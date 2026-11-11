@@ -16,6 +16,7 @@ async fn register_session(h: &ConnectionHandler, session_id: &str) {
             attached_clients: 0,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: now,
             last_activity: now,
         })

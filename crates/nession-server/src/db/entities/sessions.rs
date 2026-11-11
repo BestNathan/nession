@@ -19,6 +19,8 @@ pub struct Model {
     pub window_count: i32,
     pub attached_clients: i32,
     pub metadata: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    pub instance_id: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -1,5 +1,11 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
-import { readResumeReply, type TerminalStreamResumeResult, type TerminalOutputAppliedAck } from './agent';
+import {
+  readReconcileNotice,
+  readResumeReply,
+  type TerminalStreamResumeResult,
+  type TerminalOutputAppliedAck,
+  type TerminalReconcileNotice,
+} from './agent';
 import {
   readControlAcquireReply,
   readControlChanged,
@@ -46,6 +52,7 @@ type RelayResizeCallback = (
   controlGeneration?: number,
 ) => void;
 type RelayInputAckCallback = (ack: InputAckFields) => void;
+type RelayReconcileCallback = (notice: TerminalReconcileNotice) => void;
 
 /**
  * The ControlLease the Agent stated for THIS browser in its attach reply
@@ -68,6 +75,12 @@ export interface RelaySubscriptionProof {
   subscriberGeneration: number;
   streamEpoch: number;
   control?: RelayControlLease;
+  /**
+   * The Agent's notification capabilities, forwarded verbatim by the Server
+   * (#2877). Absent means an older Agent; the browser then keeps the v1
+   * `agent.terminal.output.applied` operation.
+   */
+  terminalCapabilities?: string[];
 }
 
 function readRelayControl(payload: Record<string, unknown>): RelayControlLease | undefined {
@@ -104,11 +117,17 @@ function readRelayReady(payload: Record<string, unknown>): RelaySubscriptionProo
     return null;
   }
   const control = readRelayControl(payload);
+  const rawCapabilities = payload.terminal_capabilities;
+  const terminalCapabilities = Array.isArray(rawCapabilities)
+    ? rawCapabilities.filter((entry): entry is string =>
+      typeof entry === 'string' && entry.length > 0)
+    : undefined;
   return {
     sessionName: session_name, browserClientId: browser_client_id,
     relayRequestId: relay_request_id, routeId: route_id,
     subscriberGeneration: subscriber_generation, streamEpoch: stream_epoch,
     ...(control ? { control } : {}),
+    ...(terminalCapabilities ? { terminalCapabilities } : {}),
   };
 }
 
@@ -184,6 +203,18 @@ export interface TerminalServerApi {
    * proof may invoke this; sending is NOT confirmation that credit was granted.
    */
   sendRelayOutputApplied(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
+  /**
+   * Relay the response-less parser progress notification (#2877). Only sent
+   * when the Agent stated `terminal-progress-notifications-v1` in its attach
+   * reply; the Server forwards the wire unchanged to the exact relay.
+   */
+  sendRelayOutputProgress(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
+  /**
+   * Subscribe to the Agent's exception-only reconcile notice (#2877), routed
+   * by session_name. The Server forwards it unchanged; the browser validates
+   * the exact subscription identity before acting.
+   */
+  onRelayReconcileRequired(sessionName: string, cb: RelayReconcileCallback): () => void;
   /** Subscribe to relay output frames for one session (routed by session_name). */
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void;
   /** Subscribe to relay resize frames for one session (routed by session_name). */
@@ -230,6 +261,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   private outputCallbacks = new Map<string, Array<GenerationEntry<RelayOutputCallback>>>();
   private resizeCallbacks = new Map<string, Array<GenerationEntry<RelayResizeCallback>>>();
   private inputAckCallbacks = new Map<string, Array<GenerationEntry<RelayInputAckCallback>>>();
+  private reconcileCallbacks = new Map<string, Array<GenerationEntry<RelayReconcileCallback>>>();
   private readyCallbacks = new Map<string, Array<GenerationEntry<(proof: RelaySubscriptionProof, physicalGeneration: number) => void>>>();
   private controlBySession = new Map<string, TerminalControlState>();
   private controlCallbacks = new Set<(sessionName: string, state: TerminalControlState) => void>();
@@ -267,6 +299,12 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       // so a name reached through a `const` is a name it cannot see (#913).
       connection.subscribe('agent.terminal.input.ack', (payload) => {
         this.handleRelayInputAck(payload as Record<string, unknown>);
+      }),
+      // The Agent's exception-only reconcile notice (#2877), forwarded by the
+      // Server unchanged. Spelled as a literal for the same reason as the
+      // input-ack wire above.
+      connection.subscribe('agent.terminal.reconcile-required', (payload) => {
+        this.handleRelayReconcileRequired(payload as Record<string, unknown>);
       }),
       connection.subscribe('server.session.relay.ready', (payload) => {
         if (payload !== null && typeof payload === 'object' && !Array.isArray(payload)) {
@@ -312,6 +350,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         this.outputCallbacks.clear();
         this.resizeCallbacks.clear();
         this.inputAckCallbacks.clear();
+        this.reconcileCallbacks.clear();
         this.readyCallbacks.clear();
         this.controlBySession.clear();
         this.controlCallbacks.clear();
@@ -422,6 +461,38 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   }
 
   sendRelayOutputApplied(sessionName: string, ack: TerminalOutputAppliedAck): boolean {
+    const payload = this.outputProgressPayload(sessionName, ack);
+    if (!payload) {
+      return false;
+    }
+    try {
+      this.requireConnection().send(TERMINAL_OUTPUT_APPLIED_WIRE, payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  sendRelayOutputProgress(sessionName: string, ack: TerminalOutputAppliedAck): boolean {
+    // A notification the Server forwards unchanged (#2877). No reply exists;
+    // the only Agent reaction is an exception-only reconcile notice. Spelled
+    // as a literal at the send site so `just check-protocol` sees a sender.
+    const payload = this.outputProgressPayload(sessionName, ack);
+    if (!payload) {
+      return false;
+    }
+    try {
+      this.requireConnection().send('client.terminal.output.progress', payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private outputProgressPayload(
+    sessionName: string,
+    ack: TerminalOutputAppliedAck,
+  ): Record<string, unknown> | null {
     const fields = [
       ack.subscriberGeneration, ack.streamEpoch,
       ack.rendererGeneration, ack.appliedThrough,
@@ -429,20 +500,15 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (!fields.every(Number.isSafeInteger)
       || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
       || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
-      return false;
+      return null;
     }
-    try {
-      this.requireConnection().send(TERMINAL_OUTPUT_APPLIED_WIRE, {
-        session_name: sessionName,
-        subscriber_generation: ack.subscriberGeneration,
-        stream_epoch: ack.streamEpoch,
-        renderer_generation: ack.rendererGeneration,
-        applied_through: ack.appliedThrough,
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    return {
+      session_name: sessionName,
+      subscriber_generation: ack.subscriberGeneration,
+      stream_epoch: ack.streamEpoch,
+      renderer_generation: ack.rendererGeneration,
+      applied_through: ack.appliedThrough,
+    };
   }
 
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void {
@@ -455,6 +521,10 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
 
   onRelayInputAck(sessionName: string, cb: RelayInputAckCallback): () => void {
     return this.addMapCallback(this.inputAckCallbacks, sessionName, cb);
+  }
+
+  onRelayReconcileRequired(sessionName: string, cb: RelayReconcileCallback): () => void {
+    return this.addMapCallback(this.reconcileCallbacks, sessionName, cb);
   }
 
   async resumeRelayStream(sessionName: string, epoch: number, afterSeq: number): Promise<TerminalStreamResumeResult> {
@@ -553,6 +623,22 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (callbacks) {
       for (const entry of callbacks) {
         entry.cb(ack);
+      }
+    }
+  }
+
+  private handleRelayReconcileRequired(payload: Record<string, unknown>): void {
+    // The same strict reader as the direct path: a stale/foreign/malformed
+    // notice is dropped here, and SessionRuntime still re-checks the exact
+    // subscription generation before starting recovery.
+    const notice = readReconcileNotice(payload);
+    if (notice === null) {
+      return;
+    }
+    const callbacks = this.reconcileCallbacks.get(notice.sessionName);
+    if (callbacks) {
+      for (const entry of callbacks) {
+        entry.cb(notice);
       }
     }
   }

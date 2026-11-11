@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { CapabilityId, CapabilityState } from '@/product/capability';
 import type { CapsuleDetail } from '@/product/terminal/capsule/types';
+import type { SessionProjectContext } from '@/product/project/types';
 import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
 import { GIT_ID } from '@/capabilities/git';
 import {
@@ -12,6 +13,7 @@ import {
   QUICK_COMMANDS_ID,
   quickCommandsProjection,
 } from '@/product/terminal/quickCommands/quickCommands';
+import { projectProjection } from '@/capabilities/project';
 
 /**
  * How a capability supplies its Terminal projection body.
@@ -107,6 +109,8 @@ export interface CapsuleProjectionBinding {
       modifier: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordModifier,
       key: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordKey,
     ) => void;
+    /** Focused Session's Project context (#3082), for the Project Peek only. */
+    projectContext?: SessionProjectContext;
     /** Put text in the composer without executing it (#2710 SC-05). */
     insertText: (text: string) => void;
     /** Send text plus Return as one terminal action (#2710 SC-05). */
@@ -159,6 +163,7 @@ export interface CapsuleProjectionBinding {
 const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
   claudeCodeProjection,
   terminalKeysProjection,
+  projectProjection,
   quickCommandsProjection,
 ];
 

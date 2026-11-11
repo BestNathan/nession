@@ -154,3 +154,11 @@ export const workspace = {
   editorHeadFontSize: 13,
   editorActionFontSize: 14,
 } as const;
+export const overlay = {
+  viewportMaxWidth: "calc(100% - 2rem)",
+  viewportMaxHeight: "calc(100dvh - 2rem)",
+  choiceMaxWidth: "30rem",
+  dialogZ: 50,
+  anchoredZ: 100,
+  tooltipZ: 110,
+} as const;

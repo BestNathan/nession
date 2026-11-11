@@ -136,6 +136,43 @@ async function createSession(socket, name, workingDir) {
   throw new Error('created Session never appeared in server.session.list');
 }
 
+/**
+ * Send one create and return its raw reply payload.
+ *
+ * Unlike `createSession`, a refusal is data here: #2999 needs to send a
+ * duplicate-name create and observe `success: false` without throwing.
+ */
+async function createSessionWithProfiles(socket, name, envFiles) {
+  const reply = await request(socket, 'server.session.create', {
+    agent_id: AGENT_ID,
+    name,
+    env_files: envFiles,
+  }, unique('env-2999-create-' + name), 45_000);
+  return reply.payload;
+}
+
+async function waitForSession(socket, sessionId) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const list = await request(socket, 'server.session.list', { force: false },
+      unique('env-2999-list'));
+    const sessions = Array.isArray(list.payload?.sessions) ? list.payload.sessions : [];
+    if (sessions.some((item) => item.session_id === sessionId)) return;
+    await sleep(200);
+  }
+  throw new Error('Session ' + sessionId + ' never appeared in server.session.list');
+}
+
+/** Whether the real tmux server still holds the exact Session name. */
+function tmuxHasSession(tmuxSocket, sessionName) {
+  const result = spawnSync(
+    'tmux',
+    ['-S', tmuxSocket, 'has-session', '-t', '=' + sessionName + ':'],
+    { encoding: 'utf8', timeout: 10_000 },
+  );
+  return result.status === 0;
+}
+
 function bindingPayload(socket, wire, payload, id) {
   return request(socket, wire, payload, id, 45_000).then((reply) => {
     assert.equal(reply.payload?.success, true,
@@ -432,15 +469,24 @@ function emitFailure(error) {
 module.exports = {
   REPO_ROOT,
   assertRan,
+  authenticate,
+  createSessionWithProfiles,
   emitFailure,
   emitPass,
   getBinding,
+  killSession,
+  openSocket,
   reapplyBinding,
   runTargetCheckoutTests,
   runWebTestsWithNames,
   runtimeFromEnv,
   setBinding,
   tmuxEnvironment,
+  tmuxHasSession,
+  unique,
   verifyLiveSessionBinding,
+  waitForAgent,
+  waitForSession,
   waitForTmuxEnvironment,
+  writeProfile,
 };

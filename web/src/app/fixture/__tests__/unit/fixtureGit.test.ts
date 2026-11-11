@@ -162,4 +162,93 @@ describe('fixture git surface', () => {
     expect(diffs[5]?.text.split('\n').length).toBeGreaterThan(100);
     expect(diffs[6]?.text).toContain('@@ -1,2 +1,2 @@');
   });
+
+  /**
+   * #2972: the first selection read is held so a reselection can answer first.
+   * The Case (not a timer) decides when the older answer settles.
+   */
+  it('holds the first selection diff and lets a same-row reselection win (#2972)', async () => {
+    const globalRecord = globalThis as unknown as { window?: unknown };
+    const hadWindow = 'window' in globalRecord;
+    const previousWindow = globalRecord.window;
+    const fakeWindow: Record<string, unknown> = {};
+    globalRecord.window = fakeWindow;
+    try {
+      const surface = fixtureGitSurface('?capability=git&git=selection-overlap');
+      const first = surface.request<GitDiffResponse>('git.diff', { path: 'src/reselect.ts' });
+      const second = await surface.request<GitDiffResponse>('git.diff', {
+        path: 'src/reselect.ts',
+      });
+      expect(second.state).toBe('ok');
+      if (second.state === 'ok') {
+        expect(second.diff.text).toContain('NEW_DIFF_RESPONSE');
+      }
+      const control = fakeWindow.fixtureGitSelectionOverlap as {
+        diffRequests: () => number;
+        olderDiffSettled: () => boolean;
+        releaseOlderDiff: (fail?: boolean) => void;
+      };
+      expect(control.diffRequests()).toBe(2);
+      control.releaseOlderDiff(false);
+      const older = await first;
+      expect(older.state).toBe('ok');
+      if (older.state === 'ok') {
+        expect(older.diff.text).toContain('OLD_DIFF_RESPONSE');
+        expect(older.diff.truncated).toBe(true);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(control.olderDiffSettled()).toBe(true);
+    } finally {
+      if (hadWindow) {
+        globalRecord.window = previousWindow;
+      } else {
+        delete globalRecord.window;
+      }
+    }
+  });
+
+  it('holds the first selection preview and lets a same-row reselection win (#2972)', async () => {
+    const globalRecord = globalThis as unknown as { window?: unknown };
+    const hadWindow = 'window' in globalRecord;
+    const previousWindow = globalRecord.window;
+    const fakeWindow: Record<string, unknown> = {};
+    globalRecord.window = fakeWindow;
+    try {
+      const surface = fixtureGitSurface('?capability=git&git=selection-overlap');
+      const first = surface.request<GitPreviewResponse>('git.preview', {
+        path: 'notes/reselect.ts',
+        expected: 'untracked',
+        want: 'text',
+      });
+      const second = await surface.request<GitPreviewResponse>('git.preview', {
+        path: 'notes/reselect.ts',
+        expected: 'untracked',
+        want: 'text',
+      });
+      expect(second.state).toBe('ok');
+      if (second.state === 'ok') {
+        expect(second.preview.text).toContain('NEW_PREVIEW_RESPONSE notes/reselect.ts');
+      }
+      const control = fakeWindow.fixtureGitSelectionOverlap as {
+        previewRequests: () => number;
+        olderPreviewSettled: () => boolean;
+        releaseOlderPreview: (fail?: boolean) => void;
+      };
+      expect(control.previewRequests()).toBe(2);
+      control.releaseOlderPreview(false);
+      const older = await first;
+      expect(older.state).toBe('ok');
+      if (older.state === 'ok') {
+        expect(older.preview.text).toContain('OLD_PREVIEW_RESPONSE notes/reselect.ts');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(control.olderPreviewSettled()).toBe(true);
+    } finally {
+      if (hadWindow) {
+        globalRecord.window = previousWindow;
+      } else {
+        delete globalRecord.window;
+      }
+    }
+  });
 });

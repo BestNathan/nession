@@ -34,6 +34,13 @@ const FAST_COMMANDS = [
     repair: 'migrate the consumer to --nession-* / a generated semantic utility / canonical recipe, or encode an explicit adapter boundary',
   },
   {
+    id: 'layout-ownership',
+    command: 'node design/scripts/layout-ownership.mjs',
+    owner: 'docs/design/composition.md §14 + web/src/app/workspace/layout/workspaceLayout.tsx',
+    expected: 'Experience frame, App header, Workspace host chrome and shared layout recipes have one owner, while local flex/grid composition stays legal',
+    repair: 'move host geometry/header/recipe classes to their canonical owner and use the shared layout recipe; keep local flex/grid inside the content',
+  },
+  {
     id: 'contract-generated-integrity',
     command: 'node design/scripts/resolve-contracts.mjs --check',
     owner: 'design/contracts/* + design/scripts/resolve-contracts.mjs',

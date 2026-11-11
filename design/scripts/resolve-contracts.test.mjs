@@ -110,6 +110,50 @@ test('terminal-capsule: the drawn affordance resolves below the App hit target',
   );
 });
 
+// #3138: the shared content recipes name their data-recipe-part anatomy, and
+// this is the one owner of what each part must resolve. The browser check
+// consumes these values; the spec contains no second copy of 16px/12.5px/etc.
+test('content recipes resolve each declared part to its approved typography role', () => {
+  const merged = mergeContracts(REAL, TOKENS)['pattern.resource-detail'];
+  assert.equal(merged.web.parts['detail-title'].typographyToken, 'experience.web.typography.title');
+  assert.deepEqual(merged.web.parts['detail-title'].typography, {
+    sizePx: 16,
+    weight: 600,
+    lineHeight: 1.25,
+    sizeVar: '--nession-typography-title-size',
+    weightVar: '--nession-typography-title-weight',
+    lineHeightVar: '--nession-typography-title-line-height',
+  });
+  assert.equal(merged.web.parts['detail-section-title'].typography.sizePx, 12.5);
+  assert.equal(merged.app.parts['detail-section-title'].typography.sizePx, 13);
+  assert.deepEqual(
+    merged.web.parts['detail-fact-value'].typographies.map((role) => role.sizePx),
+    [13, 12.5],
+    'a fact value may be body for product text and code for technical identity',
+  );
+  assert.equal(
+    merged.app.parts['detail-title'],
+    undefined,
+    'the App host header owns the surface name; content must not repeat it',
+  );
+
+  const form = mergeContracts(REAL, TOKENS)['pattern.configuration-form'];
+  assert.equal(form.web.controlHeightToken, 'experience.web.control.md');
+  assert.equal(form.web.controlHeightTokenPx, 32);
+  assert.equal(form.app.controlHeightTokenPx, 44);
+  assert.equal(form.app.parts['form-section-title'].typography.sizePx, 13);
+  assert.equal(
+    form.web.parts['form-label'],
+    undefined,
+    'the field label is owned by the shared Label primitive, not a chrome role',
+  );
+
+  const operation = mergeContracts(REAL, TOKENS)['pattern.operation-surface'];
+  assert.equal(operation.web.parts['operation-title'].typography.sizePx, 16);
+  assert.equal(operation.app.parts['operation-title'], undefined);
+  assert.equal(operation.app.controlHeightTokenPx, 44);
+});
+
 test('session-header inherits chrome band rules and distributes title/actions', () => {
   const merged = mergeContracts(REAL, TOKENS)['pattern.session-header'];
   assert.equal(merged.web.wrap, false);
@@ -258,6 +302,70 @@ test('raw px duplication is rejected as an unknown key', () => {
   assert.match(errors[0], /unknown key "heightPx"/);
 });
 
+test('a typography part must name a role group, not an arbitrary token', () => {
+  const tree = baseTree();
+  tree.patterns['session-item.json'].web.parts = {
+    'row-title': { typographyToken: 'experience.web.typography.nope' },
+  };
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /is not a typography role \(missing size, weight, lineHeight\)/);
+
+  const leafTree = baseTree();
+  leafTree.patterns['session-item.json'].web.parts = {
+    'row-title': { typographyToken: 'experience.web.typography.title.size' },
+  };
+  const leafErrors = errorsOf(leafTree);
+  assert.equal(leafErrors.length, 1);
+  assert.match(leafErrors[0], /is not a typography role/);
+});
+
+test('a part must declare an approved field and a role', () => {
+  const tree = baseTree();
+  tree.patterns['session-item.json'].web.parts = {
+    'row-title': { fontSize: '16px' },
+    'row-meta': {},
+    'row-both': {
+      typographyToken: 'experience.web.typography.title',
+      typographyTokens: ['experience.web.typography.body'],
+    },
+    'row-empty-list': { typographyTokens: [] },
+  };
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 4);
+  assert.ok(errors.some((error) => /unknown key "fontSize"/.test(error)));
+  assert.ok(errors.some((error) => /declares no approved role/.test(error)));
+  assert.ok(errors.some((error) => /names both typographyToken and typographyTokens/.test(error)));
+  assert.ok(errors.some((error) => /typographyTokens must be a non-empty array/.test(error)));
+});
+
+test('part names must be kebab-case and parts must be an object', () => {
+  const tree = baseTree();
+  tree.patterns['session-item.json'].web.parts = {
+    Row_Title: { typographyToken: 'experience.web.typography.title' },
+  };
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /must be a kebab-case data-recipe-part name/);
+
+  const arrayTree = baseTree();
+  arrayTree.patterns['session-item.json'].web.parts = [];
+  const arrayErrors = errorsOf(arrayTree);
+  assert.equal(arrayErrors.length, 1);
+  assert.match(arrayErrors[0], /must be an object of data-recipe-part names/);
+});
+
+test('part geometry and controlHeightToken must resolve to px', () => {
+  const tree = baseTree();
+  tree.patterns['session-item.json'].web.parts = {
+    'row-title': { heightToken: 'semantic.warning' },
+  };
+  tree.patterns['session-item.json'].web.controlHeightToken = 'semantic.warning';
+  const errors = errorsOf(tree);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.every((error) => /does not resolve to a px\/rem value/.test(error)));
+});
+
 test('unknown extends target fails', () => {
   const tree = baseTree();
   tree.patterns['session-item.json'].extends = ['category.chrome', 'category.list-row', 'category.nope'];
@@ -336,8 +444,10 @@ test('committed sources validate clean and merge to every declared pattern', () 
 
 test('real viewport matrix carries the canonical web/app rows', () => {
   const rows = REAL.viewports.viewports;
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 9);
   assert.deepEqual(rows.map((row) => row.id), [
+    'web.small-laptop',
+    'web.narrow-laptop',
     'web.compact-laptop',
     'web.standard-desktop',
     'web.wide-desktop',

@@ -47,13 +47,25 @@ Session navigation must remain fast and discoverable while yielding space to the
 Preferred composition families include:
 
 - overlay drawer;
-- collapsible rail/sidebar;
+- collapsible sidebar (expanded column or reserved rail);
 - compact Session switcher;
 - search/command entry with a visible navigation affordance.
 
 A wide permanent sidebar is not an invariant. On a layout where it materially helps repeated Session switching, it must still remain visually secondary and should collapse when space or focus requires it.
 
-The collapsed form is a rail with **one action (Expand) plus static Agent/Session summaries** whose counts are truthful totals — its anatomy and interaction rules are specified in [interaction/web.md](interaction/web.md) (#1196). What this layer owns is the composition rule behind it: **collapse is one state, held by the shell composition** (#1195). The composition decides both what the navigation column renders (sidebar or rail) and how much width it reserves; a navigation component must not privately know it is collapsed while the frame around it keeps reserving the expanded width — that split is what made collapse free no space for the work surface.
+The collapsed form is a **reserved navigation rail**: the column keeps 56px in
+flow and offers a small set of purposeful shortcuts (Expand, New Session,
+Search, and Projects when navigable) — its anatomy and interaction rules are
+specified in [interaction/web.md](interaction/web.md) (#3075, superseding
+#2851's 0px floating control and #1196's static rail). What this layer owns is
+the composition rule behind it: **collapse is one state, held by the shell
+composition** (#1195). The composition decides both what the navigation column
+renders and how much width it reserves; a navigation component must not
+privately know it is collapsed while the frame around it keeps reserving the
+expanded width — that split is what made collapse free no space for the work
+surface. The rail is a sibling of Main, so the work surface can never sit behind
+navigation; the narrow overlay drawer keeps its own opening control and never
+reserves a rail.
 
 Extra viewport width belongs to the work surface before it belongs to navigation — including the width a collapse releases, which the work surface reclaims through the normal resize pipeline, not by rebuilding the surface.
 
@@ -184,11 +196,13 @@ Do not preserve a toolbar/sidebar at the cost of making the actual work unusable
 | Session list | Fill its opened navigation region |
 | Workspace resource lists | Fill local region, modest contextual inset as needed |
 | Editors / reading content | Inset; optional max width where readability benefits |
-| Forms / settings / details | Contained |
+| Forms / settings / details | Contained, using the shared [ConfigurationForm](design-system/patterns/configuration-form.md) / [ResourceDetail](design-system/patterns/resource-detail.md) grammar |
 | TerminalCapsule | Floating contained surface |
 | Capability overlay/sheet | Contained/elevated contextual layer |
 
 Containment is a content decision, not a default desire to put everything in cards.
+A detail or configuration region does not gain a second shell, header or scroll
+owner when it adopts a recipe; the host composition in §7/§8 still owns those.
 
 ## 11. Large-screen whitespace
 
@@ -238,6 +252,60 @@ Do not tokenize:
 
 Those belong in product/interaction documentation.
 
+## 14. Layout ownership and shared recipes (#3194)
+
+A valid collection of Tailwind classes does not prove a consistent semantic
+layout. Composition has three owners, and only the first two may claim a host
+role:
+
+| Layer | Owns | Examples |
+|---|---|---|
+| **Experience host** | page/surface geometry, navigation frame, scroll ancestry, safe areas, the one App page header/Back | `WebLayout`, `AppLayout`/`AppLayers`, `ShellMain`, `WorkspacePanel`, `AppPageHeader` |
+| **Semantic layout recipe** | a repeated stable content relationship used by independent consumers | `WorkspaceMasterDetail`, `WorkspaceScrollRegion`; `ResourceDetail`, `ConfigurationForm`, `OperationSurface` |
+| **Capability-local composition** | its own content arrangement inside the host | local `flex` / `grid` / `min-w-0` / `min-h-0` / `flex-1`; a capability's internal list or editor |
+
+Rules:
+
+- Capability and product content must not take page geometry (`h-screen`,
+  `min-h-[100dvh]`, `fixed inset-0`, …), render the App page header/Back, or
+  publish Workspace host chrome (`workspace-shell` / `workspace-tool-bar` /
+  `workspace-tool-content` / `workspace-surface-navigation`).
+- A stable relationship repeated by two independent consumers is promoted to a
+  recipe under `web/src/app/workspace/layout/workspaceLayout.tsx`; a consumer
+  must not restate the recipe's stable class.
+- Local mechanisms remain legal when they stay inside the component's content.
+  `cn('flex min-w-0 flex-col', condition && 'min-h-0 flex-1')` is a valid local
+  composition, not a violation.
+- A scroll region that can reach the pane bottom uses `WorkspaceScrollRegion`
+  (or the shared `workspaceScrollClearanceClass` opt-in for a genuinely local
+  inner scroll). It must not create a second page-level scroll owner.
+- Web vs App is an Experience decision, not a media-width guess: constrained
+  Web stays Web, forced App stays App.
+
+### Representative inventory
+
+| Surface | Current owner | Expected role | Action |
+|---|---|---|---|
+| Web shell / App layers | `WebLayout`, `AppLayout`/`AppLayers` | Experience frame | keep; page geometry is allowed only in this layer |
+| App page header / Back | `WorkspacePanel` → `AppPageHeader` | Experience host | keep exactly one per depth |
+| Files master/detail (Web) | `FilesWebLayout` | `WorkspaceMasterDetail` | migrated (#3194) |
+| Environment master/detail (Web) | `EnvWebLayout` | `WorkspaceMasterDetail` | migrated |
+| Agent / Session detail | experience workspace maps | `WorkspaceScrollRegion` | migrated; the view no longer owns scroll ancestry |
+| Project Workspace view | `ProjectWorkspaceView` | `WorkspaceScrollRegion` | migrated |
+| Sandbox (App) | `SandboxAppLayout` | `WorkspaceScrollRegion` | migrated |
+| Claude Code / Env / Git inner lists | capability components | local scroll mechanism + shared clearance | keep; not a host geometry claim |
+
+### Enforcement
+
+`design/scripts/layout-ownership.mjs` is part of `design-system-fast`. It
+rejects capability/product page geometry, capability-local App headers, host
+chrome, duplicated master/detail or scroll-owner markers, and raw numeric
+spacing in the shared recipe owner. It accepts local flex/grid composition,
+including the Issue's control sample. `layout-ownership.test.mjs` holds the
+negative and positive fixtures. Browser evidence for the single scroll owner,
+alignment, overflow and the one App header lives in `ui-contract-web` /
+`ui-contract-matrix` and the SC-03 Case.
+
 ## Anti-patterns
 
 - permanent chrome preserved only because a prior screenshot contained it;
@@ -259,3 +327,4 @@ Those belong in product/interaction documentation.
 - visual hierarchy → [visual-language.md](visual-language.md)
 - values → [design-system/tokens.md](design-system/tokens.md)
 - measurable rules → [design-system/contracts.md](design-system/contracts.md)
+- layout ownership / shared recipes → §14 here + `web/src/app/workspace/layout/workspaceLayout.tsx`

@@ -156,11 +156,11 @@ test('an untracked preview is readable at phone width without page clipping (#28
     await body.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom)),
   ).toBeGreaterThan(0);
 
-  // A long preview is scrollable inside its own body, not by moving the shell.
+  // A long preview is scrollable inside its own pane, not by moving the shell.
+  // CodeMirror grows to its content, so the outer preview body is the scroller.
   await page.getByTestId('git-row-untracked').filter({ hasText: 'src/long-preview.txt' }).click();
-  await expect(page.getByTestId('git-file-preview-text')).toContainText('line 120');
   const scroll = await body.evaluate((element) => {
-    element.scrollTop = 200;
+    element.scrollTop = element.scrollHeight;
     return {
       scrollTop: element.scrollTop,
       scrollHeight: element.scrollHeight,
@@ -169,6 +169,7 @@ test('an untracked preview is readable at phone width without page clipping (#28
   });
   expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
   expect(scroll.scrollTop).toBeGreaterThan(0);
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('line 120');
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,

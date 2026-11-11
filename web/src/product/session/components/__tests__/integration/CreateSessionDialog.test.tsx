@@ -28,6 +28,7 @@ vi.mock('@/components/ui/dialog', () => ({
     open ? <div data-testid="dialog">{children}</div> : null,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogBody: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -502,5 +503,107 @@ describe('CreateSessionDialog', () => {
     await waitFor(() => {
       expect(screen.queryByText('Session name is required')).not.toBeInTheDocument();
     });
+  });
+});
+
+// ── Project Existing-location path (#3025) ─────────────────────────────
+
+const PROJECT: import('@/product/project/types').Project = {
+  project_id: 'project-123e4567-e89b-42d3-a456-426614174000',
+  name: 'Nession',
+  locations: [{ agent_id: 'macbook', path: '/Users/nathan/code/nession' }],
+  created_at: 1,
+  updated_at: 2,
+};
+
+describe('CreateSessionDialog Project mode', () => {
+  it('creates with the declared location and project_id', async () => {
+    const user = userEvent.setup();
+    const onCreated = vi.fn();
+    const onClose = vi.fn();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={onClose}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={onCreated}
+        project={PROJECT}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'project-session');
+    await user.click(screen.getByTestId('create-session-submit'));
+
+    await waitFor(() => {
+      expect(createSessionMock).toHaveBeenCalledWith(
+        'macbook',
+        'project-session',
+        [],
+        {
+          workingDir: '/Users/nathan/code/nession',
+          projectId: PROJECT.project_id,
+        },
+      );
+    });
+    expect(onCreated).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('refuses an offline Existing Location instead of falling back', async () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', status: 'offline' })]}
+        onCreated={vi.fn()}
+        project={PROJECT}
+      />,
+    );
+
+    expect(screen.getByTestId('project-location-offline')).toBeInTheDocument();
+    expect(screen.getByTestId('create-session-submit')).toBeDisabled();
+    expect(createSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('uses the content-sized multi-line Select for Existing Locations', () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={PROJECT}
+      />,
+    );
+
+    const trigger = screen.getByTestId('project-location-trigger');
+    expect(trigger).toHaveAttribute('data-size', 'content');
+    // The content variant drops the single-line height and nowrap contract;
+    // the selected Agent/path/status lines set the control's height.
+    expect(trigger.className).toContain('whitespace-normal');
+    expect(trigger.className).not.toContain('whitespace-nowrap');
+    expect(trigger.className).not.toContain('h-8');
+    expect(screen.getByTestId('project-location-path')).toHaveTextContent(
+      '/Users/nathan/code/nession',
+    );
+  });
+
+  it('explains a Project with no Existing Location', () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+        project={{ ...PROJECT, locations: [] }}
+      />,
+    );
+    expect(screen.getByText(/No Existing Location/)).toBeInTheDocument();
+    expect(screen.getByTestId('create-session-submit')).toBeDisabled();
   });
 });

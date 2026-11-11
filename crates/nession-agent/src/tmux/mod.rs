@@ -4,6 +4,7 @@ pub mod control;
 pub mod env;
 pub mod manager;
 pub mod ops;
+pub mod sandbox_context;
 pub use nession_tmux::parser;
 pub mod pty;
 pub mod session;

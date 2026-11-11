@@ -48,7 +48,10 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::session::v1::{
     AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionProcessesPayload, SessionMetadataUpdatePayload,
+    ServerSessionCreatePayload, ServerSessionProcessesPayload, ServerSessionSandboxContextPayload,
+    ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
+    ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
+    SessionMetadataUpdatePayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -63,6 +66,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::connection::execution::{self, Lanes, ResourceKey, SHUTDOWN_GRACE};
 use crate::connection::outbox::{Outbox, OutboxFrames};
+use crate::connection::sync_intent::{SyncIntent, SyncToken};
 // The lanes' boxed work is the shared type: the lane that carries it knows
 // nothing about this connection, which is the point of `nession-runtime`.
 use nession_runtime::lane::Work;
@@ -226,32 +230,47 @@ pub struct ServerClientHandle {
     metadata: AgentMetadata,
     /// Set by the supervisor after a reconnection so that the
     /// SessionWatcher can force a full session re-sync to the server.
-    sync_needed: Arc<AtomicBool>,
+    sync_intent: Arc<SyncIntent>,
     /// Set by the supervisor to indicate whether the connection is currently live.
     /// The SessionWatcher checks this to skip sending updates while disconnected.
     connected: Arc<AtomicBool>,
+    /// Test-only deterministic publication fault (#2976). A watcher test arms
+    /// one matching session name to fail or to mark a new reconnect request
+    /// during that publish, so the retry/generation rules are exercised against
+    /// the real watcher and outbox rather than a mocked one.
+    #[cfg(test)]
+    publish_fault: Arc<Mutex<PublishFault>>,
 }
 
 impl ServerClientHandle {
     /// Mark that a full session sync is needed (called by supervisor on reconnect).
     pub fn mark_sync_needed(&self) {
-        self.sync_needed.store(true, Ordering::SeqCst);
+        self.sync_intent.mark();
     }
 
     /// Whether a full session re-sync is required, without clearing the intent.
     ///
-    /// The [`SessionWatcher`] peeks before querying tmux and clears the flag
-    /// with [`Self::take_sync_needed`] only after a successful query: an
-    /// enumeration failure leaves the Server's view just as unknown as it was,
-    /// so it must not consume the intent that says so.
+    /// The [`SessionWatcher`] observes this before querying tmux and clears the
+    /// exact request with [`Self::clear_sync_needed_if`] only after every frame
+    /// of the snapshot was accepted by the outbox: an enumeration or publication
+    /// failure leaves the Server's view just as unknown as it was, so it must not
+    /// consume the intent that says so.
     pub fn is_sync_needed(&self) -> bool {
-        self.sync_needed.load(Ordering::SeqCst)
+        self.sync_intent.is_needed()
     }
 
-    /// Check and clear the sync-needed flag. Returns `true` if a full
-    /// session re-sync is required (server-side registry may be stale).
-    pub fn take_sync_needed(&self) -> bool {
-        self.sync_needed.swap(false, Ordering::SeqCst)
+    /// The full-resync request currently owed, if any.
+    pub(crate) fn sync_needed_token(&self) -> Option<SyncToken> {
+        self.sync_intent.token()
+    }
+
+    /// Clear the observed request only if no newer one arrived since.
+    ///
+    /// Returns `false` when a reconnect or a refused publish marked a newer
+    /// request while the snapshot was being published; that newer request owns
+    /// the intent and the watcher must run another full re-sync.
+    pub(crate) fn clear_sync_needed_if(&self, token: SyncToken) -> bool {
+        self.sync_intent.clear_if_current(token)
     }
 
     /// Returns `true` when the supervisor has an active connection to the server.
@@ -308,6 +327,7 @@ impl ServerClientHandle {
         window_count: u32,
         attached_clients: u32,
         foreground_command: Option<&str>,
+        instance_id: Option<&str>,
     ) -> Result<()> {
         let payload = AgentSessionUpdatePayload {
             agent_id: self.agent_id.clone(),
@@ -316,8 +336,15 @@ impl ServerClientHandle {
             window_count,
             attached_clients,
             foreground_command: foreground_command.map(std::string::ToString::to_string),
+            instance_id: instance_id.map(std::string::ToString::to_string),
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
+        #[cfg(test)]
+        if self.take_session_update_fault(session_name) == Some(true) {
+            return Err(anyhow::anyhow!(
+                "injected session-update publication failure"
+            ));
+        }
         self.outbox.send_session_update(session_name, frame(&msg)?)
     }
 
@@ -379,8 +406,61 @@ impl ServerClientHandle {
     }
 }
 
+/// One armed deterministic publish fault (#2976), consumed by the next matching
+/// session-update publish.
+///
+/// A test can make that publish fail, or make it succeed while marking a new
+/// reconnect request — the two interleavings the full-resync ownership rule must
+/// survive. Nothing here exists in a production build.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct PublishFault {
+    session: Option<String>,
+    remaining: usize,
+    fail: bool,
+    mark_sync: bool,
+}
+
 #[cfg(test)]
 impl ServerClientHandle {
+    /// Arm one deterministic fault for the next session-update publish whose
+    /// session name matches `session` (`None` matches any name).
+    ///
+    /// `fail` makes the publish return `Err` (the outbox owner refused it);
+    /// `mark_sync` marks a new full-resync request before the publish proceeds.
+    pub(crate) fn inject_session_update_fault(
+        &self,
+        session: Option<&str>,
+        fail: bool,
+        mark_sync: bool,
+    ) {
+        let mut fault = self
+            .publish_fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *fault = PublishFault {
+            session: session.map(str::to_string),
+            remaining: 1,
+            fail,
+            mark_sync,
+        };
+    }
+
+    fn take_session_update_fault(&self, session: &str) -> Option<bool> {
+        let mut fault = self
+            .publish_fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if fault.remaining == 0 || fault.session.as_deref().is_some_and(|name| name != session) {
+            return None;
+        }
+        fault.remaining -= 1;
+        if fault.mark_sync {
+            self.sync_intent.mark();
+        }
+        Some(fault.fail)
+    }
+
     /// A handle detached from any supervisor, with the frames it publishes into.
     ///
     /// The receiver comes back with the handle because dropping it is what
@@ -388,8 +468,8 @@ impl ServerClientHandle {
     /// `connected` is the connection-liveness flag the watcher and heartbeat
     /// read; no socket is involved either way.
     pub(crate) fn test_handle(connected: bool) -> (Self, OutboxFrames) {
-        let sync_needed = Arc::new(AtomicBool::new(false));
-        let (outbox, frames) = Outbox::new(Arc::clone(&sync_needed));
+        let sync_intent = Arc::new(SyncIntent::new());
+        let (outbox, frames) = Outbox::new(Arc::clone(&sync_intent));
         let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
         (
             Self {
@@ -402,8 +482,9 @@ impl ServerClientHandle {
                     nession_version: String::new(),
                     image_tag: String::new(),
                 },
-                sync_needed,
+                sync_intent,
                 connected: Arc::new(AtomicBool::new(connected)),
+                publish_fault: Arc::new(Mutex::new(PublishFault::default())),
             },
             frames,
         )
@@ -503,25 +584,27 @@ impl ServerClient {
         // `Ok(None)` on a transient failure, or the server's reason for
         // refusing. `Err` is terminal and travels to the caller.
         let (interval_tx, mut interval_rx) = mpsc::channel::<Result<Option<u64>, String>>(1);
-        let sync_needed = Arc::new(AtomicBool::new(false));
+        let sync_intent = Arc::new(SyncIntent::new());
         let connected = Arc::new(AtomicBool::new(false));
 
         // The outbox is built here rather than inside the supervisor because the
         // handle is what publishes into it, and the supervisor is what drains it.
-        // `sync_needed` is handed to both, and deliberately: it is the one flag
+        // `sync_intent` is handed to both, and deliberately: it is the one flag
         // that says "the Server's view of this agent may be stale", and the two
         // things that make it true — a reconnection, and a session-state publish
         // refused by a full lane — are the same question about the same view. See
-        // `connection::outbox`.
-        let (outbox, outbox_rx) = Outbox::new(Arc::clone(&sync_needed));
+        // `connection::outbox` and `connection::sync_intent`.
+        let (outbox, outbox_rx) = Outbox::new(Arc::clone(&sync_intent));
 
         let handle = ServerClientHandle {
             outbox,
             shutdown_tx,
             agent_id: self.agent_id.clone(),
             metadata: self.metadata.clone(),
-            sync_needed: sync_needed.clone(),
+            sync_intent: sync_intent.clone(),
             connected: connected.clone(),
+            #[cfg(test)]
+            publish_fault: Arc::new(Mutex::new(PublishFault::default())),
         };
 
         // Spawn the supervisor; it owns the reconnect loop and never returns
@@ -532,7 +615,7 @@ impl ServerClient {
                 outbox_rx,
                 shutdown_rx,
                 interval_tx,
-                sync_needed,
+                sync_intent,
                 connected,
                 publish_handle,
             )
@@ -559,7 +642,7 @@ impl ServerClient {
         mut outbox_rx: OutboxFrames,
         mut shutdown_rx: mpsc::Receiver<()>,
         interval_tx: mpsc::Sender<Result<Option<u64>, String>>,
-        sync_needed: Arc<AtomicBool>,
+        sync_intent: Arc<SyncIntent>,
         connected: Arc<AtomicBool>,
         session_publish_handle: ServerClientHandle,
     ) {
@@ -585,7 +668,8 @@ impl ServerClient {
 
                     // Notify the SessionWatcher that a full re-sync is needed
                     // because the server-side session registry may be stale.
-                    sync_needed.store(true, Ordering::SeqCst);
+                    // Every reconnect marks a distinct request (#2976).
+                    sync_intent.mark();
 
                     // Report the heartbeat interval from the first connection so
                     // connect_and_run can unblock.
@@ -1421,7 +1505,14 @@ mod tests {
 
         // Send session update.
         handle
-            .send_session_update("test-session", "active", 3, 1, Some("claude"))
+            .send_session_update(
+                "test-session",
+                "active",
+                3,
+                1,
+                Some("claude"),
+                Some("instance-1"),
+            )
             .expect("session update failed");
 
         let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
@@ -2309,21 +2400,38 @@ mod tests {
         let (handle, _frames) = handle_with_outbox();
 
         // Initially not sync needed
-        assert!(!handle.take_sync_needed());
+        assert!(handle.sync_needed_token().is_none());
         assert!(!handle.is_sync_needed());
 
         // Mark; a peek observes the intent without consuming it, so a caller
         // that fails before re-deriving the view can leave it pending.
         handle.mark_sync_needed();
         assert!(handle.is_sync_needed());
+        let token = handle
+            .sync_needed_token()
+            .expect("a marked intent has a token");
         assert!(
             handle.is_sync_needed(),
             "peeking must not consume the intent"
         );
-        assert!(handle.take_sync_needed());
+        assert!(handle.clear_sync_needed_if(token));
+        assert!(
+            !handle.clear_sync_needed_if(token),
+            "a spent token clears nothing"
+        );
+        assert!(!handle.is_sync_needed());
 
-        // Take clears the flag
-        assert!(!handle.take_sync_needed());
+        // A newer request during an older attempt survives that attempt's clear.
+        handle.mark_sync_needed();
+        let older = handle.sync_needed_token().expect("first request");
+        handle.mark_sync_needed();
+        assert!(
+            !handle.clear_sync_needed_if(older),
+            "the older attempt must not erase the newer request"
+        );
+        assert!(handle.is_sync_needed());
+        let latest = handle.sync_needed_token().expect("latest request");
+        assert!(handle.clear_sync_needed_if(latest));
         assert!(!handle.is_sync_needed());
     }
 
@@ -2842,6 +2950,7 @@ mod tests {
             window_count: 3,
             attached_clients: 1,
             foreground_command: Some("claude".to_string()),
+            instance_id: Some("instance-1".to_string()),
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["agent_id"], "a1");
@@ -3751,6 +3860,14 @@ fn session_by_name(payload: &serde_json::Value) -> ResourceKey {
 /// wrong about the resource — the two would share a queue, and a write to an
 /// env file would wait behind a mutation of a session that happened to have
 /// that name.
+/// The session a Sandbox capability payload names.
+///
+/// Its field is `session_name` (the same spelling process discovery uses), so
+/// it cannot share [`session_by_name`] — that reads `name`.
+fn sandbox_session_by_name(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(str_field(payload, "session_name"))
+}
+
 fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
     ResourceKey::Env(str_field(payload, "name"))
 }
@@ -3948,22 +4065,23 @@ core_routes!(agent, msg, responses;
                     let revision = payload
                         .binding_revision
                         .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
-                    let (success, error, session_name, warnings) = match agent
+                    let (success, error, session_name, warnings, sandbox_report) = match agent
                         .tmux
-                        .create_session_with_binding(
+                        .create_session_with_options(
                             &name,
                             terminal_cols,
                             payload.height,
                             &initial_working_dir,
-                            SessionBindingInput {
+                            Some(SessionBindingInput {
                                 revision,
                                 profiles: &profiles,
                                 snapshots: &payload.env_snapshots,
-                            },
+                            }),
+                            payload.sandbox.as_ref(),
                         )
                         .await
                     {
-                        Ok(warnings) => {
+                        Ok(outcome) => {
                             if let Some(publish) = agent.session_publish_handle() {
                                 if let Err(e) = crate::sync::session_watcher::publish_session_snapshot(
                                     &publish,
@@ -3977,9 +4095,15 @@ core_routes!(agent, msg, responses;
                                     );
                                 }
                             }
-                            (true, None, Some(name.clone()), warnings)
+                            (
+                                true,
+                                None,
+                                Some(name.clone()),
+                                outcome.warnings,
+                                outcome.sandbox,
+                            )
                         }
-                        Err(e) => (false, Some(e.to_string()), None, Vec::new()),
+                        Err(e) => (false, Some(format!("{e:#}")), None, Vec::new(), None),
                     };
 
                     let response = serde_json::json!({
@@ -3993,6 +4117,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "session_name": session_name,
                             "warnings": warnings,
+                            "sandbox": sandbox_report,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4415,6 +4540,227 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
+    // ── Sandbox context capability (#3124) ──
+    //
+    // The capability observes one Session's *active Pane* on this Agent's
+    // private tmux server. The Server never names a Pane and never interprets
+    // a policy; every answer is this Agent's observation or refusal.
+    "agent.session.sandbox.context" => "agent.session.sandbox.context" => 1 => Query => {
+                    let payload: ServerSessionSandboxContextPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.context payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.context",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, context, error) =
+                        match agent.tmux.sandbox_context(&payload.session_name).await {
+                            Ok(context) => (true, Some(context), None),
+                            Err(e) => {
+                                warn!(
+                                    "Sandbox context failed for {}: {e:#}",
+                                    payload.session_name
+                                );
+                                (false, None, Some(format!("{e:#}")))
+                            }
+                        };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.context",
+                            "success": success,
+                            "context": context,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.preflight" => "agent.session.sandbox.preflight" => 1 => Query => {
+                    let payload: ServerSessionSandboxPreflightPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.preflight payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.preflight",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_preflight(
+                            &payload.session_name,
+                            &payload.generation,
+                            &payload.probe_generation,
+                            &payload.policy,
+                            &payload.working_dir,
+                        )
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.preflight",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.enter" => "agent.session.sandbox.enter" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxEnterPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.enter payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.enter",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_enter(
+                            &payload.session_name,
+                            &payload.generation,
+                            &payload.probe_generation,
+                            &payload.enter_id,
+                            &payload.policy,
+                            &payload.working_dir,
+                        )
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.enter",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.return-to-native" => "agent.session.sandbox.return-to-native" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxReturnPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.return-to-native payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.return-to-native",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_return_to_native(&payload.session_name)
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.return-to-native",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.focus" => "agent.session.sandbox.focus" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxFocusPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.focus payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.focus",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_focus(&payload.session_name, &payload.pane_id)
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.focus",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
     "agent.session.report" => "agent.session.report" => 1 => Query => {
                     let request_id = str_field(&msg.payload, "request_id");
 
@@ -4423,11 +4769,14 @@ core_routes!(agent, msg, responses;
                     // "no server running" to an empty Vec. Only report the raw
                     // fields; the server derives status from `attached_clients`
                     // so the rule lives in exactly one place.
-                    let sessions = match agent.tmux.list_sessions().await {
-                        Ok(s) => s,
+                    let (sessions, list_error) = match agent.tmux.list_sessions().await {
+                        Ok(sessions) => (sessions, None),
                         Err(e) => {
                             warn!("tmux list-sessions failed: {:#}", e);
-                            vec![]
+                            // A listing failure is not "no sessions": reporting
+                            // an empty successful set would let the Server
+                            // delete live recovery rows and Project bindings.
+                            (Vec::new(), Some(e.to_string()))
                         }
                     };
 
@@ -4446,6 +4795,7 @@ core_routes!(agent, msg, responses;
                                 "attached_clients": s.attached_clients,
                                 "foreground_command": s.foreground_command,
                                 "working_dir": s.working_dir,
+                                "instance_id": s.instance_id,
                             })
                         })
                         .collect();
@@ -4457,7 +4807,8 @@ core_routes!(agent, msg, responses;
                         "payload": {
                             "request_id": request_id,
                             "command": "sessions.list",
-                            "success": true,
+                            "success": list_error.is_none(),
+                            "error": list_error,
                             "sessions": sessions_json,
                         }
                     });

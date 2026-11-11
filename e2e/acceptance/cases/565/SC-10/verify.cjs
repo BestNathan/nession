@@ -1,11 +1,16 @@
 'use strict';
 // #565 SC-10: embedded MCP shuts down with its host (Agent handle), and the
 // standalone program exits on SIGTERM without destroying a host it does not own.
-const { run, targetSha, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
-  const agent = crateTests('nession-agent', ['--test', 'integration', 'mcp::'], 900000);
+  const agent = crateTests(
+    'nession-agent',
+    ['--test', 'integration', 'mcp::'],
+    900000,
+    isolatedTmuxEnv('nession-565-sc10-agent'),
+  );
   assertRan(agent, [
     'mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server',
     'mcp::agent_mcp_refuses_an_anonymous_request',
@@ -14,6 +19,7 @@ run(({ evidence }) => {
     'nession-mcp',
     ['--test', 'integration', 'standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint'],
     900000,
+    isolatedTmuxEnv('nession-565-sc10-node'),
   );
   assertRan(standalone, ['standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint']);
   evidence.push(

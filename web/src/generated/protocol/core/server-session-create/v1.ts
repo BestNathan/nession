@@ -35,13 +35,30 @@ working_dir?: string | null,
  * hide, so the compiler pointed at the second read instead of a reviewer
  * having to notice it.
  */
-env_files: Array<EnvFileRef>, };
+env_files: Array<EnvFileRef>, 
+/**
+ * Optional Project this Session is created from (#3025).
+ *
+ * When present, `agent_id` and `working_dir` must name one of the
+ * Project's Existing Locations. The Project is only a declaration: the
+ * Session owns its realized Environment Binding and runtime identity, so
+ * a later Project edit never mutates this Session. Absent preserves the
+ * pre-Project create path unchanged.
+ */
+project_id?: string | null, };
 export type ClientSessionCreateResponsePayload = { success: boolean, session_id?: string | null, error?: string | null, 
 /**
  * Non-fatal warnings from resolving/materializing the initial Environment
  * Binding (reserved-key collisions, parse warnings). Empty on refusal.
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The Project membership committed with this Session create (#3082).
+ *
+ * Present only when the create named a Project whose Existing Location was
+ * validated. The Agent never sees this field; the Server owns the link.
+ */
+project_id?: string | null, };
 export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
 export type EnvSource = "server" | "agent";
 
@@ -62,7 +79,17 @@ working_dir?: string | null,
  * hide, so the compiler pointed at the second read instead of a reviewer
  * having to notice it.
  */
-env_files: Array<EnvFileRef>, };
+env_files: Array<EnvFileRef>, 
+/**
+ * Optional Project this Session is created from (#3025).
+ *
+ * When present, `agent_id` and `working_dir` must name one of the
+ * Project's Existing Locations. The Project is only a declaration: the
+ * Session owns its realized Environment Binding and runtime identity, so
+ * a later Project edit never mutates this Session. Absent preserves the
+ * pre-Project create path unchanged.
+ */
+project_id?: string | null, };
 
 /** The payload the provider answers with. */
 export type SessionCreateReply = { success: boolean, session_id?: string | null, error?: string | null, 
@@ -70,5 +97,12 @@ export type SessionCreateReply = { success: boolean, session_id?: string | null,
  * Non-fatal warnings from resolving/materializing the initial Environment
  * Binding (reserved-key collisions, parse warnings). Empty on refusal.
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The Project membership committed with this Session create (#3082).
+ *
+ * Present only when the create named a Project whose Existing Location was
+ * validated. The Agent never sees this field; the Server owns the link.
+ */
+project_id?: string | null, };
 

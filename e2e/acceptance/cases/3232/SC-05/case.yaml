@@ -1,0 +1,10 @@
+schema_version: 1
+issue: 3232
+criterion: SC-05
+stage: staging
+platform: both
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

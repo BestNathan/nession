@@ -14,6 +14,7 @@ import { expect, test } from '@playwright/test';
 import {
   expectDrawnAffordance,
   expectInsetFocusOutline,
+  expectNoPageOverflow,
   expectNoUnexpectedOverflow,
   expectMaxWidth,
   expectPaddingX,
@@ -27,6 +28,12 @@ import {
   expectVisibleWithin,
   waitForSettledBox,
 } from '../../helpers/ui-assert/assertions';
+import {
+  expectFormFieldAlignment,
+  expectSingleWorkspaceScrollOwner,
+  expectWorkspaceMasterDetail,
+  growUntilWorkspaceScrolls,
+} from '../../helpers/ui-assert/layout';
 import { loadContracts, patternBlock, type Experience } from '../../helpers/ui-assert/contracts';
 import { swipeHorizontally } from '../../helpers/shell';
 import { waitForFixtureTerminal } from '../../helpers/fixtureVisual';
@@ -185,15 +192,17 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expect(search).toBeFocused();
       await expectQuietPointerFocus(search, optsFor(SESSION_LIST, 'web', row.id), { border: 'ring' });
 
-      // A real Tab step: the next primitive must show the token inset outline,
-      // not an outer ring or a duplicate ring+outline.
+      // A real Tab step: the next primitive is the search field's filter action,
+      // which must show the token inset outline, not an outer ring or a
+      // duplicate ring+outline.
       await page.keyboard.press('Tab');
-      const newSession = page.getByTestId('create-session');
-      await expect(newSession).toBeFocused();
-      await expectInsetFocusOutline(newSession, optsFor(SESSION_LIST, 'web', row.id));
-
-      // Pointer focus on a button paints no focus chrome at all.
       const filters = page.getByTestId('session-list-filters');
+      await expect(filters).toBeFocused();
+      await expectInsetFocusOutline(filters, optsFor(SESSION_LIST, 'web', row.id));
+
+      // Pointer focus on a button paints no focus chrome at all. Return to the
+      // text field by pointer first so the button's focus modality is fresh.
+      await search.click();
       await filters.click();
       await expect(filters).toBeFocused();
       await expectQuietPointerFocus(filters, optsFor(SESSION_LIST, 'web', row.id));
@@ -251,6 +260,44 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
 
       // ...and focus still has an inside-the-control indicator.
       await expectInsetFocusOutline(search, optsFor('pattern.session-list', 'web', row.id));
+    });
+
+    test('capability surfaces keep the host layout and one intended scroll owner (#3194)', async ({ page }) => {
+      const opts = {
+        pattern: 'pattern.workspace-navigation',
+        experience: 'web' as const,
+        viewport: row.id,
+      };
+
+      // Files: the shared master/detail recipe clips the host; the tree and
+      // viewer own their own local scroll.
+      await page.goto('/#/fixture/workspace?capability=files');
+      const files = page.getByTestId('file-workspace');
+      await expect(files).toBeVisible();
+      await expectWorkspaceMasterDetail(files, opts);
+      await expectNoPageOverflow(page, opts);
+
+      // A Workspace detail takes its scroll ancestry from the shared recipe,
+      // not from the product component.
+      await page.goto('/#/fixture/workspace?capability=session');
+      await expect(page.getByTestId('session-details-web')).toHaveAttribute(
+        'data-workspace-scroll-owner',
+        'true',
+      );
+      await expectNoPageOverflow(page, opts);
+
+      // A long configuration state has exactly one scroller, the policy panel;
+      // its fields keep one label/control edge.
+      await page.goto('/#/fixture/workspace?capability=sandbox');
+      await page.getByTestId('sandbox-tab-filesystem').click();
+      await growUntilWorkspaceScrolls(page, 'sandbox-fs-read-add');
+      const sandboxForm = page.locator('[data-recipe="configuration-form"]').first();
+      await expectFormFieldAlignment(sandboxForm, opts);
+      await expectSingleWorkspaceScrollOwner(page.getByTestId('workspace-tool-content'), {
+        ...opts,
+        recipe: false,
+      });
+      await expectNoPageOverflow(page, opts);
     });
   });
 }

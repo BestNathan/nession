@@ -150,6 +150,7 @@ interface MockTransport extends TerminalTransport {
   seedInputCursor: ReturnType<typeof vi.fn<(seed: TerminalInputSeed | undefined) => void>>;
   seedStreamCursor: ReturnType<typeof vi.fn<(streamEpoch: number | undefined, streamCursor: number | undefined) => void>>;
   flushAllOutbound: ReturnType<typeof vi.fn<() => void>>;
+  requestReconcile: ReturnType<typeof vi.fn<(epoch: number, afterSeq: number) => Promise<boolean>>>;
 }
 
 function makeMockTransport(opts: ConnectionOptions): MockTransport {
@@ -166,6 +167,8 @@ function makeMockTransport(opts: ConnectionOptions): MockTransport {
     flushInputBuffer: vi.fn(),
     flushPendingResize: vi.fn(),
     flushAllOutbound: vi.fn<() => void>(),
+    requestReconcile: vi.fn<(epoch: number, afterSeq: number) => Promise<boolean>>()
+      .mockResolvedValue(true),
     dispose: vi.fn(),
   };
 }
@@ -318,6 +321,7 @@ describe('SessionRuntime', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     globalThis.WebSocket = OriginalWebSocket;
   });
@@ -385,6 +389,7 @@ describe('SessionRuntime', () => {
     });
     await flushMicrotasks();
     expect(rt.attachState.phase).toBe('attached');
+    vi.useFakeTimers();
     const outputAcks = () => sentFrames()
       .filter((frame) => frame.msg_type === 'agent.terminal.output.applied');
     // Socket receipt and an attach cursor cannot establish parser progress.
@@ -394,6 +399,8 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap, do not ACK
     expect(outputAcks()).toHaveLength(0);
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(outputAcks()).toHaveLength(0); // contiguous progress is batched
+    await vi.advanceTimersByTimeAsync(32);
     expect(outputAcks()).toHaveLength(1);
     expect(outputAcks()[0].payload).toEqual({
       session_name: 's1',
@@ -406,6 +413,8 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // duplicate
     expect(outputAcks()).toHaveLength(1);
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 });
+    expect(outputAcks()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(32);
     expect(outputAcks()).toHaveLength(2);
     expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(3);
     rt.noteStreamTruncated(); // revoked proof, no phantom future ACK
@@ -414,6 +423,108 @@ describe('SessionRuntime', () => {
     rt.dispose();
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
     expect(outputAcks()).toHaveLength(2);
+  });
+
+  it('bounds parser ACK chatter and flushes early at byte or event pressure (#2867)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 200, subscriber_generation: 41,
+    });
+    await flushMicrotasks();
+    vi.useFakeTimers();
+    const acks = () => sentFrames()
+      .filter((f) => f.msg_type === 'agent.terminal.output.applied');
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+
+    for (let seq = 1; seq <= 63; seq += 1) {
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: seq }, 1);
+    }
+    expect(acks()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(31);
+    expect(acks()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(acks()).toHaveLength(1);
+    expect(acks()[0].payload).toMatchObject({ applied_through: 63 });
+
+    // A 256 KiB parsed output frame must not wait behind the timer.
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 64 }, 256 * 1024);
+    expect(acks()).toHaveLength(2);
+    expect(acks()[1].payload).toMatchObject({ applied_through: 64 });
+
+    // Similarly, many tiny output/resize positions cannot exhaust the
+    // Agent's 1024-event credit ledger while a timer waits.
+    for (let seq = 65; seq <= 128; seq += 1) {
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: seq }, 0);
+    }
+    expect(acks()).toHaveLength(3);
+    expect(acks()[2].payload).toMatchObject({ applied_through: 128 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(3); // no trailing duplicate timer
+    rt.dispose();
+  });
+
+  it('revokes queued parser ACKs across generation changes and retries only real send failures (#2867)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 10, subscriber_generation: 41,
+    });
+    await flushMicrotasks();
+    vi.useFakeTimers();
+    const acks = () => sentFrames()
+      .filter((f) => f.msg_type === 'agent.terminal.output.applied');
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 12);
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(0); // old renderer's timer cannot flush
+
+    const api = rt.getAgentTerminalApi()!;
+    const send = api.sendOutputApplied;
+    api.sendOutputApplied = () => false;
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 10);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0);
+    api.sendOutputApplied = send;
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }, 10);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+    expect(acks()[0].payload).toMatchObject({ applied_through: 2 });
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(2);
+
+    // A stream hole revokes the queued prefix.
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 }, 1);
+    rt.noteStreamTruncated();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // A replaced renderer cannot let the old timer confirm its prefix.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.noteRendererReplaced();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // A route-intent change retires the old batch before its timer fires.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // Disposal cancels a final queued prefix.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.dispose();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1); // disposed runtime never sends
   });
 
   it('defers the atomic-bootstrap ACK until the attach reply states its identity (#2120)', async () => {
@@ -457,6 +568,142 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
     expect(sentFrames().filter((f) => f.msg_type === 'agent.terminal.output.applied')).toHaveLength(0);
     expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0);
+    rt.dispose();
+  });
+
+  it('uses the response-less progress notification only when the Agent negotiated it (#2877)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 3, subscriber_generation: 41,
+      terminal_capabilities: ['terminal-progress-notifications-v1'],
+    });
+    await flushMicrotasks();
+    expect(rt.attachState.phase).toBe('attached');
+
+    const progress = () => sentFrames()
+      .filter((frame) => frame.msg_type === 'client.terminal.output.progress');
+    const applied = () => sentFrames()
+      .filter((frame) => frame.msg_type === 'agent.terminal.output.applied');
+    vi.useFakeTimers();
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(progress()).toHaveLength(0); // #2867 batching still owns cadence
+    await vi.advanceTimersByTimeAsync(32);
+
+    expect(progress()).toHaveLength(1);
+    // The negotiated path never sends the v1 operation, so no `ok` reply is
+    // possible for ordinary parser progress.
+    expect(applied()).toHaveLength(0);
+    expect(progress()[0].payload).toEqual({
+      session_name: 's1',
+      subscriber_generation: 41,
+      stream_epoch: 7,
+      renderer_generation: rt.terminalAppliedSnapshot?.generation,
+      applied_through: 1,
+    });
+    vi.useRealTimers();
+    rt.dispose();
+  });
+
+  it('recovers once from a valid reconcile notice, from the trusted parser prefix (#2877)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 3, subscriber_generation: 41,
+      terminal_capabilities: ['terminal-progress-notifications-v1'],
+    });
+    await flushMicrotasks();
+    vi.useFakeTimers();
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    await vi.advanceTimersByTimeAsync(32);
+    const progress = () => sentFrames()
+      .filter((frame) => frame.msg_type === 'client.terminal.output.progress');
+    expect(progress()).toHaveLength(1);
+
+    let settle!: (ok: boolean) => void;
+    const recovery = new Promise<boolean>((resolve) => { settle = resolve; });
+    lastTransport().requestReconcile.mockReturnValue(recovery);
+    rt.noteReconcileRequired({
+      sessionName: 's1', subscriberGeneration: 41, streamEpoch: 7,
+      headSeq: 5, reason: 'progress-ahead-of-issued', action: 'resume',
+    });
+
+    // Exactly one recovery, from the last trusted parser-applied position.
+    expect(lastTransport().requestReconcile).toHaveBeenCalledTimes(1);
+    expect(lastTransport().requestReconcile).toHaveBeenCalledWith(7, 1);
+    // A second notice while recovery is in flight is ignored (single-flight).
+    rt.noteReconcileRequired({
+      sessionName: 's1', subscriberGeneration: 41, streamEpoch: 7,
+      headSeq: 5, reason: 'progress-ahead-of-issued', action: 'resume',
+    });
+    expect(lastTransport().requestReconcile).toHaveBeenCalledTimes(1);
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+    // Parser progress is not submitted while the proof is outstanding, even
+    // when the #2867 cadence timer fires.
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(progress()).toHaveLength(1);
+
+    settle(true);
+    await flushMicrotasks();
+    // The complete replay resumes reporting at the advanced frontier.
+    expect(progress()).toHaveLength(2);
+    expect(progress()[1].payload).toMatchObject({ applied_through: 2 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+    vi.useRealTimers();
+    rt.dispose();
+  });
+
+  it('ignores a stale or foreign reconcile notice and degrades when replay cannot prove continuity (#2877)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 3, subscriber_generation: 41,
+      terminal_capabilities: ['terminal-progress-notifications-v1'],
+    });
+    await flushMicrotasks();
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+
+    for (const notice of [
+      { sessionName: 'other', subscriberGeneration: 41, streamEpoch: 7,
+        headSeq: 5, reason: 'progress-ahead-of-issued' as const, action: 'resume' as const },
+      { sessionName: 's1', subscriberGeneration: 40, streamEpoch: 7,
+        headSeq: 5, reason: 'progress-ahead-of-issued' as const, action: 'resume' as const },
+      { sessionName: 's1', subscriberGeneration: 41, streamEpoch: 8,
+        headSeq: 5, reason: 'progress-ahead-of-issued' as const, action: 'resume' as const },
+    ]) {
+      rt.noteReconcileRequired(notice);
+    }
+    expect(lastTransport().requestReconcile).not.toHaveBeenCalled();
+    expect(rt.terminalAppliedSnapshot).not.toBeNull();
+
+    // A current notice whose replay cannot be proven takes the checkpoint
+    // path and leaves the terminal explicitly degraded, never synchronized.
+    lastTransport().requestReconcile.mockResolvedValue(false);
+    rt.noteReconcileRequired({
+      sessionName: 's1', subscriberGeneration: 41, streamEpoch: 7,
+      headSeq: 9, reason: 'progress-ahead-of-issued', action: 'resume',
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+    expect(rt.getSnapshot().historyDegraded).toBe(true);
+    // The fresh attach may already have moved the phase out of `attached`;
+    // either way the terminal never claims synchronization.
+    expect(['degraded-live', 'unavailable']).toContain(rt.getSnapshot().streamState);
     rt.dispose();
   });
 
@@ -981,9 +1228,12 @@ describe('SessionRuntime', () => {
       expect(ack).not.toHaveBeenCalled();
 
       rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      vi.useFakeTimers();
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap
       expect(ack).not.toHaveBeenCalled();
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }); // contiguous parser completed
+      expect(ack).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(32);
       expect(ack).toHaveBeenCalledWith('s1', {
         subscriberGeneration: 41, streamEpoch: 7,
         rendererGeneration: rt.terminalAppliedSnapshot?.generation, appliedThrough: 2,
@@ -1002,6 +1252,117 @@ describe('SessionRuntime', () => {
       expect(ack).toHaveBeenCalledTimes(1);
       rt.dispose();
       expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+    });
+
+    it('uses the response-less Relay progress notification only when the forwarded proof states it (#2877)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const readyCallbacks = new Set<(proof: RelaySubscriptionProof, gen: number) => void>();
+      const reconcileCallbacks = new Set<(notice: import('@/product/terminal').TerminalReconcileNotice) => void>();
+      const progress = vi.fn(() => true);
+      const applied = vi.fn(() => true);
+      const conn = Object.assign(serverConnection, {
+        beginRelayTracked: vi.fn(() => ({ id: 'real-begin', physicalGeneration: 3 })),
+        onRelayReady: (_session: string, cb: (proof: RelaySubscriptionProof, gen: number) => void) => {
+          readyCallbacks.add(cb);
+          return () => { readyCallbacks.delete(cb); };
+        },
+        onRelayReconcileRequired: (
+          _session: string,
+          cb: (notice: import('@/product/terminal').TerminalReconcileNotice) => void,
+        ) => {
+          reconcileCallbacks.add(cb);
+          return () => { reconcileCallbacks.delete(cb); };
+        },
+        sendRelayOutputApplied: applied,
+        sendRelayOutputProgress: progress,
+      });
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+      rt.setTransportReady(true);
+      rt.buildTransport();
+      await flushMicrotasks();
+
+      const proof: RelaySubscriptionProof = {
+        sessionName: 's1', browserClientId: 'unit-client',
+        relayRequestId: 'real-begin', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriberGeneration: 41, streamEpoch: 7,
+        terminalCapabilities: ['terminal-progress-notifications-v1'],
+      };
+      for (const cb of readyCallbacks) { cb(proof, 3); }
+      vi.useFakeTimers();
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+      await vi.advanceTimersByTimeAsync(32);
+
+      expect(progress).toHaveBeenCalledWith('s1', {
+        subscriberGeneration: 41, streamEpoch: 7,
+        rendererGeneration: rt.terminalAppliedSnapshot?.generation, appliedThrough: 1,
+      });
+      expect(applied).not.toHaveBeenCalled();
+
+      // A notice forwarded by the Server is validated against that same proof
+      // and reuses the runtime's single-flight resume.
+      for (const cb of reconcileCallbacks) {
+        cb({
+          sessionName: 's1', subscriberGeneration: 41, streamEpoch: 7,
+          headSeq: 9, reason: 'progress-ahead-of-issued', action: 'resume',
+        });
+      }
+      expect(lastTransport().requestReconcile).toHaveBeenCalledWith(7, 1);
+
+      // A route swap replaces the Agent-minted subscription. A notice from the
+      // retired generation is stale even though it names the same session and
+      // epoch; only the fresh binding may start recovery.
+      serverConnection.emit('connecting');
+      serverConnection.emit('connected');
+      await flushMicrotasks();
+      const fresh: RelaySubscriptionProof = {
+        ...proof, subscriberGeneration: 42,
+        relayRequestId: 'real-begin', routeId: 'bbbbbbbb-1234-4000-8000-aabbccddeeff',
+      };
+      for (const cb of readyCallbacks) { cb(fresh, 3); }
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+      for (const cb of reconcileCallbacks) {
+        cb({
+          sessionName: 's1', subscriberGeneration: 41, streamEpoch: 7,
+          headSeq: 9, reason: 'progress-ahead-of-issued', action: 'resume',
+        });
+      }
+      expect(lastTransport().requestReconcile).toHaveBeenCalledTimes(1);
+      for (const cb of reconcileCallbacks) {
+        cb({
+          sessionName: 's1', subscriberGeneration: 42, streamEpoch: 7,
+          headSeq: 9, reason: 'progress-ahead-of-issued', action: 'resume',
+        });
+      }
+      expect(lastTransport().requestReconcile).toHaveBeenCalledTimes(2);
+      expect(lastTransport().requestReconcile).toHaveBeenLastCalledWith(7, 1);
+      vi.useRealTimers();
+      rt.dispose();
+    });
+
+    it('takes the checkpoint path immediately when the Agent requires a fresh binding (#2877)', async () => {
+      const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+      rt.setTransportReady(true);
+      rt.buildTransport();
+      await openWs();
+      await flushMicrotasks();
+      answerPending('agent.attach', 'ok', {
+        stream_epoch: 7, stream_cursor: 3, subscriber_generation: 41,
+        terminal_capabilities: ['terminal-progress-notifications-v1'],
+      });
+      await flushMicrotasks();
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+
+      rt.noteReconcileRequired({
+        sessionName: 's1', subscriberGeneration: 41, streamEpoch: 7,
+        headSeq: 9, reason: 'renderer-replaced', action: 'reattach',
+      });
+      expect(lastTransport().requestReconcile).not.toHaveBeenCalled();
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+      expect(rt.getSnapshot().historyDegraded).toBe(true);
+      rt.dispose();
     });
 
     it('re-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)', async () => {

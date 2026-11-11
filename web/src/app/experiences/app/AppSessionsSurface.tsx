@@ -20,6 +20,8 @@ import { SearchBar } from '@/product/session/components/SearchBar';
 import { SessionList } from '@/product/session/patterns/SessionList';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
 import { SidebarFooter } from '@/app/SidebarFooter';
+import { ProjectNavSection } from '@/app/patterns/ProjectsSection';
+import { emptyProjectShell } from '@/product/project/types';
 import { appHeaderBandClass } from '@/app/patterns/SessionHeader';
 import {
   shellIconButtonClass,
@@ -28,7 +30,7 @@ import {
 } from '@/app/shellStyles';
 import { bodyAppClass, secondaryAppClass, titleAppClass } from './appTypography';
 import { APP_START_SESSION_COPY } from './AppHome';
-import { bucketSessions, type SessionBucket } from './sessionHistory';
+import { bucketSessions, type SessionBucket } from '@/product/session/model/sessionHistory';
 import type { SidebarProps } from '@/app/Sidebar';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
@@ -342,8 +344,10 @@ function SessionsFilterPanel({
  *   expression.
  * - **`emptyState` / `searchMissState`**, which the App words because it owns
  *   the creation action the empty state offers.
- * - **`footer`**, the Agents entry, which belongs below history rather than in
- *   the chrome.
+ *
+ * The Projects section and the Agents entry are siblings rendered *below* this
+ * region by the surface: Projects sit after Session history and before Agents
+ * (#3025), and both remain reachable when the list is empty.
  */
 function SessionsListRegion({
   buckets,
@@ -358,12 +362,13 @@ function SessionsListRegion({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
+  onAssociateProject,
   createDisabled,
   onCreate,
   searchQuery,
   setSearchQuery,
-  activeAgentId,
-  onlineCount,
 }: {
   buckets: SessionBucket[];
   grouped: boolean;
@@ -377,12 +382,13 @@ function SessionsListRegion({
   onSelect: AppSessionsSurfaceProps['onSelect'];
   onConfigure: AppSessionsSurfaceProps['onConfigure'];
   onKill: AppSessionsSurfaceProps['onKill'];
+  onViewDetails: AppSessionsSurfaceProps['onViewDetails'];
+  onAssociateProject?: AppSessionsSurfaceProps['onAssociateProject'];
+  onEditDetails: AppSessionsSurfaceProps['onEditDetails'];
   createDisabled: boolean;
   onCreate: () => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
-  activeAgentId: string | null;
-  onlineCount: number;
 }) {
   return (
     <div
@@ -403,6 +409,9 @@ function SessionsListRegion({
         onSelect={onSelect}
         onConfigure={onConfigure}
         onKill={onKill}
+        onViewDetails={onViewDetails}
+        onAssociateProject={onAssociateProject}
+        onEditDetails={onEditDetails}
         groups={
           grouped
             ? buckets.map((bucket) => ({
@@ -433,13 +442,6 @@ function SessionsListRegion({
           <SessionsSearchMiss
             searchQuery={searchQuery}
             onClearSearch={() => setSearchQuery('')}
-          />
-        }
-        footer={
-          <AgentsDisclosure
-            agents={agents}
-            activeAgentId={activeAgentId}
-            onlineCount={onlineCount}
           />
         }
       />
@@ -751,6 +753,10 @@ export function AppSessionsSurface({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
+  onAssociateProject,
+  projectShell = emptyProjectShell(),
 }: AppSessionsSurfaceProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
@@ -804,10 +810,20 @@ export function AppSessionsSurface({
         onSelect={onSelect}
         onConfigure={onConfigure}
         onKill={onKill}
+        onViewDetails={onViewDetails}
+        onAssociateProject={onAssociateProject}
+        onEditDetails={onEditDetails}
         createDisabled={createDisabled}
         onCreate={onCreate}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+      />
+      {/* Projects are a sibling destination below history and above the
+          secondary Agents entry (#3025). They stay reachable with zero
+          Sessions, which is why they are not part of the list's footer. */}
+      <ProjectNavSection shell={projectShell} variant="app" />
+      <AgentsDisclosure
+        agents={agents}
         activeAgentId={activeAgentId}
         onlineCount={onlineCount}
       />

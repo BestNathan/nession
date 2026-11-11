@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use nession_protocol::contracts::env::v1::{EnvSnapshot, SessionEnvProfile};
+use nession_protocol::contracts::sandbox::v1::{SandboxExecutionReport, SandboxPolicy};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -49,7 +50,7 @@ fn claude_binding_env(session_name: &str, instance_id: &str) -> Vec<(String, Str
 /// resolves the passwd shell a moment later. Without this fallback the Session
 /// runs bash while the binding reports `unsupported_shell` and Layer C is
 /// skipped.
-fn resolve_session_shell(
+pub(super) fn resolve_session_shell(
     tmux_default: Option<String>,
     shell_env: Option<String>,
     passwd_shell: Option<String>,
@@ -66,7 +67,7 @@ fn resolve_session_shell(
 /// Used only as a shell-resolution fallback. `None` when the database has no
 /// entry or records a non-interactive shell.
 #[cfg(unix)]
-fn passwd_login_shell() -> Option<String> {
+pub(super) fn passwd_login_shell() -> Option<String> {
     // SAFETY: `pwd` and `buf` are valid for the whole call, and `getpwuid_r`
     // writes the record and its strings into them. On success `pw_shell`
     // points into `buf`, and the string is copied out before either is
@@ -214,8 +215,8 @@ enum CreateStage {
     Requested,
     /// `new-session` returned Ok: this attempt owns the Session with this name.
     Created,
-    /// Every post-create step finished. The warnings are the caller's result.
-    Completed(Vec<String>),
+    /// Every post-create step finished. This is the caller's result.
+    Completed(SessionCreateOutcome),
 }
 
 type CreateProgress = Arc<Mutex<CreateStage>>;
@@ -319,6 +320,22 @@ pub struct SessionManager {
     /// Memory threshold percentage (0-100) for rejecting new sessions.
     /// `None` means use the default (90%). See [`crate::memory::check_memory_pressure`].
     memory_threshold_percent: Option<u8>,
+    /// The Agent's Sandbox runtime. `None` refuses an explicit policy rather
+    /// than silently executing it as Native.
+    sandbox: Option<Arc<crate::sandbox_runtime::SandboxRuntime>>,
+    /// The central Server's configured WebSocket URL (#3062). Managed
+    /// creation derives its authorized blob HTTP base from this value; the
+    /// Server never guesses its own public hostname.
+    server_url: String,
+}
+
+/// The result of one Session create.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionCreateOutcome {
+    /// Non-fatal Environment Binding warnings.
+    pub warnings: Vec<String>,
+    /// What the Sandbox backend verified, for a sandboxed create.
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 impl SessionManager {
@@ -340,6 +357,8 @@ impl SessionManager {
             kill_timeout: TMUX_KILL_TIMEOUT,
             create_timeout: TMUX_CREATE_TIMEOUT,
             memory_threshold_percent: None,
+            sandbox: None,
+            server_url: String::new(),
         }
     }
 
@@ -359,6 +378,32 @@ impl SessionManager {
     pub fn with_env_state_dir(mut self, state_dir: PathBuf) -> Self {
         self.env = self.env.with_state_dir(state_dir);
         self
+    }
+
+    /// Attach the Agent's Sandbox runtime and arm its execution reaper.
+    ///
+    /// Without a runtime, an explicit Sandbox policy is refused. Native
+    /// sessions are unaffected.
+    pub fn with_sandbox(mut self, sandbox: Arc<crate::sandbox_runtime::SandboxRuntime>) -> Self {
+        sandbox.arm_reaper(self.tmux_dep());
+        self.sandbox = Some(sandbox);
+        self
+    }
+
+    /// Record the central Server URL used to derive Managed download URLs.
+    pub fn with_server_url(mut self, server_url: impl Into<String>) -> Self {
+        self.server_url = server_url.into();
+        self
+    }
+
+    /// The central Server URL this manager was composed with, when any.
+    pub fn server_url(&self) -> &str {
+        &self.server_url
+    }
+
+    /// The Sandbox runtime this manager was composed with, when any.
+    pub fn sandbox_runtime(&self) -> Option<&Arc<crate::sandbox_runtime::SandboxRuntime>> {
+        self.sandbox.as_ref()
     }
 
     /// The tmux socket every command from this manager addresses.
@@ -461,6 +506,7 @@ impl SessionManager {
                 height: session.height,
                 foreground_command: session.foreground_command,
                 working_dir: session.working_dir,
+                instance_id: session.instance_id,
             })
             .collect())
     }
@@ -614,7 +660,7 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
-        self.create_session_inner(name, width, height, working_dir, env, None)
+        self.create_session_inner(name, width, height, working_dir, env, None, None, None)
             .await
             .map(|_| ())
     }
@@ -637,11 +683,81 @@ impl SessionManager {
         height: u16,
         working_dir: &str,
         binding: SessionBindingInput<'_>,
-    ) -> Result<Vec<String>> {
-        self.create_session_inner(name, width, height, working_dir, &[], Some(binding))
-            .await
+    ) -> Result<SessionCreateOutcome> {
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            working_dir,
+            &[],
+            Some(binding),
+            None,
+            None,
+        )
+        .await
     }
 
+    /// Create a Session with an optional Environment Binding and an optional
+    /// Sandbox policy (#2681).
+    ///
+    /// The policy is compiled and prepared before `new-session`, and the
+    /// create fails closed when the host cannot install a requested guarantee.
+    /// A successful create returns the mechanisms the Agent verified.
+    pub async fn create_session_with_options(
+        &self,
+        name: &str,
+        width: u16,
+        height: u16,
+        working_dir: &str,
+        binding: Option<SessionBindingInput<'_>>,
+        sandbox: Option<&SandboxPolicy>,
+    ) -> Result<SessionCreateOutcome> {
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            working_dir,
+            &[],
+            binding,
+            sandbox,
+            None,
+        )
+        .await
+    }
+
+    /// Create a Session whose initial Pane runs inside a prepared EROFS
+    /// composition (#3062).
+    ///
+    /// `tmux_working_dir` is the Agent-owned host directory tmux starts the
+    /// Session in; `sandbox_working_dir` is the composed path (`/workspace`)
+    /// the launcher enters inside the sandbox. The policy is compiled and
+    /// prepared before `new-session`, and a host that cannot install it
+    /// refuses the create with no Native fallback.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_session_managed(
+        &self,
+        name: &str,
+        width: u16,
+        height: u16,
+        tmux_working_dir: &str,
+        sandbox_working_dir: &str,
+        binding: Option<SessionBindingInput<'_>>,
+        sandbox: &SandboxPolicy,
+    ) -> Result<SessionCreateOutcome> {
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            tmux_working_dir,
+            &[],
+            binding,
+            Some(sandbox),
+            Some(sandbox_working_dir),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn create_session_inner(
         &self,
         name: &str,
@@ -650,7 +766,9 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
         binding: Option<SessionBindingInput<'_>>,
-    ) -> Result<Vec<String>> {
+        sandbox: Option<&SandboxPolicy>,
+        sandbox_working_dir: Option<&str>,
+    ) -> Result<SessionCreateOutcome> {
         // Check memory pressure before creating a new session. This prevents
         // container-level OOM by refusing new sessions when memory usage is too
         // high, rather than letting the entire container die.
@@ -698,6 +816,8 @@ impl SessionManager {
                 working_dir,
                 env,
                 binding,
+                sandbox,
+                sandbox_working_dir.unwrap_or(working_dir),
                 &token,
                 &progress,
             )
@@ -710,8 +830,8 @@ impl SessionManager {
                 // The inner future was dropped at the deadline; `progress` is
                 // the only record of how far it got. `Completed` means it
                 // actually finished in the same tick — still a success.
-                if let CreateStage::Completed(warnings) = create_stage(&progress) {
-                    return Ok(warnings);
+                if let CreateStage::Completed(outcome) = create_stage(&progress) {
+                    return Ok(outcome);
                 }
                 let note = match tokio::time::timeout(
                     TMUX_CREATE_RECONCILE_TIMEOUT,
@@ -748,9 +868,11 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
         binding: Option<SessionBindingInput<'_>>,
+        sandbox: Option<&SandboxPolicy>,
+        sandbox_working_dir: &str,
         token: &str,
         progress: &CreateProgress,
-    ) -> Result<Vec<String>> {
+    ) -> Result<SessionCreateOutcome> {
         nession_common::config::validate_terminal_cols(width).map_err(anyhow::Error::msg)?;
         // History depth needs nothing here: it travels as `-f` on every tmux
         // invocation this manager makes (`cmd.rs`), so whichever one starts the
@@ -830,6 +952,65 @@ impl SessionManager {
         // inherited environment.
         session_env.extend(adapter.env.iter().cloned());
 
+        // Prepare the Sandbox before `new-session` starts a process. The
+        // policy is the request; the runtime owns host-local facts. An
+        // explicit policy without a configured runtime is refused rather than
+        // silently executed as a Native Session.
+        let mut sandbox_prepared = match sandbox {
+            Some(policy) => {
+                // Validate even an explicitly disabled policy: a payload that
+                // says `enabled: false` while carrying constraints is
+                // contradictory and must not be silently ignored.
+                nession_sandbox::compile(policy).map_err(|error| anyhow::anyhow!("{error}"))?;
+                if !policy.enabled {
+                    None
+                } else {
+                    let Some(runtime) = self.sandbox.clone() else {
+                        anyhow::bail!(
+                        "this Agent has no Sandbox backend configured; refusing the Session's Sandbox policy"
+                    );
+                    };
+                    let inner_command = if adapter.command.is_empty() {
+                        let tmux_default = self.sdk_ops().default_shell().await.ok().flatten();
+                        let shell = resolve_session_shell(
+                            tmux_default,
+                            std::env::var("SHELL").ok(),
+                            passwd_login_shell(),
+                        )
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "could not resolve a shell to run inside the sandboxed Session"
+                            )
+                        })?;
+                        vec![shell, "-l".to_string()]
+                    } else {
+                        adapter.command.clone()
+                    };
+                    let request = nession_sandbox::LaunchRequest {
+                        policy: policy.clone(),
+                        session_name: name.to_string(),
+                        instance_id: instance_id.clone(),
+                        working_dir: sandbox_working_dir.to_string(),
+                        inner_command,
+                        tmux_socket: Some(self.socket_path().to_path_buf()),
+                    };
+                    let prepared = tokio::task::spawn_blocking(move || runtime.prepare(&request))
+                        .await
+                        .context("sandbox preparation task")?
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    Some(prepared)
+                }
+            }
+            None => None,
+        };
+        if let Some(prepared) = &sandbox_prepared {
+            session_env.extend(prepared.env().iter().cloned());
+        }
+        let launch_command = sandbox_prepared
+            .as_ref()
+            .map(|prepared| prepared.command().to_vec())
+            .unwrap_or_else(|| adapter.command.clone());
+
         // The creation fact is recorded as soon as `new-session` returns Ok:
         // from there on, a post-create failure or a cancelled future knows the
         // Session is this attempt's.
@@ -842,7 +1023,7 @@ impl SessionManager {
                 width,
                 height,
                 env: session_env,
-                command: adapter.command.clone(),
+                command: launch_command,
             })
             .await
         {
@@ -857,6 +1038,13 @@ impl SessionManager {
                 // Session this attempt can prove is its own, then report the
                 // original failure — plus, when a Session was left behind that
                 // this attempt cannot prove it made, the fact that it is there.
+                if let Some(prepared) = sandbox_prepared.take() {
+                    // No Session exists to verify; release the owned channel,
+                    // cgroup and record now instead of waiting for the reaper.
+                    if let Err(abort) = prepared.abort() {
+                        tracing::warn!("could not release the unused sandbox: {abort}");
+                    }
+                }
                 let note = self.reconcile_ambiguous_create(name, token).await;
                 return if note.is_empty() {
                     Err(error)
@@ -870,6 +1058,7 @@ impl SessionManager {
         // known. A required step's failure or this phase's deadline removes the
         // Session before the error is returned, so a retry of the same name is
         // not refused by a Session nobody is tracking.
+        let sandbox_runtime = self.sandbox.clone();
         let post_create = async move {
             // Deliver the instance identity to the Session's environment as a
             // required part of the create (#2974). `new-session -e` already
@@ -985,15 +1174,63 @@ impl SessionManager {
                 .await
                 .with_context(|| format!("record the tmux instance identity of session {name}"))?;
 
-            Ok::<Vec<String>, anyhow::Error>(warnings)
+            // The sandboxed Pane is verified only after every other required
+            // create step: the bridge is still waiting on the launch barrier,
+            // so no user code has run. Verification releases it on success;
+            // on failure the caller's compensation kills the Session and the
+            // prepared resources are removed.
+            let mut sandbox_report = None;
+            if let Some(prepared) = sandbox_prepared {
+                let Some(runtime) = sandbox_runtime else {
+                    anyhow::bail!("the Sandbox runtime disappeared between prepare and verify");
+                };
+                let panes = self
+                    .sdk_ops()
+                    .list_panes()
+                    .await
+                    .context("locate the sandboxed Pane")?;
+                let pane = panes
+                    .iter()
+                    .find(|pane| {
+                        pane.session_name == name && pane.window_index == 0 && pane.pane_index == 0
+                    })
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("the sandboxed Session has no Pane to verify")
+                    })?;
+                let pane_pid = pane.pane_pid.ok_or_else(|| {
+                    anyhow::anyhow!("the sandboxed Session has no Pane process to verify")
+                })?;
+                let target = crate::sandbox_runtime::PaneLaunchTarget {
+                    pane_pid,
+                    pane_id: Some(pane.pane_id.clone()),
+                    window_id: Some(pane.window_id.clone()),
+                };
+                let session_name = name.to_string();
+                let report = tokio::task::spawn_blocking(move || {
+                    crate::sandbox_runtime::launch_and_verify(
+                        &runtime,
+                        prepared,
+                        target,
+                        &session_name,
+                    )
+                })
+                .await
+                .context("sandbox verification task")??;
+                sandbox_report = Some(report);
+            }
+
+            Ok::<SessionCreateOutcome, anyhow::Error>(SessionCreateOutcome {
+                warnings,
+                sandbox: sandbox_report,
+            })
         };
 
         match tokio::time::timeout(self.create_timeout, post_create).await {
-            Ok(Ok(warnings)) => {
+            Ok(Ok(outcome)) => {
                 // Record completion before returning so a deadline firing in
                 // the same tick reads success, not a stale in-progress stage.
-                set_create_stage(progress, CreateStage::Completed(warnings.clone()));
-                Ok(warnings)
+                set_create_stage(progress, CreateStage::Completed(outcome.clone()));
+                Ok(outcome)
             }
             Ok(Err(error)) => {
                 self.compensate_created_session(name).await;
@@ -1108,6 +1345,24 @@ impl SessionManager {
         // stale and could give a later same-named Session an inherited
         // baseline. Removal is idempotent.
         self.env.clear_session_binding(name).await;
+        self.cleanup_sandbox_session(name).await;
+    }
+
+    /// Release a Session's Sandbox resources, if it has any.
+    async fn cleanup_sandbox_session(&self, name: &str) {
+        let Some(sandbox) = self.sandbox.clone() else {
+            return;
+        };
+        let session_name = name.to_string();
+        match tokio::task::spawn_blocking(move || sandbox.cleanup_session(&session_name)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => tracing::warn!(
+                "could not release the Sandbox resources of session {name}: {error:#}"
+            ),
+            Err(error) => {
+                tracing::warn!("Sandbox cleanup task for session {name} failed: {error}")
+            }
+        }
     }
 
     /// Apply the Agent's resolved size to a Session's pane.
@@ -1128,6 +1383,10 @@ impl SessionManager {
         // cannot read it; and a `SessionEnd` hook still finishing from this
         // instance may write it after the kill, so deleting it here would
         // mostly race that write rather than make anything safer.
+
+        // A killed Session's execution domain is gone; release exactly the
+        // resources this Agent owns for it.
+        self.cleanup_sandbox_session(name).await;
         Ok(())
     }
 }
@@ -1256,7 +1515,7 @@ mod binding_create_tests {
             warnings: Vec::new(),
         }];
 
-        let warnings = mgr
+        let outcome = mgr
             .create_session_with_binding(
                 name,
                 SESSION_WIDTH,
@@ -1270,7 +1529,7 @@ mod binding_create_tests {
             )
             .await
             .expect("the binding is materialized at creation");
-        assert!(warnings.is_empty());
+        assert!(outcome.warnings.is_empty());
 
         // Layer B: tmux's Session environment, which future panes inherit.
         let layer_b = mgr
@@ -1543,6 +1802,91 @@ mod history_limit_tests {
 /// hides that from it — the module's `.expect(…)` calls then read as
 /// production code and the lint gate fails. The items are Unix-only because
 /// they write and chmod a `#!/bin/sh` script.
+/// Fail-closed Sandbox composition (#2681).
+#[cfg(test)]
+mod sandbox_refusal_tests {
+    use super::*;
+
+    /// A payload that says `enabled: false` while carrying constraints is
+    /// contradictory and must be refused, not silently run as Native.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_disabled_policy_with_constraints_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let mgr = crate::test_support::manager_with_fake(&fake);
+        let session = crate::test_support::TestSession::new("sandbox-disabled");
+        let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+            "enabled": false,
+            "network": { "mode": "deny" }
+        }))
+        .expect("policy fixture");
+
+        let error = mgr
+            .create_session_with_options(
+                session.name(),
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                Some(&policy),
+            )
+            .await
+            .expect_err("a disabled policy with constraints must fail closed");
+        assert!(
+            format!("{error:#}").contains("disabled sandbox policy"),
+            "the refusal must name the contradiction: {error:#}"
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|args| args.first().map(String::as_str) == Some("new-session")),
+            "no Session may be created for a contradictory policy"
+        );
+    }
+
+    /// A policy without a composed Sandbox runtime is refused before tmux
+    /// creates anything. Falling through to a Native Session would silently
+    /// discard the caller's explicitly requested guarantee.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_explicit_policy_without_a_runtime_is_refused_before_create() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let mgr = crate::test_support::manager_with_fake(&fake);
+        let session = crate::test_support::TestSession::new("sandbox-no-runtime");
+        let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "network": { "mode": "deny" }
+        }))
+        .expect("policy fixture");
+
+        let error = mgr
+            .create_session_with_options(
+                session.name(),
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                Some(&policy),
+            )
+            .await
+            .expect_err("a policy this Agent cannot honour must fail closed");
+        assert!(
+            format!("{error:#}").contains("no Sandbox backend configured"),
+            "the refusal must name the missing runtime: {error:#}"
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|args| args.first().map(String::as_str) == Some("new-session")),
+            "no Session may be created for a refused policy"
+        );
+    }
+}
+
 #[cfg(test)]
 mod legacy_stage_two_tests {
     use super::*;
@@ -2621,7 +2965,7 @@ esac"#,
         let snapshots = vec![snapshot("create.env")];
         let profiles = vec![profile("create.env")];
 
-        let warnings = mgr
+        let outcome = mgr
             .create_session_with_binding(
                 &name,
                 200,
@@ -2635,7 +2979,7 @@ esac"#,
             )
             .await
             .expect("a healthy create succeeds");
-        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
 
         assert!(
             fake.calls().iter().any(|call| call

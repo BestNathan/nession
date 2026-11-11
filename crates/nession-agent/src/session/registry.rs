@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex, Mutex as StdMutex, MutexGuard};
 use nession_protocol::contracts::session::v1::ClientAttachResponse;
 use nession_protocol::contracts::terminal::v1::{
     TerminalControlAcquireResponse, TerminalControlChangedPayload, TerminalInputAckPayload,
-    TerminalOutputAppliedPayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalOutputAppliedPayload, TerminalOutputProgressPayload, TerminalStreamResumePayload,
+    TerminalStreamResumeResponse,
 };
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -31,9 +32,10 @@ use crate::session::terminal::state::{
 use crate::tmux::session::TmuxSession;
 
 use super::terminal::runtime::{
-    accept_output_ack, build_terminal_resume_response, client_attach_response, close,
-    fan_out_peers, fan_out_recorded_resize, new_output_ack, subscribe_at_stream_cut, write_input,
-    AtomicOutputPrefix, AttachedSession, SessionMap, SessionMapLock, SessionPeer, SubscriberEvent,
+    accept_output_ack, accept_output_progress, build_terminal_resume_response,
+    client_attach_response, close, fan_out_peers, fan_out_recorded_resize, new_output_ack,
+    subscribe_at_stream_cut, write_input, AtomicOutputPrefix, AttachedSession,
+    OutputProgressOutcome, SessionMap, SessionMapLock, SessionPeer, SubscriberEvent,
     SUBSCRIBER_QUEUE_SLOTS,
 };
 
@@ -81,7 +83,7 @@ impl SessionRegistry {
         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
         let queued_bytes = Arc::new(AtomicUsize::new(0));
-        let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
+        let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new_with_base(0)));
 
         let mut control = SessionControlState::new();
         control.ensure_controller(client_id, subscription_id);
@@ -138,12 +140,17 @@ impl SessionRegistry {
         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
         let queued_bytes = Arc::new(AtomicUsize::new(0));
-        let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
 
         let mut guard = self.lock();
         let Some(session) = guard.get_mut(session_name) else {
             return Err(SubscribeRejected::NotAttached);
         };
+        // The new subscription's issued frontier starts at the cut it joins
+        // (#2877). A renderer preserved across the reattach may legitimately
+        // hold applied progress at or below this point.
+        let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new_with_base(
+            session.stream.cursor(),
+        )));
         let output_ack = new_output_ack(session.stream.epoch)
             .map_err(|_| SubscribeRejected::InvalidStreamIdentity)?;
         let peer = SessionPeer {
@@ -460,6 +467,35 @@ impl SessionRegistry {
         };
         let head = session.stream.cursor();
         accept_output_ack(&mut session.peers, client_id, peer_token, payload, head)
+    }
+
+    /// Apply one subscriber's one-way parser progress and return the exact
+    /// notice (if any) the handler must deliver after the map lock is
+    /// released (#2877).
+    ///
+    /// No reply is produced for any outcome: an accepted, duplicate, stale or
+    /// invalid report is bookkeeping and silence.
+    pub(crate) fn record_output_progress(
+        &self,
+        session_name: &str,
+        client_id: &str,
+        peer_token: &Arc<()>,
+        payload: &TerminalOutputProgressPayload,
+    ) -> Result<OutputProgressOutcome, &'static str> {
+        let mut guard = self.lock();
+        let Some(session) = guard.get_mut(session_name) else {
+            return Err("not_attached");
+        };
+        let head = session.stream.cursor();
+        let first_available = session.stream.first_available_seq();
+        accept_output_progress(
+            &mut session.peers,
+            client_id,
+            peer_token,
+            payload,
+            head,
+            first_available,
+        )
     }
 
     /// Take or restate the Session's ControlLease for one attached client.

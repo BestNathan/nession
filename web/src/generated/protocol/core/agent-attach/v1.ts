@@ -131,7 +131,19 @@ input_epoch?: number | null, input_applied_through?: number | null,
  * the client keeps its own build configuration and the Agent still
  * ignores any column change on resize.
  */
-terminal_cols?: number | null, };
+terminal_cols?: number | null, 
+/**
+ * What this Agent's terminal subscription supports beyond the v1 units
+ * (#2877).
+ *
+ * Notification-only capabilities have no manifest entry: a notification
+ * is not a Protocol Unit, so the attach reply is the negotiation point.
+ * Absent means a provider built before this field — the client keeps the
+ * v1 `agent.terminal.output.applied` request/reply and must not send the
+ * response-less progress notification. The Relay forwards this list
+ * verbatim; it does not add, remove or validate entries.
+ */
+terminal_capabilities?: Array<string> | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -258,5 +270,17 @@ input_epoch?: number | null, input_applied_through?: number | null,
  * the client keeps its own build configuration and the Agent still
  * ignores any column change on resize.
  */
-terminal_cols?: number | null, };
+terminal_cols?: number | null, 
+/**
+ * What this Agent's terminal subscription supports beyond the v1 units
+ * (#2877).
+ *
+ * Notification-only capabilities have no manifest entry: a notification
+ * is not a Protocol Unit, so the attach reply is the negotiation point.
+ * Absent means a provider built before this field — the client keeps the
+ * v1 `agent.terminal.output.applied` request/reply and must not send the
+ * response-less progress notification. The Relay forwards this list
+ * verbatim; it does not add, remove or validate entries.
+ */
+terminal_capabilities?: Array<string> | null, };
 

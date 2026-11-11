@@ -120,7 +120,7 @@ Produces three binaries: `nession` (CLI), `nession-agent`, `nession-server`.
 ### 1. Start the server
 
 ```bash
-nession-server                 # reads ./config.toml if present, else uses defaults
+nession-server                 # reads ./config.toml if present, else uses the 127.0.0.1:8080 fallback
 ```
 
 With no `config.toml`, the standalone `nession-server` executable listens on `127.0.0.1:8080` with no auth. The Web development server instead proxies `/ws` and `/api` to port `19090` by default. To use the Web UI locally, configure the Server to listen on `19090` as below (or override `NESSION_DEV_WS_PROXY` in the Web dev environment). Do not expose the no-auth default to untrusted networks.
@@ -164,6 +164,50 @@ nession agent stop
 nession server start|status|stop
 ```
 
+`--config` selects the file the daemon loads. An **explicit** `--config` that is
+missing or unreadable fails before startup; omitting it uses the target's
+documented default (`~/.nession/agent-config.toml` /
+`~/.nession/server-config.toml`, or `$NESSION_HOME`). A `server start` with no
+config file uses `127.0.0.1:8080`; the standalone `nession-server` binary has
+the same no-file fallback. The two daemons' defaults are separate from the
+remote CLI target below.
+
+### Configuration files
+
+The same selection is available to the config commands, so `config set` edits
+the file a daemon was actually started with:
+
+```bash
+nession config agent init --config /srv/nession/agent.toml
+nession config agent show --config /srv/nession/agent.toml
+nession config agent set --config /srv/nession/agent.toml logging.level debug
+nession config server set --config /srv/nession/server.toml terminal_web_font_size 13.5
+```
+
+`init`, `show` and `set` without `--config` use the target's default path.
+Every serializable `AgentConfig`/`ServerConfig` field is editable with typed
+validation; dotted keys address nested values (`logging.level`,
+`logging.rotation`, `logging.retention_days`), and `advertise_addresses` takes a
+JSON array of URLs. Unknown keys and invalid values are rejected without
+writing, and edits preserve comments and unrelated keys. `show` masks
+`auth_token`/`agent_token`, and written files are private (0600 on Unix).
+
+A fresh `nession config server init` is deliberately a **local no-auth** file:
+`listen_address` is the loopback fallback (`127.0.0.1:8080`) and `auth_token`
+is empty. That is safe only for this machine, and it matches what
+`nession server start` uses when no config file exists. Accepting clients from
+other machines is an explicit opt-in: set a credential and a reachable
+listener together.
+
+```bash
+nession config server set auth_token <token>
+nession config server set listen_address 0.0.0.0:19090
+```
+
+`init --force` writes the same safe default again; it never restores an
+all-interface listener with a blank token. An operator-authored config is
+loaded as written — the CLI does not rewrite it during startup.
+
 ### 3. Use it
 
 **CLI** (targets the central Server; override with `--server-url` / `--auth-token`, or set `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`). For the `19090` example above, set the target and use the same auth token configured for the Server:
@@ -180,17 +224,32 @@ nession sessions kill   --session-id <agent_id>:<session_name> [--force]
 
 `--auth-token` is convenient for a one-off command, but a value passed as a
 flag is visible in shell history and in process listings while the command
-runs. For repeatable operation, put the token in the config file — the
-`auth_token` key, which `nession config agent set auth_token <token>` writes
-with private permissions — or in `NESSION_AUTH_TOKEN`. A background
-`nession agent start` never passes its resolved token to the child process as
-an argument; the credential goes over a private pipe instead.
+runs. For repeatable operation, set `NESSION_AUTH_TOKEN` in the environment for
+the remote CLI. The daemon config's `auth_token` is a **different credential
+direction**: it is the Agent → Server credential (and the Server's inbound
+auth), written by `nession config agent set auth_token <token>`. Remote
+commands never read a daemon config (#2267) — a config file cannot redefine
+where `agents`/`sessions` connect.
 
 Remote commands resolve one target, in this order: the explicit global flag,
 `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`, the legacy `NENSION_SERVER_URL` /
 `NENSION_AUTH_TOKEN` aliases (kept so an existing environment keeps working;
 the canonical name wins if both are set), then `ws://127.0.0.1:8080` with an
 empty token. Agent and Server daemon configs do not override this CLI target.
+A background `nession agent start` never passes its resolved token to the
+child process as an argument; the credential goes over a private pipe
+instead.
+
+The two global flags apply only where they have an effect. `agents` and
+`sessions` read them as the remote target/credential; `agent start` and
+`agent restart` read them as overrides for the Agent daemon's outbound target.
+`server`, `config`, `update`, and agent stop/status/service commands have no
+use for them and **reject** them rather than silently ignoring them:
+
+```bash
+# Rejected: --server-url does not configure the Server's listener
+nession server start --server-url ws://127.0.0.1:19090
+```
 
 **Web UI** — see [Web dashboard](#web-dashboard) below.
 

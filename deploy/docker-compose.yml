@@ -35,6 +35,13 @@ services:
       NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
       LISTEN_PORT: "10080"
       SERVER_BACKEND: "127.0.0.1:19090"
+      # Durable Agent state and EROFS cache (#3179). /data is the named
+      # volume below; the cache is an explicit durable declaration, so the
+      # Agent fails closed instead of silently using the container layer.
+      NESSION_HOME: "/data"
+      AGENT_EROFS_STORAGE_DIR: "${AGENT_EROFS_STORAGE_DIR:-/data/erofs}"
+    volumes:
+      - agent-data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:10080/health"]
       interval: 30s
@@ -62,7 +69,12 @@ services:
       LISTEN_PORT: "10080"
       SERVER_BACKEND: "127.0.0.1:18080"
       SERVER_AUTH_TOKEN: "${SERVER_AUTH_TOKEN:-}"
-      SERVER_DB_PATH: "/data/server.db"
+      # The canonical Server data root (#3179). `server-data` is mounted at
+      # this exact path below, so the metadata DB, image blobs and build
+      # workspace all resolve under the named volume. `SERVER_DB_PATH` is
+      # not a supported override: the Server resolves db_path from
+      # NESSION_HOME.
+      NESSION_HOME: "/data"
       # Fixed terminal columns and the Web max font (#2487). Derived from the
       # same release parameters as the Web build; the entrypoint writes them
       # into config.toml and the Server validates them at startup.
@@ -94,10 +106,17 @@ services:
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: "ws://server:18080"
       NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
+      # Distinct durable Agent state and EROFS cache (#3179).
+      NESSION_HOME: "/data"
+      AGENT_EROFS_STORAGE_DIR: "${AGENT_EROFS_STORAGE_DIR:-/data/erofs}"
+    volumes:
+      - agent-remote-data:/data
     depends_on:
       server:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  agent-data:
+  agent-remote-data:
   server-data:

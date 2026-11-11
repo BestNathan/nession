@@ -5,11 +5,13 @@ import { resolveConversationIdentity } from '@/app/conversationIdentities';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
+import type { FocusedProject, SessionProjectContext } from '@/product/project/types';
 import { AppPageHeader } from '@/app/patterns/AppPageHeader';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
+import { useWorkspaceFocusLifecycle } from '@/app/workspace/useWorkspaceFocusLifecycle';
 import type {
   CapabilityFocus,
   Experience,
@@ -41,6 +43,9 @@ export interface WorkspacePanelProps {
   focus?: CapabilityFocus;
   onFocusConsumed?: () => void;
   openWorktreeSession?: (worktree: import('@/capabilities/git/types').GitWorktree) => Promise<void>;
+  /** Focused Session's Project resolution and actions (#3082). */
+  focusedProject?: FocusedProject;
+  sessionProject?: SessionProjectContext;
 }
 
 /** Which capability registered the push on screen. */
@@ -79,6 +84,8 @@ export function WorkspacePanel({
   focus,
   onFocusConsumed,
   openWorktreeSession,
+  focusedProject,
+  sessionProject,
 }: WorkspacePanelProps) {
   const [pushed, setPushed] = useState<PushedDepth | null>(null);
 
@@ -119,9 +126,7 @@ export function WorkspacePanel({
     );
   }, [tool]);
 
-  useEffect(() => {
-    return () => onDepthChange?.(false);
-  }, [onDepthChange]);
+  useWorkspaceFocusLifecycle(focus, fileOps, onFocusConsumed, onDepthChange);
 
   const ctx: WorkspaceContext = useMemo(
     () => ({
@@ -136,6 +141,9 @@ export function WorkspacePanel({
       focus,
       onFocusConsumed,
       openWorktreeSession,
+      focusedProject,
+      activeCapabilityId: tool,
+      sessionProject,
     }),
     [
       selectedSession,
@@ -149,6 +157,9 @@ export function WorkspacePanel({
       focus,
       onFocusConsumed,
       openWorktreeSession,
+      focusedProject,
+      tool,
+      sessionProject,
     ],
   );
 

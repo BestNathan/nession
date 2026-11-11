@@ -28,6 +28,10 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
+use nession_protocol::contracts::sandbox::v1::{
+    SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCurrentContext,
+    SandboxPreflightResult,
+};
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
@@ -35,10 +39,13 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
     ClientSessionEnvBindingSetPayload, ClientSessionEnvQueryPayload,
     ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
-    ClientSessionProcessesPayload, ProcessSnapshot, ServerSessionListPayload,
-    ServerSessionListReply, ServerSessionProcessesReply, SessionEnvActiveResponse,
-    SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
-    SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
+    ClientSessionProcessesPayload, ClientSessionSandboxContextPayload,
+    ClientSessionSandboxEnterPayload, ClientSessionSandboxFocusPayload,
+    ClientSessionSandboxPreflightPayload, ClientSessionSandboxReturnPayload, ProcessSnapshot,
+    SandboxContextResponse, ServerSessionListPayload, ServerSessionListReply,
+    ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvQueryResponse,
+    SessionMetadata, SessionMetadataResponse, SessionProcessesResponse, SessionRefusal,
+    WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
     WebSessionMetadataUpdatePayload, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
@@ -109,6 +116,8 @@ pub struct ConnectionHandler {
     client_registry: Arc<ClientRegistry>,
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
+    /// Server-owned global EROFS image manager (#3022).
+    image_manager: Arc<crate::image::ImageManager>,
     /// Database handle for quick-command CRUD (issue #95, part 3).
     db: Arc<crate::db::Database>,
     config: ConnectionHandlerConfig,
@@ -165,6 +174,7 @@ impl Clone for ConnectionHandler {
             client_registry: Arc::clone(&self.client_registry),
             web_client_registry: Arc::clone(&self.web_client_registry),
             env_service: Arc::clone(&self.env_service),
+            image_manager: Arc::clone(&self.image_manager),
             db: Arc::clone(&self.db),
             // Shared, not connection-local: the ledger is the Server's, and a
             // clone that took a copy of it would be a clone that could not mint.
@@ -204,6 +214,8 @@ pub struct ConnectionHandlerDeps {
     pub client_registry: Arc<ClientRegistry>,
     pub web_client_registry: Arc<WebClientRegistry>,
     pub env_service: Arc<EnvService>,
+    /// Server-owned global EROFS image manager (#3022).
+    pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
     /// The P2P credential ledger (#1013).
     ///
@@ -225,6 +237,7 @@ impl ConnectionHandler {
             client_registry: deps.client_registry,
             web_client_registry: deps.web_client_registry,
             env_service: deps.env_service,
+            image_manager: deps.image_manager,
             db: deps.db,
             p2p_broker: deps.p2p_broker,
             config,
@@ -482,8 +495,9 @@ impl ConnectionHandler {
     /// Called after any mutation so browsers don't have to poll or wait for a
     /// manual refresh to notice changes.
     async fn broadcast_sessions(&self) {
+        let project_ids = self.session_registry.project_ids().await;
         self.web_client_registry
-            .broadcast_sessions_changed(Arc::clone(&self.session_registry))
+            .broadcast_sessions_changed(Arc::clone(&self.session_registry), &project_ids)
             .await;
     }
 
@@ -513,7 +527,13 @@ impl ConnectionHandler {
 
         // Fan out concurrently: this runs while a user waits on a button
         // click, so the cost must be one timeout, not N.
+        //
+        // The generation is captured **before** the Agent is queried. Any
+        // live Session report that commits while the reply is in flight bumps
+        // it, and the projection below then refuses to write the older
+        // snapshot (#2874).
         let results = futures_util::future::join_all(targets.iter().map(|agent_id| async move {
+            let observed_generation = self.session_registry.agent_generation(agent_id);
             let outcome = self
                 .agent_command_with_timeout(
                     agent_id,
@@ -522,18 +542,30 @@ impl ConnectionHandler {
                     SESSION_REFRESH_TIMEOUT,
                 )
                 .await;
-            (agent_id.clone(), outcome)
+            (agent_id.clone(), observed_generation, outcome)
         }))
         .await;
 
         let mut stale = Vec::new();
-        for (agent_id, outcome) in results {
+        for (agent_id, observed_generation, outcome) in results {
             match outcome {
+                Ok(resp)
+                    if resp.get("success").and_then(serde_json::Value::as_bool) == Some(false) =>
+                {
+                    warn!(
+                        "sessions.list refresh from agent {} reported failure: {}",
+                        agent_id,
+                        resp.get("error")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown error")
+                    );
+                    stale.push(agent_id);
+                }
                 Ok(resp) => {
                     let incoming = parse_agent_sessions(&agent_id, &resp);
                     let removed = self
                         .session_registry
-                        .replace_agent_sessions(&agent_id, incoming)
+                        .replace_agent_sessions(&agent_id, incoming, observed_generation)
                         .await;
                     // Sessions that vanished must release their desired
                     // bindings so the files become editable again.
@@ -1236,7 +1268,10 @@ fn current_timestamp() -> u64 {
 /// Serialise a session for the wire. Shared by `server.session.list` and the
 /// `server.sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
-pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInfo {
+pub(crate) fn session_to_info(
+    s: &crate::registry::SessionInfo,
+    project_id: Option<&str>,
+) -> WebSessionInfo {
     WebSessionInfo {
         session_id: s.session_id.clone(),
         agent_id: s.agent_id.clone(),
@@ -1253,12 +1288,16 @@ pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInf
         attached_clients: s.attached_clients,
         foreground_command: s.foreground_command.clone(),
         working_dir: s.working_dir.clone(),
+        project_id: project_id.map(std::string::ToString::to_string),
         last_activity: s.last_activity.to_rfc3339(),
     }
 }
 
-pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
-    serde_json::to_value(session_to_info(s)).unwrap_or(json!({}))
+pub(crate) fn session_to_json(
+    s: &crate::registry::SessionInfo,
+    project_id: Option<&str>,
+) -> serde_json::Value {
+    serde_json::to_value(session_to_info(s, project_id)).unwrap_or(json!({}))
 }
 
 /// Convert an agent's `sessions.list` reply into registry entries.
@@ -1322,6 +1361,11 @@ fn parse_agent_sessions(
                             .map(std::string::ToString::to_string),
                         created_at,
                         last_activity: now,
+                        instance_id: s
+                            .get("instance_id")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|id| !id.is_empty())
+                            .map(std::string::ToString::to_string),
                     })
                 })
                 .collect()
@@ -1334,6 +1378,8 @@ pub(crate) use routes::{dispatch_server, server_descriptors, unit_policy, SERVER
 use routes::{env_file_key, session_by_id, session_by_parts};
 
 mod control;
+mod image;
+mod project;
 mod relay;
 mod routes;
 mod server_agent_address_update_v1;
@@ -1355,7 +1401,16 @@ mod server_env_delete_v1;
 mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
+mod server_image_access_v1;
+mod server_image_build_v1;
+mod server_image_get_v1;
+mod server_image_list_v1;
 mod server_info_v1;
+mod server_project_create_v1;
+mod server_project_delete_v1;
+mod server_project_get_v1;
+mod server_project_list_v1;
+mod server_project_update_v1;
 mod server_session_attach_v1;
 mod server_session_capture_preview_v1;
 mod server_session_create_v1;
@@ -1371,7 +1426,13 @@ mod server_session_list_v1;
 mod server_session_metadata_get_v1;
 mod server_session_metadata_update_v1;
 mod server_session_processes_v1;
+mod server_session_project_set_v1;
 mod server_session_relay_begin_v1;
+mod server_session_sandbox_context_v1;
+mod server_session_sandbox_enter_v1;
+mod server_session_sandbox_focus_v1;
+mod server_session_sandbox_preflight_v1;
+mod server_session_sandbox_return_to_native_v1;
 #[cfg(test)]
 mod tests;
 
@@ -1384,6 +1445,37 @@ mod tests;
 impl ConnectionHandler {
     /// Authorize the client and split `agent:name`, then require a registered
     /// online Agent. The Agent remains the metadata owner.
+    /// The authenticated Session target for a Sandbox capability unit
+    /// (#3124).
+    ///
+    /// The registry id is split exactly as every other session unit splits
+    /// it; the Session must be registered and its Agent online. The Agent
+    /// remains the owner of the active Pane and the policy decision.
+    pub(super) async fn sandbox_session_target(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(String, String), String> {
+        if !self.authenticated_client {
+            return Err("Not authenticated".to_string());
+        }
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Err("Invalid session_id format. Expected 'agent_id:session_name'".to_string());
+        };
+        if agent_id.is_empty() || session_name.is_empty() {
+            return Err("Invalid session_id format. Expected 'agent_id:session_name'".to_string());
+        }
+        if self.session_registry.get(session_id).await.is_none() {
+            return Err(format!("Session '{session_id}' not found"));
+        }
+        match self.agent_registry.get(agent_id).await {
+            Some(agent) if agent.status == AgentStatus::Online => {
+                Ok((agent_id.to_string(), session_name.to_string()))
+            }
+            Some(_) => Err(format!("Agent '{agent_id}' is offline")),
+            None => Err(format!("Agent '{agent_id}' not found")),
+        }
+    }
+
     pub(super) async fn resolve_session_metadata_target(
         &mut self,
         session_id: &str,

@@ -532,6 +532,58 @@ pub struct NewSessionOutcome {
     pub used_e: bool,
 }
 
+/// A typed request to create one detached Window in an existing Session.
+///
+/// Used by the existing-Session Sandbox Enter (#3124): the Window runs the
+/// trusted launcher argv, the caller verifies it, and only then may focus
+/// move. The original Pane is never touched.
+#[derive(Debug, Clone)]
+pub struct NewWindow {
+    pub session_name: String,
+    /// The Window's display name. Not an identity.
+    pub name: String,
+    pub working_dir: String,
+    /// Entries the new Window's process environment receives.
+    pub env: Vec<(String, String)>,
+    /// The launcher argv, passed as separate arguments. Empty preserves
+    /// tmux's default command for a new Window.
+    pub command: Vec<String>,
+}
+
+/// The identity tmux reported for a newly created Window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewWindowOutcome {
+    /// The Pane tmux created and this caller now owns.
+    pub pane_id: String,
+    /// The Window that contains it.
+    pub window_id: String,
+    pub pane_pid: Option<u32>,
+}
+
+/// The options followed by the caller's command argv.
+fn new_window_command_args(request: &NewWindow) -> Vec<String> {
+    let mut args = new_window_args(request);
+    args.extend(request.command.iter().cloned());
+    args
+}
+
+/// The `new-window` argv, without environment injection.
+fn new_window_args(request: &NewWindow) -> Vec<String> {
+    vec![
+        "new-window".to_string(),
+        "-d".to_string(),
+        "-P".to_string(),
+        "-F".to_string(),
+        "#{pane_id}|#{window_id}|#{pane_pid}".to_string(),
+        "-t".to_string(),
+        format!("{}:", request.session_name),
+        "-n".to_string(),
+        request.name.clone(),
+        "-c".to_string(),
+        request.working_dir.clone(),
+    ]
+}
+
 /// One `list-sessions` row, in tmux's own terms.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
@@ -637,6 +689,11 @@ pub struct PaneSummary {
     pub pane_tty: Option<String>,
     /// Whether the Window is linked into more than one Session.
     pub window_linked: bool,
+    /// Whether this Window is the Session's current Window. Together with
+    /// `pane_active` it names the Session's active Pane (#3124).
+    pub window_active: bool,
+    /// Whether this Pane is active inside its Window.
+    pub pane_active: bool,
 }
 
 /// The `list-panes -a` format `list_panes` parses.
@@ -645,7 +702,7 @@ pub struct PaneSummary {
 /// to underscores. `window_name` is last and the split is capped, so a `|`
 /// inside it stays part of the name instead of shifting the row. Session names
 /// are resolved by id through [`SESSION_ID_FORMAT`] for the same reason.
-const PANE_LIST_FORMAT: &str = "#{session_id}|#{window_id}|#{window_index}|#{pane_id}|#{pane_index}|#{pane_pid}|#{pane_tty}|#{window_linked}|#{window_name}";
+const PANE_LIST_FORMAT: &str = "#{session_id}|#{window_id}|#{window_index}|#{pane_id}|#{pane_index}|#{pane_pid}|#{pane_tty}|#{window_linked}|#{window_active}|#{pane_active}|#{window_name}";
 
 /// The `list-sessions` format that maps a stable Session id to its name.
 const SESSION_ID_FORMAT: &str = "#{session_id}|#{session_name}";
@@ -655,8 +712,8 @@ fn pane_summary_from_line(
     line: &str,
     session_names: &HashMap<String, String>,
 ) -> Option<PaneSummary> {
-    let parts: Vec<&str> = line.splitn(9, '|').collect();
-    if parts.len() != 9 {
+    let parts: Vec<&str> = line.splitn(11, '|').collect();
+    if parts.len() != 11 {
         return None;
     }
     let session_id = parts.first().copied().unwrap_or_default().to_string();
@@ -675,7 +732,9 @@ fn pane_summary_from_line(
         pane_pid,
         pane_tty: (!pane_tty.is_empty()).then(|| pane_tty.to_string()),
         window_linked: parts.get(7).copied() == Some("1"),
-        window_name: parts.get(8).copied().unwrap_or_default().to_string(),
+        window_active: parts.get(8).copied() == Some("1"),
+        pane_active: parts.get(9).copied() == Some("1"),
+        window_name: parts.get(10).copied().unwrap_or_default().to_string(),
     })
 }
 
@@ -1225,6 +1284,126 @@ impl TmuxOps {
         }
     }
 
+    /// Create one detached Window in an existing Session.
+    ///
+    /// `-d` deliberately keeps focus where it was: the caller verifies the
+    /// execution barrier first and only then selects the Window, so a failed
+    /// launch leaves the original Pane focused and untouched.
+    ///
+    /// `-e` is a `new-window` flag on tmux ≥ 3.0. When the host tmux refuses
+    /// it, the Window is created again without the environment entries: those
+    /// variables are diagnostic identity, while the launcher argv carries the
+    /// channel and policy, so losing them degrades evidence but not isolation.
+    pub async fn new_window(&self, request: &NewWindow) -> Result<NewWindowOutcome> {
+        let mut args = new_window_args(request);
+        for (key, value) in &request.env {
+            args.push("-e".to_string());
+            args.push(format!("{key}={value}"));
+        }
+        args.extend(request.command.iter().cloned());
+        let first = self.run_create_args(&args).await?;
+        let output = if first.status.success() || request.env.is_empty() {
+            first
+        } else {
+            let retry = self
+                .run_create_args(&new_window_command_args(request))
+                .await?;
+            if !retry.status.success() {
+                anyhow::bail!(
+                    "Failed to create window in session {}: {} ({})",
+                    request.session_name,
+                    retry.status,
+                    String::from_utf8_lossy(&retry.stderr).trim()
+                );
+            }
+            retry
+        };
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to create window in session {}: {} ({})",
+                request.session_name,
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.trim();
+        let mut parts = line.split('|');
+        let pane_id = parts.next().unwrap_or_default().to_string();
+        let window_id = parts.next().unwrap_or_default().to_string();
+        let pane_pid = parts.next().and_then(|pid| pid.parse().ok());
+        if pane_id.is_empty() || window_id.is_empty() {
+            anyhow::bail!(
+                "tmux created a window in session {} but reported no pane identity: {line:?}",
+                request.session_name
+            );
+        }
+        Ok(NewWindowOutcome {
+            pane_id,
+            window_id,
+            pane_pid,
+        })
+    }
+
+    async fn run_create_args(&self, args: &[String]) -> Result<std::process::Output> {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        Ok(
+            tokio::time::timeout(self.create_timeout, self.command.output(&refs))
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "tmux create-window timed out after {:?}",
+                        self.create_timeout
+                    )
+                })??,
+        )
+    }
+
+    /// Make one Window the current Window of its Session.
+    pub async fn select_window(&self, window_id: &str) -> Result<()> {
+        self.run_mutating("select-window", window_id).await
+    }
+
+    /// Make one Pane the active Pane of its Window.
+    pub async fn select_pane(&self, pane_id: &str) -> Result<()> {
+        self.run_mutating("select-pane", pane_id).await
+    }
+
+    /// Remove one Window this caller owns. Used to roll back a failed Enter.
+    pub async fn kill_window(&self, window_id: &str) -> Result<()> {
+        let output = tokio::time::timeout(
+            self.kill_timeout,
+            self.command.output(&["kill-window", "-t", window_id]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.kill_timeout))??;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to kill window {window_id}: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    async fn run_mutating(&self, operation: &str, target: &str) -> Result<()> {
+        let output = tokio::time::timeout(
+            self.list_timeout,
+            self.command.output(&[operation, "-t", target]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.list_timeout))??;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux {operation} -t {target} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
     /// List the server's sessions, newest tmux answer first (tmux's order).
     ///
     /// A server that is not running is an empty list, not an error — that is
@@ -1458,8 +1637,8 @@ mod tests {
         // groups by pane_id so the process is not counted twice.
         let session_names = names(&[("$0", "alpha"), ("$1", "beta")]);
         let rows: Vec<PaneSummary> = [
-            "$0|@1|1|%1|0|35225|/dev/ttys016|1|win2",
-            "$1|@1|1|%1|0|35225|/dev/ttys016|1|win2",
+            "$0|@1|1|%1|0|35225|/dev/ttys016|1|1|1|win2",
+            "$1|@1|1|%1|0|35225|/dev/ttys016|1|1|1|win2",
         ]
         .into_iter()
         .filter_map(|line| pane_summary_from_line(line, &session_names))
@@ -1471,6 +1650,44 @@ mod tests {
         assert!(rows.iter().all(|row| row.window_linked));
         assert_eq!(rows[0].session_name, "alpha");
         assert_eq!(rows[1].session_name, "beta");
+        assert!(rows.iter().all(|row| row.window_active));
+        assert!(rows.iter().all(|row| row.pane_active));
+    }
+
+    #[test]
+    fn a_new_window_argv_is_detached_and_reports_identity_before_any_focus() {
+        let argv = new_window_args(&NewWindow {
+            session_name: "work".to_string(),
+            name: "sandbox".to_string(),
+            working_dir: "/workspace".to_string(),
+            env: Vec::new(),
+            command: vec!["/usr/bin/bwrap".to_string(), "--".to_string()],
+        });
+        assert_eq!(argv[0], "new-window");
+        assert!(
+            argv.contains(&"-d".to_string()),
+            "focus must not move before verification: {argv:?}"
+        );
+        assert!(
+            argv.contains(&"work:".to_string()),
+            "the Window is created in the named Session: {argv:?}"
+        );
+        assert!(argv.contains(&"#{pane_id}|#{window_id}|#{pane_pid}".to_string()));
+        assert_eq!(argv.last().map(String::as_str), Some("/workspace"));
+        // The command argv stays last and unmodified: nothing re-parses it.
+        let full = new_window_command_args(&NewWindow {
+            session_name: "work".to_string(),
+            name: "sandbox".to_string(),
+            working_dir: "/workspace".to_string(),
+            env: Vec::new(),
+            command: vec!["/usr/bin/bwrap".to_string(), "--".to_string()],
+        });
+        assert_eq!(full.last().map(String::as_str), Some("--"));
+        let command_at = full
+            .iter()
+            .position(|argument| argument == "/usr/bin/bwrap")
+            .expect("the launcher argv is present");
+        assert!(command_at > full.iter().position(|argument| argument == "-c").unwrap());
     }
 
     #[test]
@@ -1478,7 +1695,7 @@ mod tests {
         // window_name is last and the split is capped, so a `|` in it stays in
         // the name rather than shifting the fields before it.
         let row = pane_summary_from_line(
-            "$0|@0|0|%0|0|123|/dev/ttys001|0|a|b|c",
+            "$0|@0|0|%0|0|123|/dev/ttys001|0|1|1|a|b|c",
             &names(&[("$0", "s")]),
         )
         .expect("a well-formed row");
@@ -1488,7 +1705,7 @@ mod tests {
 
     #[test]
     fn pane_rows_survive_a_missing_root_pid_and_tty() {
-        let row = pane_summary_from_line("$0|@0|0|%0|0|||0|shell", &names(&[("$0", "s")]))
+        let row = pane_summary_from_line("$0|@0|0|%0|0|||0|1|1|shell", &names(&[("$0", "s")]))
             .expect("a pane without a live root is still a pane");
         assert_eq!(row.pane_pid, None);
         assert_eq!(row.pane_tty, None);
@@ -1496,7 +1713,7 @@ mod tests {
 
     #[test]
     fn pane_rows_fall_back_to_the_session_id_when_the_name_query_raced() {
-        let row = pane_summary_from_line("$7|@0|0|%0|0|1|/dev/pts/1|0|shell", &HashMap::new())
+        let row = pane_summary_from_line("$7|@0|0|%0|0|1|/dev/pts/1|0|0|1|shell", &HashMap::new())
             .expect("the pane row is still usable");
         assert_eq!(row.session_id, "$7");
         assert_eq!(row.session_name, "$7");

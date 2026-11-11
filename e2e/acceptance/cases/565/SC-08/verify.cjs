@@ -2,7 +2,7 @@
 // #565 SC-08: unauthenticated access, missing/unknown targets, argument errors,
 // timeouts and concurrent calls are all covered by the shared contract tests
 // and each hosting mode's error paths.
-const { run, targetSha, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -22,11 +22,13 @@ run(({ evidence }) => {
     'nession-agent',
     ['--test', 'integration', 'mcp::agent_mcp_refuses_an_anonymous_request'],
     900000,
+    isolatedTmuxEnv('nession-565-sc08-agent'),
   );
   const standalone = crateTests(
     'nession-mcp',
     ['--test', 'integration', 'standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint'],
     900000,
+    isolatedTmuxEnv('nession-565-sc08-node'),
   );
   assertRan(standalone, ['standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint']);
   evidence.push(

@@ -7,7 +7,10 @@ pub mod cache;
 pub mod check;
 pub mod download;
 pub mod github;
+pub mod install;
+pub mod release_config;
 pub mod replace;
+pub mod transaction;
 pub mod version;
 
 use std::path::PathBuf;

@@ -1,0 +1,29 @@
+[package]
+name = "nession-persistence-probes"
+version.workspace = true
+edition.workspace = true
+description = "Verification-only probes for Compose durable EROFS storage (#3179)"
+publish = false
+
+[[bin]]
+name = "nession-image-persist-probe"
+path = "src/image_persist.rs"
+
+[[bin]]
+name = "nession-erofs-cache-probe"
+path = "src/erofs_cache.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+sha2.workspace = true
+nession-common = { path = "../nession-common" }
+nession-protocol = { path = "../nession-protocol" }
+nession-erofs = { path = "../nession-erofs" }
+nession-server = { path = "../nession-server" }
+nession-agent = { path = "../nession-agent" }
+
+[lints]
+workspace = true

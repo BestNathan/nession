@@ -3,6 +3,17 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/shared/lib/utils"
 import { Button } from "@/components/ui/button"
+import { PopupPortalContainerContext, usePopupPortalContainer } from "@/components/ui/popup-portal"
+import {
+  overlayDialogZClass,
+  overlayScrimClass,
+  overlaySizeClass,
+  overlaySurfaceClass,
+  overlayTitleClass,
+  overlayViewportHeightClass,
+  overlayViewportWidthClass,
+  type OverlaySize,
+} from "@/components/ui/overlayStyles"
 import { XIcon } from "lucide-react"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -29,7 +40,9 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-overlay/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "isolate duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        overlayScrimClass,
+        overlayDialogZClass,
         className
       )}
       {...props}
@@ -41,29 +54,80 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  variant = "centered",
+  size = "compact",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /**
+   * `centered` is the product's dialog. `fullscreen` is an App operation
+   * depth (issue 3089): the whole viewport, one page, no surrounding scrim
+   * gap. `sheet` is a full-width surface anchored to the bottom edge. All are
+   * arrangements of the same primitive, so focus containment, Escape and
+   * dismissal stay owned here rather than in a second overlay.
+   */
+  variant?: "centered" | "fullscreen" | "sheet"
+  /**
+   * The semantic width role of a centered overlay (issue 3142). Consumers pick the
+   * role; the token decides the pixels. `fullscreen` and `sheet` ignore it.
+   */
+  size?: OverlaySize
 }) {
+  const [popupHost, setPopupHost] = React.useState<HTMLDivElement | null>(null);
+  // The host replaces the outer Experience container for popups opened from
+  // inside the modal, so it must state the same scope. The primitive still
+  // learns only a DOM attribute value; it does not interpret "app".
+  const inheritedScope = usePopupPortalContainer()?.getAttribute("data-experience") ?? undefined;
+  // Three-zone anatomy (issue 3298): the surface is a non-scrolling flex
+  // column. Header and Footer are opaque, full-width bands; DialogBody is the
+  // only primary vertical scroll owner. A short dialog still sizes to its
+  // content because no zone has an explicit height.
+  const arrangement =
+    variant === "centered"
+      ? cn(
+          "fixed top-1/2 left-1/2 flex w-full -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden p-0 text-sm duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          overlayDialogZClass,
+          overlayViewportWidthClass,
+          overlayViewportHeightClass,
+          overlaySurfaceClass,
+          overlaySizeClass(size)
+        )
+      : variant === "fullscreen"
+        ? "fixed inset-0 z-[var(--nession-overlay-dialog-z)] flex h-[100dvh] max-h-[100dvh] w-full flex-col gap-0 overflow-hidden rounded-none bg-background p-0 text-sm text-foreground outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+        : "fixed bottom-0 left-0 top-auto z-[var(--nession-overlay-dialog-z)] flex max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0 bg-popover p-0 text-sm text-popover-foreground outline-none data-open:animate-in data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:slide-out-to-bottom-4";
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
-        className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className
-        )}
+        data-size={size}
+        className={cn(arrangement, className)}
         {...props}
       >
-        {children}
+        <PopupPortalContainerContext.Provider value={popupHost}>
+          {children}
+          {/*
+            Anchored layers opened from inside a modal mount here rather than
+            into the Experience's body-level container. The host is inside the
+            dialog's floating tree, so base-ui's outside-content hiding, the
+            focus trap and the Experience scope all apply to the popup; a
+            body-level sibling would be aria-hidden and outside the trap.
+            `contents` keeps the empty host out of the dialog's layout.
+          */}
+          <div
+            ref={setPopupHost}
+            data-slot="dialog-popup-portal"
+            data-experience={inheritedScope}
+            className="contents"
+          />
+        </PopupPortalContainerContext.Provider>
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
             render={
               <Button
                 variant="ghost"
-                className="absolute top-2 right-2"
+                className="absolute top-2 right-2 z-20"
                 size="icon-sm"
               />
             }
@@ -82,7 +146,30 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn(
+        "flex shrink-0 flex-col gap-2 border-b bg-popover px-4 py-3 pr-12",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+/**
+ * The subtree's only primary vertical scroll owner.
+ *
+ * A form may wrap `DialogBody` + `DialogFooter` (one form owner, submit in the
+ * footer); the form is then the flex column and this body fills its available
+ * space. Without a form, `DialogContent` itself is that column.
+ */
+function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-body"
+      className={cn(
+        "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4",
+        className
+      )}
       {...props}
     />
   )
@@ -100,7 +187,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "flex shrink-0 flex-col-reverse gap-2 border-t bg-muted px-4 py-3 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -119,10 +206,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn(
-        "font-heading text-base leading-none font-medium",
-        className
-      )}
+      className={cn(overlayTitleClass, className)}
       {...props}
     />
   )
@@ -146,6 +230,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,

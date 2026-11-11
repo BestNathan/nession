@@ -1,5 +1,100 @@
 use serde::{Deserialize, Serialize};
 
+/// The capability an Agent states on `agent.attach` when it accepts the
+/// one-way `client.terminal.output.progress` notification and may emit
+/// `agent.terminal.reconcile-required` (#2877).
+///
+/// A capability string rather than a Protocol Unit version: both wires are
+/// notifications, which have no manifest entry and no generated operation
+/// binding, so the attach reply is where a client learns that sending the new
+/// notification is safe. An Agent that does not state it keeps receiving the
+/// v1 `agent.terminal.output.applied` operation.
+pub const TERMINAL_PROGRESS_NOTIFICATIONS_V1: &str = "terminal-progress-notifications-v1";
+
+/// Browser -> Agent cumulative xterm parser-applied output progress (#2877).
+///
+/// The same facts as [`TerminalOutputAppliedPayload`], sent as a **one-way
+/// notification** on `client.terminal.output.progress` by a client that
+/// negotiated [`TERMINAL_PROGRESS_NOTIFICATIONS_V1`]. Nothing answers it: an
+/// accepted, duplicate or stale report is bookkeeping, and the only Agent
+/// reaction is the exception-only [`TerminalReconcileRequiredPayload`].
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalOutputProgressPayload {
+    pub session_name: String,
+    pub subscriber_generation: u64,
+    pub stream_epoch: u64,
+    pub renderer_generation: u64,
+    pub applied_through: u64,
+}
+
+/// Why an Agent asks one current subscriber to reconcile (#2877).
+///
+/// Each variant is a **proven, actionable** statement about the exact
+/// authenticated subscription, never an inference from ordinary
+/// `applied_through < head_seq` lag.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalReconcileReason {
+    /// The claimed parser prefix is ahead of the bytes actually issued to this
+    /// subscriber. The claim cannot be credited and the renderer's proof of
+    /// position is not trustworthy.
+    ProgressAheadOfIssued,
+    /// The report names a stream epoch other than the subscription's binding.
+    EpochIncompatible,
+    /// The report comes from a renderer that is not the one pinned by this
+    /// subscription; a fresh binding is required.
+    RendererReplaced,
+    /// The Agent's retained window begins above the subscriber's last
+    /// acknowledged/issued position, so a contiguous replay is no longer
+    /// possible.
+    RetentionLoss,
+}
+
+/// What the current subscriber should do about a reconcile notice (#2877).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalReconcileAction {
+    /// Reuse `agent.terminal.stream.resume` from the last trusted
+    /// parser-applied prefix.
+    Resume,
+    /// Establish a fresh binding: reattach (a proven checkpoint/bootstrap is
+    /// the only complete reconstruction).
+    Reattach,
+}
+
+/// Agent -> current Web subscriber, exception-only reconcile notice (#2877).
+///
+/// Emitted only to the exact authenticated subscription named here, at most
+/// once per unresolved episode, and never answered: it is a notification with
+/// no ACK. A stale, malformed or foreign notice must not start recovery.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalReconcileRequiredPayload {
+    pub session_name: String,
+    /// The Agent-minted subscription this notice is about.
+    pub subscriber_generation: u64,
+    pub stream_epoch: u64,
+    /// The renderer generation pinned by this subscription, when one has
+    /// advanced a parser prefix. Absent means the subscription has not pinned
+    /// one yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer_generation: Option<u64>,
+    /// The Agent's authoritative stream head.
+    pub head_seq: u64,
+    /// The lowest sequence the Agent can still replay, when it stated one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_available_seq: Option<u64>,
+    pub reason: TerminalReconcileReason,
+    pub action: TerminalReconcileAction,
+}
+
 /// Browser -> Agent cumulative xterm parser-applied output ACK (#2006).
 ///
 /// The Agent authenticates the socket peer and its *current* attached

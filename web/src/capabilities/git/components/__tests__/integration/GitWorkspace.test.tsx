@@ -302,6 +302,7 @@ describe('GitWorkspace', () => {
       session: 'agent-1:work',
       path: 'notes.txt',
       expected: 'untracked',
+      want: 'text',
     });
     expect(mockedDiff).not.toHaveBeenCalled();
 
@@ -986,5 +987,102 @@ describe('GitWorkspace', () => {
 
     expect(screen.getByTestId('git-no-session')).toHaveTextContent('Select a Session');
     expect(mockedStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('shared presentation and bounded media (#2876)', () => {
+  function statusWithUntracked(path: string) {
+    return statusResponse({
+      status: {
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        modified: [],
+        untracked: [path],
+        unmerged: [],
+      },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedDiff.mockResolvedValue(diffResponse(''));
+  });
+
+  it('renders untracked code in the shared CodeMirror source view, not a <pre>', async () => {
+    mockedStatus.mockResolvedValue(
+      statusWithUntracked('notes/example.ts'),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({ path: 'notes/example.ts', text: 'export const x = 1;\n' }),
+    );
+
+    const { container } = render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    const text = await screen.findByTestId('git-file-preview-text');
+    await waitFor(() => expect(text.querySelector('.cm-editor')).not.toBeNull());
+    expect(text.querySelector('.cm-lineNumbers')).not.toBeNull();
+    expect(text.querySelectorAll('pre')).toHaveLength(0);
+    expect(text).toHaveTextContent('export const x = 1;');
+    expect(screen.getByTestId('git-file-preview-status')).toHaveTextContent(
+      'Untracked · File preview (no Git baseline)',
+    );
+    expect(container.querySelector('[data-testid="file-content-code"]')).not.toBeNull();
+  });
+
+  it('offers the shared Preview/Raw leaves for untracked JSON', async () => {
+    mockedStatus.mockResolvedValue(
+      statusWithUntracked('notes/data.json'),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({
+        path: 'notes/data.json',
+        text: '{"name":"git-viewer","items":[1,2,3]}',
+        size: 34,
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    expect(await screen.findByRole('tree')).toBeInTheDocument();
+    expect(screen.getByText('"name"')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Raw' }));
+    const text = screen.getByTestId('git-file-preview-text');
+    await waitFor(() => expect(text.querySelector('.cm-editor')).not.toBeNull());
+    expect(text).toHaveTextContent('{"name":"git-viewer"');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('tree')).toBeInTheDocument();
+  });
+
+  it('renders an authorized untracked image through the shared media viewer', async () => {
+    mockedStatus.mockResolvedValue(
+      statusWithUntracked('assets/photo.png'),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({
+        path: 'assets/photo.png',
+        state: 'ready',
+        text: '',
+        binary: true,
+        size: 80,
+        media: { content_base64: 'AAAA', mime_type: 'image/png', complete: true },
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    expect(await screen.findByTestId('image-viewer')).toBeInTheDocument();
+    expect(mockedPreview).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      session: 'agent-1:work',
+      path: 'assets/photo.png',
+      expected: 'untracked',
+      want: 'media',
+    });
+    expect(screen.queryByTestId('git-file-preview-text')).not.toBeInTheDocument();
   });
 });

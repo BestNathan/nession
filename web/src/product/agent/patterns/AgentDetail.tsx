@@ -6,7 +6,6 @@ import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent } from '@/types';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { AgentDetails } from '@/product/agent/components/AgentDetails';
 import { AgentProcesses } from '@/product/agent/components/AgentProcesses';
 import { useAgentProcesses } from '@/product/agent/hooks/useAgentProcesses';
@@ -34,7 +33,7 @@ export function AgentDetail({ agent, state, currentSessionId }: AgentDetailProps
   return (
     <div
       data-testid="agent-detail"
-      className={cn('flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4', workspaceScrollClearanceClass)}
+      className={cn('flex min-w-0 flex-col gap-4 p-4')}
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">

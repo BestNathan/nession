@@ -4,6 +4,91 @@ use crate::contracts::agent::v1::ProbedAddress;
 use crate::contracts::env::v1::{
     ActiveEnvFile, EnvFileRef, EnvSnapshot, SessionEnvBindingState, SessionEnvProfile,
 };
+use crate::contracts::sandbox::v1::{
+    SandboxCurrentContext, SandboxExecutionReport, SandboxPolicy, SandboxPolicyDraft,
+};
+
+/// The role one Managed image plays in the prepared composition.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManagedImageRole {
+    /// Mounted read-only at `/`.
+    Base,
+    /// The read-only Project Source image at `/workspace`.
+    Workspace,
+    /// A read-only toolchain image at `/opt/<name>`.
+    Toolchain,
+}
+
+/// One image the Agent must make ready in its authorized EROFS cache.
+///
+/// `path` is the Server's authorized blob route for this digest. The Agent
+/// derives the absolute URL from its own configured Server address; the Server
+/// never guesses its public hostname.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedImageGrant {
+    pub role: ManagedImageRole,
+    /// `sha256:<64 lowercase hex>` of the exact bytes.
+    pub digest: String,
+    /// Authorized route, `/images/blobs/<digest>`.
+    pub path: String,
+    /// Scoped bearer grant for exactly this digest.
+    pub token: String,
+    /// `/opt/<name>` for a toolchain image; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+/// The Server→Agent Managed creation input.
+///
+/// The Agent downloads and verifies every image, resolves the composition
+/// paths from its own cache namespace and creates the initial Pane in a
+/// prepared SandboxExecution. A missing cache, grant or capability refuses the
+/// create; there is no Native fallback.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedSessionImages {
+    pub images: Vec<ManagedImageGrant>,
+}
+
+/// One read-only toolchain artifact requested for a Managed Session.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedToolchainRequest {
+    /// `sha256:<64 lowercase hex>` of a ready Image Manager artifact.
+    pub digest: String,
+    /// `/opt/<lowercase name>`; the Sandbox owns the target rule.
+    pub target: String,
+}
+
+/// Client request for a Managed EROFS-backed Session (#3062).
+///
+/// The named Project supplies the read-only Project Source image
+/// (`projects.image_digest`); this request names the Base Runtime and optional
+/// toolchain artifacts. The Server pins every digest, authorizes each one and
+/// hands the Agent scoped download grants; the Agent prepares its durable
+/// cache and asks the Sandbox for the composition. There is no Native
+/// fallback when any step fails.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientManagedCreate {
+    /// The Base Runtime image mounted read-only at `/`.
+    pub base_digest: String,
+    /// Optional read-only toolchains mounted at `/opt/<name>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub toolchains: Vec<ManagedToolchainRequest>,
+}
 
 // --- Server → Agent command payloads ---
 
@@ -41,6 +126,28 @@ pub struct ServerSessionCreatePayload {
     /// parameter only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    ///
+    /// Absent means the Session is created exactly as before: Native. The
+    /// Agent validates and compiles the policy before it creates any host
+    /// resource; an explicitly requested guarantee that the host cannot
+    /// install refuses the create instead of falling back to Native.
+    ///
+    /// The Web projection omits the field deliberately: V1 has no Web surface
+    /// for Sandbox configuration, and the policy's native cgroup keys
+    /// (`memory.max`) cannot be generated under the Web naming rule. The Rust
+    /// contract is the wire owner; `nession-sandbox` is the validator.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
+    /// Managed EROFS creation input (#3062). The Agent prepares every image
+    /// from its owned durable cache and creates the Pane in a prepared
+    /// SandboxExecution; absence preserves the ordinary create path.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<ManagedSessionImages>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -72,6 +179,12 @@ pub struct AgentCommandResponsePayload {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_name: Option<String>,
+    /// The sandbox mechanisms the Agent verified for a sandboxed create.
+    /// Omitted from the Web projection for the same reason as the policy.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 // --- Client → Server session command payloads ---
@@ -94,6 +207,28 @@ pub struct ClientSessionCreatePayload {
     /// having to notice it.
     #[serde(default)]
     pub env_files: Vec<EnvFileRef>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    /// The Server routes it to the Agent, which is the validating owner.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
+    /// Optional Project this Session is created from (#3025).
+    ///
+    /// When present, `agent_id` and `working_dir` must name one of the
+    /// Project's Existing Locations. The Project is only a declaration: the
+    /// Session owns its realized Environment Binding and runtime identity, so
+    /// a later Project edit never mutates this Session. Absent preserves the
+    /// pre-Project create path unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Request a Managed EROFS-backed Session (#3062). Requires `project_id`
+    /// whose Project pins an image; the Server resolves and authorizes every
+    /// artifact before handing the Agent preparation grants.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<ClientManagedCreate>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -118,6 +253,17 @@ pub struct ClientSessionCreateResponsePayload {
     /// Binding (reserved-key collisions, parse warnings). Empty on refusal.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The Project membership committed with this Session create (#3082).
+    ///
+    /// Present only when the create named a Project whose Existing Location was
+    /// validated. The Agent never sees this field; the Server owns the link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// The sandbox mechanisms verified in effect, for a sandboxed create.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -519,6 +665,9 @@ pub struct AgentSessionUpdatePayload {
     /// to discover it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_command: Option<String>,
+    /// Durable tmux Session instance identity. See `SessionInfo::instance_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
 }
 
 // ============================================================================
@@ -671,6 +820,15 @@ pub struct SessionInfo {
     /// Live cwd of the session's active pane when the agent last reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    ///
+    /// A recyclable `agent_id:session_name` is not an incarnation: this id is
+    /// created with the tmux Session, survives Agent restarts and is replaced
+    /// when the name is killed and recreated. Project membership (#3082) and
+    /// Session metadata (#2789) key on it. Absent only for a legacy Session
+    /// that has not been asked yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -713,6 +871,18 @@ pub struct SessionCreatePayload {
     /// Session keeps its pane's width.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    /// The direct path and the relayed path carry the same policy type.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
+    /// Managed EROFS creation input (#3062). Same payload on the Server-relayed
+    /// and direct Agent projections.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<ManagedSessionImages>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -866,6 +1036,13 @@ pub struct WebSessionInfo {
     pub foreground_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// The focused Session's Server-owned Project membership (#3082).
+    ///
+    /// Absent for a Session with no Project. This is durable membership, not an
+    /// inference from cwd, Git or the Agent; a newer Session incarnation that
+    /// reuses the same `agent_id:session_name` does not inherit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub last_activity: String,
 }
 
@@ -926,6 +1103,11 @@ pub struct WebSessionCreatePayload {
     /// `None` means the Agent's own configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -935,6 +1117,11 @@ pub struct WebSessionCreateResponse {
     pub success: bool,
     pub session_id: Option<String>,
     pub error: Option<String>,
+    /// The sandbox mechanisms verified in effect, for a sandboxed create.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1043,6 +1230,16 @@ pub struct SessionCreateResponse {
     /// Non-fatal warnings from materializing the initial Environment Binding.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The sandbox mechanisms verified in effect, for a sandboxed create.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
+    /// The Agent-owned writable workspace for a Managed create (#3062).
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1115,6 +1312,17 @@ pub struct ClientAttachResponse {
     /// ignores any column change on resize.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// What this Agent's terminal subscription supports beyond the v1 units
+    /// (#2877).
+    ///
+    /// Notification-only capabilities have no manifest entry: a notification
+    /// is not a Protocol Unit, so the attach reply is the negotiation point.
+    /// Absent means a provider built before this field — the client keeps the
+    /// v1 `agent.terminal.output.applied` request/reply and must not send the
+    /// response-less progress notification. The Relay forwards this list
+    /// verbatim; it does not add, remove or validate entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_capabilities: Option<Vec<String>>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1476,6 +1684,42 @@ pub struct WebSessionMetadataUpdatePayload {
     pub expected_revision: u64,
 }
 
+/// `server.session.project.set`'s request (#3082).
+///
+/// A whole replacement of one Session's Project membership: `project_id: Some`
+/// associates or changes it, `None` removes it. `expected_revision` guards a
+/// concurrent change; its absence is a last-writer-wins first association.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionProjectBindingUpdatePayload {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+}
+
+/// `server.session.project.set`'s reply.
+///
+/// `error_kind` is the actionable classification the Web renders: `invalid`,
+/// `unauthorized`, `conflict`, `not_found` or `unavailable`. `revision` is the
+/// new membership revision on success (0 means unassociated).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionProjectBindingResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
 /// The shared answer for both metadata operations, at both ends.
 ///
 /// `error_kind` is the actionable classification the Web renders:
@@ -1611,4 +1855,161 @@ pub fn validate_session_metadata(
         description,
         tags: normalized,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox capability commands (#3124)
+//
+// The capability is addressed at one Session; the Agent resolves the
+// authenticated Session's *active Pane* itself. The Server never names a Pane
+// or an execution and never interprets a policy: it authorizes the client,
+// checks the registered Session/Agent and forwards the typed draft.
+//
+// `enter_id` is the client's idempotency key. It travels in the payload
+// because the Server's command broker injects its own `request_id` for
+// correlation, and the two identities must not be conflated.
+// ---------------------------------------------------------------------------
+
+/// `server.session.sandbox.context` — a browser asks for the active Pane's
+/// Sandbox context.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxContextPayload {
+    /// `agent_id:session_name`, the registry key the Session list already uses.
+    pub session_id: String,
+}
+
+/// `server.session.sandbox.context`'s reply: the context, or the refusal.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxContextResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SandboxCurrentContext>,
+}
+
+/// `agent.session.sandbox.context` — the Server asks the Session's Agent.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxContextPayload {
+    /// Injected by the Server's command broker, like every `agent.*` command.
+    pub request_id: String,
+    pub session_name: String,
+}
+
+/// `server.session.sandbox.preflight` — validate one draft against the exact
+/// context revision without creating host resources.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxPreflightPayload {
+    pub session_id: String,
+    /// The context generation the draft was composed against.
+    pub generation: String,
+    /// The catalog probe generation the draft was composed against. A host
+    /// capability change between composition and preflight is stale.
+    #[serde(default)]
+    pub probe_generation: String,
+    pub policy: SandboxPolicyDraft,
+    /// The Pane's initial working directory. Empty asks the Agent to use the
+    /// active Pane's own current directory.
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `agent.session.sandbox.preflight` — the Server forwards the draft.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxPreflightPayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub generation: String,
+    #[serde(default)]
+    pub probe_generation: String,
+    pub policy: SandboxPolicyDraft,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `server.session.sandbox.enter` — the one explicit Enter mutation.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxEnterPayload {
+    pub session_id: String,
+    /// The generation returned by the last preflight/context read.
+    pub generation: String,
+    /// The catalog probe generation the confirmed preflight was bound to.
+    #[serde(default)]
+    pub probe_generation: String,
+    /// Client-minted idempotency key for this Enter attempt.
+    pub enter_id: String,
+    pub policy: SandboxPolicyDraft,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `agent.session.sandbox.enter` — the Server forwards the same attempt.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxEnterPayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub generation: String,
+    #[serde(default)]
+    pub probe_generation: String,
+    pub enter_id: String,
+    pub policy: SandboxPolicyDraft,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `server.session.sandbox.return-to-native` — focus the preserved Native
+/// Pane; never a teardown.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxReturnPayload {
+    pub session_id: String,
+}
+
+/// `agent.session.sandbox.return-to-native` — the Server forwards the intent.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxReturnPayload {
+    pub request_id: String,
+    pub session_name: String,
+}
+
+/// `server.session.sandbox.focus` — focus one existing, tracked Sandbox Pane.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxFocusPayload {
+    pub session_id: String,
+    /// The `pane_id` from `SandboxPaneRef`.
+    pub pane_id: String,
+}
+
+/// `agent.session.sandbox.focus` — the Server forwards the target Pane id.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxFocusPayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub pane_id: String,
 }

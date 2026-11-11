@@ -23,11 +23,15 @@ function targetSha() {
 }
 
 /**
- * Run one integration-project Vitest file and require every named assertion to
- * have executed and passed. Exit 0 alone is not enough: a renamed or skipped
- * test must fail the Case rather than silently shrink its proof.
+ * Run one or more Vitest files in a named project and require every named
+ * assertion to have executed and passed.
+ *
+ * Exit 0 alone is not enough: a renamed or skipped test must fail the Case
+ * rather than silently shrink its proof. The project is named because the
+ * repository has separate unit and integration projects and a file belongs to
+ * exactly one of them.
  */
-function webVitest(entry, names, timeout = 100000) {
+function webVitestFiles(files, names, { project = 'integration', timeout = 120000 } = {}) {
   const web = path.join(root, 'web');
   const bin = path.join(web, 'node_modules', '.bin', 'vitest');
   if (!fs.existsSync(bin)) {
@@ -35,7 +39,7 @@ function webVitest(entry, names, timeout = 100000) {
   }
   const result = spawnSync(
     bin,
-    ['run', '--project=integration', '--reporter=verbose', '--no-color', entry],
+    ['run', '--project=' + project, '--reporter=verbose', '--no-color', ...files],
     {
       cwd: web,
       encoding: 'utf8',
@@ -57,6 +61,14 @@ function webVitest(entry, names, timeout = 100000) {
   return output;
 }
 
+/**
+ * Run one integration-project Vitest file and require every named assertion to
+ * have executed and passed.
+ */
+function webVitest(entry, names, timeout = 100000) {
+  return webVitestFiles([entry], names, { timeout });
+}
+
 function run(fn) {
   try {
     const evidence = [];
@@ -75,4 +87,4 @@ function run(fn) {
   }
 }
 
-module.exports = { run, targetSha, webVitest };
+module.exports = { run, targetSha, webVitest, webVitestFiles };

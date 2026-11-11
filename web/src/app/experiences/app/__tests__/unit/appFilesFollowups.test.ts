@@ -18,14 +18,18 @@ describe('appFilesPathUtils', () => {
 });
 
 describe('parseWorkspaceFileLink', () => {
-  it('parses path and line from compiler output', () => {
+  it('parses path, line and column from compiler output', () => {
     expect(parseWorkspaceFileLink('error at src/foo.rs:128:9')).toEqual({
+      rawPath: 'src/foo.rs',
       path: 'src/foo.rs',
       line: 128,
+      column: 9,
     });
   });
 
-  it('rejects absolute paths', () => {
-    expect(parseWorkspaceFileLink('/etc/passwd')).toBeNull();
+  it('keeps an absolute path absolute', () => {
+    expect(parseWorkspaceFileLink('/etc/app.conf')).toMatchObject({
+      path: '/etc/app.conf',
+    });
   });
 });

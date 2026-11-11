@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -20,6 +20,10 @@ interface SearchBarProps {
    * `DEFAULT_PLACEHOLDER`.
    */
   placeholder?: string;
+  /** Extra classes for the input; the Web sidebar uses the large control band. */
+  inputClassName?: string;
+  /** Accessible name for the field when the placeholder is not one. */
+  inputAriaLabel?: string;
   /**
    * A control rendered opposite the field, inside its row.
    *
@@ -33,17 +37,21 @@ interface SearchBarProps {
    * passes nothing, so its DOM is what it was.
    */
   fieldAction?: ReactNode;
+  /**
+   * The canonical search input (#3075). A collapsed navigation rail expands
+   * the sidebar and focuses *this* field rather than introducing a second
+   * search state or a rail-local input.
+   */
+  inputRef?: RefObject<HTMLInputElement | null>;
 }
 
 /**
- * The default copy: the Web column's, and still the literal it shipped with.
+ * The shared fallback copy.
  *
- * It is a *default*, not a statement about what the field does — no experience
- * filters Agents today, and the App does not even render them as a section. It
- * stays as the default so Web's copy does not move as a side effect of an App
- * change: the two experiences disagree about what this field searches, so each
- * owns its own string (#1050 stage 3) and Web's reconciliation is a separate,
- * undecided question.
+ * It is a *default*, not a statement about what the field does. Both current
+ * surfaces pass their own `Search sessions...` copy because both search Sessions;
+ * the default remains for callers that have not made that decision, and changing
+ * it must not silently move a caller that passed its own string (#1050 stage 3).
  */
 const DEFAULT_PLACEHOLDER = 'Search agents and sessions...';
 
@@ -62,22 +70,31 @@ export function SearchBar({
   offlineCount,
   showStatusFilters = true,
   placeholder = DEFAULT_PLACEHOLDER,
+  inputClassName,
+  inputAriaLabel,
   fieldAction,
+  inputRef,
 }: SearchBarProps) {
   const { value: localValue, setValue: setLocalValue, debouncedValue, syncValue } = useDebouncedInput(searchQuery, 200);
   const isFirstRender = useRef(true);
   const skipNextSync = useRef(false);
   const prevSearchQuery = useRef(searchQuery);
 
-  // Sync external searchQuery prop back to local state when it changes externally
+  // Sync external searchQuery prop back to local state when it changes
+  // externally. A value this field just debounced back is not external: setting
+  // `skipNextSync` for it would swallow the *next* query and leave the list
+  // showing the previous one.
   useEffect(() => {
     if (prevSearchQuery.current === searchQuery) {
       return;
     }
     prevSearchQuery.current = searchQuery;
+    if (debouncedValue === searchQuery) {
+      return;
+    }
     skipNextSync.current = true;
     syncValue(searchQuery);
-  }, [searchQuery, syncValue]);
+  }, [searchQuery, debouncedValue, syncValue]);
 
   // Push debounced value to parent (skip initial mount and external syncs)
   useEffect(() => {
@@ -103,13 +120,15 @@ export function SearchBar({
       <div className="relative flex-1">
         <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          ref={inputRef}
           placeholder={placeholder}
+          aria-label={inputAriaLabel}
           value={localValue}
           onChange={(e) => setLocalValue(e.target.value)}
           // The right inset only exists when something occupies it. Written as a
           // conditional rather than as a second class so that with no
           // `fieldAction` the string is exactly what it was.
-          className={cn('pl-8', fieldAction !== undefined && 'pr-11')}
+          className={cn('pl-8', fieldAction !== undefined && 'pr-11', inputClassName)}
         />
         {fieldAction !== undefined ? (
           <div className="absolute right-0.5 top-1/2 -translate-y-1/2">

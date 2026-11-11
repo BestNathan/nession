@@ -37,6 +37,16 @@ import {
   moveTerminalTouch,
   startTerminalTouch,
 } from '../../helpers/terminalTouch';
+import {
+  activateReference as activateFileReference,
+  expectEditorAt as expectFileEditorAt,
+  expectFilesSurface as expectFilesAt,
+  openShell as openFileLinkShell,
+  printReference as printFileReference,
+  returnToTerminal as returnFromFiles,
+  runLine as runFileLinkCommand,
+  seedTerminalFiles,
+} from '../../../e2e/acceptance/shared/terminal-file-links.cjs';
 
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
@@ -734,6 +744,11 @@ test.describe('Terminal I/O', () => {
       // The mode is the variable, so the other encoding must not have appeared.
       expect(await countInBuffer(page, '^[OA')).toBe(0);
     }).toPass({ timeout: 15_000 });
+    // Regression for Full #42970306164: an old prompt is still in the
+    // scrollback while cat -v is active. Waiting for that historical prompt
+    // caused the appcursor command to be sent before Ctrl-C completed.
+    expect(await readTerminalBuffer(page)).toMatch(/runner:\S*\$/m);
+    expect(await lastNonEmptyLine(page)).not.toMatch(/^runner:\S*\$/);
     await stopPtyProbe(page);
 
     // Same tap, application cursor mode: ESC O A, rendered `^[OA`. A constant
@@ -1230,16 +1245,30 @@ test.describe('Terminal touch direction pad (#2657)', () => {
 
     try {
       await context.setOffline(true);
-      await page.evaluate(() => {
-        const sockets = (window as typeof window & { __e2eDirectionSockets?: WebSocket[] })
+      const targetCount = await page.evaluate(() => {
+        const tracked = (window as typeof window & { __e2eDirectionSockets?: WebSocket[] })
           .__e2eDirectionSockets ?? [];
-        for (const socket of sockets) {
-          if (socket.readyState === WebSocket.OPEN && socket.url.includes('/ws')) {
-            socket.close(4000, 'direction-pad disconnect');
-          }
+        const targets = tracked.filter((socket) =>
+          socket.readyState === WebSocket.OPEN && socket.url.includes('/ws'),
+        );
+        (window as typeof window & { __e2eDirectionDroppedSockets?: WebSocket[] })
+          .__e2eDirectionDroppedSockets = targets;
+        for (const socket of targets) {
+          socket.close(4000, 'direction-pad disconnect');
         }
+        return targets.length;
       });
-      await expect(page.getByTestId('terminal-connecting')).toBeVisible({ timeout: 30_000 });
+      // Verify a genuine live transport was interrupted. The connecting
+      // banner may be skipped or too transient to paint during reconnect;
+      // closed physical sockets, not a particular UI frame, are the source
+      // of truth for the #3200 disconnect/gesture-cancellation regression.
+      expect(targetCount).toBeGreaterThan(0);
+      await expect.poll(async () => page.evaluate(() => {
+        const targets = (window as typeof window & { __e2eDirectionDroppedSockets?: WebSocket[] })
+          .__e2eDirectionDroppedSockets ?? [];
+        return targets.length > 0 &&
+          targets.every((socket) => socket.readyState === WebSocket.CLOSED);
+      }), { timeout: 10_000 }).toBe(true);
       await expect(page.getByTestId('terminal-direction-pad')).toHaveCount(0);
 
       // The finger is still down, but a disconnected pad must not keep
@@ -1253,5 +1282,25 @@ test.describe('Terminal touch direction pad (#2657)', () => {
     await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
     await endTerminalTouch(page, { x: center.x, y: center.y - 40 });
     await stopPtyProbe(page);
+  });
+});
+
+// #3187: a file reference printed by the live shell opens the same Session's
+// Files capability at the referenced source position.
+test.describe('Terminal file references', () => {
+  test('Web: clicking path:line:column opens Files at that position', async ({ page }) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+    seedTerminalFiles(runtime.home);
+    await openFileLinkShell(page, expect, runtime, 'e2e-3187-web');
+    await runFileLinkCommand(page, expect, 'cd src/deep');
+    await printFileReference(page, expect, 'target.py:7:3');
+    await activateFileReference(page, 'target.py:7:3');
+    await expectFilesAt(page, expect, 'web');
+    await expectFileEditorAt(page, expect, {
+      count: 1, line: 7, column: 3, activeLineText: 'target-line-7',
+    });
+    await returnFromFiles(page, expect, 'web');
+    await expect(page.getByTestId('terminal-surface')).toBeVisible();
   });
 });

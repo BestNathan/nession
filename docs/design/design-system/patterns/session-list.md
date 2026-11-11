@@ -54,19 +54,20 @@ SessionList is a navigation **capability/pattern**, not a guarantee of a fixed s
 
 Acceptable placements include:
 
-- collapsible sidebar/rail;
+- collapsible sidebar (expanded column or reserved rail);
 - overlay drawer;
 - compact Session switcher that opens the list;
 - on-demand panel combined with search/command navigation.
 
 A persistent left column may still be appropriate on some desktop compositions, but it is an implementation choice. It must remain secondary to the active Session and should yield when space/focus makes that beneficial.
 
-Where the placement is a collapsible sidebar, the collapsed rail is **not a miniature
-SessionList** (#1196): it carries one Expand action plus static summaries whose Session
-count is the unfiltered total — or an explicit "N shown · M total" while a filter is
-active — because a count that silently follows a hidden filter lies about the
-population. The full list, its search, and its filters exist only in the expanded
-placement.
+Where the placement is a collapsible sidebar, the collapsed form is a **reserved
+navigation rail**, not a miniature SessionList and not a floating overlay (#3075,
+superseding #2851's 0px tuck-away and #1196's static rail): the column keeps its
+canonical rail width in flow and exposes only purposeful shortcuts. The full
+list, its search, its history grouping and its filters exist only in the
+expanded placement; selection, search and scroll survive the round trip because
+the column stays mounted and `inert` while collapsed.
 
 ### App
 
@@ -106,7 +107,7 @@ This supports work-first navigation without importing an IM/chat domain model or
 
 ## History grouping
 
-The App realizes SessionList as a **history navigator**, and a history list
+Both experiences may realize SessionList as a **history navigator**, and a history list
 may group its rows by *when the work last happened* (#1083):
 
 ```text
@@ -130,8 +131,9 @@ Rules:
   recency; when they are not, recency stays in the row. Never both.
 - **Within a bucket, the list's own sort holds.** Grouping orders the buckets;
   it does not re-order the rows the user sorted.
-- **The Web column is flat.** Grouping is the App's history presentation, not a
-  requirement of the pattern.
+- **Both experiences may group by time when the list spans more than one bucket.**
+  The current Web column and the App's Sessions layer both use this history
+  presentation; a one-bucket list stays flat.
 
 A secondary navigation entry that belongs *below* history — the App's Agents
 entry (#1083) — is part of the list's scroll content rather than chrome. It is
@@ -157,7 +159,7 @@ Do not introduce feature-specific palette literals or decorative per-Agent color
 | Placement | On-demand, collapsible, compact, or persistent when justified | Sessions spatial layer |
 | Opening | Must remain fast/discoverable; exact shell control may vary | Gesture + visible control |
 | Density | Web Experience row density | App/touch Experience density |
-| Grouping | Flat by default | Flat by default; the App may group by time (§History grouping) |
+| Grouping | Flat when one bucket; time-grouped when the list spans several (§History grouping) | Flat when one bucket; the App may group by time (§History grouping) |
 | Infrastructure metadata | Secondary | Secondary |
 
 ## Visual contract

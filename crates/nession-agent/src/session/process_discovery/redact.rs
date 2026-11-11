@@ -8,7 +8,10 @@
 //!
 //! The rules are deliberately conservative and recognizable:
 //!
-//! - a flag whose name names a secret takes the next argument as its value;
+//! - a flag whose name names a secret takes the next argument as its value,
+//!   **even when that value begins with `-`**; there is no parser metadata that
+//!   proves a leading-hyphen argument is an option rather than a secret, so the
+//!   value position fails closed. The `--` end-of-options marker is not a value;
 //! - `--name=value` with a secret-bearing name loses the value;
 //! - URL userinfo (`scheme://user:pass@host`) loses the userinfo;
 //! - `Bearer …` and `Authorization: …` lose everything after the credential
@@ -55,8 +58,10 @@ pub(super) fn sanitize(argv: &[String], max_bytes: usize, max_args: usize) -> (S
     for arg in argv.iter().take(max_args) {
         let (sanitized, redacted) = sanitize_arg(arg, expect_value);
         redacted_any |= redacted;
-        // A flag that names a secret consumes the next argument only when that
-        // argument does not itself look like a flag.
+        // A sensitive flag consumes the next argument as its value even when
+        // that argument itself looks like a flag: argv has no parser metadata
+        // that proves otherwise, so the value position fails closed (#3018).
+        // Only the `--` end-of-options marker is not a value.
         expect_value = is_sensitive_flag(arg) && !arg.contains('=');
         pieces.push(shell_word(&sanitized));
     }
@@ -71,7 +76,10 @@ pub(super) fn sanitize(argv: &[String], max_bytes: usize, max_args: usize) -> (S
 
 /// Redact one argument, given whether the previous argument asked for a secret.
 fn sanitize_arg(arg: &str, expect_value: bool) -> (String, bool) {
-    if expect_value && !arg.starts_with('-') {
+    // The value position fails closed even for a leading-hyphen value. `--` is
+    // the end-of-options marker, not a value, so it stays readable and resets
+    // the expectation; the arguments after it are positionals.
+    if expect_value && arg != "--" {
         return ("[REDACTED]".to_string(), true);
     }
 
@@ -277,6 +285,58 @@ mod tests {
             32,
         );
         assert_eq!(display, "tool --token [REDACTED] --verbose");
+        assert!(redacted);
+    }
+
+    #[test]
+    fn a_secret_flag_redacts_a_leading_hyphen_value() {
+        let (display, redacted, _) = sanitize(&args(&["tool", "--token", "-secret123"]), 512, 32);
+        assert_eq!(display, "tool --token [REDACTED]");
+        assert!(redacted);
+        assert!(!display.contains("-secret123"));
+    }
+
+    #[test]
+    fn a_secret_flag_redacts_a_consecutive_flag_value() {
+        let (display, redacted, _) = sanitize(&args(&["tool", "--token", "--verbose"]), 512, 32);
+        assert_eq!(display, "tool --token [REDACTED]");
+        assert!(redacted);
+
+        // A sensitive flag in the value position keeps the value position
+        // closed for its own value too.
+        let (display, redacted, _) = sanitize(
+            &args(&["tool", "--token", "--password", "hunter2"]),
+            512,
+            32,
+        );
+        assert_eq!(display, "tool --token [REDACTED] [REDACTED]");
+        assert!(redacted);
+        assert!(!display.contains("hunter2"));
+    }
+
+    #[test]
+    fn a_sensitive_flag_without_a_value_is_unchanged() {
+        let (display, redacted, _) = sanitize(&args(&["tool", "--token"]), 512, 32);
+        assert_eq!(display, "tool --token");
+        assert!(!redacted);
+    }
+
+    #[test]
+    fn the_double_dash_terminator_is_not_a_secret_value() {
+        let (display, redacted, _) =
+            sanitize(&args(&["tool", "--token", "--", "-secret123"]), 512, 32);
+        assert_eq!(display, "tool --token -- -secret123");
+        assert!(!redacted);
+    }
+
+    #[test]
+    fn ordinary_flags_outside_the_value_position_stay_readable() {
+        let (display, redacted, _) = sanitize(
+            &args(&["tool", "--verbose", "--token", "secret", "--debug"]),
+            512,
+            32,
+        );
+        assert_eq!(display, "tool --verbose --token [REDACTED] --debug");
         assert!(redacted);
     }
 

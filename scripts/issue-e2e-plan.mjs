@@ -13,6 +13,30 @@ const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const digest = o => createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const git = (args, cwd) => execFileSync('git', args, { encoding: 'utf8', cwd }).trim();
 
+/**
+ * The canonical fields of an Issue E2E selection plan.
+ *
+ * Every producer and every verifier hashes exactly these fields. Extra
+ * provenance a producer attaches to a plan — `convergence`, `source_event`,
+ * `merge_sha`, `source_pr`, `reason`, `pr_number` — records where the plan
+ * came from; it is not part of the declared E2E obligation set and must never
+ * change the digest. A producer that hashed the whole plan would make a
+ * convergence/promotion push un-ingestible even though its obligations were
+ * identical.
+ */
+export function canonicalPlan(plan) {
+  return {
+    schema_version: plan.schema_version, kind: plan.kind,
+    base_sha: plan.base_sha, target_sha: plan.target_sha,
+    issues: plan.issues, selected: plan.selected, mode: plan.mode,
+  };
+}
+
+/** The one canonical plan digest owner (`#3311`). */
+export function planDigest(plan) {
+  return digest(canonicalPlan(plan));
+}
+
 export function catalogFromPaths(paths) {
   const found = new Set(), ids = [];
   for (const file of paths) {
@@ -66,7 +90,7 @@ export function buildSelectionPlan({ issues, baseIds, headIds, changedIds = [], 
     selected: selectedIds.map(id => ({ id, owners: selected.get(id).sort((a,b) => a.issue-b.issue) })),
     mode: selectedIds.length ? 'selected' : 'not-required',
   };
-  return { ...plan, plan_digest: digest(plan) };
+  return { ...plan, plan_digest: planDigest(plan) };
 }
 
 function isAncestor(repo, ancestor, descendant) {
@@ -139,7 +163,18 @@ function selfTest() {
   fail({targetSha:a});
   assert.deepEqual(catalogFromPaths(['e2e/tests/browser/x.spec.ts','e2e/tests/protocol/y.spec.ts']),['x','y']);
   assert.throws(() => catalogFromPaths(['e2e/tests/browser/x.spec.ts','e2e/tests/protocol/x.spec.ts']),/duplicate/);
-  console.log('Issue E2E plan: deterministic dedupe, exact SHA and unlisted changed-test negatives passed');
+  // #3311: provenance fields are not part of the declared obligation set.
+  const canonical = {schema_version:1,kind:'issue_e2e_selection',base_sha:a,
+    target_sha:b,issues:[],selected:[],mode:'not-required'};
+  const provenance = {...canonical,
+    convergence:{source_head_sha:b,main_sha:a,lane_sha:a,batch_digest:'c'.repeat(64),risk:'mixed'},
+    source_event:'push',merge_sha:b,source_pr:7,reason:'authenticated-source-bound-convergence'};
+  assert.equal(planDigest(provenance),planDigest(canonical),
+    'non-canonical provenance must not change the plan digest');
+  assert.match(planDigest(canonical),/^[a-f0-9]{64}$/);
+  assert.notEqual(planDigest({...canonical,selected:[{id:'login',owners:[]}]}),
+    planDigest(canonical), 'a different obligation set must change the digest');
+  console.log('Issue E2E plan: deterministic dedupe, exact SHA, unlisted changed-test negatives and canonical digest ownership passed');
 }
 
 // This module is also imported by the trusted Issue E2E selection adapter.

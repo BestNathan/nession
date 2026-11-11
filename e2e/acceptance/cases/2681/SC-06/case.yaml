@@ -1,0 +1,10 @@
+schema_version: 1
+issue: 2681
+criterion: SC-06
+stage: staging
+platform: macos
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

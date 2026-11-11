@@ -30,7 +30,10 @@ import type { ExplorerExtension } from '@/platform/explorer';
 
 export interface FileBrowserProps {
   fileOps: FileOps;
-  onFileClick: (entry: FileEntry) => void;
+  /** Return false when the host rejected the activation (e.g. a dirty-file guard). */
+  onFileClick: (entry: FileEntry) => boolean | void;
+  /** The host's open file; a guarded transition moves the row on commit. */
+  selectedPath?: string | null;
   initialPath?: string;
   /** Called when a file/directory is deleted (so parent can close tabs) */
   onFileDeleted?: (path: string) => void;
@@ -43,6 +46,7 @@ export interface FileBrowserProps {
 export function FileBrowser({
   fileOps,
   onFileClick,
+  selectedPath,
   initialPath = '',
   onFileDeleted,
   onFileRenamed,
@@ -187,6 +191,7 @@ export function FileBrowser({
         provider={browser.provider}
         extensions={extensions}
         onFileActivate={browser.handleFileActivate}
+        selectedPath={selectedPath}
         onFileRenamed={browser.handleExplorerRenamed}
         onDeleteRequest={browser.handleDeleteRequest}
         revealPath={browser.revealPath}

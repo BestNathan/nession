@@ -84,6 +84,20 @@ export async function assertPopupMenu(
   // read has to come from a settled frame (see `waitForSettledBox`).
   await waitForSettledBox(menu);
 
+  // Cross-family anchor regression for issue 3246: changing Select's defaults
+  // must not detach a DropdownMenu from its trigger. Their horizontal ranges
+  // still overlap, and the layer opens beside the trigger (4px) or on the
+  // opposite side when Base UI flips it under collision.
+  const triggerBox = await trigger.boundingBox();
+  const menuBox = await menu.boundingBox();
+  expect(triggerBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(menuBox!.x).toBeLessThan(triggerBox!.x + triggerBox!.width);
+  expect(menuBox!.x + menuBox!.width).toBeGreaterThan(triggerBox!.x);
+  const below = menuBox!.y - (triggerBox!.y + triggerBox!.height);
+  const above = triggerBox!.y - (menuBox!.y + menuBox!.height);
+  expect(Math.min(Math.abs(below), Math.abs(above))).toBeLessThanOrEqual(12);
+
   const items = menu.getByRole('menuitem');
   const count = await items.count();
   expect(count).toBeGreaterThan(0);
@@ -495,8 +509,20 @@ export async function assertProductionCapabilityCountOnlyChangesScrollExtent(
   );
   const full = await captureProductionWorkspaceCapabilityRow(page, '/#/fixture/workspace');
 
-  expect(reduced.ids).toEqual(['session', 'agent', 'env', 'claude-code', 'git']);
-  expect(full.ids).toEqual(['files', 'session', 'agent', 'env', 'claude-code', 'git']);
+  // The Sandbox capability is Session-context and view-bound (#3124), so it
+  // adds one entry to the production set after Env. The invariant under test
+  // is unchanged: one more eligible entry extends only the row's horizontal
+  // content/scroll axis.
+  expect(reduced.ids).toEqual(['session', 'agent', 'env', 'sandbox', 'claude-code', 'git']);
+  expect(full.ids).toEqual([
+    'files',
+    'session',
+    'agent',
+    'env',
+    'sandbox',
+    'claude-code',
+    'git',
+  ]);
   expect(full.ids.length).toBeGreaterThan(2);
   expect(full.ids.length).toBe(reduced.ids.length + 1);
   expect(full.states.every((state) => state !== 'unavailable')).toBe(true);

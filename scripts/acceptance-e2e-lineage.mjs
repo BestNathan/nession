@@ -2,7 +2,6 @@
 // Scope: commits that belong to an associated PR; never follow SHAs/URLs
 // suggested in mutable PR descriptions, comments or acceptance reports.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createProjectionReceipt, verifyArchivedProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { planDigest } from './issue-e2e-plan.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -122,11 +122,7 @@ export function verifyHistoricalPlan(run,record,plan,prNumber) {
       !Array.isArray(plan.issues) || !Array.isArray(plan.selected) ||
       plan.selected.length!==record.results.length)
     throw Error('historical E2E Plan identity is not bound to its Run Record');
-  const canonical={schema_version:plan.schema_version,kind:plan.kind,
-    base_sha:plan.base_sha,target_sha:plan.target_sha,
-    issues:plan.issues,selected:plan.selected,mode:plan.mode};
-  const digest=createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
-  if(digest!==plan.plan_digest)throw Error('historical E2E Plan digest mismatch');
+  if(planDigest(plan)!==plan.plan_digest)throw Error('historical E2E Plan digest mismatch');
   const declared=new Set(),owners=new Set(plan.issues.map(x=>x.issue));
   if(owners.size!==plan.issues.length || !owners.size ||
      [...owners].some(x=>!goodInt(x)))throw Error('invalid historical Issue contract set');
@@ -687,8 +683,7 @@ async function selfTest() {
       base_sha:'0'.repeat(40),target_sha:run.head_sha,
       issues:[{issue:1702}],selected:[{id:'login',owners:[{issue:1702}]}],
       mode:'selected'};
-    return {...canonical,pr_number:1718,plan_digest:createHash('sha256')
-      .update(JSON.stringify(canonical)).digest('hex')};
+    return {...canonical,pr_number:1718,plan_digest:planDigest(canonical)};
   };
   const rec=(run,result)=>({schema_version:1,kind:'issue_e2e_run',
     run_id:run.id,run_attempt:1,target_sha:run.head_sha,

@@ -6,8 +6,8 @@
 //
 // Expectations come from design/contracts (#545) unless a test explicitly
 // overrides a field for a broken-fixture proof.
-import type { Locator } from '@playwright/test';
-import type { ContractBlock, Experience } from './contracts';
+import type { Locator, Page } from '@playwright/test';
+import type { ContractBlock, Experience, PartBlock } from './contracts';
 import { contractFor } from './contracts';
 
 export interface AssertOptions {
@@ -19,6 +19,12 @@ export interface AssertOptions {
   contract?: Partial<ContractBlock>;
   /** Height tolerance in px (default 1 — borders/antialiasing). */
   tolerance?: number;
+}
+
+/** A `data-recipe-part` assertion (#3138). */
+export interface RecipePartOptions extends AssertOptions {
+  /** The part name declared by the pattern contract's `parts` map. */
+  part: string;
 }
 
 export interface ViolationFields {
@@ -877,5 +883,281 @@ export async function expectInsetFocusOutline(locator: Locator, opts: AssertOpti
   }
   if (visibleShadow(m.boxShadow)) {
     violation(opts, 'focus-outline', 'no outer box-shadow ring', `box-shadow: ${m.boxShadow}`);
+  }
+}
+
+// ── Capability visual recipes (#3138) ────────────────────────────────────────
+
+export interface RecipeTypography {
+  fontSize: string;
+  fontWeight: string;
+  lineHeight: string;
+  fontFamily: string;
+  color: string;
+}
+
+export async function captureRecipeTypography(locator: Locator): Promise<RecipeTypography> {
+  return locator.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      lineHeight: style.lineHeight,
+      fontFamily: style.fontFamily,
+      color: style.color,
+    };
+  });
+}
+
+/**
+ * The part's approved role, read from the pattern contract.
+ *
+ * A missing part is a **violation, not a skip**: a browser check that quietly
+ * no-ops when the contract forgot the part is exactly the drift this layer was
+ * added to catch.
+ */
+function contractPart(opts: RecipePartOptions): PartBlock {
+  const block = blockFor(opts);
+  const part = block.parts?.[opts.part];
+  if (part === undefined) {
+    violation(
+      opts,
+      'typography-role',
+      `${opts.pattern} declares parts.${opts.part}`,
+      'no approved part in the contract',
+      `parts: ${Object.keys(block.parts ?? {}).join(', ') || 'none'}`,
+    );
+  }
+  return part;
+}
+
+async function roleTypography(locator: Locator, role: NonNullable<PartBlock['typography']>) {
+  return locator.evaluate((el, value) => {
+    const probe = el.ownerDocument.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;';
+    probe.style.fontSize = `var(${value.sizeVar})`;
+    probe.style.fontWeight = `var(${value.weightVar})`;
+    probe.style.lineHeight = `var(${value.lineHeightVar})`;
+    // The App's typography variables are scoped to `[data-experience="app"]`,
+    // so the probe must live inside the same scope as the element it answers
+    // for; Web's variables are at `:root` and inherit through `body`.
+    const scope = el.closest('[data-experience="app"]') ?? el.ownerDocument.body;
+    scope.appendChild(probe);
+    const style = getComputedStyle(probe);
+    const out = {
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      lineHeight: style.lineHeight,
+    };
+    probe.remove();
+    return out;
+  }, role);
+}
+
+/**
+ * The part must resolve one of the typography roles its pattern contract
+ * names.
+ *
+ * A single role is the usual case; `typographyTokens` exists for parts whose
+ * domain content legitimately chooses between approved roles (a fact value is
+ * `body` for product text and `code` for technical identity). The check accepts
+ * any listed role and never accepts one outside the list.
+ *
+ * The expected values come from the resolved contract and are read through a
+ * probe using the same CSS variables the recipe paints through — the assertion
+ * contains no size, weight or leading of its own.
+ */
+export async function expectRecipeRole(locator: Locator, opts: RecipePartOptions): Promise<void> {
+  const part = contractPart(opts);
+  const roles = part.typographies ?? (part.typography === undefined ? [] : [part.typography]);
+  const tokens = part.typographyTokens ?? (part.typographyToken === undefined ? [] : [part.typographyToken]);
+  if (roles.length === 0 || tokens.length === 0) {
+    violation(
+      opts,
+      'typography-role',
+      `${opts.pattern} parts.${opts.part} pins a typography role`,
+      'part has no resolved typography role',
+    );
+  }
+  const actual = await captureRecipeTypography(locator);
+  const keys = ['fontSize', 'fontWeight', 'lineHeight'] as const;
+  let firstExpected: Awaited<ReturnType<typeof roleTypography>> | null = null;
+  for (const role of roles) {
+    const expected = await roleTypography(locator, role);
+    firstExpected ??= expected;
+    if (keys.every((key) => actual[key] === expected[key])) return;
+  }
+  if (firstExpected === null) {
+    violation(opts, 'typography-role', `${opts.pattern} parts.${opts.part} pins a typography role`, 'no resolved role');
+  }
+  // Report the first approved role's expectation; when several are approved,
+  // the message still names all of them so the repair path is unambiguous.
+  violation(
+    opts,
+    'typography-role',
+    `${tokens.join(' | ')} → ${keys.map((key) => `${key} ${firstExpected[key]}`).join(', ')}`,
+    keys.map((key) => `${key} ${actual[key]}`).join(', '),
+    `part: ${opts.part}`,
+  );
+}
+
+/**
+ * Corresponding parts of two independent consumers must resolve the same
+ * computed typography and material.
+ *
+ * This is the relational half of #3138: pinning each part to its role catches a
+ * single consumer drifting, while this comparison catches two consumers that
+ * both say "role" and still paint different relationships (a local
+ * `text-[...]` override, a different muted colour, a mono/sans fork).
+ *
+ * The reference is a captured sample, not a live locator, because Project and
+ * Sandbox are different fixture routes: the two surfaces cannot be mounted in
+ * one page, so the comparison has to survive navigation without inventing a
+ * combined fixture state.
+ */
+export async function expectSameRecipeTypography(
+  reference: RecipeTypography,
+  actual: Locator,
+  opts: RecipePartOptions,
+): Promise<void> {
+  const observed = await captureRecipeTypography(actual);
+  for (const key of ['fontSize', 'fontWeight', 'lineHeight', 'fontFamily', 'color'] as const) {
+    if (reference[key] !== observed[key]) {
+      violation(
+        opts,
+        'typography-role-relation',
+        `corresponding ${opts.part} parts resolve the same ${key} (${reference[key]})`,
+        `${observed[key]}`,
+        `part: ${opts.part}`,
+      );
+    }
+  }
+}
+
+/** Same-page convenience wrapper for `expectSameRecipeTypography`. */
+export async function expectSameRecipeRole(
+  reference: Locator,
+  actual: Locator,
+  opts: RecipePartOptions,
+): Promise<void> {
+  await expectSameRecipeTypography(await captureRecipeTypography(reference), actual, opts);
+}
+
+/**
+ * A read-only detail must not advertise an edit path: no form controls inside
+ * the surface, and no bordered/background "field" around a fact.
+ */
+export async function expectReadOnlyFacts(detail: Locator, opts: AssertOptions): Promise<void> {
+  const findings = await detail.evaluate((el) => {
+    const controls = el.querySelectorAll('input, textarea, select, fieldset').length;
+    const facts = [...el.querySelectorAll('[data-recipe-part="detail-fact"]')].map((fact) => {
+      const style = getComputedStyle(fact);
+      return {
+        bordered: [
+          style.borderTopWidth,
+          style.borderRightWidth,
+          style.borderBottomWidth,
+          style.borderLeftWidth,
+        ].some((width) => Number.parseFloat(width) > 0),
+        background: style.backgroundColor,
+      };
+    });
+    return { controls, facts };
+  });
+  if (findings.controls > 0) {
+    violation(opts, 'read-only-fact', 'no form control inside a read-only detail', `${findings.controls} found`);
+  }
+  for (const [index, fact] of findings.facts.entries()) {
+    if (fact.bordered) {
+      violation(opts, 'read-only-fact', 'a fact has no border chrome', `fact ${index} has a border`);
+    }
+    if (fact.background !== 'rgba(0, 0, 0, 0)' && fact.background !== 'transparent') {
+      violation(opts, 'read-only-fact', 'a fact has no field background', `fact ${index} painted ${fact.background}`);
+    }
+  }
+}
+
+/** A shared input/action must sit on the recipe's declared control band. */
+export async function expectControlBand(locator: Locator, opts: AssertOptions): Promise<void> {
+  const block = blockFor(opts);
+  if (block.controlHeightTokenPx === undefined) {
+    violation(
+      opts,
+      'control-height',
+      `${opts.pattern} pins controlHeightToken`,
+      'no control band in the contract',
+    );
+  }
+  await waitForSettledBox(locator);
+  const box = await locator.boundingBox();
+  if (box === null) {
+    violation(opts, 'control-height', `${block.controlHeightToken} (${block.controlHeightTokenPx}px)`, 'not measurable');
+  }
+  if (Math.abs(box.height - block.controlHeightTokenPx) > (opts.tolerance ?? 1)) {
+    violation(
+      opts,
+      'control-height',
+      `${block.controlHeightToken} (${block.controlHeightTokenPx}px)`,
+      `${box.height.toFixed(1)}px`,
+    );
+  }
+}
+
+/** The page itself must not scroll horizontally. */
+export async function expectNoPageOverflow(page: Page, opts: AssertOptions): Promise<void> {
+  const difference = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  if (difference > 1) {
+    violation(opts, 'page-overflow', 'no page-level horizontal overflow', `${difference}px`);
+  }
+}
+
+/** Secondary/primary actions share one line, secondary first. */
+export async function expectActionOrder(
+  secondary: Locator,
+  primary: Locator,
+  opts: AssertOptions,
+): Promise<void> {
+  await Promise.all([waitForSettledBox(secondary), waitForSettledBox(primary)]);
+  const [a, b] = await Promise.all([secondary.boundingBox(), primary.boundingBox()]);
+  if (a === null || b === null) {
+    violation(opts, 'action-order', 'both actions are measurable', 'missing bounding box');
+  }
+  if (a.x >= b.x) {
+    violation(opts, 'action-order', 'secondary action precedes the primary', `${a.x} vs ${b.x}`);
+  }
+  const centers = [a.y + a.height / 2, b.y + b.height / 2];
+  if (Math.abs(centers[0] - centers[1]) > 4) {
+    violation(opts, 'action-order', 'both actions share one line', `${centers[0]} vs ${centers[1]}`);
+  }
+}
+
+/** The primary action must not paint like the secondary one. */
+export async function expectDistinctActionEmphasis(
+  secondary: Locator,
+  primary: Locator,
+  opts: AssertOptions,
+): Promise<void> {
+  const [a, b] = await Promise.all([
+    secondary.evaluate((el) => getComputedStyle(el).backgroundColor),
+    primary.evaluate((el) => getComputedStyle(el).backgroundColor),
+  ]);
+  if (a === b) {
+    violation(opts, 'action-emphasis', 'primary and secondary paint different emphasis', `both ${a}`);
+  }
+}
+
+/** A related-field grid must resolve the composition's column count. */
+export async function expectGridColumns(
+  grid: Locator,
+  columns: number,
+  opts: AssertOptions,
+): Promise<void> {
+  const actual = await grid.evaluate(
+    (el) => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length,
+  );
+  if (actual !== columns) {
+    violation(opts, 'form-grid', `${columns} column(s)`, `${actual}`);
   }
 }

@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { FixtureShell } from '@/app/fixture/FixtureShell';
 
@@ -39,5 +40,43 @@ describe('FixtureShell', () => {
         .getAllByTestId('session-item-row')
         .filter((el) => el.getAttribute('data-selected') === 'true'),
     ).toHaveLength(1);
+  });
+
+  it('lists Projects and opens a standalone detail without losing the selected Session', async () => {
+    const user = userEvent.setup();
+    render(<FixtureShell />);
+
+    const projects = await screen.findAllByTestId('project-item-row');
+    expect(projects).toHaveLength(2);
+    expect(screen.getByTestId('projects-section')).toBeInTheDocument();
+
+    await user.click(projects[0]);
+    expect(await screen.findByTestId('project-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('project-detail-title')).toHaveTextContent('Nession');
+    // The Session selection (and therefore the return target) survives the
+    // Project destination even though Web replaces the main region.
+    expect(
+      screen
+        .getAllByTestId('session-item-row')
+        .filter((el) => el.getAttribute('data-selected') === 'true'),
+    ).toHaveLength(1);
+
+    const sessionRow = screen.getAllByTestId('session-item-row')[0];
+    await user.click(within(sessionRow).getAllByRole('button')[0]);
+    expect(screen.queryByTestId('project-detail')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('fixture-terminal')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-detail')).not.toBeInTheDocument();
+  });
+
+  it('keeps Projects reachable with zero Sessions', async () => {
+    window.location.hash = '#/fixture?sessions=none&selection=none';
+    try {
+      render(<FixtureShell />);
+      expect(await screen.findAllByTestId('project-item-row')).toHaveLength(2);
+      expect(screen.getByTestId('projects-section')).toBeInTheDocument();
+      expect(screen.queryAllByTestId('session-item-row')).toHaveLength(0);
+    } finally {
+      window.location.hash = '';
+    }
   });
 });

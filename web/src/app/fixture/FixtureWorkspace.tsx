@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router-dom';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
@@ -14,8 +14,10 @@ import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { envApi } from '@/capabilities/env';
 import { gitApi, githubApi } from '@/capabilities/git';
+import { sandboxApi } from '@/capabilities/sandbox';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
+import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureGithubSurface } from './fixtureGithub';
@@ -27,7 +29,13 @@ import {
   installFixtureAgentProcessSurface,
   subscribeFixtureAgentProcessSession,
 } from './fixtureAgentProcesses';
-import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import {
+  fixtureOwnershipSessionId,
+  fixtureSessionMetadataScenario,
+  isFixtureOwnershipScenario,
+  subscribeFixtureOwnershipSession,
+  useFixtureSessionMetadata,
+} from './fixtureSessionMetadata';
 
 // Module-stable — the stub is immutable and stateless, so a single instance
 // is safe to share across renders (same pattern as fixtureRoute).
@@ -47,6 +55,9 @@ export function FixtureWorkspace() {
   // wire. The route's `?sessionMetadata=` selects the state; absent is legacy.
   useFixtureSessionMetadata(search);
   const capability = openedCapability(search);
+  const gitScenario = new URLSearchParams(search).get('git');
+  const [gitSessionId, setGitSessionId] = useState(FIXTURE_SELECTED_ID);
+  const gitSessionIdRef = useRef(FIXTURE_SELECTED_ID);
   const fileOps = new URLSearchParams(search).get('files') === 'unavailable' ? null : fixtureOps;
   const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
   const githubReady = useFixtureSurface(capability === 'git', search, installGithubSurface);
@@ -56,6 +67,11 @@ export function FixtureWorkspace() {
     installConversationSurface,
   );
   const envReady = useFixtureSurface(capability === 'env', search, installEnvSurface);
+  const sandboxReady = useFixtureSurface(
+    capability === 'sandbox',
+    search,
+    installSandboxSurface,
+  );
   // #2803: the Agent capability's two-Agent same-name process scenario. The
   // route names the environment input, and the mounted capability observes the
   // Session change like a real Workspace move.
@@ -69,11 +85,45 @@ export function FixtureWorkspace() {
     subscribeFixtureAgentProcessSession,
     fixtureAgentProcessSessionId,
   );
+  // #2972: the selection-overlap Case moves the Session while a Git read is
+  // still in flight. The control is scoped to that route and removed with it.
+  useEffect(() => {
+    if (gitScenario !== 'selection-overlap' || typeof window === 'undefined') {
+      return;
+    }
+    const control = window as Window & {
+      fixtureGitSelectSession?: (sessionId: string) => void;
+      fixtureGitSelectedSession?: () => string;
+    };
+    control.fixtureGitSelectSession = (sessionId) => {
+      gitSessionIdRef.current = sessionId;
+      setGitSessionId(sessionId);
+    };
+    control.fixtureGitSelectedSession = () => gitSessionIdRef.current;
+    return () => {
+      delete control.fixtureGitSelectSession;
+      delete control.fixtureGitSelectedSession;
+    };
+  }, [gitScenario]);
   const sessions = agentProcessScenario ? FIXTURE_AGENT_PROCESS_SESSIONS : FIXTURE_SESSIONS;
   const agents = agentProcessScenario
     ? fixtureAgentProcessesAgents(agentProcessScenario)
     : FIXTURE_AGENTS;
-  const selectedId = agentProcessScenario ? agentProcessSessionId : FIXTURE_SELECTED_ID;
+  // The metadata ownership route (#2970) moves between two Sessions on the
+  // same Agent through the same in-place selection store; the capability view
+  // observes a changed Session without remounting.
+  const metadataOwnership = isFixtureOwnershipScenario(fixtureSessionMetadataScenario(search));
+  const ownershipSessionId = useSyncExternalStore(
+    subscribeFixtureOwnershipSession,
+    fixtureOwnershipSessionId,
+  );
+  const selectedId = agentProcessScenario
+    ? agentProcessSessionId
+    : gitScenario === 'selection-overlap'
+      ? gitSessionId
+      : metadataOwnership
+        ? ownershipSessionId
+        : FIXTURE_SELECTED_ID;
   const selectedSession = sessions.find((s) => s.session_id === selectedId) ?? null;
   const selectedAgent = agents.find((a) => a.agent_id === selectedSession?.agent_id);
   const domain = selectedSession
@@ -86,7 +136,7 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !githubReady || !conversationReady || !envReady || !agentProcessReady) {
+  if (!gitReady || !githubReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -142,6 +192,9 @@ function openedCapability(search: string): CapabilityId {
   if (requested === 'agent') {
     return 'agent';
   }
+  if (requested === 'sandbox') {
+    return 'sandbox';
+  }
   return requested === 'session' ? 'session' : 'files';
 }
 
@@ -162,6 +215,11 @@ function installGithubSurface(search: string): () => void {
  */
 function installEnvSurface(search: string): () => void {
   return envApi.install(fixtureEnvSurface(search));
+}
+
+/** Bind the Sandbox Agent stub (#3124). Gated for the same mount-order reason. */
+function installSandboxSurface(search: string): () => void {
+  return sandboxApi.install(fixtureSandboxSurface(search));
 }
 
 /**

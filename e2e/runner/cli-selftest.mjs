@@ -26,7 +26,7 @@ const expectError = (...args) => {
 const testList = call('test', '--list');
 assert.equal(testList.code, 0, testList.stderr);
 const declaredTests = JSON.parse(testList.stdout).tests;
-assert.equal(declaredTests.length, 39);
+assert.equal(declaredTests.length, 48);
 assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
 assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
 const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
@@ -52,7 +52,7 @@ const split = [
   'conversation-live-scroll.spec.ts',
   'conversation-disclosure-app.spec.ts',
 ];
-const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts', 'terminal-consistency-faults.spec.ts', 'ui-contract-web.spec.ts', 'fixture-visual-web-compact.spec.ts', 'fixture-visual-app.spec.ts', 'fixture-visual-app-compact.spec.ts', 'fixture-visual-app-landscape.spec.ts', 'session-metadata.spec.ts', 'pages-overview.spec.ts', 'pages-evidence.spec.ts', 'pages-workflows.spec.ts', 'pages-documents.spec.ts', 'agent-process-discovery.spec.ts', 'files-context-create.spec.ts', 'git-github-context.spec.ts']).sort();
+const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts', 'terminal-consistency-faults.spec.ts', 'ui-contract-web.spec.ts', 'fixture-visual-web-compact.spec.ts', 'fixture-visual-app.spec.ts', 'fixture-visual-app-compact.spec.ts', 'fixture-visual-app-landscape.spec.ts', 'session-metadata.spec.ts', 'pages-overview.spec.ts', 'pages-evidence.spec.ts', 'pages-workflows.spec.ts', 'pages-documents.spec.ts', 'agent-process-discovery.spec.ts', 'files-context-create.spec.ts', 'project-management.spec.ts', 'project-sidebar-detail.spec.ts', 'project-session-create.spec.ts', 'project-session-binding.spec.ts', 'app-attach-presentation.spec.ts', 'app-session-operations.spec.ts', 'sidebar-navigation-rail.spec.ts', 'sandbox-workspace-capability.spec.ts', 'git-github-context.spec.ts']).sort();
 assert.deepEqual(foundSpecs, expectedSpecs, 'regression spec dropped or drifted during semantic split');
 assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silently omit specs');
 const snapshotRoot = path.join(browserRoot, '__snapshots__');
@@ -69,7 +69,7 @@ const actualSnapshotPaths = fs.readdirSync(snapshotRoot, { withFileTypes: true }
   .flatMap(entry => fs.readdirSync(path.join(snapshotRoot, entry.name))
     .filter(name => name.endsWith('.png')).map(name => path.join(snapshotRoot, entry.name, name))).sort();
 assert.deepEqual(actualSnapshotPaths, expectedSnapshotPaths, 'visual snapshot set changed after semantic split');
-assert.equal(actualSnapshotPaths.length, 45, 'all 45 snapshot PNG blobs are retained');
+assert.equal(actualSnapshotPaths.length, 50, 'all 50 snapshot PNG blobs are retained');
 for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blobs)) {
   const filename = path.resolve(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative));
   assert.ok(filename.startsWith(snapshotRoot + path.sep), 'snapshot path escaped browser tree');

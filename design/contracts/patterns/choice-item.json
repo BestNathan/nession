@@ -1,0 +1,20 @@
+{
+  "id": "pattern.choice-item",
+  "$description": "The resource/rich-choice row anatomy (#3164), the second member of the PopupMenu family. Action rows keep pattern.popup-menu unchanged: single-line, exactly the experience control band (28px Web / 44px App). A resource row has a primary identity plus optional source/status/technically-formatted detail, so it wraps and takes its content's height; the same control band is its minimum, and on App the touch floor still applies to the whole row. Its list may grow beyond a narrow trigger up to overlay.choiceMaxWidth but never beyond Base UI's available width, and it never clips content horizontally. This block exists so the wrap/height/width exception is contracted rather than an accident at a consumer call site.",
+  "patternRef": "docs/design/design-system/patterns/popup-menu.md",
+  "web": {
+    "wrap": true,
+    "minHeightToken": "experience.web.control.sm",
+    "maxWidthToken": "experience.web.overlay.choiceMaxWidth",
+    "overflow": "wrap",
+    "scrollOwner": false
+  },
+  "app": {
+    "wrap": true,
+    "minHeightToken": "experience.app.control.sm",
+    "maxWidthToken": "experience.app.overlay.choiceMaxWidth",
+    "overflow": "wrap",
+    "scrollOwner": false,
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}

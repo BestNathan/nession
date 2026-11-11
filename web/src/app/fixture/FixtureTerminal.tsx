@@ -198,6 +198,7 @@ export function FixtureTerminal({
       capsuleCapabilities={chrome?.capsuleCapabilities}
       capsuleProjection={chrome?.capsuleProjection}
       surfaceAction={chrome?.surfaceAction}
+      sessionContextAction={chrome?.sessionContextAction}
       workContext={chrome?.workContext}
     >
       {/* Same box and inset as the product's viewport, from the product's own

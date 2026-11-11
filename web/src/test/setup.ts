@@ -8,6 +8,25 @@ if (typeof Element !== 'undefined' && !Element.prototype.getAnimations) {
   Element.prototype.getAnimations = () => [];
 }
 
+// Range geometry — @base-ui/react's floating menu measures a text range when
+// it positions a popup. jsdom implements Range without client rects, so an
+// otherwise normal `···` menu open can throw `textRange(...).getClientRects is
+// not a function` during positioning. Return the empty geometry jsdom's own
+// layout model implies.
+if (typeof Range !== 'undefined') {
+  if (!Range.prototype.getClientRects) {
+    Range.prototype.getClientRects = () =>
+      ({
+        length: 0,
+        item: () => null,
+        [Symbol.iterator]: function* emptyRects() {},
+      }) as unknown as DOMRectList;
+  }
+  if (!Range.prototype.getBoundingClientRect) {
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+  }
+}
+
 // ResizeObserver — used by Terminal.tsx.
 globalThis.ResizeObserver = class ResizeObserver {
   callback: ResizeObserverCallback;

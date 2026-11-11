@@ -4,6 +4,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -11,6 +12,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { ChoiceItemContent } from '@/components/ui/choice-item';
+import { agentDisplayName } from '@/shared/lib/format';
 import {
   Select,
   SelectContent,
@@ -150,10 +153,17 @@ function LocationFields({
                 placeholder={onlineAgents.length === 0 ? 'No online Agents' : 'Select an agent'}
               />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent width="content">
               {onlineAgents.map((a) => (
-                <SelectItem key={a.agent_id} value={a.agent_id}>
-                  {a.display_name ?? a.hostname}
+                <SelectItem key={a.agent_id} value={a.agent_id} anatomy="resource">
+                  <ChoiceItemContent
+                    title={agentDisplayName(a)}
+                    meta={
+                      a.display_name && a.display_name !== a.hostname
+                        ? a.hostname
+                        : undefined
+                    }
+                  />
                 </SelectItem>
               ))}
             </SelectContent>
@@ -363,7 +373,7 @@ export function EnvImportDialog({ isOpen, onClose, agents, onImported }: EnvImpo
         <DialogHeader>
           <DialogTitle>Import .env file</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
+        <DialogBody className="flex flex-col gap-4">
           <PhaseBody
             phase={phase}
             file={file}
@@ -379,7 +389,7 @@ export function EnvImportDialog({ isOpen, onClose, agents, onImported }: EnvImpo
             onAgent={setAgentId}
           />
           {error ? <p className={cn('text-destructive', chromeSansRole('body'))}>{error}</p> : null}
-        </div>
+        </DialogBody>
         <DialogFooter>
           <ImportFooter
             phase={phase}

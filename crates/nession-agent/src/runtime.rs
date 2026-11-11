@@ -180,8 +180,28 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     }
 
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
+    // The Agent's durable EROFS cache (#3062): opened once for Managed
+    // creation downloads. Inability to open it is not fatal for ordinary
+    // Sessions, but every Managed create is refused rather than falling back.
+    let erofs_cache = match config.effective_erofs_storage_dir() {
+        Ok(resolved) => match crate::erofs_cache::open_resolved(&resolved, &agent_id).await {
+            Ok(cache) => Some(Arc::new(cache)),
+            Err(error) => {
+                tracing::warn!(
+                    "EROFS cache unavailable; Managed Session creation will be refused: {error:#}"
+                );
+                None
+            }
+        },
+        Err(error) => {
+            tracing::warn!(
+                "EROFS cache path is unresolved; Managed Session creation will be refused: {error:#}"
+            );
+            None
+        }
+    };
     let tmux_for_client = {
-        let mut mgr = SessionManager::new();
+        let mut mgr = SessionManager::new().with_server_url(config.server_url.clone());
         // Binding state has to outlive this process: a tmux Session does, and
         // the Agent must still know a managed key's base value after a
         // restart. The directory is created here, where the Agent's state
@@ -198,8 +218,40 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             }
         }
         mgr.with_memory_threshold(Some(config.memory_threshold_percent));
+        // Sandbox host configuration and the execution reaper (#2681). The
+        // runtime is always present; `sandbox.enabled = false` makes every
+        // explicit policy fail closed with a backend-unavailable reason.
+        let sandbox = crate::sandbox_runtime::SandboxRuntime::from_config(
+            &config,
+            &agent_id,
+            erofs_cache.clone(),
+        );
+        mgr = mgr.with_sandbox(Arc::clone(&sandbox));
         Arc::new(mgr)
     };
+
+    // Reconcile Sandbox records left by a previous Agent process against the
+    // tmux Sessions that actually exist. A failed listing is not "no
+    // Sessions"; the pass is skipped and the records stay for the next start.
+    if let Some(sandbox) = tmux_for_client.sandbox_runtime() {
+        match tmux_for_client.tmux_dep().ops().list_panes().await {
+            Ok(panes) => {
+                let live: Vec<nession_sandbox::LivePane> = panes
+                    .into_iter()
+                    .map(|pane| nession_sandbox::LivePane {
+                        session_name: pane.session_name,
+                        pane_id: pane.pane_id,
+                    })
+                    .collect();
+                if let Err(error) = sandbox.reconcile(&live) {
+                    tracing::warn!("Sandbox reconciliation failed: {error:#}");
+                }
+            }
+            Err(error) => tracing::warn!(
+                "skipping Sandbox reconciliation because tmux did not answer: {error:#}"
+            ),
+        }
+    }
 
     // One metadata store for the process: the P2P listener and the central
     // connection are two entrypoints into the same Session-owned state (#2789).

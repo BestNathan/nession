@@ -39,11 +39,60 @@ describe('workspace capability providers', () => {
       'session',
       'agent',
       'env',
+      'sandbox',
       'claude-code',
       'git',
       'terminal-keys',
+      'project',
       'quick-commands',
     ]);
+  });
+
+  it('registers Sandbox where a Session and its Agent exist (#3124)', () => {
+    // Presence is environment-level. Whether the active Pane is inside,
+    // outside or unknown is the Agent's authenticated answer, read by the
+    // capability view — never inferred from this registration.
+    expect(snapshotFor('sandbox', workspaceContext())).toMatchObject({
+      title: 'Sandbox',
+      state: 'available',
+    });
+    expect(snapshotFor('sandbox', workspaceContext({ session: null }))?.state).toBe(
+      'unavailable',
+    );
+    // The Session already names the Agent that owns the Pane, so an unloaded
+    // Agent row does not hide the capability; the view reports the offline
+    // read truthfully instead of claiming a state.
+    expect(snapshotFor('sandbox', workspaceContext({ agent: undefined }))?.state).toBe(
+      'available',
+    );
+  });
+
+  it('resolves Project from the focused Session membership only (#3082)', () => {
+    const ready = workspaceContext({
+      focusedProject: {
+        status: 'ready',
+        projectId: 'project-1',
+        project: { project_id: 'project-1', name: 'Nession', locations: [] } as never,
+      },
+    });
+    expect(snapshotFor('project', ready)?.state).toBe('relevant');
+    expect(
+      snapshotFor(
+        'project',
+        { ...ready, activeCapabilityId: 'project' },
+      )?.state,
+    ).toBe('active');
+    expect(
+      snapshotFor('project', workspaceContext({
+        focusedProject: { status: 'loading', projectId: 'project-1' },
+      }))?.state,
+    ).toBe('relevant');
+    expect(
+      snapshotFor('project', workspaceContext({
+        focusedProject: { status: 'unavailable', projectId: 'project-1' },
+      }))?.state,
+    ).toBe('unavailable');
+    expect(snapshotFor('project', workspaceContext())?.state).toBe('unavailable');
   });
 
   it('reports Git as available for a Session and unavailable without one', () => {

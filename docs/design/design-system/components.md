@@ -42,6 +42,15 @@ That ordering matters. A plugin registering a view must not automatically create
 - Extension-specific components may exist inside an extension, but shared/global chrome still follows Nession patterns and visual language.
 - A primitive should not encode product policy such as `always show this tab`, `Agent is navigation parent`, or `one extension = one button`.
 
+### Sticky dialog footer
+
+A dialog whose form scrolls under its action row uses the footer's `sticky`
+variant, not a hand-written `sticky bottom-0` on the default footer. The sticky
+band is opaque (`muted` surface, never a translucent mix) and reaches the
+dialog's bottom padding edge: fields may scroll beneath it, but no field, label
+or border shows through, and the action row sits flush with the surface. A
+footer that stays in flow keeps the lighter translucent band.
+
 ### Focus treatment
 
 Focus is a modality-aware interaction state, not decoration (#2750). Pointer and
@@ -93,6 +102,32 @@ A literal **inside** an arbitrary value counts as geometry too:
 nothing objected — the scanner only saw brackets holding nothing but a number.
 `calc()` is exempt: `h-[calc(100%-1px)]` is arithmetic against an
 already-resolved dimension, not a design choice.
+
+### Compact form-field rows
+
+A row that puts several configuration fields side by side follows one rule
+(#3136). The rule keeps the controls readable as peers even when one of them is
+multiline:
+
+- Labels share one line and one gap; field **tops** align. Never bottom-align
+  mixed controls with `items-end` — a taller field must not drag its neighbour
+  down.
+- Single-line fields use the Experience control band: `Input` already does, and
+  `SelectTrigger size="field"` resolves `control.md` (32px Web, 44px App) with
+  the same padding band. Do not give one consumer a local `h-8` or pixel height.
+- A growing field uses `Textarea variant="field"`: it starts at the same
+  control band and grows downward with `field-sizing-content`. A long path
+  wraps inside the field; the row grows but the neighbouring single-line
+  control keeps its top edge.
+- A trailing row action (for example Remove) occupies the same label slot above
+  the control band, so it aligns with the fields rather than the bottom of a
+  grown textarea.
+- The default `SelectTrigger`/`Textarea` sizes remain for their existing uses;
+  `field` is an opt-in semantic variant, not a global restyle.
+- The row as a whole is a [ConfigurationForm](patterns/configuration-form.md)
+  variant (#3137): Project and Sandbox use one `FormField`/`FormSection` owner,
+  and the compact geometry is a semantic control variant rather than a
+  consumer-local form language.
 
 ### A tap target has two geometries, and the band owns only one
 

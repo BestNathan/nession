@@ -25,6 +25,8 @@ import {
   QUICK_COMMANDS_TITLE,
   resolveQuickCommandsState,
 } from '@/product/terminal/quickCommands/quickCommands';
+import { PROJECT_CAPABILITY_ID, PROJECT_CAPABILITY_TITLE, resolveProjectCapabilityState } from '@/capabilities/project';
+import { SANDBOX_CAPABILITY_ID, SANDBOX_TITLE } from '@/capabilities/sandbox';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -77,6 +79,15 @@ const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
   { id: 'session', title: 'Session', available: () => true },
   { id: 'agent', title: 'Agent', available: () => true },
   { id: 'env', title: 'Environment', shortTitle: 'Env', available: () => true },
+  // Sandbox exists where there is a Session and the Agent that owns it (#3124).
+  // `inside`/`outside`/`unknown` is the Agent's authenticated observation,
+  // read by the capability view on open; host support is Enter eligibility,
+  // never containment.
+  {
+    id: SANDBOX_CAPABILITY_ID,
+    title: SANDBOX_TITLE,
+    available: (ctx) => ctx.session !== null,
+  },
 ];
 
 function providerFor(
@@ -129,6 +140,25 @@ function gitProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
     resolve: (context) => ({
       scope: resolveScope(context, workspaceContext),
       state: resolveGitState(context.sessionId),
+    }),
+  };
+}
+
+/**
+ * Project is context-sensed from the **focused Session's persisted membership**
+ * (#3082 SC-04), never from cwd, Git, Agent health or a globally selected
+ * Project. Registration lives here; the state is Project-owned.
+ */
+function projectProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
+  return {
+    id: PROJECT_CAPABILITY_ID,
+    title: PROJECT_CAPABILITY_TITLE,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: resolveProjectCapabilityState(
+        workspaceContext.focusedProject,
+        workspaceContext.activeCapabilityId,
+      ),
     }),
   };
 }
@@ -191,6 +221,7 @@ export function createWorkspaceCapabilityRegistry(
   registry.register(claudeCodeProvider(workspaceContext));
   registry.register(gitProvider(workspaceContext));
   registry.register(terminalKeysProvider(workspaceContext));
+  registry.register(projectProvider(workspaceContext));
   registry.register(quickCommandsProvider(workspaceContext));
 
   return registry;

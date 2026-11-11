@@ -1,17 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/shared/lib/errorHelpers';
-import { getJsonPreviewKind, getViewerType, parseExt, type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
+import type { JsonPreviewKind, ViewerType } from '@/shared/file-viewer/model/viewerRegistry';
+import { mediaHintForPath, resolveFilePresentation } from '@/shared/file-viewer';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,
   detectLanguageForFile,
-  isMarkdownExt,
 } from '@/shared/markdown';
-import { readFileChunked, type FileOps } from '@/capabilities/files';
+import { readFileChunked, type FileData, type FileOps } from '@/capabilities/files';
 import { fileErrorMessage, fileErrorKind } from '../model/fileErrors';
 import { useMarkdownPreviewErrorFallback } from './useMarkdownPreviewErrorFallback';
+import { base64ToBlobUrl } from '@/shared/lib/blob';
 export type ViewMode = 'preview' | 'raw';
+
+/**
+ * What a guarded save produced. A navigation guard must distinguish a saved
+ * document (the switch may proceed), a revision conflict (the viewer's own
+ * conflict decision now owns the next step) and any other failure (the draft
+ * stays here and the guard offers retry/cancel/discard).
+ */
+export type FileSaveOutcome = 'saved' | 'conflict' | 'failed';
+
+/** A caller may request the mounted viewer's guarded save before navigating. */
+export type FileSaveHandler = () => Promise<FileSaveOutcome>;
 
 /**
  * Files larger than this switch to chunked reading with a progress bar.
@@ -34,6 +46,13 @@ export interface UseFileViewerParams {
    */
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Save-in-flight state, for a caller guarding its own navigation. */
+  onSavingChange?: (saving: boolean) => void;
+  /**
+   * Register the viewer's guarded save. The caller owns the navigation
+   * decision; the viewer still owns the content, revision and write.
+   */
+  onSaveHandlerChange?: (handler: FileSaveHandler | null) => void;
   /**
    * File size in bytes, if known up-front from the FileEntry. Files larger than
    * CHUNKED_READ_THRESHOLD are loaded in chunks with a visible progress bar and
@@ -41,25 +60,37 @@ export interface UseFileViewerParams {
    * safe at that scale.
    */
   fileSize?: number;
+  /**
+   * A navigation target from a Terminal file reference (#3187). A location
+   * makes the viewer open source/raw at that position: a rendered preview has
+   * no source line to show, so it cannot satisfy the reference.
+   */
+  initialLine?: number;
+  initialColumn?: number;
 }
 
 /** Decode base64 content to a Blob URL for media viewers. */
-function base64ToBlobUrl(base64: string, mimeType: string): string {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+
+/** Replace the caller's Blob URL with one for the freshly read media. */
+function replaceMediaBlob(
+  current: { current: string | null },
+  base64: string,
+  mimeType: string,
+): string {
+  const url = base64ToBlobUrl(base64, mimeType);
+  if (current.current) {
+    URL.revokeObjectURL(current.current);
   }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
+  current.current = url;
+  return url;
 }
 
 interface FileLoaderResult {
-  ext: string;
   viewerType: ViewerType | null;
   content: string;
   originalContent: string;
   mediaBlobUrl: string | null;
+  mediaMimeType: string | null;
   loading: boolean;
   error: string | null;
   loadedBytes: number;
@@ -73,6 +104,76 @@ interface FileLoaderResult {
   setContent: (content: string) => void;
   setOriginalContent: (content: string) => void;
   handleCancelLoad: () => void;
+}
+
+/**
+ * The only flight allowed to publish (issue #2902). `isCurrent` binds the
+ * generation this flight took; a superseded or cancelled flight fails it, so
+ * its settles cannot mutate the successor's content, progress or loading.
+ */
+interface LoadFlight {
+  isCurrent: () => boolean;
+  setError: (message: string) => void;
+  settle: () => void;
+}
+
+interface ChunkedFlight extends LoadFlight {
+  begin: () => void;
+  setProgress: (loaded: number, total: number) => void;
+  attachCancel: (cancel: () => void) => void;
+  complete: (text: string) => void;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Failed to read file';
+}
+
+/** Read one whole file; only the owning flight publishes the answer. */
+async function readWholeFile(
+  fileOps: FileOps,
+  path: string,
+  flight: LoadFlight,
+  publish: (data: FileData) => void,
+): Promise<void> {
+  try {
+    const data = await fileOps.readFile(path);
+    if (flight.isCurrent()) { publish(data); }
+  } catch (err) {
+    if (flight.isCurrent()) { flight.setError(errorMessage(err)); }
+  } finally {
+    if (flight.isCurrent()) { flight.settle(); }
+  }
+}
+
+/**
+ * Stream a large file in bounded chunks. A chunk that settles after cancel is
+ * never decoded, reported or committed: `readFileChunked` rejects it and this
+ * flight's generation can no longer publish.
+ */
+async function readChunkedFile(
+  fileOps: FileOps,
+  path: string,
+  flight: ChunkedFlight,
+): Promise<void> {
+  flight.begin();
+  const result = readFileChunked(fileOps, path, (loaded, total) => {
+    if (flight.isCurrent()) { flight.setProgress(loaded, total); }
+  });
+  if (!flight.isCurrent()) {
+    result.cancel();
+    return;
+  }
+  flight.attachCancel(result.cancel);
+  try {
+    const fullText = await result.promise;
+    if (flight.isCurrent()) { flight.complete(fullText); }
+  } catch (err) {
+    if (!flight.isCurrent()) { return; }
+    if (err instanceof DOMException && err.name === 'AbortError') { return; }
+    flight.setError(errorMessage(err));
+  } finally {
+    if (flight.isCurrent()) { flight.settle(); }
+  }
 }
 
 /**
@@ -95,12 +196,12 @@ function useFileLoader(
     onDecodedRef.current = onDecoded;
   });
 
-  const ext = parseExt(path);
-  const viewerType: ViewerType | null = ext ? getViewerType(ext) : null;
+  const viewerType: ViewerType | null = mediaHintForPath(path);
 
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+  const [mediaMimeType, setMediaMimeType] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadedBytes, setLoadedBytes] = useState(0);
@@ -110,10 +211,17 @@ function useFileLoader(
   const [revision, setRevision] = useState<string | undefined>(undefined);
   const blobUrlRef = useRef<string | null>(null);
   const chunkedCancelRef = useRef<(() => void) | null>(null);
+  /**
+   * Monotonic owner of the current read (issue #2902). Every load takes the
+   * next generation; only that generation may publish content, progress,
+   * error or loading, and only it may clear the cancel handle.
+   */
+  const loadGenerationRef = useRef(0);
 
   // Revoke blob URL on unmount
   useEffect(() => {
     return () => {
+      loadGenerationRef.current += 1;
       if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
       chunkedCancelRef.current?.();
       chunkedCancelRef.current = null;
@@ -121,43 +229,44 @@ function useFileLoader(
   }, []);
 
   const handleCancelLoad = useCallback(() => {
+    // Cancel is a settled, non-loading state: invalidate the flight first so a
+    // chunk that settles late cannot publish content or restore loading.
+    loadGenerationRef.current += 1;
     chunkedCancelRef.current?.();
     chunkedCancelRef.current = null;
     setIsChunkedLoading(false);
+    setLoading(false);
   }, []);
 
   // Large text files: chunked read, forced read-only — too big to round-trip.
-  const runChunkedLoad = useCallback(async (size: number) => {
-    setForceReadOnly(true);
-    setIsChunkedLoading(true);
-    setTotalBytes(size);
-    // A chunked document is read-only; a guarded save is not offered and the
-    // per-chunk revision would describe the file at a moment, not the whole
-    // loaded result.
-    setRevision(undefined);
-    const result = readFileChunked(fileOps, path, (loaded, total) => {
-      setLoadedBytes(loaded);
-      setTotalBytes(total);
+  const runChunkedLoad = useCallback(async (size: number, generation: number) => {
+    await readChunkedFile(fileOps, path, {
+      isCurrent: () => loadGenerationRef.current === generation,
+      begin: () => {
+        setForceReadOnly(true);
+        setIsChunkedLoading(true);
+        setTotalBytes(size);
+        // A chunked document is read-only; a guarded save is not offered and
+        // the per-chunk revision describes a moment, not the loaded result.
+        setRevision(undefined);
+      },
+      setProgress: (loaded, total) => { setLoadedBytes(loaded); setTotalBytes(total); },
+      attachCancel: (cancel) => { chunkedCancelRef.current = cancel; },
+      complete: (text) => { setContent(text); setOriginalContent(text); onDecodedRef.current(text); },
+      setError,
+      settle: () => {
+        setIsChunkedLoading(false);
+        setLoading(false);
+        chunkedCancelRef.current = null;
+      },
     });
-    chunkedCancelRef.current = result.cancel;
-    try {
-      const fullText = await result.promise;
-      setContent(fullText);
-      setOriginalContent(fullText);
-      onDecodedRef.current(fullText);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') { return; }
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setIsChunkedLoading(false);
-      setLoading(false);
-      chunkedCancelRef.current = null;
-    }
   }, [fileOps, path]);
 
   const loadFile = useCallback(async () => {
-    // Cancel any in-flight chunked read from a previous load so the stale
-    // resolver can't land after we reset state.
+    // Take ownership before cancelling the previous flight: the old reader's
+    // late chunk or finally block must not be able to touch this generation.
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
     chunkedCancelRef.current?.();
     chunkedCancelRef.current = null;
 
@@ -166,26 +275,25 @@ function useFileLoader(
     setLoadedBytes(0);
     setTotalBytes(0);
     setIsChunkedLoading(false);
+    setMediaMimeType(null);
 
     if (fileSize && fileSize > CHUNKED_READ_THRESHOLD) {
-      await runChunkedLoad(fileSize);
+      await runChunkedLoad(fileSize, generation);
       return;
     }
 
     setForceReadOnly(false);
-
-    try {
-      const data = await fileOps.readFile(path);
+    await readWholeFile(fileOps, path, {
+      isCurrent: () => loadGenerationRef.current === generation,
+      setError,
+      settle: () => setLoading(false),
+    }, (data) => {
       setRevision(data.revision);
 
       // Media files
       if (viewerType && viewerType !== 'markdown') {
-        const newBlobUrl = base64ToBlobUrl(data.content, data.mime_type);
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-        }
-        blobUrlRef.current = newBlobUrl;
-        setMediaBlobUrl(newBlobUrl);
+        setMediaBlobUrl(replaceMediaBlob(blobUrlRef, data.content, data.mime_type));
+        setMediaMimeType(data.mime_type);
         return;
       }
 
@@ -194,11 +302,7 @@ function useFileLoader(
       setContent(decoded);
       setOriginalContent(decoded);
       onDecodedRef.current(decoded, data.mime_type);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setLoading(false);
-    }
+    });
   }, [path, fileOps, viewerType, fileSize, runChunkedLoad]);
 
   useEffect(() => {
@@ -206,11 +310,11 @@ function useFileLoader(
   }, [loadFile]);
 
   return {
-    ext,
     viewerType,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     loadedBytes,
@@ -258,7 +362,7 @@ function useFileSave({
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
 
-  const save = useCallback(async (overwrite: boolean) => {
+  const save = useCallback(async (overwrite: boolean): Promise<FileSaveOutcome> => {
     setSaving(true);
     setConflict(false);
     try {
@@ -272,13 +376,15 @@ function useFileSave({
       setIsDirty(false);
       onDirtyChange?.(false);
       toast.success(`Saved ${filename}`);
+      return 'saved';
     } catch (err) {
       if (fileErrorKind(err) === 'conflict') {
         setConflict(true);
         toast.error(fileErrorMessage(err, 'save file'));
-      } else {
-        toastError(err, 'Failed to save file');
+        return 'conflict';
       }
+      toastError(err, 'Failed to save file');
+      return 'failed';
     } finally {
       setSaving(false);
     }
@@ -304,6 +410,7 @@ function useFileSave({
     isDirty,
     setIsDirty,
     saving,
+    save,
     conflict,
     setConflict,
     handleSave,
@@ -313,25 +420,91 @@ function useFileSave({
 }
 
 /**
+ * View mode and the markdown suggestion, including the navigation-target rule:
+ * a Terminal reference must open source/raw at its position, and re-activating
+ * the same file elsewhere re-enters raw without discarding the document.
+ */
+function useFileViewMode(
+  opensInPreviewByExt: boolean,
+  initialLine: number | undefined,
+  initialColumn: number | undefined,
+) {
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    initialLine !== undefined ? 'raw' : opensInPreviewByExt ? 'preview' : 'raw',
+  );
+  const [showSuggestion, setShowSuggestion] = useState(false);
+  const locationKey = initialLine === undefined
+    ? null
+    : `${initialLine}:${initialColumn ?? ''}`;
+  const appliedLocationRef = useRef(locationKey);
+
+  useEffect(() => {
+    if (locationKey === null || appliedLocationRef.current === locationKey) {
+      return;
+    }
+    appliedLocationRef.current = locationKey;
+    setViewMode('raw');
+    setShowSuggestion(false);
+  }, [locationKey]);
+
+  return { viewMode, setViewMode, showSuggestion, setShowSuggestion };
+}
+
+/**
+ * Report save-in-flight state and register the guarded save for a caller that
+ * owns navigation. The caller decides *whether* to navigate; the viewer keeps
+ * the content, revision and write.
+ */
+function useFileSaveReporting(
+  saving: boolean,
+  save: (overwrite: boolean) => Promise<FileSaveOutcome>,
+  onSavingChange?: (saving: boolean) => void,
+  onSaveHandlerChange?: (handler: FileSaveHandler | null) => void,
+) {
+  useEffect(() => {
+    onSavingChange?.(saving);
+  }, [onSavingChange, saving]);
+
+  // The registered handler is stable; it reaches the latest save closure
+  // through a ref, so a click cannot observe a save built from older content.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  useEffect(() => {
+    if (!onSaveHandlerChange) {
+      return;
+    }
+    onSaveHandlerChange(() => saveRef.current(false));
+    return () => onSaveHandlerChange(null);
+  }, [onSaveHandlerChange]);
+}
+
+/**
  * State and handlers for the FileViewer component: file loading, markdown
  * detection (extension- and content-based), Preview/Raw view mode, dirty
  * tracking, and save. Extracted so the render body stays small.
  */
-export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
-  const ext = parseExt(path);
-  const jsonPreviewKind: JsonPreviewKind | null = ext ? getJsonPreviewKind(ext) : null;
-  // Markdown detection — extension-based wins, content-based is fallback
-  const isMarkdownByExt = ext ? isMarkdownExt(ext) : false;
+export function useFileViewer({
+  fileOps, path, filename, onClose, onDirtyChange, onSavingChange,
+  onSaveHandlerChange, fileSize, initialLine, initialColumn,
+}: UseFileViewerParams) {
+  const presentation = resolveFilePresentation({ path });
+  const jsonPreviewKind: JsonPreviewKind | null = presentation.jsonKind;
+  const isMarkdownByExt = presentation.kind === 'markdown';
   const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
-  const [viewMode, setViewMode] = useState<ViewMode>(opensInPreviewByExt ? 'preview' : 'raw');
-  const [showSuggestion, setShowSuggestion] = useState(false);
+  const { viewMode, setViewMode, showSuggestion, setShowSuggestion } =
+    useFileViewMode(opensInPreviewByExt, initialLine, initialColumn);
   const suggestionDismissedRef = useRef(false);
-
   const [isReadOnly, setIsReadOnly] = useState(true);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
   const handleDecoded = useCallback((decoded: string, mimeType?: string) => {
+    // A navigation target is read as source at a line, so content sniffing
+    // must not move the viewer into a preview that cannot show that line.
+    if (initialLine !== undefined) {
+      return;
+    }
     // The extension already settled it, or the user has dismissed the offer.
     if (isMarkdownByExt || suggestionDismissedRef.current) {
       return;
@@ -355,10 +528,10 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
       setViewMode('raw');
       setShowSuggestion(true);
     }
-  }, [isMarkdownByExt, path]);
+  }, [initialLine, isMarkdownByExt, path, setShowSuggestion, setViewMode]);
 
   const {
-    viewerType, content, originalContent, mediaBlobUrl, loading, error,
+    viewerType, content, originalContent, mediaBlobUrl, mediaMimeType, loading, error,
     loadedBytes, totalBytes, isChunkedLoading, forceReadOnly, revision,
     setRevision, loadFile, setContent, setOriginalContent, handleCancelLoad,
   } = useFileLoader(fileOps, path, fileSize, handleDecoded);
@@ -374,6 +547,8 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     onDirtyChange,
     loadFile,
   });
+
+  useFileSaveReporting(saveState.saving, saveState.save, onSavingChange, onSaveHandlerChange);
 
   const handleEditToggle = () => {
     // Chunked-loaded files are forced read-only — too large to round-trip safely.
@@ -395,10 +570,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     onDirtyChange?.(dirty);
   };
 
-  // Only ever wired to a control when `onClose` was given (`FileViewer` passes
-  // `onCloseClick` conditionally), so the optional call is not a fallback —
-  // it is the same "no close affordance, no close" the rest of this hook
-  // implements, with no branch that cannot be taken.
+  // The close affordance is wired only when the caller passed `onClose`.
   const handleCloseClick = () => {
     if (saveState.isDirty) {
       setShowUnsavedDialog(true);
@@ -416,9 +588,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     suggestionDismissedRef.current = true;
   };
 
-  // Determine if this is a non-markdown text file (for toolbar logic)
-  const isMedia = viewerType !== null && viewerType !== 'markdown';
-  const isText = !isMedia;
+  const isText = viewerType === null || viewerType === 'markdown';
 
   const hasPreviewRawToggle = isMarkdown || jsonPreviewKind !== null;
 
@@ -432,6 +602,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     isReadOnly,

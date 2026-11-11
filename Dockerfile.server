@@ -52,7 +52,29 @@ COPY crates/ crates/
 COPY . .
 RUN cargo build --release --bin nession-server
 
-# Stage 5: Server runtime (no tmux needed)
+# Stage 5: Build the pinned EROFS helper tools (#3178)
+#
+# Debian bookworm's erofs-utils 1.5 cannot run the V1 packaging argv (it has no
+# block-size option) and packages no erofsfuse at all. Both binaries therefore
+# come from one pinned upstream build in `deploy/build-erofs-utils.sh`. They are
+# linked against this bookworm base, which the runtime stages below also use.
+FROM debian:bookworm-slim AS erofs-utils-builder
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential autoconf automake libtool pkg-config libfuse3-dev \
+        ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+COPY deploy/build-erofs-utils.sh /usr/local/bin/build-erofs-utils.sh
+RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
+    /usr/local/bin/build-erofs-utils.sh
+
+# Stage 6: Final Server runtime base (#3178)
+#
+# Both Server image paths (`Dockerfile.server` and
+# `Dockerfile.server.prebuilt`) extend this stage, so the EROFS Image Manager's
+# host tools have one packaging definition. `git` and `mkfs.erofs` are runtime
+# dependencies of `crates/nession-erofs/src/build.rs`; the probe below fails
+# the image build if either executable is absent.
 #
 # bookworm, not bullseye: Debian 11 reached end of LTS on 2026-08-31 and
 # `deb.debian.org/debian-security` stopped carrying bullseye packages, so the
@@ -60,17 +82,24 @@ RUN cargo build --release --bin nession-server
 # three URLs fail from a laptop as from a runner. The builder stages above stay
 # on `rust:1.96-bullseye` on purpose: they install nothing, and a binary linked
 # against glibc 2.31 runs fine on bookworm's 2.36.
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime-tools
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        nginx ca-certificates curl gettext-base git && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /etc/nginx/sites-enabled/default
+COPY --from=erofs-utils-builder /usr/local/bin/mkfs.erofs /usr/local/bin/mkfs.erofs
+RUN command -v git mkfs.erofs
+
+# Stage 7: Server runtime (no tmux needed)
+FROM runtime-tools AS runtime
 # The release-selected fixed terminal configuration (#2487). See
 # `Dockerfile.server.prebuilt`; both image paths carry the same env.
 ARG NESSION_TERMINAL_COLS=96
 ARG NESSION_TERMINAL_WEB_FONT_SIZE=14
 ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 ENV NESSION_TERMINAL_WEB_FONT_SIZE=${NESSION_TERMINAL_WEB_FONT_SIZE}
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        nginx ca-certificates curl gettext-base && \
-    rm -rf /var/lib/apt/lists/*
 
 COPY --from=rust-builder /build/target/release/nession-server /usr/local/bin/nession-server
 COPY --from=web-builder /build/dist /usr/share/nginx/html
@@ -80,7 +109,6 @@ COPY deploy/render-server-config.sh /render-server-config.sh
 RUN chmod +x /entrypoint.sh /render-server-config.sh
 
 RUN mkdir -p /data /etc/nession && chown www-data:www-data /data
-RUN rm -f /etc/nginx/sites-enabled/default
 
 WORKDIR /etc/nession
 
