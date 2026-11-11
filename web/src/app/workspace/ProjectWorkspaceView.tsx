@@ -3,6 +3,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { ProjectDetailContent } from '@/product/project/components/ProjectDetail';
 import type { WorkspaceViewProps } from '@/app/workspace/workspaceContext';
+import { WorkspaceScrollRegion } from '@/app/workspace/layout/workspaceLayout';
 
 /**
  * The focused Session's Project capability view (#3082 SC-05).
@@ -42,7 +43,7 @@ export function ProjectWorkspace({ ctx }: WorkspaceViewProps) {
     );
   }
   return (
-    <div data-testid="workspace-project-view" className="min-h-0 overflow-y-auto">
+    <WorkspaceScrollRegion data-testid="workspace-project-view">
       <ProjectDetailContent
         project={focused.project}
         agents={ctx.agents}
@@ -51,6 +52,6 @@ export function ProjectWorkspace({ ctx }: WorkspaceViewProps) {
         sessions={projectContext.relatedSessions}
         onOpenSession={projectContext.onOpenSession}
       />
-    </div>
+    </WorkspaceScrollRegion>
   );
 }
