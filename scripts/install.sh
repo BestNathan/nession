@@ -272,6 +272,9 @@ fi
 # ── First migration through the versioned transaction ───────────────────────
 if [ "$MIGRATE" = 1 ]; then
   OLD_VERSION="$("$EXISTING_CLI" --version 2>/dev/null | awk '{print $NF}')" || OLD_VERSION=""
+  # The transaction names the archive with the normalized SemVer; tolerate an
+  # older CLI that prints a `v` prefix.
+  OLD_VERSION="${OLD_VERSION#v}"
   OLD_HOME="${NESSION_HOME:-$HOME/.nession}"
   HAD_AGENT_CONFIG=0; [ -f "$OLD_HOME/agent-config.toml" ] && HAD_AGENT_CONFIG=1
   HAD_SERVER_CONFIG=0; [ -f "$OLD_HOME/server-config.toml" ] && HAD_SERVER_CONFIG=1

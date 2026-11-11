@@ -119,7 +119,6 @@ struct Journal {
     old_digests: BTreeMap<String, String>,
     new_digests: BTreeMap<String, String>,
     server_config_original: Option<String>,
-    server_config_rewritten: bool,
 }
 
 /// The durable recovery record for `home`.
@@ -286,16 +285,14 @@ fn rollback(journal: &Journal) -> Result<()> {
         restore_entry(journal, pair)?;
     }
 
-    // 3. A generated server config was rewritten for the archive. Restore the
-    //    exact original text, not a reverse rewrite that could lose comments.
-    if journal.server_config_rewritten {
+    // 3. Restore the exact original server-config text. This is unconditional
+    //    whenever the journal captured one: a crash between writing the
+    //    archive-scoped config and recording that fact must not leave the
+    //    Current config pointing into the archive. Writing it over an
+    //    unmoved/identical file is harmless, and a reverse rewrite could lose
+    //    comments or external-path distinctions.
+    if let Some(original) = journal.server_config_original.as_deref() {
         let config = journal.home.join(SERVER_CONFIG);
-        let original = journal.server_config_original.as_deref().with_context(|| {
-            format!(
-                "the install journal records a rewritten {} but not its original text",
-                config.display()
-            )
-        })?;
         fs::write(&config, original)
             .with_context(|| format!("failed to restore the original {}", config.display()))?;
     }
@@ -570,7 +567,6 @@ fn replace_current_inner(
         old_digests,
         new_digests,
         server_config_original,
-        server_config_rewritten: false,
     };
     write_journal(&journal_file, &journal)?;
 
@@ -658,7 +654,6 @@ fn apply(
         fs::write(journal.staging_dir.join(SERVER_CONFIG), text).with_context(|| {
             format!("failed to write the release-scoped {SERVER_CONFIG} into the archive")
         })?;
-        journal.server_config_rewritten = true;
         write_journal(journal_file, journal)?;
         let moved_fields: Vec<&str> = report.rewritten().collect();
         if !moved_fields.is_empty() {
@@ -1053,7 +1048,6 @@ mod tests {
             old_digests: BTreeMap::new(),
             new_digests: BTreeMap::new(),
             server_config_original: None,
-            server_config_rewritten: false,
         };
         let staging = fixture.home.join("versions/.stage-0.35.0-1");
         fs::create_dir_all(staging.join("bin")).unwrap();
@@ -1118,7 +1112,6 @@ mod tests {
             old_digests: old,
             new_digests: new,
             server_config_original: None,
-            server_config_rewritten: false,
         }
     }
 
