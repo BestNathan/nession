@@ -640,3 +640,10 @@
 - Categories: app, files, media, ownership, presentation, protocol, safety, web
 - Reason: Record #3187 Terminal file-reference resolution: activation-time CWD join, absolute-path retention, exact-parent/one-entry verification, source-raw line/column positioning and unavailable-source retirement; cite the merged staging SHA and sources
 - Source: https://github.com/BestNathan/nession/issues/3187
+
+## 2026-11-11T05:04:45Z | update | Unified overlay and operation surface system
+- Path: topics/web/unified-overlay-and-operation-surface-system.md
+- Topic: web
+- Categories: design, interaction, overlay, dialog, ownership, web, app
+- Reason: Record #3246's standard Select trigger-relative placement: bottom/start anchoring with the sideOffset gap, why item-aligned mode stays opt-in (viewport-fixed coordinates double-offset in a Dialog's translated popup host), the allowed Base UI collision flip/shift, and the unchanged DropdownMenu/ContextMenu/Popover semantics; cite the merged staging SHA, Cases and selected E2E run
+- Source: https://github.com/BestNathan/nession/issues/3246

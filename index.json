@@ -250,7 +250,7 @@
       },
       {
         "title": "Unified overlay and operation surface system",
-        "description": "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics",
+        "description": "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, trigger-relative Select placement with collision as an exception, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics",
         "path": "topics/web/unified-overlay-and-operation-surface-system.md",
         "status": "verified",
         "categories": [
@@ -262,7 +262,7 @@
           "web",
           "app"
         ],
-        "updated_at": "2026-11-10T17:52:00Z"
+        "updated_at": "2026-11-11T05:04:45Z"
       },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",

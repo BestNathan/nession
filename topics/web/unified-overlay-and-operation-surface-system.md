@@ -1,12 +1,12 @@
 ---
 title: "Unified overlay and operation surface system"
-description: "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics"
+description: "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, trigger-relative Select placement with collision as an exception, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics"
 topic: web
 categories: ["design", "interaction", "overlay", "dialog", "ownership", "web", "app"]
 status: verified
 created_at: 2026-11-10T04:45:00Z
-updated_at: 2026-11-10T17:52:00Z
-sources: ["https://github.com/BestNathan/nession/issues/3142", "https://github.com/BestNathan/nession/pull/3144", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns/overlay-surfaces.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/contracts/patterns/overlay-surfaces.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/web.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/app.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/semantic.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/overlayStyles.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/alert-dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/design/contracts/patterns/choice-item.json", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-item.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-itemStyles.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-04/verify.spec.ts"]
+updated_at: 2026-11-11T05:04:45Z
+sources: ["https://github.com/BestNathan/nession/issues/3142", "https://github.com/BestNathan/nession/pull/3144", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns/overlay-surfaces.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/contracts/patterns/overlay-surfaces.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/web.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/app.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/semantic.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/overlayStyles.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/alert-dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/design/contracts/patterns/choice-item.json", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-item.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-itemStyles.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3246", "https://github.com/BestNathan/nession/pull/3254", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/design/contracts/patterns/popup-menu.json", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/helpers/selectAnchor.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-01/verify.spec.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-03/verify.spec.ts"]
 ---
 
 # Unified overlay and operation surface system
@@ -258,6 +258,46 @@ changing the action-row contract:
   `ui-contract-matrix` 100/100. The `choice-list-3164` prototype remained pinned
   at `5906b9d946fd9e117ed89072fc52d874b85e61e4` and published unchanged. Staging
   `deploy-watch` verified server, agent and ui pods on image `dae365a`.
+
+### Trigger-relative placement and collision (#3246)
+
+PR [#3254](https://github.com/BestNathan/nession/pull/3254) merged to staging at
+`1c2e06b81a62e40d51c829c44813b3f6ed665497` fixed the standard anchored Select's placement by changing the
+shared `SelectContent` defaults in
+[`web/src/components/ui/select.tsx`](https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/web/src/components/ui/select.tsx),
+not by adding consumer offsets:
+
+- **Standard placement.** `SelectContent` defaults to `side="bottom"`,
+  `sideOffset=4`, `align="start"` and `alignItemWithTrigger=false`. Measured
+  after the opening animation settles, the popup's start edge matches the
+  trigger's start edge within 2px and the vertical gap is the configured
+  `sideOffset` within 2px. The selected option index does not move that anchor,
+  and `width="content"` grows the list from the same start edge. Base UI keeps
+  ownership of collision avoidance.
+- **Why item-aligned was wrong here.** Base UI's `alignItemWithTrigger` overlaps
+  the selected row with the trigger and writes viewport-fixed coordinates.
+  Outside a dialog the old default covered the trigger vertically (measured
+  gap `-32px`); inside a Dialog the `dialog-popup-portal` host lives in the
+  dialog's translated containing block, so fixed coordinates were re-anchored by
+  the dialog origin (measured ≈360px horizontal / ≈58px vertical at 1440).
+  Normal absolute anchoring is the form that survives the modal host.
+  `alignItemWithTrigger` remains an explicit opt-in for a future surface that
+  genuinely needs selected-row overlap; no current consumer opts in.
+- **Collision is a documented exception.** Near a viewport edge Base UI may
+  shift horizontally or flip above the trigger (`data-side="top"`). The
+  invariant then is visibility, operability, continued horizontal overlap with
+  the trigger, and one list scroll owner — not always-bottom/always-left.
+  `DropdownMenu` keeps its trigger anchor, `ContextMenu` its pointer origin, and
+  `Popover` its scene-specific centring; none were restyled by this fix.
+- **Proof.** Pre-merge cases: SC-01 2/2 (214 assertions) and SC-02 2/2 (229) at
+  `d30cf5858e73ddaaff2744a0b7146a8e67edcc03`; SC-03 4/4 (105) at
+  `849a32af2611748181902a68ec0a0005dc35d73e` (run `42962531168`). The web unit,
+  integration and coverage gates and the selected E2E regressions
+  (`ui-contract-matrix`, `project-session-create`, `project-management`, run
+  `42962531171`) verify the same behavior. The linked #3089
+  `session-operation-surfaces-3089` and #3164 `choice-list-3164` prototypes were
+  audited at `2126adf00`: both already place options start-aligned below the
+  trigger, so no prototype revision or stale marking was required.
 
 ## Related knowledge
 
