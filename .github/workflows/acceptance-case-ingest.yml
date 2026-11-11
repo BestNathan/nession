@@ -212,7 +212,15 @@ jobs:
           failed=0
           while IFS= read -r durable_path; do
             echo "Projecting ${durable_path}"
-            if ! node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}"; then
+            if node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}"; then
+              # The Case result is already source-authenticated and projected
+              # by the only trusted Case writer; this observes its live Issue.
+              issue="$(jq -er '.issue' "results-repo/${durable_path}")"
+              if ! node trusted/scripts/issue-lifecycle-reconcile.mjs issue "${issue}"; then
+                echo "::error::Lifecycle reconciliation failed for Issue #${issue}"
+                failed=1
+              fi
+            else
               echo "::error::Projection failed for ${durable_path}"
               failed=1
             fi
