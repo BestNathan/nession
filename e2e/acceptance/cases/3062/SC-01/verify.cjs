@@ -49,8 +49,8 @@ run(({ evidence }) => {
       type: 'runtime',
       value:
         'exact SHA ' + sha + ': the Server resolved ready artifacts, minted per-artifact grants, ' +
-        'sent `/workspace` as the sandbox cwd and recorded a ready managed context with the ' +
-        'resolved source commit; missing or non-ready artifacts were refused',
+        'sent a managed create with no host working directory and recorded a ready managed ' +
+        'context with the resolved source commit; missing or non-ready artifacts were refused',
     },
     {
       type: 'runtime',
