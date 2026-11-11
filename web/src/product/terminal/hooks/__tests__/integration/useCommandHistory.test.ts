@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
+import {
+  useCommandHistory,
+  resetCommandHistoryForTests,
+} from '@/product/terminal/hooks/useCommandHistory';
 
 function mockLocalStorage() {
   const store: Record<string, string> = {};
@@ -18,6 +21,7 @@ describe('useCommandHistory', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     mockLocalStorage();
+    resetCommandHistoryForTests();
     // Return strictly increasing timestamps so addEntry() calls made in the
     // same millisecond produce distinct timestamps (dedup test depends on it).
     now = 1000;
@@ -153,5 +157,64 @@ describe('useCommandHistory', () => {
     localStorage.setItem('nession_command_history', 'not-valid-json');
     const { result } = renderHook(() => useCommandHistory());
     expect(result.current.history).toEqual([]);
+  });
+
+  it('shares one reactive history between simultaneously mounted consumers (#3189 SC-02)', () => {
+    const first = renderHook(() => useCommandHistory());
+    const second = renderHook(() => useCommandHistory());
+
+    act(() => { first.result.current.addEntry('shared-command'); });
+    expect(second.result.current.history).toHaveLength(1);
+    expect(second.result.current.history[0].command).toBe('shared-command');
+
+    act(() => { second.result.current.addEntry('newer-command'); });
+    expect(first.result.current.history.map((entry) => entry.command)).toEqual([
+      'newer-command',
+      'shared-command',
+    ]);
+
+    const removedId = second.result.current.history[1].id;
+    act(() => { second.result.current.removeEntry(removedId); });
+    expect(first.result.current.history.map((entry) => entry.id)).not.toContain(removedId);
+    expect(JSON.parse(localStorage.getItem('nession_command_history')!)).toHaveLength(1);
+
+    act(() => { first.result.current.clearHistory(); });
+    expect(second.result.current.history).toEqual([]);
+
+    // A stale consumer cannot resurrect a cleared/removed entry: every
+    // mutation reads the shared current snapshot.
+    act(() => { first.result.current.addEntry('after-clear'); });
+    expect(second.result.current.history.map((entry) => entry.command)).toEqual(['after-clear']);
+  });
+
+  it('applies the 500-entry bound across consumers without stale resurrection (#3189 SC-02)', () => {
+    const first = renderHook(() => useCommandHistory());
+    const second = renderHook(() => useCommandHistory());
+
+    act(() => {
+      for (let i = 0; i < 510; i += 1) {
+        first.result.current.addEntry(`bounded-${i}`);
+      }
+    });
+    expect(first.result.current.history).toHaveLength(500);
+    expect(second.result.current.history).toHaveLength(500);
+    expect(JSON.parse(localStorage.getItem('nession_command_history')!)).toHaveLength(500);
+
+    const removedId = second.result.current.history[0].id;
+    act(() => { second.result.current.removeEntry(removedId); });
+    expect(first.result.current.history).toHaveLength(499);
+    expect(first.result.current.history.some((entry) => entry.id === removedId)).toBe(false);
+  });
+
+  it('refreshes from another tab storage event (#3189 SC-02)', () => {
+    const { result } = renderHook(() => useCommandHistory());
+    const external = [
+      { id: 'tab-entry', command: 'from-another-tab', timestamp: Date.now() },
+    ];
+    act(() => {
+      localStorage.setItem('nession_command_history', JSON.stringify(external));
+      window.dispatchEvent(new StorageEvent('storage', { key: 'nession_command_history' }));
+    });
+    expect(result.current.history).toEqual(external);
   });
 });
