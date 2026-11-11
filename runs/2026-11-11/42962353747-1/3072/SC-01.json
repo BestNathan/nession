@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "521d14fbf4b03bc10d33955f447d19380d69af4d32fdfe539c55cf0bf4ee2f5e",
+  "run_id": 42962353747,
+  "run_attempt": 1,
+  "issue": 3072,
+  "criterion": "SC-01",
+  "criterion_text": "Exact-SHA successful observed Staging deployment proof remains authenticated and queryable after newer releases; no observation means no retroactive Pass.",
+  "stage": "post-merge",
+  "target_sha": "d5bd67f1529155aff9392d885ab58160bc679ddb",
+  "contract_sha256": "f1192287358278780e8f2f45ef428efc893292a6596598534109cc1bb2bd6d0d",
+  "case_revision": "d5bd67f1529155aff9392d885ab58160bc679ddb",
+  "case_tree_sha": "4953506a8ec34004153c39bf33acdb57de9c92cf",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T04:58:27.152Z",
+  "finished_at": "2026-11-11T04:58:35.000Z",
+  "duration_ms": 7848,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real historical Staging deployment remains queryable and re-attested after newer releases; absent source is not Pass",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Case checkout d5bd67f1529155aff9392d885ab58160bc679ddb; GitHub ancestry confirms newer staging descendant, ahead=830 of historical deployment d4025428dcb79cfd273a16a66ff828cd2288eb54"
+        },
+        {
+          "type": "runtime",
+          "value": "Authenticated public GitHub original Deploy / Identity Run 42487859753/1 + successful Kubernetes attest Job; immutable index indexes/by-sha/d4025428dcb79cfd273a16a66ff828cd2288eb54/deployment/42487859753-1-staging.json and record runs/2026-11-08/42487859753-1/deployment/staging.json; GitOps 823fc14994dac425fbc0d949492188e88b501cee; observed 2026-11-08T14:03:30.000Z"
+        },
+        {
+          "type": "runtime",
+          "value": "3/3 independent observed ready workloads with matching image digests; unknown exact-SHA deployment index returns 404; forged/missing source fixtures passed"
+        }
+      ],
+      "duration_ms": 1917,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42962353747,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d5bd67f1529155aff9392d885ab58160bc679ddb",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42962353747",
+    "record_path": "runs/2026-11-11/42962353747-1/3072/SC-01.json",
+    "source_result_sha256": "b32532ebdc090b39565346a9299924fa2986cab924498177909ba351ab7c5503"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42962353747-1",
+    "sha256": "b32532ebdc090b39565346a9299924fa2986cab924498177909ba351ab7c5503",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42962353747",
+    "durability": "time-limited; object archival not configured"
+  }
+}

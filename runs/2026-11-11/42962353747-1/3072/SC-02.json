@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a0e42a53b5aa43c09c39d025f90d81e24b56defcd4d872bb19dc18c370be34e3",
+  "run_id": 42962353747,
+  "run_attempt": 1,
+  "issue": 3072,
+  "criterion": "SC-02",
+  "criterion_text": "A validated completed Staging deployment-attestation source wakes only the matching outstanding `when: merged, branch: staging` Agent SC through the canonical Acceptance/Issue updater, with bounded idempotency and no feedback loop.",
+  "stage": "post-merge",
+  "target_sha": "d5bd67f1529155aff9392d885ab58160bc679ddb",
+  "contract_sha256": "f1192287358278780e8f2f45ef428efc893292a6596598534109cc1bb2bd6d0d",
+  "case_revision": "d5bd67f1529155aff9392d885ab58160bc679ddb",
+  "case_tree_sha": "bf121c87f5ea7624b6246c142c7e0ec811d225f4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T04:58:35.001Z",
+  "finished_at": "2026-11-11T04:58:42.612Z",
+  "duration_ms": 7611,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "Authenticated historical no-op wake is correct; awaiting a real matched post-attestation staging Agent evaluation and canonical Issue update at one observed SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Exact Case checkout d5bd67f1529155aff9392d885ab58160bc679ddb; historical Deploy / Identity 42805092603/1, Ingest 42815588295/1 and Waker 42815670151/1 independently re-attested"
+        },
+        {
+          "type": "runtime",
+          "value": "Historical evaluate-staging was correctly skipped; no unrelated successor SHA, initial push Acceptance or invented Issue can satisfy the positive wake"
+        },
+        {
+          "type": "runtime",
+          "value": "Natural source Issue #3200 merged at exact Staging SHA 03df2212e17578febb5cf2cde850bbadecb6b425 still has no verified matching post-attestation Issue updater trace"
+        }
+      ],
+      "duration_ms": 1736,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42962353747,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d5bd67f1529155aff9392d885ab58160bc679ddb",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42962353747",
+    "record_path": "runs/2026-11-11/42962353747-1/3072/SC-02.json",
+    "source_result_sha256": "5c83c97bb7a7425416db1546e1040e3b4eedcd16e485bb97ed5c0646be5ed490"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42962353747-1",
+    "sha256": "5c83c97bb7a7425416db1546e1040e3b4eedcd16e485bb97ed5c0646be5ed490",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42962353747",
+    "durability": "time-limited; object archival not configured"
+  }
+}
