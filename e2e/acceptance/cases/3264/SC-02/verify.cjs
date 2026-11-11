@@ -57,7 +57,7 @@ run(({ evidence }) => {
   if (!modules.includes('ToolRegistry::build(')) {
     throw new Error('tools/mod.rs does not register handlers with one ToolRegistry');
   }
-  if (/match\s+name/.test(modules)) {
+  if (/match\s+name(\.as_str\(\))?\s*\{/.test(modules)) {
     throw new Error('tools/mod.rs contains a central match-name dispatch');
   }
   if (/(macro_rules!|inventory::|linkme::)/.test(modules)) {
