@@ -82,7 +82,7 @@ async function inventory(read, plan) {
 function marker(plan) { return '<!-- nession-command-comment:' + plan.comment_id + ' -->'; }
 async function dispatch(plan, read = api) {
   const comments = await read('/repos/' + REPO + '/issues/' +
-    plan.issue_number + '/comments?per_page=100');
+    plan.issue_number + '/comments?per_page=100&sort=created&direction=desc');
   if (!Array.isArray(comments)) throw Error('bad comment inventory');
   if (comments.some(c => c?.body?.includes(marker(plan)) &&
       c?.user?.type === 'Bot' && c?.user?.login === 'github-actions[bot]'))
@@ -173,9 +173,9 @@ async function selfTest() {
     const run = { display_title: workflowTitle(plan), event: 'workflow_dispatch',
       head_branch: 'main', repository: repo, head_repository: repo,
       html_url: 'https://github.com/BestNathan/nession/actions/runs/22' };
-    assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100')
+    assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100&sort=created&direction=desc')
       ? [] : { workflow_runs: [run] })).state, 'already-dispatched');
-    assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100')
+    assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100&sort=created&direction=desc')
       ? [{ body: marker(plan), user: { login: 'github-actions[bot]', type: 'Bot' } }]
       : { workflow_runs: [] })).state, 'already-acknowledged');
     console.log('github-comment-router: source checks, context, replay guards passed');
