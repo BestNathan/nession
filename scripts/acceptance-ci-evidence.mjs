@@ -78,6 +78,26 @@ const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
 const MAX_IMPLEMENTATION_PULLS = 2;
 const MAX_CROSS_REFERENCED_PULLS = 40;
+
+/**
+ * Should this stage collect independent Full Regression receipts?
+ *
+ * Post-merge keeps the established L3 gate (`verification:full`). A `staging`
+ * Agent criterion may also require an all-ID Full run (for example a bug whose
+ * SC explicitly asks for zero unexpected/skipped/flaky at the next integration
+ * SHA); there the Issue body itself names `Full Regression`, so collect at the
+ * exact target SHA instead of silently leaving the evidence array empty.
+ */
+export function shouldCollectFullRegression(stage, issue) {
+  const labels = (issue?.labels ?? []).map((label) =>
+    typeof label === 'string' ? label : label?.name);
+  if (stage === 'post-merge') return labels.includes('verification:full');
+  if (stage === 'staging') {
+    return labels.includes('verification:full') ||
+      /\bFull Regression\b/i.test(String(issue?.body ?? ''));
+  }
+  return false;
+}
 const MAX_EXACT_E2E_STEP_RUNS = 2;
 const MAX_TARGET_PUSH_E2E_RUNS = 5;
 const E2E_STEP_NAMES = Object.freeze(['Resolve linked Issue E2E obligations', 'Run E2E tests', 'Normalize selected per-file results even on failure', 'Enforce authenticated selected-E2E execution result']);
@@ -1822,6 +1842,12 @@ async function collectCommand(workspace, outFile) {
   const replayIssue=process.env.ACCEPTANCE_STAGE==='post-merge'&&
     /^[1-9][0-9]*$/.test(issueNumberForReplay)
     ? await githubGet('/repos/'+repo+'/issues/'+issueNumberForReplay) : null;
+  // A staging Agent criterion may explicitly require all-ID Full proof. Read
+  // the same trusted Issue contract at that stage only to make the collection
+  // decision; post-merge keeps using `replayIssue` for its existing pipelines.
+  const fullProofIssue=replayIssue ?? (process.env.ACCEPTANCE_STAGE==='staging'&&
+    /^[1-9][0-9]*$/.test(issueNumberForReplay)
+    ? await githubGet('/repos/'+repo+'/issues/'+issueNumberForReplay) : null);
   const verifiedHistoricalCaseReplays=replayIssue ? await historicalCaseEvidence({
     repo,target:sha,body:replayIssue.body,get:githubGet,getText:githubJobLog,
   }) : [];
@@ -1984,8 +2010,8 @@ async function collectCommand(workspace, outFile) {
   }
   // Full scope is optional for ordinary Issues. Only L3 Issues request
   // authenticated all-ID proof, independent from green selected push runs.
-  const fullRegressionReceipts=process.env.ACCEPTANCE_STAGE==='post-merge' &&
-    replayIssue?.labels?.some(label=> (typeof label==='string'?label:label.name)==='verification:full')
+  const fullRegressionReceipts=shouldCollectFullRegression(
+    process.env.ACCEPTANCE_STAGE, fullProofIssue)
       ?await collectFullRegression({repo,sha,get:githubGet,getText:githubJobLog})
       :[];
   const fullNotRequiredReceipts = process.env.ACCEPTANCE_STAGE==='post-merge'
@@ -3355,6 +3381,16 @@ async function selfTest() {
   selfTestHistoricalRecovery();
   selfTestRegressions();
   selfTestCaseReceipts();
+  // Full receipts stay L3-gated at post-merge, and a staging SC that names a
+  // Full Regression requirement also collects them at its exact target SHA.
+  assert.equal(shouldCollectFullRegression('post-merge',{labels:[{name:'verification:full'}]}),true);
+  assert.equal(shouldCollectFullRegression('post-merge',{labels:[{name:'verification:integration'}]}),false);
+  assert.equal(shouldCollectFullRegression('staging',{labels:[],
+    body:'SC-02 A source-bound Full Regression run shows unexpected=0.'}),true);
+  assert.equal(shouldCollectFullRegression('staging',{labels:[{name:'verification:full'}],body:''}),true);
+  assert.equal(shouldCollectFullRegression('staging',{labels:[],body:'scoped terminal proof only'}),false);
+  assert.equal(shouldCollectFullRegression('pre-merge',{labels:[{name:'verification:full'}],
+    body:'Full Regression'}),false);
   assert.equal(selfTestQwenChainEvidence(),true);
   assert.deepEqual(normalizeCiEvidence({targetSha:head, verifiedCaseReceipts:[{changed_records:2}]}).verified_case_receipts,[{changed_records:2}]);
   console.log('acceptance-ci-evidence self-test: historical Case, authenticated receipt, reporter history and negative ancestry passed');
