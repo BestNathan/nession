@@ -150,6 +150,23 @@ function selfTest() {
     assert.throws(() => selectTrustedCases({ ...macBase, platform: 'windows' }),
       /unsupported Acceptance platform/);
 
+    // One dual-native Case must be selected independently by both OS jobs;
+    // neither platform may silently mark it Not Required.
+    const bothDir = path.join(root, '45', 'SC-01');
+    fs.mkdirSync(bothDir, { recursive: true });
+    fs.writeFileSync(path.join(bothDir, 'case.yaml'),
+      'schema_version: 1\nissue: 45\ncriterion: SC-01\nstage: staging\nplatform: both\nruntime: full-stack-local\nverifiers:\n  - type: runtime\n    entry: verify.js\nresult_policy: all-pass\n');
+    fs.writeFileSync(path.join(bothDir, 'verify.js'), '// dual-native fixture');
+    const bothIssue = { ...issue, number: 45, body: issueBody('staging', true) };
+    for (const os of ['linux', 'macos']) {
+      const selectedBoth = selectTrustedCases({
+        ...base, issueNumbers: [45], issues: [bothIssue], platform: os,
+      });
+      assert.deepEqual(selectedBoth.coverage.expected, ['45/SC-01']);
+      assert.equal(selectedBoth.selected.length, 1);
+      assert.equal(selectedBoth.selected[0].platform, 'both');
+    }
+
     // A `when: deployed` criterion's post-merge compatibility Case exists in
     // the tree, but without an authenticated binding the executor makes the
     // criterion ineligible — the selector must not count the Case as
