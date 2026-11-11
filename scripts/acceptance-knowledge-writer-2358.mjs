@@ -12,6 +12,7 @@ const WRITER_ID = 26835890;
 const APPEND_ID = 26836090;
 const APP_ID = 5677350;
 const OWNER_COMMENT = 6787387357;
+const ADMIN_SNAPSHOT_COMMENT = 6787515591;
 const OWNER_ATTESTATION = 'confirmed `knowledge-publish` Environment is configured correctly';
 const specs = [
   {id:WRITER_ID,name:'Knowledge / Writer identity',
@@ -33,7 +34,7 @@ function validRule(rule,spec){
     spec.name+': unexpected rule set');
   // Do not confuse GitHub API masking with zero bypass: this is a strict
   // administrator-visible evidence path, never a permission elevation request.
-  requireProof(Array.isArray(rule.bypass_actors),spec.name+': bypass metadata masked');
+  if(!Array.isArray(rule.bypass_actors))return false;
   if(spec.actor==='none')requireProof(rule.bypass_actors.length===0,
     spec.name+': unexpected bypass');
   else requireProof(rule.bypass_actors.length===1&&
@@ -41,16 +42,31 @@ function validRule(rule,spec){
     rule.bypass_actors[0].actor_type==='Integration'&&
     rule.bypass_actors[0].bypass_mode==='always',
     spec.name+': unexpected writer bypass');
+  return true;
 }
 export function shouldCollectKnowledgeWriter2358(stage,issue){
   return stage==='post-merge'&&String(issue)==='2358';
 }
-export function attestKnowledgeWriter2358({targetSha,branch,writer,append,comment}){
+export function attestKnowledgeWriter2358({targetSha,branch,writer,append,comment,adminSnapshot}){
   requireProof(SHA.test(targetSha),'unbound target SHA');
   requireProof(branch?.name==='knowledge'&&branch.protected===true&&
     SHA.test(branch.commit?.sha||''),'production knowledge must be protected');
-  validRule(writer,specs[0]);
-  validRule(append,specs[1]);
+  const writerBypassVisible=validRule(writer,specs[0]);
+  const appendBypassVisible=validRule(append,specs[1]);
+  // Privileged bypass arrays are masked for Actions GITHUB_TOKEN. Authenticate
+  // the owner's separate observed API snapshot without representing that
+  // snapshot as an independent CI-token readback.
+  requireProof(adminSnapshot?.id===ADMIN_SNAPSHOT_COMMENT&&
+    adminSnapshot.user?.login==='BestNathan'&&adminSnapshot.user?.type==='User'&&
+    adminSnapshot.author_association==='OWNER'&&
+    adminSnapshot.issue_url==='https://api.github.com/repos/'+REPO+'/issues/2358'&&
+    typeof adminSnapshot.created_at==='string'&&
+    adminSnapshot.updated_at===adminSnapshot.created_at&&
+    typeof adminSnapshot.body==='string'&&
+    adminSnapshot.body.includes('bypass exactly `[{"actor_id":5677350,"actor_type":"Integration","bypass_mode":"always"}]`')&&
+    adminSnapshot.body.includes('`bypass_actors=[]`')&&
+    adminSnapshot.body.includes('`enforcement=active`'),
+    'missing authenticated, unedited owner admin-API readback attestation');
   requireProof(comment?.id===OWNER_COMMENT&&
     comment.user?.login==='BestNathan'&&comment.user?.type==='User'&&
     comment.author_association==='OWNER'&&
@@ -72,11 +88,17 @@ export function attestKnowledgeWriter2358({targetSha,branch,writer,append,commen
     append_only_ruleset_rules:specs[1].types,
     writer_only_bypass:'Integration/always App '+APP_ID,
     append_only_bypass_actors:0,
+    writer_bypass_metadata_visible_to_collector:writerBypassVisible,
+    append_bypass_metadata_visible_to_collector:appendBypassVisible,
+    privileged_owner_ruleset_readback_comment_id:ADMIN_SNAPSHOT_COMMENT,
+    bypass_identity_evidence:writerBypassVisible&&appendBypassVisible
+      ? 'GitHub Ruleset detail API directly visible to trusted collector'
+      : 'GitHub-authenticated owner API snapshot; Actions bypass metadata masked',
     owner_environment_comment_id:OWNER_COMMENT,
     owner_environment_attestation:'GitHub-authenticated owner assertion; private Environment settings not independently API-readable',
     independent_environment_api_readback:false,
     actual_unauthorized_force_delete_denial_tested:false,
-    verified_by:'GitHub live branch and both Ruleset detail APIs plus immutable owner comment identity',
+    verified_by:'GitHub live branch/rule types; authenticated owner snapshot for masked bypass; immutable owner Environment comment',
     establishes_sc_verdict:false,
   });
 }
@@ -85,13 +107,14 @@ export async function collectKnowledgeWriter2358({repo,targetSha,stage,issue,get
   requireProof(repo===REPO&&SHA.test(targetSha)&&typeof get==='function',
     'wrong repository, target or reader');
   const base='/repos/'+REPO;
-  const [branch,writer,append,comment]=await Promise.all([
+  const [branch,writer,append,comment,adminSnapshot]=await Promise.all([
     get(base+'/branches/knowledge'),
     get(base+'/rulesets/'+WRITER_ID),
     get(base+'/rulesets/'+APPEND_ID),
     get(base+'/issues/comments/'+OWNER_COMMENT),
+    get(base+'/issues/comments/'+ADMIN_SNAPSHOT_COMMENT),
   ]);
-  return [attestKnowledgeWriter2358({targetSha,branch,writer,append,comment})];
+  return [attestKnowledgeWriter2358({targetSha,branch,writer,append,comment,adminSnapshot})];
 }
 export function selfTestKnowledgeWriter2358(){
   const targetSha='a'.repeat(40);
@@ -108,8 +131,18 @@ export function selfTestKnowledgeWriter2358(){
     issue_url:'https://api.github.com/repos/'+REPO+'/issues/2358',
     created_at:'2026-11-11T04:53:37Z',updated_at:'2026-11-11T04:53:37Z',
     body:'Owner '+OWNER_ATTESTATION+'.'};
-  const good={targetSha,branch,writer,append,comment};
+  const adminSnapshot={id:ADMIN_SNAPSHOT_COMMENT,user:{login:'BestNathan',type:'User'},
+    author_association:'OWNER',
+    issue_url:'https://api.github.com/repos/'+REPO+'/issues/2358',
+    created_at:'2026-11-11T04:56:00Z',updated_at:'2026-11-11T04:56:00Z',
+    body:'Ruleset readback `enforcement=active`; writer bypass exactly `[{"actor_id":5677350,"actor_type":"Integration","bypass_mode":"always"}]`; append `bypass_actors=[]`.'};
+  const good={targetSha,branch,writer,append,comment,adminSnapshot};
   assert.equal(attestKnowledgeWriter2358(good).append_only_bypass_actors,0);
+  assert.equal(attestKnowledgeWriter2358({...good,
+    writer:{...writer,bypass_actors:undefined},
+    append:{...append,bypass_actors:undefined}
+  }).bypass_identity_evidence,
+  'GitHub-authenticated owner API snapshot; Actions bypass metadata masked');
   assert.equal(shouldCollectKnowledgeWriter2358('post-merge',2358),true);
   assert.equal(shouldCollectKnowledgeWriter2358('pre-merge',2358),false);
   assert.equal(shouldCollectKnowledgeWriter2358('post-merge',3156),false);
@@ -118,7 +151,6 @@ export function selfTestKnowledgeWriter2358(){
     {writer:{...writer,enforcement:'disabled'}},
     {writer:{...writer,conditions:{ref_name:{include:['~ALL'],exclude:[]}}}},
     {writer:{...writer,rules:[{type:'update'}]}},
-    {writer:{...writer,bypass_actors:undefined}},
     {writer:{...writer,bypass_actors:[{actor_id:5326063,actor_type:'Integration',bypass_mode:'always'}]}},
     {writer:{...writer,bypass_actors:[...writer.bypass_actors,{actor_id:1}]}},
     {append:{...append,bypass_actors:[{actor_id:APP_ID}]}},
@@ -127,6 +159,8 @@ export function selfTestKnowledgeWriter2358(){
     {comment:{...comment,user:{login:'BestNathan',type:'Bot'}}},
     {comment:{...comment,updated_at:'2026-11-11T04:54:00Z'}},
     {comment:{...comment,body:'Environment not verified'}},
+    {adminSnapshot:{...adminSnapshot,user:{login:'attacker',type:'User'}}},
+    {adminSnapshot:{...adminSnapshot,body:'enforcement=active bypass 1'}},
     {targetSha:'bad'},
   ])assert.throws(()=>attestKnowledgeWriter2358({...good,...patch}));
   console.log('knowledge-writer-2358: strict live policy and owner attestation fixtures passed');
