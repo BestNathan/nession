@@ -145,9 +145,10 @@ async fn test_list_sessions_older_than() {
         .await
         .unwrap();
 
-    // Query with a very large duration (0 seconds) - should return nothing
-    // since both sessions were just inserted with last_activity = now()
-    let old_sessions = db.list_sessions_older_than(0).await.unwrap();
+    // Activity is stored in whole UTC seconds: a zero-second cutoff can
+    // cross a second boundary and classify a freshly inserted row as old.
+    // Use a positive age threshold well beyond this test's execution time.
+    let old_sessions = db.list_sessions_older_than(3600).await.unwrap();
     assert_eq!(old_sessions.len(), 0);
 
     // Query with negative duration (future cutoff) - should return both
