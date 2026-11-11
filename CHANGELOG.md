@@ -689,3 +689,10 @@
 - Categories: design, interaction, overlay, dialog, ownership, web, app
 - Reason: Record #3298's non-scrolling three-zone Dialog: DialogBody as the sole scroll owner, full-width opaque Header/Footer bands, form ownership wrapping body+footer, consumer and App operation migrations, the updated overlay-surfaces contract, and the exact-SHA Case/E2E/prototype proof
 - Source: https://github.com/BestNathan/nession/issues/3298
+
+## 2026-11-11T17:42:44Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
+- Reason: Record #3181's complete paged inventory with aliases, Project-or-Session scoped grants and m009, Workspace Images discovery, independent Project/Sandbox selection, Sandbox Enter composition and Agent cache observation; update the #3303 shared-cache ownership and exact staging source SHA
+- Source: https://github.com/BestNathan/nession/issues/3181
