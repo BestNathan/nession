@@ -9,7 +9,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {planBatch} from './staging-convergence-batch.mjs';
-import {catalogFromPaths} from './issue-e2e-plan.mjs';
+import {catalogFromPaths,planDigest} from './issue-e2e-plan.mjs';
 import {BROWSER_DESIGN_IDS} from '../design/scripts/browser-design-catalog.mjs';
 
 const REPO='BestNathan/nession';
@@ -107,11 +107,32 @@ export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sh
     lane_sha:targetSha,risk:'staging-to-main',
     selection_digest:sha256({baseSha,targetSha,ids}),
   };
+  return promotionE2EPlan({baseSha,targetSha,ids,convergence:identity});
+}
+
+/**
+ * The convergence E2E plan (`#3311`).
+ *
+ * `convergence` is provenance — it identifies the immutable batch but is not
+ * part of the declared obligation set — so the digest comes from
+ * `planDigest`, never from hashing the whole wrapper.
+ */
+export function convergenceE2EPlan({baseSha,targetSha,ids,convergence}) {
+  const plan={schema_version:1,kind:'issue_e2e_selection',
+    base_sha:baseSha,target_sha:targetSha,issues:[],
+    selected:ids.map(id=>({id,owners:[]})),
+    mode:ids.length?'selected':'not-required',
+    convergence};
+  return {...plan,plan_digest:planDigest(plan)};
+}
+
+/** The promotion E2E plan (`#3311`); same canonical digest rule. */
+export function promotionE2EPlan({baseSha,targetSha,ids,convergence}) {
   const plan={schema_version:1,kind:'issue_e2e_selection',
     base_sha:baseSha,target_sha:targetSha,issues:[],
     selected:ids.map(id=>({id,owners:[]})),mode:'selected',
-    convergence:identity};
-  return {...plan,plan_digest:sha256(plan)};
+    convergence};
+  return {...plan,plan_digest:planDigest(plan)};
 }
 
 export function isNativeConvergencePr(pr){
@@ -173,18 +194,11 @@ export function verifiedConvergenceBatch(pr,repoRoot,baseSha,
 export function convergenceE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
   const batch=verifiedConvergenceBatch(pr,repoRoot,baseSha,targetSha);
   const ids=[...new Set([...batch.newIds,...batch.regressionIds])].sort();
-  const plan={
-    schema_version:1,kind:'issue_e2e_selection',base_sha:baseSha,
-    target_sha:targetSha,issues:[],
-    selected:ids.map(id=>({id,owners:[]})),
-    mode:ids.length?'selected':'not-required',
-    convergence:{
-      source_head_sha:batch.integration_head,main_sha:batch.main_sha,
-      lane_sha:batch.lane_sha,batch_digest:convergenceBatchDigest(batch),
-      risk:batch.impact.category,
-    },
-  };
-  return {...plan,plan_digest:sha256(plan)};
+  return convergenceE2EPlan({baseSha,targetSha,ids,convergence:{
+    source_head_sha:batch.integration_head,main_sha:batch.main_sha,
+    lane_sha:batch.lane_sha,batch_digest:convergenceBatchDigest(batch),
+    risk:batch.impact.category,
+  }});
 }
 export function convergenceApprovalCommand(batch){
   return '/approve-staging-convergence '+batch.integration_head+' '+
@@ -358,6 +372,10 @@ export function selfTest(){
     assert.deepEqual(selected.selected.map(x=>x.id),['login','new-browser']);
     assert.deepEqual(selected.issues,[]);
     assert.match(selected.plan_digest,DIGEST);
+    assert.equal(selected.plan_digest,planDigest(selected),
+      '#3311 convergence plan digest covers the canonical obligation fields');
+    assert.notEqual(selected.plan_digest,sha256(selected),
+      '#3311 convergence provenance must not be hashed into the plan digest');
     assert.deepEqual(convergenceE2ESelection(pr,root,lane),selected);
     assert.throws(()=>verifiedConvergenceBatch(
       {...pr,body:pr.body.replace(convergenceBatchDigest(source),'0'.repeat(64))},
@@ -424,6 +442,10 @@ export function selfTest(){
       'changed browser ID from exact Main..Staging source must be selected');
     assert.ok(!promoter.selected.some(x=>['login','new-browser'].includes(x.id)),
       'unchanged Main-owned browser IDs must not be over-selected');
+    assert.equal(promoter.plan_digest,planDigest(promoter),
+      '#3311 promotion plan digest covers the canonical obligation fields');
+    assert.notEqual(promoter.plan_digest,sha256(promoter),
+      '#3311 promotion provenance must not be hashed into the plan digest');
     assert.deepEqual(promotionE2ESelection(promotion,root,main),promoter);
     // The real #3208 kept its bot-authored creation SHA while protected
     // Staging advanced. New PR head is permitted ONLY as a descendant of
