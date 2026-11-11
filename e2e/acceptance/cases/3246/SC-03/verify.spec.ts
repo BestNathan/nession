@@ -36,7 +36,7 @@ async function expectListOwnsScroll(page: Page): Promise<void> {
   expect(pageOverflow).toBeLessThanOrEqual(1);
 }
 
-test('SC-03: a horizontal edge shifts the Select but keeps it visible and operable', async ({ page }) => {
+test('SC-03: a content Select keeps one visible scroll owner at 1440', async ({ page }) => {
   test.setTimeout(110_000);
   const { sha } = verifiedRuntime('SC-03');
   await freezeFixtureClock(page);
