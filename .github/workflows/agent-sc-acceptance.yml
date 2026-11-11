@@ -464,6 +464,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: read
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -495,3 +496,5 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/acceptance-executor.mjs apply             "${ISSUE_NUMBER}" "${RUNNER_TEMP}/acceptance-result/acceptance-result.json"
+          # This does not evaluate SCs; only the canonical close-guard decision.
+          node scripts/issue-lifecycle-reconcile.mjs issue "${ISSUE_NUMBER}"
