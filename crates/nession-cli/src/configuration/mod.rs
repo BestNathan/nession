@@ -275,6 +275,10 @@ pub enum FieldKind {
     F64Positive,
     AttachMode,
     AdvertiseAddresses,
+    /// A JSON array of strings.
+    StringList,
+    /// A JSON array of strings, or `none`/empty to remove the key.
+    OptionalStringList,
     LogLevel,
     LogRotation,
 }
@@ -447,6 +451,14 @@ pub const AGENT_FIELDS: &[FieldSpec] = &[
         key: "mcp.max_concurrent_calls",
         kind: FieldKind::UsizeNonZero,
     },
+    FieldSpec {
+        key: "mcp.allowed_origins",
+        kind: FieldKind::StringList,
+    },
+    FieldSpec {
+        key: "mcp.allowed_hosts",
+        kind: FieldKind::OptionalStringList,
+    },
 ];
 
 /// Every editable `ServerConfig` field.
@@ -566,6 +578,14 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         key: "mcp.max_concurrent_calls",
         kind: FieldKind::UsizeNonZero,
+    },
+    FieldSpec {
+        key: "mcp.allowed_origins",
+        kind: FieldKind::StringList,
+    },
+    FieldSpec {
+        key: "mcp.allowed_hosts",
+        kind: FieldKind::OptionalStringList,
     },
 ];
 
@@ -905,9 +925,29 @@ fn apply_field(document: &mut toml_edit::DocumentMut, spec: &FieldSpec, value: &
             })
         }
         FieldKind::AdvertiseAddresses => advertise_addresses_item(value)?,
+        FieldKind::StringList => string_list_item(value)?,
+        FieldKind::OptionalStringList => {
+            if is_clear(value) {
+                remove_path(document, spec.key);
+                return Ok(());
+            }
+            string_list_item(value)?
+        }
     };
 
     set_path(document, spec.key, item)
+}
+
+/// A JSON array of strings, the unambiguous spelling for a list of origins or
+/// hosts (`[]` is the empty list; `none`/an empty value removes an optional key).
+fn string_list_item(value: &str) -> Result<toml_edit::Item> {
+    let items: Vec<String> =
+        serde_json::from_str(value).context("expected a JSON array of strings")?;
+    let mut array = toml_edit::Array::new();
+    for item in items {
+        array.push(item);
+    }
+    Ok(toml_edit::value(array))
 }
 
 fn is_clear(value: &str) -> bool {
