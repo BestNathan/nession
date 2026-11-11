@@ -210,21 +210,29 @@ jobs:
         run: |
           set -uo pipefail
           failed=0
+          : > "${RUNNER_TEMP}/projected-issues.txt"
           while IFS= read -r durable_path; do
             echo "Projecting ${durable_path}"
-            if node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}"; then
-              # The Case result is already source-authenticated and projected
-              # by the only trusted Case writer; this observes its live Issue.
-              issue="$(jq -er '.issue' "results-repo/${durable_path}")"
-              if ! node trusted/scripts/issue-lifecycle-reconcile.mjs issue "${issue}"; then
-                echo "::error::Lifecycle reconciliation failed for Issue #${issue}"
-                failed=1
+            if result="$(node trusted/scripts/acceptance-case-ingest.mjs apply "results-repo/${durable_path}")"; then
+              echo "${result}"
+              if jq -e '.projected == true' <<<"${result}" >/dev/null; then
+                jq -er '.issue' "results-repo/${durable_path}" >> "${RUNNER_TEMP}/projected-issues.txt" || failed=1
               fi
             else
               echo "::error::Projection failed for ${durable_path}"
               failed=1
             fi
           done < "${RUNNER_TEMP}/persisted-records.txt"
+          # Reconcile once per Issue after all its Case criteria have projected.
+          # Never close from a partial/failed projection batch.
+          if [[ "${failed}" -eq 0 ]]; then
+            while IFS= read -r issue; do
+              if ! node trusted/scripts/issue-lifecycle-reconcile.mjs issue "${issue}"; then
+                echo "::error::Lifecycle reconciliation failed for Issue #${issue}"
+                failed=1
+              fi
+            done < <(sort -u "${RUNNER_TEMP}/projected-issues.txt")
+          fi
           exit "${failed}"
 
       - name: Summarize ingestion
