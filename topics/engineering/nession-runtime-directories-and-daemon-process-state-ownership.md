@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "cli", "lifecycle", "process", "security", "storage"]
 status: verified
 created_at: 2026-11-10T11:18:40Z
-updated_at: 2026-11-10T15:06:36Z
-sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs"]
+updated_at: 2026-11-11T06:08:01Z
+sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs"]
 ---
 
 # Nession runtime directories and daemon process state ownership
@@ -80,6 +80,25 @@ The generated systemd user unit and launchd LaunchAgent carry the resolved
 `NESSION_RUNTIME_DIR`. The service manager therefore starts the same state file
 that a later CLI `status`/`stop` reads. Existing supervision remains
 `Restart=on-failure` / launchd `KeepAlive` (#363).
+
+### Service-manager ownership and CLI deference
+
+The manager is the lifecycle owner of the Agent it registered. When the
+unit/plist pins the state file a CLI invocation resolved, `agent start` is
+idempotent for a running managed Agent and refuses to create an unmanaged
+process beside the registration; `restart`/`stop` are refused with the manager
+command. The generated artifact marks its direct child with
+`NESION_MANAGED_AGENT=1`; the marker is honored only with a systemd/launchd
+parent, because tmux Sessions inherit the variable. Isolated explicit state
+files and `status` are unaffected. `uninstall-service` names the manager stop
+for a still-loaded job.
+
+### Termination re-check
+
+`stop` re-reads the recorded ProcessIdentity immediately before SIGKILL. A
+changed start time, a reused pid, an unreadable record or a record naming a
+different live instance means no signal; the ordinary timeout still force-kills
+the recorded instance. The grace and settle windows are unchanged.
 
 ## Limits / when to revisit
 

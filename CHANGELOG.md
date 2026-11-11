@@ -654,3 +654,17 @@
 - Categories: design, interaction, overlay, dialog, ownership, web, app
 - Reason: Correct the #3246 proof bullet to the exact CI Case Smoke assertion counts (SC-01 211, SC-02 228, SC-03 102) and target SHA 849a32a for all three, instead of mixing earlier local run counts
 - Source: https://github.com/BestNathan/nession/issues/3246
+
+## 2026-11-11T06:08:01Z | update | Nession CLI release versioning and single-active daemons
+- Path: topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, release, storage
+- Reason: Add archive transaction recovery, archived server paths, the shared lifecycle contract, exact stop identity re-check and service-manager ownership after Issue #3232.
+- Source: https://github.com/BestNathan/nession/issues/3232
+
+## 2026-11-11T06:08:01Z | update | Nession runtime directories and daemon process state ownership
+- Path: topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, security, storage
+- Reason: Add service-manager ownership/deference and the exact stop identity re-check from Issue #3232.
+- Source: https://github.com/BestNathan/nession/issues/3232
