@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "bce0205fc74d5e5fa391186915782cddf7f16b89be43bd4277195495c477765f",
+  "run_id": 43007362590,
+  "run_attempt": 1,
+  "issue": 3138,
+  "criterion": "SC-02",
+  "criterion_text": "Actual Chromium + Playwright production fixtures at Web 1440/1180/1024 and App 390/375 + landscape exercise Project and Sandbox's approved representative states. Relational computed-style/bounds/scroll/focus assertions and a deliberately small reviewed screenshot baseline catch at least title/section hierarchy, field/row alignment, inappropriate host chrome and responsive action/footer problems; no screenshot-only pass path.",
+  "stage": "staging",
+  "target_sha": "2198a4c0aaa29d7286b332514ead303006704408",
+  "contract_sha256": "593926e8fb9be3acff163a59c1f613819448fd18d1d26ba2ec79a4d57ace82ff",
+  "case_revision": "2198a4c0aaa29d7286b332514ead303006704408",
+  "case_tree_sha": "18977efc9fd8e7e0d01921ab1d51260c5efccde8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T10:56:23.449Z",
+  "finished_at": "2026-11-11T10:56:46.742Z",
+  "duration_ms": 23293,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The focused #3138 visual baseline set is committed at the exact target tree and produced by the canonical fixture-visual specs",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/web-project-detail-linux.png is 1440x900 (86369 bytes, blob a11c3183c0bd), referenced by e2e/tests/browser/fixture-visual.spec.ts at the canonical viewport width"
+        },
+        {
+          "type": "source",
+          "value": "e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/web-sandbox-outside-linux.png is 1440x900 (52149 bytes, blob b0a924825dbc), referenced by e2e/tests/browser/fixture-visual.spec.ts at the canonical viewport width"
+        },
+        {
+          "type": "source",
+          "value": "e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/web-sandbox-inside-linux.png is 1440x900 (63556 bytes, blob 987763d46aab), referenced by e2e/tests/browser/fixture-visual.spec.ts at the canonical viewport width"
+        },
+        {
+          "type": "source",
+          "value": "e2e/tests/browser/__snapshots__/fixture-visual-app.spec.ts/app-project-detail-linux.png is 390x844 (39156 bytes, blob c4bc9ce95ccf), referenced by e2e/tests/browser/fixture-visual-app.spec.ts at the canonical viewport width"
+        },
+        {
+          "type": "source",
+          "value": "e2e/tests/browser/__snapshots__/fixture-visual-app.spec.ts/app-sandbox-inside-linux.png is 390x844 (54123 bytes, blob e9e7607d960d), referenced by e2e/tests/browser/fixture-visual-app.spec.ts at the canonical viewport width"
+        }
+      ],
+      "duration_ms": 72,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-web.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=15"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 15
+      },
+      "duration_ms": 6849,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-app.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=42"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 42
+      },
+      "duration_ms": 10434,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43007362590,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2198a4c0aaa29d7286b332514ead303006704408",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43007362590",
+    "record_path": "runs/2026-11-11/43007362590-1/3138/SC-02.json",
+    "source_result_sha256": "550f001923e5fd996cb078f0aa2e9a6f676dd767e5d1e5d8c1a1e9faa14fa6bc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43007362590-1",
+    "sha256": "550f001923e5fd996cb078f0aa2e9a6f676dd767e5d1e5d8c1a1e9faa14fa6bc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43007362590",
+    "durability": "time-limited; object archival not configured"
+  }
+}
