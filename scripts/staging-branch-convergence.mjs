@@ -9,6 +9,7 @@ import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
   convergenceApproval,fullRegressionTitle,latestConvergenceFull,
   attestConvergenceFull} from './staging-convergence-pr.mjs';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -725,6 +726,52 @@ function selfTest() {
   assert.match(jobIf[1],/github\.event\.workflow_run\.pull_requests\[0\]\.head\.ref == 'staging'/);
   assert.match(jobIf[1],/github\.event\.workflow_run\.pull_requests\[0\]\.base\.ref == 'main'/);
   assert.match(jobIf[1],/github\.event\.workflow_run\.event == 'pull_request'/);
+  // #3247: prove the actual workflow job-if accepts the authenticated
+  // post-deployment completion, not merely a copied JS approximation.
+  assert.match(workflow,
+    /workflows: \[[^\n]*'Release \/ Staging Artifacts'[^\n]*\]/);
+  const releaseWake = {
+    event: 'push',
+    name: 'Release / Staging Artifacts',
+    path: '.github/workflows/release-staging.yml',
+    head_branch: 'staging',
+    conclusion: 'success',
+    repository: {full_name: 'BestNathan/nession'},
+    head_repository: {full_name: 'BestNathan/nession'},
+    pull_requests: [],
+  };
+  const acceptsWake = (source, root={}) => vm.runInNewContext(
+    jobIf[1], {
+      github: {
+        repository: 'BestNathan/nession', repository_owner: 'BestNathan',
+        ref: 'refs/heads/main', event_name: 'workflow_run',
+        event: {workflow_run: source}, ...root,
+      },
+      startsWith: (value, prefix) =>
+        typeof value === 'string' && value.startsWith(prefix),
+    }, {timeout: 1000});
+  assert.equal(acceptsWake(releaseWake), true,
+    'the canonical staging push release success must re-wake convergence');
+  const refusedWake = [
+    {event: 'workflow_dispatch'},
+    {name: 'Release / Staging Artifacts (forged)'},
+    {path: '.github/workflows/foreign.yml'},
+    {head_branch: 'main'},
+    {head_branch: 'integration/staging'},
+    {conclusion: 'failure'},
+    {conclusion: 'skipped'},
+    {head_repository: {full_name: 'attacker/fork'}},
+    {repository: {full_name: 'attacker/fork'}},
+  ];
+  for (const mutation of refusedWake) {
+    assert.equal(acceptsWake({...releaseWake, ...mutation}), false,
+      'untrusted Staging release wake must not start convergence: '+
+        JSON.stringify(mutation));
+  }
+  assert.equal(acceptsWake(releaseWake, {ref:'refs/heads/staging'}), false,
+    'only protected main may run the release controller');
+  assert.equal(acceptsWake(releaseWake, {repository:'attacker/fork'}), false,
+    'the wake must not execute in an unrelated repository');
   const deploy = [
     'name: Release / Staging Artifacts', 'on:', '  push:',
     "    branches: ['staging']", '  workflow_dispatch:',
