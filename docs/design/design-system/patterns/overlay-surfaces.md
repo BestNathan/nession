@@ -79,21 +79,30 @@ the role, decides on a small viewport. Roles do not imply a fixed height.
 
 ```text
 ┌──────────────────────────────┐
-│ Header — sticky, opaque      │  title/identity, close/back
+│ Header — fixed, opaque band  │  title/identity, close/back
 ├──────────────────────────────┤
 │ Body — the sole scroll owner │  fields, lists, anchored controls
 │                              │
 ├──────────────────────────────┤
-│ Footer — sticky, opaque,     │  cancel + one primary action
+│ Footer — fixed, opaque band  │  cancel + one primary action
 │ flush with the surface edge  │
 └──────────────────────────────┘
 ```
 
+- The dialog surface is a non-scrolling column. `DialogHeader` and
+  `DialogFooter` are full-width, opaque, non-scrolling bands; `DialogBody`
+  (`data-slot="dialog-body"`) is the one primary vertical scroll owner, with
+  `min-height: 0` and contained overscroll. The surface never owns the scroll
+  (#3298).
 - Content takes its natural height until the viewport clamp applies. After
-  that, the **body scrolls**; the header and footer do not.
-- A sticky footer is an opaque band flush with the dialog's bottom edge, so
-  content scrolling beneath it can never show through (#3128).
-- A form inside the body must not create a second vertical scroller. Lists that
+  that the **body** shrinks and scrolls; header, close control and footer stay
+  fixed. A short dialog still sizes to its content.
+- The footer is an opaque full-width band flush with the dialog's bottom edge,
+  with no consumer negative margins or `sticky` compensation. Fields cannot
+  show through it or below it.
+- A form has exactly one owner: the form wraps the `DialogBody` and
+  `DialogFooter` (or the submit control references the form), so the action
+  band can submit without a second form or a second scroll region. Lists that
   need their own scroll (Env files, long choices) own a bounded region with a
   visible boundary and a single scroll axis.
 - Long paths/URLs/addresses wrap or scroll horizontally inside their own field;

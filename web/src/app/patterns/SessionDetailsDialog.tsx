@@ -1,5 +1,6 @@
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -41,7 +42,9 @@ export function SessionDetailsDialog({
             Session work context. The tmux name and Session ID never change here.
           </DialogDescription>
         </DialogHeader>
-        <SessionDetails session={session} state={state} initialEditing={editing} />
+        <DialogBody>
+          <SessionDetails session={session} state={state} initialEditing={editing} />
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

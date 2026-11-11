@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -261,7 +262,7 @@ export function AppFilesFolderSheet({
           <DialogTitle>{folderTitle}</DialogTitle>
           <DialogDescription>Folder actions</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-1">
+        <DialogBody className="flex flex-col gap-1">
           {open ? (
             <AppFilesCreateSection
               relativeDir={relativeDir}
@@ -301,7 +302,7 @@ export function AppFilesFolderSheet({
             <Copy className="size-4" aria-hidden />
             Copy full path
           </Button>
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

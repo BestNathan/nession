@@ -8,6 +8,7 @@ import {
 } from '@/product/terminal/capsule/capsuleStyles';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -503,16 +504,18 @@ export function TerminalSurface({
               <DialogHeader>
                 <DialogTitle>Terminal notices</DialogTitle>
               </DialogHeader>
-              <TerminalNoticeDetails
-                historyDegraded={historyDegraded}
-                inputDrop={inputDrop}
-                clipboardNotice={clipboardNotice}
-                controller={controller}
-                terminalControl={terminalControl}
-                onDismissInputDrop={onDismissInputDrop}
-                onDismissClipboardNotice={onDismissClipboardNotice}
-                onTakeControl={onTakeControl}
-              />
+              <DialogBody>
+                <TerminalNoticeDetails
+                  historyDegraded={historyDegraded}
+                  inputDrop={inputDrop}
+                  clipboardNotice={clipboardNotice}
+                  controller={controller}
+                  terminalControl={terminalControl}
+                  onDismissInputDrop={onDismissInputDrop}
+                  onDismissClipboardNotice={onDismissClipboardNotice}
+                  onTakeControl={onTakeControl}
+                />
+              </DialogBody>
             </DialogContent>
           ) : null}
         </Dialog>

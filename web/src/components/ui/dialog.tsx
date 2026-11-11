@@ -78,10 +78,14 @@ function DialogContent({
   // inside the modal, so it must state the same scope. The primitive still
   // learns only a DOM attribute value; it does not interpret "app".
   const inheritedScope = usePopupPortalContainer()?.getAttribute("data-experience") ?? undefined;
+  // Three-zone anatomy (issue 3298): the surface is a non-scrolling flex
+  // column. Header and Footer are opaque, full-width bands; DialogBody is the
+  // only primary vertical scroll owner. A short dialog still sizes to its
+  // content because no zone has an explicit height.
   const arrangement =
     variant === "centered"
       ? cn(
-          "fixed top-1/2 left-1/2 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto p-4 text-sm duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 flex w-full -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden p-0 text-sm duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           overlayDialogZClass,
           overlayViewportWidthClass,
           overlayViewportHeightClass,
@@ -89,8 +93,8 @@ function DialogContent({
           overlaySizeClass(size)
         )
       : variant === "fullscreen"
-        ? "fixed inset-0 z-[var(--nession-overlay-dialog-z)] flex h-[100dvh] max-h-[100dvh] w-full flex-col gap-0 overflow-y-auto rounded-none bg-background p-0 text-sm text-foreground outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
-        : "fixed bottom-0 left-0 top-auto z-[var(--nession-overlay-dialog-z)] flex max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-4 overflow-y-auto rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0 bg-popover p-4 text-sm text-popover-foreground outline-none data-open:animate-in data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:slide-out-to-bottom-4";
+        ? "fixed inset-0 z-[var(--nession-overlay-dialog-z)] flex h-[100dvh] max-h-[100dvh] w-full flex-col gap-0 overflow-hidden rounded-none bg-background p-0 text-sm text-foreground outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+        : "fixed bottom-0 left-0 top-auto z-[var(--nession-overlay-dialog-z)] flex max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0 bg-popover p-0 text-sm text-popover-foreground outline-none data-open:animate-in data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:slide-out-to-bottom-4";
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -123,7 +127,7 @@ function DialogContent({
             render={
               <Button
                 variant="ghost"
-                className="absolute top-2 right-2"
+                className="absolute top-2 right-2 z-20"
                 size="icon-sm"
               />
             }
@@ -142,7 +146,30 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn(
+        "flex shrink-0 flex-col gap-2 border-b bg-popover px-4 py-3 pr-12",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+/**
+ * The subtree's only primary vertical scroll owner.
+ *
+ * A form may wrap `DialogBody` + `DialogFooter` (one form owner, submit in the
+ * footer); the form is then the flex column and this body fills its available
+ * space. Without a form, `DialogContent` itself is that column.
+ */
+function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-body"
+      className={cn(
+        "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4",
+        className
+      )}
       {...props}
     />
   )
@@ -151,26 +178,16 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 function DialogFooter({
   className,
   showCloseButton = false,
-  sticky = false,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
-  /**
-   * Pins the footer to the bottom of a scrolling dialog. A sticky footer is
-   * opaque so form fields can never show through it, and it reaches the
-   * dialog's padding edge so the band is flush with the surface instead of
-   * floating above it.
-   */
-  sticky?: boolean
 }) {
   return (
     <div
       data-slot="dialog-footer"
-      data-sticky={sticky ? "true" : undefined}
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t p-4 sm:flex-row sm:justify-end",
-        sticky ? "sticky -bottom-4 z-10 bg-muted" : "bg-muted/50",
+        "flex shrink-0 flex-col-reverse gap-2 border-t bg-muted px-4 py-3 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -213,6 +230,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,

@@ -1,5 +1,6 @@
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -239,44 +240,46 @@ export function CreateSessionDialog({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent size="standard" data-testid="create-session-dialog">
-        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
+        <DialogHeader>
           <DialogTitle>
             {project ? `Create Session in “${project.name}”` : 'Create Session'}
           </DialogTitle>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit} className="flex flex-col gap-4">
-          {project ? (
-            <ProjectLocationSelect
-              locations={form.locations}
-              agents={agents}
-              selectedLocation={form.selectedLocation}
-              locationIndex={form.locationIndex}
-              onIndexChange={form.setLocationIndex}
-              disabled={form.loading}
+        <form onSubmit={form.handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <DialogBody className="flex flex-col gap-4">
+            {project ? (
+              <ProjectLocationSelect
+                locations={form.locations}
+                agents={agents}
+                selectedLocation={form.selectedLocation}
+                locationIndex={form.locationIndex}
+                onIndexChange={form.setLocationIndex}
+                disabled={form.loading}
+              />
+            ) : (
+              <AgentSelect
+                agents={form.onlineAgents}
+                value={form.agentId}
+                onChange={form.setAgentId}
+                disabled={form.loading}
+              />
+            )}
+            <SessionFields
+              nameInputRef={form.nameInputRef}
+              sessionName={form.sessionName}
+              setSessionName={form.setSessionName}
+              envFiles={form.envFiles}
+              selectedEnv={form.selectedEnv}
+              setSelectedEnv={form.setSelectedEnv}
+              loading={form.loading}
             />
-          ) : (
-            <AgentSelect
-              agents={form.onlineAgents}
-              value={form.agentId}
-              onChange={form.setAgentId}
-              disabled={form.loading}
-            />
-          )}
-          <SessionFields
-            nameInputRef={form.nameInputRef}
-            sessionName={form.sessionName}
-            setSessionName={form.setSessionName}
-            envFiles={form.envFiles}
-            selectedEnv={form.selectedEnv}
-            setSelectedEnv={form.setSelectedEnv}
-            loading={form.loading}
-          />
-          {form.error && (
-            <p className={cn('text-destructive', chromeSansRole('body'))} data-testid="create-session-error">
-              {form.error}
-            </p>
-          )}
-          <DialogFooter sticky>
+            {form.error && (
+              <p className={cn('text-destructive', chromeSansRole('body'))} data-testid="create-session-error">
+                {form.error}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.loading}>
               Cancel
             </Button>

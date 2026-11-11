@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -61,22 +63,22 @@ export function AppOperationPage({
           <DialogTitle className="sr-only">{title}</DialogTitle>
           <DialogHeader
             data-recipe-part="operation-title"
-            className="sticky top-0 z-10 gap-0 bg-background p-0"
+            className="gap-0 border-b-0 bg-background p-0 pr-0"
           >
             <AppPageHeader backLabel={backLabel} onBack={onBack} title={title} />
           </DialogHeader>
-          <div
+          <DialogBody
             data-testid={`${testId}-body`}
             data-recipe-part="operation-body"
-            className="flex min-h-0 flex-1 flex-col gap-[var(--nession-shell-space-3)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]"
+            className="flex flex-col gap-[var(--nession-shell-space-3)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]"
           >
             {children}
-          </div>
+          </DialogBody>
           <footer
             data-testid={`${testId}-footer`}
             data-recipe-part="operation-actions"
             className={cn(
-              'sticky bottom-0 z-10 shrink-0 border-t bg-background px-[var(--nession-shell-space-3)] pt-[var(--nession-shell-space-2)]',
+              'z-10 shrink-0 border-t bg-background px-[var(--nession-shell-space-3)] pt-[var(--nession-shell-space-2)]',
               'pb-[max(var(--nession-shell-space-2),env(safe-area-inset-bottom))]',
             )}
           >
@@ -120,15 +122,15 @@ export function AppSheet({
           variant="sheet"
           showCloseButton
         >
-          <DialogHeader>
+          <DialogHeader className="px-[var(--nession-shell-space-3)] pr-12">
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
-          <div className="flex min-h-0 flex-col gap-[var(--nession-shell-space-2)] overflow-y-auto">
+          <DialogBody className="flex flex-col gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]">
             {children}
-          </div>
-          <div className="border-t pt-[var(--nession-shell-space-2)] pb-[max(var(--nession-shell-space-2),env(safe-area-inset-bottom))]">
+          </DialogBody>
+          <DialogFooter className="bg-popover px-[var(--nession-shell-space-3)] pt-[var(--nession-shell-space-2)] pb-[max(var(--nession-shell-space-2),env(safe-area-inset-bottom))]">
             {footer}
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </AppPopupPortal>

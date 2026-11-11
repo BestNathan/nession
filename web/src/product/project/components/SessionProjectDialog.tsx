@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -62,7 +63,7 @@ export function SessionProjectDialog({
         <DialogHeader>
           <DialogTitle>Project membership</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <DialogBody className="flex flex-col gap-3">
           <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
             Session {session?.session_name ?? ''} ·{' '}
             {current ? `currently ${current.name}` : 'currently unassociated'}
@@ -108,7 +109,7 @@ export function SessionProjectDialog({
               {error}
             </p>
           ) : null}
-        </div>
+        </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onClose()} disabled={busy}>
             Cancel

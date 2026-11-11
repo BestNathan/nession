@@ -3,6 +3,7 @@ import { Boxes, GitBranch, MapPin, Plus, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -276,11 +277,13 @@ function ManagedUnavailableDialog({ open, onClose }: { open: boolean; onClose: (
         <DialogHeader>
           <DialogTitle>Managed Session is not available yet</DialogTitle>
         </DialogHeader>
-        <p className={chromeSansRole('secondary')}>
-          A Managed Session needs the native EROFS/Sandbox runtime, which this
-          Server does not provide yet. Nothing was created and no Native
-          fallback was attempted. The Project configuration is preserved.
-        </p>
+        <DialogBody>
+          <p className={chromeSansRole('secondary')}>
+            A Managed Session needs the native EROFS/Sandbox runtime, which this
+            Server does not provide yet. Nothing was created and no Native
+            fallback was attempted. The Project configuration is preserved.
+          </p>
+        </DialogBody>
         <DialogFooter>
           <Button type="button" onClick={() => onClose()}>
             Close
