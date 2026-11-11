@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "f670b0de70001157e10ce07e2fa8533b25c39c3c",
+  "run_id": 43044035291,
+  "run_attempt": 1,
+  "plan_digest": "d638d41ec840d4d284f5ec249b9d46dfef23361745d1d57dfc492bcf4ffe7820",
+  "artifact_digest": "sha256:506d81a8bca979c8c965e69d313a29853d77f5d2873f28daac1e9c0d86f663be",
+  "results": [
+    {
+      "id": "app-attach-presentation",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 27
+    },
+    {
+      "id": "app-session-operations",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 24,
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 154
+    },
+    {
+      "id": "project-management",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 47
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 104,
+      "passed": 104,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 852
+    }
+  ]
+}
