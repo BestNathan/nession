@@ -26,7 +26,7 @@
     "ui-contract-matrix.spec.ts"
   ],
   "baseline_png_blobs": {
-    "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "c2147a1f1dd52e23575f35edc57d94cba4efb746",
+    "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "9e5ac075285d286d05335b97c3bcdab6f4828af1",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "eda9c14900c5e6b67388eff7df3908448cad25ca",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png": "797765295b400b535c693a3f73803a4e5d110343",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "c8d2d844928672bb1e64dd184def15e2dc3ee2ad",
@@ -48,10 +48,10 @@
     "__snapshots__/fixture-visual.spec.ts/app-sessions-filtered-linux.png": "837b938cb6b181739d37aad11e310f622194a563",
     "__snapshots__/fixture-visual.spec.ts/app-sessions-linux.png": "e5d2ba7a15472524bf9f2d2d7bda9d2cc62fe57c",
     "__snapshots__/fixture-visual.spec.ts/app-sessions-status-filtered-linux.png": "2d01ec8e8bbb24a3c31ca502d596b6377f23c3ea",
-    "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png": "39ea237dd4dcd3d20bf3bcb92bc997466348a9ef",
+    "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png": "617bae3214c0952c1d47b1b0bb93655a6a8efa70",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-linux.png": "be41d555dcb75b3ce1f9c6c59e5dc7a792766187",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-multiline-linux.png": "2f158e83a3cf8d7c15aa0143bdb72a661e023408",
-    "__snapshots__/fixture-visual.spec.ts/app-cli-open-context-disclosure-linux.png": "3b2106c4f9e56b6e8fffb2648b45da132e26950d",
+    "__snapshots__/fixture-visual.spec.ts/app-cli-open-context-disclosure-linux.png": "f64f38b9ce8d346127466ac3fa62a084fa97461a",
     "__snapshots__/fixture-visual.spec.ts/app-workspace-linux.png": "8bd6b1d663d04ebb6ef7faeb09ff33f0e122c8a1",
     "__snapshots__/fixture-visual.spec.ts/web-active-terminal-linux.png": "803f63d25bce3edbe603d042d54355ceb214d473",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-chat-dialect-linux.png": "3cfaa94cbad8fecdf976174030c97c99a5657b97",
