@@ -7,6 +7,9 @@ use std::fs;
 
 pub async fn run(pid_file_path: Option<String>) -> Result<()> {
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
+    // The manager's `Restart=on-failure`/`KeepAlive` would race a direct stop
+    // and could bring the process back beside the CLI (#3232 F5).
+    crate::service::guard_agent_lifecycle(crate::service::AgentLifecycleAction::Stop, &state)?;
     let lock = LifecycleLock::acquire()?;
     run_with(state, &lock).await
 }

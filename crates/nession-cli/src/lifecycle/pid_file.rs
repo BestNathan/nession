@@ -538,6 +538,17 @@ impl Inspection {
     }
 }
 
+/// Whether `path` is the default Agent state file for this process's runtime
+/// environment.
+///
+/// A service registration that does not pin `--pid-file` starts its process at
+/// exactly this location, so the service manager owns it.
+pub fn matches_default_agent_state_path(path: &str) -> bool {
+    nession_common::paths::agent_pid_path()
+        .map(|default| default.as_path() == Path::new(path))
+        .unwrap_or(false)
+}
+
 /// The live process recorded at the default shared runtime location for
 /// `component`, with the state-file path.
 ///

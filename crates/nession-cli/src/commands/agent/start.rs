@@ -26,6 +26,22 @@ pub async fn run(
 ) -> Result<()> {
     let selection = ConfigSelection::resolve(ConfigTarget::Agent, config)?;
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
+    // A registered OS service owns the Agent's lifecycle. `start` may report
+    // the manager's live process (it is idempotent), but it must not create a
+    // second, unmanaged one beside a registered service (#3232 F5).
+    match crate::service::guard_agent_lifecycle(
+        crate::service::AgentLifecycleAction::Start,
+        &state,
+    )? {
+        crate::service::AgentLifecycleGuard::AlreadyRunning => {
+            println!(
+                "Agent is already running under {} supervision; start is idempotent.",
+                crate::service::manager_name()
+            );
+            return Ok(());
+        }
+        crate::service::AgentLifecycleGuard::Proceed => {}
+    }
     // One lifecycle command at a time across every installed release. The
     // runtime identity is shared, so the lock must be too. The foreground child
     // of a background start inherits the parent's lock through its marker; it
