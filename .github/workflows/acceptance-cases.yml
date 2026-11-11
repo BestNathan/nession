@@ -340,7 +340,7 @@ jobs:
 
       - name: Build Rust runtime
         if: steps.select.outputs.count != '0'
-        run: cd workspace && cargo build -p nession-server -p nession-agent
+        run: cd workspace && cargo build -p nession-server -p nession-agent -p nession-cli
 
       - name: Verify dual-native evidence combiner
         if: steps.select.outputs.both_count != '0'
@@ -657,7 +657,7 @@ jobs:
 
       - name: Build Rust runtime
         if: steps.select.outputs.count != '0'
-        run: cd workspace && cargo build -p nession-server -p nession-agent
+        run: cd workspace && cargo build -p nession-server -p nession-agent -p nession-cli
 
       - name: Authorize isolated native launchd Case
         if: steps.select.outputs.both_count != '0' && github.event_name == 'push' && github.ref == 'refs/heads/staging'
