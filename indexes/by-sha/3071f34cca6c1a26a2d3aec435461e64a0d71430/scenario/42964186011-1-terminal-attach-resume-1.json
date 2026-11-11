@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42964186011,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3189-capsule-history-store",
+    "target_sha": "3071f34cca6c1a26a2d3aec435461e64a0d71430",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42964186011",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "a17487f3718919698ff64ba01b5a714e01188032fb08a2dae5ffee3f42bfd326"
+  },
+  "record": "runs/2026-11-11/42964186011-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "b3810577c8c22620bb16eb7b4370974123f282d34134a77ce7d657cb1c6b2500"
+}
