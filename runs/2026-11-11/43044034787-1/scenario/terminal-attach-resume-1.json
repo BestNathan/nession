@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "f670b0de70001157e10ce07e2fa8533b25c39c3c",
+  "scenario_revision": "f670b0de70001157e10ce07e2fa8533b25c39c3c",
+  "run_id": 43044034787,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-11T15:10:25.329Z",
+  "finished_at": "2026-11-11T15:10:35.197Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-11T15:10:34.288Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "3471e7443b8354fe054de47dbea1b8bac48d5f40151def26891afb2ba2550395",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-11T15:10:34.603Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "3471e7443b8354fe054de47dbea1b8bac48d5f40151def26891afb2ba2550395",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-11T15:10:35.121Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "3471e7443b8354fe054de47dbea1b8bac48d5f40151def26891afb2ba2550395",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43044034787,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3298-dialog-three-zone",
+    "target_sha": "f670b0de70001157e10ce07e2fa8533b25c39c3c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43044034787",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "339596f7ba733f21e8d5fb02e78028007e047b1b8ac8cef93b5576fd5c4ebba3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-43044034787-1",
+    "sha256": "339596f7ba733f21e8d5fb02e78028007e047b1b8ac8cef93b5576fd5c4ebba3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43044034787",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "5ba7d8f4b11ceabcb169fee56bd84882b8f21edd241ba8b688d038ac600f983c"
+}
