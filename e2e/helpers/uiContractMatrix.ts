@@ -84,6 +84,20 @@ export async function assertPopupMenu(
   // read has to come from a settled frame (see `waitForSettledBox`).
   await waitForSettledBox(menu);
 
+  // Cross-family anchor regression for issue 3246: changing Select's defaults
+  // must not detach a DropdownMenu from its trigger. Their horizontal ranges
+  // still overlap, and the layer opens beside the trigger (4px) or on the
+  // opposite side when Base UI flips it under collision.
+  const triggerBox = await trigger.boundingBox();
+  const menuBox = await menu.boundingBox();
+  expect(triggerBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(menuBox!.x).toBeLessThan(triggerBox!.x + triggerBox!.width);
+  expect(menuBox!.x + menuBox!.width).toBeGreaterThan(triggerBox!.x);
+  const below = menuBox!.y - (triggerBox!.y + triggerBox!.height);
+  const above = triggerBox!.y - (menuBox!.y + menuBox!.height);
+  expect(Math.min(Math.abs(below), Math.abs(above))).toBeLessThanOrEqual(12);
+
   const items = menu.getByRole('menuitem');
   const count = await items.count();
   expect(count).toBeGreaterThan(0);

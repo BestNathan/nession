@@ -80,6 +80,40 @@ whose *whole row* is the hit target.
   governs the action anatomy; the resource anatomy below is its documented
   exception and is contracted separately.
 
+## Placement
+
+A standard anchored Select opens **below its trigger**, its start edge on the
+trigger's start edge, separated by the primitive's `sideOffset` (4px). That is
+measured after the opening animation settles, in trigger-relative coordinates:
+`|popup.left - trigger.left| ≤ 2px` and
+`|popup.top - trigger.bottom - sideOffset| ≤ 2px` for a `bottom` placement. The
+selected option does not move the anchor; re-opening after choosing another
+row produces the same coordinates.
+
+`width="content"` grows the list from that start edge to the end edge (clamped
+by the viewport and `overlay.choiceMaxWidth`); it never re-centres the popup
+over the trigger. The simple, anchor-width list keeps `w-(--anchor-width)`.
+
+**Item-aligned placement is not the default.** Base UI's
+`alignItemWithTrigger` overlaps the selected row with the trigger and writes
+viewport-fixed coordinates. It stays an explicit opt-in for a future surface
+that genuinely needs that macOS-like behaviour. It is incompatible with the
+Dialog popup host: the dialog is a translated containing block, so a
+viewport-fixed child is positioned relative to the dialog instead of the
+viewport and shifts by the dialog's origin. Standard anchored (absolute)
+placement is the form that survives the host, keeps the modal's focus trap and
+Experience scope, and matches the form-control semantics of a Nession Select.
+
+**Collision is Base UI's, and it is allowed.** Near a viewport edge, or when
+the list is taller than the available space, the library may flip the popup
+above the trigger (`data-side="top"`) or shift it horizontally to stay inside
+the viewport. The invariant then is not "always below and left": the popup
+stays fully visible and operable, still overlaps the trigger it belongs to,
+keeps one scroll owner (its own list), and reports the placement it actually
+used. DropdownMenu keeps the same trigger-anchored semantics with its own
+start alignment; ContextMenu keeps a pointer-origin placement; Popover may
+intentionally centre on its trigger.
+
 ## Two item anatomies
 
 The list has one interaction engine (Base UI) and two visual jobs. Choose the
@@ -146,7 +180,9 @@ resource identity, not because it is a Select.
 
 `design/contracts/patterns/popup-menu.json` pins, per experience: single-line
 action rows, the row height token, the App touch floor, and that the list owns
-its scroll. `design/contracts/patterns/choice-item.json` pins the resource
+its scroll; its description also records the trigger-relative placement and
+the collision exception above, because they are properties of this popup, not
+of each consuming form. `design/contracts/patterns/choice-item.json` pins the resource
 anatomy's wrap, minimum row band, choice width and touch floor as the separate
 member. The action row is asserted by `e2e/specs/ui-contract-matrix.spec.ts` at
 every canonical viewport — the Web rows pin 28px so an App fix cannot move Web
