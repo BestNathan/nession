@@ -40,8 +40,52 @@ impl HttpResponse {
             .map(|(_, value)| value.as_str())
     }
 
+    fn decoded_body(&self) -> String {
+        let chunked = self
+            .header("transfer-encoding")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"));
+        if !chunked {
+            return self.body.clone();
+        }
+        let mut decoded = String::new();
+        let mut rest = self.body.as_str();
+        while let Some((size_line, tail)) = rest.split_once("\r\n") {
+            let size = usize::from_str_radix(size_line.trim(), 16).unwrap_or(0);
+            if size == 0 {
+                break;
+            }
+            let Some(chunk) = tail.get(..size) else {
+                break;
+            };
+            decoded.push_str(chunk);
+            let Some(next) = tail.get(size + 2..) else {
+                break;
+            };
+            rest = next;
+        }
+        decoded
+    }
+
     fn json(&self) -> Value {
-        serde_json::from_str(&self.body).expect("a JSON body")
+        let body = self.decoded_body();
+        if let Ok(value) = serde_json::from_str::<Value>(&body) {
+            return value;
+        }
+        for event in body.split("\n\n") {
+            let mut data = String::new();
+            for line in event.lines() {
+                if let Some(rest) = line.strip_prefix("data:") {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(rest.trim_start());
+                }
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                return value;
+            }
+        }
+        panic!("no JSON payload in response: {}", self.body)
     }
 }
 
@@ -86,7 +130,9 @@ async fn send(
 ) -> Option<HttpResponse> {
     let mut stream = TcpStream::connect(addr).await.ok()?;
     let mut head = format!(
-        "{method} {path} HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\nConnection: close\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+         text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+         Connection: close\r\n",
         body.len()
     );
     if let Some(token) = token {
@@ -283,13 +329,20 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
         .as_array()
         .expect("tools")
         .clone();
-    assert_eq!(tools.len(), 12);
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    for expected in [
-        "nession_server_list_agents",
+    assert_eq!(
+        names,
+        vec![
+            "nession_server_list_agents",
+            "nession_agent_list_sessions",
+            "nession_agent_create_session",
+            "nession_agent_kill_session",
+        ]
+    );
+    for removed in [
         "nession_server_list_sessions",
         "nession_server_get_info",
         "nession_server_capture_session_preview",
@@ -298,11 +351,11 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
         "nession_server_kill_session",
         "nession_server_rename_agent",
         "nession_server_delete_agent",
-        "nession_agent_list_sessions",
-        "nession_agent_create_session",
-        "nession_agent_kill_session",
     ] {
-        assert!(names.contains(&expected), "catalog is missing {expected}");
+        assert!(
+            !names.contains(&removed),
+            "removed Tool {removed} is still advertised"
+        );
     }
 }
 
@@ -352,36 +405,14 @@ async fn embedded_mcp_does_not_displace_the_websocket_connection() {
     assert_eq!(reply["payload"]["agents"], json!([]));
 
     // The MCP endpoint is still serving on the same listener.
-    let info = call_tool(addr, &session, "nession_server_get_info", json!({})).await;
-    assert_eq!(info["isError"], false, "{info}");
+    let agents = call_tool(addr, &session, "nession_server_list_agents", json!({})).await;
+    assert_eq!(agents["isError"], false, "{agents}");
 }
 
 #[tokio::test]
-async fn embedded_mcp_reports_a_missing_session() {
+async fn embedded_mcp_answers_server_owned_discovery_from_the_registry() {
     let (addr, _server) = start_server(enabled_mcp()).await;
     let session = initialize(addr).await;
-    let result = call_tool(
-        addr,
-        &session,
-        "nession_server_get_session_attach_info",
-        json!({ "session_id": "ghost-agent:work" }),
-    )
-    .await;
-    assert_eq!(result["isError"], true, "{result}");
-    let text = result["content"][0]["text"].as_str().expect("text");
-    assert!(text.contains("not in the registry"), "{text}");
-}
-
-#[tokio::test]
-async fn embedded_mcp_answers_cluster_reads_from_the_server() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
-    let session = initialize(addr).await;
-
-    let info = call_tool(addr, &session, "nession_server_get_info", json!({})).await;
-    assert_eq!(info["isError"], false);
-    let info = text_of(&info);
-    assert!(info["version"].is_string());
-    assert_eq!(info["agent_count"], 0);
 
     let agents = call_tool(addr, &session, "nession_server_list_agents", json!({})).await;
     assert_eq!(agents["isError"], false);
@@ -455,29 +486,20 @@ async fn embedded_mcp_node_tools_route_to_the_named_agent() {
     let created = call_tool(
         addr,
         &session,
-        "nession_server_create_session",
+        "nession_agent_create_session",
         json!({ "agent_id": "agent-1", "name": "work" }),
     )
     .await;
     assert_eq!(created["isError"], false, "{created}");
 
-    // The Session is now in the registry, so the attach projection can be
-    // checked for the one thing it must never contain.
-    let attach = call_tool(
+    let killed = call_tool(
         addr,
         &session,
-        "nession_server_get_session_attach_info",
-        json!({ "session_id": "agent-1:work" }),
+        "nession_agent_kill_session",
+        json!({ "agent_id": "agent-1", "name": "work" }),
     )
     .await;
-    assert_eq!(attach["isError"], false, "{attach}");
-    let attach = text_of(&attach);
-    assert_eq!(attach["agent_id"], "agent-1");
-    assert_eq!(attach["credential"], Value::Null);
-    assert!(
-        !attach.to_string().contains("connection_token"),
-        "attach info leaked a credential field: {attach}"
-    );
+    assert_eq!(killed["isError"], false, "{killed}");
 
     server_task.abort();
 }
@@ -499,7 +521,7 @@ async fn embedded_mcp_terminates_a_session_and_then_refuses_it() {
     let deleted = send(addr, "DELETE", "/mcp", Some(TOKEN), Some(&session), "")
         .await
         .expect("delete response");
-    assert_eq!(deleted.status, 200);
+    assert!(deleted.status < 300, "DELETE returned {}", deleted.status);
 
     let body = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }).to_string();
     let reused = send(addr, "POST", "/mcp", Some(TOKEN), Some(&session), &body)

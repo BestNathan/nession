@@ -1,19 +1,18 @@
-//! The Server's MCP backends (`#565`).
+//! The Server's MCP backends (`#3264`).
 //!
 //! The Server hosts MCP by injecting **its own business services**, not a
 //! second implementation:
 //!
-//! * cluster tools dispatch through the same `server_routes!` table a Web or
-//!   CLI connection reaches, using a detached authenticated handler. Registry
-//!   mutation, keyed-lane ordering and broadcast semantics are therefore the
-//!   Server's, not a copy.
-//! * node tools route to the explicitly named Agent through the existing
-//!   command broker. The Server host never creates a tmux Session itself.
+//! * Server-owned discovery dispatches through the same `server_routes!`
+//!   table a Web or CLI connection reaches, using a detached authenticated
+//!   handler.
+//! * Agent-owned Session tools route to the explicitly named Agent through the
+//!   existing command broker. The Server host never creates a tmux Session
+//!   itself.
 //!
-//! `get_session_attach_info` is the one projection written here rather than
-//! dispatched: `server.session.attach` mints a P2P credential as a side
-//! effect, and this tool is read-only and must not. The projection is derived
-//! from the registry and contains no authentication material by construction.
+//! Only four Tools exist: one Server-owned discovery Tool and three
+//! Agent-owned Session Tools. Removing an MCP projection did not remove any
+//! Protocol route.
 
 use std::sync::Arc;
 
@@ -25,12 +24,9 @@ use nession_protocol::Message;
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-use crate::registry::{
-    legacy_agent_address, AgentInfo, AgentRegistry, AgentStatus, SessionRegistry,
-};
+use crate::registry::{AgentRegistry, AgentStatus};
 use crate::server::execution::{
-    policy_for_wire, ExecutionPolicy, Lanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT,
-    DEFAULT_QUERY_CONCURRENCY, LANE_LABEL,
+    Lanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, DEFAULT_QUERY_CONCURRENCY, LANE_LABEL,
 };
 use crate::server::handler::{
     dispatch_server, ConnectionHandler, ConnectionHandlerConfig, ConnectionHandlerDeps,
@@ -54,7 +50,6 @@ pub(crate) fn build(
         .validate_for_host(&config.auth_token, "auth_token")?;
 
     let agent_registry = Arc::clone(&deps.agent_registry);
-    let session_registry = Arc::clone(&deps.session_registry);
     let handler = ConnectionHandler::new_authenticated(
         deps,
         ConnectionHandlerConfig {
@@ -65,28 +60,26 @@ pub(crate) fn build(
         },
     );
 
-    let mutations_for_node = Arc::clone(&mutations);
     let cluster = Arc::new(ServerClusterBackend {
         handler: handler.clone(),
-        agent_registry,
-        session_registry,
-        mutations,
     });
     let node = Arc::new(ServerNodeBackend {
         handler,
-        agent_registry: Arc::clone(&cluster.agent_registry),
-        mutations: mutations_for_node,
+        agent_registry,
+        mutations,
     });
 
+    let allowed_hosts =
+        config.mcp.allowed_hosts.clone().unwrap_or_else(|| {
+            nession_mcp::service::allowed_hosts_for_bind(&config.listen_address)
+        });
     let service_config = ServiceConfig {
         path: config.mcp.path.clone(),
         auth_token: config.auth_token.clone(),
         tool_timeout: std::time::Duration::from_secs(config.mcp.tool_timeout_secs),
         max_concurrent_calls: config.mcp.max_concurrent_calls,
-        session_idle: std::time::Duration::from_secs(
-            nession_mcp::protocol::DEFAULT_SESSION_IDLE_SECS,
-        ),
-        max_sessions: nession_mcp::protocol::DEFAULT_MAX_SESSIONS,
+        allowed_origins: config.mcp.allowed_origins.clone(),
+        allowed_hosts,
     };
     let service = McpService::new(service_config, cluster, node)?;
     Ok(Some(Arc::new(service)))
@@ -94,48 +87,6 @@ pub(crate) fn build(
 
 struct ServerClusterBackend {
     handler: ConnectionHandler,
-    agent_registry: Arc<AgentRegistry>,
-    session_registry: Arc<SessionRegistry>,
-    /// The runtime's keyed mutation lane, shared with every WebSocket
-    /// connection. An MCP mutation of a Session queues against a browser's
-    /// mutation of the same Session (#565).
-    mutations: Arc<KeyedLane<ResourceKey>>,
-}
-
-impl ServerClusterBackend {
-    async fn dispatch(&self, wire: &'static str, payload: Value) -> Result<Value, ToolError> {
-        match policy_for_wire(wire, &payload) {
-            ExecutionPolicy::Key(key) => {
-                // The lane's work future must be `'static`; the handler
-                // template and the payload are owned, so the queued work does
-                // not borrow this backend.
-                let handler = self.handler.clone();
-                let (reply, result) = tokio::sync::oneshot::channel();
-                let mut lanes = Lanes::shared(
-                    DEFAULT_QUERY_CONCURRENCY,
-                    Arc::clone(&self.mutations),
-                    DEFAULT_MUTATIONS_IN_FLIGHT,
-                    LANE_LABEL,
-                );
-                lanes
-                    .key(
-                        key,
-                        Box::pin(async move {
-                            let _ = reply.send(dispatch_with(handler, wire, payload).await);
-                        }),
-                    )
-                    .await;
-                result.await.map_err(|_| {
-                    ToolError::backend("the Server's mutation lane ended before answering")
-                })?
-            }
-            // `Inline`, `Query` and `Ordered` need no key. None of this
-            // backend's mutations in this phase is `Ordered`; if one becomes
-            // that, this branch is where the barrier must be added rather than
-            // guessed at.
-            _ => dispatch_with(self.handler.clone(), wire, payload).await,
-        }
-    }
 }
 
 /// Route one unit through the Server's real handler table.
@@ -171,92 +122,7 @@ async fn dispatch_with(
 #[async_trait::async_trait]
 impl ClusterBackend for ServerClusterBackend {
     async fn list_agents(&self) -> Result<Value, ToolError> {
-        self.dispatch("server.agent.list", json!({})).await
-    }
-
-    async fn list_sessions(&self, agent_id: Option<&str>, force: bool) -> Result<Value, ToolError> {
-        self.dispatch(
-            "server.session.list",
-            json!({ "agent_id": agent_id, "force": force }),
-        )
-        .await
-    }
-
-    async fn get_info(&self) -> Result<Value, ToolError> {
-        self.dispatch("server.info", json!({})).await
-    }
-
-    async fn capture_session_preview(
-        &self,
-        session_id: &str,
-        lines: u32,
-    ) -> Result<Value, ToolError> {
-        self.dispatch(
-            "server.session.capture-preview",
-            json!({ "session_id": session_id, "lines": lines }),
-        )
-        .await
-    }
-
-    async fn get_session_attach_info(&self, session_id: &str) -> Result<Value, ToolError> {
-        let Some((agent_id, _session_name)) = session_id.split_once(':') else {
-            return Err(ToolError::invalid_argument(
-                "session_id must be in `agent_id:session_name` form",
-            ));
-        };
-        let Some(session) = self.session_registry.get(session_id).await else {
-            return Err(ToolError::not_found(format!(
-                "Session '{session_id}' is not in the registry"
-            )));
-        };
-        let Some(agent) = self.agent_registry.get(agent_id).await else {
-            return Err(ToolError::not_found(format!(
-                "Agent '{agent_id}' is not in the registry"
-            )));
-        };
-        if agent.status != AgentStatus::Online {
-            return Err(ToolError::unavailable(format!(
-                "Agent '{agent_id}' is {}",
-                agent_status(&agent.status)
-            )));
-        }
-        Ok(attach_info_projection(
-            &session.session_id,
-            &session.agent_id,
-            &session.session_name,
-            session_status(&session.status),
-            &agent,
-        ))
-    }
-
-    async fn create_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
-        self.dispatch(
-            "server.session.create",
-            json!({ "agent_id": agent_id, "name": name }),
-        )
-        .await
-    }
-
-    async fn kill_session(&self, session_id: &str) -> Result<Value, ToolError> {
-        self.dispatch("server.session.kill", json!({ "session_id": session_id }))
-            .await
-    }
-
-    async fn rename_agent(
-        &self,
-        agent_id: &str,
-        display_name: Option<&str>,
-    ) -> Result<Value, ToolError> {
-        self.dispatch(
-            "server.agent.rename",
-            json!({ "agent_id": agent_id, "display_name": display_name }),
-        )
-        .await
-    }
-
-    async fn delete_agent(&self, agent_id: &str) -> Result<Value, ToolError> {
-        self.dispatch("server.agent.delete", json!({ "agent_id": agent_id }))
-            .await
+        dispatch_with(self.handler.clone(), "server.agent.list", json!({})).await
     }
 }
 
@@ -442,42 +308,4 @@ fn agent_status(status: &AgentStatus) -> &'static str {
         AgentStatus::Offline => "offline",
         AgentStatus::Degraded => "degraded",
     }
-}
-
-fn session_status(status: &crate::registry::SessionStatus) -> &'static str {
-    match status {
-        crate::registry::SessionStatus::Active => "active",
-        crate::registry::SessionStatus::Detached => "detached",
-        crate::registry::SessionStatus::Recovering => "recovering",
-        crate::registry::SessionStatus::Orphaned => "orphaned",
-        crate::registry::SessionStatus::Zombie => "zombie",
-    }
-}
-
-/// The shared non-secret attach projection.
-///
-/// `session_name` is passed separately so an Agent error cannot change which
-/// Session the facts describe. The value has **no** credential field populated:
-/// `"credential": null` is an explicit statement, not a redaction after the
-/// fact.
-fn attach_info_projection(
-    session_id: &str,
-    agent_id: &str,
-    session_name: &str,
-    session_status: &str,
-    agent: &AgentInfo,
-) -> Value {
-    let agent_address = legacy_agent_address(&agent.addresses)
-        .or_else(|| agent.connect_url.clone())
-        .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
-    json!({
-        "session_id": session_id,
-        "agent_id": agent_id,
-        "session_name": session_name,
-        "session_status": session_status,
-        "agent_status": agent_status(&agent.status),
-        "agent_address": agent_address,
-        "addresses": agent.addresses,
-        "credential": null,
-    })
 }

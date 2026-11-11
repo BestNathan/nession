@@ -4,4 +4,5 @@
 //! `rust-test-integration` Gate (`cargo test --workspace --test integration`)
 //! owns these tests, alongside every other crate's real-stack suite.
 
+mod protocol;
 mod standalone;

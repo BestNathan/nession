@@ -449,19 +449,19 @@ where
 {
     match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
         Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
-        Ok(Sniffed::Http { head, body }) => {
+        Ok(Sniffed::Http { head, stream }) => {
             let is_image = head
                 .path()
                 .starts_with(nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX);
             if is_image {
                 return ctx
                     .image_http
-                    .serve(head, body)
+                    .serve(head, stream)
                     .await
                     .map_err(|error| anyhow::anyhow!("image blob response failed: {error}"));
             }
             if let Some(mcp) = ctx.mcp.clone() {
-                mcp.serve(head, body)
+                mcp.serve(stream)
                     .await
                     .map_err(|error| anyhow::anyhow!("MCP response failed: {error}"))
             } else {
