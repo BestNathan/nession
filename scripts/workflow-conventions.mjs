@@ -3,6 +3,7 @@
 // Baseline names are intentionally supported until each producer/consumer is
 // migrated atomically. This is an inventory, not a second acceptance/CI policy.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,7 @@ const WORKFLOW_DIR = path.join(ROOT, '.github/workflows');
 // Never silently drop a workflow from this inventory. Remove a retired entry
 // only with replacement/provenance/required-check evidence in the owning PR.
 export const CATALOG = [
+  ['automation-comment-router', 'automation-comment-router.yml', 'Automation / Comment Router', 'automation-comment-router.yml', 'Automation / Comment Router', 'automation'],
   ['agent-controller-dispatch', 'agent-controller-dispatch.yml', 'Agent / Controller Dispatch', 'agent-controller-dispatch.yml', 'Agent / Controller Dispatch', 'agent'],
   ['agent-develop', 'agent-develop.yml', 'Agent / Development', 'agent-develop.yml', 'Agent / Development', 'agent'],
   ['agent-staging-developer-canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent'],
@@ -101,6 +103,7 @@ export function resolveWorkflowPath(id, root = ROOT) {
 }
 
 const DOMAIN_PREFIX = {
+  automation: 'Automation /',
   agent: 'Agent /',
   acceptance: 'Acceptance /',
   e2e: 'E2E /',
@@ -312,6 +315,12 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
       }
     }
   }
+  if (files.has('automation-comment-router.yml')) {
+    for (const file of ['agent-issue-audit.yml', 'acceptance-manual-request.yml']) {
+      if (/^  issue_comment:\s*$/m.test(files.get(file) ?? ''))
+        errors.push(file + ': duplicate public command listener; use Automation / Comment Router');
+    }
+  }
   if (documents) errors.push(...auditWorkflowDocumentation(documents, catalog));
   return { ok: errors.length === 0, errors, inventory: [...byPath.entries()].map(([file, id]) => ({ file, id })) };
 }
@@ -405,6 +414,11 @@ function selfTest() {
   const staleDoc = new Map(docs);
   staleDoc.set('.claude/skills/nession-acceptance/SKILL.md', 'Actions -> Acceptance');
   assert.match(auditWorkflowDocumentation(staleDoc).join('\n'), /missing current workflow display name/);
+  for (const script of ['github-comment-command.mjs', 'github-comment-source.mjs', 'github-comment-router.mjs']) {
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts', script), 'self-test'], {
+      stdio: 'inherit',
+    });
+  }
   console.log('workflow-conventions: standard and dual-orphan positive/negative scenarios passed');
 }
 
