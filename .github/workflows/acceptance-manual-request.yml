@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: '24'
       - name: Verify comment routing and lifecycle policy
-        run: node scripts/issue-lifecycle-reconcile.mjs self-test
+        run: ./gates/run requirement-acceptance-selftest
       - name: Reconcile or dispatch existing stage-qualified Agent Acceptance
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
