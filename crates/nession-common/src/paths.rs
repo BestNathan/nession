@@ -52,7 +52,15 @@ pub fn agent_dir() -> io::Result<PathBuf> {
 
 /// Server database path: ~/.nession/server/server.db
 pub fn server_db_path() -> io::Result<PathBuf> {
-    server_dir().map(|d| d.join("server.db"))
+    nession_home().map(|home| server_db_path_under(&home))
+}
+
+/// Server database path under an explicit Nession home.
+///
+/// The release-archive transaction uses this to recognize a persisted default
+/// and rewrite it to the archived release's own home (#3232 F1).
+pub fn server_db_path_under(home: &Path) -> PathBuf {
+    home.join("server").join("server.db")
 }
 
 /// Server image blob store: ~/.nession/server/images/blobs
@@ -61,12 +69,22 @@ pub fn server_db_path() -> io::Result<PathBuf> {
 /// under the same durable root as the database so a Compose/Kubernetes volume
 /// carries both across container recreation (#3179).
 pub fn server_image_blob_dir() -> io::Result<PathBuf> {
-    server_dir().map(|d| d.join("images").join("blobs"))
+    nession_home().map(|home| server_image_blob_dir_under(&home))
+}
+
+/// Server image blob store under an explicit Nession home.
+pub fn server_image_blob_dir_under(home: &Path) -> PathBuf {
+    home.join("server").join("images").join("blobs")
 }
 
 /// Server image build workspace: ~/.nession/server/images/build
 pub fn server_image_build_dir() -> io::Result<PathBuf> {
-    server_dir().map(|d| d.join("images").join("build"))
+    nession_home().map(|home| server_image_build_dir_under(&home))
+}
+
+/// Server image build workspace under an explicit Nession home.
+pub fn server_image_build_dir_under(home: &Path) -> PathBuf {
+    home.join("server").join("images").join("build")
 }
 
 /// The OS runtime directory for Nession process-lifecycle state.

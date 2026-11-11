@@ -1,14 +1,15 @@
 //! `nession agent stop` — stop the Agent daemon by owned PID identity.
 
 use crate::lifecycle::lock::LifecycleLock;
-use crate::lifecycle::pid_file;
-use anyhow::{Context, Result};
+use crate::lifecycle::{pid_file, terminate};
+use anyhow::Result;
 use std::fs;
-use std::time::Duration;
-use tracing::error;
 
 pub async fn run(pid_file_path: Option<String>) -> Result<()> {
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
+    // The manager's `Restart=on-failure`/`KeepAlive` would race a direct stop
+    // and could bring the process back beside the CLI (#3232 F5).
+    crate::service::guard_agent_lifecycle(crate::service::AgentLifecycleAction::Stop, &state)?;
     let lock = LifecycleLock::acquire()?;
     run_with(state, &lock).await
 }
@@ -48,56 +49,21 @@ pub(crate) async fn run_with(state: pid_file::StateFiles, _lock: &LifecycleLock)
             );
         }
         if !stopped.contains(&identity.pid) {
-            stop_pid(identity.pid).await?;
+            // The grace timeout re-verifies the same identity before SIGKILL
+            // (#3232 F6); a reused pid is never signalled.
+            terminate::stop_verified(&record.path, &identity, pid_file::Component::Agent).await?;
             stopped.push(identity.pid);
         }
-        let _ = fs::remove_file(&record.path);
-    }
-
-    Ok(())
-}
-
-/// Stop one verified agent process.
-async fn stop_pid(pid: u32) -> Result<()> {
-    println!("Stopping agent (PID {pid})...");
-
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-
-        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).context("failed to send SIGTERM")?;
-    }
-
-    let timeout = Duration::from_secs(5);
-    let start = std::time::Instant::now();
-
-    while start.elapsed() < timeout {
-        if !pid_file::is_process_running(pid) {
-            println!("Agent stopped successfully");
-            return Ok(());
+        // A manager restart (or another writer) can replace the record during
+        // the grace period. A live identity that is not the one this stop was
+        // for belongs to a new process and must not be erased.
+        match pid_file::ownership(&record.path) {
+            Ok(pid_file::Ownership::Alive(_)) | Err(_) => {}
+            Ok(_) => {
+                let _ = fs::remove_file(&record.path);
+            }
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-
-    println!("Agent didn't stop gracefully, sending SIGKILL...");
-
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-
-        kill(Pid::from_raw(pid as i32), Signal::SIGKILL).context("failed to send SIGKILL")?;
-    }
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    if pid_file::is_process_running(pid) {
-        error!("Failed to stop agent process {}", pid);
-        anyhow::bail!("Failed to stop agent process");
-    }
-
-    println!("Agent stopped (force killed)");
 
     Ok(())
 }

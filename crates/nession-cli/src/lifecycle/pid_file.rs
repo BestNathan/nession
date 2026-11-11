@@ -312,6 +312,13 @@ fn start_time_of(pid: u32) -> Option<u64> {
     Some(now.saturating_sub(uptime))
 }
 
+/// The start-time reading for an arbitrary pid, for tests that must describe a
+/// child process rather than the process running the test.
+#[cfg(test)]
+pub(crate) fn start_time_of_pid(pid: u32) -> Option<u64> {
+    start_time_of(pid)
+}
+
 /// Record the identity of the current process at `path`.
 pub fn write_identity(
     path: &str,
@@ -392,6 +399,16 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
         // rather than as an identity, because a bare pid is what this replaces.
         _ => anyhow::bail!("state file at {path} does not hold a process identity"),
     }
+}
+
+/// Whether two identities are the same *recorded* instance.
+///
+/// Both values come from the state file, so the start field is exact: a record
+/// rewritten by another process (even one that reused the pid) must not compare
+/// equal. The OS-time tolerance in [`ownership`] is separate and still applies
+/// when deciding whether the live process matches a record.
+pub fn same_instance(left: &ProcessIdentity, right: &ProcessIdentity) -> bool {
+    left.pid == right.pid && left.started_at == right.started_at
 }
 
 /// What the state file at `path` says about the process it names.
@@ -529,6 +546,17 @@ impl Inspection {
             })
             .collect()
     }
+}
+
+/// Whether `path` is the default Agent state file for this process's runtime
+/// environment.
+///
+/// A service registration that does not pin `--pid-file` starts its process at
+/// exactly this location, so the service manager owns it.
+pub fn matches_default_agent_state_path(path: &str) -> bool {
+    nession_common::paths::agent_pid_path()
+        .map(|default| default.as_path() == Path::new(path))
+        .unwrap_or(false)
 }
 
 /// The live process recorded at the default shared runtime location for
@@ -827,6 +855,24 @@ mod tests {
         write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
 
         assert!(matches!(ownership(path).unwrap(), Ownership::Alive(_)));
+    }
+
+    #[test]
+    fn same_instance_requires_the_pid_and_start_time() {
+        let real = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        assert!(same_instance(&real, &real));
+        let mut other_start = real.clone();
+        other_start.started_at += 60;
+        assert!(!same_instance(&real, &other_start));
+        let mut one_second = real.clone();
+        one_second.started_at += 1;
+        assert!(
+            !same_instance(&real, &one_second),
+            "a rewritten record is not the same instance even inside the OS tolerance"
+        );
+        let mut other_pid = real.clone();
+        other_pid.pid += 1;
+        assert!(!same_instance(&real, &other_pid));
     }
 
     #[test]

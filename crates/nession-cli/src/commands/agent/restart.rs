@@ -24,6 +24,10 @@ pub async fn run(
     candidate.validate()?;
 
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
+    // Refuse before stopping anything: the manager would restart its own
+    // snapshotted binary, so a direct restart can neither replace the selected
+    // release nor guarantee a single process (#3232 F5).
+    crate::service::guard_agent_lifecycle(crate::service::AgentLifecycleAction::Restart, &state)?;
     let lock = LifecycleLock::acquire()?;
     // Refuse before stopping anything if the Server is running another release.
     release::ensure_no_mixed_release(pid_file::Component::Server, pid_file::Component::Agent)?;

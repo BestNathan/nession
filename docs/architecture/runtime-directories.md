@@ -90,6 +90,14 @@ An explicit `--pid-file` is written to the unit/plist but does not pin a runtime
 directory. Service-manager supervision (`Restart=on-failure`, launchd
 `KeepAlive`) is unchanged (#363).
 
+The service manager is the lifecycle owner of the Agent it registered (#3232).
+When the unit/plist targets the state file a CLI invocation resolved, direct
+`agent start/restart/stop` defer to the manager or refuse with its command;
+`start` stays idempotent for an already-running managed Agent. This prevents a
+CLI stop from racing the manager's restart policy or reviving a snapshotted
+older binary. Commands aimed at a different explicit state file are unaffected.
+See [cli-release-versioning.md](cli-release-versioning.md#service-managers).
+
 Implementation owners: `crates/nession-common/src/paths.rs`,
 `crates/nession-cli/src/lifecycle/pid_file.rs`,
 `crates/nession-cli/src/commands/agent/`,

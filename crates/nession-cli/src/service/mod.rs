@@ -153,10 +153,16 @@ pub fn install_service(config_path: Option<String>, pid_file: Option<String>) ->
 pub fn uninstall_service() -> Result<()> {
     uninstall_platform()?;
     println!("Autostart service uninstalled.");
-    println!(
-        "Note: the running agent (if any) was NOT stopped. \
-         Run `nession agent stop` to stop it manually."
-    );
+    if managed_agent().state == ManagedAgentState::Running {
+        println!(
+            "Note: the running Agent was NOT stopped and is still owned by {}. \
+             Stop it with `{}`.",
+            manager_name(),
+            manager_lifecycle_command(AgentLifecycleAction::Stop)
+        );
+    } else {
+        println!("Note: no running Agent was stopped.");
+    }
     Ok(())
 }
 
@@ -168,6 +174,389 @@ pub fn uninstall_service() -> Result<()> {
 /// - `"not installed"`
 pub fn service_status() -> &'static str {
     service_status_platform()
+}
+
+/// Environment marker written into the generated service artifact.
+///
+/// The manager's direct child is the one process allowed to start the
+/// manager-owned Agent. tmux Sessions and shells started by the Agent inherit
+/// this variable, so it is honored only together with a service-manager parent
+/// (systemd/launchd), never by an interactive descendant.
+pub const MANAGED_AGENT_ENV: &str = "NESION_MANAGED_AGENT";
+
+fn manager_invoked_process() -> bool {
+    is_manager_child(
+        std::env::var_os(MANAGED_AGENT_ENV).is_some(),
+        parent_is_service_manager(),
+    )
+}
+
+fn is_manager_child(marker_present: bool, parent_is_manager: bool) -> bool {
+    marker_present && parent_is_manager
+}
+
+#[cfg(target_os = "linux")]
+fn parent_is_service_manager() -> bool {
+    let parent = std::os::unix::process::parent_id();
+    if parent == 1 {
+        return true;
+    }
+    std::fs::read_to_string(format!("/proc/{parent}/comm"))
+        .map(|comm| comm.trim() == "systemd")
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn parent_is_service_manager() -> bool {
+    // launchd is PID 1; the job process is its direct child.
+    std::os::unix::process::parent_id() == 1
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn parent_is_service_manager() -> bool {
+    false
+}
+
+/// The lifecycle action a CLI command is about to take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentLifecycleAction {
+    Start,
+    Stop,
+    Restart,
+}
+
+/// Whether the OS service manager owns an Agent for this user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedAgentState {
+    /// No unit/plist registration and no loaded job.
+    NotInstalled,
+    /// A unit/plist is registered, but the manager does not run the job now.
+    Installed,
+    /// The manager currently runs the registered job.
+    Running,
+}
+
+/// What the observed manager registration owns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAgent {
+    pub state: ManagedAgentState,
+    /// The `--pid-file` the registration passes to the Agent, when its
+    /// unit/plist can be read. `None` means the registration could not be
+    /// inspected or does not pass one (a pre-runtime unit), in which case the
+    /// default Agent state path is the only location it can own.
+    pub pid_file: Option<String>,
+}
+
+/// What a CLI lifecycle command may do after consulting the manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentLifecycleGuard {
+    /// No manager registration applies to this state location.
+    Proceed,
+    /// The manager already runs the Agent; the idempotent `start` reports it.
+    AlreadyRunning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentLifecycleDecision {
+    Proceed,
+    AlreadyRunning,
+    Refuse,
+}
+
+/// The ownership decision, independent of how the manager state was observed.
+///
+/// The service manager owns a registered Agent's lifecycle: `start` may not
+/// create an unmanaged process beside it, `stop` may not race its
+/// `Restart=on-failure`/`KeepAlive`, and `restart` may not replace a process the
+/// manager would then start again from its snapshotted binary (#3232 F5).
+fn decide_managed_agent(
+    action: AgentLifecycleAction,
+    manager: ManagedAgentState,
+    targets_this_state: bool,
+) -> AgentLifecycleDecision {
+    if manager == ManagedAgentState::NotInstalled || !targets_this_state {
+        return AgentLifecycleDecision::Proceed;
+    }
+    match (action, manager) {
+        (AgentLifecycleAction::Start, ManagedAgentState::Running) => {
+            AgentLifecycleDecision::AlreadyRunning
+        }
+        (AgentLifecycleAction::Start, ManagedAgentState::Installed) => {
+            AgentLifecycleDecision::Refuse
+        }
+        (AgentLifecycleAction::Stop, ManagedAgentState::Running) => AgentLifecycleDecision::Refuse,
+        // Nothing is running under the manager; a direct stop can only affect
+        // the unmanaged process the operator actually named.
+        (AgentLifecycleAction::Stop, ManagedAgentState::Installed) => {
+            AgentLifecycleDecision::Proceed
+        }
+        (AgentLifecycleAction::Restart, _) => AgentLifecycleDecision::Refuse,
+        (_, ManagedAgentState::NotInstalled) => AgentLifecycleDecision::Proceed,
+    }
+}
+
+/// Observe the manager's ownership of the registered Agent.
+pub fn managed_agent() -> ManagedAgent {
+    managed_agent_platform()
+}
+
+/// Refuse a direct lifecycle command on the state file the manager's
+/// registration targets.
+///
+/// The registered unit/plist pins the state path the manager's process records
+/// its identity in. A CLI command aimed elsewhere — an isolated runtime for
+/// tests, or an operator's explicit file — names a different process and is not
+/// the manager's business.
+pub fn guard_agent_lifecycle(
+    action: AgentLifecycleAction,
+    state: &pid_file::StateFiles,
+) -> Result<AgentLifecycleGuard> {
+    // The service manager starts the Agent by running this same foreground
+    // command. That direct child must proceed; an interactive descendant that
+    // inherited the marker must not (see `MANAGED_AGENT_ENV`).
+    if manager_invoked_process() {
+        return Ok(AgentLifecycleGuard::Proceed);
+    }
+    let managed = managed_agent();
+    let targets_this_state = match managed.pid_file.as_deref() {
+        Some(pinned) => Path::new(pinned) == Path::new(&state.current),
+        None => pid_file::matches_default_agent_state_path(&state.current),
+    };
+    match decide_managed_agent(action, managed.state, targets_this_state) {
+        AgentLifecycleDecision::Proceed => Ok(AgentLifecycleGuard::Proceed),
+        AgentLifecycleDecision::AlreadyRunning => Ok(AgentLifecycleGuard::AlreadyRunning),
+        AgentLifecycleDecision::Refuse => {
+            let state_label = match managed.state {
+                ManagedAgentState::Running => "currently running",
+                _ => "registered but not running",
+            };
+            let command = manager_lifecycle_command(action);
+            if action == AgentLifecycleAction::Restart {
+                anyhow::bail!(
+                    "The Agent is managed by {} ({}); direct restart is refused because the \
+                     manager would start its snapshotted binary again and could revive a \
+                     different release or race this process.\n\
+                     Fix: switch releases by installing the target as Current and running \
+                     `nession agent install-service` from it (the manager then restarts the \
+                     registered binary), or use `{}` for a same-release restart.",
+                    manager_name(),
+                    state_label,
+                    command
+                );
+            }
+            if action == AgentLifecycleAction::Stop {
+                anyhow::bail!(
+                    "The Agent is managed by {} ({}); direct stop is refused so the manager and \
+                     the CLI cannot both control the process.\n\
+                     Fix: use `{}` to stop the managed service. The CLI does not signal a \
+                     manager-owned process.",
+                    manager_name(),
+                    state_label,
+                    command
+                );
+            }
+            anyhow::bail!(
+                "The Agent is registered as a {} service but is not running; direct start is \
+                 refused so it cannot create an unmanaged process beside the registration.\n\
+                 Fix: start it with `{}`, or run `nession agent uninstall-service` first to \
+                 return the Agent to CLI management.",
+                manager_name(),
+                command
+            );
+        }
+    }
+}
+
+/// The manager command that performs `action` on the installed Agent service.
+pub fn manager_lifecycle_command(action: AgentLifecycleAction) -> String {
+    manager_lifecycle_command_platform(action)
+}
+
+/// Parse the `ExecStart=` argv systemd will run.
+///
+/// The unit quotes every argument (`systemd_quote`), so this splits on
+/// whitespace outside double quotes and reverses those escapes. Only the
+/// `--pid-file` value is consumed; the rest is parsed so a quoted argument
+/// containing spaces cannot shift the position of that flag.
+#[cfg(any(target_os = "linux", test))]
+fn systemd_exec_args(content: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut chars = content.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '"' => quoted = !quoted,
+            '\\' if quoted => match chars.next() {
+                Some('\\') => current.push('\\'),
+                Some('"') => current.push('"'),
+                Some(';') => current.push(';'),
+                Some(other) => {
+                    current.push('\\');
+                    current.push(other);
+                }
+                None => current.push('\\'),
+            },
+            '%' if quoted && chars.peek() == Some(&'%') => {
+                chars.next();
+                current.push('%');
+            }
+            '$' if quoted && chars.peek() == Some(&'$') => {
+                chars.next();
+                current.push('$');
+            }
+            character if character.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            character => current.push(character),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// The pid-file argument in a systemd unit's `ExecStart=` line.
+#[cfg(any(target_os = "linux", test))]
+fn systemd_unit_pid_file(content: &str) -> Option<String> {
+    let args = content
+        .lines()
+        .find_map(|line| line.strip_prefix("ExecStart="))
+        .map(systemd_exec_args)
+        .unwrap_or_default();
+    pid_file_from_args(&args)
+}
+
+fn pid_file_from_args(args: &[String]) -> Option<String> {
+    args.iter()
+        .position(|arg| arg == "--pid-file")
+        .and_then(|index| args.get(index + 1))
+        .cloned()
+}
+
+/// The `<string>` values of a launchd plist's `ProgramArguments` array.
+#[cfg(any(target_os = "macos", test))]
+fn plist_program_arguments(content: &str) -> Vec<String> {
+    let Some(key) = content.find("<key>ProgramArguments</key>") else {
+        return Vec::new();
+    };
+    let rest = &content[key..];
+    let Some(array) = rest.find("<array>") else {
+        return Vec::new();
+    };
+    let rest = &rest[array..];
+    let Some(end) = rest.find("</array>") else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    let mut cursor = &rest[..end];
+    while let Some(open) = cursor.find("<string>") {
+        let after = &cursor[open + "<string>".len()..];
+        let Some(close) = after.find("</string>") else {
+            break;
+        };
+        values.push(xml_unescape(&after[..close]));
+        cursor = &after[close + "</string>".len()..];
+    }
+    values
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// The pid-file argument in a launchd plist's `ProgramArguments`.
+#[cfg(any(target_os = "macos", test))]
+fn plist_pid_file(content: &str) -> Option<String> {
+    pid_file_from_args(&plist_program_arguments(content))
+}
+
+#[cfg(target_os = "linux")]
+fn managed_agent_platform() -> ManagedAgent {
+    let unit_path = systemd_user_unit_dir()
+        .ok()
+        .map(|dir| dir.join(SYSTEMD_UNIT_NAME));
+    let installed = unit_path
+        .as_ref()
+        .map(|path| path.exists())
+        .unwrap_or(false);
+    let content = unit_path.and_then(|path| fs::read_to_string(path).ok());
+    let pid_file = content.as_deref().and_then(systemd_unit_pid_file);
+    let state = match systemd_active_state() {
+        Ok(state) if systemd_state_is_managed(&state) => ManagedAgentState::Running,
+        Ok(_) if installed => ManagedAgentState::Installed,
+        Ok(_) => ManagedAgentState::NotInstalled,
+        Err(_) if installed => ManagedAgentState::Installed,
+        Err(_) => ManagedAgentState::NotInstalled,
+    };
+    ManagedAgent { state, pid_file }
+}
+
+#[cfg(target_os = "linux")]
+fn manager_lifecycle_command_platform(action: AgentLifecycleAction) -> String {
+    let verb = match action {
+        AgentLifecycleAction::Start => "start",
+        AgentLifecycleAction::Stop => "stop",
+        AgentLifecycleAction::Restart => "restart",
+    };
+    format!("systemctl --user {verb} {SYSTEMD_UNIT_NAME}")
+}
+
+#[cfg(target_os = "macos")]
+fn managed_agent_platform() -> ManagedAgent {
+    let plist_path = launchd_agents_dir()
+        .ok()
+        .map(|dir| dir.join(LAUNCHD_PLIST_NAME));
+    let installed = plist_path
+        .as_ref()
+        .map(|path| path.exists())
+        .unwrap_or(false);
+    let content = plist_path.and_then(|path| fs::read_to_string(path).ok());
+    let pid_file = content.as_deref().and_then(plist_pid_file);
+    let state = match launchd_job_state() {
+        Ok(LaunchdJobState::Running) => ManagedAgentState::Running,
+        Ok(_) if installed => ManagedAgentState::Installed,
+        Ok(_) => ManagedAgentState::NotInstalled,
+        Err(_) if installed => ManagedAgentState::Installed,
+        Err(_) => ManagedAgentState::NotInstalled,
+    };
+    ManagedAgent { state, pid_file }
+}
+
+#[cfg(target_os = "macos")]
+fn manager_lifecycle_command_platform(action: AgentLifecycleAction) -> String {
+    let target = launchd_target("gui");
+    match action {
+        AgentLifecycleAction::Start => format!(
+            "launchctl bootstrap gui/{} ~/Library/LaunchAgents/{}",
+            unsafe { libc::getuid() },
+            LAUNCHD_PLIST_NAME
+        ),
+        AgentLifecycleAction::Stop => format!("launchctl bootout {target}"),
+        AgentLifecycleAction::Restart => format!("launchctl kickstart -k {target}"),
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn managed_agent_platform() -> ManagedAgent {
+    ManagedAgent {
+        state: ManagedAgentState::NotInstalled,
+        pid_file: None,
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn manager_lifecycle_command_platform(_action: AgentLifecycleAction) -> String {
+    "the platform service manager".to_string()
 }
 
 /// How the install command left the agent's lifecycle when it returned.
@@ -243,7 +632,7 @@ const MANAGER_NAME: &str = "launchd";
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const MANAGER_NAME: &str = "service manager";
 
-fn manager_name() -> &'static str {
+pub(crate) fn manager_name() -> &'static str {
     MANAGER_NAME
 }
 
@@ -767,7 +1156,7 @@ fn systemd_unit_content(
     nession_home: Option<&str>,
     runtime_dir: Option<&str>,
 ) -> String {
-    let mut env_lines = String::new();
+    let mut env_lines = format!("Environment=\"{MANAGED_AGENT_ENV}=1\"\n");
     if let Some(home) = nession_home {
         env_lines.push_str(&format!(
             "Environment=\"{}={}\"\n",
@@ -822,7 +1211,7 @@ fn launchd_plist_content(
     nession_home: Option<&str>,
     runtime_dir: Option<&str>,
 ) -> String {
-    let mut env_entries = String::new();
+    let mut env_entries = format!("    <key>{MANAGED_AGENT_ENV}</key>\n    <string>1</string>\n");
     if let Some(home) = nession_home {
         env_entries.push_str(&format!(
             "    <key>{}</key>\n    <string>{}</string>\n",
@@ -875,7 +1264,7 @@ fn launchd_plist_content(
 /// Run a command, returning a friendly error on failure.
 fn run_cmd(program: &str, args: &[&str]) -> Result<()> {
     use std::process::Command;
-    let status = Command::new(program)
+    let status = Command::new(program) // not-tmux: runs the service manager command
         .args(args)
         .status()
         .with_context(|| format!("failed to execute `{program}` — is it installed?"))?;
@@ -898,7 +1287,7 @@ fn run_cmd(program: &str, args: &[&str]) -> Result<()> {
 #[cfg(target_os = "macos")]
 fn run_cmd_quiet(program: &str, args: &[&str]) {
     use std::process::{Command, Stdio};
-    let _ = Command::new(program)
+    let _ = Command::new(program) // not-tmux: runs the service manager command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -914,7 +1303,7 @@ fn run_cmd_quiet(program: &str, args: &[&str]) {
 #[cfg(target_os = "linux")]
 fn run_cmd_output(program: &str, args: &[&str]) -> Result<std::process::Output> {
     use std::process::Command;
-    let output = Command::new(program)
+    let output = Command::new(program) // not-tmux: runs the service manager command
         .args(args)
         .output()
         .with_context(|| format!("failed to execute `{program}` — is it installed?"))?;
@@ -1275,5 +1664,142 @@ mod tests {
             msg.contains("run `nession config agent init"),
             "error should hint at init command, got: {msg}"
         );
+    }
+    /// The marker alone is inherited by tmux shells; only the manager's direct
+    /// child may bypass the ownership guard.
+    #[test]
+    fn only_a_manager_parent_can_use_the_managed_agent_marker() {
+        assert!(is_manager_child(true, true));
+        assert!(
+            !is_manager_child(true, false),
+            "a tmux descendant must not bypass the guard"
+        );
+        assert!(
+            !is_manager_child(false, true),
+            "a manager parent without the marker is not the artifact"
+        );
+        assert!(!is_manager_child(false, false));
+    }
+
+    #[test]
+    fn the_generated_service_artifacts_are_marked_as_manager_invoked() {
+        #[cfg(target_os = "linux")]
+        {
+            let unit = systemd_unit_content(
+                "/usr/local/bin/nession",
+                "/home/u/.nession/agent-config.toml",
+                "/run/user/1/nession/agent.pid",
+                Some("/home/u/.nession"),
+                Some("/run/user/1/nession"),
+            );
+            assert!(
+                unit.contains(&format!("Environment=\"{MANAGED_AGENT_ENV}=1\"")),
+                "the unit must mark its direct child: {unit}"
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let plist = launchd_plist_content(
+                "/usr/local/bin/nession",
+                "/Users/u/.nession/agent-config.toml",
+                "/tmp/nession/agent.pid",
+                Some("/Users/u/.nession"),
+                Some("/tmp/nession"),
+            );
+            assert!(
+                plist.contains(&format!("<key>{MANAGED_AGENT_ENV}</key>")),
+                "the plist must mark its direct child: {plist}"
+            );
+        }
+    }
+
+    /// #3232 F5: the manager owns a registered Agent, and the decision is a
+    /// pure function of the action, the manager state and whether the command
+    /// targets the registered state file.
+    #[test]
+    fn the_manager_ownership_decision_matrix_is_explicit() {
+        use AgentLifecycleAction::{Restart, Start, Stop};
+        use AgentLifecycleDecision::{AlreadyRunning, Proceed, Refuse};
+        use ManagedAgentState::{Installed, NotInstalled, Running};
+
+        for action in [Start, Stop, Restart] {
+            assert_eq!(
+                decide_managed_agent(action, NotInstalled, true),
+                Proceed,
+                "no registration never blocks a CLI command"
+            );
+            assert_eq!(
+                decide_managed_agent(action, Running, false),
+                Proceed,
+                "a registration for another state location is a different process"
+            );
+        }
+        assert_eq!(decide_managed_agent(Start, Running, true), AlreadyRunning);
+        assert_eq!(decide_managed_agent(Start, Installed, true), Refuse);
+        assert_eq!(decide_managed_agent(Stop, Running, true), Refuse);
+        assert_eq!(decide_managed_agent(Stop, Installed, true), Proceed);
+        assert_eq!(decide_managed_agent(Restart, Running, true), Refuse);
+        assert_eq!(decide_managed_agent(Restart, Installed, true), Refuse);
+    }
+
+    /// The systemd unit is not a shell: every argument is double-quoted and
+    /// `%%`/`$$`/`\"`/`\\`/`\;` are escapes. The parser must recover the exact
+    /// `--pid-file` value, including spaces, or the guard refuses the wrong
+    /// location (or misses the right one).
+    #[test]
+    fn the_systemd_exec_start_pid_file_is_parsed_with_quotes_and_escapes() {
+        let unit = "\
+[Service]
+ExecStart=\"/opt/Nession Tools/nession\" agent start --config \"/home/a b/config.toml\" \
+--pid-file \"/run/user/501/nession/agent.pid\" --foreground
+";
+        assert_eq!(
+            systemd_unit_pid_file(unit).as_deref(),
+            Some("/run/user/501/nession/agent.pid")
+        );
+        let escaped =
+            "ExecStart=\"C:\\\\a\\\\b\" agent start --pid-file \"/tmp/a%%b$$c\\\"d.pid\"\n";
+        let args = systemd_exec_args(escaped.strip_prefix("ExecStart=").unwrap().trim_end());
+        assert_eq!(
+            pid_file_from_args(&args).as_deref(),
+            Some("/tmp/a%b$c\"d.pid")
+        );
+        assert_eq!(systemd_unit_pid_file("[Service]\n"), None);
+    }
+
+    /// The launchd plist stores ProgramArguments as XML strings; entities must
+    /// be decoded before comparing the path.
+    #[test]
+    fn the_launchd_program_arguments_pid_file_is_parsed() {
+        let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/a&amp;b/nession</string>
+    <string>agent</string>
+    <string>start</string>
+    <string>--pid-file</string>
+    <string>/run/agent &quot;quoted&quot;.pid</string>
+  </array>
+  <key>KeepAlive</key><true/>
+</dict></plist>
+"#;
+        assert_eq!(
+            plist_pid_file(plist).as_deref(),
+            Some("/run/agent \"quoted\".pid")
+        );
+        assert_eq!(plist_pid_file("<plist><dict/></plist>"), None);
+    }
+
+    /// An explicit state file that is not the manager's pinned path is not
+    /// owned by the registration: isolated runtimes and operator-selected
+    /// files must remain CLI-managed.
+    #[test]
+    fn a_different_state_path_is_not_the_managers_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = pid_file::StateFiles::explicit(
+            dir.path().join("agent.pid").to_string_lossy().into_owned(),
+        );
+        assert!(!pid_file::matches_default_agent_state_path(&state.current));
     }
 }
