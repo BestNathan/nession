@@ -42,7 +42,11 @@ The rows inside an anchored list are owned by [PopupMenu](popup-menu.md): an
 **resource** row may wrap and grow with its identity/metadata. A resource list
 may widen beyond a narrow trigger up to `experience.*.overlay.choiceMaxWidth`;
 that growth does not change this document's portal, stacking or dismissal
-contract.
+contract. [PopupMenu](popup-menu.md#placement) also owns the trigger-relative
+placement: a standard Select opens below its trigger with a start-aligned edge,
+the selected row does not move that anchor, and Base UI's allowed collision
+flip/shift is judged by visibility and operability rather than by forcing the
+same side at every viewport.
 
 ## Web composition
 

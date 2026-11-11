@@ -22,6 +22,96 @@ export const BROWSER_DESIGN_IDS = Object.freeze([
   'design-renderer-boundary',
 ]);
 
+/**
+ * Approved cross-capability visual recipes (#3138).
+ *
+ * These are the capability-level invariants the canonical browser profile
+ * enforces in `ui-contract-assertions.spec.ts`. Three things stay true by
+ * construction:
+ *
+ * - the **values** are not here; each `parts` entry names a typography role in
+ *   `design/contracts/patterns/*.json`, so the contract remains the one owner
+ *   and a role change is one edit;
+ * - every contract part must be declared here and every declared part must
+ *   exist in the contract, so a new part cannot ship without an owner/repair
+ *   path (checked by `capability-visual-catalog.test.mjs`);
+ * - `owner` names the shared recipe component that must be repaired, not the
+ *   consumer that happens to render it.
+ *
+ * `relationalParts` are roles whose owner is a shared *primitive* rather than a
+ * chrome role (the field label is the shared `Label`); the invariant there is
+ * that independent consumers resolve the same computed style, not that they
+ * name a typography token.
+ */
+const frozenParts = (web, app) => Object.freeze({ web: Object.freeze(web), app: Object.freeze(app) });
+
+export const CAPABILITY_VISUAL_INVARIANTS = Object.freeze([
+  Object.freeze({
+    id: 'capability-detail-typography',
+    pattern: 'pattern.resource-detail',
+    contract: 'design/contracts/patterns/resource-detail.json',
+    owner: 'web/src/components/ui/resource-detail.tsx',
+    checkedBy: 'e2e/tests/browser/ui-contract-assertions.spec.ts',
+    parts: frozenParts(
+      ['detail-title', 'detail-section-title', 'detail-fact-label', 'detail-fact-value'],
+      ['detail-section-title', 'detail-fact-label', 'detail-fact-value'],
+    ),
+    repair: 'render the part through DetailHeader/DetailSection/DetailFact; do not fork the type role in a consumer',
+  }),
+  Object.freeze({
+    id: 'capability-read-only-facts',
+    pattern: 'pattern.resource-detail',
+    contract: 'design/contracts/patterns/resource-detail.json',
+    owner: 'web/src/components/ui/resource-detail.tsx',
+    checkedBy: 'e2e/tests/browser/ui-contract-assertions.spec.ts',
+    relationalParts: frozenParts(['detail-fact'], ['detail-fact']),
+    repair: 'render observed state as DetailFact; a read-only fact must not borrow input, fieldset or disabled-control chrome',
+  }),
+  Object.freeze({
+    id: 'capability-form-typography',
+    pattern: 'pattern.configuration-form',
+    contract: 'design/contracts/patterns/configuration-form.json',
+    owner: 'web/src/components/ui/configuration-form.tsx',
+    checkedBy: 'e2e/tests/browser/ui-contract-assertions.spec.ts',
+    parts: frozenParts(
+      ['form-section-title', 'form-section-description', 'form-help', 'form-error'],
+      ['form-section-title', 'form-section-description', 'form-help', 'form-error'],
+    ),
+    relationalParts: frozenParts(['form-label'], ['form-label']),
+    repair: 'render sections/help/errors through FormSection/FormField; the field label stays the shared Label primitive',
+  }),
+  Object.freeze({
+    id: 'capability-form-control-band',
+    pattern: 'pattern.configuration-form',
+    contract: 'design/contracts/patterns/configuration-form.json',
+    owner: 'web/src/components/ui/configuration-form.tsx',
+    checkedBy: 'e2e/tests/browser/ui-contract-assertions.spec.ts',
+    controlField: 'controlHeightToken',
+    repair: 'let shared Input/Button resolve the Experience control band; do not add a consumer-local height',
+  }),
+  Object.freeze({
+    id: 'capability-operation-typography',
+    pattern: 'pattern.operation-surface',
+    contract: 'design/contracts/patterns/operation-surface.json',
+    owner: 'web/src/components/ui/operation-surface.tsx',
+    checkedBy: 'e2e/tests/browser/ui-contract-assertions.spec.ts',
+    parts: frozenParts(
+      ['operation-title', 'operation-error'],
+      ['operation-error'],
+    ),
+    repair: 'use the shared Dialog title and OperationError roles; the App host header owns the operation name',
+  }),
+  Object.freeze({
+    id: 'capability-operation-action-band',
+    pattern: 'pattern.operation-surface',
+    contract: 'design/contracts/patterns/operation-surface.json',
+    owner: 'web/src/components/ui/operation-surface.tsx',
+    checkedBy: 'e2e/tests/browser/ui-contract-assertions.spec.ts',
+    controlField: 'controlHeightToken',
+    repair: 'put shared Buttons in OperationActions; secondary before primary, both on the Experience control band',
+  }),
+]);
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export function sha256(value) {

@@ -90,7 +90,7 @@ The layout difference is an explicit composition variant (`locationsLayout="stac
 - All controls resolve their height from the Experience control vocabulary; the App keeps the touch floor.
 - No horizontal overflow when a path, tag or identifier is long; the control wraps or scrolls intentionally.
 
-Executable form: `data-recipe="configuration-form"` plus `data-recipe-part="form-*"` on the shared owner. `design/contracts/patterns/configuration-form.json` records the stable wrap/overflow and App touch constraint.
+Executable form: `data-recipe="configuration-form"` plus `data-recipe-part="form-*"` on the shared owner. `design/contracts/patterns/configuration-form.json` records the stable wrap/overflow and App touch constraint, the shared `controlHeightToken`, and the section/help/error typography roles; `e2e/tests/browser/ui-contract-assertions.spec.ts` checks them on the real Project and Sandbox fixtures (#3138). The field label is deliberately not a chrome role in the contract: its owner is the shared `Label` primitive, so the check compares it relationally between consumers.
 
 ## Domain boundaries
 

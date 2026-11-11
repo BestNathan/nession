@@ -1,14 +1,28 @@
 {
   "id": "pattern.configuration-form",
-  "$description": "The shared editable content grammar for resource configuration (#3137): named sections, a field label + control + help + field error, related fields and repeated dynamic rows. A field value may wrap or scroll intentionally but may not make the form overflow horizontally; the App keeps every interactive control at the touch floor.",
+  "$description": "The shared editable content grammar for resource configuration (#3137): named sections, a field label + control + help + field error, related fields and repeated dynamic rows. A field value may wrap or scroll intentionally but may not make the form overflow horizontally; the App keeps every interactive control at the touch floor. `controlHeightToken` names the Experience band shared inputs/actions resolve (#3138); `parts` maps section/help/error roles to their typography vocabulary. The field label is deliberately absent: its owner is the shared Label primitive, so the invariant there is relational equality between consumers rather than a chrome role.",
   "patternRef": "docs/design/design-system/patterns/configuration-form.md",
   "web": {
     "wrap": true,
-    "overflow": "wrap"
+    "overflow": "wrap",
+    "controlHeightToken": "experience.web.control.md",
+    "parts": {
+      "form-section-title": { "typographyToken": "experience.web.typography.secondary" },
+      "form-section-description": { "typographyToken": "experience.web.typography.caption" },
+      "form-help": { "typographyToken": "experience.web.typography.caption" },
+      "form-error": { "typographyToken": "experience.web.typography.caption" }
+    }
   },
   "app": {
     "wrap": true,
     "overflow": "wrap",
-    "touchTargetToken": "experience.app.touchTarget.min"
+    "touchTargetToken": "experience.app.touchTarget.min",
+    "controlHeightToken": "experience.app.control.md",
+    "parts": {
+      "form-section-title": { "typographyToken": "experience.app.typography.secondary" },
+      "form-section-description": { "typographyToken": "experience.app.typography.caption" },
+      "form-help": { "typographyToken": "experience.app.typography.caption" },
+      "form-error": { "typographyToken": "experience.app.typography.caption" }
+    }
   }
 }

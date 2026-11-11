@@ -649,6 +649,39 @@ test.describe('App 390×844', () => {
       ...FIXTURE_SCREENSHOT,
     });
   });
+
+  // #3138 — the same content-recipe family on the App's own density. Two
+  // states, because they make different claims: a resource destination where
+  // the host header owns the name, and a capability's observed state where the
+  // facts must read as facts rather than disabled inputs.
+  test('Project detail', async ({ page }) => {
+    await gotoFixtureApp(page, '?projects=canonical');
+    await page.getByTestId('app-header-sessions').first().click();
+    await page.getByTestId('project-item-row').first().click();
+    await expect(page.getByTestId('app-project-detail')).toBeVisible();
+    await expect(page.getByTestId('project-detail-title')).toBeVisible();
+    await expect(
+      page.getByTestId('app-project-detail').getByTestId('app-page-header'),
+    ).toHaveCount(1);
+
+    await expect(page).toHaveScreenshot('app-project-detail.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Sandbox inside', async ({ page }) => {
+    await gotoFixtureApp(page, '?sandbox=inside');
+    await page.getByTestId('app-header-workspace').click();
+    await page.getByTestId('workspace-tool-sandbox').click();
+    await expect(page.getByTestId('sandbox-inside')).toBeVisible();
+    await expect(page.getByTestId('sandbox-status')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sandbox-inside.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });
 
 // #1050 criterion 11 names **375/390**, and until now only 390 had goldens:

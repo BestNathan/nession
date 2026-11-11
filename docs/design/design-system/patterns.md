@@ -115,6 +115,14 @@ Stable relationships should be asserted **between** analogous components
 (computed material, bounds, typography role, transition continuity), not only by
 checking that each component independently uses allowed tokens.
 
+The content-region recipes make that executable: their pattern contracts map
+each stable `data-recipe-part` to its approved typography role(s) and the
+Experience control band, and the canonical Browser Design spec compares Project
+and Sandbox as independent consumers on real fixtures. The owner/repair map is
+`design/scripts/browser-design-catalog.mjs`
+(`CAPABILITY_VISUAL_INVARIANTS`); the workflow checklist is in
+[validation.md](validation.md) (#3138).
+
 ## Shared rules
 
 - Current work outranks pattern chrome.

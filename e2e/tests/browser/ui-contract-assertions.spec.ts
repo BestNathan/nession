@@ -12,11 +12,21 @@
 // px in this file are intentional violations crafted for the proofs.
 import { expect, test, type Page } from '@playwright/test';
 import {
+  captureRecipeTypography,
+  expectActionOrder,
   expectAlignedY,
+  expectControlBand,
+  expectDistinctActionEmphasis,
   expectDrawnAffordance,
+  expectGridColumns,
   expectInsetFocusOutline,
+  expectNoPageOverflow,
   expectNoUnexpectedOverflow,
   expectQuietPointerFocus,
+  expectReadOnlyFacts,
+  expectRecipeRole,
+  expectSameRecipeRole,
+  expectSameRecipeTypography,
   expectScrollable,
   expectSingleLine,
   expectTokenHeight,
@@ -25,7 +35,7 @@ import {
   expectTouchTargetsWithin,
   expectVisibleWithin,
 } from '../../helpers/ui-assert/assertions';
-import { patternBlock } from '../../helpers/ui-assert/contracts';
+import { loadContracts, patternBlock } from '../../helpers/ui-assert/contracts';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
@@ -443,5 +453,422 @@ test.describe('app fixtures at 390×844', () => {
       await expectTouchTarget(rows.nth(i), ITEM_APP);
       await expectNoUnexpectedOverflow(rows.nth(i), ITEM_APP);
     }
+  });
+});
+
+// ── 3. Capability visual recipes (#3138) ───────────────────────────────────
+//
+// #3137 gave Project and Sandbox one content grammar (ResourceDetail,
+// ConfigurationForm, OperationSurface). Those acceptance Cases proved the
+// grammar once at that PR's SHA; this block is the ongoing enforcement. It
+// runs in the canonical Browser Design profile, consumes the pattern
+// contracts' `parts` map (never a second copy of 16px/12.5px), and compares
+// the two independent consumers relationally as well as against their roles.
+//
+// The viewport ids and dimensions come from design/contracts/viewports.json;
+// SC-02 names the three Web widths and the three App sizes.
+
+function canonicalViewport(experience: 'web' | 'app', width: number) {
+  const row = loadContracts().viewports.find(
+    (item) => item.experience === experience && item.width === width,
+  );
+  if (row === undefined) {
+    throw new Error(
+      `canonical ${experience} viewport ${width} is missing from design/contracts/viewports.json`,
+    );
+  }
+  return row;
+}
+
+const DETAIL = 'pattern.resource-detail';
+const FORM = 'pattern.configuration-form';
+const OPERATION = 'pattern.operation-surface';
+
+for (const width of [1440, 1180, 1024]) {
+  const viewport = canonicalViewport('web', width);
+
+  test.describe(`${viewport.id}: capability recipes (#3138)`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('Project and Sandbox resolve the approved detail/form/operation roles', async ({ page }) => {
+      test.setTimeout(110_000);
+      const base = { experience: 'web' as const, viewport: viewport.id };
+      const detailOpts = { ...base, pattern: DETAIL };
+      const formOpts = { ...base, pattern: FORM };
+      const operationOpts = { ...base, pattern: OPERATION };
+
+      // ── Project Detail: ResourceDetail ──
+      await page.goto('/#/fixture?projects=canonical');
+      await page.getByTestId('project-item-row').first().click();
+      const detail = page.getByTestId('project-detail');
+      await expect(detail).toHaveAttribute('data-recipe', 'resource-detail');
+      await expectRecipeRole(detail.locator('[data-recipe-part="detail-title"]').first(), {
+        ...detailOpts,
+        part: 'detail-title',
+      });
+      const projectSection = detail.locator('[data-recipe-part="detail-section-title"]').first();
+      await expectRecipeRole(projectSection, { ...detailOpts, part: 'detail-section-title' });
+      const projectFactLabel = detail.locator('[data-recipe-part="detail-fact-label"]').first();
+      await expectRecipeRole(projectFactLabel, { ...detailOpts, part: 'detail-fact-label' });
+      await expectRecipeRole(detail.locator('[data-recipe-part="detail-fact-value"]').first(), {
+        ...detailOpts,
+        part: 'detail-fact-value',
+      });
+      await expectReadOnlyFacts(detail, detailOpts);
+      await expectNoPageOverflow(page, detailOpts);
+      const projectSectionStyle = await captureRecipeTypography(projectSection);
+      const projectFactLabelStyle = await captureRecipeTypography(projectFactLabel);
+
+      // ── Sandbox Inside: the same content hierarchy on observed state ──
+      await page.goto('/#/fixture/workspace?capability=sandbox&sandbox=inside');
+      const inside = page.getByTestId('sandbox-inside');
+      await expect(inside).toBeVisible();
+      await expectRecipeRole(inside.locator('[data-recipe-part="detail-title"]').first(), {
+        ...detailOpts,
+        part: 'detail-title',
+      });
+      const insideSection = inside.locator('[data-recipe-part="detail-section-title"]').first();
+      await expectRecipeRole(insideSection, { ...detailOpts, part: 'detail-section-title' });
+      await expectSameRecipeTypography(projectSectionStyle, insideSection, {
+        ...detailOpts,
+        part: 'detail-section-title',
+      });
+      const insideFactLabel = inside.locator('[data-recipe-part="detail-fact-label"]').first();
+      await expectRecipeRole(insideFactLabel, { ...detailOpts, part: 'detail-fact-label' });
+      await expectSameRecipeTypography(projectFactLabelStyle, insideFactLabel, {
+        ...detailOpts,
+        part: 'detail-fact-label',
+      });
+      await expectReadOnlyFacts(inside, detailOpts);
+      await expectNoPageOverflow(page, detailOpts);
+
+      // ── Project Settings: OperationSurface + ConfigurationForm ──
+      await page.goto('/#/fixture?projects=canonical');
+      await page.getByTestId('project-item-row').first().click();
+      await page.getByTestId('project-detail-settings').click();
+      const settings = page.getByTestId('project-settings-dialog');
+      await expect(settings).toHaveAttribute('data-recipe', 'operation-surface');
+      await expectRecipeRole(
+        settings.locator('[data-recipe-part="operation-title"]'),
+        { ...operationOpts, part: 'operation-title' },
+      );
+      const projectFormSection = settings.locator('[data-recipe-part="form-section-title"]').first();
+      await expectRecipeRole(projectFormSection, { ...formOpts, part: 'form-section-title' });
+      await expectRecipeRole(
+        settings.locator('[data-recipe-part="form-section-description"]').first(),
+        { ...formOpts, part: 'form-section-description' },
+      );
+      const projectFormHelp = settings.locator('[data-recipe-part="form-help"]').first();
+      await expectRecipeRole(projectFormHelp, { ...formOpts, part: 'form-help' });
+      const projectFormLabel = settings.locator('[data-recipe-part="form-label"]').first();
+      await expectControlBand(settings.locator('#project-settings-name'), formOpts);
+      await expectGridColumns(
+        settings.locator('[data-recipe-part="form-grid"]').first(),
+        2,
+        formOpts,
+      );
+      const cancel = settings.getByRole('button', { name: 'Cancel' });
+      const save = settings.getByTestId('project-settings-submit');
+      await expectControlBand(cancel, formOpts);
+      await expectControlBand(save, formOpts);
+      await expectActionOrder(cancel, save, operationOpts);
+      await expectDistinctActionEmphasis(cancel, save, operationOpts);
+      await expectNoPageOverflow(page, formOpts);
+      const projectFormSectionStyle = await captureRecipeTypography(projectFormSection);
+      const projectFormHelpStyle = await captureRecipeTypography(projectFormHelp);
+      const projectFormLabelStyle = await captureRecipeTypography(projectFormLabel);
+
+      // An action-level failure uses the shared operation-error role.
+      await page.keyboard.press('Escape');
+      await page.getByTestId('project-create').click();
+      const create = page.getByTestId('create-project-dialog');
+      await create.getByTestId('project-create-submit').click();
+      const operationError = create.getByTestId('project-dialog-error');
+      await expect(operationError).toHaveAttribute('data-recipe-part', 'operation-error');
+      await expectRecipeRole(operationError, { ...operationOpts, part: 'operation-error' });
+      await page.keyboard.press('Escape');
+
+      // ── Sandbox Outside: the same form grammar, independently mounted ──
+      await page.goto('/#/fixture/workspace?capability=sandbox');
+      const composer = page.getByTestId('sandbox-composer');
+      await expect(composer).toBeVisible();
+      await page.getByTestId('sandbox-tab-filesystem').click();
+      const sandboxForm = composer.locator('[data-recipe="configuration-form"]').first();
+      await expect(sandboxForm).toBeVisible();
+      const sandboxSection = sandboxForm.locator('[data-recipe-part="form-section-title"]').first();
+      await expectRecipeRole(sandboxSection, { ...formOpts, part: 'form-section-title' });
+      await expectSameRecipeTypography(projectFormSectionStyle, sandboxSection, {
+        ...formOpts,
+        part: 'form-section-title',
+      });
+      const sandboxHelp = sandboxForm.locator('[data-recipe-part="form-help"]').first();
+      await expectRecipeRole(sandboxHelp, { ...formOpts, part: 'form-help' });
+      await expectSameRecipeTypography(projectFormHelpStyle, sandboxHelp, {
+        ...formOpts,
+        part: 'form-help',
+      });
+      const sandboxLabel = sandboxForm.locator('[data-recipe-part="form-label"]').first();
+      await expectSameRecipeTypography(projectFormLabelStyle, sandboxLabel, {
+        ...formOpts,
+        part: 'form-label',
+      });
+      await expectControlBand(page.getByTestId('sandbox-working-dir'), formOpts);
+      await expectNoPageOverflow(page, formOpts);
+
+      // A real field error is the recipe's FormField error, at the field.
+      await page.getByTestId('sandbox-tab-resource').click();
+      await page.getByTestId('sandbox-resource-add').click();
+      await page.getByTestId('sandbox-tab-overview').click();
+      await page.getByTestId('sandbox-preflight').click();
+      await page.getByTestId('sandbox-tab-resource').click();
+      const fieldError = page.getByTestId('sandbox-resource-key-error-0');
+      await expect(fieldError).toHaveAttribute('data-recipe-part', 'form-error');
+      await expectRecipeRole(fieldError, { ...formOpts, part: 'form-error' });
+
+      // A long technical value wraps instead of widening the page.
+      await page.getByTestId('sandbox-tab-filesystem').click();
+      await page.getByTestId('sandbox-fs-read-add').click();
+      await page.getByTestId('sandbox-fs-read-0').fill(
+        '/Users/nathan/code/nession/.claude/worktrees/feat-3138-capability-visual-proof/web/src/product/project/components/very-long-directory',
+      );
+      await expectNoPageOverflow(page, formOpts);
+    });
+  });
+}
+
+for (const width of [390, 375, 844]) {
+  const viewport = canonicalViewport('app', width);
+
+  test.describe(`${viewport.id}: capability recipes (#3138)`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('App keeps one header, stacked touch hierarchy and the App roles', async ({ page }) => {
+      test.setTimeout(110_000);
+      const base = { experience: 'app' as const, viewport: viewport.id };
+      const detailOpts = { ...base, pattern: DETAIL };
+      const formOpts = { ...base, pattern: FORM };
+
+      // ── Project Detail: the host names the depth; content does not repeat it ──
+      await page.goto('/#/fixture/app?projects=canonical');
+      await page.reload();
+      await page.getByTestId('app-layer-root').waitFor();
+      await page.getByTestId('app-header-sessions').first().click();
+      await page.getByTestId('project-item-row').first().click();
+      const detail = page.getByTestId('app-project-detail');
+      await expect(detail).toBeVisible();
+      await expect(detail.getByTestId('app-page-header')).toHaveCount(1);
+      await expect(page.getByTestId('project-detail-title')).toHaveCount(1);
+      await expect(detail.locator('[data-recipe-part="detail-title"]')).toHaveCount(0);
+      const appDetail = page.getByTestId('project-detail');
+      const appSection = appDetail.locator('[data-recipe-part="detail-section-title"]').first();
+      await expectRecipeRole(appSection, { ...detailOpts, part: 'detail-section-title' });
+      const appFactLabel = appDetail.locator('[data-recipe-part="detail-fact-label"]').first();
+      await expectRecipeRole(appFactLabel, { ...detailOpts, part: 'detail-fact-label' });
+      await expectRecipeRole(appDetail.locator('[data-recipe-part="detail-fact-value"]').first(), {
+        ...detailOpts,
+        part: 'detail-fact-value',
+      });
+      await expectReadOnlyFacts(appDetail, detailOpts);
+      await expectNoPageOverflow(page, detailOpts);
+      const appSectionStyle = await captureRecipeTypography(appSection);
+      const appFactLabelStyle = await captureRecipeTypography(appFactLabel);
+
+      // ── Project Create: one header, stacked fields at the touch band ──
+      await page.getByTestId('app-page-back').click();
+      await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+      await page.getByTestId('project-create').click();
+      const create = page.getByTestId('app-project-create-page');
+      await expect(create).toBeVisible();
+      await expect(create.getByTestId('app-page-header')).toHaveCount(1);
+      const appFormSection = create.locator('[data-recipe-part="form-section-title"]').first();
+      await expectRecipeRole(appFormSection, { ...formOpts, part: 'form-section-title' });
+      await expectRecipeRole(
+        create.locator('[data-recipe-part="form-section-description"]').first(),
+        { ...formOpts, part: 'form-section-description' },
+      );
+      const appFormHelp = create.locator('[data-recipe-part="form-help"]').first();
+      await expectRecipeRole(appFormHelp, { ...formOpts, part: 'form-help' });
+      await expectControlBand(create.locator('#project-create-name'), formOpts);
+      await expectControlBand(create.getByTestId('project-create-submit'), formOpts);
+      await expectGridColumns(create.locator('[data-recipe-part="form-grid"]').first(), 1, formOpts);
+      await expectNoPageOverflow(page, formOpts);
+      const appFormSectionStyle = await captureRecipeTypography(appFormSection);
+      const appFormHelpStyle = await captureRecipeTypography(appFormHelp);
+
+      // ── Settings: the same operation grammar, Back as the only leave ──
+      await create.getByTestId('app-page-back').click();
+      await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+      await page.getByTestId('project-item-row').first().click();
+      await page.getByTestId('project-detail-settings').click();
+      const settings = page.getByTestId('app-project-settings-page');
+      await expect(settings).toBeVisible();
+      await expect(settings.getByTestId('app-page-header')).toHaveCount(1);
+      await expect(settings.locator('[data-recipe-part="operation-title"]')).toHaveCount(1);
+      const settingsSection = settings.locator('[data-recipe-part="form-section-title"]').first();
+      await expectRecipeRole(settingsSection, { ...formOpts, part: 'form-section-title' });
+      await expectSameRecipeTypography(appFormSectionStyle, settingsSection, {
+        ...formOpts,
+        part: 'form-section-title',
+      });
+      await expectControlBand(settings.locator('#project-settings-name'), formOpts);
+      await expectControlBand(settings.getByTestId('project-settings-submit'), formOpts);
+      await expectNoPageOverflow(page, formOpts);
+      await settings.getByTestId('app-page-back').click();
+      await expect(page.getByTestId('app-project-detail')).toBeVisible();
+
+      // ── Sandbox Outside: one host header and the shared form roles ──
+      await page.goto('/#/fixture/app');
+      await page.reload();
+      await page.getByTestId('app-layer-root').waitFor();
+      await page.getByTestId('app-header-workspace').click();
+      await page.getByTestId('workspace-tool-sandbox').click();
+      await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+      await expect(
+        page.getByTestId('app-layer-workspace').getByTestId('app-page-header'),
+      ).toHaveCount(1);
+      await page.getByTestId('sandbox-tab-filesystem').click();
+      const sandboxForm = page
+        .getByTestId('sandbox-composer')
+        .locator('[data-recipe="configuration-form"]')
+        .first();
+      const sandboxSection = sandboxForm.locator('[data-recipe-part="form-section-title"]').first();
+      await expectRecipeRole(sandboxSection, { ...formOpts, part: 'form-section-title' });
+      await expectSameRecipeTypography(appFormSectionStyle, sandboxSection, {
+        ...formOpts,
+        part: 'form-section-title',
+      });
+      const sandboxHelp = sandboxForm.locator('[data-recipe-part="form-help"]').first();
+      await expectSameRecipeTypography(appFormHelpStyle, sandboxHelp, {
+        ...formOpts,
+        part: 'form-help',
+      });
+      await expectControlBand(page.getByTestId('sandbox-working-dir'), formOpts);
+      await expectGridColumns(
+        sandboxForm.locator('[data-recipe-part="form-grid"]').first(),
+        1,
+        formOpts,
+      );
+      await expectNoPageOverflow(page, formOpts);
+
+      // ── Sandbox Inside: observed facts, no input chrome, one header ──
+      await page.goto('/#/fixture/app?sandbox=inside');
+      await page.reload();
+      await page.getByTestId('app-layer-root').waitFor();
+      await page.getByTestId('app-header-workspace').click();
+      await page.getByTestId('workspace-tool-sandbox').click();
+      const inside = page.getByTestId('sandbox-inside');
+      await expect(inside).toBeVisible();
+      await expect(
+        page.getByTestId('app-layer-workspace').getByTestId('app-page-header'),
+      ).toHaveCount(1);
+      const insideSection = inside.locator('[data-recipe-part="detail-section-title"]').first();
+      await expectRecipeRole(insideSection, { ...detailOpts, part: 'detail-section-title' });
+      await expectSameRecipeTypography(appSectionStyle, insideSection, {
+        ...detailOpts,
+        part: 'detail-section-title',
+      });
+      const insideFactLabel = inside.locator('[data-recipe-part="detail-fact-label"]').first();
+      await expectRecipeRole(insideFactLabel, { ...detailOpts, part: 'detail-fact-label' });
+      await expectSameRecipeTypography(appFactLabelStyle, insideFactLabel, {
+        ...detailOpts,
+        part: 'detail-fact-label',
+      });
+      await expectReadOnlyFacts(inside, detailOpts);
+      await expectNoPageOverflow(page, detailOpts);
+    });
+  });
+}
+
+test.describe('capability recipe regression proofs (#3138)', () => {
+  const viewport = canonicalViewport('web', 1440);
+  test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+  test('an intentional role regression is detected by the contract owner', async ({ page }) => {
+    const detailOpts = {
+      pattern: DETAIL,
+      experience: 'web' as const,
+      viewport: viewport.id,
+    };
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-item-row').first().click();
+    const detail = page.getByTestId('project-detail');
+    const title = detail.locator('[data-recipe-part="detail-title"]').first();
+    const section = detail.locator('[data-recipe-part="detail-section-title"]').first();
+
+    // Promote the quiet section heading to the title's metrics. The values come
+    // from the production title role, not a copied px literal, so the proof
+    // cannot drift away from the rule it is proving.
+    const titleStyle = await captureRecipeTypography(title);
+    await section.evaluate((el, style) => {
+      el.style.fontSize = style.fontSize;
+      el.style.fontWeight = style.fontWeight;
+      el.style.lineHeight = style.lineHeight;
+    }, titleStyle);
+
+    await expect(
+      expectRecipeRole(section, { ...detailOpts, part: 'detail-section-title' }),
+    ).rejects.toThrow(/typography-role/);
+  });
+
+  test('a read-only fact that borrows field chrome is detected', async ({ page }) => {
+    const detailOpts = {
+      pattern: DETAIL,
+      experience: 'web' as const,
+      viewport: viewport.id,
+    };
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-item-row').first().click();
+    const detail = page.getByTestId('project-detail');
+    await detail
+      .locator('[data-recipe-part="detail-fact"]')
+      .first()
+      .evaluate((el) => {
+        el.style.border = '1px solid rgb(0, 0, 0)';
+      });
+    await expect(expectReadOnlyFacts(detail, detailOpts)).rejects.toThrow(/read-only-fact/);
+  });
+
+  test('the approved Web/App variant passes instead of being flattened to sameness', async ({
+    page,
+  }) => {
+    const webViewport = canonicalViewport('web', 1440);
+    const appViewport = canonicalViewport('app', 390);
+
+    await page.setViewportSize({ width: webViewport.width, height: webViewport.height });
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-item-row').first().click();
+    const webSection = page
+      .getByTestId('project-detail')
+      .locator('[data-recipe-part="detail-section-title"]')
+      .first();
+    await expectRecipeRole(webSection, {
+      pattern: DETAIL,
+      experience: 'web',
+      viewport: webViewport.id,
+      part: 'detail-section-title',
+    });
+    const webStyle = await captureRecipeTypography(webSection);
+
+    await page.setViewportSize({ width: appViewport.width, height: appViewport.height });
+    await page.goto('/#/fixture/app?projects=canonical');
+    await page.reload();
+    await page.getByTestId('app-layer-root').waitFor();
+    await page.getByTestId('app-header-sessions').first().click();
+    await page.getByTestId('project-item-row').first().click();
+    const appSection = page
+      .getByTestId('project-detail')
+      .locator('[data-recipe-part="detail-section-title"]')
+      .first();
+    await expectRecipeRole(appSection, {
+      pattern: DETAIL,
+      experience: 'app',
+      viewport: appViewport.id,
+      part: 'detail-section-title',
+    });
+    const appStyle = await captureRecipeTypography(appSection);
+
+    // Both experiences pass their own role, and the roles are deliberately not
+    // the same size: the App keeps its own density instead of inheriting Web's.
+    expect(appStyle.fontSize).not.toBe(webStyle.fontSize);
   });
 });
