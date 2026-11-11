@@ -4,6 +4,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -372,7 +373,7 @@ export function EnvImportDialog({ isOpen, onClose, agents, onImported }: EnvImpo
         <DialogHeader>
           <DialogTitle>Import .env file</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
+        <DialogBody className="flex flex-col gap-4">
           <PhaseBody
             phase={phase}
             file={file}
@@ -388,7 +389,7 @@ export function EnvImportDialog({ isOpen, onClose, agents, onImported }: EnvImpo
             onAgent={setAgentId}
           />
           {error ? <p className={cn('text-destructive', chromeSansRole('body'))}>{error}</p> : null}
-        </div>
+        </DialogBody>
         <DialogFooter>
           <ImportFooter
             phase={phase}

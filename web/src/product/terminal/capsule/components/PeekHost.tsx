@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -198,7 +199,9 @@ export function PeekHost({
           <DialogHeader>
             <DialogTitle>{detail?.title ?? ''}</DialogTitle>
           </DialogHeader>
-          <div className="flex min-h-0 flex-1 flex-col">{detail?.content}</div>
+          <DialogBody className="flex min-h-0 flex-1 flex-col">
+            {detail?.content}
+          </DialogBody>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,7 +1,8 @@
-// #3128 SC-01: a scrolling Web dialog keeps its sticky action footer as an
-// opaque band flush with the dialog's bottom edge. Fields may scroll beneath
-// it, but must not show through, and the action stays inside the band. A
-// non-sticky footer keeps the lighter translucent band.
+// #3128 SC-01 (maintained under the #3298 three-zone contract): a scrolling Web
+// dialog keeps its action footer as a fixed opaque band flush with the dialog's
+// bottom edge while DialogBody alone scrolls. The action stays inside the band.
+// Short dialogs use the same opaque band; the old in-flow translucent variant
+// is retired by the shared anatomy.
 import { expect, test, type Locator } from '@playwright/test';
 import { freezeFixtureClock } from '../../../../helpers/fixtureVisual';
 import { verifiedRuntime } from '../../../shared/foreground-resume-browser.cjs';
@@ -28,7 +29,7 @@ async function addLocationsUntilScrollable(
 ): Promise<void> {
   for (let i = 0; i < 12; i += 1) {
     await dialog.getByTestId('project-location-add').click();
-    const scrollable = await dialog.evaluate(
+    const scrollable = await dialog.locator('[data-slot="dialog-body"]').evaluate(
       (element) => element.scrollHeight > element.clientHeight,
     );
     if (scrollable) return;
@@ -36,7 +37,7 @@ async function addLocationsUntilScrollable(
   throw new Error('the Create Project dialog did not become scrollable');
 }
 
-test('SC-01: the sticky footer is opaque, flush and contains the action', async ({ page }) => {
+test('SC-01: the fixed footer is opaque, flush and contains the action', async ({ page }) => {
   test.setTimeout(110_000);
   const { sha } = verifiedRuntime('SC-01');
   const observed: string[] = [];
@@ -55,8 +56,8 @@ test('SC-01: the sticky footer is opaque, flush and contains the action', async 
     await addLocationsUntilScrollable(page, dialog);
 
     const footer = dialog.locator('[data-slot="dialog-footer"]');
-    await expect(footer).toHaveAttribute('data-sticky', 'true');
-    expect(await backgroundAlpha(footer), 'the sticky band is opaque').toBe(1);
+    await expect(footer).not.toHaveAttribute('data-sticky');
+    expect(await backgroundAlpha(footer), 'the footer band is opaque').toBe(1);
 
     const dialogBox = await dialog.boundingBox();
     const footerBox = await footer.boundingBox();
@@ -76,7 +77,7 @@ test('SC-01: the sticky footer is opaque, flush and contains the action', async 
     expect(submitBox!.x + submitBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
 
     // Scrolling to the end keeps the band in the same place and opaque.
-    await dialog.evaluate((element) => {
+    await dialog.locator('[data-slot="dialog-body"]').evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
     const scrolledFooter = await footer.boundingBox();
@@ -93,12 +94,13 @@ test('SC-01: the sticky footer is opaque, flush and contains the action', async 
   });
 });
 
-test('SC-01: a footer that stays in flow keeps the lighter band', async ({ page }) => {
+test('SC-01: a short dialog keeps the same fixed opaque footer', async ({ page }) => {
   test.setTimeout(110_000);
   const { sha } = verifiedRuntime('SC-01');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/fixture?projects=canonical');
-  // Rename is a short dialog whose footer never becomes sticky.
+  // Rename is a short dialog: it must not scroll and its footer is the same
+  // opaque, flush band, not a legacy in-flow translucent variant.
   const projectRow = page.getByTestId('project-item-row').first();
   const projectId = await projectRow.getAttribute('data-project-id');
   await page.getByTestId(`project-actions-${projectId}`).click();
@@ -107,11 +109,20 @@ test('SC-01: a footer that stays in flow keeps the lighter band', async ({ page 
   await expect(rename).toBeVisible();
   const footer = rename.locator('[data-slot="dialog-footer"]');
   await expect(footer).not.toHaveAttribute('data-sticky');
-  expect(await backgroundAlpha(footer), 'the in-flow band stays lighter').toBeLessThan(1);
+  expect(await backgroundAlpha(footer), 'the short-dialog band is opaque').toBe(1);
+  const dialogBox = await rename.boundingBox();
+  const footerBox = await footer.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(footerBox).not.toBeNull();
+  expect(Math.abs(footerBox!.y + footerBox!.height - (dialogBox!.y + dialogBox!.height)))
+    .toBeLessThanOrEqual(1);
+  expect(
+    await rename.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
+  ).toBe(true);
 
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ': the non-sticky Rename Project footer kept the existing translucent band',
+      'exact SHA ' + sha + ': the short Rename Project dialog kept a non-scrolling surface and the same opaque flush footer band',
   });
 });

@@ -1,17 +1,17 @@
 {
   "id": "pattern.overlay-surfaces",
-  "$description": "The cross-family overlay contract (#3142): every modal body is the one scroll owner, headers/footers stay put, and centered Web overlays resolve their width from a semantic token rather than a consumer literal. The anchored/menu member's row band remains pattern.popup-menu; this block names the shared operation-surface constraints, not a second list contract.",
+  "$description": "The cross-family overlay contract (#3142, #3298): the dialog surface is a non-scrolling column, DialogBody is the one scroll owner and headers/footers are fixed opaque full-width bands, and centered Web overlays resolve their width from a semantic token rather than a consumer literal. The anchored/menu member's row band remains pattern.popup-menu; this block names the shared operation-surface constraints, not a second list contract.",
   "patternRef": "docs/design/design-system/patterns/overlay-surfaces.md",
   "web": {
     "wrap": true,
     "overflow": "scroll",
-    "scrollOwner": true,
+    "scrollOwner": "dialog-body",
     "maxWidthToken": "experience.web.overlay.standardMaxWidth"
   },
   "app": {
     "wrap": true,
     "overflow": "scroll",
-    "scrollOwner": true,
+    "scrollOwner": "dialog-body",
     "touchTargetToken": "experience.app.touchTarget.min"
   }
 }

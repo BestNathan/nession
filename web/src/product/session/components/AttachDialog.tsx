@@ -2,6 +2,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -55,10 +56,10 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
         size="wide"
         data-testid="attach-dialog"
       >
-        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
+        <DialogHeader>
           <DialogTitle>Attach{session ? `: ${session.session_name}` : ''}</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
+        <DialogBody className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <Label>Connection Mode</Label>
             <ModeChoices mode={mode} onChange={attach.setMode} />
@@ -94,8 +95,8 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
               {attach.error}
             </p>
           ) : null}
-        </div>
-        <DialogFooter sticky>
+        </DialogBody>
+        <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onClose()}>
             Cancel
           </Button>

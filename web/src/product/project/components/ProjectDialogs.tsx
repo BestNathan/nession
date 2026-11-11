@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -61,26 +62,28 @@ export function CreateProjectDialog({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent size="wide" data-recipe="operation-surface" data-testid="create-project-dialog">
-        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
+        <DialogHeader>
           <DialogTitle data-recipe-part="operation-title">Create Project</DialogTitle>
         </DialogHeader>
         <form
           data-recipe-part="operation-body"
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void form.submit();
           }}
         >
-          <ProjectFormFields
-            draft={form.draft}
-            onChange={form.setDraft}
-            agents={agents}
-            disabled={form.busy}
-            idPrefix="project-create"
-          />
-          <ErrorText error={form.error} />
-          <DialogFooter sticky data-recipe-part="operation-actions">
+          <DialogBody className="flex flex-col gap-4">
+            <ProjectFormFields
+              draft={form.draft}
+              onChange={form.setDraft}
+              agents={agents}
+              disabled={form.busy}
+              idPrefix="project-create"
+            />
+            <ErrorText error={form.error} />
+          </DialogBody>
+          <DialogFooter data-recipe-part="operation-actions">
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
@@ -146,24 +149,26 @@ export function RenameProjectDialog({
         </DialogHeader>
         <form
           data-recipe-part="operation-body"
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
           }}
         >
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="project-rename-name">Name</Label>
-            <Input
-              id="project-rename-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={busy}
-              autoComplete="off"
-              autoFocus
-            />
-          </div>
-          <ErrorText error={error} />
+          <DialogBody className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="project-rename-name">Name</Label>
+              <Input
+                id="project-rename-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={busy}
+                autoComplete="off"
+                autoFocus
+              />
+            </div>
+            <ErrorText error={error} />
+          </DialogBody>
           <DialogFooter data-recipe-part="operation-actions">
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={busy}>
               Cancel
@@ -205,26 +210,28 @@ export function ProjectSettingsDialog({
   return (
     <Dialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent size="wide" data-recipe="operation-surface" data-testid="project-settings-dialog">
-        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
+        <DialogHeader>
           <DialogTitle data-recipe-part="operation-title">Project settings</DialogTitle>
         </DialogHeader>
         <form
           data-recipe-part="operation-body"
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void form.submit();
           }}
         >
-          <ProjectFormFields
-            draft={form.draft}
-            onChange={form.setDraft}
-            agents={agents}
-            disabled={form.busy}
-            idPrefix="project-settings"
-          />
-          <ErrorText error={form.error} />
-          <DialogFooter sticky data-recipe-part="operation-actions">
+          <DialogBody className="flex flex-col gap-4">
+            <ProjectFormFields
+              draft={form.draft}
+              onChange={form.setDraft}
+              agents={agents}
+              disabled={form.busy}
+              idPrefix="project-settings"
+            />
+            <ErrorText error={form.error} />
+          </DialogBody>
+          <DialogFooter data-recipe-part="operation-actions">
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
