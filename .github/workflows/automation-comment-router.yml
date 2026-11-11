@@ -1,0 +1,81 @@
+name: Automation / Comment Router
+
+# One public human command intake; old specialized bot/recovery signals
+# remain in their original narrowly constrained workflows.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automation-comment-${{ github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.action == 'created' &&
+      github.actor == github.event.comment.user.login &&
+      github.event.comment.user.type == 'User' &&
+      startsWith(github.event.comment.body, '/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      handler: ${{ steps.route.outputs.handler }}
+      issue_number: ${{ steps.route.outputs.issue_number }}
+      comment_id: ${{ steps.route.outputs.comment_id }}
+      target_sha: ${{ steps.route.outputs.target_sha }}
+      target_ref: ${{ steps.route.outputs.target_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Self-test trusted command parsing, context and authorization
+        run: |
+          node scripts/github-comment-command.mjs self-test
+          node scripts/github-comment-source.mjs self-test
+          node scripts/github-comment-router.mjs self-test
+      - name: Resolve original comment and immutable target
+        id: route
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/github-comment-router.mjs resolve
+
+  dispatch:
+    needs: resolve
+    if: needs.resolve.outputs.handler != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Revalidate source and dispatch domain-owned workflow
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_HANDLER: ${{ needs.resolve.outputs.handler }}
+          EXPECTED_ISSUE: ${{ needs.resolve.outputs.issue_number }}
+          EXPECTED_COMMENT: ${{ needs.resolve.outputs.comment_id }}
+          EXPECTED_SHA: ${{ needs.resolve.outputs.target_sha }}
+          EXPECTED_REF: ${{ needs.resolve.outputs.target_ref }}
+        run: node scripts/github-comment-router.mjs dispatch

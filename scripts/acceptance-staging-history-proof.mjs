@@ -56,7 +56,8 @@ export function verifySource(record, index, nativeRun, nativeJobs) {
       nativeRun.head_branch !== 'main' ||
       nativeRun.name !== 'Deploy / Identity' ||
       String(nativeRun.path ?? '').split('@')[0] !== '.github/workflows/deploy-identity.yml' ||
-      nativeRun.event !== 'workflow_dispatch' ||
+      !['workflow_dispatch', 'workflow_run'].includes(nativeRun.event) ||
+      nativeRun.event !== source.event ||
       nativeRun.status !== 'completed' || nativeRun.conclusion !== 'success' ||
       nativeRun.repository?.full_name !== REPO ||
       nativeRun.head_repository?.full_name !== REPO) {
@@ -240,6 +241,18 @@ export async function selfTest() {
       {name:'Observe deployed workloads',conclusion:'success'},
       {name:'Attest deployment identity',conclusion:'success'},
     ]}]};
+  // Automatic Staging release completion is also a native, main-owned
+  // observer source. Exact source-event matching is required: no substitution
+  // of a manual Run's stored receipt with an automatic workflow_run.
+  const automatic = enrichReceipt(receipt, {
+    source: { ...source, event: 'workflow_run' }, recordPath: durable,
+    workflowUrl:'https://github.com/BestNathan/nession/actions/runs/123',
+  });
+  const automaticIndex = indexRecord(automatic);
+  assert.equal(verifySource(automatic, automaticIndex,
+    { ...run, event: 'workflow_run' }, jobs).source_sha, target);
+  assert.throws(() => verifySource(automatic, automaticIndex, run, jobs),
+    /historical source GitHub Run identity mismatch/);
   const get = async p => {
     if (p.endsWith('/commits/' + target)) return commit;
     if (p.endsWith('/commits/' + head)) return integrated;

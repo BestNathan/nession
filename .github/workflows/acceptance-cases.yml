@@ -205,6 +205,7 @@ jobs:
           cp "${RUNNER_TEMP}/selected-cases.json" "${RUNNER_TEMP}/acceptance-case-results/selection.json"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
           echo "needs_browser=${needs_browser}" >> "${GITHUB_OUTPUT}"
+          echo "both_count=$(jq '[.[] | select(.platform == "both")] | length' "$RUNNER_TEMP/selected-cases.json")" >> "$GITHUB_OUTPUT"
           {
             echo "## Acceptance Case selection"
             echo
@@ -341,6 +342,34 @@ jobs:
         if: steps.select.outputs.count != '0'
         run: cd workspace && cargo build -p nession-server -p nession-agent
 
+      - name: Verify dual-native evidence combiner
+        if: steps.select.outputs.both_count != '0'
+        run: node trusted/scripts/acceptance-native-case-combine.mjs self-test
+
+      # Main-owned setup, staging only, on a disposable GitHub-hosted machine.
+      - name: Prepare native systemd user manager
+        if: steps.select.outputs.both_count != '0' && github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_ENVIRONMENT" != "github-hosted" ]] || \
+             [[ -e "$HOME/.config/systemd/user/nession-agent.service" ]]; then
+            echo 'No clean hosted systemd lane; Case remains Pending'
+            exit 0
+          fi
+          uid="$(id -u)"
+          sudo loginctl enable-linger "$(id -un)" || true
+          sudo systemctl start "user@$uid.service" || true
+          runtime="/run/user/$uid"
+          if XDG_RUNTIME_DIR="$runtime" DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+             systemctl --user show-environment >/dev/null 2>&1; then
+            echo "XDG_RUNTIME_DIR=$runtime" >> "$GITHUB_ENV"
+            echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus" >> "$GITHUB_ENV"
+            echo 'NESION_ACCEPTANCE_ISOLATED_SERVICE_MANAGER=1' >> "$GITHUB_ENV"
+          else
+            echo 'No systemd user bus; native Case remains Pending'
+          fi
+
       # Browser-only setup remains governed by the trusted needs_browser flag;
       # restore matching binaries without repeating Playwright's apt dependency
       # installation in an ephemeral Ubuntu runner (#2525).
@@ -400,6 +429,10 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           exit "${status}"
+      - name: Withhold unpaired native Linux records
+        if: always() && steps.select.outputs.both_count != '0'
+        run: node trusted/scripts/acceptance-native-case-combine.mjs detach-linux "$RUNNER_TEMP/selected-cases.json" "$RUNNER_TEMP/acceptance-case-results"
+
       - name: Enforce Case coverage without suppressing executed Case evidence
         if: always() && steps.select.outcome == 'success'
         run: |
@@ -594,6 +627,7 @@ jobs:
           count="$(jq 'length' "${RUNNER_TEMP}/selected-cases.json")"
           cp "${RUNNER_TEMP}/selected-cases.json" "${RUNNER_TEMP}/acceptance-case-results/selection.json"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          echo "both_count=$(jq '[.[] | select(.platform == "both")] | length' "$RUNNER_TEMP/selected-cases.json")" >> "$GITHUB_OUTPUT"
           {
             echo "## Acceptance Case selection (macOS)"
             echo
@@ -624,6 +658,20 @@ jobs:
       - name: Build Rust runtime
         if: steps.select.outputs.count != '0'
         run: cd workspace && cargo build -p nession-server -p nession-agent
+
+      - name: Authorize isolated native launchd Case
+        if: steps.select.outputs.both_count != '0' && github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          uid="$(id -u)"
+          if [[ "$RUNNER_ENVIRONMENT" == "github-hosted" ]] && \
+             [[ ! -e "$HOME/Library/LaunchAgents/com.nession.agent.plist" ]] && \
+             (launchctl print "gui/$uid" >/dev/null 2>&1 || launchctl print "user/$uid" >/dev/null 2>&1); then
+            echo 'NESION_ACCEPTANCE_ISOLATED_SERVICE_MANAGER=1' >> "$GITHUB_ENV"
+          else
+            echo 'No clean hosted launchd domain; native Case remains Pending'
+          fi
 
       - name: Execute selected Cases in one job-scoped batch
         id: cases
@@ -657,6 +705,17 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           exit "${status}"
+
+      - name: Download same-run Linux native proof
+        if: always() && steps.select.outputs.both_count != '0'
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-case-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-native-results
+
+      - name: Combine exact-SHA native Linux and macOS proofs
+        if: always() && steps.select.outputs.both_count != '0'
+        run: node trusted/scripts/acceptance-native-case-combine.mjs combine-macos "$RUNNER_TEMP/selected-cases.json" "$RUNNER_TEMP/linux-native-results" "$RUNNER_TEMP/acceptance-case-results"
 
       - name: Enforce Case coverage without suppressing executed Case evidence
         if: always() && steps.select.outcome == 'success'

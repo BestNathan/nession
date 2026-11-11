@@ -161,5 +161,13 @@ export async function startPagesFixture(options:{historicalLineage?:boolean}={})
  });
  await new Promise<void>((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done);});
  const port=server.address();if(!port||typeof port==='string')throw new Error('missing fixture port');
- return {origin:'http://127.0.0.1:'+port.port,close:()=>new Promise<void>((done,fail)=>server.close(e=>e?fail(e):done()))};
+ return {origin:'http://127.0.0.1:'+port.port,close:()=>new Promise<void>((done,fail)=>{
+  // A browser may leave an HTTP request or keep-alive connection active.
+  // server.close() alone waits indefinitely for active connections and can
+  // turn an already-passing Pages assertion into a 30s flaky test timeout.
+  // This server belongs exclusively to this test fixture: after ceasing to
+  // accept new requests, terminate its remaining HTTP connections.
+  server.close(e=>e?fail(e):done());
+  server.closeAllConnections();
+ })};
 }

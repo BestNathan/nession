@@ -92,7 +92,7 @@ jobs:
               .head_repository.full_name == $repo and
               .name == "Deploy / Identity" and
               (.path | split("@")[0]) == ".github/workflows/deploy-identity.yml" and
-              .event == "workflow_dispatch" and
+              (.event == "workflow_dispatch" or .event == "workflow_run") and
               .head_branch == "main" and
               .status == "completed" and
               .conclusion == "success" and
