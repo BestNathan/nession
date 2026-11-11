@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'node:crypto';
 import { collect } from './issue-e2e-collect.mjs';
+import { planDigest } from './issue-e2e-plan.mjs';
 
 const sha256=b=>crypto.createHash('sha256').update(b).digest('hex');
 export function verifyScopeArtifact({plan,results,report,assertions,run,scopeProof}) {
@@ -20,10 +21,7 @@ export function verifyScopeArtifact({plan,results,report,assertions,run,scopePro
   assert.equal(plan.source_event,'push','only scoped post-merge producer plans are eligible');
   assert.equal(plan.merge_sha,run.head_sha,'scope plan must bind exact merged SHA');
   if(plan.plan_digest!=null){
-    const canonical={schema_version:plan.schema_version,kind:plan.kind,
-      base_sha:plan.base_sha,target_sha:plan.target_sha,issues:plan.issues,
-      selected:plan.selected,mode:plan.mode};
-    assert.equal(plan.plan_digest,sha256(JSON.stringify(canonical)),
+    assert.equal(plan.plan_digest,planDigest(plan),
       'source plan digest does not match canonical declared E2E obligations');
   }
   assert.equal(plan.mode,scopeProof.scope);
@@ -103,15 +101,30 @@ function selfTest(){
     {scopeProof:{scope:'selected',receipt:{selected_ids:['login']}}},
   ])assert.throws(()=>verifyScopeArtifact({plan,results,run,scopeProof,...wrong}));
   const selected={...plan,mode:'selected',selected:[{id:'login',owners:[]}]};
-  selected.plan_digest=sha256(JSON.stringify({schema_version:selected.schema_version,
-    kind:selected.kind,base_sha:selected.base_sha,target_sha:selected.target_sha,
-    issues:selected.issues,selected:selected.selected,mode:selected.mode}));
+  selected.plan_digest=planDigest(selected);
   assert.throws(()=>verifyScopeArtifact({plan:{...selected,plan_digest:'b'.repeat(64)},
     results,run,scopeProof:{scope:'selected',receipt:{selected_ids:['login']}}}),
     /digest/);
   const selectedReceipt={scope:'selected',receipt:{selected_ids:['login']}};
   assert.throws(()=>verifyScopeArtifact({plan:selected,results,run,scopeProof:selectedReceipt,
     report:null,assertions:null}),/assertion|untrusted|Pass/);
-  console.log('trusted merged scoped artifact: exact SHA, attempt, not-required and negative proof tests passed');
+  const withoutDigest={...selected};
+  delete withoutDigest.plan_digest;
+  assert.throws(()=>verifyScopeArtifact({plan:withoutDigest,results,run,
+    scopeProof:selectedReceipt,report:null,assertions:null}));
+  // #3311: a convergence plan carries provenance beside the obligation set;
+  // the canonical digest must still authenticate it.
+  const convergence={...plan,
+    convergence:{source_head_sha:sha,main_sha:'b'.repeat(40),lane_sha:'d'.repeat(40),
+      batch_digest:'e'.repeat(64),risk:'mixed'},
+    source_event:'push',merge_sha:sha,source_pr:7,
+    reason:'authenticated-source-bound-convergence'};
+  convergence.plan_digest=planDigest(convergence);
+  const convergenceResults={...results,plan_digest:convergence.plan_digest};
+  assert.equal(verifyScopeArtifact({plan:convergence,results:convergenceResults,run,scopeProof}).scope,
+    'not-required');
+  assert.throws(()=>verifyScopeArtifact({plan:{...convergence,plan_digest:'b'.repeat(64)},
+    results:convergenceResults,run,scopeProof}),/digest/);
+  console.log('trusted merged scoped artifact: exact SHA, attempt, not-required, convergence-plan digest and negative proof tests passed');
 }
 if(process.argv[2]==='self-test')selfTest();
