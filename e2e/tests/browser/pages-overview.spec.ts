@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {connect} from 'node:net';
 import {startPagesFixture} from '../../helpers/pagesStandalone';
 test.describe('standalone Pages overview',()=>{
  let site:Awaited<ReturnType<typeof startPagesFixture>>;
@@ -106,6 +107,40 @@ test.describe('standalone Pages overview',()=>{
    await expect(page.getByText('Evidence unavailable in this bounded snapshot')).toBeVisible();
   }finally{
    await historical.close();
+  }
+ });
+ test('standalone Pages fixture shutdown drains an active incomplete HTTP request',async()=>{
+  const isolated=await startPagesFixture();
+  const address=new URL(isolated.origin);
+  const socket=connect(Number(address.port),address.hostname);
+  socket.on('error',()=>{});
+  let closing:Promise<void>|null=null;
+  try{
+   await new Promise<void>((done,fail)=>{
+    socket.once('connect',done);
+    socket.once('error',fail);
+   });
+   // Deliberately leave the request body unfinished. Even after the
+   // response, this is an active HTTP socket that server.close() alone
+   // cannot drain. This reproduces the original teardown timeout without
+   // browser timing/sleeps or any production service.
+   socket.write('POST /index.html HTTP/1.1\r\nHost: localhost\r\nContent-Length: 999999\r\nConnection: keep-alive\r\n\r\nx');
+   await new Promise<void>((done,fail)=>{
+    socket.once('data',()=>done());
+    socket.once('error',fail);
+   });
+   closing=isolated.close();
+   let timer:ReturnType<typeof setTimeout>|undefined;
+   try{
+    await Promise.race([
+     closing,
+     new Promise<void>((_,fail)=>{timer=setTimeout(()=>fail(new Error('Pages fixture left active HTTP connection open on close')),5000);}),
+    ]);
+   }finally{if(timer)clearTimeout(timer);}
+  }finally{
+   socket.destroy();
+   if(closing)await closing;
+   else await isolated.close();
   }
  });
  test('unknown, malformed and unlisted evidence routes never show a forged source',async({page})=>{
