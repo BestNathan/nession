@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@codemirror/view';
 import { FileViewer } from '@/capabilities/files/components/FileViewer';
@@ -275,6 +275,63 @@ Run the deploy script.
     });
     // Edit button should not be visible in preview mode
     expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+  });
+
+  it('reports save-in-flight state and exposes the guarded save outcome (#3171)', async () => {
+    let finishWrite: ((value: { path: string; written: number; revision: string }) => void) | null = null;
+    const writeFile = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        finishWrite = resolve;
+      }),
+    );
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      }),
+      writeFile,
+    });
+    const onSavingChange = vi.fn();
+    let handler: (() => Promise<'saved' | 'conflict' | 'failed'>) | null = null;
+    render(
+      <FileViewer
+        fileOps={ops}
+        path="/test/notes.txt"
+        filename="notes.txt"
+        onClose={vi.fn()}
+        onSavingChange={onSavingChange}
+        onSaveHandlerChange={(next) => {
+          handler = next;
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    view?.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Save/ })).toBeEnabled(),
+    );
+    expect(handler).not.toBeNull();
+
+    let savePromise: Promise<'saved' | 'conflict' | 'failed'> | undefined;
+    await act(async () => {
+      savePromise = handler!();
+    });
+    await waitFor(() => expect(onSavingChange).toHaveBeenCalledWith(true));
+    await act(async () => {
+      finishWrite?.({ path: '/test/notes.txt', written: 6, revision: 'rev-2' });
+      expect(await savePromise).toBe('saved');
+    });
+    expect(writeFile).toHaveBeenCalledWith(
+      '/test/notes.txt',
+      'hello!',
+      { expectedRevision: 'rev-1' },
+    );
+    expect(onSavingChange).toHaveBeenLastCalledWith(false);
   });
 
   it('sizes the toolbar controls by role, not by the Button size they use', async () => {

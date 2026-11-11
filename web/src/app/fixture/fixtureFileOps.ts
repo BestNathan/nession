@@ -28,6 +28,9 @@ interface FixtureState {
 }
 
 let state: FixtureState | null = null;
+/** Test-only write controls for the guarded Web Files transition Case (#3171). */
+let nextWriteDelayMs = 0;
+let nextWriteError: string | null = null;
 
 function parentOf(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -174,6 +177,16 @@ async function writeFile(
   content: string,
   options?: WriteFileOptions,
 ): Promise<{ path: string; written: number; revision: string }> {
+  const delay = nextWriteDelayMs;
+  const failure = nextWriteError;
+  nextWriteDelayMs = 0;
+  nextWriteError = null;
+  if (delay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  if (failure !== null) {
+    return reject(failure);
+  }
   const target = current();
   if (options?.createOnly && target.entries.has(path)) {
     return reject(`already_exists: ${path}`);
@@ -320,14 +333,26 @@ export interface FixtureFilesControl {
   reset: () => void;
   revisionOf: (path: string) => string;
   writeExternal: (path: string, content: string) => void;
+  /** Delay exactly the next write, so a pending save is observable. */
+  delayNextWrite: (milliseconds: number) => void;
+  /** Reject exactly the next write with a non-conflict failure. */
+  failNextWrite: (message?: string) => void;
 }
 
 export function fixtureFilesControl(): FixtureFilesControl {
   return {
     reset: () => {
       state = null;
+      nextWriteDelayMs = 0;
+      nextWriteError = null;
     },
     revisionOf: (path: string) => knownRevision(current(), path),
+    delayNextWrite: (milliseconds: number) => {
+      nextWriteDelayMs = Math.max(0, Math.min(milliseconds, 5_000));
+    },
+    failNextWrite: (message = 'fixture: the next write failed') => {
+      nextWriteError = message;
+    },
     writeExternal: (path: string, content: string) => {
       const target = current();
       ensureParentDirs(target, path);

@@ -22,6 +22,8 @@ declare global {
       reset: () => void;
       revisionOf: (path: string) => string;
       writeExternal: (path: string, content: string) => void;
+      delayNextWrite: (milliseconds: number) => void;
+      failNextWrite: (message?: string) => void;
     };
   }
 }
@@ -86,6 +88,103 @@ test('Web: creation follows the captured selection/right-click target, create-on
   await page.getByLabel('New file name').fill('inside.ts');
   await page.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByText('inside.ts', { exact: true })).toBeVisible();
+});
+
+test('Web: switching from a dirty file is a guarded transition (#3171)', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'index.css');
+  await expect(page.getByText('web/src/index.css', { exact: true })).toBeVisible();
+
+  // A clean file switches directly, without a decision.
+  await clickTree(page, 'App.tsx');
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('files-web-unsaved-dialog')).toHaveCount(0);
+  await clickTree(page, 'index.css');
+
+  // Edit A, select B: one decision; Cancel keeps A, its draft and selection.
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('X');
+  await clickTree(page, 'App.tsx');
+  const dialog = page.getByTestId('files-web-unsaved-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('index.css');
+  await expect(dialog).toContainText('App.tsx');
+  await page.getByTestId('files-web-switch-cancel').click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('web/src/index.css', { exact: true })).toBeVisible();
+  await expect(page.locator('.cm-content')).toContainText('/* fixture css */X');
+
+  // A repeated second target cannot replace the first pending decision.
+  await clickTree(page, 'fixtures');
+  const otherFile = page
+    .locator('[data-testid="file-workspace"] [role="tree"]')
+    .getByText('events.jsonl', { exact: true })
+    .first();
+  await clickTree(page, 'App.tsx');
+  await expect(dialog).toBeVisible();
+  await otherFile.evaluate((element) => (element as HTMLElement).click());
+  await expect(dialog).toContainText('App.tsx');
+  await page.getByTestId('files-web-switch-discard').click();
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toBeVisible();
+  await expect(dialog).toBeHidden();
+
+  // A confirmed save is committed before the target opens.
+  await clickTree(page, 'index.css');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('Y');
+  await clickTree(page, 'App.tsx');
+  await page.getByTestId('files-web-switch-save').click();
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toBeVisible();
+  await clickTree(page, 'index.css');
+  await expect(page.locator('.cm-content')).toContainText('/* fixture css */Y');
+});
+
+test('Web: a pending or failed save cannot silently replace the dirty file (#3171)', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'index.css');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('Z');
+
+  // A save already in flight owns the transition: the guard waits, then opens
+  // the target only because that save completed with the committed edit.
+  await page.evaluate(() => window.fixtureFiles?.delayNextWrite(800));
+  await page.getByRole('button', { name: 'Save' }).click();
+  await clickTree(page, 'App.tsx');
+  await expect(page.getByTestId('files-web-unsaved-dialog')).toBeVisible();
+  await expect(page.getByTestId('files-web-switch-save')).toHaveText('Saving…');
+  await expect(page.getByTestId('files-web-switch-discard')).toBeDisabled();
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toBeVisible({
+    timeout: 5000,
+  });
+  await clickTree(page, 'index.css');
+  await expect(page.locator('.cm-content')).toContainText('/* fixture css */Z');
+
+  // A failed save leaves A mounted, keeps the draft and does not open B.
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('Q');
+  await page.evaluate(() => window.fixtureFiles?.failNextWrite('fixture write unavailable'));
+  await clickTree(page, 'App.tsx');
+  await page.getByTestId('files-web-switch-save').click();
+  await expect(page.getByTestId('files-web-switch-error')).toContainText('could not be saved');
+  await expect(page.getByText('web/src/index.css', { exact: true })).toBeVisible();
+  await expect(page.locator('.cm-content')).toContainText('/* fixture css */ZQ');
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toHaveCount(0);
+
+  // The explicit discard after that failure still opens the target.
+  await page.getByTestId('files-web-switch-discard').click();
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toBeVisible();
 });
 
 test('Web: a save against a changed file offers reload/overwrite', async ({ page }) => {

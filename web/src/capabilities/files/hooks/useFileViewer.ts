@@ -15,6 +15,17 @@ import { base64ToBlobUrl } from '@/shared/lib/blob';
 export type ViewMode = 'preview' | 'raw';
 
 /**
+ * What a guarded save produced. A navigation guard must distinguish a saved
+ * document (the switch may proceed), a revision conflict (the viewer's own
+ * conflict decision now owns the next step) and any other failure (the draft
+ * stays here and the guard offers retry/cancel/discard).
+ */
+export type FileSaveOutcome = 'saved' | 'conflict' | 'failed';
+
+/** A caller may request the mounted viewer's guarded save before navigating. */
+export type FileSaveHandler = () => Promise<FileSaveOutcome>;
+
+/**
  * Files larger than this switch to chunked reading with a progress bar.
  * 10 MB keeps single-request latency bounded on slow P2P links while still
  * making common text files (configs, logs, source) load in one round-trip.
@@ -35,6 +46,13 @@ export interface UseFileViewerParams {
    */
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Save-in-flight state, for a caller guarding its own navigation. */
+  onSavingChange?: (saving: boolean) => void;
+  /**
+   * Register the viewer's guarded save. The caller owns the navigation
+   * decision; the viewer still owns the content, revision and write.
+   */
+  onSaveHandlerChange?: (handler: FileSaveHandler | null) => void;
   /**
    * File size in bytes, if known up-front from the FileEntry. Files larger than
    * CHUNKED_READ_THRESHOLD are loaded in chunks with a visible progress bar and
@@ -344,7 +362,7 @@ function useFileSave({
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
 
-  const save = useCallback(async (overwrite: boolean) => {
+  const save = useCallback(async (overwrite: boolean): Promise<FileSaveOutcome> => {
     setSaving(true);
     setConflict(false);
     try {
@@ -358,13 +376,15 @@ function useFileSave({
       setIsDirty(false);
       onDirtyChange?.(false);
       toast.success(`Saved ${filename}`);
+      return 'saved';
     } catch (err) {
       if (fileErrorKind(err) === 'conflict') {
         setConflict(true);
         toast.error(fileErrorMessage(err, 'save file'));
-      } else {
-        toastError(err, 'Failed to save file');
+        return 'conflict';
       }
+      toastError(err, 'Failed to save file');
+      return 'failed';
     } finally {
       setSaving(false);
     }
@@ -390,6 +410,7 @@ function useFileSave({
     isDirty,
     setIsDirty,
     saving,
+    save,
     conflict,
     setConflict,
     handleSave,
@@ -430,23 +451,51 @@ function useFileViewMode(
 }
 
 /**
+ * Report save-in-flight state and register the guarded save for a caller that
+ * owns navigation. The caller decides *whether* to navigate; the viewer keeps
+ * the content, revision and write.
+ */
+function useFileSaveReporting(
+  saving: boolean,
+  save: (overwrite: boolean) => Promise<FileSaveOutcome>,
+  onSavingChange?: (saving: boolean) => void,
+  onSaveHandlerChange?: (handler: FileSaveHandler | null) => void,
+) {
+  useEffect(() => {
+    onSavingChange?.(saving);
+  }, [onSavingChange, saving]);
+
+  // The registered handler is stable; it reaches the latest save closure
+  // through a ref, so a click cannot observe a save built from older content.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  useEffect(() => {
+    if (!onSaveHandlerChange) {
+      return;
+    }
+    onSaveHandlerChange(() => saveRef.current(false));
+    return () => onSaveHandlerChange(null);
+  }, [onSaveHandlerChange]);
+}
+
+/**
  * State and handlers for the FileViewer component: file loading, markdown
  * detection (extension- and content-based), Preview/Raw view mode, dirty
  * tracking, and save. Extracted so the render body stays small.
  */
 export function useFileViewer({
-  fileOps, path, filename, onClose, onDirtyChange, fileSize, initialLine, initialColumn,
+  fileOps, path, filename, onClose, onDirtyChange, onSavingChange,
+  onSaveHandlerChange, fileSize, initialLine, initialColumn,
 }: UseFileViewerParams) {
   const presentation = resolveFilePresentation({ path });
   const jsonPreviewKind: JsonPreviewKind | null = presentation.jsonKind;
-  // Markdown detection — extension-based wins, content-based is fallback
   const isMarkdownByExt = presentation.kind === 'markdown';
   const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
   const { viewMode, setViewMode, showSuggestion, setShowSuggestion } =
     useFileViewMode(opensInPreviewByExt, initialLine, initialColumn);
   const suggestionDismissedRef = useRef(false);
-
   const [isReadOnly, setIsReadOnly] = useState(true);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
@@ -499,6 +548,8 @@ export function useFileViewer({
     loadFile,
   });
 
+  useFileSaveReporting(saveState.saving, saveState.save, onSavingChange, onSaveHandlerChange);
+
   const handleEditToggle = () => {
     // Chunked-loaded files are forced read-only — too large to round-trip safely.
     if (forceReadOnly) { return; }
@@ -519,10 +570,7 @@ export function useFileViewer({
     onDirtyChange?.(dirty);
   };
 
-  // Only ever wired to a control when `onClose` was given (`FileViewer` passes
-  // `onCloseClick` conditionally), so the optional call is not a fallback —
-  // it is the same "no close affordance, no close" the rest of this hook
-  // implements, with no branch that cannot be taken.
+  // The close affordance is wired only when the caller passed `onClose`.
   const handleCloseClick = () => {
     if (saveState.isDirty) {
       setShowUnsavedDialog(true);
@@ -540,9 +588,7 @@ export function useFileViewer({
     suggestionDismissedRef.current = true;
   };
 
-  // Determine if this is a non-markdown text file (for toolbar logic)
-  const isMedia = viewerType !== null && viewerType !== 'markdown';
-  const isText = !isMedia;
+  const isText = viewerType === null || viewerType === 'markdown';
 
   const hasPreviewRawToggle = isMarkdown || jsonPreviewKind !== null;
 
