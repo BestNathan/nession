@@ -24,6 +24,19 @@ Current authoritative contracts remain the checked-in code and skills: `scripts/
 
 Keep the **current** and **target** state explicit in reviews and PRs. See [Acceptance orchestration](references/acceptance-orchestration.md) and [Migration playbook](references/migration-playbook.md).
 
+
+## Comment router (cross-domain trigger, not another Executor)
+
+The main-owned `Automation / Comment Router` receives ordinary human
+Issue/PR slash comments and validates original REST comment, Issue/PR context,
+permission and exact source SHA. It dispatches only to fixed existing domain
+workflows. Audit and Acceptance recheck the original author because the
+`workflow_dispatch` actor is a bot; Source Run/telemetry remain domain-owned.
+The behavior and migration exclusions are recorded in
+[GitHub Comment Routing](../../../docs/architecture/github-comment-routing.md).
+Do not combine it with Agent execution, Acceptance projection, Store writing,
+or Production deployment in a single command-execution boundary.
+
 ## 1. Classify by direct responsibility
 
 Filename and GitHub Actions display name identify the owner, not the upstream trigger, language, runtime binary, or metric subject.
