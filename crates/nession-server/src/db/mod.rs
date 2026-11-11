@@ -17,14 +17,15 @@ pub mod schema;
 
 use anyhow::{Context, Result};
 use entities::{
-    agents, env_files, projects, quick_commands, session_env_bindings, session_project_bindings,
-    sessions,
+    agents, env_files, projects, quick_commands, session_env_bindings, session_managed_context,
+    session_project_bindings, sessions,
 };
 pub use images::{ImageGrantRow, ImageLeaseRow, ImageRow, ImageStatusCounts};
 use migration::Migrator;
 use nession_protocol::contracts::project::v1::{
     ProjectLocation, ProjectSessionDefaults, ProjectSource,
 };
+use nession_protocol::contracts::session::v1::ManagedToolchainRequest;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait,
@@ -136,6 +137,32 @@ pub struct SessionProjectBindingRow {
     pub revision: u64,
     pub updated_at: i64,
 }
+
+/// One Managed EROFS Session creation's durable context (#3062).
+///
+/// `attempt_id` fences concurrent attempts for the same Session name: a losing
+/// attempt may mark `failed` only while it still owns the row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionManagedContextRow {
+    pub session_id: String,
+    pub agent_id: String,
+    pub project_id: String,
+    pub attempt_id: String,
+    pub base_digest: String,
+    pub workspace_digest: String,
+    pub toolchains: Vec<ManagedToolchainRequest>,
+    pub source_sha: Option<String>,
+    pub workspace: Option<String>,
+    /// `preparing`, `ready` or `failed`.
+    pub status: String,
+    pub error: Option<String>,
+    pub updated_at: i64,
+}
+
+/// A Managed create may legitimately stay `preparing` for the Server's 300 s
+/// response window; reconciliation must not mistake "not yet reported" for
+/// "removed". The grace exceeds that window with margin.
+const MANAGED_PREPARING_GRACE_SECS: i64 = 600;
 
 /// One persisted Project (#3021).
 ///
@@ -340,6 +367,12 @@ impl Database {
             .collect();
         self.reconcile_session_project_bindings(agent_id, &live)
             .await?;
+        let live_ids: Vec<String> = live
+            .iter()
+            .map(|(session_id, _, _)| session_id.clone())
+            .collect();
+        self.reconcile_session_managed_contexts(agent_id, &live_ids)
+            .await?;
         Ok(())
     }
 
@@ -365,6 +398,10 @@ impl Database {
             .exec(&txn)
             .await
             .context("failed to delete session project binding")?;
+        session_managed_context::Entity::delete_by_id(session_id.to_owned())
+            .exec(&txn)
+            .await
+            .context("failed to delete session managed context")?;
         sessions::Entity::delete_many()
             .filter(sessions::Column::SessionId.eq(session_id))
             .exec(&txn)
@@ -408,6 +445,11 @@ impl Database {
             .exec(&txn)
             .await
             .context("failed to delete agent session project bindings")?;
+        session_managed_context::Entity::delete_many()
+            .filter(session_managed_context::Column::AgentId.eq(agent_id))
+            .exec(&txn)
+            .await
+            .context("failed to delete agent session managed contexts")?;
         sessions::Entity::delete_many()
             .filter(sessions::Column::AgentId.eq(agent_id))
             .exec(&txn)
@@ -913,6 +955,186 @@ impl Database {
         Ok(())
     }
 
+    // ── Session Managed Contexts (#3062) ─────────────────────────────
+
+    /// Start (or restart) one Managed creation attempt.
+    ///
+    /// The upsert makes the new `attempt_id` the row's owner, so a later
+    /// outcome from an older attempt cannot overwrite it.
+    pub async fn begin_session_managed_context(
+        &self,
+        row: &SessionManagedContextRow,
+    ) -> Result<()> {
+        let model = session_managed_context::ActiveModel {
+            session_id: Set(row.session_id.clone()),
+            agent_id: Set(row.agent_id.clone()),
+            project_id: Set(row.project_id.clone()),
+            attempt_id: Set(row.attempt_id.clone()),
+            base_digest: Set(row.base_digest.clone()),
+            workspace_digest: Set(row.workspace_digest.clone()),
+            toolchains_json: Set(
+                serde_json::to_string(&row.toolchains).unwrap_or_else(|_| "[]".to_string())
+            ),
+            source_sha: Set(row.source_sha.clone()),
+            workspace: Set(row.workspace.clone()),
+            status: Set(row.status.clone()),
+            error: Set(row.error.clone()),
+            updated_at: Set(row.updated_at),
+        };
+        session_managed_context::Entity::insert(model)
+            .on_conflict(
+                OnConflict::column(session_managed_context::Column::SessionId)
+                    .update_columns([
+                        session_managed_context::Column::AgentId,
+                        session_managed_context::Column::ProjectId,
+                        session_managed_context::Column::AttemptId,
+                        session_managed_context::Column::BaseDigest,
+                        session_managed_context::Column::WorkspaceDigest,
+                        session_managed_context::Column::ToolchainsJson,
+                        session_managed_context::Column::SourceSha,
+                        session_managed_context::Column::Workspace,
+                        session_managed_context::Column::Status,
+                        session_managed_context::Column::Error,
+                        session_managed_context::Column::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.conn)
+            .await
+            .context("failed to begin session managed context")?;
+        Ok(())
+    }
+
+    /// Mark one attempt's Managed context `ready`. Returns false when another
+    /// attempt owns the row.
+    pub async fn mark_session_managed_context_ready(
+        &self,
+        session_id: &str,
+        attempt_id: &str,
+        workspace: Option<&str>,
+    ) -> Result<bool> {
+        let result = session_managed_context::Entity::update_many()
+            .col_expr(
+                session_managed_context::Column::Status,
+                Expr::value("ready"),
+            )
+            .col_expr(
+                session_managed_context::Column::Workspace,
+                Expr::value(workspace.map(str::to_string)),
+            )
+            .col_expr(
+                session_managed_context::Column::Error,
+                Expr::value(Option::<String>::None),
+            )
+            .col_expr(
+                session_managed_context::Column::UpdatedAt,
+                Expr::value(chrono::Utc::now().timestamp()),
+            )
+            .filter(session_managed_context::Column::SessionId.eq(session_id))
+            .filter(session_managed_context::Column::AttemptId.eq(attempt_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to mark session managed context ready")?;
+        Ok(result.rows_affected > 0)
+    }
+
+    /// Mark one attempt's Managed context `failed`. Returns false when another
+    /// attempt owns the row.
+    pub async fn mark_session_managed_context_failed(
+        &self,
+        session_id: &str,
+        attempt_id: &str,
+        error: &str,
+    ) -> Result<bool> {
+        let result = session_managed_context::Entity::update_many()
+            .col_expr(
+                session_managed_context::Column::Status,
+                Expr::value("failed"),
+            )
+            .col_expr(
+                session_managed_context::Column::Error,
+                Expr::value(Some(error.to_string())),
+            )
+            .col_expr(
+                session_managed_context::Column::UpdatedAt,
+                Expr::value(chrono::Utc::now().timestamp()),
+            )
+            .filter(session_managed_context::Column::SessionId.eq(session_id))
+            .filter(session_managed_context::Column::AttemptId.eq(attempt_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to mark session managed context failed")?;
+        Ok(result.rows_affected > 0)
+    }
+
+    /// Read one Session's Managed context.
+    pub async fn get_session_managed_context(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionManagedContextRow>> {
+        let row = session_managed_context::Entity::find_by_id(session_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to read session managed context")?;
+        Ok(row.map(session_managed_context_row_from_model))
+    }
+
+    /// Delete one Session's Managed context (idempotent).
+    pub async fn delete_session_managed_context(&self, session_id: &str) -> Result<()> {
+        session_managed_context::Entity::delete_by_id(session_id.to_owned())
+            .exec(&self.conn)
+            .await
+            .context("failed to delete session managed context")?;
+        Ok(())
+    }
+
+    /// Delete every Managed context owned by one Agent.
+    pub async fn delete_session_managed_contexts_by_agent(&self, agent_id: &str) -> Result<()> {
+        session_managed_context::Entity::delete_many()
+            .filter(session_managed_context::Column::AgentId.eq(agent_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to delete agent session managed contexts")?;
+        Ok(())
+    }
+
+    /// Remove Managed contexts for Sessions the Agent no longer reports.
+    ///
+    /// A full-session refresh cannot see a Session that is still
+    /// `preparing`: no tmux Session exists until the Agent finishes cache
+    /// preparation. A recent `preparing` attempt is therefore in flight, not
+    /// gone, and reconciliation leaves it alone. Once the managed create
+    /// window has passed (plus margin), the attempt is stale and its record
+    /// is reclaimed with the Session it belongs to.
+    pub async fn reconcile_session_managed_contexts(
+        &self,
+        agent_id: &str,
+        live: &[String],
+    ) -> Result<()> {
+        let live_ids: std::collections::HashSet<&str> = live.iter().map(String::as_str).collect();
+        let existing = session_managed_context::Entity::find()
+            .filter(session_managed_context::Column::AgentId.eq(agent_id))
+            .all(&self.conn)
+            .await
+            .context("failed to list agent session managed contexts")?;
+        let now = chrono::Utc::now().timestamp();
+        for row in existing {
+            if live_ids.contains(row.session_id.as_str()) {
+                continue;
+            }
+            let in_flight = row.status == "preparing"
+                && now.saturating_sub(row.updated_at) < MANAGED_PREPARING_GRACE_SECS;
+            if in_flight {
+                continue;
+            }
+            session_managed_context::Entity::delete_by_id(row.session_id)
+                .exec(&self.conn)
+                .await
+                .context("failed to remove managed context for a removed Session")?;
+        }
+        Ok(())
+    }
+
     // ── Projects (#3021) ──────────────────────────────────────────────
 
     /// Insert one Project.
@@ -1026,6 +1248,25 @@ impl Database {
             .await
             .context("failed to commit project deletion")?;
         Ok(res.rows_affected > 0)
+    }
+}
+
+fn session_managed_context_row_from_model(
+    model: session_managed_context::Model,
+) -> SessionManagedContextRow {
+    SessionManagedContextRow {
+        session_id: model.session_id,
+        agent_id: model.agent_id,
+        project_id: model.project_id,
+        attempt_id: model.attempt_id,
+        base_digest: model.base_digest,
+        workspace_digest: model.workspace_digest,
+        toolchains: serde_json::from_str(&model.toolchains_json).unwrap_or_default(),
+        source_sha: model.source_sha,
+        workspace: model.workspace,
+        status: model.status,
+        error: model.error,
+        updated_at: model.updated_at,
     }
 }
 
@@ -1891,6 +2132,68 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn managed_context_reconciliation_keeps_an_in_flight_preparation() {
+        let db = new_db().await;
+        let now = chrono::Utc::now().timestamp();
+        let row = |status: &str, updated_at: i64| SessionManagedContextRow {
+            session_id: "a1:managed".to_string(),
+            agent_id: "a1".to_string(),
+            project_id: "project-123e4567-e89b-42d3-a456-426614174000".to_string(),
+            attempt_id: "attempt".to_string(),
+            base_digest: "sha256:aaaa".to_string(),
+            workspace_digest: "sha256:bbbb".to_string(),
+            toolchains: Vec::new(),
+            source_sha: None,
+            workspace: None,
+            status: status.to_string(),
+            error: None,
+            updated_at,
+        };
+
+        db.begin_session_managed_context(&row("preparing", now))
+            .await
+            .unwrap();
+        db.reconcile_session_managed_contexts("a1", &[])
+            .await
+            .unwrap();
+        assert!(
+            db.get_session_managed_context("a1:managed")
+                .await
+                .unwrap()
+                .is_some(),
+            "a refresh cannot see a not-yet-created tmux Session; it must not erase the in-flight attempt"
+        );
+
+        db.begin_session_managed_context(&row("preparing", now - MANAGED_PREPARING_GRACE_SECS - 1))
+            .await
+            .unwrap();
+        db.reconcile_session_managed_contexts("a1", &[])
+            .await
+            .unwrap();
+        assert!(
+            db.get_session_managed_context("a1:managed")
+                .await
+                .unwrap()
+                .is_none(),
+            "a preparing attempt older than the create window is stale"
+        );
+
+        db.begin_session_managed_context(&row("ready", now))
+            .await
+            .unwrap();
+        db.reconcile_session_managed_contexts("a1", &[])
+            .await
+            .unwrap();
+        assert!(
+            db.get_session_managed_context("a1:managed")
+                .await
+                .unwrap()
+                .is_none(),
+            "a ready context for a Session the Agent no longer reports is reclaimed"
+        );
     }
 
     #[tokio::test]

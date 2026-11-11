@@ -226,6 +226,7 @@ fn test_server_session_create_payload() {
         binding_revision: None,
         terminal_cols: None,
         sandbox: None,
+        managed: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -297,6 +298,7 @@ fn test_client_session_create_payload() {
         env_files: Vec::new(),
         sandbox: None,
         project_id: None,
+        managed: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -675,4 +677,84 @@ fn sandbox_context_and_action_replies_round_trip() {
     let value = serde_json::to_value(&preflight).unwrap();
     assert_eq!(value["errors"][0]["code"], "unknown-key");
     assert!(value.get("error").is_none());
+}
+
+// ---- Managed EROFS creation (#3062) ----
+
+const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+#[test]
+fn a_client_managed_create_round_trips_its_pinned_artifacts() {
+    let payload: ClientSessionCreatePayload = serde_json::from_value(serde_json::json!({
+        "agent_id": "agent-a",
+        "name": "managed",
+        "project_id": "project-00000000-0000-0000-0000-000000000001",
+        "managed": {
+            "base_digest": DIGEST_A,
+            "toolchains": [{ "digest": DIGEST_B, "target": "/opt/rust" }]
+        }
+    }))
+    .expect("a managed create parses");
+    let managed = payload.managed.clone().expect("managed request");
+    assert_eq!(managed.base_digest, DIGEST_A);
+    assert_eq!(managed.toolchains.len(), 1);
+    assert_eq!(managed.toolchains[0].digest, DIGEST_B);
+    assert_eq!(managed.toolchains[0].target, "/opt/rust");
+
+    let encoded = serde_json::to_value(&payload).unwrap();
+    let decoded: ClientSessionCreatePayload = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded.managed.unwrap().toolchains[0].target, "/opt/rust");
+}
+
+#[test]
+fn a_server_managed_create_carries_one_grant_per_role() {
+    let payload: ServerSessionCreatePayload = serde_json::from_value(serde_json::json!({
+        "request_id": "req-1",
+        "name": "managed",
+        "managed": {
+            "images": [
+                { "role": "base", "digest": DIGEST_A, "path": "/images/blobs/aaa", "token": "t1" },
+                { "role": "workspace", "digest": DIGEST_B, "path": "/images/blobs/bbb", "token": "t2" },
+                { "role": "toolchain", "digest": DIGEST_B, "path": "/images/blobs/bbb", "token": "t3", "target": "/opt/rust" }
+            ]
+        }
+    }))
+    .expect("a server managed create parses");
+    let images = payload.managed.clone().expect("managed images").images;
+    assert_eq!(images[0].role, ManagedImageRole::Base);
+    assert_eq!(images[1].role, ManagedImageRole::Workspace);
+    assert_eq!(images[2].role, ManagedImageRole::Toolchain);
+    assert_eq!(images[2].target.as_deref(), Some("/opt/rust"));
+    let encoded = serde_json::to_value(&payload).unwrap();
+    assert_eq!(encoded["managed"]["images"][0]["role"], "base");
+    assert!(encoded["managed"]["images"][0].get("target").is_none());
+}
+
+#[test]
+fn unknown_managed_fields_are_refused() {
+    let client = serde_json::from_value::<ClientManagedCreate>(serde_json::json!({
+        "base_digest": DIGEST_A,
+        "unexpected": true
+    }));
+    assert!(client.is_err(), "an unknown managed key must be refused");
+
+    let grant = serde_json::from_value::<ManagedImageGrant>(serde_json::json!({
+        "role": "base",
+        "digest": DIGEST_A,
+        "path": "/images/blobs/aaa",
+        "token": "t",
+        "unexpected": true
+    }));
+    assert!(grant.is_err(), "an unknown grant key must be refused");
+
+    let toolchain = serde_json::from_value::<ManagedToolchainRequest>(serde_json::json!({
+        "digest": DIGEST_A,
+        "target": "/opt/rust",
+        "unexpected": true
+    }));
+    assert!(
+        toolchain.is_err(),
+        "an unknown toolchain key must be refused"
+    );
 }

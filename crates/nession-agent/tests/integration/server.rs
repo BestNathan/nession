@@ -171,6 +171,7 @@ async fn integration_session_create_and_kill() {
         binding_revision: None,
         terminal_cols: None,
         sandbox: None,
+        managed: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let resp: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -568,6 +569,7 @@ async fn integration_attach_detach_churn_keeps_the_binding() {
             binding_revision: Some(3),
             terminal_cols: None,
             sandbox: None,
+            managed: None,
         },
     );
     let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -714,6 +716,7 @@ async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
         binding_revision: None,
         terminal_cols: None,
         sandbox: None,
+        managed: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -971,6 +974,7 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         // No Server stated a value, so the Agent's own configuration decides.
         terminal_cols: None,
         sandbox: None,
+        managed: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -1078,6 +1082,7 @@ async fn shared_agent_keeps_independent_session_widths() {
             binding_revision: None,
             terminal_cols,
             sandbox: None,
+            managed: None,
         };
         let req = new_message(msg_types::SESSION_CREATE, create);
         let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -1276,6 +1281,7 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
             binding_revision: None,
             terminal_cols: None,
             sandbox: None,
+            managed: None,
         };
         let req = new_message(msg_types::SESSION_CREATE, create);
         let created: nession_agent::server::websocket::Message<serde_json::Value> =

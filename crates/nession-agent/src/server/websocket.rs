@@ -1786,32 +1786,97 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let revision = payload
                     .binding_revision
                     .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
-                match ctx
-                    .tmux
-                    .create_session_with_options(
-                        &payload.name,
-                        terminal_cols,
-                        payload.height,
-                        &working_dir,
-                        Some(SessionBindingInput {
-                            revision,
-                            profiles: &profiles,
-                            snapshots: &payload.env_snapshots,
-                        }),
-                        payload.sandbox.as_ref(),
-                    )
-                    .await
-                {
+                // Managed EROFS creation (#3062): the Server pinned and
+                // authorized every image; the Agent prepares its durable cache
+                // and the composition before any tmux resource exists. A
+                // missing cache/runtime refuses the create with no Native
+                // fallback.
+                let managed = match payload.managed.as_ref() {
+                    Some(images) => {
+                        if payload.sandbox.is_some() {
+                            return ctx.err(
+                                "invalid_managed",
+                                "a Managed create carries its own sandbox composition",
+                            );
+                        }
+                        let Some(runtime) = ctx.tmux.sandbox_runtime().cloned() else {
+                            return ctx.err(
+                                "managed_unavailable",
+                                "this Agent has no Sandbox runtime configured; refusing Managed creation",
+                            );
+                        };
+                        let Some(cache) = runtime.erofs_cache() else {
+                            return ctx.err(
+                                "managed_unavailable",
+                                "this Agent has no EROFS cache configured; refusing Managed creation",
+                            );
+                        };
+                        match crate::managed_session::prepare(
+                            &cache,
+                            &images.images,
+                            ctx.tmux.server_url(),
+                            runtime.settings().state_dir.as_path(),
+                        )
+                        .await
+                        {
+                            Ok(prepared) => Some(prepared),
+                            Err(error) => {
+                                return ctx.err("managed_prepare_failed", &error.to_string());
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let binding = Some(SessionBindingInput {
+                    revision,
+                    profiles: &profiles,
+                    snapshots: &payload.env_snapshots,
+                });
+                let outcome = if let Some(prepared) = managed.as_ref() {
+                    ctx.tmux
+                        .create_session_managed(
+                            &payload.name,
+                            terminal_cols,
+                            payload.height,
+                            prepared.workspace.to_string_lossy().as_ref(),
+                            crate::managed_session::MANAGED_WORKING_DIR,
+                            binding,
+                            &prepared.policy,
+                        )
+                        .await
+                } else {
+                    ctx.tmux
+                        .create_session_with_options(
+                            &payload.name,
+                            terminal_cols,
+                            payload.height,
+                            &working_dir,
+                            binding,
+                            payload.sandbox.as_ref(),
+                        )
+                        .await
+                };
+                match outcome {
                     Ok(outcome) => {
                         let resp = SessionCreateResponse {
                             name: payload.name,
                             warnings: outcome.warnings,
                             sandbox: outcome.sandbox,
+                            workspace: managed
+                                .as_ref()
+                                .map(|prepared| prepared.workspace.display().to_string()),
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("create_failed", &e.to_string()),
+                    Err(e) => {
+                        // A failed managed create leaves no Session; the
+                        // prepared workspace is this attempt's and is removed.
+                        if let Some(prepared) = managed {
+                            let _ = std::fs::remove_dir_all(&prepared.workspace);
+                        }
+                        ctx.err("create_failed", &e.to_string())
+                    }
                 }
             }
             "agent.session.kill" => "agent.session.kill" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
@@ -5766,6 +5831,7 @@ mod tests {
             binding_revision: None,
             terminal_cols: None,
             sandbox: None,
+            managed: None,
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
         let create_resp: Message<SessionCreateResponse> =
