@@ -57,6 +57,7 @@ export function commandPlan(event, comment, issue, pr, permission) {
     handler: def.handler,
     workflow: def.workflow,
     author,
+    created_at: comment.created_at ?? '',
   };
   if (!isPr) return { ...base, kind: 'issue', mode: def.mode ?? '' };
   if (!pr || pr.number !== number || pr.state !== 'open' ||
