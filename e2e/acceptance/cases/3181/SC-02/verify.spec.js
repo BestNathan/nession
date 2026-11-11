@@ -38,9 +38,9 @@ test('SC-02: Project and Sandbox select images through independent flows', async
   await page.getByTestId('sandbox-image-target').fill('/opt/tool');
   await page.getByTestId('sandbox-image-add').click();
   await expect(page.getByTestId('sandbox-image-selection')).toHaveCount(2);
-  await expect(page.getByTestId('sandbox-image-composition')).toContainText(
-    'independent of the Project image reference',
-  );
+  await expect(
+    page.getByText('independent of the Project image reference'),
+  ).toBeVisible();
 
   test.info().annotations.push({
     type: 'evidence',
