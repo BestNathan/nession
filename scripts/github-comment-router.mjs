@@ -80,6 +80,16 @@ async function inventory(read, plan) {
   return data.workflow_runs;
 }
 function marker(plan) { return '<!-- nession-command-comment:' + plan.comment_id + ' -->'; }
+async function acknowledge(read, plan, link) {
+  const target = plan.kind === 'pull_request'
+    ? 'PR #' + plan.issue_number + ' at ' + plan.target_sha
+    : 'Issue #' + plan.issue_number;
+  const body = 'Comment command ' + String.fromCharCode(96) + plan.command +
+    String.fromCharCode(96) + ' accepted for ' + target +
+    '. [Actions run](' + link + '). This request is not an Acceptance Pass.\n\n' + marker(plan);
+  await read('/repos/' + REPO + '/issues/' + plan.issue_number + '/comments',
+    { method: 'POST', body: { body } });
+}
 async function dispatch(plan, read = api) {
   const comments = await read('/repos/' + REPO + '/issues/' +
     plan.issue_number + '/comments?per_page=100&sort=created&direction=desc');
@@ -89,7 +99,12 @@ async function dispatch(plan, read = api) {
     return { state: 'already-acknowledged' };
   const runs = await inventory(read, plan);
   const previous = findRun(runs, plan);
-  if (previous) return { state: 'already-dispatched', url: previous.html_url };
+  if (previous) {
+    // Recovery after dispatch succeeded but the acknowledgment POST failed:
+    // repair the receipt without spending model/Full quota a second time.
+    await acknowledge(read, plan, previous.html_url);
+    return { state: 'already-dispatched', url: previous.html_url };
+  }
   // A full page is safe for a freshly created command only when its oldest
   // item precedes the source comment. Otherwise history may hide a replay.
   const since = Date.parse(plan.created_at);
@@ -107,14 +122,7 @@ async function dispatch(plan, read = api) {
   }
   const link = run?.html_url ||
     'https://github.com/' + REPO + '/actions/workflows/' + plan.workflow;
-  const target = plan.kind === 'pull_request'
-    ? 'PR #' + plan.issue_number + ' at ' + plan.target_sha
-    : 'Issue #' + plan.issue_number;
-  const body = 'Comment command ' + String.fromCharCode(96) + plan.command +
-    String.fromCharCode(96) + ' accepted for ' + target +
-    '. [Actions run](' + link + '). This request is not an Acceptance Pass.\n\n' + marker(plan);
-  await read('/repos/' + REPO + '/issues/' + plan.issue_number + '/comments',
-    { method: 'POST', body: { body } });
+  await acknowledge(read, plan, link);
   return { state: 'dispatched', url: link };
 }
 async function main() {
