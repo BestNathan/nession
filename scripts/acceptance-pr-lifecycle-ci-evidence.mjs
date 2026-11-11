@@ -58,7 +58,9 @@ export async function collectVerifiedIssueLifecycleCi(
   {repo,issue,stage,targetSha},get,getLog){
   assertSource({repo,issue,stage,targetSha});
   const pr=await get(PREFIX+'/pulls/'+PR);
-  if(pr?.number!==PR||pr.state!=='open'||pr.draft||
+  const eligiblePrState=pr?.state==='open' || (pr?.state==='closed' &&
+    typeof pr.merged_at==='string' && pr.merged_at.length>0);
+  if(pr?.number!==PR||!eligiblePrState||pr.draft||
     pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
     pr.head?.repo?.full_name!==REPO||pr.head?.sha!==targetSha)
     fail('PR #3241 current head/base identity mismatch');
@@ -144,11 +146,17 @@ async function selfTest(){
     if(path.endsWith('/attempts/1/jobs?per_page=100'))return {jobs,total_count:jobs.length};
     throw Error('unexpected fixture GitHub path '+path);
   };
+  // PR #3241 must remain source-verifiable after its authorized Main merge.
+  const mergedPr={...pr,state:'closed',merged_at:'2026-11-11T01:21:00Z'};
+  const mergedGet=async path=>path.endsWith('/pulls/'+PR)?mergedPr:request(path);
+  assert.equal((await collectVerifiedIssueLifecycleCi(source,mergedGet,
+    async()=>log)).pr,PR);
   const real=await collectVerifiedIssueLifecycleCi(source,request,async()=>log);
   assert.equal(real.target_sha,sha);
   assert.equal(real.jobs.length,5);
   assert.equal(real.verified_gate,'requirement-acceptance-selftest');
   const variants=[
+    [source,async p=>p.endsWith('/pulls/'+PR)?{...pr,state:'closed',merged_at:null}:request(p),async()=>log],
     [{...source,targetSha:'wrong'},request,async()=>log],
     [source,async p=>p.endsWith('/pulls/'+PR)?{...pr,head:{...pr.head,sha:'b'.repeat(40)}}:request(p),async()=>log],
     [source,async p=>p.includes('/actions/runs?')?{workflow_runs:[{...run,conclusion:'failure'}],total_count:1}:request(p),async()=>log],
@@ -166,7 +174,7 @@ async function selfTest(){
     await assert.rejects(collectVerifiedIssueLifecycleCi(s,g,t),
       /unverified #2990 CI source/);
   }
-  console.log('PR lifecycle CI: positive and twelve fail-closed source/step/Gate fixtures passed');
+  console.log('PR lifecycle CI: positive and thirteen fail-closed source/step/Gate fixtures passed');
 }
 async function main(){
   const cmd=process.argv[2];
