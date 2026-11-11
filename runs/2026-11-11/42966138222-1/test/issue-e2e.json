@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "6622e5016b00398e956fc2c4d46f47a3f22af95f",
+  "run_id": 42966138222,
+  "run_attempt": 1,
+  "plan_digest": "bdeb91248b1d5770250072045d1f8c909f341c60271625157e296486a47b8f1d",
+  "artifact_digest": "sha256:7afcd495eb3f153825e4ee0c83831068b97b862919ba4fa848241aee34f352a3",
+  "results": [
+    {
+      "id": "fixture-visual",
+      "result": "Pass",
+      "discovered": 15,
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 96
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 24,
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 153
+    },
+    {
+      "id": "project-management",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 40
+    },
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 246
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 30,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 140
+    }
+  ]
+}
