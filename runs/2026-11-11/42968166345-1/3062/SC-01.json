@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "47a355ee6d138b92278527c72f090b8482ec95807fbdd09efb73137f61e5910b",
+  "run_id": 42968166345,
+  "run_attempt": 1,
+  "issue": 3062,
+  "criterion": "SC-01",
+  "criterion_text": "Managed creation pins resolved source+image digests, prepares local cached EROFS, launches an authorized Sandbox initial Pane on a capable Linux Agent, and never silently falls back to Native if preparation/isolation fails.",
+  "stage": "staging",
+  "target_sha": "4745ddbfa9426b1470967bb988242b496a6ae02e",
+  "contract_sha256": "9af1c8d04ca19ba51bc72ad84c00db5b2ad9a65c87df4b1f9815fb39ae86a5c4",
+  "case_revision": "4745ddbfa9426b1470967bb988242b496a6ae02e",
+  "case_tree_sha": "d086b45205a63ef18a76cd3f7454278932b398fa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T05:51:30.885Z",
+  "finished_at": "2026-11-11T05:52:59.720Z",
+  "duration_ms": 88835,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Managed creation pins and authorizes every artifact, prepares the Agent cache and composition, and refuses missing or unverifiable artifacts instead of falling back to Native",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 4745ddbfa9426b1470967bb988242b496a6ae02e: the managed create protocol carries the Base Runtime and Project Source digests plus one scoped grant per artifact; unknown fields are refused"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 4745ddbfa9426b1470967bb988242b496a6ae02e: the Server resolved ready artifacts, minted per-artifact grants, sent a managed create with no host working directory and recorded a ready managed context with the resolved source commit; missing or non-ready artifacts were refused"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 4745ddbfa9426b1470967bb988242b496a6ae02e: the Agent downloaded and verified every image into its identity cache, built and compiled the `/` + `/workspace` + `/opt/rust` composition with an Agent-owned writable workspace; a missing image or digest mismatch failed closed with no workspace and no Native fallback"
+        }
+      ],
+      "duration_ms": 82888,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42968166345,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "4745ddbfa9426b1470967bb988242b496a6ae02e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42968166345",
+    "record_path": "runs/2026-11-11/42968166345-1/3062/SC-01.json",
+    "source_result_sha256": "60d6d63577689c9d770de2ad6c265e939c4358587d4feb370c189e935d6c0c68"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42968166345-1",
+    "sha256": "60d6d63577689c9d770de2ad6c265e939c4358587d4feb370c189e935d6c0c68",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42968166345",
+    "durability": "time-limited; object archival not configured"
+  }
+}

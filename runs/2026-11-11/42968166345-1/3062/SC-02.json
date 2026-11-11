@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6c09ecb2a82038c6de8e86c3a00fb8455cb54c0956b00186487abeede08cd119",
+  "run_id": 42968166345,
+  "run_attempt": 1,
+  "issue": 3062,
+  "criterion": "SC-02",
+  "criterion_text": "Concurrent Session creation, retry/timeout, and deletion preserve image/writable-resource ownership, never duplicate an already-created tmux Session or delete another Session's active artifacts, and report truthful recoverable state.",
+  "stage": "staging",
+  "target_sha": "4745ddbfa9426b1470967bb988242b496a6ae02e",
+  "contract_sha256": "9af1c8d04ca19ba51bc72ad84c00db5b2ad9a65c87df4b1f9815fb39ae86a5c4",
+  "case_revision": "4745ddbfa9426b1470967bb988242b496a6ae02e",
+  "case_tree_sha": "2a84158741351a20c975ae9856c3575ba1c7de47",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T05:52:59.721Z",
+  "finished_at": "2026-11-11T05:53:06.991Z",
+  "duration_ms": 7270,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Concurrent, retried and deleted Managed creations keep attempt, workspace and image ownership with truthful recoverable state",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 4745ddbfa9426b1470967bb988242b496a6ae02e: a losing attempt could not overwrite the winning attempt's ready managed context; a same-named attempt against a ready Session was refused before reaching the Agent and left the winner's attempt, workspace and status intact; a refused attempt was recorded failed and a retry of the same name reached ready with a new attempt id"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 4745ddbfa9426b1470967bb988242b496a6ae02e: two preparations over the same shared image set reused the warm cache (zero additional transfers) and received distinct Agent-owned workspaces; concurrent cache callers shared one fetch per digest"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 4745ddbfa9426b1470967bb988242b496a6ae02e: deleting one Session's managed context left another Session's context and shared image bytes untouched; a session refresh during preparation did not erase the in-flight context, while a stale preparing or a ready context for a removed Session was reclaimed"
+        }
+      ],
+      "duration_ms": 1390,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42968166345,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "4745ddbfa9426b1470967bb988242b496a6ae02e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42968166345",
+    "record_path": "runs/2026-11-11/42968166345-1/3062/SC-02.json",
+    "source_result_sha256": "7a0c3f88eee93a72cd4dcf54daa347195d351841fbd4d8a56c07dcbb63efc4b1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42968166345-1",
+    "sha256": "7a0c3f88eee93a72cd4dcf54daa347195d351841fbd4d8a56c07dcbb63efc4b1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42968166345",
+    "durability": "time-limited; object archival not configured"
+  }
+}
