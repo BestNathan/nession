@@ -26,17 +26,17 @@ fn should_skip_background_check(args: &[OsString]) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let raw_args: Vec<OsString> = std::env::args_os().collect();
+
     // A previous install may have been killed between moving state and
     // swapping binaries. Recover (or fail closed) before any command reads
     // Current; `version list` included (#3232 F4). The diagnostic goes to
     // stderr so it cannot corrupt a command's parseable stdout.
-    if let Some(message) = nession_cli::update::transaction::recover_at_cli_start()?.describe() {
-        eprintln!("{message}");
-    }
+    nession_cli::update::transaction::recover_before_command(&raw_args)?;
 
     // This may `exec` an archived release and never return. When it returns,
     // the Current CLI owns the command.
-    let prepared = versions::prepare(std::env::args_os())?;
+    let prepared = versions::prepare(raw_args)?;
 
     if prepared
         .args

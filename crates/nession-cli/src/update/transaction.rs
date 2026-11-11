@@ -142,6 +142,29 @@ pub fn recover_at_cli_start() -> Result<Recovery> {
     recover_journal_locked(&home)
 }
 
+/// Recover before a CLI command reads Current.
+///
+/// Help, version and the lifecycle-contract handshake must work without a
+/// resolvable Nession home and must not mutate the installation.
+pub fn recover_before_command(args: &[std::ffi::OsString]) -> Result<()> {
+    if should_skip_recovery(args) {
+        return Ok(());
+    }
+    if let Some(message) = recover_at_cli_start()?.describe() {
+        eprintln!("{message}");
+    }
+    Ok(())
+}
+
+fn should_skip_recovery(args: &[std::ffi::OsString]) -> bool {
+    args.iter().skip(1).any(|argument| {
+        matches!(
+            argument.to_str(),
+            Some("--help" | "-h" | "help" | "--version" | "-V" | "--lifecycle-contract")
+        )
+    })
+}
+
 /// Recover under an already-held lifecycle lock (or when no journal exists).
 pub fn recover_journal_locked(home: &Path) -> Result<Recovery> {
     let path = journal_path(home);
@@ -240,6 +263,17 @@ fn all_installed_match_new(journal: &Journal) -> Result<bool> {
 }
 
 fn rollback(journal: &Journal) -> Result<()> {
+    // A previous recovery may have restored everything and then been killed
+    // before (or while) removing the archive/staging/journal. In that state the
+    // archive is already gone and a naive retry would report "cannot restore"
+    // forever even though Current is correct. Prove the restored state first.
+    if rollback_already_complete(journal)? {
+        restore_original_config(journal)?;
+        remove_dir_if_exists(&journal.archive_dir)?;
+        remove_dir_if_exists(&journal.staging_dir)?;
+        return Ok(());
+    }
+
     // 1. The archive is the rollback source for every binary once it has been
     //    published. Before that rename the staging directory holds the same
     //    copies; a crash during the state move must be able to use it.
@@ -285,23 +319,65 @@ fn rollback(journal: &Journal) -> Result<()> {
         restore_entry(journal, pair)?;
     }
 
-    // 3. Restore the exact original server-config text. This is unconditional
-    //    whenever the journal captured one: a crash between writing the
-    //    archive-scoped config and recording that fact must not leave the
-    //    Current config pointing into the archive. Writing it over an
-    //    unmoved/identical file is harmless, and a reverse rewrite could lose
-    //    comments or external-path distinctions.
-    if let Some(original) = journal.server_config_original.as_deref() {
-        let config = journal.home.join(SERVER_CONFIG);
-        fs::write(&config, original)
-            .with_context(|| format!("failed to restore the original {}", config.display()))?;
-    }
+    // 3. Restore the exact original server-config text.
+    restore_original_config(journal)?;
 
     // 4. The archive never committed; remove the transaction's tree so it
     //    cannot masquerade as a runnable release.
     remove_dir_if_exists(&journal.archive_dir)?;
     remove_dir_if_exists(&journal.staging_dir)?;
     Ok(())
+}
+
+/// Restore the captured original server-config text.
+///
+/// Unconditional whenever the journal captured one: a crash between writing
+/// the archive-scoped config and recording that fact must not leave the Current
+/// config pointing into the archive. Writing over an unmoved/identical file is
+/// harmless, and a reverse rewrite could lose comments or external-path
+/// distinctions.
+fn restore_original_config(journal: &Journal) -> Result<()> {
+    if let Some(original) = journal.server_config_original.as_deref() {
+        let config = journal.home.join(SERVER_CONFIG);
+        fs::write(&config, original)
+            .with_context(|| format!("failed to restore the original {}", config.display()))?;
+    }
+    Ok(())
+}
+
+/// Whether a previous rollback already restored binaries, state and config.
+///
+/// This is what makes recovery idempotent after its cleanup phase starts. A
+/// missing source plus a restored tree is success, not the "cannot restore"
+/// failure that a partially removed archive would otherwise produce.
+fn rollback_already_complete(journal: &Journal) -> Result<bool> {
+    for name in versions::RELEASE_BINARIES {
+        let Some(expected) = journal.old_digests.get(name) else {
+            // A journal without the pre-install digest cannot prove the state;
+            // fall through to the normal rollback/error path.
+            return Ok(false);
+        };
+        let installed = journal.install_dir.join(name);
+        if !installed.is_file() {
+            return Ok(false);
+        }
+        let actual = download::sha256_file(&installed)
+            .with_context(|| format!("failed to hash {}", installed.display()))?;
+        if &actual != expected {
+            return Ok(false);
+        }
+    }
+    for pair in &journal.moved {
+        let name = pair
+            .to
+            .file_name()
+            .with_context(|| format!("the journal entry {} has no file name", pair.to.display()))?;
+        let staged = journal.staging_dir.join(name);
+        if !pair.from.exists() || pair.to.exists() || staged.exists() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn restore_entry(journal: &Journal, pair: &MovePair) -> Result<()> {
@@ -1168,6 +1244,115 @@ mod tests {
         let error = recover_journal_locked(&fixture.home).unwrap_err();
         assert!(format!("{error:#}").contains("unreadable"), "{error:#}");
         assert!(journal_path(&fixture.home).exists());
+    }
+
+    /// A crash after restoration but during cleanup must not brick recovery:
+    /// the archive and staging are already gone, yet Current is intact.
+    #[test]
+    fn help_and_version_do_not_require_recovery() {
+        use std::ffi::OsString;
+        let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
+        assert!(should_skip_recovery(&args(&["nession", "--help"])));
+        assert!(should_skip_recovery(&args(&["nession", "-h"])));
+        assert!(should_skip_recovery(&args(&["nession", "--version"])));
+        assert!(should_skip_recovery(&args(&["nession", "-V"])));
+        assert!(should_skip_recovery(&args(&[
+            "nession",
+            "--lifecycle-contract"
+        ])));
+        assert!(!should_skip_recovery(&args(&[
+            "nession", "version", "list"
+        ])));
+        assert!(!should_skip_recovery(&args(&["nession", "agent", "start"])));
+    }
+
+    #[test]
+    fn a_recovery_that_already_restored_is_cleaned_up() {
+        let fixture = fixture();
+        let mut old = BTreeMap::new();
+        let mut new = BTreeMap::new();
+        for name in versions::RELEASE_BINARIES {
+            old.insert(
+                name.to_string(),
+                download::sha256_file(&fixture.install_dir.join(name)).unwrap(),
+            );
+            new.insert(
+                name.to_string(),
+                download::sha256_file(&fixture.staged.join(name)).unwrap(),
+            );
+        }
+        let original_config = fs::read_to_string(fixture.home.join(SERVER_CONFIG)).unwrap();
+        let journal = Journal {
+            schema: JOURNAL_SCHEMA,
+            phase: Phase::BinarySwap,
+            from: "0.35.0".into(),
+            to: "1.2.0".into(),
+            pid: 999_999,
+            home: fixture.home.clone(),
+            install_dir: fixture.install_dir.clone(),
+            archive_dir: fixture.home.join("versions/gone"),
+            staging_dir: fixture.home.join("versions/.stage-gone"),
+            moved: Vec::new(),
+            swapped: versions::RELEASE_BINARIES
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
+            old_digests: old,
+            new_digests: new,
+            server_config_original: Some(original_config.clone()),
+        };
+        write_journal(&journal_path(&fixture.home), &journal).unwrap();
+
+        let recovery = recover_journal_locked(&fixture.home).unwrap();
+        assert!(matches!(recovery, Recovery::RolledBack { .. }));
+        assert!(!journal_path(&fixture.home).exists());
+        for name in versions::RELEASE_BINARIES {
+            assert_eq!(installed(&fixture, name), format!("old-{name}"));
+        }
+        assert_eq!(
+            fs::read_to_string(fixture.home.join(SERVER_CONFIG)).unwrap(),
+            original_config,
+            "the captured original config is re-applied"
+        );
+    }
+
+    /// The same idempotent path repairs a config that was rewritten before the
+    /// crash, then cleans up.
+    #[test]
+    fn an_already_restored_tree_repairs_the_config_before_cleanup() {
+        let fixture = fixture();
+        let mut old = BTreeMap::new();
+        for name in versions::RELEASE_BINARIES {
+            old.insert(
+                name.to_string(),
+                download::sha256_file(&fixture.install_dir.join(name)).unwrap(),
+            );
+        }
+        let original_config = fs::read_to_string(fixture.home.join(SERVER_CONFIG)).unwrap();
+        let config_path = fixture.home.join(SERVER_CONFIG);
+        fs::write(&config_path, "db_path = \"/wrong/archive/path\"\n").unwrap();
+        let journal = Journal {
+            schema: JOURNAL_SCHEMA,
+            phase: Phase::StateMove,
+            from: "0.35.0".into(),
+            to: "1.2.0".into(),
+            pid: std::process::id(),
+            home: fixture.home.clone(),
+            install_dir: fixture.install_dir.clone(),
+            archive_dir: fixture.home.join("versions/gone"),
+            staging_dir: fixture.home.join("versions/.stage-gone"),
+            moved: Vec::new(),
+            swapped: Vec::new(),
+            old_digests: old,
+            new_digests: BTreeMap::new(),
+            server_config_original: Some(original_config.clone()),
+        };
+        write_journal(&journal_path(&fixture.home), &journal).unwrap();
+
+        let recovery = recover_journal_locked(&fixture.home).unwrap();
+        assert!(matches!(recovery, Recovery::RolledBack { .. }));
+        assert_eq!(fs::read_to_string(config_path).unwrap(), original_config);
+        assert!(!journal_path(&fixture.home).exists());
     }
 
     #[test]

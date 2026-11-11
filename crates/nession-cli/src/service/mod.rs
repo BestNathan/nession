@@ -153,10 +153,16 @@ pub fn install_service(config_path: Option<String>, pid_file: Option<String>) ->
 pub fn uninstall_service() -> Result<()> {
     uninstall_platform()?;
     println!("Autostart service uninstalled.");
-    println!(
-        "Note: the running agent (if any) was NOT stopped. \
-         Run `nession agent stop` to stop it manually."
-    );
+    if managed_agent().state == ManagedAgentState::Running {
+        println!(
+            "Note: the running Agent was NOT stopped and is still owned by {}. \
+             Stop it with `{}`.",
+            manager_name(),
+            manager_lifecycle_command(AgentLifecycleAction::Stop)
+        );
+    } else {
+        println!("Note: no running Agent was stopped.");
+    }
     Ok(())
 }
 
@@ -168,6 +174,47 @@ pub fn uninstall_service() -> Result<()> {
 /// - `"not installed"`
 pub fn service_status() -> &'static str {
     service_status_platform()
+}
+
+/// Environment marker written into the generated service artifact.
+///
+/// The manager's direct child is the one process allowed to start the
+/// manager-owned Agent. tmux Sessions and shells started by the Agent inherit
+/// this variable, so it is honored only together with a service-manager parent
+/// (systemd/launchd), never by an interactive descendant.
+pub const MANAGED_AGENT_ENV: &str = "NESION_MANAGED_AGENT";
+
+fn manager_invoked_process() -> bool {
+    is_manager_child(
+        std::env::var_os(MANAGED_AGENT_ENV).is_some(),
+        parent_is_service_manager(),
+    )
+}
+
+fn is_manager_child(marker_present: bool, parent_is_manager: bool) -> bool {
+    marker_present && parent_is_manager
+}
+
+#[cfg(target_os = "linux")]
+fn parent_is_service_manager() -> bool {
+    let parent = std::os::unix::process::parent_id();
+    if parent == 1 {
+        return true;
+    }
+    std::fs::read_to_string(format!("/proc/{parent}/comm"))
+        .map(|comm| comm.trim() == "systemd")
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn parent_is_service_manager() -> bool {
+    // launchd is PID 1; the job process is its direct child.
+    std::os::unix::process::parent_id() == 1
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn parent_is_service_manager() -> bool {
+    false
 }
 
 /// The lifecycle action a CLI command is about to take.
@@ -264,6 +311,12 @@ pub fn guard_agent_lifecycle(
     action: AgentLifecycleAction,
     state: &pid_file::StateFiles,
 ) -> Result<AgentLifecycleGuard> {
+    // The service manager starts the Agent by running this same foreground
+    // command. That direct child must proceed; an interactive descendant that
+    // inherited the marker must not (see `MANAGED_AGENT_ENV`).
+    if manager_invoked_process() {
+        return Ok(AgentLifecycleGuard::Proceed);
+    }
     let managed = managed_agent();
     let targets_this_state = match managed.pid_file.as_deref() {
         Some(pinned) => Path::new(pinned) == Path::new(&state.current),
@@ -273,11 +326,6 @@ pub fn guard_agent_lifecycle(
         AgentLifecycleDecision::Proceed => Ok(AgentLifecycleGuard::Proceed),
         AgentLifecycleDecision::AlreadyRunning => Ok(AgentLifecycleGuard::AlreadyRunning),
         AgentLifecycleDecision::Refuse => {
-            let action_label = match action {
-                AgentLifecycleAction::Start => "start",
-                AgentLifecycleAction::Stop => "stop",
-                AgentLifecycleAction::Restart => "restart",
-            };
             let state_label = match managed.state {
                 ManagedAgentState::Running => "currently running",
                 _ => "registered but not running",
@@ -296,14 +344,23 @@ pub fn guard_agent_lifecycle(
                     command
                 );
             }
+            if action == AgentLifecycleAction::Stop {
+                anyhow::bail!(
+                    "The Agent is managed by {} ({}); direct stop is refused so the manager and \
+                     the CLI cannot both control the process.\n\
+                     Fix: use `{}` to stop the managed service. The CLI does not signal a \
+                     manager-owned process.",
+                    manager_name(),
+                    state_label,
+                    command
+                );
+            }
             anyhow::bail!(
-                "The Agent is managed by {} ({}); direct {} is refused so the manager and \
-                 the CLI cannot both control the process.\n\
-                 Fix: use `{}`, or run `nession agent uninstall-service` first to make the \
-                 Agent CLI-managed again.",
+                "The Agent is registered as a {} service but is not running; direct start is \
+                 refused so it cannot create an unmanaged process beside the registration.\n\
+                 Fix: start it with `{}`, or run `nession agent uninstall-service` first to \
+                 return the Agent to CLI management.",
                 manager_name(),
-                state_label,
-                action_label,
                 command
             );
         }
@@ -1099,7 +1156,7 @@ fn systemd_unit_content(
     nession_home: Option<&str>,
     runtime_dir: Option<&str>,
 ) -> String {
-    let mut env_lines = String::new();
+    let mut env_lines = format!("Environment=\"{MANAGED_AGENT_ENV}=1\"\n");
     if let Some(home) = nession_home {
         env_lines.push_str(&format!(
             "Environment=\"{}={}\"\n",
@@ -1154,7 +1211,7 @@ fn launchd_plist_content(
     nession_home: Option<&str>,
     runtime_dir: Option<&str>,
 ) -> String {
-    let mut env_entries = String::new();
+    let mut env_entries = format!("    <key>{MANAGED_AGENT_ENV}</key>\n    <string>1</string>\n");
     if let Some(home) = nession_home {
         env_entries.push_str(&format!(
             "    <key>{}</key>\n    <string>{}</string>\n",
@@ -1207,7 +1264,7 @@ fn launchd_plist_content(
 /// Run a command, returning a friendly error on failure.
 fn run_cmd(program: &str, args: &[&str]) -> Result<()> {
     use std::process::Command;
-    let status = Command::new(program)
+    let status = Command::new(program) // not-tmux: runs the service manager command
         .args(args)
         .status()
         .with_context(|| format!("failed to execute `{program}` — is it installed?"))?;
@@ -1230,7 +1287,7 @@ fn run_cmd(program: &str, args: &[&str]) -> Result<()> {
 #[cfg(target_os = "macos")]
 fn run_cmd_quiet(program: &str, args: &[&str]) {
     use std::process::{Command, Stdio};
-    let _ = Command::new(program)
+    let _ = Command::new(program) // not-tmux: runs the service manager command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1246,7 +1303,7 @@ fn run_cmd_quiet(program: &str, args: &[&str]) {
 #[cfg(target_os = "linux")]
 fn run_cmd_output(program: &str, args: &[&str]) -> Result<std::process::Output> {
     use std::process::Command;
-    let output = Command::new(program)
+    let output = Command::new(program) // not-tmux: runs the service manager command
         .args(args)
         .output()
         .with_context(|| format!("failed to execute `{program}` — is it installed?"))?;
@@ -1608,6 +1665,54 @@ mod tests {
             "error should hint at init command, got: {msg}"
         );
     }
+    /// The marker alone is inherited by tmux shells; only the manager's direct
+    /// child may bypass the ownership guard.
+    #[test]
+    fn only_a_manager_parent_can_use_the_managed_agent_marker() {
+        assert!(is_manager_child(true, true));
+        assert!(
+            !is_manager_child(true, false),
+            "a tmux descendant must not bypass the guard"
+        );
+        assert!(
+            !is_manager_child(false, true),
+            "a manager parent without the marker is not the artifact"
+        );
+        assert!(!is_manager_child(false, false));
+    }
+
+    #[test]
+    fn the_generated_service_artifacts_are_marked_as_manager_invoked() {
+        #[cfg(target_os = "linux")]
+        {
+            let unit = systemd_unit_content(
+                "/usr/local/bin/nession",
+                "/home/u/.nession/agent-config.toml",
+                "/run/user/1/nession/agent.pid",
+                Some("/home/u/.nession"),
+                Some("/run/user/1/nession"),
+            );
+            assert!(
+                unit.contains(&format!("Environment=\"{MANAGED_AGENT_ENV}=1\"")),
+                "the unit must mark its direct child: {unit}"
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let plist = launchd_plist_content(
+                "/usr/local/bin/nession",
+                "/Users/u/.nession/agent-config.toml",
+                "/tmp/nession/agent.pid",
+                Some("/Users/u/.nession"),
+                Some("/tmp/nession"),
+            );
+            assert!(
+                plist.contains(&format!("<key>{MANAGED_AGENT_ENV}</key>")),
+                "the plist must mark its direct child: {plist}"
+            );
+        }
+    }
+
     /// #3232 F5: the manager owns a registered Agent, and the decision is a
     /// pure function of the action, the manager state and whether the command
     /// targets the registered state file.

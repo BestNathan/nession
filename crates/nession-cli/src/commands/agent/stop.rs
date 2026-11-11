@@ -54,7 +54,15 @@ pub(crate) async fn run_with(state: pid_file::StateFiles, _lock: &LifecycleLock)
             terminate::stop_verified(&record.path, &identity, pid_file::Component::Agent).await?;
             stopped.push(identity.pid);
         }
-        let _ = fs::remove_file(&record.path);
+        // A manager restart (or another writer) can replace the record during
+        // the grace period. A live identity that is not the one this stop was
+        // for belongs to a new process and must not be erased.
+        match pid_file::ownership(&record.path) {
+            Ok(pid_file::Ownership::Alive(_)) | Err(_) => {}
+            Ok(_) => {
+                let _ = fs::remove_file(&record.path);
+            }
+        }
     }
 
     Ok(())

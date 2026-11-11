@@ -38,7 +38,7 @@ function elapsedSeconds(text) {
  * Its identity is written from the OS start time, which is exactly what the
  * daemon writer records.
  */
-function startTermIgnoringProcess(identityPath, kind) {
+function startTermIgnoring() {
   const pid = Number(execFileSync('/bin/sh', [
     '-c',
     "(trap '' TERM; while :; do sleep 1; done) >/dev/null 2>&1 & echo $!",
@@ -47,9 +47,18 @@ function startTermIgnoringProcess(identityPath, kind) {
   const elapsed = elapsedSeconds(
     execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' }),
   );
-  const startedAt = Math.floor(Date.now() / 1000) - elapsed;
-  writeIdentity(identityPath, { pid, startedAt, kind, version: '0.35.0' });
-  return { pid, startedAt };
+  return { pid, startedAt: Math.floor(Date.now() / 1000) - elapsed };
+}
+
+function startTermIgnoringProcess(identityPath, kind) {
+  const process = startTermIgnoring();
+  writeIdentity(identityPath, {
+    pid: process.pid,
+    startedAt: process.startedAt,
+    kind,
+    version: '0.35.0',
+  });
+  return process;
 }
 
 async function positiveTimeout(component, identityPath, env, evidence) {
@@ -68,12 +77,16 @@ async function positiveTimeout(component, identityPath, env, evidence) {
 
 async function changedIdentity(component, identityPath, env, evidence) {
   const target = startTermIgnoringProcess(identityPath, component);
+  // The replacement record describes a *different live instance*, not merely a
+  // forged start time: that is the case where a manager restart rewrites the
+  // state path while `stop` is in its grace period.
+  const replacement = startTermIgnoring();
   const stop = spawnCli([component, 'stop'], env);
   try {
     await new Promise((resolve) => setTimeout(resolve, 700));
     writeIdentity(identityPath, {
-      pid: target.pid,
-      startedAt: target.startedAt + 3_600,
+      pid: replacement.pid,
+      startedAt: replacement.startedAt,
       kind: component,
       version: '0.35.0',
     });
@@ -81,15 +94,26 @@ async function changedIdentity(component, identityPath, env, evidence) {
     const output = readOutput(stop);
     assert.equal(exit.code, 0, component + ' identity mismatch must be a safe no-op: ' + output);
     assert.match(output, /not sending SIGKILL/);
-    assert.ok(isRunning(target.pid), 'a reused ' + component + ' pid was signalled');
+    assert.ok(isRunning(target.pid), 'the original ' + component + ' was signalled');
+    assert.ok(isRunning(replacement.pid), 'the replacement ' + component + ' was signalled');
+    assert.ok(fs.existsSync(identityPath), 'the replacement identity record was erased');
+    assert.equal(
+      readIdentity(identityPath).pid,
+      replacement.pid,
+      'the live replacement identity must remain in the state file',
+    );
     evidence.push({
       type: 'runtime',
-      value: component + ' PID ' + target.pid + ' survived: the record described another instance at SIGKILL time',
+      value: component + ' PID ' + target.pid + ' survived and the replacement PID ' +
+        replacement.pid + ' was neither signalled nor erased',
     });
   } finally {
-    if (isRunning(target.pid)) globalThis.process.kill(target.pid, 'SIGKILL');
+    for (const pid of [target.pid, replacement.pid]) {
+      if (isRunning(pid)) globalThis.process.kill(pid, 'SIGKILL');
+    }
     await waitForExit(stop, 5_000).catch(() => {});
     await waitForGone(target.pid, 5_000, component + ' cleanup').catch(() => {});
+    await waitForGone(replacement.pid, 5_000, component + ' replacement cleanup').catch(() => {});
   }
 }
 

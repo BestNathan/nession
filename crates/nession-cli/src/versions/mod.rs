@@ -244,14 +244,19 @@ pub fn prepare<I: IntoIterator<Item = OsString>>(raw_args: I) -> Result<Prepared
         _ => {}
     }
 
-    let cli = archived_cli(&version)?;
-    if !cli.is_file() {
+    let home = version_home(&version)?;
+    if !is_complete_archive(&home) {
+        let detail = if home.exists() {
+            "is incomplete (an executable is missing)"
+        } else {
+            "is not installed"
+        };
         bail!(
-            "release {version} is not installed (missing {}); run `nession install {version}`",
-            cli.display()
+            "release {version} {detail} at {}; run `nession install {version}`",
+            home.display()
         );
     }
-    let home = version_home(&version)?;
+    let cli = archived_cli(&version)?;
     // A dangerous lifecycle command must not be executed by a release that
     // predates the shared lock/PID/single-active contract: it would look in
     // its own home and could start a second daemon (#3232 F2).

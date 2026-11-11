@@ -85,8 +85,11 @@ function prepareHome(home) {
   ].join('\n'));
 }
 
-async function scenario(fixture, installDir, home) {
-  return runInstaller(['--version', TARGET, '--dir', installDir], installerEnv(fixture, installDir, home));
+async function scenario(fixture, installDir, home, extra = {}) {
+  return runInstaller(
+    ['--version', TARGET, '--dir', installDir],
+    installerEnv(fixture, installDir, home, extra),
+  );
 }
 
 main(async () => {
@@ -106,7 +109,7 @@ main(async () => {
     const migrationInstall = copyInstall(legacySource, path.join(base, 'migration-install'));
     const migrationHome = path.join(base, 'migration-home');
     prepareHome(migrationHome);
-    const migrated = await scenario(good, migrationInstall, migrationHome);
+    const migrated = await scenario(good, migrationInstall, migrationHome, { NESSION_VERSION: LEGACY });
     assert.equal(migrated.status, 0, 'first migration failed: ' + migrated.output);
     assert.deepEqual(hashes(migrationInstall), payload, 'installed binaries are not the target release');
     const archive = path.join(migrationHome, 'versions', LEGACY_REPORTED);

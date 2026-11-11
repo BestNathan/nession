@@ -113,7 +113,16 @@ pub fn rewrite_server_config_for_archive(
                          refusing to archive Current"
                     );
                 };
-                *item = toml_edit::value(rendered);
+                // `toml_edit` stores whitespace and an inline comment in the
+                // value's decor. Replacing the whole item would silently drop
+                // them, so carry the old decor onto the new value.
+                let decor = item
+                    .as_value()
+                    .map(|value| value.decor().clone())
+                    .unwrap_or_default();
+                let mut replacement = toml_edit::Value::from(rendered);
+                *replacement.decor_mut() = decor;
+                *item = toml_edit::Item::Value(replacement);
                 report.actions.push((field, FieldAction::Rewritten));
             }
             Decision::External => report.actions.push((field, FieldAction::Retained)),
@@ -213,6 +222,22 @@ mod tests {
             rewritten.contains("auth_token = \"secret\""),
             "unrelated keys survive"
         );
+    }
+
+    #[test]
+    fn an_inline_comment_on_a_rewritten_field_survives() {
+        let (current, archive) = homes();
+        let config = format!(
+            "db_path = \"{}\" # primary volume\n",
+            paths::server_db_path_under(&current).display()
+        );
+        let (rewritten, _) =
+            rewrite_server_config_for_archive(&config, &current, &archive).unwrap();
+        assert!(
+            rewritten.contains("# primary volume"),
+            "the inline comment was lost: {rewritten}"
+        );
+        assert!(rewritten.contains(&paths::server_db_path_under(&archive).display().to_string()));
     }
 
     #[test]

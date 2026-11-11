@@ -209,9 +209,17 @@ consults the manager before acting:
 - commands aimed at a different explicit state file — an isolated runtime — are
   unaffected, as is `status`.
 
+The generated unit/plist marks its **direct child** with
+`NESION_MANAGED_AGENT=1`. The guard honors that marker only when the process's
+parent is the service manager (systemd/launchd), because tmux Sessions started
+by the Agent inherit the variable. Without that distinction the manager's own
+foreground start would be refused, or an interactive shell inside a Session
+could bypass the ownership guard.
+
 `nession agent uninstall-service` returns the Agent to CLI-managed operation
-for future starts. Cross-release switching is done by installing the target as
-Current and re-running `install-service` from it.
+for future starts and names the manager stop command when a job is still
+running. Cross-release switching is done by installing the target as Current
+and re-running `install-service` from it.
 
 ## Limits / when to revisit
 

@@ -17,7 +17,8 @@
 #   -h, --help            Show this help
 #
 # Environment overrides: NESSION_VERSION, NESSION_INSTALL_DIR, NESSION_BINS,
-#   NESSION_RELEASE_BASE_URL (mirror/test base; requires an explicit version),
+#   NESSION_RELEASE_BASE_URL (mirror/test base; requires an explicit version and,
+#   for an existing installation, NESSION_UPDATE_API_URL),
 #   GITHUB_TOKEN
 #
 # First migration: when the install directory already holds a CLI that predates
@@ -46,7 +47,7 @@ warn()  { printf '%swarning:%s %s\n' "$C_YLW" "$C_RST" "$*" >&2; }
 die()   { printf '%serror:%s %s\n' "$C_RED" "$C_RST" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -60,6 +61,11 @@ while [ $# -gt 0 ]; do
     *)            die "unknown option: $1 (try --help)" ;;
   esac
 done
+
+# The script owns the selector from here on. A delegated/migrating CLI must not
+# re-apply it: `install`/`update` refuse a non-Current selector, and the
+# capability probe below would otherwise fail for any NESSION_VERSION.
+unset NESSION_VERSION NESSION_VERSION_DISPATCHED
 
 # ── Detect platform ─────────────────────────────────────────────────────────
 detect_os() {
@@ -178,6 +184,14 @@ elif command -v nession >/dev/null 2>&1; then
   if [ "$(dirname "$PATH_CLI")" = "$INSTALL_DIR" ]; then
     EXISTING_CLI="$PATH_CLI"
   fi
+fi
+
+# A mirror base only changes where the script downloads. The CLI's install
+# transaction discovers and verifies the release through its own API base, so an
+# upgrade of an existing installation needs that base too.
+if [ -n "$EXISTING_CLI" ] && [ -n "${NESSION_RELEASE_BASE_URL:-}" ] \
+   && [ -z "${NESSION_UPDATE_API_URL:-}" ]; then
+  die "NESSION_RELEASE_BASE_URL requires NESSION_UPDATE_API_URL when upgrading an existing installation (the CLI verifies releases through its API base)"
 fi
 
 # ── Delegate versioned installs to an existing CLI ──────────────────────────

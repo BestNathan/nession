@@ -34,7 +34,7 @@ use crate::versions;
 use anyhow::{bail, Result};
 use semver::Version;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One install/update request.
 #[derive(Debug, Clone)]
@@ -307,11 +307,31 @@ async fn download_and_apply(
 fn refuse_while_running() -> Result<()> {
     for component in [Component::Agent, Component::Server] {
         if let Some((path, identity)) = pid_file::default_live(component)? {
+            let stop_hint = if component == Component::Agent {
+                let managed = crate::service::managed_agent();
+                let targets = match managed.pid_file.as_deref() {
+                    Some(pinned) => Path::new(pinned) == Path::new(&path),
+                    None => pid_file::matches_default_agent_state_path(&path),
+                };
+                if managed.state != crate::service::ManagedAgentState::NotInstalled && targets {
+                    format!(
+                        "`{}` (the Agent is managed by {})",
+                        crate::service::manager_lifecycle_command(
+                            crate::service::AgentLifecycleAction::Stop
+                        ),
+                        crate::service::manager_name()
+                    )
+                } else {
+                    "`nession agent stop`".to_string()
+                }
+            } else {
+                "`nession server stop`".to_string()
+            };
             bail!(
                 "{} is running (PID {}, release {}, state file {path}); installing a new Current \
                  requires moving its configuration and durable state.\n\
-                 Fix: stop the {} first (`nession {} stop`), then re-run the install. Nession \
-                 never stops or restarts a service implicitly.",
+                 Fix: stop the {} first with {}, then re-run the install. Nession never stops \
+                 or restarts a service implicitly.",
                 match component {
                     Component::Agent => "Agent",
                     Component::Server => "Server",
@@ -319,7 +339,7 @@ fn refuse_while_running() -> Result<()> {
                 identity.pid,
                 identity.release_version.as_deref().unwrap_or("unknown"),
                 component.as_str(),
-                component.as_str()
+                stop_hint
             );
         }
     }
