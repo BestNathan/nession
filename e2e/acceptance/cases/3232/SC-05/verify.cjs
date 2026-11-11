@@ -52,9 +52,12 @@ function launchdProperties(env) {
       pid, target, detail: result.output.slice(0, 500),
     };
   }
+  const domainAvailable = ['gui', 'user'].some((domain) =>
+    command('launchctl', ['print', domain + '/' + uid], env).code === 0);
   return {
-    manager: 'launchd', available: true, registered: false,
-    running: false, pid: 0, detail: 'No launchd job registered',
+    manager: 'launchd', available: domainAvailable, registered: false,
+    running: false, pid: 0,
+    detail: domainAvailable ? 'No launchd job registered' : 'No live launchd user/GUI domain',
   };
 }
 function observe(env) {
