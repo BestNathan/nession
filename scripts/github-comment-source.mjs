@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseCommand } from './github-comment-command.mjs';
+import { resolveAcceptComment } from './issue-lifecycle-reconcile.mjs';
 
 const REPO = 'BestNathan/nession';
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -68,6 +69,10 @@ function selfTest() {
     body: '/audit tree', user: { type: 'User', login: 'maintainer' }, author_association: 'COLLABORATOR' };
   assert.equal(verifiedSource('audit', REPO, 9, 99, issue, comment).comment.body, '/audit tree');
   assert.equal(verifiedSource('accept', REPO, 9, 99, issue, { ...comment, body: '/accept' }).sender.login, 'maintainer');
+  const authorizedAccept = verifiedSource('accept', REPO, 9, 99, issue, { ...comment, body: '/accept' });
+  assert.equal(resolveAcceptComment(authorizedAccept, REPO, authorizedAccept.sender.login).commentId, 99);
+  assert.equal(resolveAcceptComment(authorizedAccept, REPO, 'github-actions[bot]'), null,
+    'a bot-dispatched request cannot substitute its bot actor for the verified human');
   for (const change of [
     { comment: { ...comment, body: '/audit\nextra' } },
     { comment: { ...comment, body: '/accept' } },
