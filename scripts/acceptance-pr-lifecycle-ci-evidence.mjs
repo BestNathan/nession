@@ -39,8 +39,10 @@ function runSource(run,sha){
 function requiredJob(jobs,name,stepName){
   const job=unique(jobs,j=>j.name===name,name+' job');
   if(!validId(job.id)||job.status!=='completed'||job.conclusion!=='success')fail(name+' job not successfully completed');
-  unique(job.steps||[],s=>s.name===stepName&&s.status==='completed'&&
-    s.conclusion==='success',name+' required successful step');
+  const step=unique(job.steps||[],s=>s.name===stepName,
+    name+' required step');
+  if(step.status!=='completed'||step.conclusion!=='success')
+    fail(name+' required step did not pass');
   return job;
 }
 function assertGateLog(log){
@@ -156,6 +158,7 @@ async function selfTest(){
     [source,async p=>p.includes('/attempts/1/jobs?')?{jobs:[...jobs,jobs[0]]}:request(p),async()=>log],
     [source,async p=>p.includes('/attempts/1/jobs?')?{jobs:jobs.map(j=>j.name==='tooling-check'?{...j,conclusion:'skipped'}:j)}:request(p),async()=>log],
     [source,async p=>p.includes('/attempts/1/jobs?')?{jobs:jobs.map(j=>j.name==='tooling-check'?{...j,steps:[{...j.steps[0],conclusion:'failure'}]}:j)}:request(p),async()=>log],
+    [source,async p=>p.includes('/attempts/1/jobs?')?{jobs:jobs.map(j=>j.name==='tooling-check'?{...j,steps:[...j.steps,j.steps[0]]}:j)}:request(p),async()=>log],
     [source,request,async()=>log.replace('✓ requirement-acceptance-selftest','- not run')],
     [source,request,async()=>log.replace('64 passed','63 passed')],
   ];
@@ -163,7 +166,7 @@ async function selfTest(){
     await assert.rejects(collectVerifiedIssueLifecycleCi(s,g,t),
       /unverified #2990 CI source/);
   }
-  console.log('PR lifecycle CI: positive and eleven fail-closed source/step/Gate fixtures passed');
+  console.log('PR lifecycle CI: positive and twelve fail-closed source/step/Gate fixtures passed');
 }
 async function main(){
   const cmd=process.argv[2];
