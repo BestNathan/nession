@@ -151,8 +151,8 @@ async function verify() {
     const identity = readIdentity(path.join(runtime, 'agent.pid'));
     assert.equal(identity.pid, before.pid, 'manager and Agent PID identity must agree');
     assert.ok(isRunning(before.pid), 'manager Agent must actually be alive');
-    evidence.push({ type: 'runtime', value: before.manager + ' owns real Agent PID ' +
-      before.pid + ', version ' + identity.release_version });
+    evidence.push({ type: 'runtime', value: before.manager + ' ' + (before.target || UNIT) +
+      ' owns real Agent PID ' + before.pid + ', version ' + identity.release_version });
 
     // A real, independently published pre-contract release must fail closed
     // even while a service manager is keeping the Current Agent alive.
