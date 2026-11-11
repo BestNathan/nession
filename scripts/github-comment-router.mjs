@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { commandPlan, workflowTitle, dispatchInputs } from './github-comment-command.mjs';
+import { commandPlan, parseCommand, workflowTitle, dispatchInputs } from './github-comment-command.mjs';
 
 const REPO = 'BestNathan/nession';
 const API = 'https://api.github.com';
@@ -32,12 +32,13 @@ function validEvent(event) {
     Number.isSafeInteger(event?.issue?.number) && event.issue.number > 0;
 }
 export async function resolve(event, read = api) {
-  if (!validEvent(event)) return null;
+  if (!validEvent(event) || !parseCommand(event.comment.body)) return null;
   const id = event.comment.id, number = event.issue.number;
   const [comment, issue] = await Promise.all([
     read('/repos/' + REPO + '/issues/comments/' + id),
     read('/repos/' + REPO + '/issues/' + number),
   ]);
+  if (!['OWNER', 'MEMBER', 'COLLABORATOR'].includes(comment?.author_association)) return null;
   const isPr = Boolean(issue?.pull_request);
   let pr = null, permission = null;
   if (isPr) {
@@ -89,7 +90,11 @@ async function dispatch(plan, read = api) {
   const runs = await inventory(read, plan);
   const previous = findRun(runs, plan);
   if (previous) return { state: 'already-dispatched', url: previous.html_url };
-  if (runs.length === 100 || comments.length === 100)
+  // A full page is safe for a freshly created command only when its oldest
+  // item precedes the source comment. Otherwise history may hide a replay.
+  const since = Date.parse(plan.created_at);
+  if ((runs.length === 100 && !(Date.parse(runs.at(-1)?.created_at) < since)) ||
+      (comments.length === 100 && !(Date.parse(comments.at(-1)?.created_at) < since)))
     throw Error('bounded run/comment inventory exhausted; reconcile manually');
   await read('/repos/' + REPO + '/actions/workflows/' + plan.workflow + '/dispatches', {
     method: 'POST', body: { ref: 'main', inputs: dispatchInputs(plan) },
