@@ -131,6 +131,8 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         command,
         server_url,
         auth_token,
+        // Intercepted before Clap in `main`; never reaches dispatch.
+        lifecycle_contract: _,
     } = cli;
 
     match command {

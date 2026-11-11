@@ -15,6 +15,13 @@
 //! safe operation, and the requirement is explicit that install must never
 //! stop or restart a service.
 //!
+//! The filesystem half is a recoverable transaction owned by
+//! [`crate::update::transaction`]: a complete archive is assembled in staging
+//! and published by one rename, the old release's generated server paths move
+//! with its home, and an interrupted transaction is rolled back (or proven
+//! complete) by the next CLI invocation instead of leaving a half-installed
+//! release (#3232 F1/F4).
+//!
 //! The filesystem half is separated from the network half so the archive
 //! transaction, idempotence and rollback are testable against a temporary tree.
 
@@ -22,16 +29,12 @@ use crate::lifecycle::lock::LifecycleLock;
 use crate::lifecycle::pid_file::{self, Component};
 use crate::update::download;
 use crate::update::github::{self, GitHubReleaseClient};
-use crate::update::replace;
+use crate::update::transaction;
 use crate::versions;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use semver::Version;
 use std::fs;
-use std::path::{Path, PathBuf};
-
-const BINARIES: [&str; 3] = ["nession", "nession-agent", "nession-server"];
-const CONFIG_FILES: [&str; 2] = ["agent-config.toml", "server-config.toml"];
-const DURABLE_DIRS: [&str; 2] = ["agent", "server"];
+use std::path::PathBuf;
 
 /// One install/update request.
 #[derive(Debug, Clone)]
@@ -84,7 +87,7 @@ pub fn plan(layout: &versions::Layout, target: &Version) -> Result<InstallPlan> 
     if target < &layout.current {
         let target_dir = versions_root.join(target.to_string());
         if target_dir.exists() {
-            if target_dir.join("bin").join("nession").is_file() {
+            if versions::is_complete_archive(&target_dir) {
                 return Ok(InstallPlan::NoOp);
             }
             bail!(
@@ -95,7 +98,7 @@ pub fn plan(layout: &versions::Layout, target: &Version) -> Result<InstallPlan> 
         }
         return Ok(InstallPlan::ArchiveOnly { target_dir });
     }
-    for name in BINARIES {
+    for name in versions::RELEASE_BINARIES {
         if !layout.install_dir.join(name).is_file() {
             bail!(
                 "the Current installation is incomplete: {} is missing; refusing to replace it",
@@ -116,6 +119,10 @@ pub fn plan(layout: &versions::Layout, target: &Version) -> Result<InstallPlan> 
 
 /// Run a full install/update, including the download and checksum.
 pub async fn run(request: InstallRequest) -> Result<()> {
+    // A previous process may have been killed mid-transaction. Resolve that
+    // before reading Current: a mixed binary set is not a release, and the
+    // journal is the only safe source of what to restore (#3232 F4).
+    report_recovery(transaction::recover_at_cli_start()?);
     let layout = versions::Layout::resolve()?;
     // An explicit version can be resolved from the local layout. Reinstalling
     // Current or an already-archived release is an idempotent no-op and must
@@ -225,13 +232,19 @@ pub async fn run(request: InstallRequest) -> Result<()> {
     Ok(())
 }
 
+fn report_recovery(recovery: transaction::Recovery) {
+    if let Some(message) = recovery.describe() {
+        println!("{message}");
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn download_and_apply(
     client: &GitHubReleaseClient,
     release: &github::ReleaseInfo,
     asset_name: &str,
     asset_url: &str,
-    tmp_dir: &Path,
+    tmp_dir: &std::path::Path,
     layout: &versions::Layout,
     target: &Version,
     plan: &InstallPlan,
@@ -243,26 +256,28 @@ async fn download_and_apply(
     download::verify_checksum(&tarball, &checksums, asset_name)?;
     println!("Checksum verified.");
     download::extract_binaries(&tarball, tmp_dir)?;
-    for name in BINARIES {
+    for name in versions::RELEASE_BINARIES {
         if !tmp_dir.join(name).is_file() {
             bail!("release archive is missing the {name} binary; refusing a partial release");
         }
     }
 
+    // One lifecycle command at a time across every installed release. The lock
+    // covers the live-process re-check and the whole archive transaction, and
+    // any journal left by an earlier crash is recovered before this plan runs.
+    let _lock = LifecycleLock::acquire()?;
+    report_recovery(transaction::recover_journal_locked(&layout.home)?);
+
     match plan {
         InstallPlan::NoOp => Ok(InstallOutcome::NoOp {
             version: target.clone(),
         }),
-        InstallPlan::ArchiveOnly { target_dir } => {
-            apply_archive_only(target_dir, tmp_dir).map(|path| InstallOutcome::ArchivedOnly {
+        InstallPlan::ArchiveOnly { target_dir } => transaction::archive_only(target_dir, tmp_dir)
+            .map(|path| InstallOutcome::ArchivedOnly {
                 version: target.clone(),
                 path,
-            })
-        }
+            }),
         InstallPlan::ReplaceCurrent { archive_dir } => {
-            // Hold the cross-release lifecycle lock across the live-process
-            // re-check and the whole archive transaction.
-            let _lock = LifecycleLock::acquire()?;
             refuse_while_running()?;
             let current_now = versions::current_version(&layout.install_dir)?;
             if current_now != layout.current {
@@ -272,10 +287,11 @@ async fn download_and_apply(
                     current_now
                 );
             }
-            apply_replace_current(
+            transaction::replace_current(
                 &layout.home,
                 &layout.install_dir,
                 &layout.current,
+                target,
                 archive_dir,
                 tmp_dir,
             )
@@ -310,139 +326,6 @@ fn refuse_while_running() -> Result<()> {
     Ok(())
 }
 
-fn apply_archive_only(target_dir: &Path, staged: &Path) -> Result<PathBuf> {
-    if target_dir.exists() {
-        if target_dir.join("bin").join("nession").is_file() {
-            return Ok(target_dir.to_path_buf());
-        }
-        bail!(
-            "archive {} exists but is incomplete; remove it before reinstalling",
-            target_dir.display()
-        );
-    }
-    if let Some(parent) = target_dir.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create the versions root {}", parent.display()))?;
-    }
-    fs::create_dir(target_dir).with_context(|| {
-        format!(
-            "failed to claim the archive directory {}",
-            target_dir.display()
-        )
-    })?;
-    let bin_dir = target_dir.join("bin");
-    if let Err(error) = fs::create_dir(&bin_dir) {
-        let _ = fs::remove_dir_all(target_dir);
-        return Err(error).with_context(|| format!("failed to create {}", bin_dir.display()));
-    }
-    for name in BINARIES {
-        if let Err(error) = copy_binary(&staged.join(name), &bin_dir.join(name)) {
-            let _ = fs::remove_dir_all(target_dir);
-            return Err(error);
-        }
-    }
-    Ok(target_dir.to_path_buf())
-}
-
-fn apply_replace_current(
-    home: &Path,
-    install_dir: &Path,
-    current: &Version,
-    archive_dir: &Path,
-    staged: &Path,
-) -> Result<PathBuf> {
-    for name in BINARIES {
-        if !install_dir.join(name).is_file() {
-            bail!(
-                "the Current installation is incomplete: {} is missing",
-                install_dir.join(name).display()
-            );
-        }
-    }
-    if archive_dir.exists() {
-        bail!(
-            "archive {} appeared while installing; refusing to overwrite it",
-            archive_dir.display()
-        );
-    }
-
-    let archive_bin = archive_dir.join("bin");
-    fs::create_dir_all(&archive_bin)
-        .with_context(|| format!("failed to create {}", archive_bin.display()))?;
-
-    // 1. A complete copy of the Current binaries is the rollback source and
-    //    the archived release entry.
-    for name in BINARIES {
-        copy_binary(&install_dir.join(name), &archive_bin.join(name))
-            .with_context(|| format!("failed to archive the Current {name} binary"))?;
-    }
-
-    // 2. Move the configuration and durable state with the release. They are
-    //    restored on failure.
-    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
-    for name in CONFIG_FILES.iter().chain(DURABLE_DIRS.iter()) {
-        let original = home.join(name);
-        if !original.exists() {
-            continue;
-        }
-        let archived = archive_dir.join(name);
-        if let Err(error) = fs::rename(&original, &archived) {
-            rollback_move(&moved);
-            let _ = fs::remove_dir_all(archive_dir);
-            return Err(error).with_context(|| {
-                format!(
-                    "failed to archive {}; Current was restored",
-                    original.display()
-                )
-            });
-        }
-        moved.push((original, archived));
-    }
-
-    // 3. Install the target binaries into the managed install directory.
-    for name in BINARIES {
-        if let Err(error) = replace::atomic_replace(&staged.join(name), &install_dir.join(name)) {
-            rollback_move(&moved);
-            for bin in BINARIES {
-                let archived = archive_bin.join(bin);
-                if archived.is_file() {
-                    let _ = replace::atomic_replace(&archived, &install_dir.join(bin));
-                }
-            }
-            let _ = fs::remove_dir_all(archive_dir);
-            return Err(error).with_context(|| {
-                format!("failed to install release {name}; Current was restored from the archive")
-            });
-        }
-    }
-
-    println!(
-        "Archived release {current} to {}; Current is now the installed target.",
-        archive_dir.display()
-    );
-    Ok(archive_dir.to_path_buf())
-}
-
-fn rollback_move(moved: &[(PathBuf, PathBuf)]) {
-    for (original, archived) in moved.iter().rev() {
-        if archived.exists() && !original.exists() {
-            let _ = fs::rename(archived, original);
-        }
-    }
-}
-
-fn copy_binary(source: &Path, destination: &Path) -> Result<()> {
-    fs::copy(source, destination).with_context(|| {
-        format!(
-            "failed to copy {} to {}",
-            source.display(),
-            destination.display()
-        )
-    })?;
-    replace::set_executable(destination)?;
-    Ok(())
-}
-
 fn report(outcome: &InstallOutcome) {
     match outcome {
         InstallOutcome::NoOp { version } => {
@@ -463,6 +346,7 @@ fn report(outcome: &InstallOutcome) {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn write_binary(path: &Path, body: &str) {
@@ -477,9 +361,9 @@ mod tests {
 
     fn current_tree(root: &TempDir, version: &str) -> versions::Layout {
         let install_dir = root.path().join("install");
-        write_binary(&install_dir.join("nession"), version);
-        write_binary(&install_dir.join("nession-agent"), version);
-        write_binary(&install_dir.join("nession-server"), version);
+        for name in versions::RELEASE_BINARIES {
+            write_binary(&install_dir.join(name), version);
+        }
         versions::Layout {
             home: root.path().join("home"),
             install_dir,
@@ -489,7 +373,7 @@ mod tests {
 
     fn staged(root: &TempDir, version: &str) -> PathBuf {
         let dir = root.path().join("staged");
-        for name in BINARIES {
+        for name in versions::RELEASE_BINARIES {
             write_binary(&dir.join(name), version);
         }
         dir
@@ -512,7 +396,7 @@ mod tests {
         let plan = plan(&layout, &Version::new(0, 35, 0)).unwrap();
         assert!(matches!(plan, InstallPlan::ArchiveOnly { .. }));
 
-        let outcome = apply_archive_only(
+        let outcome = transaction::archive_only(
             &root.path().join("home/versions/0.35.0"),
             &staged(&root, "0.35.0"),
         )
@@ -535,10 +419,11 @@ mod tests {
         fs::create_dir_all(layout.home.join("server")).unwrap();
         fs::write(layout.home.join("server/server.db"), "old-db").unwrap();
 
-        let archive = apply_replace_current(
+        let archive = transaction::replace_current(
             &layout.home,
             &layout.install_dir,
             &layout.current,
+            &Version::new(1, 2, 0),
             &layout.home.join("versions/1.1.0"),
             &staged(&root, "1.2.0"),
         )
@@ -587,15 +472,28 @@ mod tests {
     }
 
     #[test]
+    fn an_incomplete_archive_is_not_an_installed_release() {
+        let root = TempDir::new().unwrap();
+        let layout = current_tree(&root, "1.1.0");
+        let archive = layout.home.join("versions/0.35.0/bin");
+        fs::create_dir_all(&archive).unwrap();
+        write_binary(&archive.join("nession"), "0.35.0");
+
+        let error = plan(&layout, &Version::new(0, 35, 0)).unwrap_err();
+        assert!(error.to_string().contains("incomplete"));
+    }
+
+    #[test]
     fn a_missing_binary_refuses_a_replace() {
         let root = TempDir::new().unwrap();
         let layout = current_tree(&root, "1.1.0");
         fs::remove_file(layout.install_dir.join("nession-agent")).unwrap();
 
-        let error = apply_replace_current(
+        let error = transaction::replace_current(
             &layout.home,
             &layout.install_dir,
             &layout.current,
+            &Version::new(1, 2, 0),
             &layout.home.join("versions/1.1.0"),
             &staged(&root, "1.2.0"),
         )
@@ -610,23 +508,22 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_binary_install_restores_configuration_and_binaries() {
+    fn an_incomplete_staged_release_is_refused_before_archiving() {
         let root = TempDir::new().unwrap();
         let layout = current_tree(&root, "1.1.0");
         fs::create_dir_all(&layout.home).unwrap();
         fs::write(layout.home.join("agent-config.toml"), "old-config").unwrap();
         let archive = layout.home.join("versions/1.1.0");
 
-        // A staged release missing one binary fails after the configuration has
-        // moved, which exercises the rollback path deterministically.
         let incomplete = root.path().join("incomplete-staged");
         write_binary(&incomplete.join("nession"), "1.2.0");
         write_binary(&incomplete.join("nession-server"), "1.2.0");
 
-        let result = apply_replace_current(
+        let result = transaction::replace_current(
             &layout.home,
             &layout.install_dir,
             &layout.current,
+            &Version::new(1, 2, 0),
             &archive,
             &incomplete,
         );
@@ -635,16 +532,16 @@ mod tests {
         assert_eq!(
             fs::read_to_string(layout.home.join("agent-config.toml")).unwrap(),
             "old-config",
-            "configuration must be restored after a failed transaction"
+            "configuration must be untouched"
         );
         assert_eq!(
             fs::read_to_string(layout.install_dir.join("nession")).unwrap(),
             "1.1.0",
-            "Current binaries must be restored after a failed transaction"
+            "Current binaries must be untouched"
         );
         assert!(
             !archive.exists(),
-            "a rolled-back archive must not masquerade as an installed release"
+            "a refused archive must not appear as an installed release"
         );
     }
 }

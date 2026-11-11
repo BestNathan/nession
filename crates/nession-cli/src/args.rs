@@ -40,6 +40,14 @@ pub struct Cli {
     /// boundary. Commands that do not consume this flag reject it.
     #[arg(long, global = true)]
     pub auth_token: Option<String>,
+
+    /// Internal: print the shared lifecycle contract and exit.
+    ///
+    /// The version dispatcher probes this before running a dangerous
+    /// lifecycle command on an archived release (#3232 F2). Hidden: it is a
+    /// capability handshake, not an operator-facing flag.
+    #[arg(long, hide = true, global = true)]
+    pub lifecycle_contract: bool,
 }
 
 /// The top-level command families.

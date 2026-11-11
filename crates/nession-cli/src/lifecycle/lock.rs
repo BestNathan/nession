@@ -38,8 +38,10 @@ impl LifecycleLock {
         Ok(Self { _file: file })
     }
 
-    /// Try to acquire without blocking. Used by tests to prove exclusion.
-    #[cfg(test)]
+    /// Try to acquire without blocking.
+    ///
+    /// CLI startup uses this to recover an interrupted install only when no
+    /// install is currently running; tests use it to prove exclusion.
     pub fn try_acquire() -> Result<Option<Self>> {
         let file = open_lock_file()?;
         match lock_exclusive_nonblocking(&file) {
@@ -80,7 +82,7 @@ fn lock_exclusive(file: &File) -> std::io::Result<()> {
     }
 }
 
-#[cfg(all(unix, test))]
+#[cfg(unix)]
 fn lock_exclusive_nonblocking(file: &File) -> std::io::Result<bool> {
     use std::os::fd::AsRawFd;
     // SAFETY: `file` owns a valid descriptor for the duration of the call.
@@ -101,7 +103,7 @@ fn lock_exclusive(_file: &File) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(all(not(unix), test))]
+#[cfg(not(unix))]
 fn lock_exclusive_nonblocking(_file: &File) -> std::io::Result<bool> {
     Ok(true)
 }
