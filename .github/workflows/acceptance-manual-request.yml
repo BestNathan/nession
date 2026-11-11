@@ -1,11 +1,20 @@
 name: Acceptance / Manual Request
+run-name: >-
+  ${{ format('Comment Accept #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) }}
 
-# An exact owner/collaborator /accept comment is a recovery trigger only.
-# This workflow never writes an SC verdict; trusted Agent/Case projectors
-# retain exclusive authority. Untrusted PR/bot comments are no-ops.
+# Exact owner/collaborator /accept recovery. Only the trusted projector may
+# mark SC Pass: this comment is a recovery request, not a verdict.
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing open native Issue
+        required: true
+        type: string
+      source_comment_id:
+        description: Original authorized /accept comment ID
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,19 +23,17 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: acceptance-manual-request-${{ github.event.issue.number }}
+  group: acceptance-manual-request-${{ inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
   request:
     if: >-
       github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
       github.run_attempt == 1 &&
-      github.event.issue.state == 'open' &&
-      !github.event.issue.pull_request &&
-      github.event.comment.body == '/accept' &&
-      github.event.comment.user.type == 'User' &&
-      github.event.comment.user.login == github.actor
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -38,10 +45,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Verify comment routing and lifecycle policy
-        run: ./gates/run requirement-acceptance-selftest
+      - name: Verify comment source and canonical Acceptance policy
+        run: |
+          node scripts/github-comment-source.mjs self-test
+          ./gates/run requirement-acceptance-selftest
       - name: Reconcile or dispatch existing stage-qualified Agent Acceptance
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/issue-lifecycle-reconcile.mjs manual "$GITHUB_EVENT_PATH"
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/github-comment-source.mjs materialize accept \
+            '${{ inputs.issue_number }}' '${{ inputs.source_comment_id }}' \
+            "$RUNNER_TEMP/original-comment.json"
+          # Restore the verified original human author only for the scoped
+          # legacy /accept parser. The source was independently re-read above.
+          original_actor="$(jq -er '.sender.login' "$RUNNER_TEMP/original-comment.json")"
+          [[ "$original_actor" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || exit 1
+          GITHUB_ACTOR="$original_actor" node scripts/issue-lifecycle-reconcile.mjs manual             "$RUNNER_TEMP/original-comment.json"
