@@ -17,16 +17,30 @@ export function semanticIssueBody(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
   const meaningful = [];
   let projection = false;
+  let fence = null;
   for (const line of lines) {
-    const heading = line.match(/^##[ \t]+(.+?)[ \t]*$/);
+    // Markdown headings inside fenced examples are ordinary content. They
+    // must never open a projected section and hide meaningful spec changes.
+    const boundary = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (boundary) {
+      if (!fence) {
+        fence = { char: boundary[1][0], length: boundary[1].length };
+      } else if (boundary[1][0] === fence.char &&
+                 boundary[1].length >= fence.length &&
+                 line.slice(boundary[0].length).trim() === '') {
+        fence = null;
+      }
+      if (!projection) meaningful.push(line);
+      continue;
+    }
+    const heading = !fence && line.match(/^##[ \t]+(.+?)[ \t]*$/);
     if (heading) {
       projection = PROJECTION_HEADINGS.has(heading[1].trim().toLowerCase());
       if (projection) continue;
     }
     if (projection) continue;
-    meaningful.push(
-      line.replace(/^(\s*-\s+\[)[ xX](\]\s+SC-\d{2,}\b)/, '$1 $2'),
-    );
+    meaningful.push(fence ? line :
+      line.replace(/^(\s*-\s+\[)[ xX](\]\s+SC-\d{2,}\b)/, '$1 $2'));
   }
   return meaningful.join('\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -86,6 +100,14 @@ function selfTest() {
   assert.equal(issueAuditAdmission('issues', { action: 'unlabeled', label: { name: 'verification:scoped' } }).semantic, false);
   assert.equal(issueAuditAdmission('issues', edited(original, statusUpdate)).semantic, false);
   assert.equal(issueAuditAdmission('issues', edited(original, reportUpdate)).semantic, false);
+  const markdownExample = original.replace('Description of the desired behavior.',
+    'Description of the desired behavior.\\n~~~md\\n## Acceptance Report\\nreal example text\\n~~~');
+  assert.equal(issueAuditAdmission('issues', edited(markdownExample,
+    markdownExample.replace('real example text', 'changed example requirement'))).semantic, true);
+  const fencedCheckbox = original.replace('Description of the desired behavior.',
+    'Description of the desired behavior.\\n~~~md\\n- [ ] SC-01 example\\n~~~');
+  assert.equal(issueAuditAdmission('issues', edited(fencedCheckbox,
+    fencedCheckbox.replace('- [ ] SC-01 example', '- [x] SC-01 example'))).semantic, true);
   assert.equal(issueAuditAdmission('issues', edited(original, original.replace('SC-01 deterministic gate', 'SC-01 other gate'))).semantic, true);
   assert.equal(issueAuditAdmission('issues', edited(original, original.replace('acceptance: recorded', 'acceptance: changed'))).semantic, true);
   assert.equal(issueAuditAdmission('issues', edited(original, original.replace('Description of the desired', 'New meaning of the desired'))).semantic, true);
