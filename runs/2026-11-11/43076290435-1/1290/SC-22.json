@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c466e6e093259fc58204f922727434aa70bd789f9c8d8b5c87d88ec98a8906eb",
+  "run_id": 43076290435,
+  "run_attempt": 1,
+  "issue": 1290,
+  "criterion": "SC-22",
+  "criterion_text": "Untrusted remote URLs, custom hosts, redirects and CLI/API arguments cannot cause credential-bearing requests to an unapproved host or arbitrary endpoint.",
+  "stage": "staging",
+  "target_sha": "37b6af7ebf81c805c9274e007b9de1b11fdc8851",
+  "contract_sha256": "ce810c89d3bbe11d77342890645a7a24c56a64fdb93c935d830183c758343f05",
+  "case_revision": "37b6af7ebf81c805c9274e007b9de1b11fdc8851",
+  "case_tree_sha": "80aa916a2bc871c0db4706441de772329c754879",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T18:21:17.921Z",
+  "finished_at": "2026-11-11T18:21:24.348Z",
+  "duration_ms": 6427,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Untrusted URLs, hosts and redirects cannot cause credential-bearing requests to an unapproved endpoint",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 37b6af7ebf81c805c9274e007b9de1b11fdc8851: credential-bearing/custom URLs cannot widen the API origin; a 3xx is refused and host checks run before an authenticated request"
+        }
+      ],
+      "duration_ms": 541,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43076290435,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "37b6af7ebf81c805c9274e007b9de1b11fdc8851",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43076290435",
+    "record_path": "runs/2026-11-11/43076290435-1/1290/SC-22.json",
+    "source_result_sha256": "8c5efcfb819b5fdeb366a0245c2ed7ea274d0f6198c574fea06598c44938f35b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43076290435-1",
+    "sha256": "8c5efcfb819b5fdeb366a0245c2ed7ea274d0f6198c574fea06598c44938f35b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43076290435",
+    "durability": "time-limited; object archival not configured"
+  }
+}

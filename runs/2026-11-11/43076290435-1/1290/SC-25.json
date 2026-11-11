@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e09de7d67299969a6b30000e9f9d8953ec192c0f06cdfb091035b2a946cf4e23",
+  "run_id": 43076290435,
+  "run_attempt": 1,
+  "issue": 1290,
+  "criterion": "SC-25",
+  "criterion_text": "Actual supported Agent runtimes prove packaged client/auth availability or return an honest unavailable state, without depending on CI-host gh installation.",
+  "stage": "staging",
+  "target_sha": "37b6af7ebf81c805c9274e007b9de1b11fdc8851",
+  "contract_sha256": "ce810c89d3bbe11d77342890645a7a24c56a64fdb93c935d830183c758343f05",
+  "case_revision": "37b6af7ebf81c805c9274e007b9de1b11fdc8851",
+  "case_tree_sha": "97974e40ba91f6290e0f020a2f2d95ab6f9ad93a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T18:21:24.348Z",
+  "finished_at": "2026-11-11T18:21:30.539Z",
+  "duration_ms": 6191,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Supported Agent runtimes expose the packaged client/auth or an honest unavailable state",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 37b6af7ebf81c805c9274e007b9de1b11fdc8851: the supported Agent runtime constructs the typed client from its own token env; without a token it answers not_authenticated instead of failing startup or depending on CI-host gh"
+        }
+      ],
+      "duration_ms": 308,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43076290435,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "37b6af7ebf81c805c9274e007b9de1b11fdc8851",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43076290435",
+    "record_path": "runs/2026-11-11/43076290435-1/1290/SC-25.json",
+    "source_result_sha256": "78f4a3232ad67ef9edcb931f36adefa4afe4ba7baffe5279c4c5ca744d5feb85"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43076290435-1",
+    "sha256": "78f4a3232ad67ef9edcb931f36adefa4afe4ba7baffe5279c4c5ca744d5feb85",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43076290435",
+    "durability": "time-limited; object archival not configured"
+  }
+}
