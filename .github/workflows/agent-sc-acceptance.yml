@@ -220,12 +220,12 @@ jobs:
             *) echo "Unsupported Acceptance provider: ${ACCEPTANCE_PROVIDER}" >&2; exit 1 ;;
           esac
 
-      # PR-stage CI readback remains exceptional: #2917 has bounded timing
-      # evidence and #3001 independently proves its original Qwen implementing
-      # PR and Reviewer against pinned GitHub/Store source. Trusted Main owns
-      # both collectors; other PR-stage SCs have no GitHub evidence cost.
+      # PR-stage CI readback remains exceptional: #2917, #3001 and #3195
+      # retain their independently approved collectors. #2990 is a bounded
+      # exact-head PR Quality Gate readback for the lifecycle proof (#3243).
+      # Trusted Main owns these sources; other PR-stage SCs stay null.
       - name: Collect trusted GitHub Actions evidence
-        if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195'))
+        if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '2990'))
         working-directory: trusted
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -241,6 +241,9 @@ jobs:
                 "${GITHUB_WORKSPACE}/workspace" \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
               3195) node scripts/acceptance-pr-pages-e2e-evidence.mjs collect \
+                "${GITHUB_WORKSPACE}/workspace" \
+                "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
+              2990) node scripts/acceptance-pr-lifecycle-ci-evidence.mjs collect \
                 "${GITHUB_WORKSPACE}/workspace" \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
               *) echo "Unsupported PR-stage collector Issue: ${ISSUE_NUMBER}" >&2; exit 1 ;;
@@ -261,7 +264,7 @@ jobs:
         run: |
           set -euo pipefail
           ci_evidence_file="-"
-          if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 ]]; then
+          if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 2990 ]]; then
             ci_evidence_file="${RUNNER_TEMP}/acceptance-ci-evidence.json"
           fi
           node scripts/acceptance-executor.mjs prepare \
