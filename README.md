@@ -15,6 +15,8 @@
 
 ## Catalog
 
+| Server-owned Images: Workspace discovery without a Session, Project explicit reference / Git build bind, Sandbox shared Picker and multi-image composition, Agent cache vs Server Ready; Web/App | [#3181](https://github.com/BestNathan/nession/issues/3181) | [Interactive HTML](images-3181/index.html) · [Scenario & fidelity](images-3181/README.md) |
+
 | AI · Current Session Agent Skills/MCP, no Agent selector; project discovery stays in client extensions | [#3251](https://github.com/BestNathan/nession/issues/3251) | [Interactive HTML](ai-global-resources-3251/index.html) · [Scenario & fidelity](ai-global-resources-3251/README.md) |
 
 
