@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a1fb1cb6f241c3bb02f0427120a371010fea253de48572d4127e39b2779183df",
+  "run_id": 42993378842,
+  "run_attempt": 1,
+  "issue": 3072,
+  "criterion": "SC-02",
+  "criterion_text": "A validated completed Staging deployment-attestation source wakes only the matching outstanding `when: merged, branch: staging` Agent SC through the canonical Acceptance/Issue updater, with bounded idempotency and no feedback loop.",
+  "stage": "post-merge",
+  "target_sha": "074ff26c078d2ab41fea2383b7f7e0a1c001bd5a",
+  "contract_sha256": "f1192287358278780e8f2f45ef428efc893292a6596598534109cc1bb2bd6d0d",
+  "case_revision": "074ff26c078d2ab41fea2383b7f7e0a1c001bd5a",
+  "case_tree_sha": "0e9ba8c08c1eb2a6fa71580ef37f007819f42461",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T09:19:01.023Z",
+  "finished_at": "2026-11-11T09:19:08.456Z",
+  "duration_ms": 7433,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "Authenticated historical no-op wake is correct; awaiting a real matched post-attestation staging Agent evaluation and canonical Issue update at one observed SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Exact Case checkout 074ff26c078d2ab41fea2383b7f7e0a1c001bd5a; historical Deploy / Identity 42805092603/1, Ingest 42815588295/1 and Waker 42815670151/1 independently re-attested"
+        },
+        {
+          "type": "runtime",
+          "value": "Historical evaluate-staging was correctly skipped; no unrelated successor SHA, initial push Acceptance or invented Issue can satisfy the positive wake"
+        },
+        {
+          "type": "runtime",
+          "value": "No recently linked real Staging Agent criterion has a verified matching source wake, canonical Issue updater and exact-SHA workload attestation"
+        }
+      ],
+      "duration_ms": 1577,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42993378842,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "074ff26c078d2ab41fea2383b7f7e0a1c001bd5a",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42993378842",
+    "record_path": "runs/2026-11-11/42993378842-1/3072/SC-02.json",
+    "source_result_sha256": "590c0287d6b3af9e7d66125a96bf1b8b0c261e7b73d2182562a5e1d1506cfc34"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42993378842-1",
+    "sha256": "590c0287d6b3af9e7d66125a96bf1b8b0c261e7b73d2182562a5e1d1506cfc34",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42993378842",
+    "durability": "time-limited; object archival not configured"
+  }
+}
