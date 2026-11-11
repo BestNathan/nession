@@ -14,8 +14,22 @@ const REQUIRED=[
   'Run full canonical Playwright suite at pinned SHA',
   'Verify complete per-ID assertions',
 ];
+// GitHub's Workflow Run `name` is the workflow's evaluated `run-name`, not the
+// static workflow name. `e2e-full-regression.yml` deliberately names every run
+// `Convergence Full <ref>@<sha>`, `Full Regression <branch>@<sha>` or
+// `Comment E2E #<pr> comment:<id>`, so requiring the static `E2E / Full
+// Regression` string rejects every real Full run. The path below is the
+// workflow identity; this helper only bounds the dynamic name and, where the
+// name carries a SHA, binds it to the receipt's target.
+export function trustedFullRunName(run,targetSha){
+  const name=String(run?.name??'');
+  if(name.length===0||name.length>300||/[\r\n]/.test(name))return false;
+  if(/^Comment E2E #[1-9][0-9]* comment:[1-9][0-9]*$/.test(name))return true;
+  const match=/^(?:Full Regression [^\s@]+|Convergence Full \S+)@([0-9a-f]{40})$/.exec(name);
+  return match!==null&&match[1]===targetSha;
+}
 export function attestFullRegression({targetSha,run,job,log}){
-  if(!SHA.test(targetSha)||run?.name!=='E2E / Full Regression'||
+  if(!SHA.test(targetSha)||!trustedFullRunName(run,targetSha)||
     String(run?.path??'').replace(/@refs\/[^\s]+$/,'')!=='.github/workflows/e2e-full-regression.yml'||
     !isTrustedMainFullEvent(run.event)||
     run.head_branch!=='main'||!SHA.test(run.head_sha??'')||
@@ -114,7 +128,7 @@ export async function collectFullRegression({
 }
 function selfTest(){
   const sha='a'.repeat(40);
-  const run={name:'E2E / Full Regression',path:'.github/workflows/e2e-full-regression.yml',
+  const run={name:'Full Regression main@'+sha,path:'.github/workflows/e2e-full-regression.yml',
     event:'schedule',head_branch:'main',head_sha:sha,id:11,run_attempt:2,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
     status:'completed',conclusion:'success'};
@@ -133,12 +147,19 @@ function selfTest(){
     run:{...run,event:'push'}}).status,'Pass');
   // Trusted main workflow dispatch can exercise a historical/release SHA;
   // the target source is authenticated by pinned checkout + per-ID proof.
-  assert.equal(attestFullRegression({...source,run:{...run,head_sha:'d'.repeat(40)},
-    job:{...job,head_sha:'d'.repeat(40)}}).workflow_sha,'d'.repeat(40));
+  assert.equal(attestFullRegression({...source,run:{...run,name:'Convergence Full release/'+sha+'@'+sha,
+    head_sha:'d'.repeat(40)},job:{...job,head_sha:'d'.repeat(40)}}).workflow_sha,'d'.repeat(40));
+  // The workflow's other dynamic run-name form (router source comment) has no
+  // SHA in its display name; its receipt and Run/Job identity still bind it.
+  assert.equal(attestFullRegression({...source,
+    run:{...run,name:'Comment E2E #3200 comment:123456789'}}).status,'Pass');
   for(const wrong of [
     {targetSha:'c'.repeat(40)},{run:{...run,head_branch:'staging'}},
     {run:{...run,event:'pull_request'}},{job:{...job,run_attempt:1}},
     {job:{...job,steps:job.steps.slice(0,2)}},{log:log+log},
+    {run:{...run,name:'E2E / Full Regression'}},
+    {run:{...run,name:'Full Regression main@'+'c'.repeat(40)}},
+    {run:{...run,name:'Unrelated Full@'+sha}},
     {log:PREFIX+JSON.stringify({...receipt,results:[]})},
     {log:PREFIX+JSON.stringify({...receipt,results:[{...receipt.results[0],flaky:1}]})}
   ])assert.throws(()=>attestFullRegression({...source,...wrong}));
@@ -147,7 +168,7 @@ function selfTest(){
 
 async function collectorSelfTest(){
   const sha='a'.repeat(40);
-  const mkRun=(id)=>({name:'E2E / Full Regression',
+  const mkRun=(id)=>({name:'Full Regression main@'+sha,
     path:'.github/workflows/e2e-full-regression.yml',event:'schedule',
     head_branch:'main',head_sha:sha,id,run_attempt:1,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
