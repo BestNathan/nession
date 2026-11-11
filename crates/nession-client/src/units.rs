@@ -382,13 +382,27 @@ impl ClientConnection {
         agent_id: &str,
         name: &str,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
+        self.create_session_in(agent_id, name, None).await
+    }
+
+    /// `server.session.create` with an explicit initial working directory.
+    ///
+    /// The Server passes `working_dir` to the target Agent on the same
+    /// canonical create route; an MCP caller that names a directory must not
+    /// silently lose it (`#3264`).
+    pub async fn create_session_in(
+        &mut self,
+        agent_id: &str,
+        name: &str,
+        working_dir: Option<&str>,
+    ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
         self.request_within(
             proto_msg(
                 wire::SERVER_SESSION_CREATE,
                 ClientSessionCreatePayload {
                     agent_id: agent_id.to_string(),
                     name: name.to_string(),
-                    working_dir: None,
+                    working_dir: working_dir.map(str::to_owned),
                     env_files: Vec::new(),
                 },
             ),

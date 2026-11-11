@@ -51,12 +51,37 @@ tokio-rustls.workspace = true
 nession-client = { path = "../nession-client", optional = true }
 nession-protocol = { path = "../nession-protocol", optional = true }
 
+# `#3264`: the official MCP Rust SDK owns the Streamable HTTP protocol and
+# transport grammar the endpoint must speak. Nession still owns the flat
+# ToolHandler/ToolRegistry and the host seams; rmcp only carries the wire.
+rmcp = { version = "3.9.0", default-features = false, features = [
+    "server",
+    "transport-streamable-http-server",
+] }
+schemars = { workspace = true }
+# The embedding hosts already own a raw listener; hyper is only the HTTP/1.1
+# connection driver in front of the rmcp tower service.
+hyper = { version = "1.11", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1.5"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+tower-service = "0.3"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["full", "test-util"] }
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
 rand.workspace = true
+# SC-05/SC-06: an official MCP client must negotiate both protocol eras.
+rmcp = { version = "3.9.0", default-features = false, features = [
+    "server",
+    "transport-streamable-http-server",
+    "client",
+    "transport-streamable-http-client-reqwest",
+] }
 # A real Server proves the standalone path end to end. Dev-only, so the
 # shipped library still cannot name a provider.
 nession-server = { path = "../nession-server" }

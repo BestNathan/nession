@@ -202,6 +202,16 @@ pub struct McpConfig {
     /// Bound on concurrent MCP tool executions.
     #[serde(default = "default_mcp_max_concurrent_calls")]
     pub max_concurrent_calls: usize,
+    /// Browser origins allowed to call `/mcp` (`#3264`).
+    ///
+    /// Empty means no browser origin is accepted: a request presenting an
+    /// `Origin` header is refused. MCP clients omit `Origin`, so the default
+    /// keeps them working while closing DNS-rebinding through a page.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    /// Override the Host-header allowlist. Defaults to the listener's own host.
+    #[serde(default)]
+    pub allowed_hosts: Option<Vec<String>>,
 }
 
 fn default_mcp_path() -> String {
@@ -227,6 +237,8 @@ impl Default for McpConfig {
             tls_key_path: None,
             tool_timeout_secs: default_mcp_tool_timeout_secs(),
             max_concurrent_calls: default_mcp_max_concurrent_calls(),
+            allowed_origins: Vec::new(),
+            allowed_hosts: None,
         }
     }
 }
@@ -258,6 +270,15 @@ impl McpConfig {
         }
         if self.max_concurrent_calls == 0 {
             anyhow::bail!("[mcp] max_concurrent_calls must be greater than zero");
+        }
+        for origin in &self.allowed_origins {
+            if origin != "null" && !origin.starts_with("http://") && !origin.starts_with("https://")
+            {
+                anyhow::bail!(
+                    "[mcp] allowed_origins entries must include a scheme (http:// or https://) or \
+                     be \"null\"; got {origin:?}"
+                );
+            }
         }
         Ok(())
     }
