@@ -5,7 +5,7 @@ topic: engineering
 categories: ["architecture", "session", "metadata", "identity", "ownership", "web", "app"]
 status: verified
 created_at: 2026-11-05T18:11:33Z
-updated_at: 2026-11-09T01:09:24Z
+updated_at: 2026-11-11T13:15:17Z
 sources: ["https://github.com/BestNathan/nession/issues/2789", "https://github.com/BestNathan/nession/pull/2795", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/docs/architecture/session-tmux-sdk-ownership.md", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/crates/nession-agent/src/session/metadata.rs", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/web/src/product/session/components/SessionMetadataSection.tsx", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/docs/design/design-system/patterns/session-item.md"]
 ---
 
@@ -84,3 +84,6 @@ Related knowledge:
 - [Project declaration and Workspace location ownership](project-declaration-and-workspace-location-ownership.md)
   owns the persisted Project declaration and the explicit mapping of previously
   inferred Workspace Locations.
+- [Nession MCP access layer semantic tool ownership and protocol versions](nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md)
+  routes MCP Session Tools to this same Agent-owned Session authority instead
+  of introducing a second one.

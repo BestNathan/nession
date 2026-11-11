@@ -78,6 +78,20 @@
         "updated_at": "2026-11-03T09:34:15Z"
       },
       {
+        "title": "Nession MCP access layer semantic tool ownership and protocol versions",
+        "description": "Four business-owned MCP Tools behind a flat startup registry, Agent-owned Session routing through the Server, and dual-era MCP 2026-07-28 / 2025-03-26 hosting",
+        "path": "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "protocol",
+          "agent",
+          "integration",
+          "ownership"
+        ],
+        "updated_at": "2026-11-11T13:15:17Z"
+      },
+      {
         "title": "Nession runtime directories and daemon process state ownership",
         "description": "OS-scoped runtime roots for Agent/Server PID and readiness state, private-directory safety, service-manager pinning and legacy home-relative migration",
         "path": "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
@@ -135,7 +149,7 @@
           "web",
           "app"
         ],
-        "updated_at": "2026-11-09T01:09:24Z"
+        "updated_at": "2026-11-11T13:15:17Z"
       }
     ],
     "terminal": [
@@ -345,6 +359,7 @@
     ],
     "agent": [
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
     "agents": [
@@ -362,6 +377,7 @@
     "architecture": [
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
+      "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
@@ -415,6 +431,9 @@
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
+    "integration": [
+      "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md"
+    ],
     "interaction": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
@@ -448,6 +467,7 @@
     ],
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
@@ -479,6 +499,7 @@
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md"
     ],
     "protocol": [
+      "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",

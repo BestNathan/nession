@@ -668,3 +668,17 @@
 - Categories: architecture, cli, lifecycle, process, security, storage
 - Reason: Add service-manager ownership/deference and the exact stop identity re-check from Issue #3232.
 - Source: https://github.com/BestNathan/nession/issues/3232
+
+## 2026-11-11T13:15:17Z | create | Nession MCP access layer semantic tool ownership and protocol versions
+- Path: topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md
+- Topic: engineering
+- Categories: architecture, protocol, agent, integration, ownership
+- Reason: Record #3264's four business-owned MCP Tools, flat startup ToolRegistry, Agent-owned Session routing through the Server, and dual-era MCP 2026-07-28 / 2025-03-26 hosting; cite the merged main and staging SHAs and the accepted Case/Agent evidence
+- Source: https://github.com/BestNathan/nession/issues/3264
+
+## 2026-11-11T13:15:17Z | update | Session metadata and display identity ownership
+- Path: topics/engineering/session-metadata-and-display-identity-ownership.md
+- Topic: engineering
+- Categories: architecture, session, metadata, identity, ownership, web, app
+- Reason: Cross-link the new MCP access-layer article: MCP Session Tools route to this same Agent-owned Session authority rather than a second one (#3264)
+- Source: https://github.com/BestNathan/nession/issues/3264
