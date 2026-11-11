@@ -1,14 +1,35 @@
 {
   "id": "pattern.resource-detail",
-  "$description": "The shared content grammar for a resource destination and a Session-context capability's observed state (#3137). The two hosts keep different shell/navigation owners; the content region keeps one hierarchy. Long identities, paths and digests wrap at the value's own role instead of forcing horizontal overflow, and a read-only fact is never given input chrome. App local rows/actions still honour the touch floor.",
+  "$description": "The shared content grammar for a resource destination and a Session-context capability's observed state (#3137). The two hosts keep different shell/navigation owners; the content region keeps one hierarchy. Long identities, paths and digests wrap at the value's own role instead of forcing horizontal overflow, and a read-only fact is never given input chrome. App local rows/actions still honour the touch floor. `parts` maps the recipe's stable data-recipe-part anatomy to the Experience typography role each part must resolve (#3138); on App the host header owns the surface name, so the app block deliberately has no detail-title.",
   "patternRef": "docs/design/design-system/patterns/resource-detail.md",
   "web": {
     "wrap": true,
-    "overflow": "wrap"
+    "overflow": "wrap",
+    "parts": {
+      "detail-title": { "typographyToken": "experience.web.typography.title" },
+      "detail-section-title": { "typographyToken": "experience.web.typography.secondary" },
+      "detail-fact-label": { "typographyToken": "experience.web.typography.caption" },
+      "detail-fact-value": {
+        "typographyTokens": [
+          "experience.web.typography.body",
+          "experience.web.typography.code"
+        ]
+      }
+    }
   },
   "app": {
     "wrap": true,
     "overflow": "wrap",
-    "touchTargetToken": "experience.app.touchTarget.min"
+    "touchTargetToken": "experience.app.touchTarget.min",
+    "parts": {
+      "detail-section-title": { "typographyToken": "experience.app.typography.secondary" },
+      "detail-fact-label": { "typographyToken": "experience.app.typography.caption" },
+      "detail-fact-value": {
+        "typographyTokens": [
+          "experience.app.typography.body",
+          "experience.app.typography.code"
+        ]
+      }
+    }
   }
 }

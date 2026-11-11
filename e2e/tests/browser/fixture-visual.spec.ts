@@ -407,4 +407,44 @@ test.describe('Web 1440×900', () => {
     await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toHaveCount(1);
     await expect(xterm).toBeVisible();
   });
+
+  // #3138 — the content-recipe family's canonical Web screens. Structured role
+  // assertions run in `ui-contract-assertions`; these three images are the
+  // focused visual remainder the Issue asks for: hierarchy, density, border or
+  // card excess and decorative noise that a computed-style check cannot see.
+  // The set is deliberately small and names product states, not controls.
+  test('Project detail', async ({ page }) => {
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-item-row').first().click();
+    await expect(page.getByTestId('project-detail')).toBeVisible();
+    await expect(page.getByTestId('project-detail-title')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-project-detail.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Sandbox outside', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=sandbox');
+    await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-tab-filesystem').click();
+    await expect(page.getByTestId('sandbox-working-dir')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-sandbox-outside.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Sandbox inside', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=sandbox&sandbox=inside');
+    await expect(page.getByTestId('sandbox-inside')).toBeVisible();
+    await expect(page.getByTestId('sandbox-status')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('web-sandbox-inside.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
 });

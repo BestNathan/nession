@@ -117,6 +117,24 @@ Verify:
 
 Use repository browser/E2E policy; do not update a baseline merely to hide a structured contract failure.
 
+### Capability visual recipes (#3138)
+
+A new capability surface that composes details, configuration or an operation
+must reuse the approved recipe and its executable roles:
+
+1. select `ResourceDetail` / `ConfigurationForm` / `OperationSurface` instead of
+   assembling a local hierarchy;
+2. identify the visual relation — a `parts` typography role or a
+   `controlHeightToken` band — and its owner in
+   `design/scripts/browser-design-catalog.mjs` (`CAPABILITY_VISUAL_INVARIANTS`);
+3. exercise a deterministic production fixture state and compare corresponding
+   parts relationally; Web/App role values may legitimately differ;
+4. run `./gates/run design-system-fast`, then the canonical Browser Design
+   profile / Full E2E, and inspect the relevant screenshot diff.
+
+The full checklist and non-goals are owned by
+[docs/design/design-system/validation.md](../../../docs/design/design-system/validation.md#capability-visual-recipes-3138).
+
 ## 10. Failure repair
 
 When a design Gate fails, follow its reported owner/repair.
