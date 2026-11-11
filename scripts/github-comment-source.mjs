@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { parseCommand } from './github-comment-command.mjs';
+import { parseCommand, commandPlan } from './github-comment-command.mjs';
 import { resolveAcceptComment } from './issue-lifecycle-reconcile.mjs';
 
 const REPO = 'BestNathan/nession';
@@ -48,6 +48,51 @@ async function api(path) {
   if (!response.ok) throw Error('GitHub source lookup failed: ' + path + ' [' + response.status + ']');
   return response.json();
 }
+
+// E2E Full has a separate original-comment admission: an optional comment
+// run-name must never be accepted as proof of a legitimate PR source.
+export function verifiedPrSource(issueNumber, commentId, ref, sha, issue, comment, pr, permission) {
+  if (!Number.isSafeInteger(issueNumber) || issueNumber < 1 ||
+      !Number.isSafeInteger(commentId) || commentId < 1 ||
+      !/^[0-9a-f]{40}$/.test(sha) || typeof ref !== 'string')
+    throw Error('invalid PR comment source request');
+  const event = {
+    action: 'created',
+    repository: { full_name: REPO },
+    issue: { number: issueNumber, pull_request: { url: 'PR' } },
+    sender: { login: comment?.user?.login },
+    comment: { id: commentId, body: '/e2e full', user: comment?.user },
+  };
+  const plan = commandPlan(event, comment, issue, pr, permission);
+  if (!plan || plan.handler !== 'e2e-full' ||
+      plan.target_ref !== ref || plan.target_sha !== sha ||
+      comment?.updated_at !== comment?.created_at)
+    throw Error('unverified or stale PR comment source');
+  return plan;
+}
+async function verifyPr() {
+  const [issueValue, commentValue, ref, sha] = process.argv.slice(3);
+  const issueNumber = Number(issueValue), commentId = Number(commentValue);
+  if (process.env.GITHUB_REPOSITORY !== REPO ||
+      process.env.GITHUB_REF !== 'refs/heads/main' ||
+      process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+      process.env.GITHUB_ACTOR !== 'github-actions[bot]' ||
+      !Number.isSafeInteger(issueNumber) || !Number.isSafeInteger(commentId))
+    throw Error('untrusted PR comment dispatcher');
+  const [issue, comment, pr] = await Promise.all([
+    api('/repos/' + REPO + '/issues/' + issueNumber),
+    api('/repos/' + REPO + '/issues/comments/' + commentId),
+    api('/repos/' + REPO + '/pulls/' + issueNumber),
+  ]);
+  const permission = comment.user?.login === 'BestNathan' &&
+    comment.author_association === 'OWNER' ? 'admin' :
+    (await api('/repos/' + REPO + '/collaborators/' +
+      encodeURIComponent(comment.user?.login ?? '') + '/permission')).permission;
+  verifiedPrSource(issueNumber, commentId, ref, sha, issue, comment, pr, permission);
+  console.log('Verified original PR /e2e full command #' + issueNumber +
+    ' comment:' + commentId + ' @ ' + sha);
+}
+
 async function materialize() {
   const [kind, issueValue, commentValue, output] = process.argv.slice(3);
   const issueNumber = Number(issueValue), commentId = Number(commentValue);
@@ -83,11 +128,27 @@ function selfTest() {
     { issue: { ...issue, state: 'closed' } },
   ]) assert.throws(() => verifiedSource('audit', REPO, 9, 99,
     change.issue || issue, change.comment || comment), /unauthorized|not an open/);
-  console.log('github-comment-source: source-bound Audit/Acceptance positive and hostile fixtures passed');
+  const prSha = 'a'.repeat(40);
+  const pr = { number: 9, state: 'open', head: { sha: prSha, ref: 'feat/source',
+    repo: { full_name: REPO } }, base: { sha: 'b'.repeat(40), ref: 'staging' } };
+  const prIssue = { ...issue, pull_request: { url: 'PR' } };
+  const prComment = { ...comment, body: '/e2e full',
+    created_at: '2026-11-11T01:00:00Z',
+    updated_at: '2026-11-11T01:00:00Z' };
+  assert.equal(verifiedPrSource(9,99,'feat/source',prSha,prIssue,prComment,pr,'write').target_sha,prSha);
+  assert.throws(() => verifiedPrSource(9,99,'feat/source','c'.repeat(40),prIssue,prComment,pr,'write'),
+    /stale PR comment source/);
+  assert.throws(() => verifiedPrSource(9,99,'feat/source',prSha,prIssue,
+    { ...prComment, updated_at: '2026-11-11T01:01:00Z' },pr,'write'), /stale PR comment source/);
+  assert.throws(() => verifiedPrSource(9,99,'feat/source',prSha,prIssue,prComment,pr,'read'),
+    /stale PR comment source/);
+
+  console.log('github-comment-source: source-bound Audit/Acceptance/PR positive and hostile fixtures passed');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const mode = process.argv[2];
   if (mode === 'self-test') selfTest();
   else if (mode === 'materialize') await materialize();
-  else throw Error('Usage: github-comment-source.mjs <self-test|materialize kind issue_number comment_id output>');
+  else if (mode === 'verify-pr') await verifyPr();
+  else throw Error('Usage: github-comment-source.mjs <self-test|materialize kind issue_number comment_id output|verify-pr issue_number comment_id ref sha>');
 }
