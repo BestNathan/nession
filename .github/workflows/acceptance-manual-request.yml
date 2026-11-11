@@ -57,4 +57,8 @@ jobs:
           node scripts/github-comment-source.mjs materialize accept \
             '${{ inputs.issue_number }}' '${{ inputs.source_comment_id }}' \
             "$RUNNER_TEMP/original-comment.json"
-          node scripts/issue-lifecycle-reconcile.mjs manual "$RUNNER_TEMP/original-comment.json"
+          # Restore the verified original human author only for the scoped
+          # legacy /accept parser. The source was independently re-read above.
+          original_actor="$(jq -er '.sender.login' "$RUNNER_TEMP/original-comment.json")"
+          [[ "$original_actor" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || exit 1
+          GITHUB_ACTOR="$original_actor" node scripts/issue-lifecycle-reconcile.mjs manual             "$RUNNER_TEMP/original-comment.json"
