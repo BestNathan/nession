@@ -726,6 +726,21 @@ function selfTest() {
   assert.match(jobIf[1],/github\.event\.workflow_run\.pull_requests\[0\]\.head\.ref == 'staging'/);
   assert.match(jobIf[1],/github\.event\.workflow_run\.pull_requests\[0\]\.base\.ref == 'main'/);
   assert.match(jobIf[1],/github\.event\.workflow_run\.event == 'pull_request'/);
+  // A real Main run must expose immutable source-run identity/attempt/SHA;
+  // nearby timestamps or a green workflow cannot substitute for this receipt.
+  const receiptStep=workflow.match(/- name: Record authenticated workflow wake receipt[\s\S]*?(?=\n      - name: Verify trusted main)/)?.[0];
+  assert.ok(receiptStep, 'source wake receipt must remain in the trusted job');
+  assert.match(receiptStep, /if: github\.event_name == 'workflow_run'/);
+  for (const field of ['source_run_id', 'source_attempt', 'source_event',
+    'source_path', 'source_repository', 'source_head_repository',
+    'source_sha', 'source_branch', 'source_conclusion']) {
+    assert.ok(receiptStep.includes(field+': .workflow_run.'),
+      'missing authenticated wake field: '+field);
+  }
+  assert.match(receiptStep, /\$GITHUB_EVENT_PATH/);
+  assert.match(receiptStep, /CONVERGENCE_WAKE_V1/);
+  assert.match(receiptStep, /source_name: \.workflow_run\.name/);
+  assert.match(receiptStep, /controller_run: \(\$controller_run \| tonumber\)/);
   // #3247: prove the actual workflow job-if accepts the authenticated
   // post-deployment completion, not merely a copied JS approximation.
   assert.match(workflow,
