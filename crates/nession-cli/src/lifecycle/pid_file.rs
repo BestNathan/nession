@@ -401,12 +401,14 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
     }
 }
 
-/// Whether two identities describe the same process instance.
+/// Whether two identities are the same *recorded* instance.
 ///
-/// The start time is what distinguishes a reused pid from the recorded process;
-/// comparing only the pid would let a stop signal the new holder of the number.
+/// Both values come from the state file, so the start field is exact: a record
+/// rewritten by another process (even one that reused the pid) must not compare
+/// equal. The OS-time tolerance in [`ownership`] is separate and still applies
+/// when deciding whether the live process matches a record.
 pub fn same_instance(left: &ProcessIdentity, right: &ProcessIdentity) -> bool {
-    left.pid == right.pid && left.started_at.abs_diff(right.started_at) <= START_TIME_TOLERANCE_SECS
+    left.pid == right.pid && left.started_at == right.started_at
 }
 
 /// What the state file at `path` says about the process it names.
@@ -862,6 +864,12 @@ mod tests {
         let mut other_start = real.clone();
         other_start.started_at += 60;
         assert!(!same_instance(&real, &other_start));
+        let mut one_second = real.clone();
+        one_second.started_at += 1;
+        assert!(
+            !same_instance(&real, &one_second),
+            "a rewritten record is not the same instance even inside the OS tolerance"
+        );
         let mut other_pid = real.clone();
         other_pid.pid += 1;
         assert!(!same_instance(&real, &other_pid));
