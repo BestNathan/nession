@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43025117410,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3299-session-age-fixture-clock",
+    "target_sha": "dcd8b58fff39da7b8480b0275893bc655efeeafc",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43025117410",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "5921745f05e50b162aec2749c4d9d3def56fe3a52866b6e1877e478a411d819b"
+  },
+  "record": "runs/2026-11-11/43025117410-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "4b15608d4c6350bce123c6e31b09b0693cec28764c68246088e8300e7d00a52f"
+}
