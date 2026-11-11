@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42964919321,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3138-capability-visual-proof",
+    "target_sha": "dc0cb8aba8a3f625500020c30e09224cffeb050d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42964919321",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "9c4dbc7ceb27adf15fbf5cb286ec4a9a7a14311a0c752ac7acc4b54e96dd9003"
+  },
+  "record": "runs/2026-11-11/42964919321-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "974d8012934c2430d88c05697b49a6f201eb93787d2394b3283266e5a3bf63c0"
+}
