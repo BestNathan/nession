@@ -1970,6 +1970,7 @@ dependencies = [
  "mime_guess",
  "nession-claude-code",
  "nession-common",
+ "nession-erofs",
  "nession-git",
  "nession-mcp",
  "nession-protocol",
@@ -2103,13 +2104,13 @@ name = "nession-erofs"
 version = "0.35.0"
 dependencies = [
  "anyhow",
- "chrono",
- "nession-protocol",
- "serde",
- "serde_json",
+ "futures-util",
+ "httptest",
+ "libc",
+ "reqwest 0.12.28",
  "sha2 0.10.9",
  "tempfile",
- "tracing",
+ "tokio",
  "uuid",
 ]
 
@@ -2228,6 +2229,7 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "libc",
+ "nession-erofs",
  "nession-protocol",
  "serde",
  "serde_json",

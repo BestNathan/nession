@@ -7,9 +7,9 @@ const { agentCacheTests } = require('../../../shared/erofs-cache-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
-  const agent = agentCacheTests('erofs_cache::tests::diagnostics_');
+  const agent = agentCacheTests('cache::tests::diagnostics_');
   assertRan(agent, [
-    'erofs_cache::tests::diagnostics_separate_ready_bytes_from_temporary_artifacts',
+    'cache::tests::diagnostics_separate_ready_bytes_from_temporary_artifacts',
   ]);
   const server = crateTests('nession-server', ['--lib', 'image::tests::diagnostics_'], 600000);
   assertRan(server, [

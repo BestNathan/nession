@@ -86,7 +86,13 @@ before mounting anything.
   targets, non-`/opt` targets, and combining `composition` with
   `filesystem.access` (one owner for the root).
 - **Mount mechanics.** The Linux backend mounts each image read-only with the
-  unprivileged `erofsfuse` helper (a usable `/dev/fuse` is required). A Project
+  unprivileged `erofsfuse` helper (a usable `/dev/fuse` is required). The probe,
+  helper invocation, mountpoint readiness check and unmount live in the
+  reusable `nession_erofs::mount` primitive (#3303), which returns an owned
+  `ErofsMount` handle. `nession-sandbox` keeps source-root authorization, byte
+  verification (through `nession_erofs::digest`), mount ordering, the overlay
+  composition and the per-execution cleanup record; the primitive never sees
+  an image role or a mount plan. A Project
   source image is merged with the bounded write directory through
   `fuse-overlayfs` (`lowerdir=<Project image>,upperdir=<write>/upper,workdir=<write>/work`);
   a workspace without an image is a direct writable bind. Bubblewrap starts

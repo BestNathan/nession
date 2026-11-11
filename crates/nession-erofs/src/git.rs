@@ -9,8 +9,6 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use nession_protocol::contracts::image::v1::NormalizedImageSource;
-
 /// The exact Git identity a build is allowed to materialize.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitTarget {
@@ -20,24 +18,6 @@ pub struct GitTarget {
     pub reference: String,
     /// `Some(sha)` for a fixed-SHA request, `None` for a branch.
     pub requested_sha: Option<String>,
-}
-
-impl GitTarget {
-    /// Extract the Git target from a normalized source, if it is a Git source.
-    pub fn from_source(source: &NormalizedImageSource) -> Option<Self> {
-        match source {
-            NormalizedImageSource::GitHub {
-                repository_url,
-                reference,
-                requested_sha,
-            } => Some(Self {
-                repository_url: repository_url.clone(),
-                reference: reference.clone(),
-                requested_sha: requested_sha.clone(),
-            }),
-            NormalizedImageSource::LocalDirectory { .. } => None,
-        }
-    }
 }
 
 /// The resolved snapshot a build records.

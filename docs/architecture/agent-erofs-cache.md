@@ -20,6 +20,13 @@ A Project references a digest; a Session/consumer asks the Server for a grant;
 the Agent caches the exact bytes under that digest. Sandbox never treats the
 cache as a rootfs or mounts it; EROFS kernel mounting is separate (#3024).
 
+The download/resume/verify/publish/pin mechanics are the reusable
+`nession_erofs::cache` feature (#3303). `crates/nession-agent/src/erofs_cache.rs`
+is a thin adapter that supplies the Agent's configured-root precedence and
+stable identity; the identity-namespace layout, partial retention, eviction
+pins and diagnostics live in the crate, so another runtime can reuse the same
+verified cache without copying the downloader.
+
 ## Configuration and precedence
 
 ```toml

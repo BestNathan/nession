@@ -183,17 +183,15 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // creation downloads. Inability to open it is not fatal for ordinary
     // Sessions, but every Managed create is refused rather than falling back.
     let erofs_cache = match config.effective_erofs_storage_dir() {
-        Ok(resolved) => {
-            match crate::erofs_cache::ErofsCache::open_resolved(&resolved, &agent_id).await {
-                Ok(cache) => Some(Arc::new(cache)),
-                Err(error) => {
-                    tracing::warn!(
-                        "EROFS cache unavailable; Managed Session creation will be refused: {error:#}"
-                    );
-                    None
-                }
+        Ok(resolved) => match crate::erofs_cache::open_resolved(&resolved, &agent_id).await {
+            Ok(cache) => Some(Arc::new(cache)),
+            Err(error) => {
+                tracing::warn!(
+                    "EROFS cache unavailable; Managed Session creation will be refused: {error:#}"
+                );
+                None
             }
-        }
+        },
         Err(error) => {
             tracing::warn!(
                 "EROFS cache path is unresolved; Managed Session creation will be refused: {error:#}"
