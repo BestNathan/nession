@@ -132,7 +132,10 @@ export function ProjectImageReferenceField({
             </Button>
           ) : null}
         </div>
-        <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+        <p
+          data-recipe-part="form-help"
+          className={cn('text-muted-foreground', chromeSansRole('caption'))}
+        >
           A reference only. The Project never owns image bytes. The build requires this
           Project's GitHub source.
         </p>
