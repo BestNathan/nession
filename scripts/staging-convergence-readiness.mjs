@@ -224,7 +224,32 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
   const runs=getRuns('head_sha='+expectedHead+'&event=pull_request');
   const preliminary=evaluatePull({pr,action,plan:{branch,main_sha:mainSha,sha:laneSha,
     sync_ref:syncRef,sync_head_sha:syncHeadSha},baseSha,workflowRuns:runs});
-  if(!preliminary.ready)return preliminary;
+  if(!preliminary.ready) {
+    // #3248: the controller has observed a missing exact-head check even
+    // when public GitHub REST reports that run as successful. Emit the
+    // bounded authenticated inventory *fields*, not a replacement verdict.
+    // The fail-closed source/run/PR matching above remains authoritative.
+    if(preliminary.reason.startsWith('MISSING_EXACT_HEAD_PR_CHECK:')) {
+      const candidates=runs.filter(r =>
+        REQUIRED.includes(r.path?.split('@')[0]) ||
+        r.head_sha===expectedHead).slice(0,20);
+      console.error('staging convergence exact-head PR check diagnostic: '+
+        JSON.stringify({
+          reason:preliminary.reason,
+          pr_number:pr.number,expected_head:expectedHead,
+          run_count:runs.length,
+          candidates:candidates.map(r=>({
+            id:r.id,path:r.path,head_sha:r.head_sha,event:r.event,
+            status:r.status,conclusion:r.conclusion,
+            head_repo:r.head_repository?.full_name??null,
+            associated_prs:Array.isArray(r.pull_requests)
+              ?r.pull_requests.map(p=>p.number):null,
+            run_number:r.run_number,run_attempt:r.run_attempt,
+          })),
+        }));
+    }
+    return preliminary;
+  }
   if(action==='sync-main-to-lane')return preliminary;
 
   // A code-promotion merge must not silently become a Production release.
