@@ -9,6 +9,7 @@
 // merged-staging, source-aligned proof that the named evidence belongs to the
 // acceptance target SHA, not a second implementation of the behavior.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -61,6 +62,20 @@ function read(relativePath) {
 }
 
 /**
+ * A private tmux server and state home for a Case's crate tests.
+ *
+ * The Acceptance batch keeps a full-stack runtime on one tmux socket. A test
+ * that starts another Agent must not borrow it, or the Agent's instance
+ * identity and the runtime's Sessions collide.
+ */
+function isolatedTmuxEnv(prefix = 'nession-3264-case') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix + '-'));
+  const home = path.join(dir, 'home');
+  fs.mkdirSync(home, { recursive: true });
+  return { NESSION_TMUX_SOCKET: path.join(dir, 'tmux.sock'), NESSION_HOME: home };
+}
+
+/**
  * Run a Case body: `fn({evidence})` returns the pass summary and pushes the
  * concrete lines a reader can check. Any throw is a Fail.
  */
@@ -79,4 +94,4 @@ function run(fn) {
   }
 }
 
-module.exports = { run, targetSha, checked, crateTests, assertRan, read };
+module.exports = { run, targetSha, checked, crateTests, assertRan, read, isolatedTmuxEnv };
