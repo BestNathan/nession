@@ -252,6 +252,60 @@ Do not tokenize:
 
 Those belong in product/interaction documentation.
 
+## 14. Layout ownership and shared recipes (#3194)
+
+A valid collection of Tailwind classes does not prove a consistent semantic
+layout. Composition has three owners, and only the first two may claim a host
+role:
+
+| Layer | Owns | Examples |
+|---|---|---|
+| **Experience host** | page/surface geometry, navigation frame, scroll ancestry, safe areas, the one App page header/Back | `WebLayout`, `AppLayout`/`AppLayers`, `ShellMain`, `WorkspacePanel`, `AppPageHeader` |
+| **Semantic layout recipe** | a repeated stable content relationship used by independent consumers | `WorkspaceMasterDetail`, `WorkspaceScrollRegion`; `ResourceDetail`, `ConfigurationForm`, `OperationSurface` |
+| **Capability-local composition** | its own content arrangement inside the host | local `flex` / `grid` / `min-w-0` / `min-h-0` / `flex-1`; a capability's internal list or editor |
+
+Rules:
+
+- Capability and product content must not take page geometry (`h-screen`,
+  `min-h-[100dvh]`, `fixed inset-0`, …), render the App page header/Back, or
+  publish Workspace host chrome (`workspace-shell` / `workspace-tool-bar` /
+  `workspace-tool-content` / `workspace-surface-navigation`).
+- A stable relationship repeated by two independent consumers is promoted to a
+  recipe under `web/src/app/workspace/layout/workspaceLayout.tsx`; a consumer
+  must not restate the recipe's stable class.
+- Local mechanisms remain legal when they stay inside the component's content.
+  `cn('flex min-w-0 flex-col', condition && 'min-h-0 flex-1')` is a valid local
+  composition, not a violation.
+- A scroll region that can reach the pane bottom uses `WorkspaceScrollRegion`
+  (or the shared `workspaceScrollClearanceClass` opt-in for a genuinely local
+  inner scroll). It must not create a second page-level scroll owner.
+- Web vs App is an Experience decision, not a media-width guess: constrained
+  Web stays Web, forced App stays App.
+
+### Representative inventory
+
+| Surface | Current owner | Expected role | Action |
+|---|---|---|---|
+| Web shell / App layers | `WebLayout`, `AppLayout`/`AppLayers` | Experience frame | keep; page geometry is allowed only in this layer |
+| App page header / Back | `WorkspacePanel` → `AppPageHeader` | Experience host | keep exactly one per depth |
+| Files master/detail (Web) | `FilesWebLayout` | `WorkspaceMasterDetail` | migrated (#3194) |
+| Environment master/detail (Web) | `EnvWebLayout` | `WorkspaceMasterDetail` | migrated |
+| Agent / Session detail | experience workspace maps | `WorkspaceScrollRegion` | migrated; the view no longer owns scroll ancestry |
+| Project Workspace view | `ProjectWorkspaceView` | `WorkspaceScrollRegion` | migrated |
+| Sandbox (App) | `SandboxAppLayout` | `WorkspaceScrollRegion` | migrated |
+| Claude Code / Env / Git inner lists | capability components | local scroll mechanism + shared clearance | keep; not a host geometry claim |
+
+### Enforcement
+
+`design/scripts/layout-ownership.mjs` is part of `design-system-fast`. It
+rejects capability/product page geometry, capability-local App headers, host
+chrome, duplicated master/detail or scroll-owner markers, and raw numeric
+spacing in the shared recipe owner. It accepts local flex/grid composition,
+including the Issue's control sample. `layout-ownership.test.mjs` holds the
+negative and positive fixtures. Browser evidence for the single scroll owner,
+alignment, overflow and the one App header lives in `ui-contract-web` /
+`ui-contract-matrix` and the SC-03 Case.
+
 ## Anti-patterns
 
 - permanent chrome preserved only because a prior screenshot contained it;
@@ -273,3 +327,4 @@ Those belong in product/interaction documentation.
 - visual hierarchy → [visual-language.md](visual-language.md)
 - values → [design-system/tokens.md](design-system/tokens.md)
 - measurable rules → [design-system/contracts.md](design-system/contracts.md)
+- layout ownership / shared recipes → §14 here + `web/src/app/workspace/layout/workspaceLayout.tsx`

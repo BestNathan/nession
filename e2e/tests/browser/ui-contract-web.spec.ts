@@ -14,6 +14,7 @@ import { expect, test } from '@playwright/test';
 import {
   expectDrawnAffordance,
   expectInsetFocusOutline,
+  expectNoPageOverflow,
   expectNoUnexpectedOverflow,
   expectMaxWidth,
   expectPaddingX,
@@ -27,6 +28,12 @@ import {
   expectVisibleWithin,
   waitForSettledBox,
 } from '../../helpers/ui-assert/assertions';
+import {
+  expectFormFieldAlignment,
+  expectSingleWorkspaceScrollOwner,
+  expectWorkspaceMasterDetail,
+  growUntilWorkspaceScrolls,
+} from '../../helpers/ui-assert/layout';
 import { loadContracts, patternBlock, type Experience } from '../../helpers/ui-assert/contracts';
 import { swipeHorizontally } from '../../helpers/shell';
 import { waitForFixtureTerminal } from '../../helpers/fixtureVisual';
@@ -253,6 +260,44 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
 
       // ...and focus still has an inside-the-control indicator.
       await expectInsetFocusOutline(search, optsFor('pattern.session-list', 'web', row.id));
+    });
+
+    test('capability surfaces keep the host layout and one intended scroll owner (#3194)', async ({ page }) => {
+      const opts = {
+        pattern: 'pattern.workspace-navigation',
+        experience: 'web' as const,
+        viewport: row.id,
+      };
+
+      // Files: the shared master/detail recipe clips the host; the tree and
+      // viewer own their own local scroll.
+      await page.goto('/#/fixture/workspace?capability=files');
+      const files = page.getByTestId('file-workspace');
+      await expect(files).toBeVisible();
+      await expectWorkspaceMasterDetail(files, opts);
+      await expectNoPageOverflow(page, opts);
+
+      // A Workspace detail takes its scroll ancestry from the shared recipe,
+      // not from the product component.
+      await page.goto('/#/fixture/workspace?capability=session');
+      await expect(page.getByTestId('session-details-web')).toHaveAttribute(
+        'data-workspace-scroll-owner',
+        'true',
+      );
+      await expectNoPageOverflow(page, opts);
+
+      // A long configuration state has exactly one scroller, the policy panel;
+      // its fields keep one label/control edge.
+      await page.goto('/#/fixture/workspace?capability=sandbox');
+      await page.getByTestId('sandbox-tab-filesystem').click();
+      await growUntilWorkspaceScrolls(page, 'sandbox-fs-read-add');
+      const sandboxForm = page.locator('[data-recipe="configuration-form"]').first();
+      await expectFormFieldAlignment(sandboxForm, opts);
+      await expectSingleWorkspaceScrollOwner(page.getByTestId('workspace-tool-content'), {
+        ...opts,
+        recipe: false,
+      });
+      await expectNoPageOverflow(page, opts);
     });
   });
 }
