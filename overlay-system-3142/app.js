@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const root=document.getElementById('nession-product'), page=document.querySelector('[data-np-root]'),device=page.querySelector('[data-np-device]');
-const S={experience:'web',width:1440,fixture:'normal',overlay:null,child:null,popup:null,toast:'',name:'Dev shell',projectName:'Workspace tools',path:'/workspace/nession',location:'agent-alpha',mode:'auto',env:[],locations:1,deleted:false,dirty:false};
+const S={experience:'web',width:1440,fixture:'normal',anatomy:'fixed',overlay:null,child:null,popup:null,toast:'',name:'Dev shell',projectName:'Workspace tools',path:'/workspace/nession',location:'agent-alpha',mode:'auto',env:[],locations:1,deleted:false,dirty:false};
 const longPath='/workspace/projects/nession/infrastructure/agent-runtime/multinode/sessions/long-location-name-with-many-components-and-environment-details';
 const e=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const btn=(label,action,extra='',cls='btn')=>'<button type="button" class="'+cls+'" data-action="'+action+'" '+extra+'>'+label+'</button>';
@@ -36,9 +36,26 @@ if(which==='menu'){title='Contextual choices';body=menuBody();primary='Done';act
 if(app&&S.child==='location'||app&&S.child==='env'){return '<div class="layer"><div class="scrim" data-action="back"></div>'+appSubsurface()+'</div>';}
 if(app&&which==='session'){body='<div class="form-stack">'+inp('name','Session name',S.name)+'<div class="field"><label>Existing Location</label>'+btn(e(S.location==='agent-alpha'?'Agent alpha':'Agent beta')+' · '+e(actualPath()),'choose-location')+'</div><div class="field"><label>Environment</label>'+btn(S.env.length?e(S.env.join(', ')):'Choose environment','choose-env')+'</div>'+(S.fixture==='offline'?'<p class="error">Agent offline</p>':'')+'</div>';}
 if(app&&which==='attach'&&S.child!=='settings')body+=btn('Connection settings','settings','','btn textbtn');
-return '<div class="layer"><div class="scrim" data-action="close"></div><div class="dialog '+role+'" role="dialog" aria-modal="true" aria-label="'+e(title)+'">'+(app&&role==='fullscreen'?backhead(title):head(title,sub))+'<div class="dialog-body">'+body+'</div>'+foot(primary,act,disabled,which==='delete'?'Keep Project':'Cancel')+'</div></div>';
+return '<div class="layer"><div class="scrim" data-action="close"></div><div class="dialog '+role+'" data-scroll-contract="header-body-footer" role="dialog" aria-modal="true" aria-label="'+e(title)+'">'+(app&&role==='fullscreen'?backhead(title):head(title,sub))+'<div class="dialog-body">'+body+'</div>'+foot(primary,act,disabled,which==='delete'?'Keep Project':'Cancel')+'</div></div>';
 }
-function render(){root.dataset.experience=S.experience;root.innerHTML=shell()+overlay()+(S.toast?'<div class="toast" role="status">'+e(S.toast)+'</div>':'');const ins=document.getElementById('mock-state');if(ins)ins.textContent=JSON.stringify({...S,deleted:Boolean(S.deleted)},null,2);}
+function anatomyReport(){
+const out=page.querySelector('[data-anatomy-report]'),dialog=root.querySelector('.dialog');
+for(const b of page.querySelectorAll('[data-anatomy-scroll]'))b.disabled=!dialog;
+if(!dialog){out.textContent='Open New Project / New Session; choose Long path to force scrolling.';out.dataset.geometry='idle';return;}
+const h=dialog.querySelector('.dialog-head'),b=dialog.querySelector('.dialog-body'),f=dialog.querySelector('.dialog-foot');
+if(!h||!b||!f){out.textContent='This child state does not include all three bands.';out.dataset.geometry='unavailable';return;}
+const d=dialog.getBoundingClientRect(),hr=h.getBoundingClientRect(),fr=f.getBoundingClientRect();
+const covered=Math.abs(hr.left-d.left)<=2&&Math.abs(hr.right-d.right)<=2;
+const flush=Math.abs(fr.bottom-d.bottom)<=2;
+const outer=getComputedStyle(dialog).overflowY,inner=getComputedStyle(b).overflowY;
+const isolated=!['auto','scroll'].includes(outer)&&['auto','scroll'].includes(inner);
+const scroller=isolated?b:dialog,max=Math.max(0,scroller.scrollHeight-scroller.clientHeight);
+const label=S.anatomy==='legacy'&&!isApp()?'Legacy approximation (Web)':'Corrected three-zone';
+out.textContent=label+' · Header full width: '+(covered?'yes':'no')+' · Footer flush: '+(flush?'yes':'no')+' · Scroll owner: '+(isolated?'Body':'Dialog')+' · Scroll range: '+Math.round(max)+'px';
+out.dataset.geometry=covered&&flush&&isolated?'pass':'review';
+}
+function scrollAnatomy(position){const dialog=root.querySelector('.dialog');if(!dialog)return;const body=dialog.querySelector('.dialog-body');if(!body)return;const scroller=S.anatomy==='legacy'&&!isApp()?dialog:body,max=Math.max(0,scroller.scrollHeight-scroller.clientHeight);scroller.scrollTop=position==='start'?0:position==='middle'?max/2:max;anatomyReport();}
+function render(){root.dataset.experience=S.experience;root.dataset.anatomy=S.anatomy;root.innerHTML=shell()+overlay()+(S.toast?'<div class="toast" role="status">'+e(S.toast)+'</div>':'');const ins=document.getElementById('mock-state');if(ins)ins.textContent=JSON.stringify({...S,deleted:Boolean(S.deleted)},null,2);anatomyReport();}
 function close(){if(S.popup){S.popup=null;render();return;}if(S.child){S.child=null;render();return;}S.overlay=null;S.popup=null;S.child=null;render();}
 function notify(message){S.toast=message;S.overlay=null;S.child=null;S.popup=null;render();}
 function handle(action){if(!action)return;if(action==='noop')return;if(action==='close'){close();return;}if(action==='back'){S.popup=null;if(S.child)S.child=null;else S.overlay=null;render();return;}
@@ -55,8 +72,11 @@ if(action==='add-location'){S.locations=Math.min(12,S.locations+1);render();retu
 if(action==='submit-project'||action==='submit-session'||action==='submit-rename'){const val=action==='submit-session'?S.name:S.projectName;if(!val.trim()||S.fixture==='invalid'||S.fixture==='offline'){S.toast='Cannot submit: review validation / Agent state';render();return;}notify('Mock only · '+(action==='submit-session'?'Session':action==='submit-project'?'Project':'Project name')+' operation confirmed');return;}
 if(action==='confirm-delete'){S.deleted=true;notify('Mock only · Project deletion confirmed');return;}if(action==='confirm-attach'){if(S.fixture==='offline')return;notify('Mock only · Attach confirmed');return;}if(action==='save-settings'){notify('Mock only · Connection settings saved (no attach)');return;}}
 root.addEventListener('click',ev=>{const el=ev.target.closest('[data-action]');if(el&&root.contains(el))handle(el.dataset.action);});
+root.addEventListener('scroll',anatomyReport,true);
 root.addEventListener('input',ev=>{const key=ev.target.getAttribute('data-input');if(key==='name'||key==='projectName'||key==='path')S[key]=ev.target.value;});
 document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&S.overlay){ev.preventDefault();close();}});
+page.querySelectorAll('[data-anatomy-mode]').forEach(b=>b.addEventListener('click',()=>{S.anatomy=b.dataset.anatomyMode;for(const peer of page.querySelectorAll('[data-anatomy-mode]'))peer.setAttribute('aria-pressed',String(peer===b));render();}));
+page.querySelectorAll('[data-anatomy-scroll]').forEach(b=>b.addEventListener('click',()=>scrollAnatomy(b.dataset.anatomyScroll)));
 page.querySelectorAll('[data-fixture]').forEach(b=>b.addEventListener('click',()=>{S.fixture=b.dataset.fixture;S.locations=S.fixture==='long'?8:1;S.popup=null;for(const x of page.querySelectorAll('[data-fixture]'))x.setAttribute('aria-pressed',String(x===b));render();}));
 device.addEventListener('np:resize',ev=>{S.width=ev.detail.width;const active=page.querySelector('[data-np-size][aria-pressed="true"]');S.experience=active?.dataset.npExperience|| (S.width>=1000?'web':'app');device.style.setProperty('--np-device-height',S.width===844?'390px':S.width>=1000?'820px':'844px');S.popup=null;S.child=null;S.overlay=null;S.toast='';render();});
 render();

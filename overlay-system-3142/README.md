@@ -1,9 +1,20 @@
 # Unified Overlay & Operation Surface System — interactive candidate (#3142)
 
+## 2026-11-11 Dialog anatomy regression comparison — [Bug #3298](https://github.com/BestNathan/nession/issues/3298)
+
+This is an **in-place mock revision**, not a production component change. #3142 remains the visual owner; no competing prototype directory is created. Source review: staging `web/src/components/ui/dialog.tsx`, Session/Project consumers and current #3142 browser cases. The observed header/footer issue was reported by the user; the legacy illustration is a **source-inspired approximation, not a measured screenshot**.
+
+**Proposed contract:** Dialog shell owns viewport clamp and surface, Header and Footer are opaque, full-width **non-scrollable bands**, Body alone has `min-height:0;overflow-y:auto`. The Footer is flush with the surface bottom with no negative-margin sticky compensation; short dialogs remain content-sized. App retains one Back/header and safe-area actions.
+
+**Walkthrough:** Web 1180/1024 → Long path/many rows → New Project → toggle `Corrected · three zones` (default) vs `Legacy approximation · Web` → click Scroll top/middle/bottom. Read the live DOM geometry report (Header side coverage; Footer edge; CSS scroll owner; scroll distance). Repeat with New Session/Location child Select and compact Rename. Switch App 390/375/430/844×390, Offline/Invalid and Back/Cancel. Only the Web mock's legacy mode intentionally models a faulty anatomy; App keeps its candidate operation structure.
+
+**Verification boundary:** geometry report is diagnostic code inside a deterministic sanitized HTML mock. Chromium execution is still necessary for actual rendered geometry and focus/keyboard/touch behavior, and trusted Pages manifest+HTML SHA readback is necessary to label a public revision published. Existing #3142 production SC receipts do not prove #3298; the React correction and new production browser Acceptance remain Pending.
+
+
 - [Owning Requirement #3142](https://github.com/BestNathan/nession/issues/3142)
 - **Browser HTML preview (requires verified Pages publication):** https://bestnathan.github.io/nession/prototypes/overlay-system-3142/index.html
 - **Shared orphan source:** `prototype/overlay-system-3142/{index.html,styles.css,app.js,README.md}`; pin the immutable commit in the Issue after gallery update.
-- Reference: #3089 Session/Project operation prototype and #3128 sticky footer fix. The open #3137 owns content hierarchy/visual grammar; this prototype owns **temporary overlay presentation and behavior**, not resource detail layouts.
+- Reference: #3089 Session/Project operation prototype, #3128 historical sticky footer fix and #3298 shared anatomy regression. The open #3137 owns content hierarchy/visual grammar; this prototype owns **temporary overlay presentation and behavior**, not resource detail layouts.
 
 ## Product question
 
