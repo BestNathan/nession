@@ -100,15 +100,27 @@
 .overlay[hidden]{display:none}
 .product[data-experience="app"] .overlay{position:static;display:none;background:transparent;padding:0}
 .dialog{width:min(640px,100%);max-height:88%;display:flex;flex-direction:column;border:1px solid var(--nession-border);border-radius:14px;background:var(--nession-background);box-shadow:0 18px 50px rgb(0 0 0/.18);overflow:hidden}
+.dialog.wide{width:min(900px,100%)}
 .product[data-experience="app"] .dialog{width:100%;max-height:none;border:0;border-radius:0;box-shadow:none}
 .dialog-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--nession-border)}
 .dialog-head h3{margin:0;font-size:15px}
 .dialog-body{padding:12px 14px;overflow:auto;min-height:0}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;border-top:1px solid var(--nession-border)}
-.picker-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--nession-border);border-radius:10px;padding:9px 10px;margin-bottom:7px}
-.picker-row .pick-main{min-width:0}
-.picker-row strong{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.picker-row small{display:block;color:var(--nession-muted-foreground);font-size:11px;overflow-wrap:anywhere}
+.registry-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--nession-border);border-radius:10px;padding:9px 10px;margin-bottom:7px}
+.registry-row.selected{border-color:var(--nession-foreground);background:var(--nession-surface)}
+.registry-row .registry-main{min-width:0}
+.registry-row strong{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.registry-row .button{white-space:nowrap;flex:0 0 auto}
+.registry-row small{display:block;color:var(--nession-muted-foreground);font-size:11px;overflow-wrap:anywhere}
+.sandbox-add-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr);gap:12px}
+.product[data-experience="app"] .sandbox-add-grid{grid-template-columns:minmax(0,1fr)}
+.product[data-experience="app"] .sandbox-add-grid > .sandbox-form{order:-1}
+.product[data-experience="app"] .content .dialog-head{display:none}
+.product[data-experience="app"] .content .dialog-actions.cancel-only{display:none}
+.product[data-experience="app"] .app-hide{display:none}
+.sandbox-form{border:1px solid var(--nession-border);border-radius:10px;padding:12px;background:var(--nession-surface);align-self:start;position:sticky;top:0}
+.sandbox-form h4{margin:0 0 8px;font-size:13px}
+.target-error{color:var(--nession-danger)}
 .stack{display:flex;flex-direction:column;gap:8px}
 .kbd{font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--nession-border);border-radius:5px;padding:2px 4px;background:var(--nession-surface)}
 @media (max-width:720px){.list-detail{grid-template-columns:minmax(0,1fr)}}
@@ -119,7 +131,7 @@
 <header class="np-overview">
 <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Requirement #3181</span></nav>
 <span class="np-eyebrow">WORKSPACE · SERVER-OWNED IMAGES</span>
-<div class="np-header-main"><div><h1 class="np-title">Images · Server registry, Project reference, Sandbox composition</h1><p class="np-subtitle">Server 拥有不可变镜像与 Digest；Workspace 发现/操作 Images capability；Project 只引用并在 Git 构建成功后显式绑定；Sandbox 复用同一 Picker 组合挂载；Agent 缓存状态独立于 Server Ready。</p></div>
+<div class="np-header-main"><div><h1 class="np-title">Images · Server registry, Project reference, Sandbox composition</h1><p class="np-subtitle">Server 拥有不可变镜像与 Digest；Workspace 发现/操作 Images capability；Project 与 Sandbox 各自拥有独立的镜像选择/组合流程，不共用 Picker；Agent 缓存状态独立于 Server Ready。</p></div>
 <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3181" target="_blank" rel="noopener noreferrer">Issue #3181</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype/images-3181" target="_blank" rel="noopener noreferrer">View source</a></div></div>
 <div class="np-meta"><span>Scope: <strong>Server Images · Workspace / Project / Sandbox / Agent</strong></span><span>Data: <strong>synthetic fixture, 235 images</strong></span><span>Actions: <strong>local mock only</strong></span></div>
 </header>
@@ -133,9 +145,9 @@
 </div></div></div><p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
 </section>
 <section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">完全确定性的 mock：没有真实 Registry、Git 构建、blob 下载、Agent 缓存或 Sandbox 执行。</p><div class="np-detail-grid">
-<article class="np-detail"><h3>Ownership / information architecture</h3><ol class="np-steps"><li>Server 拥有 Registry、Alias 与 Blob；Workspace 只发现并操作 Images capability，没有永久 Images 侧栏项。</li><li>Project 只保存 image reference；构建成功后必须显式选择 Ready 镜像，失败不改变旧引用。</li><li>Sandbox 复用同一 Picker/model，但独立拥有 target 与 read-only/overlay 组合；不拥有镜像字节。</li><li>Agent 仅消费 scoped Digest；缓存 absent/preparing/verified/failed 与 Server Ready 分开呈现。</li></ol></article>
-<article class="np-detail"><h3>Try these paths</h3><ol class="np-steps"><li>Workspace 无 Session：搜索、翻页 235 张图、查看 Digest/Alias/来源；切到 empty 或 unavailable 查看真实空/不可用状态。</li><li>Context → Project：Choose image 打开共享 Picker；Build from Git Source 成功→Use this image，或 buildfail→旧引用保持不变。</li><li>Context → Sandbox：同一 Picker 添加镜像，编辑 target/mode；aliasshift 时旧选择保持 pinned Digest。</li><li>Web 1180/1024 ↔ App 390/375：App 单 Back 在 list→detail→picker 间返回；键盘可操作。</li></ol></article>
-<article class="np-detail"><h3>Decisions being tested</h3><p>Images 只在 Workspace 语境中出现，不成为全局导航；Project 与 Sandbox 的镜像选择共享一个契约和 Picker；Server Ready 不等于 Agent ready；Alias 变化不改变已固定的 Session/Sandbox 镜像身份；超过 200 张时必须可完整分页，而不是静默截断。</p></article>
+<article class="np-detail"><h3>Ownership / information architecture</h3><ol class="np-steps"><li>Server 拥有 Registry、Alias 与 Blob；Workspace 只发现并操作 Images capability，没有永久 Images 侧栏项。</li><li>Project 只保存 image reference；拥有独立的单镜像选择流程，构建成功后必须显式选择 Ready 镜像，失败不改变旧引用。</li><li>Sandbox 拥有独立的多镜像组合流程（选择 + target + mode），不复用 Project 的选择器/引用模型；不拥有镜像字节。</li><li>Agent 仅消费 scoped Digest；缓存 absent/preparing/verified/failed 与 Server Ready 分开呈现。</li></ol></article>
+<article class="np-detail"><h3>Try these paths</h3><ol class="np-steps"><li>Workspace 无 Session：搜索、翻页 235 张图、查看 Digest/Alias/来源；切到 empty 或 unavailable 查看真实空/不可用状态。</li><li>Context → Project：Select Project image 是 Project 独立的单镜像流程；Build from Git Source 成功→Use this image，或 buildfail→旧引用保持不变。</li><li>Context → Sandbox：Add image 打开 Sandbox 独立的组合流程，选择镜像并配置 target/mode 后加入；aliasshift 时旧选择保持 pinned Digest。</li><li>Web 1180/1024 ↔ App 390/375：App 单 Back 在 capability→list→detail 及各自选择流程间返回；键盘可操作。</li></ol></article>
+<article class="np-detail"><h3>Decided product boundaries</h3><p><strong>已确认（2026-11-11）：</strong>Images 不增加永久全局侧栏项；Project 与 Sandbox 的镜像流程彼此独立，不共用 Picker/引用模型。Sandbox 保留独立 target 与 read-only/overlay，选择时固定 Digest；Alias 变化不改变已固定的 Sandbox/Session 镜像身份。Server Ready 不等于 Agent ready。App 使用 capability 入口 + 单 Back/标题层级。超过 200 张时必须可完整分页，而不是静默截断。</p></article>
 <article class="np-detail"><h3>Verification limitations</h3><p>本页是 mock；CSS/布局基于 WorkspaceShell、WorkspacePanel、AppPageHeader 与生成的 token 语义近似。真实 API、授权、Digest 校验、Agent 缓存与 Sandbox 执行必须由后续实现与 Acceptance Cases 证明。Pages 发布 SHA 与真实 Chromium 交互另行记录。</p><details class="np-inspector"><summary>State inspector</summary><pre id="inspector">No action yet.</pre></details></article>
 </div></section></main><footer class="np-footer">Nession prototype · Synthetic UI only · GitHub Issue #3181</footer></div>
 <script src="../prototype-frame-2758/frame.js"></script>
@@ -163,7 +175,7 @@ function makeImage(i){
 }
 const IMAGES=Array.from({length:235},(_,i)=>makeImage(i));
 const BUILD_IMAGE=makeImage(997); BUILD_IMAGE.alias='nession-web-build'; BUILD_IMAGE.source='github.com/nession/workspace-image · main@a91c72e';
-const state={surface:'workspace',scenario:'normal',experience:'web',query:'',page:0,selected:IMAGES[0].digest,project:{alias:'workspace-runtime',digest:IMAGES[1].digest},sandbox:[{digest:IMAGES[0].digest,alias:'toolchain-base',target:'/opt/toolchain',mode:'read-only'},{digest:IMAGES[2].digest,alias:'node-24',target:'/opt/node',mode:'overlay'}],build:{phase:'idle',image:null,error:null},picker:null,appDepth:'root',toast:'',aliasMoved:false};
+const state={surface:'workspace',scenario:'normal',experience:'web',query:'',page:0,selected:IMAGES[0].digest,project:{alias:'workspace-runtime',digest:IMAGES[1].digest},sandbox:[{digest:IMAGES[0].digest,alias:'toolchain-base',target:'/opt/toolchain',mode:'read-only'},{digest:IMAGES[2].digest,alias:'node-24',target:'/opt/node',mode:'overlay'}],build:{phase:'idle',image:null,error:null},projectChooser:null,sandboxAdd:null,appDepth:'root',toast:'',aliasMoved:false};
 function byDigest(d){return IMAGES.find(x=>x.digest===d)||BUILD_IMAGE;}
 function scenario(){
   const empty=state.scenario==='empty';
@@ -189,17 +201,19 @@ function render(){
   const app=state.experience==='app';
   const toastHtml=state.toast?'<div class="toast" id="toast" role="status">'+escape(state.toast)+'</div>':'';
   if(app&&state.surface==='workspace'&&state.appDepth==='root') content.innerHTML=toastHtml+workspaceEntryView();
-  else if(app&&state.appDepth==='picker') content.innerHTML=toastHtml+'<div class="panel">'+pickerView()+'</div>';
+  else if(app&&state.appDepth==='project-select') content.innerHTML=toastHtml+'<div class="panel">'+projectChooserView()+'</div>';
+  else if(app&&state.appDepth==='sandbox-add') content.innerHTML=toastHtml+'<div class="panel">'+sandboxAddView()+'</div>';
   else if(app&&state.appDepth==='build') content.innerHTML=toastHtml+'<div class="panel">'+buildView()+'</div>';
   else if(state.surface==='workspace') content.innerHTML=toastHtml+workspaceView();
   else if(state.surface==='project') content.innerHTML=toastHtml+projectView();
   else content.innerHTML=toastHtml+sandboxView();
   const title=document.getElementById('app-title');
   const back=document.getElementById('app-back');
-  const titleByDepth={root:'Workspace',list:'Images',detail:'Image detail',picker:'Choose image',build:'Build image'};
+  const titleByDepth={root:'Workspace',list:'Images',detail:'Image detail','project-select':'Select Project image','sandbox-add':'Add Sandbox image',build:'Build image'};
   let titleText='Images';
   if(app){
-    if(state.appDepth==='picker') titleText='Choose image';
+    if(state.appDepth==='project-select') titleText='Select Project image';
+    else if(state.appDepth==='sandbox-add') titleText='Add Sandbox image';
     else if(state.appDepth==='build') titleText='Build image';
     else if(state.surface==='workspace') titleText=titleByDepth[state.appDepth]||'Images';
     else titleText=state.surface==='project'?'Project image':'Sandbox images';
@@ -207,11 +221,11 @@ function render(){
   if(title) title.textContent=titleText;
   if(back) back.disabled=false;
   renderOverlay();
-  document.getElementById('inspector').textContent=JSON.stringify({surface:state.surface,scenario:state.scenario,experience:state.experience,appDepth:state.appDepth,page:state.page,query:state.query,selected:state.selected,project:state.project,sandbox:state.sandbox.map(x=>({alias:x.alias,digest:x.digest.slice(0,18)+'…',target:x.target,mode:x.mode})),build:state.build.phase,aliasMoved:state.aliasMoved,toast:state.toast},null,2);
+  document.getElementById('inspector').textContent=JSON.stringify({surface:state.surface,scenario:state.scenario,experience:state.experience,appDepth:state.appDepth,page:state.page,query:state.query,selected:state.selected,project:state.project,sandbox:state.sandbox.map(x=>({alias:x.alias,digest:x.digest.slice(0,18)+'…',target:x.target,mode:x.mode})),projectChooser:Boolean(state.projectChooser),sandboxAdd:state.sandboxAdd?{digest:state.sandboxAdd.digest,target:state.sandboxAdd.target,mode:state.sandboxAdd.mode}:null,build:state.build.phase,aliasMoved:state.aliasMoved,toast:state.toast},null,2);
 }
 function workspaceEntryView(){
   const s=scenario();
-  return '<div class="surface-head"><div><p class="eyebrow">Workspace · no Session selected</p><h2 class="surface-title">Server resources</h2><p class="note" style="margin-top:6px">The Workspace is available without a Session. Capabilities appear here when the Server reports them.</p></div></div><section class="capability"><div><p class="eyebrow" style="margin-bottom:4px">Server resources</p><h3>Images</h3><p>Server-owned immutable images with Digests and Aliases. Discover and inspect them here; Projects and Sandboxes consume the same registry.</p><p style="margin-top:8px">'+(s.available?chip('235 images available','ok'):chip('Unavailable on this Server','bad'))+(s.empty?chip('Empty inventory','warn'):'')+'</p></div><button type="button" class="button primary" data-open-images'+(s.available?'':' disabled')+'>Open Images</button></section>';
+  return '<div class="surface-head"><div><p class="eyebrow">Workspace · no Session selected</p><h2 class="surface-title">Server resources</h2><p class="note" style="margin-top:6px">The Workspace is available without a Session. Capabilities appear here when the Server reports them.</p></div></div><section class="capability"><div><p class="eyebrow" style="margin-bottom:4px">Server resources</p><h3>Images</h3><p>Server-owned immutable images with Digests and Aliases. Discover and inspect them here; Project and Sandbox each consume this registry through their own independent flows.</p><p style="margin-top:8px">'+(s.available?chip('235 images available','ok'):chip('Unavailable on this Server','bad'))+(s.empty?chip('Empty inventory','warn'):'')+'</p></div><button type="button" class="button primary" data-open-images'+(s.available?'':' disabled')+'>Open Images</button></section>';
 }
 function workspaceView(){
   const s=scenario();
@@ -238,42 +252,85 @@ function detailView(img){
 function projectView(){
   const current=byDigest(state.project.digest);
   const build=state.build;
+  const available=scenario().available;
   const buildBox=build.phase==='idle'?'':'<div class="section-block"><h3>Build result</h3><div class="panel panel-pad">'+(build.phase==='building'?'<p class="note">Building from Git Source… The existing Project reference is unchanged until an explicit successful choice.</p>':build.phase==='failed'?'<p class="note bad">Build failed: the Git Source could not be packaged. The existing reference remains <strong>'+escape(state.project.alias)+'</strong> at '+state.project.digest.slice(0,24)+'… .</p>':build.phase==='succeeded'?'<p class="note">Build succeeded: <strong>'+escape(BUILD_IMAGE.alias)+'</strong> is Server Ready at <span class="pin-line">'+BUILD_IMAGE.digest.slice(0,24)+'…</span>. The Project reference has not changed yet.</p><div style="margin-top:8px"><button type="button" class="button primary" data-build-use>Use this image</button></div>':'')+'</div></div>';
-  return '<div class="surface-head"><div><p class="eyebrow">Project · reference only</p><h2 class="surface-title">Nession Web '+chip('Git Source connected','ok')+'</h2><p class="note" style="margin-top:6px">A Project stores an image reference. It does not own image bytes or build inside the browser.</p></div></div><section class="panel panel-pad"><h3 style="margin:0 0 8px">Current image reference</h3><div class="reference"><div class="ref-main"><strong>'+escape(current.alias)+'</strong><small>'+current.digest+'</small></div><div class="stack" style="flex-direction:row"><button type="button" class="button" data-open-picker data-purpose="project">Choose image</button><button type="button" class="button" data-open-build>Build from Git Source</button></div></div><p class="note" style="margin-top:8px">Only a Server Ready, explicitly selected digest updates this reference. A failed or cancelled build preserves it.</p></section>'+buildBox+'<div class="section-block"><h3>Shared selection contract</h3><div class="panel panel-pad"><p class="note">The same Picker used by Sandbox is opened here. It lists the Server registry, shows Server and Agent readiness separately, and returns a Digest only after the user chooses.</p></div></div>';
+  return '<div class="surface-head"><div><p class="eyebrow">Project · independent reference flow</p><h2 class="surface-title">Nession Web '+chip('Git Source connected','ok')+'</h2><p class="note" style="margin-top:6px">A Project stores one image reference. Its selection flow is Project-specific and is not shared with Sandbox composition.</p></div></div><section class="panel panel-pad"><h3 style="margin:0 0 8px">Current image reference</h3><div class="reference"><div class="ref-main"><strong>'+escape(current.alias)+'</strong><small>'+current.digest+'</small></div><div class="stack" style="flex-direction:row"><button type="button" class="button" data-open-project-select'+(available?'':' disabled')+'>Select Project image</button><button type="button" class="button" data-open-build'+(available?'':' disabled')+'>Build from Git Source</button></div></div><p class="note" style="margin-top:8px">Only a Server Ready, explicitly selected Digest updates this reference. A failed or cancelled build preserves it.</p>'+(available?'':'<p class="note bad" style="margin-top:8px">The Server reports no Images capability. The existing reference remains visible, but this Project cannot select or build an image.</p>')+'</section>'+buildBox+'<div class="section-block"><h3>Project-specific selection</h3><div class="panel panel-pad"><p class="note">Select Project image lists the Server registry with Server and Agent readiness separated, then updates this reference only after an explicit selection. Sandbox has its own separate add-image and composition flow.</p></div></div>';
 }
 function sandboxView(){
+  const available=scenario().available;
   const items=state.sandbox.map((item,index)=>{
     const img=byDigest(item.digest);
     const agent=agentStateFor(img);
     const moved=state.aliasMoved&&index===1;
     return '<div class="compose-item"><div class="compose-head"><div><strong>'+escape(item.alias)+'</strong> '+serverChip(img.server)+agentChip(agent)+'</div><div class="stack" style="flex-direction:row"><button type="button" class="button" data-remove-sandbox="'+index+'" aria-label="Remove '+escape(item.alias)+'">Remove</button></div></div><p class="pin-line">Pinned '+item.digest.slice(0,24)+'…'+(moved?' · alias now resolves to another Digest; this pin stays':'')+'</p><div class="compose-controls"><div class="field"><label>Target path</label><input data-target="'+index+'" value="'+escape(item.target)+'" aria-label="Target path"></div><div class="field"><label>Composition</label><select data-mode="'+index+'" aria-label="Composition mode"><option value="read-only"'+(item.mode==='read-only'?' selected':'')+'>Read-only mount</option><option value="overlay"'+(item.mode==='overlay'?' selected':'')+'>Overlay upper</option></select></div></div>'+(agent!=='Verified'?'<p class="note bad">Not mount-ready on devbox-01 ('+agent+'). The Server Blob may still be Ready; the Agent cache is the missing piece.</p>':'')+'</div>';
   }).join('')||'<p class="empty">No images in this Sandbox composition.</p>';
-  return '<div class="surface-head"><div><p class="eyebrow">Sandbox · one shared Picker</p><h2 class="surface-title">Image composition '+chip('Policy draft','')+'</h2><p class="note" style="margin-top:6px">Selections pin an Alias to a resolved Digest before execution. Mount targets and modes are Sandbox-owned and independent of the Project reference.</p></div><button type="button" class="button primary" data-open-picker data-purpose="sandbox">Add image</button></div><section class="panel panel-pad"><div class="compose-list">'+items+'</div><p class="note" style="margin-top:10px">A running Session keeps its pinned Digest when the Alias changes. New compositions resolve the current Alias.</p></section><div class="section-block"><h3>Existing Session pin</h3><div class="panel panel-pad"><p class="note">Running for 12m: <strong>toolchain-base</strong> remains pinned to <span class="pin-line">'+IMAGES[0].digest.slice(0,24)+'…</span> even if the Alias moves.</p></div></div>';
+  return '<div class="surface-head"><div><p class="eyebrow">Sandbox · independent composition flow</p><h2 class="surface-title">Image composition '+chip('Policy draft','')+'</h2><p class="note" style="margin-top:6px">Sandbox owns this add-image flow, including target and mode. It does not reuse the Project image selector or its reference.</p></div><button type="button" class="button primary" data-open-sandbox-add'+(available?'':' disabled')+'>Add image</button></div>'+(available?'':'<p class="note bad" style="margin-bottom:10px">The Server reports no Images capability. Existing pinned selections remain visible, but no new image can be added.</p>')+'<section class="panel panel-pad"><div class="compose-list">'+items+'</div><p class="note" style="margin-top:10px">A running Session keeps its pinned Digest when the Alias changes. New compositions resolve the current Alias at selection time.</p></section><div class="section-block"><h3>Existing Session pin</h3><div class="panel panel-pad"><p class="note">Running for 12m: <strong>toolchain-base</strong> remains pinned to <span class="pin-line">'+IMAGES[0].digest.slice(0,24)+'…</span> even if the Alias moves.</p></div></div><div class="section-block"><h3>Project boundary</h3><div class="panel panel-pad"><p class="note">This composition neither reads nor changes the Project image reference. Both consume the Server registry through separate, independent flows.</p></div></div>';
 }
-function openPicker(purpose){
-  state.picker={purpose,page:0,query:''};
-  state.appDepth='picker';
+function openProjectChooser(){
+  state.projectChooser={page:0,query:''};
+  state.appDepth='project-select';
   state.toast='';
   render();
 }
-function pickerView(){
-  const p=state.picker; if(!p)return '';
-  const rows=currentImages().filter(img=>!p.query||img.alias.toLowerCase().includes(p.query.toLowerCase())||img.digest.includes(p.query.toLowerCase()));
-  const pages=Math.max(1,Math.ceil(rows.length/PAGE_SIZE)); const page=Math.min(p.page,pages-1);
-  const slice=rows.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
-  const body=slice.map(img=>'<div class="picker-row"><div class="pick-main"><strong>'+escape(img.alias)+'</strong><small>'+img.digest.slice(0,26)+'… · '+escape(img.source)+'</small><div style="margin-top:4px">'+serverChip(img.server)+' '+agentChip(agentStateFor(img))+'</div></div><button type="button" class="button" data-pick="'+img.digest+'"'+(img.server!=='Ready'?' disabled title="Only a Server Ready image can be selected"':'')+'>'+(p.purpose==='project'?'Select':'Add')+'</button></div>').join('')||'<p class="empty">No image matches this search.</p>';
-  return '<div class="dialog-head"><h3>Choose image · '+esc(p.purpose==='project'?'Project reference':'Sandbox composition')+'</h3><button type="button" class="button" data-close-picker>Close</button></div><div class="dialog-body"><p class="note">One registry, one Picker. The Server lists authorized images; the Agent cache state is shown but never conflated with Server readiness.</p><div class="field-row" style="margin:10px 0"><div class="field"><label>Search</label><input id="picker-search" value="'+escape(p.query)+'" placeholder="Search registry" aria-label="Search registry"></div></div><div class="pager" style="border:0;padding:0 0 8px"><span>'+rows.length+' images · page '+(page+1)+'/'+pages+'</span><span class="stack" style="flex-direction:row"><button type="button" class="button" data-picker-page="-1"'+(page<=0?' disabled':'')+'>Prev</button><button type="button" class="button" data-picker-page="1"'+(page>=pages-1?' disabled':'')+'>Next</button></span></div>'+body+'</div><div class="dialog-actions"><button type="button" class="button" data-close-picker>Cancel</button></div>';
+function closeProjectChooser(){
+  state.projectChooser=null;
+  state.appDepth='root';
+  render();
+}
+function openSandboxAdd(){
+  state.sandboxAdd={page:0,query:'',digest:null,target:'',mode:'read-only'};
+  state.appDepth='sandbox-add';
+  state.toast='';
+  render();
+}
+function closeSandboxAdd(){
+  state.sandboxAdd=null;
+  state.appDepth='root';
+  render();
+}
+function paginate(rows,page){
+  const pages=Math.max(1,Math.ceil(rows.length/PAGE_SIZE));
+  const safe=Math.min(Math.max(page,0),pages-1);
+  return {pages,page:safe,slice:rows.slice(safe*PAGE_SIZE,(safe+1)*PAGE_SIZE)};
+}
+function registryMatches(query){
+  const q=query.trim().toLowerCase();
+  return currentImages().filter(img=>!q||img.alias.toLowerCase().includes(q)||img.digest.toLowerCase().includes(q)||img.source.toLowerCase().includes(q));
+}
+function projectChooserView(){
+  const c=state.projectChooser; if(!c)return '';
+  const s=scenario();
+  const rows=registryMatches(c.query);
+  const page=paginate(rows,c.page);
+  const body=page.slice.map(img=>'<div class="registry-row"><div class="registry-main"><strong>'+escape(img.alias)+'</strong><small>'+img.digest.slice(0,26)+'… · '+escape(img.source)+'</small><div style="margin-top:4px">'+serverChip(img.server)+' '+agentChip(img.agent)+'</div></div><button type="button" class="button primary" data-project-pick="'+img.digest+'"'+(img.server!=='Ready'?' disabled title="Only a Server Ready image can be selected"':'')+'>Use image</button></div>').join('');
+  const content=!s.available?'<p class="note bad">Images is unavailable on this Server. The existing Project reference is unchanged and cannot be replaced.</p>':s.empty?'<p class="empty">This Server currently holds no images. Build from the Project Git Source or seed the Registry outside this mock.</p>':'<div class="field-row" style="margin:0 0 10px"><div class="field"><label>Search Project images</label><input id="project-search" value="'+escape(c.query)+'" placeholder="Search alias, digest or source" aria-label="Search Project images"></div></div><div class="pager" style="border:0;padding:0 0 8px"><span>'+rows.length+' images · page '+(page.page+1)+'/'+page.pages+'</span><span class="stack" style="flex-direction:row"><button type="button" class="button" data-project-page="-1"'+(page.page<=0?' disabled':'')+'>Prev</button><button type="button" class="button" data-project-page="1"'+(page.page>=page.pages-1?' disabled':'')+'>Next</button></span></div>'+(body||'<p class="empty">No image matches this search.</p>');
+  return '<div class="dialog-head"><h3>Select Project image</h3><button type="button" class="button" data-close-project-chooser>Close</button></div><div class="dialog-body"><p class="note">Project-specific single-image reference flow. This does not share a Picker or reference model with Sandbox composition.</p>'+content+'</div><div class="dialog-actions cancel-only"><button type="button" class="button" data-close-project-chooser>Cancel</button></div>';
+}
+function sandboxAddView(){
+  const a=state.sandboxAdd; if(!a)return '';
+  const s=scenario();
+  const rows=registryMatches(a.query);
+  const page=paginate(rows,a.page);
+  const selected=s.images.find(img=>img.digest===a.digest)||null;
+  const targetValid=/^\/[^\0]*$/.test(a.target)&&!a.target.split('/').includes('..');
+  const body=page.slice.map(img=>{
+    const selectedStyle=img.digest===a.digest?' selected':'';
+    const isSelected=img.digest===a.digest?' aria-pressed="true"':'';
+    return '<div class="registry-row'+selectedStyle+'"><div class="registry-main"><strong>'+escape(img.alias)+'</strong><small>'+img.digest.slice(0,26)+'… · '+escape(img.source)+'</small><div style="margin-top:4px">'+serverChip(img.server)+' '+agentChip(img.agent)+'</div></div><button type="button" class="button" data-sandbox-pick="'+img.digest+'"'+isSelected+(img.server!=='Ready'?' disabled title="Only a Server Ready image can be composed"':'')+'>'+(img.digest===a.digest?'Selected':'Choose')+'</button></div>';
+  }).join('');
+  const content=!s.available?'<p class="note bad">Images is unavailable on this Server. Existing pinned selections remain visible, but no new image can be added.</p>':s.empty?'<p class="empty">This Server currently holds no images. No Sandbox composition can be added.</p>':'<div class="sandbox-add-grid"><div><div class="field-row" style="margin:0 0 10px"><div class="field"><label>Search Sandbox images</label><input id="sandbox-search" value="'+escape(a.query)+'" placeholder="Search alias, digest or source" aria-label="Search Sandbox images"></div></div><div class="pager" style="border:0;padding:0 0 8px"><span>'+rows.length+' images · page '+(page.page+1)+'/'+page.pages+'</span><span class="stack" style="flex-direction:row"><button type="button" class="button" data-sandbox-page="-1"'+(page.page<=0?' disabled':'')+'>Prev</button><button type="button" class="button" data-sandbox-page="1"'+(page.page>=page.pages-1?' disabled':'')+'>Next</button></span></div>'+(body||'<p class="empty">No image matches this search.</p>')+'</div><div class="sandbox-form"><h4>Sandbox composition</h4>'+(selected?'<p class="pin-line" style="margin:0 0 8px">Pinned '+selected.digest.slice(0,26)+'…</p>':'<p class="note">Select a Server Ready image, then set its target and mode. The Digest is pinned when you add it.</p>')+'<div class="field" style="margin-bottom:8px"><label>Target path</label><input id="sandbox-target" data-sandbox-target value="'+escape(a.target)+'" placeholder="/opt/toolchain" aria-label="Sandbox target path" '+(selected?'':'disabled')+'></div><div class="field" style="margin-bottom:8px"><label>Composition</label><select data-sandbox-mode aria-label="Sandbox composition mode" '+(selected?'':'disabled')+'><option value="read-only"'+(a.mode==='read-only'?' selected':'')+'>Read-only mount</option><option value="overlay"'+(a.mode==='overlay'?' selected':'')+'>Overlay upper</option></select></div>'+(selected&&!targetValid?'<p class="note bad">Target must be an absolute path without "..".</p>':'<p class="note">Sandbox target and mode are independent of the Project reference.</p>')+'<div style="margin-top:10px"><button type="button" class="button primary" data-sandbox-commit'+(selected&&targetValid?'':' disabled')+'>Add to composition</button></div></div></div>';
+  return '<div class="dialog-head"><h3>Add image to Sandbox</h3><button type="button" class="button" data-close-sandbox-add>Close</button></div><div class="dialog-body"><p class="note">Sandbox-specific flow: choose one image and configure its target/mode before adding. This does not reuse the Project selection flow.</p>'+content+'</div><div class="dialog-actions cancel-only"><button type="button" class="button" data-close-sandbox-add>Cancel</button></div>';
 }
 function buildView(){
   const b=state.build;
-  return '<div class="dialog-head"><h3>Build image from Git Source</h3><button type="button" class="button" data-close-build>Close</button></div><div class="dialog-body"><p class="note">Server builds and publishes an immutable EROFS image. This mock does not clone Git or publish bytes.</p><div class="stack" style="margin-top:10px"><div class="field"><label>Repository</label><input value="https://github.com/nession/workspace-image" aria-label="Repository"></div><div class="field"><label>Ref</label><input value="main" aria-label="Ref"></div></div><p class="note" style="margin-top:8px">Source commit and build digest are preserved on the result.</p>'+(b.phase==='building'?'<p class="note warn">Building… the current Project reference is unchanged.</p>':b.phase==='failed'?'<p class="note bad">The build failed. Current Project reference stays '+escape(state.project.alias)+'.</p>':b.phase==='succeeded'?'<p class="note">Built '+escape(BUILD_IMAGE.alias)+' · Server Ready. Choose it explicitly to update the Project.</p>':'')+'</div><div class="dialog-actions"><button type="button" class="button" data-close-build>Cancel</button><button type="button" class="button primary" data-build-start'+(b.phase==='building'?' disabled':'')+'>'+(b.phase==='succeeded'?'Build again':'Start build')+'</button>'+(b.phase==='succeeded'?'<button type="button" class="button primary" data-build-use>Use this image</button>':'')+'</div>';
+  return '<div class="dialog-head"><h3>Build image from Git Source</h3><button type="button" class="button" data-close-build>Close</button></div><div class="dialog-body"><p class="note">Server builds and publishes an immutable EROFS image. This mock does not clone Git or publish bytes.</p><div class="stack" style="margin-top:10px"><div class="field"><label>Repository</label><input value="https://github.com/nession/workspace-image" aria-label="Repository"></div><div class="field"><label>Ref</label><input value="main" aria-label="Ref"></div></div><p class="note" style="margin-top:8px">Source commit and build digest are preserved on the result.</p>'+(b.phase==='building'?'<p class="note warn">Building… the current Project reference is unchanged.</p>':b.phase==='failed'?'<p class="note bad">The build failed. Current Project reference stays '+escape(state.project.alias)+'.</p>':b.phase==='succeeded'?'<p class="note">Built '+escape(BUILD_IMAGE.alias)+' · Server Ready. Choose it explicitly to update the Project.</p>':'')+'</div><div class="dialog-actions"><button type="button" class="button app-hide" data-close-build>Cancel</button><button type="button" class="button primary" data-build-start'+(b.phase==='building'?' disabled':'')+'>'+(b.phase==='succeeded'?'Build again':'Start build')+'</button>'+(b.phase==='succeeded'?'<button type="button" class="button primary" data-build-use>Use this image</button>':'')+'</div>';
 }
-function esc(v){return escape(v);}
 function renderOverlay(){
   const overlay=document.getElementById('overlay');
   if(state.experience==='app'){overlay.innerHTML='';overlay.hidden=true;return;}
   let html='';
-  if(state.picker){html='<div class="dialog" role="dialog" aria-modal="true" aria-label="Choose image">'+pickerView()+'</div>';}
+  if(state.projectChooser){html='<div class="dialog" role="dialog" aria-modal="true" aria-label="Select Project image">'+projectChooserView()+'</div>';}
+  else if(state.sandboxAdd){html='<div class="dialog wide" role="dialog" aria-modal="true" aria-label="Add image to Sandbox">'+sandboxAddView()+'</div>';}
   else if(state.build.phase==='form'||state.build.phase==='building'||state.build.phase==='failed'||state.build.phase==='succeeded'){html='<div class="dialog" role="dialog" aria-modal="true" aria-label="Build image">'+buildView()+'</div>';}
   overlay.innerHTML=html; overlay.hidden=!html;
 }
@@ -283,29 +340,46 @@ function setExperience(width){
   if(app&&state.appDepth==='detail'&&state.surface!=='workspace') state.appDepth='root';
   document.getElementById('product').dataset.experience=state.experience;
 }
-function selectSurface(surface){state.surface=surface;state.appDepth='root';state.picker=null;state.build={phase:'idle',image:null,error:null};state.toast='';state.query='';state.page=0;render();}
-function closePicker(){state.picker=null;state.appDepth=state.surface==='workspace'&&state.experience==='app'?'list':'root';render();}
-function chooseImage(digest){
-  const purpose=state.picker&&state.picker.purpose;
-  if(purpose==='project'){state.project={alias:byDigest(digest).alias,digest:digest};state.picker=null;state.appDepth='root';state.toast='Project reference updated to '+byDigest(digest).alias+' (explicit selection).';}
-  else {const img=byDigest(digest);state.sandbox.push({digest,alias:img.alias,target:'/opt/'+img.alias.replace(/[^a-z0-9-]/gi,'-'),mode:'read-only'});state.picker=null;state.appDepth='root';state.toast='Added '+img.alias+' to the Sandbox composition (pinned).';}
+function selectSurface(surface){state.surface=surface;state.appDepth='root';state.projectChooser=null;state.sandboxAdd=null;state.build={phase:'idle',image:null,error:null};state.toast='';state.query='';state.page=0;render();}
+function chooseProjectImage(digest){
+  const img=currentImages().find(x=>x.digest===digest);
+  if(!img||img.server!=='Ready')return;
+  state.project={alias:img.alias,digest:img.digest};
+  state.projectChooser=null;
+  state.appDepth='root';
+  state.toast='Project reference updated to '+img.alias+' (explicit selection).';
+  render();
+}
+function pickSandboxImage(digest){
+  const img=currentImages().find(x=>x.digest===digest);
+  if(!img||img.server!=='Ready'||!state.sandboxAdd)return;
+  state.sandboxAdd.digest=img.digest;
+  state.sandboxAdd.target='/opt/'+img.alias.replace(/[^a-z0-9-]/gi,'-');
+  render();
+}
+function commitSandboxAdd(){
+  const a=state.sandboxAdd;
+  if(!a)return;
+  const img=currentImages().find(x=>x.digest===a.digest);
+  const targetValid=/^\/[^\0]*$/.test(a.target)&&!a.target.split('/').includes('..');
+  if(!img||img.server!=='Ready'||!targetValid)return;
+  state.sandbox.push({digest:img.digest,alias:img.alias,target:a.target,mode:a.mode});
+  state.sandboxAdd=null;
+  state.appDepth='root';
+  state.toast='Added '+img.alias+' to the Sandbox composition with its pinned Digest.';
   render();
 }
 function beginBuild(){state.build={phase:'building',image:null,error:null};state.appDepth='build';render();setTimeout(()=>{if(state.scenario==='buildfail'){state.build={phase:'failed',image:null,error:'Git Source packaging failed'};}else{state.build={phase:'succeeded',image:BUILD_IMAGE,error:null};}render();},700);}
 function bindBuild(){state.project={alias:BUILD_IMAGE.alias,digest:BUILD_IMAGE.digest};state.build={phase:'idle',image:null,error:null};state.appDepth='root';state.toast='Project reference explicitly bound to the successful build.';render();}
 function back(){
   const app=state.experience==='app';
-  if(state.surface==='workspace'){
-    if(state.appDepth==='detail'){state.appDepth='list';}
-    else if(state.appDepth==='picker'){state.picker=null;state.appDepth='list';}
-    else if(state.appDepth==='build'){state.build={phase:'idle',image:null,error:null};state.appDepth='root';}
-    else if(state.appDepth==='list'){state.appDepth='root';}
-    else {state.toast='App root: Back would return to Sessions (outside this Images mock).';}
-  } else {
-    if(state.appDepth==='picker'){state.picker=null;state.appDepth='root';}
-    else if(state.appDepth==='build'){state.build={phase:'idle',image:null,error:null};state.appDepth='root';}
-    else {state.toast='Back would return to Workspace (outside this '+state.surface+' fixture).';}
-  }
+  if(state.appDepth==='detail'){state.appDepth='list';}
+  else if(state.appDepth==='project-select'){state.projectChooser=null;state.appDepth='root';}
+  else if(state.appDepth==='sandbox-add'){state.sandboxAdd=null;state.appDepth='root';}
+  else if(state.appDepth==='build'){state.build={phase:'idle',image:null,error:null};state.appDepth='root';}
+  else if(state.surface==='workspace'&&state.appDepth==='list'){state.appDepth='root';}
+  else if(state.surface==='workspace'){state.toast='App root: Back would return to Sessions (outside this Images mock).';}
+  else {state.toast='Back would return to Workspace (outside this '+state.surface+' fixture).';}
   if(!app) state.appDepth='root';
   render();
 }
@@ -315,15 +389,20 @@ function bindEvents(){
   document.getElementById('review').addEventListener('np:resize',e=>{setExperience(e.detail.width);render();});
   document.getElementById('app-back').addEventListener('click',back);
   document.getElementById('product').addEventListener('click',e=>{
-    const t=e.target.closest('[data-select],[data-page],[data-open-picker],[data-picker-page],[data-pick],[data-close-picker],[data-open-build],[data-build-start],[data-build-use],[data-close-build],[data-remove-sandbox],[data-open-images]');
+    const t=e.target.closest('[data-select],[data-page],[data-open-project-select],[data-project-page],[data-project-pick],[data-close-project-chooser],[data-open-sandbox-add],[data-sandbox-page],[data-sandbox-pick],[data-sandbox-commit],[data-close-sandbox-add],[data-open-build],[data-build-start],[data-build-use],[data-close-build],[data-remove-sandbox],[data-open-images]');
     if(!t)return;
     if(t.dataset.select){state.selected=t.dataset.select;if(state.experience==='app')state.appDepth='detail';render();}
     else if(t.dataset.page){state.page+=Number(t.dataset.page);render();}
-    else if(t.dataset.purpose){openPicker(t.dataset.purpose);}
+    else if(t.hasAttribute('data-open-project-select')){openProjectChooser();}
+    else if(t.dataset.projectPage){state.projectChooser.page+=Number(t.dataset.projectPage);render();}
+    else if(t.dataset.projectPick){chooseProjectImage(t.dataset.projectPick);}
+    else if(t.hasAttribute('data-close-project-chooser')){closeProjectChooser();}
+    else if(t.hasAttribute('data-open-sandbox-add')){openSandboxAdd();}
+    else if(t.dataset.sandboxPage){state.sandboxAdd.page+=Number(t.dataset.sandboxPage);render();}
+    else if(t.dataset.sandboxPick){pickSandboxImage(t.dataset.sandboxPick);}
+    else if(t.hasAttribute('data-sandbox-commit')){commitSandboxAdd();}
+    else if(t.hasAttribute('data-close-sandbox-add')){closeSandboxAdd();}
     else if(t.hasAttribute('data-open-images')){state.appDepth='list';render();}
-    else if(t.dataset.pickerPage){state.picker.page+=Number(t.dataset.pickerPage);render();}
-    else if(t.dataset.pick){chooseImage(t.dataset.pick);}
-    else if(t.hasAttribute('data-close-picker')){closePicker();}
     else if(t.hasAttribute('data-open-build')){state.build={phase:'form',image:null,error:null};state.appDepth='build';state.toast='';render();}
     else if(t.hasAttribute('data-build-start')){beginBuild();}
     else if(t.hasAttribute('data-build-use')){bindBuild();}
@@ -332,20 +411,23 @@ function bindEvents(){
   });
   document.getElementById('product').addEventListener('input',e=>{
     if(e.target.id==='search'){state.query=e.target.value;state.page=0;render();const el=document.getElementById('search');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
-    if(e.target.id==='picker-search'){state.picker.query=e.target.value;state.picker.page=0;render();const el=document.getElementById('picker-search');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
+    if(e.target.id==='project-search'){state.projectChooser.query=e.target.value;state.projectChooser.page=0;render();const el=document.getElementById('project-search');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
+    if(e.target.id==='sandbox-search'){state.sandboxAdd.query=e.target.value;state.sandboxAdd.page=0;render();const el=document.getElementById('sandbox-search');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
+    if(e.target.dataset.sandboxTarget!==undefined){state.sandboxAdd.target=e.target.value;render();const el=document.getElementById('sandbox-target');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
   });
   document.getElementById('product').addEventListener('change',e=>{
     if(e.target.dataset.mode!==undefined){state.sandbox[Number(e.target.dataset.mode)].mode=e.target.value;render();}
     if(e.target.dataset.target!==undefined){state.sandbox[Number(e.target.dataset.target)].target=e.target.value;render();}
+    if(e.target.dataset.sandboxMode!==undefined){state.sandboxAdd.mode=e.target.value;render();}
   });
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&(state.picker||state.build.phase!=='idle')){if(state.picker)closePicker();else{state.build={phase:'idle',image:null,error:null};state.appDepth='root';render();}}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(state.projectChooser)closeProjectChooser();else if(state.sandboxAdd)closeSandboxAdd();else if(state.build.phase!=='idle'){state.build={phase:'idle',image:null,error:null};state.appDepth='root';render();}}});
 }
 function boot(){
   bindEvents();
   const initial=document.querySelector('[data-np-size][aria-pressed="true"]');
   setExperience(initial?Number(initial.getAttribute('data-np-size')):1180);
   render();
-  window.__images3181={state,chooseImage,selectSurface,back,agentStateFor,makeImage};
+  window.__images3181={state,chooseProjectImage,pickSandboxImage,commitSandboxAdd,selectSurface,back,agentStateFor,makeImage};
 }
 boot();
 })();

@@ -35,7 +35,10 @@ check('six scenario fixtures', ['normal', 'empty', 'unavailable', 'buildfail', '
 check('workspace entry hook', /data-open-images/.test(html));
 check('inventory list hook', /id="image-list"/.test(html));
 check('image detail hook', /id="image-detail"/.test(html));
-check('shared picker purpose hook', /data-purpose="project"/.test(html) && /data-purpose="sandbox"/.test(html));
+check('Project independent selector hooks', /data-open-project-select/.test(html) && /data-project-pick/.test(html) && /data-close-project-chooser/.test(html));
+check('Sandbox independent composition hooks', /data-open-sandbox-add/.test(html) && /data-sandbox-pick/.test(html) && /data-sandbox-target/.test(html) && /data-sandbox-mode/.test(html) && /data-sandbox-commit/.test(html) && /data-close-sandbox-add/.test(html));
+check('independent-flow copy present', /Project-specific single-image reference flow/.test(html) && /Sandbox-specific flow/.test(html));
+check('no shared Picker claim', !/one shared Picker|same Picker/i.test(html));
 check('build success bind hook', /data-build-use/.test(html));
 check('build failure copy preserves reference', /Build failed/.test(html));
 check('agent readiness separately labelled', /Agent · /.test(html) && /Server · /.test(html));

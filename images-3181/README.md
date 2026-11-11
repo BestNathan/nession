@@ -2,7 +2,9 @@
 
 Linked Requirement: [#3181](https://github.com/BestNathan/nession/issues/3181) — Server-owned Images capability discoverable in Workspace and consumable by Project/Sandbox/Agent.
 
-Status: **Draft prototype for product sign-off**, not production UI and not Acceptance evidence.
+Status: **Draft revision for product sign-off**, not production UI and not Acceptance evidence.
+
+Revision 2026-11-11: product feedback confirmed that Images must not add a permanent global sidebar item and that **Project and Sandbox are independent**. They no longer share a Picker or reference model; each owns its own selection/composition flow. The delegated target/mode, Digest-pinning and App-depth decisions are recorded below.
 
 ## Product surface and fidelity baseline
 
@@ -11,9 +13,9 @@ Status: **Draft prototype for product sign-off**, not production UI and not Acce
   `WebLayout → Sidebar (Agents + Sessions) + main → Workspace content → Images capability`.
   No Session is selected, so the capability is discovered from Server-owned resources rather than from a Session or Agent.
 - App ownership tree represented:
-  `AppLayout → Workspace capability entry → Image list → Image detail / Picker / Build`, with one App page header owning Back and title at each depth.
+  `AppLayout → Workspace capability entry → Image list → Image detail / Project image selection / Sandbox add-image / Build`, with one App page header owning Back and title at each depth.
 - Reference sources: `web/src/product/workspace`, the Terminal/Workspace capsule and page-header patterns, and generated `--nession-*` token semantics. The mock is a standalone HTML approximation, not a rendering of those components.
-- Current-vs-candidate delta: this prototype explores **whether** Images should be a contextual Workspace capability plus a shared Picker for Project and Sandbox. It does not propose a new permanent global navigation item.
+- Current-vs-candidate delta: this prototype proposes Images as a **contextual Workspace capability**, with **independent Project and Sandbox flows**. It does not propose a new permanent global navigation item and does not share a Picker/reference model between Project and Sandbox.
 
 Known fidelity limitations:
 
@@ -22,39 +24,44 @@ Known fidelity limitations:
 - Motion, focus trapping, virtualized rows, real pagination semantics, auth scoping and error codes are approximated or omitted.
 - Status copy is illustrative; it is not copied from an accepted server contract.
 
-## Decision the prototype should settle
+## Product decisions
 
-1. Does Images appear as a Workspace capability when no Session exists, without becoming a global sidebar entry?
-2. Should Project image selection and Sandbox image composition share one Picker and one reference model?
-3. Is the distinction between Server Ready and Agent cache readiness legible enough to prevent a user from assuming mountability?
-4. Does an explicit bind after a Git build (and preserving the old reference on failure) match product expectations?
-5. Does pinning an Alias to a resolved Digest at selection time make Alias movement safe and understandable?
-6. Does the App navigation keep a single Back/title owner across list → detail → picker/build?
+**Confirmed by product feedback (2026-11-11):**
+
+1. Images is a contextual Workspace capability; **no permanent global sidebar item**.
+2. Project and Sandbox are **independent**; they do **not** share a Picker, selection contract, or reference model. Both consume the Server registry, but through separate flows.
+
+**Delegated decisions recorded by this prototype:**
+
+3. Sandbox owns target path and read-only/overlay per image. A selection pins the resolved Digest immediately; Alias movement does not mutate an existing Sandbox/Session pin. Server Blob readiness and Agent cache readiness stay visibly separate, and a non-verified Agent cache is not mount-ready.
+4. App uses a Workspace capability entry and one `AppPageHeader` Back/title owner per pushed depth. Project selection and Sandbox composition each push their own depth; no leaf-level second Back. The Web Project chooser is a single-image reference dialog; the Web Sandbox flow is a wider composition dialog with target/mode. On App, both become full content depths, and the Sandbox form precedes its registry list.
+
+Remaining product sign-off is on the revised independent flows and these recorded decisions, before production implementation.
 
 ## Entry and goal
 
 - Workspace: the user has no Session selected, opens the Workspace, sees a Server resources capability entry, opens Images, searches/pages the inventory and inspects an image.
-- Project: the user has a Git Source, chooses a Registry image or builds one, and only then explicitly updates the Project reference.
-- Sandbox: the user adds images through the same Picker, sets independent target paths and read-only/overlay composition, and observes a pinned Digest.
+- Project: the user has a Git Source, uses the Project-specific single-image selector or builds one, and only then explicitly updates the Project reference.
+- Sandbox: the user opens the Sandbox-specific add-image flow, chooses an image, configures its target and read-only/overlay mode, and adds it with a pinned Digest. This flow does not read or change the Project reference.
 
 ## Scenarios
 
 | Scenario | What it shows |
 |---|---|
 | `normal` | 235 images, mixed Server/Agent states, complete paging (50 per page), search. |
-| `empty` | Server reports Images but the inventory is empty; no fake rows. |
-| `unavailable` | Server does not report Images; Workspace capability is disabled with a reason and no cached Agent image is presented as available. |
+| `empty` | Server reports Images but the inventory is empty; no fake rows in Workspace, Project selection, or Sandbox composition. |
+| `unavailable` | Server does not report Images; Workspace capability and both new-image flows are disabled with a reason, while existing references/pins stay visible and unchanged. |
 | `buildfail` | Git build fails; the previous Project reference is unchanged. |
-| `agentfail` | Server image is Ready but the Agent cache is Failed; the composition flags “not mount-ready”. |
+| `agentfail` | Server image is Ready but the Agent cache is Failed; the Sandbox composition flags “not mount-ready”. |
 | `aliasshift` | An Alias now resolves to another Digest; an existing Sandbox/Session pin keeps the old Digest. |
 
 ## Critical paths exercised
 
 1. Workspace entry → Images list → search → page → detail (server vs agent readiness).
-2. Project → Choose image (shared Picker) → explicit Select updates the reference.
+2. Project → Select Project image (its own single-image flow) → explicit Use image updates the reference.
 3. Project → Build from Git Source → success → Use this image; or failure → old reference preserved.
-4. Sandbox → Add image (same Picker) → edit target/mode → alias movement keeps the pinned Digest.
-5. Web ↔ App widths; App list → detail → Back → list → Back → capability entry; Picker/build push and Back.
+4. Sandbox → Add image (its own composition flow) → choose image → set target/mode → Add to composition; Project reference stays unchanged.
+5. Web ↔ App widths; App list → detail → Back → list → Back → capability entry; Project selector and Sandbox add are separate pushed depths with one header/Back owner.
 6. `Reset` reloads the frame and returns to the initial fixture.
 
 ## Fidelity classification
@@ -87,9 +94,9 @@ Click through the critical paths at 1180 and 390 widths; verify the App header r
 
 | Check | Status |
 |---|---|
-| Static asset/link/selector smoke test | **PASS** — `node smoke-test.mjs`, 30/30 checks on 2026-11-11 |
-| Chromium interaction at Web 1180/1024 | **PASS** — 23-check Playwright walkthrough: exact widths, paging/search, detail, shared Picker, explicit build bind, build failure preserving reference, Sandbox target/mode and pin, alias movement, Agent cache failure, Reset, gallery entry, no console errors |
-| Chromium interaction at App 390/375 | **PASS** — capability entry → list → detail → Back, one App header, Picker push/back, no horizontal product overflow |
+| Static asset/link/selector smoke test | **PASS** — `node smoke-test.mjs`, 33/33 checks on 2026-11-11 |
+| Chromium interaction at Web 1180/1024 | **PASS** — 24-check Playwright walkthrough: exact widths, paging/search, detail, independent Project selector, explicit build bind, build failure preserving reference, independent Sandbox composition with target/mode and Project isolation, alias movement, Agent cache failure, Reset, gallery entry, no console errors |
+| Chromium interaction at App 390/375 | **PASS** — capability entry → list → detail → Back, one App header, independent Project-selector and Sandbox-add depths with Back, no horizontal product overflow |
 | Narrow-browser stage edges | **PASS** — 720px browser with the 1180px device: both stage edges reachable through horizontal scroll |
 | Published Pages preview SHA match | Pending publication; verify `prototypes/manifest.json` SHA after the fast-forward push |
 | Production Acceptance | not claimed; belongs to the future implementation |
