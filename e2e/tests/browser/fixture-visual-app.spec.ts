@@ -135,7 +135,7 @@ test.describe('App 390×844', () => {
     await expect(page.getByTestId('capsule-capability-picker-claude-code')).toBeVisible();
     // #2710: Quick Commands is the second view of the terminal-tools slot and
     // is reachable from the same one-list entry.
-    await expect(page.getByTestId('capsule-capability-picker-terminal-keys')).toBeVisible();
+    await expect(page.getByTestId('capsule-capability-picker-quick-commands')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-capability-entry.png', {
       fullPage: true,
@@ -167,7 +167,7 @@ test.describe('App 390×844', () => {
     await expect(page.getByText('Working in this session')).toHaveCount(0);
     await expect(page.getByTestId('capsule-context-item-claude-code')).toHaveCount(0);
     // The ordinary entries are in this same list (SC-35 as amended).
-    await expect(page.getByTestId('capsule-capability-picker-terminal-keys')).toBeVisible();
+    await expect(page.getByTestId('capsule-capability-picker-quick-commands')).toBeVisible();
     // Nothing about this is a modal: no dialog role, no backdrop (SC-33).
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 

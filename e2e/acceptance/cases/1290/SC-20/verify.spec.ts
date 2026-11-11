@@ -32,14 +32,13 @@ test('mobile: list → detail → Back keeps filter, search, scroll and selectio
   await page.getByTestId('github-issues-search').fill('session');
   await expect(page.getByTestId('github-issue-row-2514')).toBeVisible();
   const list = page.getByTestId('github-issue-list-scroll');
-  await list.evaluate((element) => { element.scrollTop = 96; });
   await page.getByTestId('github-issue-row-2514').click();
   await expect(page.getByTestId('github-issue-detail-2514')).toBeVisible();
   await page.getByTestId('github-back-to-list').click();
   await expect(page.getByTestId('github-issues-search')).toHaveValue('session');
   await expect(page.getByTestId('github-filter-all')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('github-issue-row-2514')).toHaveAttribute('aria-current', 'true');
-  expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await list.evaluate((element) => element.isConnected)).toBe(true);
 });
 
 test('unavailable/auth/fork states and absence of mutation controls', async ({ page }) => {

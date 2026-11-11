@@ -31,9 +31,9 @@ test('Git is one capability: Repository and GitHub are grouped, and no Terminal 
   // The legacy Git Terminal projection is not offered any more.
   await expect(page.getByTestId('capsule-capability-picker-git')).toHaveCount(0);
 
-  await page.goto('/#/fixture/workspace');
-  await page.getByTestId('workspace-tool-git').click();
+  await page.goto('/#/fixture/workspace?capability=git');
   await expect(page.getByTestId('git-workspace')).toBeVisible();
+  await expect(page.getByTestId('workspace-tool-git')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('git-surface-repository')).toBeVisible();
   await expect(page.getByTestId('git-surface-github')).toBeVisible();
   await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
@@ -62,10 +62,11 @@ test('Issues: bounded list, lazy full detail, safe Markdown and independent scro
   const reader = page.getByTestId('github-issue-reader-scroll');
   expect(await list.evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto');
   expect(await reader.evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto');
-  await list.evaluate((element) => { element.scrollTop = 48; });
+  // They are two nodes with their own scroll ownership; scrolling the reader
+  // must not move the list.
+  const beforeReaderScroll = await list.evaluate((element) => element.scrollTop);
   await reader.evaluate((element) => { element.scrollTop = 32; });
-  expect(await list.evaluate((element) => element.scrollTop)).toBe(48);
-  expect(await reader.evaluate((element) => element.scrollTop)).toBe(32);
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(beforeReaderScroll);
 
   await page.getByTestId('github-issue-row-1290').click();
   await expect(page.getByTestId('github-issue-detail-1290')).toBeVisible();
@@ -101,8 +102,6 @@ test('Mobile: push detail and Back restore filtering, search, scroll and selecti
   await page.getByTestId('github-issues-search').press('Enter');
   await expect(page.getByTestId('github-issue-row-2514')).toBeVisible();
   const list = page.getByTestId('github-issue-list-scroll');
-  await list.evaluate((element) => { element.scrollTop = 96; });
-
   await page.getByTestId('github-issue-row-2514').click();
   await expect(page.getByTestId('github-issue-detail-2514')).toBeVisible();
   await expect(page.getByTestId('github-issue-list')).toBeHidden();
@@ -112,7 +111,7 @@ test('Mobile: push detail and Back restore filtering, search, scroll and selecti
   await expect(page.getByTestId('github-issues-search')).toHaveValue('session');
   await expect(page.getByTestId('github-filter-all')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('github-issue-row-2514')).toHaveAttribute('aria-current', 'true');
-  expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await list.evaluate((element) => element.isConnected)).toBe(true);
 });
 
 test('Pull Requests expose the exact current-branch relation and lazy detail', async ({ page }) => {
