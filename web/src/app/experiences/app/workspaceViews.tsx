@@ -59,8 +59,8 @@ export const APP_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<Workspac
   files: FilesAppLayout,
   sandbox: SandboxAppLayout,
   images: ({ ctx, depth }) => (
-    <AppToolScroll data-testid="images-app">
+    <WorkspaceScrollRegion data-testid="images-app">
       <ImagesAppLayout ctx={ctx} depth={depth} />
-    </AppToolScroll>
+    </WorkspaceScrollRegion>
   ),
 };
