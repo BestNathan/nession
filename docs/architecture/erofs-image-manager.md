@@ -12,14 +12,37 @@ EROFS is a **global immutable resource**, not a `ProjectEnvironment`.
 
 | Thing | Owner |
 |---|---|
-| Image metadata, digest, bytes, aliases, leases, access grants | Server Image Manager (`crates/nession-server/src/image`, `crates/nession-erofs`) |
+| Portable EROFS mechanics: byte digest/verify, content-addressed atomic store, deterministic builder, optional cache and FUSE mount primitives | `nession-erofs` |
+| Image metadata, digest, bytes, aliases, leases, access grants | Server Image Manager (`crates/nession-server/src/image`) |
 | `image_digest` reference on a Project | Project declaration (`projects.image_digest`) |
-| Build worker and `mkfs.erofs` | Server Image Manager |
+| Build worker and `mkfs.erofs` | Server Image Manager (consumes the crate's builder) |
 | Sandbox policy | `nession-sandbox`; it never clones Git or manages a registry |
 | Runtime provisioning / mounting | Follow-up managed-location and Sandbox work (#2681, #3024) |
 
 A Project only references a digest. Deleting a Project never deletes shared
 bytes, and two Projects may reference one physical image.
+
+### Reusable crate boundary (#3303)
+
+`crates/nession-erofs` is a workspace library with explicit cargo features,
+not a second authority:
+
+| Feature | Owns | Consumer |
+|---|---|---|
+| core (`digest`) | `sha256:` validation and streamed file verification | every consumer |
+| `store` | content-addressed `sha256/<hex>` files, `.tmp` publication, atomic rename, usage | Server Image Manager |
+| `build` | controlled Git/local snapshot, fixed `mkfs.erofs` argv, `Packaging` mechanics | Server Image Manager |
+| `cache` | authenticated ranged download/resume, verify-before-publish, identity namespace, pin/eviction, diagnostics | Agent adapter (`crates/nession-agent/src/erofs_cache.rs`) |
+| `mount` (Linux) | unprivileged `erofsfuse` probe/mount/unmount primitive with an owned handle | Sandbox composition (`crates/nession-sandbox/src/linux/erofs.rs`) |
+
+The crate has no `nession-protocol` dependency. The Server translates the
+versioned `ImageSource`/`ImagePackaging` DTO into the crate's mechanical inputs
+after wire validation; the Agent adapter supplies the configured root and
+identity; the Sandbox keeps source-root authorization, mount ordering, overlay
+composition, execution records and teardown. The crate never owns image roles,
+Project identity, registry metadata, authorization, download origins or
+Session orchestration.
+
 
 ## Sources
 

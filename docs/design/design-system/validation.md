@@ -93,6 +93,18 @@ A screenshot baseline is not behavioral proof. A missing, skipped,
 foreign-SHA, zero-assertion or list-drifted browser report fails closed and is
 never a Pass.
 
+## Layout ownership (#3194)
+
+Layout validation starts with ownership, not screenshots.
+`design/scripts/layout-ownership.mjs` (in `design-system-fast`) rejects
+capability/product page geometry, capability-local App headers, Workspace host
+chrome, duplicated shared-recipe classes and raw numeric spacing in the recipe
+owner — while accepting local `flex`/`grid` composition. Browser checks then
+assert the computed result: one intended scroll owner, no page-level horizontal
+overflow, the approved control band, one App page header/Back, and visible
+actions. The canonical model is
+[composition.md §14](../../composition.md#14-layout-ownership-and-shared-recipes-3194).
+
 ## Failure shape
 
 Failures should be structured enough for an AI coding agent or developer to diagnose without guessing:

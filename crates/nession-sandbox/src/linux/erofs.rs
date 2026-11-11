@@ -12,14 +12,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use sha2::{Digest, Sha256};
+use nession_erofs::digest::file_digest;
+use nession_erofs::mount::{self, ErofsMount, MountSettings};
 
 use crate::error::{Result, SandboxError};
 use crate::policy::{CompiledComposition, CompiledImage};
 use crate::settings::SandboxSettings;
 
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-const MOUNT_READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// The composed mount view uses the same mountpoint oracle as the reusable
+/// primitive; re-exported for the Linux runtime proof.
+pub use nession_erofs::mount::is_mounted;
 
 /// How the `/workspace` view is installed.
 #[derive(Debug, Clone)]
@@ -42,9 +44,26 @@ pub struct ResolvedComposition {
     pub toolchains: Vec<(PathBuf, PathBuf)>,
 }
 
+/// One mount this execution owns, in creation order.
+enum OwnedMount {
+    /// A read-only EROFS image mount with its primitive-owned handle.
+    Erofs(ErofsMount),
+    /// A `fuse-overlayfs` merge; the Sandbox owns its cleanup policy.
+    Overlay(PathBuf),
+}
+
+impl OwnedMount {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Erofs(mount) => mount.mountpoint(),
+            Self::Overlay(path) => path,
+        }
+    }
+}
+
 /// Live mounts owned by one execution. Cleanup unmounts exactly these paths.
 pub struct MountedComposition {
-    mounts: Vec<PathBuf>,
+    mounts: Vec<OwnedMount>,
     fusermount: PathBuf,
     resolved: ResolvedComposition,
 }
@@ -58,7 +77,7 @@ impl MountedComposition {
     pub fn mountpoints(&self) -> Vec<String> {
         self.mounts
             .iter()
-            .map(|path| path.display().to_string())
+            .map(|mount| mount.path().display().to_string())
             .collect()
     }
 
@@ -66,16 +85,21 @@ impl MountedComposition {
     pub fn unmount(&mut self, report: &mut crate::exec::CleanupReport) -> Result<()> {
         let mounts = std::mem::take(&mut self.mounts);
         let mut failure = None;
-        for mountpoint in mounts.iter().rev() {
-            match unmount_one(&self.fusermount, mountpoint) {
-                Ok(()) => report
-                    .evidence
-                    .push(("unmounted".to_string(), mountpoint.display().to_string())),
+        for mount in mounts.into_iter().rev() {
+            let path = mount.path().display().to_string();
+            let outcome = match mount {
+                OwnedMount::Erofs(mut mount) => mount
+                    .unmount()
+                    .map_err(|error| SandboxError::Prepare(format!("{error:#}"))),
+                OwnedMount::Overlay(path) => mount::unmount_one(&self.fusermount, &path)
+                    .map_err(|error| SandboxError::Prepare(format!("{error:#}"))),
+            };
+            match outcome {
+                Ok(()) => report.evidence.push(("unmounted".to_string(), path)),
                 Err(error) => {
-                    report.evidence.push((
-                        "unmount-failed".to_string(),
-                        format!("{}: {error}", mountpoint.display()),
-                    ));
+                    report
+                        .evidence
+                        .push(("unmount-failed".to_string(), format!("{path}: {error}")));
                     failure = Some(error);
                 }
             }
@@ -90,8 +114,13 @@ impl MountedComposition {
 impl Drop for MountedComposition {
     fn drop(&mut self) {
         let mounts = std::mem::take(&mut self.mounts);
-        for mountpoint in mounts.iter().rev() {
-            let _ = unmount_one(&self.fusermount, mountpoint);
+        for mount in mounts.into_iter().rev() {
+            match mount {
+                OwnedMount::Erofs(handle) => drop(handle),
+                OwnedMount::Overlay(path) => {
+                    let _ = mount::unmount_one(&self.fusermount, &path);
+                }
+            }
         }
     }
 }
@@ -113,40 +142,19 @@ pub fn probe(settings: &SandboxSettings) -> (bool, Option<String>) {
             )),
         );
     }
-    if !executable(&settings.erofsfuse_path) {
-        return (
-            false,
-            Some(format!(
-                "{} is not executable",
-                settings.erofsfuse_path.display()
-            )),
-        );
-    }
-    if !executable(&settings.fusermount_path) {
-        return (
-            false,
-            Some(format!(
-                "{} is not executable",
-                settings.fusermount_path.display()
-            )),
-        );
-    }
-    match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/fuse")
-    {
-        Ok(_) => (true, None),
-        Err(error) => (
-            false,
-            Some(format!("/dev/fuse is not readable and writable: {error}")),
-        ),
-    }
+    mount::probe(&mount_settings(settings))
+}
+
+fn mount_settings(settings: &SandboxSettings) -> MountSettings {
+    MountSettings::new(
+        settings.erofsfuse_path.clone(),
+        settings.fusermount_path.clone(),
+    )
 }
 
 /// Whether the unprivileged OverlayFS helper is available.
 pub fn overlay_available(settings: &SandboxSettings) -> bool {
-    executable(&settings.fuse_overlayfs_path)
+    mount::executable(&settings.fuse_overlayfs_path)
 }
 
 /// Verify and mount every image in one composition.
@@ -174,6 +182,7 @@ pub fn mount_composition(
         ))
     })?;
 
+    let helpers = mount_settings(settings);
     let mut mounted = MountedComposition {
         mounts: Vec::new(),
         fusermount: settings.fusermount_path.clone(),
@@ -188,7 +197,7 @@ pub fn mount_composition(
         &composition.base,
         &mounts_dir.join("base"),
         &image_root,
-        settings,
+        &helpers,
         &mut mounted.mounts,
     )?;
     if !base.join("bin/sh").exists() && !base.join("usr/bin/sh").exists() {
@@ -227,7 +236,7 @@ pub fn mount_composition(
                 image,
                 &mounts_dir.join("workspace-image"),
                 &image_root,
-                settings,
+                &helpers,
                 &mut mounted.mounts,
             )?;
             let upper = write.join("upper");
@@ -254,8 +263,8 @@ pub fn mount_composition(
                 &work,
                 &merged,
             )?;
-            mounted.mounts.push(merged.clone());
-            if !is_mounted(&merged) {
+            mounted.mounts.push(OwnedMount::Overlay(merged.clone()));
+            if !mount::is_mounted(&merged) {
                 return Err(SandboxError::Prepare(format!(
                     "fuse-overlayfs reported success but {} is not a mount",
                     merged.display()
@@ -271,7 +280,7 @@ pub fn mount_composition(
             toolchain,
             &mounts_dir.join(format!("toolchain-{index}")),
             &image_root,
-            settings,
+            &helpers,
             &mut mounted.mounts,
         )?;
         mounted
@@ -303,29 +312,13 @@ fn mount_image(
     image: &CompiledImage,
     mountpoint: &Path,
     image_root: &Path,
-    settings: &SandboxSettings,
-    mounted: &mut Vec<PathBuf>,
+    settings: &MountSettings,
+    mounted: &mut Vec<OwnedMount>,
 ) -> Result<PathBuf> {
     let source = verify_image(image, image_root)?;
-    std::fs::create_dir_all(mountpoint).map_err(|error| {
-        SandboxError::Prepare(format!(
-            "create EROFS mountpoint {}: {error}",
-            mountpoint.display()
-        ))
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(mountpoint, std::fs::Permissions::from_mode(0o700));
-    }
-    run_fuse(&settings.erofsfuse_path, &source, mountpoint)?;
-    mounted.push(mountpoint.to_path_buf());
-    if !is_mounted(mountpoint) {
-        return Err(SandboxError::Prepare(format!(
-            "erofsfuse reported success but {} is not a mount",
-            mountpoint.display()
-        )));
-    }
+    let handle = ErofsMount::mount(&source, mountpoint, settings)
+        .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+    mounted.push(OwnedMount::Erofs(handle));
     Ok(mountpoint.to_path_buf())
 }
 
@@ -362,27 +355,12 @@ fn verify_image(image: &CompiledImage, image_root: &Path) -> Result<PathBuf> {
             image_root.display()
         )));
     }
-    let mut file = std::fs::File::open(&canonical).map_err(|error| {
+    let actual = file_digest(&canonical).map_err(|error| {
         SandboxError::InvalidPolicy(format!(
-            "EROFS image {} cannot be read: {error}",
+            "EROFS image {} cannot be verified: {error:#}",
             canonical.display()
         ))
     })?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer).map_err(|error| {
-            SandboxError::Prepare(format!("read EROFS image {}: {error}", canonical.display()))
-        })?;
-        if read == 0 {
-            break;
-        }
-        let Some(chunk) = buffer.get(..read) else {
-            break;
-        };
-        hasher.update(chunk);
-    }
-    let actual = format!("sha256:{}", hex(&hasher.finalize()));
     if actual != image.digest {
         return Err(SandboxError::InvalidPolicy(format!(
             "EROFS image {} digest {actual} does not match the prepared digest {}",
@@ -441,16 +419,11 @@ fn validate_workspace_write(write: &Path, state_dir: &Path) -> Result<PathBuf> {
     Ok(canonical_write)
 }
 
-fn run_fuse(erofsfuse: &Path, image: &Path, mountpoint: &Path) -> Result<()> {
-    let mut command = Command::new(erofsfuse); // not-tmux: unprivileged EROFS FUSE helper
-    command.arg(image).arg(mountpoint);
-    run_mount_helper(
-        command,
-        &format!("{} {}", erofsfuse.display(), image.display()),
-        mountpoint,
-    )
-}
-
+/// Merge the Project image and the bounded writable upper/work through the
+/// unprivileged `fuse-overlayfs` helper.
+///
+/// Overlay composition is Sandbox-owned; only the EROFS image mount itself is
+/// the reusable primitive.
 fn run_fuse_overlay(
     helper: &Path,
     lower: &Path,
@@ -502,7 +475,7 @@ fn run_mount_helper(mut command: Command, label: &str, mountpoint: &Path) -> Res
             bytes
         })
     });
-    let deadline = Instant::now() + PROBE_TIMEOUT;
+    let deadline = Instant::now() + mount::PROBE_TIMEOUT;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -535,9 +508,9 @@ fn run_mount_helper(mut command: Command, label: &str, mountpoint: &Path) -> Res
             stderr
         )));
     }
-    let deadline = Instant::now() + MOUNT_READY_TIMEOUT;
+    let deadline = Instant::now() + mount::MOUNT_READY_TIMEOUT;
     while Instant::now() < deadline {
-        if is_mounted(mountpoint) {
+        if mount::is_mounted(mountpoint) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -545,45 +518,8 @@ fn run_mount_helper(mut command: Command, label: &str, mountpoint: &Path) -> Res
     Err(SandboxError::Prepare(format!(
         "{} did not become a mount within {:?}",
         mountpoint.display(),
-        MOUNT_READY_TIMEOUT
+        mount::MOUNT_READY_TIMEOUT
     )))
-}
-
-fn unmount_one(fusermount: &Path, mountpoint: &Path) -> Result<()> {
-    if !is_mounted(mountpoint) {
-        return Ok(());
-    }
-    let status = Command::new(fusermount) // not-tmux: FUSE unmount helper
-        .arg("-u")
-        .arg(mountpoint)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|error| {
-            SandboxError::Prepare(format!(
-                "run {} -u {}: {error}",
-                fusermount.display(),
-                mountpoint.display()
-            ))
-        })?;
-    if status.success() && !is_mounted(mountpoint) {
-        return Ok(());
-    }
-    let _ = Command::new(fusermount) // not-tmux: FUSE lazy-unmount helper
-        .arg("-uz")
-        .arg(mountpoint)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    if is_mounted(mountpoint) {
-        return Err(SandboxError::Prepare(format!(
-            "could not unmount {}",
-            mountpoint.display()
-        )));
-    }
-    Ok(())
 }
 
 /// Unmount paths recorded by a previous Agent process, before removing their
@@ -605,8 +541,8 @@ pub fn unmount_recorded(
         if !canonical.starts_with(&owned_root) {
             continue;
         }
-        if is_mounted(path) {
-            match unmount_one(fusermount, path) {
+        if mount::is_mounted(path) {
+            match mount::unmount_one(fusermount, path) {
                 Ok(()) => report
                     .evidence
                     .push(("reconciled-unmount".to_string(), raw.clone())),
@@ -617,63 +553,6 @@ pub fn unmount_recorded(
             }
         }
     }
-}
-
-/// Whether `path` currently appears as a mountpoint in this process's view.
-pub fn is_mounted(path: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string("/proc/self/mountinfo") else {
-        return false;
-    };
-    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    text.lines().any(|line| {
-        let Some(field) = line.split_whitespace().nth(4) else {
-            return false;
-        };
-        Path::new(&unescape_mount_point(field)) == canonical
-    })
-}
-
-fn unescape_mount_point(value: &str) -> String {
-    value
-        .replace("\\040", " ")
-        .replace("\\011", "\t")
-        .replace("\\012", "\n")
-        .replace("\\134", "\\")
-}
-
-fn executable(path: &Path) -> bool {
-    let resolved = if path.is_absolute() || path.components().count() > 1 {
-        Some(path.to_path_buf())
-    } else {
-        std::env::var_os("PATH").and_then(|value| {
-            std::env::split_paths(&value)
-                .map(|directory| directory.join(path))
-                .find(|candidate| is_executable_file(candidate))
-        })
-    };
-    resolved.is_some_and(|candidate| is_executable_file(&candidate))
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path)
-            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push_str(&format!("{byte:02x}"));
-    }
-    output
 }
 
 #[cfg(test)]
@@ -726,5 +605,43 @@ mod tests {
     fn a_missing_overlay_helper_reports_overlay_unavailable() {
         let root = tempfile::tempdir().unwrap();
         assert!(!overlay_available(&settings(root.path())));
+    }
+
+    #[test]
+    fn a_digest_mismatch_is_refused_before_mounting() {
+        let root = tempfile::tempdir().unwrap();
+        let images = root.path().join("images");
+        std::fs::create_dir_all(&images).unwrap();
+        let image = images.join("base.erofs");
+        std::fs::write(&image, b"real bytes").unwrap();
+        let compiled = CompiledImage {
+            digest: nession_erofs::digest::digest_of_bytes(b"different bytes"),
+            source: image,
+            target: PathBuf::from("/"),
+        };
+        let error = verify_image(&compiled, &images).unwrap_err();
+        assert!(
+            format!("{error}").contains("does not match the prepared digest"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_source_outside_the_authorized_root_is_refused_before_mounting() {
+        let root = tempfile::tempdir().unwrap();
+        let images = root.path().join("images");
+        std::fs::create_dir_all(&images).unwrap();
+        let outside = root.path().join("outside.erofs");
+        std::fs::write(&outside, b"bytes").unwrap();
+        let compiled = CompiledImage {
+            digest: nession_erofs::digest::digest_of_bytes(b"bytes"),
+            source: outside,
+            target: PathBuf::from("/"),
+        };
+        let error = verify_image(&compiled, &images).unwrap_err();
+        assert!(
+            format!("{error}").contains("outside the Agent-authorized image root"),
+            "{error}"
+        );
     }
 }

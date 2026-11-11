@@ -16,11 +16,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
+use nession_erofs::build::Packaging as ErofsPackaging;
 use nession_erofs::{BlobStore, BuiltImage, ErofsBuilder};
 use nession_protocol::contracts::image::v1::{
     is_valid_image_digest, normalize_alias, normalize_image_digest, normalize_image_source,
-    ImageDescriptor, ImagePackaging, ImageSource, ImageStatus, NormalizedImageSource,
-    IMAGE_BLOB_PATH_PREFIX, IMAGE_LIST_MAX_LIMIT,
+    validate_packaging, ImageDescriptor, ImagePackaging, ImageSource, ImageStatus,
+    NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX, IMAGE_LIST_MAX_LIMIT,
 };
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 
@@ -42,7 +43,33 @@ impl ImageBuildBackend for ErofsBuilder {
         source: &NormalizedImageSource,
         packaging: &ImagePackaging,
     ) -> Result<BuiltImage> {
-        self.build_source(source, packaging)
+        // This impl is the Server's adapter boundary: the versioned wire DTO is
+        // validated here, then translated into the crate's mechanical inputs.
+        // `nession-erofs` never learns the wire shape.
+        validate_packaging(packaging)?;
+        let packaging = ErofsPackaging {
+            compression: packaging.compression.clone(),
+            block_size: packaging.block_size,
+            fixed_timestamp: packaging.fixed_timestamp,
+            fixed_uuid: packaging.fixed_uuid.clone(),
+        };
+        match source {
+            NormalizedImageSource::GitHub {
+                repository_url,
+                reference,
+                requested_sha,
+            } => self.build_git(
+                &nession_erofs::GitTarget {
+                    repository_url: repository_url.clone(),
+                    reference: reference.clone(),
+                    requested_sha: requested_sha.clone(),
+                },
+                &packaging,
+            ),
+            NormalizedImageSource::LocalDirectory { path } => {
+                self.build_local(std::path::Path::new(path), &packaging)
+            }
+        }
     }
 }
 
@@ -903,7 +930,7 @@ mod tests {
                     NormalizedImageSource::GitHub { requested_sha, .. } => requested_sha.clone(),
                     NormalizedImageSource::LocalDirectory { .. } => None,
                 },
-                packaging: ImagePackaging::default(),
+                packaging: ErofsPackaging::default(),
             })
         }
     }

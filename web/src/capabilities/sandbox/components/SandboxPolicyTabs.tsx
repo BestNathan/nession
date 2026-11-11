@@ -55,6 +55,14 @@ export function SandboxPolicyTabs({
             : 'sticky top-0 z-10 -mx-3 bg-background px-3 pb-1',
         )}
       >
+        {/* App's horizontal strip is a touch surface: its triggers are 44px, so
+            the list must take its content height. The primitive's
+            `group-data-horizontal/tabs:h-8` is what would otherwise clip the
+            strip vertically (measured 52px scrollHeight in a 32px box), and a
+            data-variant selector has higher specificity than `h-auto`; the
+            important utility is the composition's explicit override, not a
+            new primitive default. Vertical (Web) lists keep the primitive
+            height. */}
         <TabsList
           variant="line"
           activateOnFocus
@@ -64,7 +72,7 @@ export function SandboxPolicyTabs({
           className={cn(
             vertical
               ? 'flex h-auto w-full flex-col items-stretch gap-0.5'
-              : 'flex h-auto w-full flex-nowrap items-stretch justify-start gap-1 overflow-x-auto',
+              : 'flex h-auto! w-full flex-nowrap items-stretch justify-start gap-1 overflow-x-auto',
           )}
         >
           {SANDBOX_TABS.map((tab) => (

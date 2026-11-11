@@ -1,16 +1,46 @@
-//! Nession's deterministic EROFS build and content-addressed blob layer
-//! (#3022).
+//! Nession's reusable EROFS infrastructure layer (#3022, #3303).
 //!
-//! The Server owns image metadata, bytes and authorization. This crate owns the
-//! mechanics that make the bytes reproducible: a controlled, shallow Git
-//! snapshot; a fixed `mkfs.erofs` argv; a digest-addressed atomic blob store.
-//! It never executes repository code and it never mints or accepts a
-//! credential.
+//! This crate owns portable EROFS mechanics only:
+//!
+//! - [`digest`]: byte-level `sha256:` identity and file verification;
+//! - [`store`]: a content-addressed, atomically published blob store;
+//! - [`build`]/[`git`]: a deterministic, non-executing source snapshot and
+//!   fixed `mkfs.erofs` build;
+//! - [`cache`] (feature `cache`): a durable authenticated download/resume/
+//!   verify/pin cache;
+//! - [`mount`] (feature `mount`, Linux): an unprivileged EROFS FUSE
+//!   mount/unmount primitive with an owned handle.
+//!
+//! It deliberately does not depend on `nession-protocol`: wire DTOs, image
+//! roles, registry metadata and authorization stay with their runtime owners.
+//! Features let a consumer compile only the mechanics it uses.
 
-pub mod build;
-pub mod git;
+pub mod digest;
+
+#[cfg(feature = "store")]
 pub mod store;
 
-pub use build::{BuiltImage, ErofsBuilder, MkfsRunner, ProcessMkfsRunner};
+#[cfg(feature = "build")]
+pub mod build;
+#[cfg(feature = "build")]
+pub mod git;
+
+#[cfg(feature = "cache")]
+pub mod cache;
+
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub mod mount;
+
+#[cfg(feature = "build")]
+pub use build::{BuiltImage, ErofsBuilder, MkfsRunner, Packaging, ProcessMkfsRunner};
+#[cfg(feature = "cache")]
+pub use cache::{CachedImage, DownloadGrant, ErofsCache, PinGuard};
+pub use digest::{
+    digest_of_bytes, file_digest, is_valid_digest, regular_file_digest, verify_file, DIGEST_PREFIX,
+};
+#[cfg(feature = "build")]
 pub use git::{GitCommandRunner, GitSnapshot, GitTarget, ProcessGitRunner};
-pub use store::{BlobDigest, BlobStore};
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub use mount::ErofsMount;
+#[cfg(feature = "store")]
+pub use store::{BlobDigest, BlobStore, StoreUsage};

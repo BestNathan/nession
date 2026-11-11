@@ -80,6 +80,16 @@ Keep global product structure owned by Nession. Extensions/capabilities may cont
 
 Apply progressive disclosure: presence/state first, deeper controls when relevant.
 
+### Layout ownership (#3194)
+
+Layout has three owners, not one universal DSL:
+
+1. the **Experience host** owns page geometry, navigation frame, scroll ancestry, safe areas and the one App header/Back;
+2. a **semantic layout recipe** owns a stable relationship repeated by independent consumers (`WorkspaceMasterDetail`, `WorkspaceScrollRegion`; existing `ResourceDetail` / `ConfigurationForm` / `OperationSurface`);
+3. **capability-local composition** owns only its content inside that host.
+
+Local `flex`, `grid`, `min-w-0`, `min-h-0`, `flex-1` and `cn()` conditionals remain legal. Do not take host geometry (`h-screen`, `min-h-[100dvh]`, `fixed inset-0`), render an App page header/Back, publish Workspace shell/tool chrome, or restate a shared recipe's stable class. `design/scripts/layout-ownership.mjs` runs in `design-system-fast`; the full inventory and repair path are in [composition.md §14](../../../docs/design/composition.md#14-layout-ownership-and-shared-recipes-3194).
+
 ## 7. Third-party renderers
 
 For xterm, CodeMirror, markdown renderers, or other internally styled systems, utility classes on the outer component may not control the rendered result.

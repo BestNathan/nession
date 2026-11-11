@@ -8,11 +8,11 @@ const { agentCacheTests } = require('../../../shared/erofs-cache-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
-  const output = agentCacheTests('erofs_cache::tests::');
+  const output = agentCacheTests('cache::tests::');
   assertRan(output, [
-    'erofs_cache::tests::two_identities_on_one_volume_never_share_ready_or_partial_files',
-    'erofs_cache::tests::an_identity_must_be_one_safe_path_segment',
-    'erofs_cache::tests::concurrent_callers_share_one_fetch_per_digest',
+    'cache::tests::two_identities_on_one_volume_never_share_ready_or_partial_files',
+    'cache::tests::an_identity_must_be_one_safe_path_segment',
+    'cache::tests::concurrent_callers_share_one_fetch_per_digest',
   ]);
   evidence.push({
     type: 'runtime',

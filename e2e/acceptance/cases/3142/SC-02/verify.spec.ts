@@ -200,8 +200,13 @@ test('SC-02: anchored layers stay above their dialog and one body scroll keeps t
     for (let index = 0; index < 8; index += 1) {
       await dialog.getByTestId('project-location-add').click();
     }
+    const body = dialog.locator('[data-slot="dialog-body"]');
     await expect.poll(async () =>
-      dialog.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+      body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    expect(
+      await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
+      'the dialog surface does not own the scroll',
+    ).toBe(true);
     expect(
       await dialog.locator('form').evaluate((element) => getComputedStyle(element).overflowY),
     ).toBe('visible');

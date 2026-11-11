@@ -4,7 +4,8 @@ run-name: >-
 
 on:
   issues:
-    types: [opened, edited, reopened, labeled, unlabeled]
+    # Labels and lifecycle/progress transitions are not semantic Audit requests.
+    types: [opened, edited]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -46,6 +47,7 @@ jobs:
     outputs:
       issue_number: ${{ steps.target.outputs.issue_number }}
       needs_agent: ${{ steps.tier.outputs.needs_agent }}
+      semantic_change: ${{ steps.admission.outputs.semantic }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
       provider: ${{ steps.target.outputs.provider }}
       agent_id: ${{ steps.target.outputs.agent_id }}
@@ -58,6 +60,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Classify substantive Issue changes before Agent admission
+        id: admission
+        env:
+          ISSUE_AUDIT_EVENT_NAME: ${{ github.event_name }}
+        run: node scripts/issue-audit-admission.mjs classify "$GITHUB_EVENT_PATH" "$GITHUB_OUTPUT"
       - name: Resolve issue, trust boundary, and provider
         id: target
         env:
@@ -219,7 +226,8 @@ jobs:
               ;;
           esac
 
-      # Structurally valid Issues still require tier assessment on trusted edits.
+      # Semantic Issue edits can reassess risk; acceptance/progress projection edits
+      # still run the deterministic Contract but never request a new model audit.
       - name: Select requirement-risk reassessment
         if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
         id: tier
@@ -229,7 +237,7 @@ jobs:
           CONTRACT_NEEDS_AGENT: ${{ steps.contract.outputs.needs_agent }}
           ALLOW_AGENT: ${{ steps.target.outputs.allow_agent }}
           EVENT_ACTION: ${{ github.event.action }}
-          EVENT_LABEL: ${{ github.event.label.name }}
+          SEMANTIC_CHANGE: ${{ steps.admission.outputs.semantic }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -240,16 +248,18 @@ jobs:
             exit 1
           fi
           needs="${CONTRACT_NEEDS_AGENT}"
-          if [[ "$ALLOW_AGENT" == true ]]; then
-            if (( tier_count == 0 )) || [[ "$EVENT_NAME" == workflow_dispatch || "$EVENT_NAME" == issue_comment ]] ||
-               [[ "$EVENT_ACTION" == edited ]] ||
-               { [[ "$EVENT_ACTION" == labeled || "$EVENT_ACTION" == unlabeled ]] &&
-                 [[ "$EVENT_LABEL" == verification:* ]]; }; then
+          if [[ "$EVENT_NAME" == issues && "$EVENT_ACTION" == edited && "$SEMANTIC_CHANGE" != true ]]; then
+            # Acceptance and E2E report projections must remain owned by their
+            # canonical validators/projectors, not re-enter an AI repair loop.
+            needs=false
+          elif [[ "$ALLOW_AGENT" == true ]]; then
+            if (( tier_count == 0 )) || [[ "$EVENT_NAME" == workflow_dispatch ]] ||
+               { [[ "$EVENT_ACTION" == edited ]] && [[ "$SEMANTIC_CHANGE" == true ]]; }; then
               needs=true
             fi
           fi
           echo "needs_agent=$needs" >> "$GITHUB_OUTPUT"
-          echo "Risk tier labels=$tier_count, needs_agent=$needs" >> "$GITHUB_STEP_SUMMARY"
+          echo "Risk tier labels=$tier_count, semantic=$SEMANTIC_CHANGE, needs_agent=$needs" >> "$GITHUB_STEP_SUMMARY"
 
   agent:
     needs: contract
@@ -272,7 +282,7 @@ jobs:
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
       ISSUE_AUDIT_MODE: ${{ needs.contract.outputs.mode || 'single' }}
-      ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment' || github.event.action == 'edited' || github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
+      ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || (github.event.action == 'edited' && needs.contract.outputs.semantic_change == 'true') }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}

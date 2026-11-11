@@ -61,13 +61,19 @@ test.describe('Project management', () => {
     for (let i = 0; i < 8; i += 1) {
       await dialog.getByTestId('project-location-add').click();
     }
+    const body = dialog.locator('[data-slot="dialog-body"]');
     expect(
-      await dialog.evaluate((element) => element.scrollHeight > element.clientHeight),
-      'the dialog is scrolling',
+      await body.evaluate((element) => element.scrollHeight > element.clientHeight),
+      'the Body is the scroll owner',
+    ).toBe(true);
+    expect(
+      await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
+      'the dialog surface never scrolls',
     ).toBe(true);
 
+    const header = dialog.locator('[data-slot="dialog-header"]');
     const footer = dialog.locator('[data-slot="dialog-footer"]');
-    await expect(footer).toHaveAttribute('data-sticky', 'true');
+    await expect(footer).not.toHaveAttribute('data-sticky');
     const alpha = await footer.evaluate((element) => {
       const color = getComputedStyle(element).backgroundColor;
       const canvas = document.createElement('canvas');
@@ -80,7 +86,15 @@ test.describe('Project management', () => {
       context.fillRect(0, 0, 1, 1);
       return context.getImageData(0, 0, 1, 1).data[3] / 255;
     });
-    expect(alpha, 'the sticky band is opaque').toBe(1);
+    expect(alpha, 'the footer band is opaque').toBe(1);
+    const dialogBoxForHeader = await dialog.boundingBox();
+    const headerBox = await header.boundingBox();
+    expect(dialogBoxForHeader).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    expect(headerBox!.x).toBeCloseTo(dialogBoxForHeader!.x, 0);
+    expect(headerBox!.width).toBeCloseTo(dialogBoxForHeader!.width, 0);
+    expect(await header.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .not.toBe('rgba(0, 0, 0, 0)');
 
     const dialogBox = await dialog.boundingBox();
     const footerBox = await footer.boundingBox();

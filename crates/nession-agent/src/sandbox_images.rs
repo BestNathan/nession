@@ -286,7 +286,6 @@ async fn fetch_image(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ResolvedErofsStorage;
     use crate::erofs_cache::StorageProbe;
     use httptest::http::Response;
     use httptest::{matchers::*, Expectation, Server};
@@ -307,16 +306,9 @@ mod tests {
     }
 
     async fn cache(root: &Path) -> ErofsCache {
-        ErofsCache::open_with_probe(
-            &ResolvedErofsStorage {
-                path: root.to_path_buf(),
-                explicit: true,
-            },
-            "sandbox-images-test",
-            &DurableProbe,
-        )
-        .await
-        .unwrap()
+        ErofsCache::open_with_probe(root, "sandbox-images-test", true, &DurableProbe)
+            .await
+            .unwrap()
     }
 
     fn ws_url(server: &Server) -> String {
@@ -399,7 +391,7 @@ mod tests {
         assert_eq!(prepared.images.len(), 3);
         for (_, digest, path) in &prepared.images {
             assert_eq!(
-                cache.status(digest).await.state,
+                crate::erofs_cache::status(&cache, digest).await.state,
                 nession_protocol::contracts::image::v1::ImageCacheState::Verified
             );
             assert!(path.exists(), "cache path exists after preparation");

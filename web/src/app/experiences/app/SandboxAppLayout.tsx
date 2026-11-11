@@ -1,4 +1,4 @@
-import { AppToolScroll } from './AppToolScroll';
+import { WorkspaceScrollRegion } from '@/app/workspace/layout/workspaceLayout';
 import { SandboxWorkspace } from '@/capabilities/sandbox';
 import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
 
@@ -7,13 +7,13 @@ import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
  *
  * The capability owns no navigation chrome: the pushed Enter confirmation is
  * declared through `depth`, and `WorkspacePanel` renders the one App Back for
- * it. `AppToolScroll` supplies the capsule's bottom clearance for both the
- * root form and the pushed page.
+ * it. `WorkspaceScrollRegion` supplies the capsule's bottom clearance and the
+ * single scroll owner for both the root form and the pushed page.
  */
 export function SandboxAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   return (
-    <AppToolScroll data-testid="sandbox-app-scroll">
+    <WorkspaceScrollRegion data-testid="sandbox-app-scroll">
       <SandboxWorkspace ctx={ctx} depth={depth} />
-    </AppToolScroll>
+    </WorkspaceScrollRegion>
   );
 }

@@ -306,14 +306,14 @@
       "web": {
         "overflow": "scroll",
         "wrap": true,
-        "scrollOwner": true,
+        "scrollOwner": "dialog-body",
         "maxWidthToken": "experience.web.overlay.standardMaxWidth",
         "maxWidthTokenPx": 640
       },
       "app": {
         "overflow": "scroll",
         "wrap": true,
-        "scrollOwner": true,
+        "scrollOwner": "dialog-body",
         "touchTargetToken": "experience.app.touchTarget.min",
         "touchTargetTokenPx": 44
       }

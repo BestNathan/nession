@@ -13,10 +13,10 @@ run(({ evidence }) => {
     'config::erofs_tests::relative_empty_and_parent_cache_paths_are_refused',
     'config::erofs_tests::a_relative_home_is_refused_rather_than_resolved_against_the_cwd',
   ]);
-  const storage = agentCacheTests('erofs_cache::tests::an_');
+  const storage = agentCacheTests('cache::tests::an_');
   assertRan(storage, [
-    'erofs_cache::tests::an_explicit_cache_on_a_tmpfs_fails_closed_and_an_implicit_one_is_a_dev_default',
-    'erofs_cache::tests::an_unwritable_cache_directory_fails_closed',
+    'cache::tests::an_explicit_cache_on_a_tmpfs_fails_closed_and_an_implicit_one_is_a_dev_default',
+    'cache::tests::an_unwritable_cache_directory_fails_closed',
   ]);
   evidence.push({
     type: 'runtime',

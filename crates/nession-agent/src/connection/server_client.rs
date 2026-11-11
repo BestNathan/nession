@@ -4587,7 +4587,7 @@ core_routes!(agent, msg, responses;
                     {
                         let mut statuses = Vec::with_capacity(payload.cache_digests.len());
                         for digest in &payload.cache_digests {
-                            statuses.push(cache.status(digest).await);
+                            statuses.push(crate::erofs_cache::status(&cache, digest).await);
                         }
                         statuses
                     } else {
