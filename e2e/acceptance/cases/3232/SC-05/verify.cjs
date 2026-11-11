@@ -72,8 +72,6 @@ function emit(result) {
 }
 
 (async () => {
-  const sha = targetSha();
-  nessionBin();
   const observed = probe();
   const evidence = [{ type: 'runtime', value: observed.detail }];
 
@@ -96,6 +94,8 @@ function emit(result) {
   }
 
   // The isolated lane owns this manager and process. Prove the CLI defers.
+  const sha = targetSha();
+  nessionBin();
   const before = observed.pid;
   const stop = cliOutput(['agent', 'stop'], process.env, 30_000);
   assert.notEqual(stop.status, 0, 'CLI stop must refuse a manager-owned Agent');
