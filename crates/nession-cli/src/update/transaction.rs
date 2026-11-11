@@ -795,7 +795,17 @@ fn write_journal(path: &Path, journal: &Journal) -> Result<()> {
     let temp = path.with_file_name(format!("{JOURNAL_FILE}.tmp"));
     let body = serde_json::to_vec_pretty(journal)
         .context("failed to serialize the install transaction journal")?;
-    let mut file = fs::File::create(&temp)
+    // The journal captures the original server config, including any
+    // credentials it holds. It must never be group/world-readable.
+    let mut options = fs::OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temp)
         .with_context(|| format!("failed to create the install journal at {}", temp.display()))?;
     file.write_all(&body)
         .with_context(|| format!("failed to write the install journal at {}", temp.display()))?;
@@ -1244,6 +1254,18 @@ mod tests {
         let error = recover_journal_locked(&fixture.home).unwrap_err();
         assert!(format!("{error:#}").contains("unreadable"), "{error:#}");
         assert!(journal_path(&fixture.home).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_transaction_journal_is_owner_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = fixture();
+        let journal = binary_swap_crash(&fixture, 0, true);
+        let path = journal_path(&fixture.home);
+        write_journal(&path, &journal).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the journal may contain server credentials");
     }
 
     /// A crash after restoration but during cleanup must not brick recovery:
