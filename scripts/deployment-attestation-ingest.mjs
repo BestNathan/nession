@@ -67,8 +67,8 @@ export function sourceRunIdentity(event, repository = REPOSITORY) {
     throw new Error('unexpected source workflow definition path');
   }
   const eventName = singleLine(run.event, 'workflow_run.event');
-  if (eventName !== 'workflow_dispatch') {
-    throw new Error('deployment identity requires a manual trusted dispatch');
+  if (!['workflow_dispatch', 'workflow_run'].includes(eventName)) {
+    throw new Error('deployment identity requires a trusted manual or native release source');
   }
   return {
     repository,
@@ -101,7 +101,9 @@ function validateVerifiedSource(source, repository = REPOSITORY) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) fail('verified source is missing');
   if (source.repository !== repository) fail('verified source repository mismatch');
   const event = singleLine(source.event, 'verified source event');
-  if (event !== 'workflow_dispatch') fail('verified source event must be workflow_dispatch');
+  if (!['workflow_dispatch', 'workflow_run'].includes(event)) {
+    fail('verified source event must be trusted workflow_dispatch or workflow_run');
+  }
   const branch = singleLine(source.head_branch, 'verified source branch');
   if (branch !== 'main') fail('verified source branch must be main');
   return {
@@ -274,7 +276,10 @@ function selfTest() {
   assert.equal(source.head_branch, 'main');
   assert.throws(() => sourceRunIdentity(eventFixture({ name: 'E2E / Tests' })), /expected a completed/);
   assert.throws(() => sourceRunIdentity(eventFixture({ conclusion: 'failure' })), /successful terminal/);
-  assert.throws(() => sourceRunIdentity(eventFixture({ event: 'push' })), /manual trusted dispatch/);
+  assert.equal(sourceRunIdentity(eventFixture({ event: 'workflow_run' })).event,
+    'workflow_run');
+  assert.throws(() => sourceRunIdentity(eventFixture({ event: 'push' })),
+    /trusted manual or native release source/);
   assert.throws(() => sourceRunIdentity(eventFixture({ head_branch: 'staging' })), /trusted main/);
   assert.throws(() => sourceRunIdentity(eventFixture({ path: '.github/workflows/other.yml' })),
     /definition path/);
