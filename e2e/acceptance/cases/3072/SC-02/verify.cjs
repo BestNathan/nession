@@ -84,13 +84,20 @@ function stagingAgentRows(issue) {
         fields.method === 'agent') wanted.add(match[1]);
   }
   const out = [];
+  const seen = new Set();
   for (const line of report.split(/\r?\n/)) {
     const cols = line.split('|').slice(1, -1).map(x => x.trim());
     const id = cols[0];
-    if (!wanted.has(id) || cols.length !== 3) continue;
-    const result = cols[1];
+    if (!wanted.has(id)) continue;
+    if (seen.has(id)) throw Error('duplicate Staging Agent receipt: ' + id);
+    seen.add(id);
+    const staged = cols.length === 4;
+    if (!staged && cols.length !== 3) continue;
+    if (staged && cols[1] !== 'staging') continue;
+    const result = cols[staged ? 2 : 1];
     if (!['Pass', 'Pending', 'Fail'].includes(result)) continue;
-    const match = /^run ([1-9][0-9]*); ref ([a-f0-9]{40}); source (agent-[a-z0-9-]+);/.exec(cols[2]);
+    const evidence = cols[staged ? 3 : 2];
+    const match = /^run ([1-9][0-9]*); ref ([a-f0-9]{40}); source (agent-[a-z0-9-]+);/.exec(evidence);
     if (match) out.push({ issue: issue.number, criterion: id,
       result, runId: Number(match[1]), sha: match[2] });
   }
@@ -219,6 +226,18 @@ function selfTestPositiveSelection() {
   assert.deepEqual(stagingAgentRows({
     ...base, body: base.body.replace('run 44;', 'not a native receipt;'),
   }), []);
+  assert.deepEqual(stagingAgentRows({
+    ...base, body: base.body.replace('branch: staging', 'branch: main'),
+  }), []);
+  assert.deepEqual(stagingAgentRows({
+    ...base, body: base.body.replace('| SC-01 | Pending |',
+      '| SC-01 | main | Pending |').replace('| Criterion | Result | Evidence |',
+      '| Criterion | Stage | Result | Evidence |'),
+  }), []);
+  assert.throws(() => stagingAgentRows({
+    ...base, body: base.body + '| SC-01 | Pending | run 44; ref ' +
+      'a'.repeat(40) + '; source agent-qwen; duplicate |\n',
+  }), /duplicate Staging Agent receipt/);
 }
 
 async function main() {
