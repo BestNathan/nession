@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 3240,
+  "run_id": 42934373685,
+  "run_attempt": 1,
+  "target_sha": "fdd6dd28700809b10264719271fe1c66ba92999f",
+  "plan_digest": "9f73e0908992acbb6fb0c22d42416a706f131ddb066e1a7493a3476df3669971",
+  "artifact_digest": "sha256:41f33b2c3358246965e1d3b4e23a99a07b0ec190b0dd45f761c220cd34f18f5d",
+  "ingest_run_id": 42934994353,
+  "ingest_attempt": 1,
+  "declaration_digest": "d0343ddcf3aa0e1fdc94f1ab28521efb71c543c3eb993b8719edbce8b4ec1864",
+  "before_body_sha256": "f85e79be4ab89624467006aa5a31777d0c8a57cf1629f737ccc8e6d9f0f1c86e",
+  "body_sha256": "9d4fb84549514cbcadfa2b2d89fa89bc31c2e52fd9ce40992a3751c539831d33",
+  "readback_body": "## Description\n\n`Release / Staging Convergence` cannot integrate `main` into `staging`: run 42885691664 reports `BLOCKED / MERGE_CONFLICT`, and the controller's direct-source surface PR #3237 is `CONFLICTING`. The promotion PR #3208 therefore cannot proceed.\n\n## Reproduction\n\n1. Merge runtime/pages changes to `main` while `staging` independently adds browser specs.\n2. Run `Release / Staging Convergence` (or `git merge-tree origin/staging origin/main`).\n3. Observe the sole conflict in `e2e/runner/cli-selftest.mjs`: main asserts 38 declared tests and a list including `pages-documents.spec.ts`; staging asserts 46 and a list including its eight new project/app/sandbox specs.\n\n## Root Cause\n\nBoth branches changed the same hard-coded assertions in the E2E catalog self-test. Git cannot choose the union; a Developer merge resolution is required.\n\n## Impact\n\nNative `main -> staging` integration is blocked, which blocks the staging -> main promotion. No product code is broken; the gates are behaving correctly.\n\n## Fix Direction\n\nMerge `main` into `staging` in a repair branch, resolve the self-test to the verified union (47 declared tests; union spec list including `pages-documents` and every staging addition), run the self-test, and merge the integration PR to staging with all exact-head checks green. No test is dropped and no assertion is loosened.\n\n## Location\n\n- `e2e/runner/cli-selftest.mjs`\n\n### Success Criteria\n\n- [ ] SC-01: `main` is integrated into `staging` through a reviewed merge commit whose E2E catalog self-test reflects the verified union (47 declared tests; no dropped spec), and the staging -> main promotion is no longer blocked by this conflict.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head Agent proof |\n\n## E2E Verification\n### New\n- pages-documents\n### Regression\n- none: the integration changes no existing browser spec; main's pages work adds only the new pages-documents spec\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-documents | New | Pass | run 42934373685/1, SHA fdd6dd28700809b10264719271fe1c66ba92999f, contract d0343ddcf3aa0e1fdc94f1ab28521efb71c543c3eb993b8719edbce8b4ec1864, plan 9f73e0908992acbb6fb0c22d42416a706f131ddb066e1a7493a3476df3669971, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/42934373685) |\n\n## Product alignment\n\n- [x] This moves Nession toward VISION.md\n- [x] It obeys PRINCIPLE.md\n- [x] Relevant docs/design/* sources were checked\n- [x] No product deviation\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-11-11T00:54:51Z",
+  "readback_updated_at": "2026-11-11T00:54:51Z",
+  "rows": [
+    {
+      "id": "pages-documents",
+      "result": "Pass",
+      "evidence": "run 42934373685/1, SHA fdd6dd28700809b10264719271fe1c66ba92999f, contract d0343ddcf3aa0e1fdc94f1ab28521efb71c543c3eb993b8719edbce8b4ec1864, plan 9f73e0908992acbb6fb0c22d42416a706f131ddb066e1a7493a3476df3669971, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/42934373685)"
+    }
+  ]
+}
