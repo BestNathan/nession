@@ -1,0 +1,47 @@
+name: Acceptance / Manual Request
+
+# An exact owner/collaborator /accept comment is a recovery trigger only.
+# This workflow never writes an SC verdict; trusted Agent/Case projectors
+# retain exclusive authority. Untrusted PR/bot comments are no-ops.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: acceptance-manual-request-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.run_attempt == 1 &&
+      github.event.issue.state == 'open' &&
+      !github.event.issue.pull_request &&
+      github.event.comment.body == '/accept' &&
+      github.event.comment.user.type == 'User' &&
+      github.event.comment.user.login == github.actor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted Acceptance implementation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify comment routing and lifecycle policy
+        run: node scripts/issue-lifecycle-reconcile.mjs self-test
+      - name: Reconcile or dispatch existing stage-qualified Agent Acceptance
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/issue-lifecycle-reconcile.mjs manual "$GITHUB_EVENT_PATH"
