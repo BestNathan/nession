@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "99119368f864a6dc0c5ccbd96da5341c8099401e",
+  "run_id": 43067824114,
+  "run_attempt": 1,
+  "plan_digest": "2650bb9f7c7a5709ef600eaecf2e6db0b19d59e92f6477d946399598d9d622d2",
+  "artifact_digest": "sha256:14d9f7873873250b2f9e75f4b0ba8869edf60cac820aa5fa96def509b53a3dfc",
+  "results": [
+    {
+      "id": "fixture-git",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-visual",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "git-github-context",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
