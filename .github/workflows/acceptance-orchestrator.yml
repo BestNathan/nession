@@ -113,7 +113,7 @@ jobs:
         with:
           node-version: '24'
       - name: Verify deterministic lifecycle policy
-        run: node scripts/issue-lifecycle-reconcile.mjs self-test
+        run: ./gates/run requirement-acceptance-selftest
       - name: Reconcile Issues associated with the merged PR
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
