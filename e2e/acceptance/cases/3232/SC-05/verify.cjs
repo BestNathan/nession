@@ -36,7 +36,7 @@ function systemdProperties(env) {
     registered: props.LoadState === 'loaded',
     running: props.LoadState === 'loaded' && props.ActiveState === 'active',
     pid: Number(props.MainPID || 0),
-    detail: result.output.trim().slice(0, 500),
+    detail: oneLine(result.output).slice(0, 500),
   };
 }
 function launchdProperties(env) {
@@ -49,7 +49,7 @@ function launchdProperties(env) {
     return {
       manager: 'launchd', available: true, registered: true,
       running: /^\s*state = running\s*$/m.test(result.output) && pid > 0,
-      pid, target, detail: result.output.slice(0, 500),
+      pid, target, detail: oneLine(result.output).slice(0, 500),
     };
   }
   const domainAvailable = ['gui', 'user'].some((domain) =>
@@ -78,6 +78,11 @@ function managerStop(state, env) {
     command('systemctl', ['--user', 'disable', '--now', UNIT], env);
   }
 }
+/** Evidence values must be single-line; manager output is not. */
+function oneLine(value) {
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
 function emit(status, summary, evidence) {
   process.stdout.write(JSON.stringify({ status, summary, evidence }) + '\n');
 }
@@ -226,7 +231,7 @@ async function verify() {
     }
     if (cleanupErrors.length > 0) {
       // Cleanup failures are never suppressed as a successful proof.
-      evidence.push({ type: 'runtime', value: 'CLEANUP FAILED: ' + cleanupErrors.join('; ').slice(-1200) });
+      evidence.push({ type: 'runtime', value: oneLine('CLEANUP FAILED: ' + cleanupErrors.join('; ')).slice(-1200) });
       if (!error) throw Error('Native service cleanup failed: ' + cleanupErrors.join('; '));
     } else {
       evidence.push({ type: 'runtime', value: 'Only Case-owned service/runtime were torn down' });
