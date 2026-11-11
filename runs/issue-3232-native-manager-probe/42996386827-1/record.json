@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "issue-3232-native-manager-probe",
+  "source_sha": "6200a78ce3f0547b2469f724b95dcce58654e128",
+  "source_digest": "4f3ee46b9b975cdf83d1d93565cb8477cd6921e4bad6adda8ad96d656d8c1552",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 42996386827,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42996386827",
+    "event": "push",
+    "branch": "task/issue-3232-native-manager-probe",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-11T09:35:10.897Z",
+    "finished_at": "2026-11-11T09:35:10.933Z",
+    "result": {
+      "issue": 3232,
+      "criterion": "SC-05",
+      "kind": "unprivileged-native-service-manager-feasibility-probe",
+      "authoritative_acceptance": false,
+      "platform": "linux",
+      "observations": [
+        {
+          "name": "user",
+          "exit_code": 0,
+          "error": null,
+          "output": "runner",
+          "stderr": ""
+        },
+        {
+          "name": "uid",
+          "exit_code": 0,
+          "error": null,
+          "output": "1001",
+          "stderr": ""
+        },
+        {
+          "name": "systemd-user-manager",
+          "exit_code": 1,
+          "error": null,
+          "output": "",
+          "stderr": "Failed to connect to bus: No medium found"
+        },
+        {
+          "name": "systemd-running",
+          "exit_code": 1,
+          "error": null,
+          "output": "starting",
+          "stderr": ""
+        }
+      ],
+      "runtime_dir_present": false,
+      "platform_supported": true,
+      "manager_accessible": false,
+      "native_user_service_proven": false,
+      "verdict": "linux-user-manager-unavailable-or-unsupported",
+      "required_next_step": "Use trusted source-aligned Acceptance / Cases on isolated native Linux and macOS managers. Task results cannot pass SC-05."
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/6200a78ce3f0547b2469f724b95dcce58654e128/issue-3232-native-manager-probe.json"
+}

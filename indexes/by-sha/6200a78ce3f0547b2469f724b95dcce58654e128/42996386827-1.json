@@ -1,0 +1,8 @@
+{
+  "task_id": "issue-3232-native-manager-probe",
+  "source_sha": "6200a78ce3f0547b2469f724b95dcce58654e128",
+  "run_id": 42996386827,
+  "run_attempt": 1,
+  "record_path": "runs/issue-3232-native-manager-probe/42996386827-1/record.json",
+  "source_path": "sources/6200a78ce3f0547b2469f724b95dcce58654e128/issue-3232-native-manager-probe.json"
+}
