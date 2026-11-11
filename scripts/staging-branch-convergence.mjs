@@ -738,6 +738,9 @@ function selfTest() {
       'missing authenticated wake field: '+field);
   }
   assert.match(receiptStep, /\$GITHUB_EVENT_PATH/);
+  assert.match(receiptStep, /CONVERGENCE_WAKE_V1/);
+  assert.match(receiptStep, /source_name: \.workflow_run\.name/);
+  assert.match(receiptStep, /controller_run: \(\$controller_run \| tonumber\)/);
   // #3247: prove the actual workflow job-if accepts the authenticated
   // post-deployment completion, not merely a copied JS approximation.
   assert.match(workflow,
