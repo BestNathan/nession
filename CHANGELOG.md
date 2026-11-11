@@ -647,3 +647,10 @@
 - Categories: design, interaction, overlay, dialog, ownership, web, app
 - Reason: Record #3246's standard Select trigger-relative placement: bottom/start anchoring with the sideOffset gap, why item-aligned mode stays opt-in (viewport-fixed coordinates double-offset in a Dialog's translated popup host), the allowed Base UI collision flip/shift, and the unchanged DropdownMenu/ContextMenu/Popover semantics; cite the merged staging SHA, Cases and selected E2E run
 - Source: https://github.com/BestNathan/nession/issues/3246
+
+## 2026-11-11T05:09:53Z | update | Unified overlay and operation surface system
+- Path: topics/web/unified-overlay-and-operation-surface-system.md
+- Topic: web
+- Categories: design, interaction, overlay, dialog, ownership, web, app
+- Reason: Correct the #3246 proof bullet to the exact CI Case Smoke assertion counts (SC-01 211, SC-02 228, SC-03 102) and target SHA 849a32a for all three, instead of mixing earlier local run counts
+- Source: https://github.com/BestNathan/nession/issues/3246
