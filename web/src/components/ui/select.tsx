@@ -76,14 +76,23 @@ function SelectTrigger({
   )
 }
 
+/**
+ * Standard anchored Select placement (issue 3246): the popup opens below the
+ * trigger with its start edge on the trigger's start edge, `sideOffset` away.
+ * `alignItemWithTrigger` stays opt-in for a future caller that genuinely wants
+ * the selected row to overlap the trigger. Item-aligned mode writes
+ * viewport-fixed coordinates and therefore double-offsets when its required
+ * host is a Dialog's translated popup container; normal anchored mode is the
+ * one that survives the host. Collision flip/shift remains Base UI's.
+ */
 function SelectContent({
   className,
   children,
   side = "bottom",
   sideOffset = 4,
-  align = "center",
+  align = "start",
   alignOffset = 0,
-  alignItemWithTrigger = true,
+  alignItemWithTrigger = false,
   width = "anchor",
   ...props
 }: SelectPrimitive.Popup.Props &
