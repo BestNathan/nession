@@ -612,3 +612,17 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record #3141 native cgroup v2 KV passthrough: Agent-discovered declarative controller files, one basename/lifecycle/status/command naming owner, kernel-authoritative raw values, prelaunch O_NOFOLLOW writes with readback, and the independent seccomp registry; cite the merged staging SHA and Case receipts
 - Source: https://github.com/BestNathan/nession/issues/3141
+
+## 2026-11-10T17:38:53Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record #3187 file-reference link activation: Product recognition, engine-owned tap to logical-line/cell targeting, and PTY-free activation; cite the merged staging SHA, parser/engine sources and browser Cases
+- Source: https://github.com/BestNathan/nession/issues/3187
+
+## 2026-11-10T17:38:53Z | update | Files capability identity, creation context and safe mutation ownership
+- Path: topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md
+- Topic: web
+- Categories: app, files, media, ownership, presentation, protocol, safety, web
+- Reason: Record #3187 Terminal file-reference resolution: activation-time CWD join, absolute-path retention, exact-parent/one-entry verification, source-raw line/column positioning and unavailable-source retirement; cite the merged staging SHA and sources
+- Source: https://github.com/BestNathan/nession/issues/3187
