@@ -80,7 +80,7 @@ function trackedBlob(relative) {
   }).trim();
 }
 
-function main() {
+async function main() {
   const evidence = [];
   for (const baseline of BASELINES) {
     const specFile = path.join(ROOT, baseline.spec);
