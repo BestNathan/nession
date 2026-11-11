@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42967385685,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3062-managed-erofs-session",
+    "target_sha": "65bbbe9a5ecc14ae32fe2d0b101684964ccc0ff7",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42967385685",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "500dbbade58874bea999260b4c6a49f2dd632b7929c5d870aab85591fb82b450"
+  },
+  "record": "runs/2026-11-11/42967385685-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "f8a391ba14c66c6021532b51e6c92dcc90001c81c6592c2f0d38769224f25061"
+}
