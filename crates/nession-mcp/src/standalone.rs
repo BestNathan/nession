@@ -1,4 +1,5 @@
-//! Configuration and composition for the standalone `nession-mcp` program.
+//! Configuration and composition for the standalone `nession-mcp` program
+//! (`#3264`).
 //!
 //! The document has two halves because the requirement separates them:
 //!
@@ -7,6 +8,11 @@
 //! * `[backend.server]` / `[backend.agent]` are **outbound** credentials. They
 //!   are explicit; nothing is guessed from the host machine, and the inbound
 //!   token is never forwarded to a backend.
+//!
+//! Agent-owned Session tools route through `[backend.server]` by default, so
+//! the Server's authorization and routing apply. An operator may configure an
+//! explicit direct-Agent mode instead; there is no implicit fallback between
+//! them.
 //!
 //! ```toml
 //! [mcp]
@@ -17,7 +23,7 @@
 //! endpoint = "wss://nession.example.com/ws"
 //! auth_token = "<server-token>"
 //!
-//! # Optional: direct Agent management for `nession_agent_*`.
+//! # Optional: bypass Server routing and manage one Agent directly.
 //! [backend.agent]
 //! endpoint = "ws://127.0.0.1:19091/ws"
 //! auth_token = "<agent-operator-token>"
@@ -30,10 +36,10 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::backend::{NodeBackend, UnavailableNodeBackend};
+use crate::backend::NodeBackend;
 use crate::protocol;
-use crate::remote::{RemoteClusterBackend, RemoteNodeBackend};
-use crate::service::{McpService, ServiceConfig};
+use crate::remote::{RemoteClusterBackend, RemoteNodeBackend, ServerRoutedNodeBackend};
+use crate::service::{allowed_hosts_for_bind, McpService, ServiceConfig};
 
 /// The standalone document.
 #[derive(Debug, Clone, Deserialize)]
@@ -67,6 +73,16 @@ pub struct StandaloneMcpConfig {
     /// Concurrent tool executions.
     #[serde(default = "default_max_concurrent_calls")]
     pub max_concurrent_calls: usize,
+    /// Browser origins allowed to call the endpoint.
+    ///
+    /// Empty (the default) refuses every request that presents an `Origin`
+    /// header. MCP clients do not send one; a browser-based client must be
+    /// named explicitly.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    /// Override the Host allowlist. Defaults to the listener's own host.
+    #[serde(default)]
+    pub allowed_hosts: Option<Vec<String>>,
 }
 
 fn default_path() -> String {
@@ -84,10 +100,11 @@ fn default_max_concurrent_calls() -> usize {
 /// The configured backends.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct BackendConfig {
-    /// The Nession Server every cluster tool uses.
+    /// The Nession Server every Server-owned tool uses, and the default route
+    /// for Agent-owned Session tools.
     #[serde(default)]
     pub server: Option<ServerBackendConfig>,
-    /// The one Agent `nession_agent_*` tools may manage, if any.
+    /// The one Agent `nession_agent_*` tools manage directly, if configured.
     #[serde(default)]
     pub agent: Option<AgentBackendConfig>,
 }
@@ -143,9 +160,19 @@ impl StandaloneConfig {
         if self.mcp.max_concurrent_calls == 0 {
             anyhow::bail!("[mcp] max_concurrent_calls must be greater than zero");
         }
+        for origin in &self.mcp.allowed_origins {
+            if origin != "null" && !origin.starts_with("http://") && !origin.starts_with("https://")
+            {
+                anyhow::bail!(
+                    "[mcp] allowed_origins entries must include a scheme (http:// or https://) or \
+                     be \"null\"; got {origin:?}"
+                );
+            }
+        }
         let server = self.backend.server.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "[backend.server] is required: cluster tools must reach a real Nession Server"
+                "[backend.server] is required: Server-owned discovery and the default routed \
+                 Agent tools must reach a real Nession Server"
             )
         })?;
         if server.endpoint.trim().is_empty() || server.auth_token.trim().is_empty() {
@@ -168,13 +195,18 @@ impl StandaloneConfig {
 
     /// The shared service configuration derived from `[mcp]`.
     pub fn service_config(&self) -> ServiceConfig {
+        let allowed_hosts = self
+            .mcp
+            .allowed_hosts
+            .clone()
+            .unwrap_or_else(|| allowed_hosts_for_bind(&self.mcp.listen_address));
         ServiceConfig {
             path: self.mcp.path.clone(),
             auth_token: self.mcp.auth_token.clone(),
             tool_timeout: Duration::from_secs(self.mcp.tool_timeout_secs),
             max_concurrent_calls: self.mcp.max_concurrent_calls,
-            session_idle: Duration::from_secs(protocol::DEFAULT_SESSION_IDLE_SECS),
-            max_sessions: protocol::DEFAULT_MAX_SESSIONS,
+            allowed_origins: self.mcp.allowed_origins.clone(),
+            allowed_hosts,
         }
     }
 
@@ -195,10 +227,13 @@ impl StandaloneConfig {
                 &agent.auth_token,
                 &agent.agent_id,
             )),
-            None => Arc::new(UnavailableNodeBackend::new(
-                "this standalone MCP host has no [backend.agent]; agent tools need an explicit \
-                 Agent endpoint and operator token",
-            )),
+            None => {
+                let mut routed = ServerRoutedNodeBackend::new(&server.endpoint, &server.auth_token);
+                if let Some(seconds) = server.request_timeout_secs {
+                    routed = routed.with_request_timeout(Duration::from_secs(seconds));
+                }
+                Arc::new(routed)
+            }
         };
         let service = McpService::new(self.service_config(), Arc::new(cluster), node)?;
         Ok(Arc::new(service))

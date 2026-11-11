@@ -8,7 +8,7 @@ export const CASE_RUNTIMES = new Set(['full-stack-local']);
 // never be executed on the Linux runner (it would report Pending at best);
 // the trusted selector routes each platform to its own job. Defaults to linux
 // for every historical manifest.
-export const CASE_PLATFORMS = new Set(['linux', 'macos']);
+export const CASE_PLATFORMS = new Set(['linux', 'macos', 'both']);
 // Only a Case that provably leaves no observable state may join a shared
 // job-scoped runtime (#1866 SC-05). Anything else keeps its own runtime.
 export const CASE_ISOLATIONS = new Set(['isolated', 'shared']);

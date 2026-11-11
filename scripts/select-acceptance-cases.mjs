@@ -28,7 +28,7 @@ export function selectTrustedCases({
     .filter((item) => item.stage === stage)
     .filter((item) => !requested || item.criterion === requested)
     .filter((item) => !runtime || item.runtime === runtime)
-    .filter((item) => !platform || item.platform === platform)
+    .filter((item) => !platform || item.platform === platform || item.platform === 'both')
     .map(({ issue, criterion, platform: platformName, runtime: runtimeName, verifiers }) => ({
       issue, criterion, platform: platformName, runtime: runtimeName,
       needs_browser: verifiers.some((item) => item.type === 'browser'),
@@ -60,7 +60,7 @@ export function selectTrustedCases({
       // platform covers only its own Cases. A genuinely missing Case is still
       // expected on both platforms and fails closed there.
       const manifest = manifestByKey.get(key);
-      if (platform && manifest && manifest.platform !== platform) continue;
+      if (platform && manifest && manifest.platform !== platform && manifest.platform !== 'both') continue;
       // Explicit Case-method obligations must be present. Historical issues
       // without a declared Method retain only their existing source Cases:
       // forcing a Case for all legacy Agent-validated SCs would break them.
@@ -149,6 +149,23 @@ function selfTest() {
     assert.equal(selectTrustedCases(macBase).selected.length, 1);
     assert.throws(() => selectTrustedCases({ ...macBase, platform: 'windows' }),
       /unsupported Acceptance platform/);
+
+    // One dual-native Case must be selected independently by both OS jobs;
+    // neither platform may silently mark it Not Required.
+    const bothDir = path.join(root, '45', 'SC-01');
+    fs.mkdirSync(bothDir, { recursive: true });
+    fs.writeFileSync(path.join(bothDir, 'case.yaml'),
+      'schema_version: 1\nissue: 45\ncriterion: SC-01\nstage: staging\nplatform: both\nruntime: full-stack-local\nverifiers:\n  - type: runtime\n    entry: verify.js\nresult_policy: all-pass\n');
+    fs.writeFileSync(path.join(bothDir, 'verify.js'), '// dual-native fixture');
+    const bothIssue = { ...issue, number: 45, body: issueBody('staging', true) };
+    for (const os of ['linux', 'macos']) {
+      const selectedBoth = selectTrustedCases({
+        ...base, issueNumbers: [45], issues: [bothIssue], platform: os,
+      });
+      assert.deepEqual(selectedBoth.coverage.expected, ['45/SC-01']);
+      assert.equal(selectedBoth.selected.length, 1);
+      assert.equal(selectedBoth.selected[0].platform, 'both');
+    }
 
     // A `when: deployed` criterion's post-merge compatibility Case exists in
     // the tree, but without an authenticated binding the executor makes the

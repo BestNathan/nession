@@ -431,4 +431,13 @@ ok(()=>{
   }
 });
 
+ok(() => {
+  const combined = spawnSync(process.execPath, [
+    path.join(repoRoot, 'scripts/acceptance-native-case-combine.mjs'), 'self-test',
+  ], { cwd: repoRoot, encoding: 'utf8', timeout: 8000 });
+  assert.equal(combined.status, 0,
+    'trusted native Case pair combiner self-test failed: ' + (combined.stderr || combined.error));
+  assert.match(combined.stdout, /Native pair positive\/negative tests passed/);
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');

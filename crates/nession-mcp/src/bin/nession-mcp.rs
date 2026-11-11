@@ -25,7 +25,7 @@ use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info, warn};
 
-use nession_mcp::http::{self, Response, Sniffed};
+use nession_mcp::http::{self, Sniffed};
 use nession_mcp::service::McpService;
 use nession_mcp::standalone::StandaloneConfig;
 
@@ -144,11 +144,11 @@ async fn handle_connection(
     };
 
     match http::sniff(io, Duration::from_secs(10)).await {
-        Ok(Sniffed::Http { head, body }) => service.serve(head, body).await?,
+        Ok(Sniffed::Http { stream, .. }) => service.serve(stream).await?,
         Ok(Sniffed::WebSocket { mut stream }) => {
             // This listener is the MCP endpoint only; there is no terminal
             // WebSocket behind it.
-            http::write_response(&mut stream, Response::empty(400)).await?;
+            http::write_status(&mut stream, 400, "Bad Request").await?;
         }
         Err(error) => {
             // A port probe or a scanner is expected noise, not an actionable

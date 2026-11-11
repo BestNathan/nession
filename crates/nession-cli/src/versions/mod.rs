@@ -460,9 +460,15 @@ mod tests {
     #[cfg(unix)]
     fn probe_script(dir: &std::path::Path, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
+        // An executable must not be published while its inode is open for
+        // writing. Under concurrent llvm-cov tests, executing an in-place
+        // fixture can hit Linux ETXTBSY. Stage and close the script before
+        // atomically publishing it, just like a real archived release.
+        let staging = dir.join("nession.staging");
         let path = dir.join("nession");
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&staging, body).unwrap();
+        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(&staging, &path).unwrap();
         path
     }
 
