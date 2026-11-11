@@ -56,6 +56,134 @@ function hasStep(j, name) {
     s.status === 'completed' && s.conclusion === 'success'),
   'unverified native step: ' + name);
 }
+
+// The earlier natural source legitimately produced no selected Agent SC. Keep
+// that negative fixture, but do not freeze SC-02 permanently at Pending: a
+// distinct, real matched wake can prove the positive end-to-end path.
+// #3200/#3201 are an existing (not invented) outstanding Staging obligation.
+const POSITIVE_ISSUE = 3200;
+const POSITIVE_PR = 3201;
+const POSITIVE_SHA = '03df2212e17578febb5cf2cde850bbadecb6b425';
+
+function pendingRow(body) {
+  // Read the canonical three-column Acceptance Report, not prose/comments.
+  const heading = String(body).match(/^## Acceptance Report\s*$/m);
+  if (!heading) throw Error('missing source Issue Acceptance Report');
+  const table = String(body).slice(heading.index + heading[0].length)
+    .split(/^##\s+/m, 1)[0];
+  const rows = [...table.matchAll(/^\|\s*SC-02\s*\|\s*(Pass|Pending|Fail)\s*\|\s*([^|\r\n]+)\|/gm)];
+  if (rows.length !== 1) throw Error('ambiguous source Issue SC-02 row');
+  const match = rows[0][2].trim().match(/^run ([1-9][0-9]*); ref ([a-f0-9]{40}); source (agent-[a-z0-9-]+);/);
+  if (!match) return null; // No canonical Agent receipt to correlate.
+  return { result: rows[0][1], runId: Number(match[1]), sha: match[2] };
+}
+
+function matchJob(jobs, predicate, description, attempt) {
+  const selected = jobs.filter(j => predicate(j.name) && j.run_attempt === attempt);
+  assert.equal(selected.length, 1, 'missing/ambiguous ' + description);
+  assert.equal(selected[0].status, 'completed');
+  assert.equal(selected[0].conclusion, 'success');
+  return selected[0];
+}
+
+async function nativeAttempt(runId, attempt) {
+  assert.ok(Number.isSafeInteger(runId) && runId > 0);
+  assert.ok(Number.isSafeInteger(attempt) && attempt > 0);
+  const [run, jobs] = await Promise.all([
+    get(resource('/actions/runs/' + runId)),
+    get(resource('/actions/runs/' + runId +
+      '/attempts/' + attempt + '/jobs?per_page=100')),
+  ]);
+  assert.equal(run.id, runId);
+  assert.equal(run.run_attempt, attempt);
+  assert.equal(run.repository?.full_name, REPO);
+  assert.equal(run.head_repository?.full_name, REPO);
+  assert.ok(Array.isArray(jobs.jobs) && jobs.jobs.length < 100);
+  return { run, jobs: jobs.jobs };
+}
+
+async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
+  // Correlate the real Issue receipt with its protected Staging merge, rather
+  // than accepting a successful but unrelated Waker or newer workload SHA.
+  const [issue, pr] = await Promise.all([
+    get(resource('/issues/' + POSITIVE_ISSUE)),
+    get(resource('/pulls/' + POSITIVE_PR)),
+  ]);
+  assert.equal(issue.number, POSITIVE_ISSUE);
+  assert.ok(!issue.pull_request);
+  assert.equal(pr.number, POSITIVE_PR);
+  assert.equal(pr.merged, true);
+  assert.equal(pr.merge_commit_sha, POSITIVE_SHA);
+  assert.equal(pr.base?.ref, 'staging');
+  assert.match(String(pr.title) + '\n' + String(pr.body),
+    /(?:#3200|issues\/3200)/);
+  assert.match(String(issue.body),
+    /SC-02:\s*\n\s*when: merged\s*\n\s*branch: staging\s*\n\s*method: agent/);
+  const row = pendingRow(issue.body);
+  if (!row || row.sha !== POSITIVE_SHA) return null;
+  const wakerMeta = await get(resource('/actions/runs/' + row.runId));
+  const waker = await nativeAttempt(row.runId, wakerMeta.run_attempt);
+  // The initial push Acceptance is not post-attestation reconciliation.
+  if (waker.run.name !== 'Acceptance / Post-Run Waker') return null;
+  assert.equal(waker.run.path.split('@')[0],
+    '.github/workflows/acceptance-postrun-waker.yml');
+  assert.equal(waker.run.event, 'workflow_run');
+  assert.equal(waker.run.head_branch, 'main');
+  assert.equal(waker.run.status, 'completed');
+  assert.equal(waker.run.conclusion, 'success');
+  const selector = matchJob(waker.jobs, n => n === 'select-staging',
+    'source-bound Staging selector', waker.run.run_attempt);
+  hasStep(selector, 'Authenticate completed Staging attestation ingestion');
+  hasStep(selector, 'Select pending exact-SHA merged-Staging Agent criteria');
+  const evaluator = matchJob(waker.jobs,
+    n => n.includes('evaluate-staging (' + POSITIVE_ISSUE + ')') &&
+      n.endsWith('/ Execute acceptance'),
+    'matched Staging Agent evaluator', waker.run.run_attempt);
+  const updater = matchJob(waker.jobs,
+    n => n.includes('evaluate-staging (' + POSITIVE_ISSUE + ')') &&
+      n.endsWith('/ Deterministic Issue updater'),
+    'matched canonical Issue updater', waker.run.run_attempt);
+  // Successful jobs alone are not evidence that the exact target ever ran.
+  // Re-attest an immutable by-SHA Staging record and original K8s source.
+  const prefix = 'indexes/by-sha/' + POSITIVE_SHA + '/deployment/';
+  let entries;
+  try { entries = await get(normalizedPath(prefix.slice(0, -1))); }
+  catch (error) {
+    if (/HTTP 404\b/.test(String(error.message))) return null;
+    throw error;
+  }
+  assert.ok(Array.isArray(entries) && entries.length > 0 && entries.length <= 100);
+  const candidates = entries.filter(e =>
+    e.type === 'file' && e.path === prefix + e.name &&
+    /^[1-9][0-9]*-[1-9][0-9]*-staging\.json$/.test(e.name));
+  if (!candidates.length) return null;
+  // A successful record must match the source SHA, original Run/attempt,
+  // Ready workloads and exact image digests through the canonical verifier.
+  const indexPath = candidates[0].path;
+  const index = parseContents(await get(normalizedPath(indexPath)), indexPath);
+  assert.equal(index.target_sha, POSITIVE_SHA);
+  assert.equal(index.environment_id, 'staging');
+  const recordPath = index.record;
+  const record = parseContents(await get(normalizedPath(recordPath)), recordPath);
+  const source = await nativeAttempt(index.source.run_id, index.source.run_attempt);
+  const attested = verifySource(record, index, source.run, { jobs: source.jobs });
+  assert.equal(attested.source_sha, POSITIVE_SHA);
+  assert.equal(attested.environment_id, 'staging');
+  assert.ok(attested.workload_readiness.length > 0);
+  assert.ok(attested.workload_readiness.every(w =>
+    w.ready && w.generation === w.observed_generation));
+  // The current Issue row must still point to the real Waker execution,
+  // not to a different / more recent evaluation with no proven provenance.
+  return {
+    issue: POSITIVE_ISSUE, target: POSITIVE_SHA,
+    waker: waker.run.id, wakerAttempt: waker.run.run_attempt, source: source.run.id,
+    sourceAttempt: source.run.run_attempt,
+    record: recordPath, index: indexPath,
+    observedAt: attested.observed_at, result: row.result,
+    evaluator: evaluator.name, updater: updater.name,
+  };
+}
+
 async function main() {
   const checkout = targetSha();
   const { parseContents, normalizedPath, verifySource } = await import(
@@ -110,22 +238,42 @@ async function main() {
   const evaluator = job(wakerJobs, 'evaluate-staging', 'skipped');
   assert.equal(evaluator.status, 'completed');
 
-  // This live source has NO pending matching Agent SC. The selector's skip
-  // is correct: it proves negative routing, but NOT a positive Issue update.
-  // Do not invent an Issue or copy the old #2984 acceptance verdict.
+  // The historical source has no matching outstanding Agent SC; that is a
+  // required negative fixture, never a positive Issue projection.
+  const positive = await verifyPositiveWake(parseContents, normalizedPath, verifySource);
+  if (!positive) {
+    console.log(JSON.stringify({
+      status: 'pending',
+      summary: 'Authenticated historical no-op wake is correct; awaiting a real matched post-attestation staging Agent evaluation and canonical Issue update at one observed SHA',
+      evidence: [
+        { type: 'runtime', value: 'Exact Case checkout ' + checkout +
+          '; historical Deploy / Identity ' + ORIGINAL_RUN + '/1, Ingest ' +
+          INGEST_RUN + '/1 and Waker ' + WAKER_RUN + '/1 independently re-attested' },
+        { type: 'runtime', value: 'Historical evaluate-staging was correctly skipped; no unrelated successor SHA, initial push Acceptance or invented Issue can satisfy the positive wake' },
+        { type: 'runtime', value: 'Natural source Issue #' + POSITIVE_ISSUE +
+          ' merged at exact Staging SHA ' + POSITIVE_SHA +
+          ' still has no verified matching post-attestation Issue updater trace' },
+      ],
+    }));
+    return;
+  }
   console.log(JSON.stringify({
-    status: 'pending',
-    summary: 'Real source->append-only Store->trusted staging wake verified; no matching pending staging Agent criterion was evaluated, so canonical Issue re-evaluation is still unproven',
+    status: 'pass',
+    summary: 'Real attested Staging source woke a matching outstanding Agent criterion through the canonical Issue updater; no SC verdict was fabricated',
     evidence: [
       { type: 'runtime', value: 'Exact Case checkout ' + checkout +
-        '; independent source Deploy / Identity ' + ORIGINAL_RUN +
-        '/1 Staging SHA ' + STAGING_SOURCE +
-        ' with immutable Store index and K8s observation' },
-      { type: 'runtime', value: 'Deploy / Identity Ingest ' + INGEST_RUN +
-        '/1 has successful append, readback and wake-emission steps; ' +
-        'Acceptance / Post-Run Waker ' + WAKER_RUN +
-        '/1 has verified source and exact-SHA staging selector steps' },
-      { type: 'runtime', value: 'Matched staging Agent evaluation was skipped (no eligible outstanding criterion): a new real source->selected SC->canonical Issue update trace is required for SC-02 Pass' },
+        '; observed Staging SHA ' + positive.target + ' for linked real Issue #' +
+        positive.issue + '; deployment ' + positive.source + '/' +
+        positive.sourceAttempt + ' at ' + positive.observedAt +
+        '; immutable index ' + positive.index + '; record ' + positive.record },
+      { type: 'runtime', value: 'Trusted source-bound Post-Run Waker ' +
+        positive.waker + '/' + positive.wakerAttempt +
+        ' selected the exact matching Staging Agent obligation; ' +
+        positive.evaluator + ' and ' + positive.updater +
+        ' both completed successfully; canonical Issue result remains ' +
+        positive.result + ' (not coerced to Pass)' },
+      { type: 'runtime', value: 'Historical no-match Waker ' + WAKER_RUN +
+        '/1 correctly skipped evaluation; forged/duplicate/source-mismatch fixtures passed' },
     ],
   }));
 }
