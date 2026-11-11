@@ -5,12 +5,12 @@ const { agentCacheTests } = require('../../../shared/erofs-cache-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
-  const output = agentCacheTests('erofs_cache::tests::');
+  const output = agentCacheTests('cache::tests::');
   assertRan(output, [
-    'erofs_cache::tests::restart_reuses_a_verified_blob_without_another_transfer',
-    'erofs_cache::tests::a_corrupted_published_blob_is_rejected_and_refetched',
-    'erofs_cache::tests::a_partial_download_resumes_with_one_range_request',
-    'erofs_cache::tests::a_digest_mismatch_never_publishes_and_leaves_no_part',
+    'cache::tests::restart_reuses_a_verified_blob_without_another_transfer',
+    'cache::tests::a_corrupted_published_blob_is_rejected_and_refetched',
+    'cache::tests::a_partial_download_resumes_with_one_range_request',
+    'cache::tests::a_digest_mismatch_never_publishes_and_leaves_no_part',
   ]);
   evidence.push({
     type: 'runtime',

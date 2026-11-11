@@ -11,12 +11,62 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use nession_protocol::contracts::image::v1::{
-    validate_packaging, ImagePackaging, NormalizedImageSource, IMAGE_FIXED_UUID,
-};
-
 use crate::git::{self, GitCommandRunner, GitTarget};
 use crate::store::{BlobDigest, BlobStore};
+
+/// The fixed filesystem UUID V1 passes to `mkfs.erofs`.
+///
+/// The wire contract (`nession-protocol`) owns the accepted V1 value; this is
+/// the builder's mechanical constant for the same bytes.
+pub const FIXED_UUID: &str = "11111111-1111-4111-8111-111111111111";
+/// The only block size V1 accepts.
+pub const BLOCK_SIZE: u32 = 4096;
+/// The fixed timestamp V1 passes to `mkfs.erofs`.
+pub const FIXED_TIMESTAMP: i64 = 0;
+/// The only compression mode V1 accepts.
+pub const COMPRESSION: &str = "none";
+
+/// Mechanical packaging inputs for one deterministic build.
+///
+/// This is the builder's own type; `nession-protocol`'s versioned
+/// `ImagePackaging` DTO is translated by the runtime adapter after wire
+/// validation. Keeping the builder free of wire types is what lets a non-
+/// Nession consumer build the same bytes without the Protocol Kernel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Packaging {
+    pub block_size: u32,
+    pub compression: String,
+    pub fixed_timestamp: i64,
+    pub fixed_uuid: String,
+}
+
+impl Default for Packaging {
+    fn default() -> Self {
+        Self {
+            block_size: BLOCK_SIZE,
+            compression: COMPRESSION.to_string(),
+            fixed_timestamp: FIXED_TIMESTAMP,
+            fixed_uuid: FIXED_UUID.to_string(),
+        }
+    }
+}
+
+impl Packaging {
+    /// The invariants `mkfs.erofs` itself needs. Wire-specific rejection stays
+    /// in the Protocol Kernel's `validate_packaging`.
+    pub fn validate(&self) -> Result<()> {
+        if self.block_size == 0 {
+            anyhow::bail!("EROFS packaging block size must be positive");
+        }
+        if self.compression.trim().is_empty() {
+            anyhow::bail!("EROFS packaging compression must not be empty");
+        }
+        if self.fixed_uuid.trim().is_empty() {
+            anyhow::bail!("EROFS packaging UUID must not be empty");
+        }
+        Ok(())
+    }
+}
 
 /// The maximum bytes one snapshot may contain before `mkfs.erofs` runs.
 pub const MAX_SNAPSHOT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -28,7 +78,7 @@ pub const MAX_SNAPSHOT_ENTRIES: usize = 200_000;
 pub struct BuiltImage {
     pub blob: BlobDigest,
     pub source_sha: Option<String>,
-    pub packaging: ImagePackaging,
+    pub packaging: Packaging,
 }
 
 /// Runs `mkfs.erofs`. Tests substitute a deterministic fake; production uses
@@ -103,8 +153,8 @@ impl ErofsBuilder {
     }
 
     /// Build a Git source into the content-addressed store.
-    pub fn build_git(&self, target: &GitTarget, packaging: &ImagePackaging) -> Result<BuiltImage> {
-        validate_packaging(packaging)?;
+    pub fn build_git(&self, target: &GitTarget, packaging: &Packaging) -> Result<BuiltImage> {
+        packaging.validate()?;
         let work = tempfile::Builder::new()
             .prefix("nession-erofs-git-")
             .tempdir_in(&self.work_root)
@@ -126,8 +176,8 @@ impl ErofsBuilder {
     ///
     /// The source is copied with symlinks preserved but never followed, then
     /// scanned; the build reads the private copy, not the mutable input.
-    pub fn build_local(&self, source: &Path, packaging: &ImagePackaging) -> Result<BuiltImage> {
-        validate_packaging(packaging)?;
+    pub fn build_local(&self, source: &Path, packaging: &Packaging) -> Result<BuiltImage> {
+        packaging.validate()?;
         let metadata = fs::symlink_metadata(source)
             .with_context(|| format!("local image source is not readable: {}", source.display()))?;
         if !metadata.is_dir() {
@@ -153,25 +203,7 @@ impl ErofsBuilder {
         })
     }
 
-    /// Build from a normalized source.
-    pub fn build_source(
-        &self,
-        source: &NormalizedImageSource,
-        packaging: &ImagePackaging,
-    ) -> Result<BuiltImage> {
-        match source {
-            NormalizedImageSource::GitHub { .. } => {
-                let target = GitTarget::from_source(source)
-                    .ok_or_else(|| anyhow::anyhow!("normalized GitHub source has no Git target"))?;
-                self.build_git(&target, packaging)
-            }
-            NormalizedImageSource::LocalDirectory { path } => {
-                self.build_local(Path::new(path), packaging)
-            }
-        }
-    }
-
-    fn build_image(&self, snapshot: &Path, image: &Path, packaging: &ImagePackaging) -> Result<()> {
+    fn build_image(&self, snapshot: &Path, image: &Path, packaging: &Packaging) -> Result<()> {
         let args = mkfs_command(image, snapshot, packaging);
         self.mkfs.run(&args)?;
         let metadata = fs::metadata(image)
@@ -184,7 +216,7 @@ impl ErofsBuilder {
 }
 
 /// The exact `mkfs.erofs` argv V1 emits, published for tests and operators.
-pub fn mkfs_command(image: &Path, root: &Path, packaging: &ImagePackaging) -> Vec<String> {
+pub fn mkfs_command(image: &Path, root: &Path, packaging: &Packaging) -> Vec<String> {
     let mut args = vec![
         "-T".to_string(),
         packaging.fixed_timestamp.to_string(),
@@ -207,7 +239,7 @@ pub fn mkfs_command(image: &Path, root: &Path, packaging: &ImagePackaging) -> Ve
 
 /// The fixed UUID V1 uses, published so tests do not restate it.
 pub fn fixed_uuid() -> &'static str {
-    IMAGE_FIXED_UUID
+    FIXED_UUID
 }
 
 /// Copy a tree without following symlinks. Directories are created 0o755,
@@ -391,12 +423,8 @@ mod tests {
         let source = local_source(root.path());
         let mkfs = Arc::new(FakeMkfs::default());
         let builder = test_builder(root.path(), mkfs);
-        let first = builder
-            .build_local(&source, &ImagePackaging::default())
-            .unwrap();
-        let second = builder
-            .build_local(&source, &ImagePackaging::default())
-            .unwrap();
+        let first = builder.build_local(&source, &Packaging::default()).unwrap();
+        let second = builder.build_local(&source, &Packaging::default()).unwrap();
         assert_eq!(first.blob.digest, second.blob.digest);
         assert_eq!(first.blob.path, second.blob.path);
         assert_eq!(first.source_sha, None);
@@ -407,13 +435,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let source = local_source(root.path());
         let builder = test_builder(root.path(), Arc::new(FakeMkfs::default()));
-        let first = builder
-            .build_local(&source, &ImagePackaging::default())
-            .unwrap();
+        let first = builder.build_local(&source, &Packaging::default()).unwrap();
         fs::write(source.join("a.txt"), b"changed").unwrap();
-        let second = builder
-            .build_local(&source, &ImagePackaging::default())
-            .unwrap();
+        let second = builder.build_local(&source, &Packaging::default()).unwrap();
         assert_ne!(first.blob.digest, second.blob.digest);
         assert!(first.blob.path.exists());
         assert!(second.blob.path.exists());
@@ -424,7 +448,7 @@ mod tests {
         let args = mkfs_command(
             Path::new("/tmp/image.erofs"),
             Path::new("/tmp/snapshot"),
-            &ImagePackaging::default(),
+            &Packaging::default(),
         );
         assert_eq!(
             args,
@@ -457,7 +481,7 @@ mod tests {
         )
         .unwrap();
         let error = builder
-            .build_local(&source, &ImagePackaging::default())
+            .build_local(&source, &Packaging::default())
             .unwrap_err();
         let text = format!("{error:#}");
         assert!(
@@ -473,7 +497,7 @@ mod tests {
         std::os::unix::fs::symlink("/etc/passwd", source.join("absolute")).unwrap();
         let builder = test_builder(root.path(), Arc::new(FakeMkfs::default()));
         let error = builder
-            .build_local(&source, &ImagePackaging::default())
+            .build_local(&source, &Packaging::default())
             .unwrap_err();
         assert!(
             format!("{error:#}").contains("absolute symlink"),
@@ -489,7 +513,7 @@ mod tests {
             Arc::new(FakeMkfs::default()),
         );
         let error = builder
-            .build_local(&other, &ImagePackaging::default())
+            .build_local(&other, &Packaging::default())
             .unwrap_err();
         assert!(format!("{error:#}").contains("escapes"), "{error:#}");
     }
@@ -543,9 +567,7 @@ mod tests {
             reference: sha.clone(),
             requested_sha: Some(sha.clone()),
         };
-        let built = builder
-            .build_git(&target, &ImagePackaging::default())
-            .unwrap();
+        let built = builder.build_git(&target, &Packaging::default()).unwrap();
         assert_eq!(built.source_sha.as_deref(), Some(sha.as_str()));
         let mut file = std::fs::File::open(&built.blob.path).unwrap();
         let mut bytes = Vec::new();
@@ -566,12 +588,8 @@ mod tests {
             root.path().join("work"),
         )
         .unwrap();
-        let first = builder
-            .build_local(&source, &ImagePackaging::default())
-            .unwrap();
-        let second = builder
-            .build_local(&source, &ImagePackaging::default())
-            .unwrap();
+        let first = builder.build_local(&source, &Packaging::default()).unwrap();
+        let second = builder.build_local(&source, &Packaging::default()).unwrap();
         assert_eq!(first.blob.digest, second.blob.digest);
         let image = fs::read(&first.blob.path).unwrap();
         assert_eq!(

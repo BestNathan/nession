@@ -11,7 +11,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
-use nession_protocol::contracts::image::v1::{is_valid_image_digest, IMAGE_DIGEST_PREFIX};
+use crate::digest::{is_valid_digest, verify_file, DIGEST_PREFIX};
 
 /// The verified identity of one stored blob.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,10 +59,10 @@ impl BlobStore {
 
     /// The path for a validated digest.
     pub fn path_for(&self, digest: &str) -> Result<PathBuf> {
-        if !is_valid_image_digest(digest) {
+        if !is_valid_digest(digest) {
             anyhow::bail!("invalid image digest");
         }
-        let Some(hex) = digest.strip_prefix(IMAGE_DIGEST_PREFIX) else {
+        let Some(hex) = digest.strip_prefix(DIGEST_PREFIX) else {
             anyhow::bail!("invalid image digest");
         };
         Ok(self.root.join("sha256").join(hex))
@@ -127,7 +127,7 @@ impl BlobStore {
         drop(writer);
 
         let hex = format!("{:x}", hasher.finalize());
-        let digest = format!("{IMAGE_DIGEST_PREFIX}{hex}");
+        let digest = format!("{DIGEST_PREFIX}{hex}");
         let destination = self.path_for(&digest)?;
         if destination.exists() {
             let existing = fs::metadata(&destination)
@@ -158,21 +158,7 @@ impl BlobStore {
     /// Used by readers and tests before bytes are offered as ready; a store that
     /// lost or mutated bytes is a failure, not a warning.
     pub fn verify(&self, digest: &str) -> Result<()> {
-        let mut file = self.open(digest)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0_u8; 64 * 1024];
-        loop {
-            let read = file.read(&mut buffer).context("failed to read blob")?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(buffer.get(..read).unwrap_or_default());
-        }
-        let actual = format!("{IMAGE_DIGEST_PREFIX}{:x}", hasher.finalize());
-        if actual != digest {
-            anyhow::bail!("blob digest mismatch: expected {digest}, stored bytes hash to {actual}");
-        }
-        Ok(())
+        verify_file(&self.path_for(digest)?, digest)
     }
 
     /// Measure ready blob bytes separately from unpublished temporary files.
@@ -259,6 +245,23 @@ mod tests {
         let stored = store.put_file(&input).unwrap();
         fs::write(&stored.path, b"tampered").unwrap();
         assert!(store.verify(&stored.digest).is_err());
+    }
+
+    /// #3303 SC-02: a failed/interrupted publication leaves only a `.tmp`
+    /// artifact. The digest never becomes a ready blob, and verification of
+    /// the claimed digest fails rather than exposing the partial bytes.
+    #[test]
+    fn an_interrupted_publication_never_exposes_a_ready_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        fs::write(dir.path().join("store/.tmp/blob-aborted"), b"partial bytes").unwrap();
+
+        assert!(!store.contains(&digest).unwrap());
+        assert!(store.verify(&digest).is_err());
+        let usage = store.usage().unwrap();
+        assert_eq!(usage.blobs, 0, "a temp file is not a ready blob");
+        assert_eq!(usage.temp_files, 1);
     }
 
     /// #3180 SC-05: ready blob bytes and unpublished temporary files are

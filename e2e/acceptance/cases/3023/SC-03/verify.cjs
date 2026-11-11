@@ -6,11 +6,11 @@ const { agentCacheTests } = require('../../../shared/erofs-cache-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
-  const output = agentCacheTests('erofs_cache::tests::');
+  const output = agentCacheTests('cache::tests::');
   assertRan(output, [
-    'erofs_cache::tests::cold_fetch_publishes_the_verified_digest_and_warm_hit_transfers_nothing',
-    'erofs_cache::tests::concurrent_callers_share_one_fetch_per_digest',
-    'erofs_cache::tests::a_digest_mismatch_never_publishes_and_leaves_no_part',
+    'cache::tests::cold_fetch_publishes_the_verified_digest_and_warm_hit_transfers_nothing',
+    'cache::tests::concurrent_callers_share_one_fetch_per_digest',
+    'cache::tests::a_digest_mismatch_never_publishes_and_leaves_no_part',
   ]);
   evidence.push({
     type: 'runtime',

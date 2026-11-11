@@ -22,9 +22,13 @@ run(({ evidence }) => {
   assertRan(agent, [
     'managed_session::tests::managed_prepare_downloads_pins_and_builds_the_composition',
   ]);
-  const cache = crateTests('nession-agent', ['--lib', 'erofs_cache::tests::concurrent_'], 600000);
+  const cache = crateTests(
+    'nession-erofs',
+    ['--features', 'cache', '--lib', 'cache::tests::concurrent_'],
+    600000,
+  );
   assertRan(cache, [
-    'erofs_cache::tests::concurrent_callers_share_one_fetch_per_digest',
+    'cache::tests::concurrent_callers_share_one_fetch_per_digest',
   ]);
   const reconciliation = crateTests(
     'nession-server',
