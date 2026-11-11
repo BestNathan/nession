@@ -181,8 +181,19 @@ async function selfTest() {
     const run = { display_title: workflowTitle(plan), event: 'workflow_dispatch',
       head_branch: 'main', repository: repo, head_repository: repo,
       html_url: 'https://github.com/BestNathan/nession/actions/runs/22' };
-    assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100&sort=created&direction=desc')
-      ? [] : { workflow_runs: [run] })).state, 'already-dispatched');
+    let receiptsWritten = 0, redundantDispatches = 0;
+    const recovered = await dispatch(plan, async (path, options = {}) => {
+      if (options.method === 'POST') {
+        if (path.endsWith('/dispatches')) redundantDispatches += 1;
+        else if (path.endsWith('/comments')) receiptsWritten += 1;
+        return {};
+      }
+      return path.endsWith('/comments?per_page=100&sort=created&direction=desc')
+        ? [] : { workflow_runs: [run] };
+    });
+    assert.equal(recovered.state, 'already-dispatched');
+    assert.equal(receiptsWritten, 1, 'missing receipt must be recovered');
+    assert.equal(redundantDispatches, 0, 'replay cannot schedule another Full run');
     assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100&sort=created&direction=desc')
       ? [{ body: marker(plan), user: { login: 'github-actions[bot]', type: 'Bot' } }]
       : { workflow_runs: [] })).state, 'already-acknowledged');
