@@ -68,15 +68,15 @@ pub(crate) async fn stop_verified_with_timeout(
     // The pid still answers, but that is not the claim that matters. Re-read
     // the record and re-check the OS start time before the forceful signal.
     match pid_file::ownership(record_path) {
-        Ok(Ownership::Alive(current)) if current.pid == pid => {
+        Ok(Ownership::Alive(current)) if pid_file::same_instance(&current, identity) => {
             println!("{label} didn't stop gracefully, sending SIGKILL...");
             signal(pid, Signal::Kill).context("failed to send SIGKILL")?;
         }
         Ok(Ownership::Alive(current)) => {
             println!(
-                "State file {record_path} now records PID {} while this stop was for PID {pid}; \
-                 not sending SIGKILL.",
-                current.pid
+                "State file {record_path} now records a different instance (PID {}, started {}); \
+                 this stop was for PID {pid}, started {}; not sending SIGKILL.",
+                current.pid, current.started_at, identity.started_at
             );
             return Ok(());
         }
@@ -107,7 +107,7 @@ pub(crate) async fn stop_verified_with_timeout(
         return Ok(());
     }
     match pid_file::ownership(record_path) {
-        Ok(Ownership::Alive(current)) if current.pid == pid => {
+        Ok(Ownership::Alive(current)) if pid_file::same_instance(&current, identity) => {
             bail!("Failed to stop {} process {pid}", component.as_str())
         }
         // The recorded instance is gone even though its old number now names

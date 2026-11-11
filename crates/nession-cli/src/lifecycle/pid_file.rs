@@ -401,6 +401,14 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
     }
 }
 
+/// Whether two identities describe the same process instance.
+///
+/// The start time is what distinguishes a reused pid from the recorded process;
+/// comparing only the pid would let a stop signal the new holder of the number.
+pub fn same_instance(left: &ProcessIdentity, right: &ProcessIdentity) -> bool {
+    left.pid == right.pid && left.started_at.abs_diff(right.started_at) <= START_TIME_TOLERANCE_SECS
+}
+
 /// What the state file at `path` says about the process it names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ownership {
@@ -845,6 +853,18 @@ mod tests {
         write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
 
         assert!(matches!(ownership(path).unwrap(), Ownership::Alive(_)));
+    }
+
+    #[test]
+    fn same_instance_requires_the_pid_and_start_time() {
+        let real = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        assert!(same_instance(&real, &real));
+        let mut other_start = real.clone();
+        other_start.started_at += 60;
+        assert!(!same_instance(&real, &other_start));
+        let mut other_pid = real.clone();
+        other_pid.pid += 1;
+        assert!(!same_instance(&real, &other_pid));
     }
 
     #[test]

@@ -117,6 +117,35 @@ async function changedIdentity(component, identityPath, env, evidence) {
   }
 }
 
+async function reusedSamePid(component, identityPath, env, evidence) {
+  const target = startTermIgnoringProcess(identityPath, component);
+  const stop = spawnCli([component, 'stop'], env);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    // The record keeps the pid but describes a start time the OS does not
+    // match: the same shape as a recycled pid, without waiting for the OS.
+    writeIdentity(identityPath, {
+      pid: target.pid,
+      startedAt: target.startedAt + 3_600,
+      kind: component,
+      version: '0.35.0',
+    });
+    const exit = await waitForExit(stop, 30_000);
+    const output = readOutput(stop);
+    assert.equal(exit.code, 0, component + ' recycled-pid stop must be a safe no-op: ' + output);
+    assert.match(output, /not sending SIGKILL/);
+    assert.ok(isRunning(target.pid), 'a recycled ' + component + ' pid was signalled');
+    evidence.push({
+      type: 'runtime',
+      value: component + ' PID ' + target.pid + ' kept the same number but not the same identity; no SIGKILL was sent',
+    });
+  } finally {
+    if (isRunning(target.pid)) globalThis.process.kill(target.pid, 'SIGKILL');
+    await waitForExit(stop, 5_000).catch(() => {});
+    await waitForGone(target.pid, 5_000, component + ' recycled-pid cleanup').catch(() => {});
+  }
+}
+
 main(async () => {
   const sha = targetSha();
   nessionBin();
@@ -130,8 +159,10 @@ main(async () => {
 
   await positiveTimeout('server', serverIdentity, env, evidence);
   await changedIdentity('server', serverIdentity, env, evidence);
+  await reusedSamePid('server', serverIdentity, env, evidence);
   await positiveTimeout('agent', agentIdentity, env, evidence);
   await changedIdentity('agent', agentIdentity, env, evidence);
+  await reusedSamePid('agent', agentIdentity, env, evidence);
 
   return {
     summary: 'Agent and Server stop re-verify ProcessIdentity before SIGKILL; a changed identity '
