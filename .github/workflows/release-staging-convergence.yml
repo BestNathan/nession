@@ -31,10 +31,13 @@ on:
   # #3211: PR-native staging -> main promotion has native exact-head PR
   # checks too. Wake on those completed source checks; the controller still
   # revalidates the bot PR, exact SHA, deployment and Issue evidence.
+  # #3247: wake on canonical successful Staging Artifacts push only after
+  # release proof exists. This is NEVER approval; reconcile independently
+  # re-attests exact HEAD checks, deployment and all source acceptance.
   # Wake only on completed checks for repository-owned immutable sync heads;
   # the trusted controller still revalidates every source and receipt.
   workflow_run:
-    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'E2E / Full Regression']
+    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'E2E / Full Regression', 'Release / Staging Artifacts']
     types: [completed]
 
 permissions:
@@ -92,6 +95,13 @@ jobs:
                   github.event.workflow_run.pull_requests[0].base.ref == 'main'
                 )
               )
+            ) ||
+            (
+              github.event.workflow_run.event == 'push' &&
+              github.event.workflow_run.head_branch == 'staging' &&
+              github.event.workflow_run.path == '.github/workflows/release-staging.yml' &&
+              github.event.workflow_run.name == 'Release / Staging Artifacts' &&
+              github.event.workflow_run.repository.full_name == github.repository
             ) ||
             (
               (
