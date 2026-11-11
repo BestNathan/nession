@@ -35,6 +35,7 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   …&sandbox=offline     → the context read fails (Agent unreachable)
  *   …&sandbox=preflight-fail → validation blocked by host capability
  *   …&sandbox=enter-fail  → validated, then the launch barrier refuses
+ *   …&sandbox=agent-cache-failed → a selected image's Agent cache failed
  *
  * The row validation below is a **fixture mirror** of the Agent's rules, so a
  * browser Case can drive the UI's field-error rendering. It is not a second
@@ -54,7 +55,8 @@ type Scenario =
   | 'unknown'
   | 'offline'
   | 'preflight-fail'
-  | 'enter-fail';
+  | 'enter-fail'
+  | 'agent-cache-failed';
 
 function scenarioOf(search: string): Scenario {
   const requested = new URLSearchParams(search).get('sandbox');
@@ -68,6 +70,7 @@ function scenarioOf(search: string): Scenario {
     case 'offline':
     case 'preflight-fail':
     case 'enter-fail':
+    case 'agent-cache-failed':
       return requested;
     default:
       return 'outside';
@@ -650,7 +653,20 @@ function answerSandbox(
     if (state.scenario === 'offline') {
       return Promise.reject(new Error('Agent did not answer'));
     }
-    const response: SandboxContextResponse = { success: true, context: contextFor() };
+    const cacheDigests = Array.isArray(payload.cache_digests)
+      ? payload.cache_digests.filter((digest): digest is string => typeof digest === 'string')
+      : [];
+    const response: SandboxContextResponse = {
+      success: true,
+      context: contextFor(),
+      cache_statuses: cacheDigests.map((digest) => ({
+        digest,
+        state: state.scenario === 'agent-cache-failed' ? 'failed' : 'verified',
+        ...(state.scenario === 'agent-cache-failed'
+          ? { detail: 'fixture cache verification failed' }
+          : {}),
+      })),
+    };
     return Promise.resolve(response);
   }
   if (type === PREFLIGHT_WIRE) {

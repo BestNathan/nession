@@ -20,6 +20,7 @@ import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureGithubSurface } from './fixtureGithub';
+import { useFixtureImages } from './fixtureImages';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { fixturePaneCommand } from './fixturePaneCommand';
@@ -172,6 +173,7 @@ export function FixtureShell() {
   // second depth had no Web baseline at all (#1102).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
   useEffect(() => githubApi.install(fixtureGithubSurface(search)), [search]);
+  useFixtureImages(search);
 
   const {
     agents,

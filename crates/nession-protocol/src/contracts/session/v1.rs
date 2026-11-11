@@ -5,7 +5,8 @@ use crate::contracts::env::v1::{
     ActiveEnvFile, EnvFileRef, EnvSnapshot, SessionEnvBindingState, SessionEnvProfile,
 };
 use crate::contracts::sandbox::v1::{
-    SandboxCurrentContext, SandboxExecutionReport, SandboxPolicy, SandboxPolicyDraft,
+    SandboxCurrentContext, SandboxExecutionReport, SandboxImageSelection, SandboxPolicy,
+    SandboxPolicyDraft,
 };
 
 /// The role one Managed image plays in the prepared composition.
@@ -1879,6 +1880,9 @@ pub fn validate_session_metadata(
 pub struct ClientSessionSandboxContextPayload {
     /// `agent_id:session_name`, the registry key the Session list already uses.
     pub session_id: String,
+    /// Digests whose Agent cache state this read should include.
+    #[serde(default)]
+    pub cache_digests: Vec<String>,
 }
 
 /// `server.session.sandbox.context`'s reply: the context, or the refusal.
@@ -1891,6 +1895,9 @@ pub struct SandboxContextResponse {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<SandboxCurrentContext>,
+    /// Per-digest Agent cache observations for `cache_digests`.
+    #[serde(default)]
+    pub cache_statuses: Vec<crate::contracts::image::v1::ImageCacheStatus>,
 }
 
 /// `agent.session.sandbox.context` — the Server asks the Session's Agent.
@@ -1901,6 +1908,8 @@ pub struct ServerSessionSandboxContextPayload {
     /// Injected by the Server's command broker, like every `agent.*` command.
     pub request_id: String,
     pub session_name: String,
+    #[serde(default)]
+    pub cache_digests: Vec<String>,
 }
 
 /// `server.session.sandbox.preflight` — validate one draft against the exact
@@ -1918,6 +1927,11 @@ pub struct ClientSessionSandboxPreflightPayload {
     #[serde(default)]
     pub probe_generation: String,
     pub policy: SandboxPolicyDraft,
+    /// Optional image composition for this Enter. Each digest is authorized by
+    /// the Server against the authenticated Session before the Agent prepares
+    /// it; the Web contract carries no local cache path.
+    #[serde(default)]
+    pub images: Vec<SandboxImageSelection>,
     /// The Pane's initial working directory. Empty asks the Agent to use the
     /// active Pane's own current directory.
     #[serde(default)]
@@ -1935,6 +1949,11 @@ pub struct ServerSessionSandboxPreflightPayload {
     #[serde(default)]
     pub probe_generation: String,
     pub policy: SandboxPolicyDraft,
+    /// Metadata only: preflight must not download image bytes. The Agent uses
+    /// the role/target/digest shape to validate the composition request and
+    /// leaves cache preparation to Enter.
+    #[serde(default)]
+    pub images: Vec<SandboxImageSelection>,
     #[serde(default)]
     pub working_dir: String,
 }
@@ -1954,6 +1973,9 @@ pub struct ClientSessionSandboxEnterPayload {
     /// Client-minted idempotency key for this Enter attempt.
     pub enter_id: String,
     pub policy: SandboxPolicyDraft,
+    /// Optional image composition, independent of the policy draft.
+    #[serde(default)]
+    pub images: Vec<SandboxImageSelection>,
     #[serde(default)]
     pub working_dir: String,
 }
@@ -1970,6 +1992,11 @@ pub struct ServerSessionSandboxEnterPayload {
     pub probe_generation: String,
     pub enter_id: String,
     pub policy: SandboxPolicyDraft,
+    /// Server-authorized image grants. The Agent prepares each one in its
+    /// durable cache and builds the local composition; the Server never sends
+    /// a native cache path.
+    #[serde(default)]
+    pub images: Vec<ManagedImageGrant>,
     #[serde(default)]
     pub working_dir: String,
 }

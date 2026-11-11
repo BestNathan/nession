@@ -14,8 +14,9 @@
 use std::collections::BTreeSet;
 
 use nession_protocol::contracts::sandbox::v1::{
-    SandboxCgroupV2Policy, SandboxFieldError, SandboxKvEntry, SandboxPolicy, SandboxPolicyDraft,
-    SandboxResourcePolicy, SandboxSeccompPolicy, SandboxSyscallPolicy,
+    SandboxCgroupV2Policy, SandboxFieldError, SandboxFilesystemAccess,
+    SandboxFilesystemComposition, SandboxFilesystemPolicy, SandboxKvEntry, SandboxPolicy,
+    SandboxPolicyDraft, SandboxResourcePolicy, SandboxSeccompPolicy, SandboxSyscallPolicy,
 };
 
 use crate::cgroup_file::{validate_key, validate_value};
@@ -61,6 +62,34 @@ pub fn materialize(
         }),
         enforcement: draft.enforcement,
     })
+}
+
+/// Materialize a draft and attach one Server-resolved image composition.
+///
+/// The Web draft may carry `filesystem.access`; a composition and that access
+/// list are two owners for the sandbox root, so carrying both is refused
+/// instead of silently dropping one. The composition is already a canonical
+/// value built from Agent-verified cache paths.
+pub fn materialize_with_composition(
+    draft: &SandboxPolicyDraft,
+    composition: SandboxFilesystemComposition,
+) -> std::result::Result<SandboxPolicy, Vec<SandboxFieldError>> {
+    let mut policy = materialize(draft)?;
+    let access_nonempty = policy.filesystem.as_ref().is_some_and(|filesystem| {
+        !filesystem.access.read.is_empty() || !filesystem.access.write.is_empty()
+    });
+    if access_nonempty {
+        return Err(vec![field_error(
+            "filesystem.access",
+            "conflict",
+            "filesystem.composition replaces filesystem.access; clear the access lists before selecting images",
+        )]);
+    }
+    policy.filesystem = Some(SandboxFilesystemPolicy {
+        access: SandboxFilesystemAccess::default(),
+        composition: Some(composition),
+    });
+    Ok(policy)
 }
 
 /// Project a canonical policy back into the Web-safe editor shape.
@@ -318,5 +347,48 @@ mod tests {
         let errors = materialize(&draft(serde_json::json!({ "enabled": false })))
             .expect_err("Enter cannot be a silent Native fallback");
         assert_eq!(errors[0].field, "enabled");
+    }
+
+    #[test]
+    fn a_composition_replaces_access_and_refuses_both_owners() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let composition = SandboxFilesystemComposition {
+            base: nession_protocol::contracts::sandbox::v1::SandboxImageRef {
+                digest: digest.clone(),
+                source: "/cache/base.erofs".to_string(),
+            },
+            workspace: Some(nession_protocol::contracts::sandbox::v1::SandboxWorkspace {
+                image: None,
+                write: "/state/workspace".to_string(),
+            }),
+            toolchains: Vec::new(),
+        };
+        let policy = materialize_with_composition(
+            &draft(serde_json::json!({ "enabled": true })),
+            composition.clone(),
+        )
+        .expect("an empty access list becomes a composition");
+        assert_eq!(
+            policy
+                .filesystem
+                .as_ref()
+                .and_then(|filesystem| filesystem.composition.as_ref())
+                .map(|value| value.base.digest.as_str()),
+            Some(digest.as_str())
+        );
+        assert!(policy
+            .filesystem
+            .as_ref()
+            .is_some_and(|filesystem| filesystem.access.read.is_empty()));
+
+        let errors = materialize_with_composition(
+            &draft(serde_json::json!({
+                "enabled": true,
+                "filesystem": { "access": { "read": ["/usr"], "write": [] } }
+            })),
+            composition,
+        )
+        .expect_err("composition and access cannot both own the root");
+        assert_eq!(errors[0].field, "filesystem.access");
     }
 }

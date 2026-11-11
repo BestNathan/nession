@@ -116,20 +116,42 @@ old digest.
 | Unit | Policy | Meaning |
 |---|---|---|
 | `server.image.build` | Inline | Validate a source, run the bounded worker, return the ready/failed descriptor |
-| `server.image.list` | Query | Newest builds first, bounded |
+| `server.image.list` | Query | Complete inventory, newest first, paginated and searchable |
 | `server.image.get` | Query | Exactly one of `digest` or `alias` |
-| `server.image.access` | Inline | Mint a Project-scoped, expiring bearer grant for one digest |
+| `server.image.access` | Inline | Mint a Project- or Session-scoped, expiring bearer grant for one digest |
 
 All four require an authenticated client. The contract types and validation
 live in `nession-protocol::contracts::image::v1`.
+
+`server.image.list` takes an absolute `offset`, a `limit` (default 200 for an
+older client, maximum 200) and an optional case-sensitive `query` over alias,
+digest, image id and persisted source. The reply always carries `total` and
+carries `next_offset` while more rows remain. The descriptor's `aliases` field
+is the sorted set of tags currently resolving to the immutable digest; the
+build-time `alias` remains the tag supplied by that build. A UI can therefore
+render the complete >200-image inventory without paging-by-convention or
+silent truncation.
 
 `server.session.create`'s Managed path (#3062) is a Server-originated image
 consumer: after resolving the Project's pinned Source image and the requested
 Base Runtime/toolchain digests, the Server mints scoped grants with
 `ImageManager::grant_managed_access`. It keeps the same Ready and digest rules
 but does not require the Project to reference a global Base Runtime/toolchain
-artifact; the client-facing `server.image.access` unit keeps that
-Project-reference rule unchanged.
+artifact; the client-facing Project access path keeps that reference rule.
+
+Sandbox Enter (#3181) is a second Server-originated consumer. The client sends
+Web-safe `SandboxImageSelection` values (role, digest, target, mode), never a
+native source path. The Server validates the selection shape, requires each
+digest to be Ready, and mints one `grant_sandbox_access(session_id, digest)`
+bearer per selected image. The Agent prepares those grants in its own durable
+cache and builds the canonical `filesystem.composition`. The token remains
+bound to one `(session_id, digest)`.
+
+`server.image.access` names exactly one consumer. A Project consumer must
+durably reference the digest in `projects.image_digest`. A Session consumer
+must name a digest already resolved by that Session's ready Managed context.
+Unrelated Sessions and guessed digests are refused; a Project-scoped request
+remains compatible.
 
 ## Authorized blob HTTP
 
@@ -142,9 +164,13 @@ Authorization: Bearer <grant token>
 ```
 
 The token is random, stored only as SHA-256, expires (default five minutes),
-and is bound to one `(project_id, digest)`. `server.image.access` mints it only
-when the named Project durably references that digest. Knowing another
-Project's digest therefore does not authorize its bytes.
+and is bound to one consumer (`project_id` or `session_id`) and one digest.
+`server.image.access` mints a Project token only when the named Project durably
+references that digest, and a Session token only when that Session's ready
+Managed context resolved it. Knowing another consumer's digest therefore does
+not authorize its bytes. Access grants are ephemeral capabilities, not durable
+bookmarks: the m009 migration may rebuild their table and a client simply
+requests a new grant.
 
 Responses are digest-bound:
 

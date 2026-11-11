@@ -5,11 +5,15 @@ use super::{
     info, json, reply_json, warn, ClientSessionSandboxEnterPayload, ConnectionHandler, Duration,
     HandlerAction, ProtocolMessage, SandboxActionErrorKind, SandboxActionResult,
 };
+use nession_protocol::contracts::sandbox::v1::{
+    validate_image_selections, SandboxFieldError, SandboxImageRole, SandboxImageSelection,
+};
+use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 
-/// Enter prepares host resources, creates a Pane, waits for the in-sandbox
-/// launch barrier and verifies it. The budget has to cover all of them; the
-/// Agent refuses long before this if anything is unavailable.
-const SANDBOX_ENTER_TIMEOUT: Duration = Duration::from_secs(60);
+/// Enter may prepare a full image composition in the Agent's durable cache
+/// before it creates the Pane. The budget covers preparation, launch and the
+/// barrier; a missing cache or image still fails closed.
+const SANDBOX_ENTER_TIMEOUT: Duration = Duration::from_secs(300);
 
 impl ConnectionHandler {
     /// Handle `server.session.sandbox.enter` — the one explicit Enter.
@@ -36,6 +40,21 @@ impl ConnectionHandler {
                 .unwrap_or_else(|_| json!({ "success": false, "error": "refused" })),
             )
         };
+        let refuse_with_fields =
+            |kind: SandboxActionErrorKind, error: &str, field_errors: Vec<SandboxFieldError>| {
+                reply_json(
+                    &id,
+                    "server.session.sandbox.enter",
+                    serde_json::to_value(SandboxActionResult {
+                        success: false,
+                        error_kind: Some(kind),
+                        error: Some(error.to_string()),
+                        field_errors: Some(field_errors),
+                        context: None,
+                    })
+                    .unwrap_or_else(|_| json!({ "success": false, "error": "refused" })),
+                )
+            };
         if !self.authenticated_client {
             warn!("Unauthenticated client requested Sandbox Enter");
             return Ok(refuse(
@@ -64,9 +83,60 @@ impl ConnectionHandler {
             }
         };
 
+        if !payload.images.is_empty()
+            && payload
+                .policy
+                .filesystem
+                .as_ref()
+                .is_some_and(|filesystem| {
+                    !filesystem.access.read.is_empty() || !filesystem.access.write.is_empty()
+                })
+        {
+            return Ok(refuse(
+                SandboxActionErrorKind::Invalid,
+                "filesystem.composition replaces filesystem.access; clear the access lists before selecting images",
+            ));
+        }
+        if let Err(errors) = validate_image_selections(&payload.images) {
+            return Ok(refuse_with_fields(
+                SandboxActionErrorKind::Invalid,
+                "the Sandbox image selection is not a valid composition",
+                errors,
+            ));
+        }
+        let mut grants = Vec::with_capacity(payload.images.len());
+        for selection in &payload.images {
+            let grant = match self
+                .image_manager
+                .grant_sandbox_access(&payload.session_id, &selection.digest)
+                .await
+            {
+                Ok(grant) => grant,
+                Err(error) => {
+                    return Ok(refuse(
+                        if error.kind() == "unavailable" {
+                            SandboxActionErrorKind::Unavailable
+                        } else {
+                            SandboxActionErrorKind::Invalid
+                        },
+                        &format!(
+                            "cannot authorize Sandbox image {}: {}",
+                            selection.digest,
+                            error.message()
+                        ),
+                    ));
+                }
+            };
+            grants.push(managed_grant(selection, grant));
+        }
+
         info!(
-            "Sandbox Enter: agent_id={}, session_name={}, generation={}, enter_id={}",
-            agent_id, session_name, payload.generation, payload.enter_id
+            "Sandbox Enter: agent_id={}, session_name={}, generation={}, enter_id={}, images={}",
+            agent_id,
+            session_name,
+            payload.generation,
+            payload.enter_id,
+            grants.len()
         );
         match self
             .agent_command_with_timeout(
@@ -78,6 +148,7 @@ impl ConnectionHandler {
                     "probe_generation": payload.probe_generation,
                     "enter_id": payload.enter_id,
                     "policy": payload.policy,
+                    "images": grants,
                     "working_dir": payload.working_dir,
                 }),
                 SANDBOX_ENTER_TIMEOUT,
@@ -116,5 +187,23 @@ impl ConnectionHandler {
             }
             Err(error) => Ok(refuse(SandboxActionErrorKind::Unavailable, &error)),
         }
+    }
+}
+
+fn managed_grant(
+    selection: &SandboxImageSelection,
+    grant: crate::image::ImageAccessGrant,
+) -> ManagedImageGrant {
+    let (role, target) = match selection.role {
+        SandboxImageRole::Base => (ManagedImageRole::Base, None),
+        SandboxImageRole::Workspace => (ManagedImageRole::Workspace, None),
+        SandboxImageRole::Toolchain => (ManagedImageRole::Toolchain, selection.target.clone()),
+    };
+    ManagedImageGrant {
+        role,
+        digest: selection.digest.clone(),
+        path: grant.path,
+        token: grant.token,
+        target,
     }
 }
