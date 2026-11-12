@@ -221,7 +221,8 @@ jobs:
           export KUBECONFIG="$RUNNER_TEMP/nession-ci-kubeconfig"
           # The trusted collector alone classifies retryable rolling readiness
           # (exit 75). Identity/provenance/namespace/digest mismatches fail
-          # immediately. Neither retries nor timeout produce a Run Record.
+          # immediately and emit one allowlisted rejection receipt (#3318);
+          # neither retries nor timeout produce a Run Record.
           attempts=18
           attested=false
           rm -f "$RUNNER_TEMP/deployment-attestation.json"
@@ -255,7 +256,22 @@ jobs:
               break
             fi
             if (( status != 75 )); then
-              echo "::error::Staging identity rejected non-retryable source, namespace or digest evidence"
+              # #3318: surface only the collector's allowlisted rejection
+              # receipt, never arbitrary redirected stderr. A missing or
+              # malformed receipt degrades to a bounded generic class.
+              rejection="$(grep -m1 '^DEPLOYMENT_IDENTITY_REJECTION_V1 ' \
+                "$RUNNER_TEMP/deployment-attempt.stderr" || true)"
+              rejection_class='unknown'
+              rejection_reason='unclassified deployment identity rejection'
+              if [[ -n "$rejection" ]]; then
+                payload="${rejection#DEPLOYMENT_IDENTITY_REJECTION_V1 }"
+                rejection_class="$(jq -r 'if (.class | type) == "string" then .class else "unknown" end' \
+                  <<<"$payload" 2>/dev/null || true)"
+                rejection_reason="$(jq -r 'if (.message | type) == "string" then .message else empty end' \
+                  <<<"$payload" 2>/dev/null || true)"
+                rejection_reason="${rejection_reason//$'\n'/ }"
+              fi
+              echo "::error::Staging identity rejected (class=${rejection_class:-unknown}, retryable=false, deployed=${DEPLOYED_SHA:-unknown}): ${rejection_reason:-unclassified deployment identity rejection}"
               exit 1
             fi
             if (( attempt == attempts )); then
