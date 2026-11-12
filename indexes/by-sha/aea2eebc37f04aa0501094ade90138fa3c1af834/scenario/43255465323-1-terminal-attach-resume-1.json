@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43255465323,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3371-transport-snake-case",
+    "target_sha": "aea2eebc37f04aa0501094ade90138fa3c1af834",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43255465323",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "4e17150faf102867277fc894c1035fd3c5dc572a194bfdb5549b4db5df6a48f2"
+  },
+  "record": "runs/2026-11-12/43255465323-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "fc5f5662f0bd0ea1db4ac6f1000994b310e03bc71116a68afb87b3f4d48d2241"
+}
