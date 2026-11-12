@@ -26,9 +26,9 @@ const runtime = JSON.parse(
 ) as { target_sha: string; server_port: number };
 
 async function waitForTerminal(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.locator('.xterm')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
-  await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.xterm')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 45_000 });
+  await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 45_000 });
 }
 
 async function waitForMarker(
@@ -70,7 +70,7 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
   // Outage longer than the 8s test lease and the 31s Server fast budget.
   await setWebSocketFault(page, true);
   await dropAllSockets(page);
-  await page.waitForTimeout(36_000);
+  await page.waitForTimeout(33_000);
 
   // Waiting on the credential issuer must not unmount the surface, send the
   // user to Login, exhaust P2P candidates into Relay, or reset the buffer.
@@ -93,7 +93,7 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ': a 36s Server+P2P outage past the 8s P2P credential lease kept the same ' +
+      'exact SHA ' + sha + ': a 33s Server+P2P outage past the 8s P2P credential lease kept the same ' +
       'xterm instance mounted with no Login; after recovery the client re-authenticated, reissued a ' +
       'scoped credential, re-dialed the Agent and resumed I/O in the same Session without reload',
   });

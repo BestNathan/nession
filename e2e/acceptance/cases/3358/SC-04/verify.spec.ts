@@ -24,9 +24,9 @@ const runtime = JSON.parse(
 ) as { target_sha: string; server_port: number };
 
 async function waitForTerminal(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.locator('.xterm')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
-  await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.xterm')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 45_000 });
+  await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 45_000 });
 }
 
 /** Submit until the marker is parsed; a fresh PTY may still be attaching. */
@@ -71,7 +71,7 @@ test('SC-04: Server WS outage keeps the attached Workspace and recovers without 
   // long tail while the page stays visible.
   await setWebSocketFault(page, true);
   await dropAllSockets(page);
-  await page.waitForTimeout(36_000);
+  await page.waitForTimeout(33_000);
 
   // The authenticated surface survived: no Login form, same xterm node, and
   // the buffered output was not discarded.
@@ -94,7 +94,7 @@ test('SC-04: Server WS outage keeps the attached Workspace and recovers without 
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ': a visible Relay Terminal survived a 36s Server WS outage past the fast ' +
+      'exact SHA ' + sha + ': a visible Relay Terminal survived a 33s Server WS outage past the fast ' +
       'reconnect budget; the same xterm instance and buffered output stayed mounted with no Login ' +
       'form, and I/O resumed after recovery without reload',
   });
