@@ -927,6 +927,16 @@ async function selfTest() {
   });
   assert.equal(manuallyBound.dispatch_binding.target_sha, valid.target_sha);
   assert.equal(manuallyBound.dispatch_binding.job_id, 700);
+  // The same GitHub-derived proof works when manual selection runs only
+  // on macOS; the platform-skipped Linux job must not block ingestion.
+  const macOSBound = await attestManualStagingSource(valid, manualSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async () => ({ jobs: [
+      { ...manualJob, status: 'completed', conclusion: 'skipped', steps: [] },
+      { ...manualJob, id: 702, name: 'execute-macos' },
+    ] }),
+  });
+  assert.equal(macOSBound.dispatch_binding.job_id, 702);
   assert.equal(assertSourceBoundRecord(valid, manuallyBound).criterion, valid.criterion);
   assert.throws(() => assertSourceBoundRecord(valid, manualSource), /not bound/);
   const manualEvent = { workflow_run: {
