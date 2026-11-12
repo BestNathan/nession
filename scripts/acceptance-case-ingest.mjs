@@ -891,6 +891,107 @@ async function selfTest() {
   const attestation = { event: fixtureEvent, repository: 'BestNathan/nession',
     token: 'self-test', request: attestationRequest };
   assert.equal((await attestCaseRecord(valid, attestation)).item.case_tree_sha, valid.case_tree_sha);
+  // #3316: GitHub-owned step metadata (evaluated from workflow_dispatch
+  // inputs before target checkout) binds manual Staging proof separately from
+  // the trusted-main workflow code SHA. A Case artifact cannot create it.
+  const manualSource = {
+    ...source, event: 'workflow_dispatch', head_branch: 'main',
+    head_sha: 'e'.repeat(40),
+  };
+  const manualStep = {
+    number: 3, status: 'completed', conclusion: 'success',
+    name: 'Authenticate manual Staging Case 1474 SC-14 ' + valid.target_sha,
+  };
+  const manualJob = {
+    id: 700, name: 'execute', run_id: valid.run_id,
+    run_attempt: valid.run_attempt, head_sha: manualSource.head_sha,
+    status: 'completed', conclusion: 'success',
+    steps: [
+      { number: 2, name: 'Checkout trusted discovery tooling' },
+      manualStep,
+      { number: 4, name: 'Resolve target identity' },
+      { number: 5, name: 'Checkout exact target SHA' },
+    ],
+  };
+  const manualJobPath = '/repos/BestNathan/nession/actions/runs/100/attempts/1/jobs?per_page=100';
+  const manualJobs = { jobs: [manualJob, {
+    id: 701, name: 'execute-macos', conclusion: 'skipped',
+    status: 'completed', run_id: 100, run_attempt: 1,
+  }] };
+  const manuallyBound = await attestManualStagingSource(valid, manualSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async (apiPath) => {
+      assert.equal(apiPath, manualJobPath);
+      return manualJobs;
+    },
+  });
+  assert.equal(manuallyBound.dispatch_binding.target_sha, valid.target_sha);
+  assert.equal(manuallyBound.dispatch_binding.job_id, 700);
+  assert.equal(assertSourceBoundRecord(valid, manuallyBound).criterion, valid.criterion);
+  assert.throws(() => assertSourceBoundRecord(valid, manualSource), /not bound/);
+  const manualEvent = { workflow_run: {
+    ...fixtureEvent.workflow_run, event: 'workflow_dispatch',
+    head_sha: manualSource.head_sha, head_branch: 'main',
+    path: '.github/workflows/acceptance-cases.yml',
+  } };
+  const manualRequest = async (apiPath) =>
+    apiPath === manualJobPath ? manualJobs : attestationRequest(apiPath);
+  const manualAttested = await attestCaseRecord(valid, {
+    event: manualEvent, repository: 'BestNathan/nession',
+    token: 'self-test', request: manualRequest,
+  });
+  assert.equal(manualAttested.source.dispatch_binding.issue, 1474);
+  assert.equal(caseIndexRecord(enrichCaseRecord(valid, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(valid), source: manualAttested.source,
+  })).target_sha, valid.target_sha);
+  for (const bad of [
+    { jobs: [{ ...manualJob, steps: manualJob.steps.filter(s => s !== manualStep) }] },
+    { jobs: [{ ...manualJob, steps: [{ number: 2, name: 'Checkout exact target SHA' }, manualStep] }] },
+    { jobs: [{ ...manualJob, steps: [{ ...manualStep, conclusion: 'failure' },
+      { number: 5, name: 'Checkout exact target SHA' }] }] },
+    { jobs: [{ ...manualJob, run_attempt: 2 }] },
+    { jobs: [{ ...manualJob, head_sha: 'f'.repeat(40) }] },
+    { jobs: [{ ...manualJob, steps: [
+      { ...manualStep, name: 'Authenticate manual Staging Case 1474 SC-14 ' + 'c'.repeat(40) },
+      { number: 5, name: 'Checkout exact target SHA' },
+    ] }] },
+    { jobs: [{ ...manualJob, steps: [manualStep, manualStep,
+      { number: 5, name: 'Checkout exact target SHA' }] }] },
+  ]) {
+    if (bad.jobs[0].steps?.length === 2 &&
+        bad.jobs[0].steps[0]?.name?.endsWith('c'.repeat(40))) {
+      const forged = await attestManualStagingSource(valid, manualSource, {
+        repository: 'BestNathan/nession', token: 'self-test',
+        request: async () => bad,
+      });
+      assert.throws(() => assertSourceBoundRecord(valid, forged), /not bound/);
+    } else {
+      await assert.rejects(() => attestManualStagingSource(valid, manualSource, {
+        repository: 'BestNathan/nession', token: 'self-test',
+        request: async () => bad,
+      }), /manual Case|missing or ambiguous/);
+    }
+  }
+  assert.throws(() => assertSourceBoundRecord(
+    { ...valid, issue: 1499 }, manuallyBound), /not bound/);
+  assert.throws(() => assertSourceBoundRecord(
+    { ...valid, criterion: 'SC-15' }, manuallyBound), /not bound/);
+  assert.throws(() => assertSourceBoundRecord(
+    { ...valid, run_attempt: 2 }, manuallyBound), /run identity/);
+  // Correct run/attempt and input target still cannot attest a forged Case
+  // tree; the tree must physically exist at the GitHub target commit.
+  const forgedTree = { ...valid, case_tree_sha: 'f'.repeat(40) };
+  forgedTree.execution_id = crypto.createHash('sha256').update(JSON.stringify({
+    schema_version: 1, run_id: forgedTree.run_id, run_attempt: forgedTree.run_attempt,
+    target_sha: forgedTree.target_sha, issue: forgedTree.issue,
+    criterion: forgedTree.criterion, contract_sha256: forgedTree.contract_sha256,
+    case_tree_sha: forgedTree.case_tree_sha,
+  })).digest('hex');
+  await assert.rejects(() => attestCaseRecord(forgedTree, {
+    event: manualEvent, repository: 'BestNathan/nession',
+    token: 'self-test', request: manualRequest,
+  }), /Case Git tree does not match/);
   const replaceSourceTrees = (transform) => async (apiPath) => {
     const response = await attestationRequest(apiPath);
     if (response.tree && Array.isArray(response.tree)) return { ...response, tree: transform(response.tree) };
