@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
 import { gitApi } from '../GitPlugin';
+import { gitRequestTargetKey, type GitRequestTarget } from './useGitRequest';
 import type {
   GitCreateCommitResponse,
   GitMutationFailure,
@@ -173,6 +174,166 @@ function adoptMutationResponse(
   return false;
 }
 
+type PendingCommit = { message: string; snapshot: string; requestId: string };
+
+/**
+ * Adopt a mutation answer only while the target it ran for is still active.
+ * A late answer from the previous Session is dropped, never applied to B.
+ */
+function adoptForTarget({
+  response,
+  forTarget,
+  activeTarget,
+  applyStatus,
+  reload,
+  setNotice,
+}: {
+  response: GitMutationResponse | GitCreateCommitResponse;
+  forTarget: GitRequestTarget;
+  activeTarget: MutableRefObject<string | null>;
+  applyStatus: (status: GitStatusResponse, forTarget: GitRequestTarget) => void;
+  reload: () => void;
+  setNotice: (notice: GitMutationNotice | null) => void;
+}): boolean {
+  if (activeTarget.current !== gitRequestTargetKey(forTarget)) {
+    return false;
+  }
+  return adoptMutationResponse(
+    response,
+    (status) => applyStatus(status, forTarget),
+    reload,
+    setNotice,
+  );
+}
+
+/**
+ * The Session identity a mutation captures at dispatch, plus the per-target
+ * commit idempotency identities. A target change resets the transient view
+ * state; in-flight requests are fenced by their captured key (#3327).
+ */
+function useGitMutationTarget({
+  agentId,
+  sessionId,
+  reset,
+}: {
+  agentId: string | undefined;
+  sessionId: string | undefined;
+  reset: () => void;
+}) {
+  const targetKey =
+    agentId && sessionId
+      ? gitRequestTargetKey({ agent_id: agentId, session: sessionId })
+      : null;
+  const activeTarget = useRef<string | null>(targetKey);
+  const pendingCommits = useRef(new Map<string, PendingCommit>());
+  useEffect(() => {
+    if (activeTarget.current === targetKey) {
+      return;
+    }
+    activeTarget.current = targetKey;
+    reset();
+  }, [reset, targetKey]);
+  return { targetKey, activeTarget, pendingCommits };
+}
+
+/**
+ * The commit half of the mutation controller. One idempotency identity per
+ * target; a late answer from another Session is dropped, and its settle path
+ * never clears the current Session's busy state (#845 SC-09, #3327).
+ */
+function useGitCommit({
+  agentId,
+  sessionId,
+  snapshot,
+  commitBusy,
+  setCommitBusy,
+  setNotice,
+  adopt,
+  activeTarget,
+  pendingCommits,
+}: {
+  agentId: string | undefined;
+  sessionId: string | undefined;
+  snapshot: GitSnapshot | null;
+  commitBusy: boolean;
+  setCommitBusy: (busy: boolean) => void;
+  setNotice: (notice: GitMutationNotice | null) => void;
+  adopt: (
+    response: GitMutationResponse | GitCreateCommitResponse,
+    forTarget: GitRequestTarget,
+  ) => boolean;
+  activeTarget: MutableRefObject<string | null>;
+  pendingCommits: MutableRefObject<Map<string, PendingCommit>>;
+}): (message: string) => Promise<boolean> {
+  return useCallback(
+    async (message: string): Promise<boolean> => {
+      if (!agentId || !sessionId || !snapshot) {
+        setNotice({ tone: 'destructive', message: LOADING_NOTICE });
+        return false;
+      }
+      if (commitBusy) {
+        return false;
+      }
+
+      const snapshotToken = snapshot.token;
+      const forTarget = { agent_id: agentId, session: sessionId };
+      const forTargetKey = gitRequestTargetKey(forTarget);
+      const previous = pendingCommits.current.get(forTargetKey);
+      const requestId =
+        previous &&
+        previous.message === message &&
+        previous.snapshot === snapshotToken
+          ? previous.requestId
+          : newRequestId();
+      pendingCommits.current.set(forTargetKey, {
+        message,
+        snapshot: snapshotToken,
+        requestId,
+      });
+
+      setCommitBusy(true);
+      setNotice(null);
+      try {
+        const response = await gitApi.gitCreateCommit({
+          agent_id: agentId,
+          session: sessionId,
+          expectedSnapshot: snapshotToken,
+          message,
+          requestId,
+        });
+        const created = adopt(response, forTarget);
+        if (created) {
+          pendingCommits.current.delete(forTargetKey);
+        }
+        return created;
+      } catch (error) {
+        // Keep the target's pending id: a resubmit of the same message against
+        // the same reviewed state is the retry the idempotency key exists for.
+        if (activeTarget.current === forTargetKey) {
+          setNotice({ tone: 'destructive', message: transportMessage(error) });
+        }
+        return false;
+      } finally {
+        // A settled attempt from another Session must not clear B's busy state.
+        if (activeTarget.current === forTargetKey) {
+          setCommitBusy(false);
+        }
+      }
+    },
+    [
+      activeTarget,
+      adopt,
+      agentId,
+      commitBusy,
+      pendingCommits,
+      sessionId,
+      setCommitBusy,
+      setNotice,
+      snapshot,
+    ],
+  );
+}
+
 /**
  * Stage, unstage and commit for one Session's repository (#845).
  *
@@ -191,22 +352,38 @@ export function useGitMutations({
   agentId: string | undefined;
   sessionId: string | undefined;
   snapshot: GitSnapshot | null;
-  applyStatus: (status: GitStatusResponse) => void;
+  /** Adopt a post-state, fenced to the target this mutation ran for. */
+  applyStatus: (status: GitStatusResponse, forTarget: GitRequestTarget) => void;
   reload: () => void;
 }): GitMutationController {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [commitBusy, setCommitBusy] = useState(false);
   const [notice, setNotice] = useState<GitMutationNotice | null>(null);
-  const pendingCommit = useRef<{
-    message: string;
-    snapshot: string;
-    requestId: string;
-  } | null>(null);
+  const resetTransient = useCallback(() => {
+    setBusyKey(null);
+    setCommitBusy(false);
+    setNotice(null);
+  }, []);
+  const { activeTarget, pendingCommits } = useGitMutationTarget({
+    agentId,
+    sessionId,
+    reset: resetTransient,
+  });
 
   const adopt = useCallback(
-    (response: GitMutationResponse | GitCreateCommitResponse): boolean =>
-      adoptMutationResponse(response, applyStatus, reload, setNotice),
-    [applyStatus, reload],
+    (
+      response: GitMutationResponse | GitCreateCommitResponse,
+      forTarget: GitRequestTarget,
+    ): boolean =>
+      adoptForTarget({
+        response,
+        forTarget,
+        activeTarget,
+        applyStatus,
+        reload,
+        setNotice,
+      }),
+    [activeTarget, applyStatus, reload],
   );
 
   const mutateRow = useCallback(
@@ -220,6 +397,8 @@ export function useGitMutations({
       if (busyKey || commitBusy) {
         return;
       }
+      const forTarget = { agent_id: agentId, session: sessionId };
+      const forTargetKey = gitRequestTargetKey(forTarget);
       setBusyKey(row.key);
       setNotice(null);
       const outcome = await requestRowMutation({
@@ -229,14 +408,20 @@ export function useGitMutations({
         row,
         action,
       });
+      // The user switched Sessions while A's request was in flight. A's
+      // answer may not touch B's status, notice, or busy state; A's transient
+      // state was reset when the target changed (#3327).
+      if (activeTarget.current !== forTargetKey) {
+        return;
+      }
       if (!outcome.ok) {
         setNotice({ tone: 'destructive', message: outcome.error });
       } else {
-        adopt(outcome.response);
+        adopt(outcome.response, forTarget);
       }
       setBusyKey(null);
     },
-    [adopt, agentId, busyKey, commitBusy, sessionId, snapshot],
+    [activeTarget, adopt, agentId, busyKey, commitBusy, sessionId, snapshot],
   );
 
   const stage = useCallback(
@@ -253,52 +438,17 @@ export function useGitMutations({
     [mutateRow],
   );
 
-  const commit = useCallback(
-    async (message: string): Promise<boolean> => {
-      if (!agentId || !sessionId || !snapshot) {
-        setNotice({ tone: 'destructive', message: LOADING_NOTICE });
-        return false;
-      }
-      if (commitBusy) {
-        return false;
-      }
-
-      const snapshotToken = snapshot.token;
-      const previous = pendingCommit.current;
-      const requestId =
-        previous &&
-        previous.message === message &&
-        previous.snapshot === snapshotToken
-          ? previous.requestId
-          : newRequestId();
-      pendingCommit.current = { message, snapshot: snapshotToken, requestId };
-
-      setCommitBusy(true);
-      setNotice(null);
-      try {
-        const response = await gitApi.gitCreateCommit({
-          agent_id: agentId,
-          session: sessionId,
-          expectedSnapshot: snapshotToken,
-          message,
-          requestId,
-        });
-        const created = adopt(response);
-        if (created) {
-          pendingCommit.current = null;
-        }
-        return created;
-      } catch (error) {
-        // Keep `pendingCommit`: a resubmit of the same message against the same
-        // reviewed state is the retry the idempotency key exists for.
-        setNotice({ tone: 'destructive', message: transportMessage(error) });
-        return false;
-      } finally {
-        setCommitBusy(false);
-      }
-    },
-    [adopt, agentId, commitBusy, sessionId, snapshot],
-  );
+  const commit = useGitCommit({
+    agentId,
+    sessionId,
+    snapshot,
+    commitBusy,
+    setCommitBusy,
+    setNotice,
+    adopt,
+    activeTarget,
+    pendingCommits,
+  });
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 

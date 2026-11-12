@@ -13,6 +13,23 @@ export interface GitRequestTarget {
   session: string;
 }
 
+/**
+ * Identity of one Session's Git target.
+ *
+ * A mutation captures the target it was dispatched for and passes it back when
+ * its answer arrives. The answer may only be adopted while that same target is
+ * still the one this hook serves — a late A answer must not overwrite B.
+ */
+export function gitRequestTargetKey(target: GitRequestTarget): string;
+export function gitRequestTargetKey(
+  target: GitRequestTarget | null | undefined,
+): string | null;
+export function gitRequestTargetKey(
+  target: GitRequestTarget | null | undefined,
+): string | null {
+  return target ? `${target.agent_id}\u0000${target.session}` : null;
+}
+
 export interface GitRequestState<T> {
   data: T | null;
   loading: boolean;
@@ -63,7 +80,14 @@ export function useGitRequest<T>({
   agentId: string | undefined;
   sessionId: string | undefined;
   load: (target: GitRequestTarget) => Promise<T>;
-}): GitRequestState<T> & { refresh: () => void; apply: (data: T) => void } {
+}): GitRequestState<T> & {
+  refresh: () => void;
+  /**
+   * Adopt an authoritative answer. When `forTarget` is supplied, the answer is
+   * dropped unless that target is still the active one.
+   */
+  apply: (data: T, forTarget?: GitRequestTarget) => void;
+} {
   const [state, setState] = useState<GitRequestState<T>>({
     data: null,
     // Optimistic: the effect below starts a load on mount, so starting at
@@ -170,7 +194,16 @@ export function useGitRequest<T>({
    * any read already in flight unable to publish over this answer, exactly as a
    * manual Refresh does.
    */
-  const apply = useCallback((data: T) => {
+  const apply = useCallback((data: T, forTarget?: GitRequestTarget) => {
+    // A mutation's answer can arrive after the Session changed. It must not
+    // overwrite the new target's state, and it must not take the newest
+    // request identity away from a read the new target already started.
+    if (
+      forTarget &&
+      gitRequestTargetKey(target.current) !== gitRequestTargetKey(forTarget)
+    ) {
+      return;
+    }
     requestSequence.current += 1;
     setState({ data, loading: false, error: null });
   }, []);
