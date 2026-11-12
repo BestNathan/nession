@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "5e5ae99d1a6270239779894859056e21c954bf79",
+  "run_id": 43215433095,
+  "run_attempt": 2,
+  "plan_digest": "aee34547660d781595babe8264a86e3dbbc734e8a9c9e5672e32560469f95995",
+  "artifact_digest": "sha256:067a892bdb561d1fbfb5265d4845b7fede5059e57722f01c7a89d9b8d82fe38f",
+  "results": [
+    {
+      "id": "images-workspace-capability",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 47
+    }
+  ]
+}
