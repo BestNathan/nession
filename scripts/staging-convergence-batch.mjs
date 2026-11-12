@@ -52,9 +52,21 @@ export function planBatch({branch,main_sha,lane_sha,integration_head,repoRoot=pr
   const history=list(localGit('rev-list','--first-parent','--reverse',main_sha,'^'+lane_sha));
   if(history.length>400)throw Error('unbounded main history for E2E audit');
   const changed=new Set(localDiff(lane_sha,integration_head)),touched=new Set();
+  const laneContains=(parent)=>{
+    try{localGit('merge-base','--is-ancestor',parent,lane_sha);return true;}
+    catch{return false;}
+  };
   for(const sha of history){
     const refs=localGit('rev-list','--parents','-n','1',sha).split(/\s+/);
     if(refs.length<2)throw Error('unattributable root commit in main history');
+    // A promotion merge brings the lane into main. Its first-parent diff is
+    // the lane's own content, which lane_sha already represents; attributing
+    // it to the following main->lane sync turned one promotion into a 1273
+    // path "unknown" batch and blocked the sync (#3335). Content introduced
+    // from the lane is not a new sync change. Merges from non-lane branches
+    // remain in the historical audit.
+    const bringsLane=refs.slice(2).some(parent=>laneContains(parent));
+    if(bringsLane)continue;
     for(const file of localDiff(refs[1],sha)){
       changed.add(file);
       if(file.startsWith('e2e/tests/')&&file.endsWith('.spec.ts'))touched.add(file);
@@ -308,6 +320,24 @@ function selfTest(){
     assert.deepEqual(source.regressionIds,['fixture-git']);
     assert.throws(()=>planBatch({branch:'staging',main_sha:lane,
       lane_sha:main,integration_head:integration}),/parent identity/);
+    // #3335: a promotion merge brings the lane into main. Its first-parent
+    // diff is lane-owned content and must not be re-attributed to the next
+    // main->lane sync as new changed paths.
+    git('checkout','main');
+    git('merge','--no-ff','-m','promotion merge into main',lane);
+    fs.mkdirSync('scripts',{recursive:true});
+    fs.writeFileSync('scripts/post-promotion.mjs','// fix\\n');
+    git('add','.');git('commit','-qm','post-promotion fix');
+    const promotedMain=git('rev-parse','HEAD');
+    const promotedTree=git('merge-tree','--write-tree',lane,promotedMain).split('\n')[0];
+    const syncIntegration=git('commit-tree',promotedTree,'-p',lane,'-p',promotedMain,
+      '-m','checked sync after promotion');
+    const sync=planBatch({branch:'staging',main_sha:promotedMain,
+      lane_sha:lane,integration_head:syncIntegration});
+    assert.equal(sync.changedPaths.includes('README.md'),false,
+      'promotion-merge lane content is not a new sync change');
+    assert.equal(sync.changedPaths.includes('scripts/post-promotion.mjs'),true,
+      'post-promotion main changes remain audited');
   }finally{
     process.chdir(original);
     fs.rmSync(tmp,{recursive:true,force:true});
