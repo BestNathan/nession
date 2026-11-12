@@ -339,7 +339,7 @@ export async function attestManualStagingSource(record, source, {
   }
   const matches = [];
   for (const job of jobs.jobs) {
-    if (!['execute', 'execute-macos'].includes(job.name)) continue;
+    if (!['execute', 'execute-macos'].includes(job.name) || job.conclusion === 'skipped') continue;
     if (job.run_id !== source.run_id || job.run_attempt !== source.run_attempt ||
         job.head_sha !== source.head_sha || job.status !== 'completed' ||
         !['success', 'failure'].includes(job.conclusion) ||
