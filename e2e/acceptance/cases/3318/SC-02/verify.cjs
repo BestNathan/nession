@@ -42,9 +42,9 @@ run(({ evidence }) => {
   assert.equal(valid.rejection, null, 'success must not emit a rejection receipt');
 
   evidence.push(
-    'rolling readiness exits 75 with retryable=true and no attestation',
-    'namespace mismatch exits 2 with retryable=false and no attestation',
-    'reconciled fixture exits 0 and writes the canonical attestation',
+    { type: 'runtime', value: 'rolling readiness exits 75 with retryable=true and no attestation' },
+    { type: 'runtime', value: 'namespace mismatch exits 2 with retryable=false and no attestation' },
+    { type: 'runtime', value: 'reconciled fixture exits 0 and writes the canonical attestation' },
   );
   return 'Retryable readiness stays 75; trust violations stay fail-closed at 2';
 });

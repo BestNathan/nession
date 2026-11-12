@@ -68,9 +68,9 @@ assert.equal(formatDeploymentIdentityRejection(Error('first\\nsecond')).split('\
     'the workflow must not dump arbitrary collector stderr');
 
   evidence.push(
-    'collector digest mismatch exit 2 with class=digest and no attestation receipt',
-    'hostile error text withheld as unclassified deployment identity rejection',
-    'workflow prints only the bounded DEPLOYMENT_IDENTITY_REJECTION_V1 receipt',
+    { type: 'runtime', value: 'collector digest mismatch exit 2 with class=digest and no attestation receipt' },
+    { type: 'runtime', value: 'hostile error text withheld as unclassified deployment identity rejection' },
+    { type: 'runtime', value: 'workflow prints only the bounded DEPLOYMENT_IDENTITY_REJECTION_V1 receipt' },
   );
   return 'Deterministic identity mismatch yields a bounded sanitized rejection reason';
 });
