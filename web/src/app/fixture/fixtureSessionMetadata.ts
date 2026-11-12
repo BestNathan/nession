@@ -10,6 +10,7 @@ import {
   normalizeSessionMetadataDraft,
   validateSessionMetadataDraft,
 } from '@/product/session/model/sessionMetadata';
+import { loadSessionMetadata } from '@/product/session/state/metadata';
 import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
 
 /**
@@ -32,11 +33,14 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *                                        releases it (#2970)
  *   ?sessionMetadata=ownership-reload  → A's save conflicts, and the forced
  *                                        read is held until the Case releases it
+ *   ?sessionMetadata=late-read         → a forced read is held while a normal
+ *                                        save succeeds, then released with its
+ *                                        pre-save answer (#3319)
  *
  * `legacy` is the default the canonical routes already render: the fixture's
  * Session rows keep their tmux names, so existing goldens do not move.
  *
- * The `ownership-*` scenarios also publish a real in-place Session switch (two
+ * The controlled scenarios also publish a real in-place Session switch (two
  * Sessions on the same Agent) and deferred transport controls on the browser
  * window, so a Case can settle A's answer after moving the Workspace to B.
  * The switch replaces the selected Session without remounting the capability
@@ -48,12 +52,17 @@ export type FixtureSessionMetadataScenario =
   | 'offline'
   | 'conflict'
   | 'ownership-save'
-  | 'ownership-reload';
+  | 'ownership-reload'
+  | 'late-read';
 
-export function isFixtureOwnershipScenario(
+export function isFixtureControlledScenario(
   scenario: FixtureSessionMetadataScenario,
 ): boolean {
-  return scenario === 'ownership-save' || scenario === 'ownership-reload';
+  return (
+    scenario === 'ownership-save' ||
+    scenario === 'ownership-reload' ||
+    scenario === 'late-read'
+  );
 }
 
 export function fixtureSessionMetadataScenario(search: string): FixtureSessionMetadataScenario {
@@ -63,7 +72,8 @@ export function fixtureSessionMetadataScenario(search: string): FixtureSessionMe
     requested === 'offline' ||
     requested === 'conflict' ||
     requested === 'ownership-save' ||
-    requested === 'ownership-reload'
+    requested === 'ownership-reload' ||
+    requested === 'late-read'
   ) {
     return requested;
   }
@@ -236,6 +246,12 @@ export interface FixtureSessionMetadataControls {
   holdNextRead(): void;
   releaseRead(): void;
   releaseSave(): void;
+  /**
+   * Force-read one Session, as the reconnect-triggered refresh does (#3319).
+   * The read is the production owner's; the Case awaits `heldRead()` rather
+   * than the promise because the answer may be intentionally held.
+   */
+  read(sessionId: string): void;
   /** How many `metadata.update` requests this surface was asked for. */
   saves(): number;
   heldRead(): boolean;
@@ -256,7 +272,8 @@ interface FixtureSessionMetadataTransport {
   scenario: FixtureSessionMetadataScenario;
   /** The attach-info answer a #3089 presentation Case reads. */
   attachScenario: 'normal' | 'long' | 'relay' | 'offline';
-  ownership: boolean;
+  /** A controlled scenario with deferred answers and in-place selection. */
+  controlled: boolean;
   store: Map<string, SessionMetadata>;
   conflictEscalated: boolean;
   saveCount: number;
@@ -287,7 +304,7 @@ function readMetadata(
     success: true,
     metadata: currentMetadata(state, String(sessionId)),
   };
-  if (!state.ownership || !state.holdRead) {
+  if (!state.controlled || !state.holdRead) {
     return answer;
   }
   // The answer is captured now and delivered after the Case moves to B.
@@ -444,7 +461,7 @@ function createMetadataSurface(state: FixtureSessionMetadataTransport): PluginSu
 function createMetadataControls(
   state: FixtureSessionMetadataTransport,
 ): FixtureSessionMetadataControls | null {
-  if (!state.ownership) {
+  if (!state.controlled) {
     return null;
   }
   return {
@@ -456,6 +473,9 @@ function createMetadataControls(
     releaseRead: () => {
       state.releaseHeldRead?.();
       state.releaseHeldRead = null;
+    },
+    read: (sessionId) => {
+      void loadSessionMetadata(sessionId, { force: true });
     },
     releaseSave: () => {
       state.releaseHeldSave?.();
@@ -481,12 +501,12 @@ export function createFixtureSessionMetadataHarness(
   const state: FixtureSessionMetadataTransport = {
     scenario,
     attachScenario: fixtureAttachScenario(search),
-    ownership: isFixtureOwnershipScenario(scenario),
+    controlled: isFixtureControlledScenario(scenario),
     store: new Map(scenario === 'legacy' ? [] : Object.entries(SEED)),
     // The conflict route changes the store once, standing in for the other
     // client's save that happens between this client's read and its write.
     conflictEscalated: false,
-    // The ownership route holds exactly the answer a Case asks it to hold.
+    // A controlled route holds exactly the answer a Case asks it to hold.
     saveCount: 0,
     releaseHeldSave: null,
     holdRead: false,
