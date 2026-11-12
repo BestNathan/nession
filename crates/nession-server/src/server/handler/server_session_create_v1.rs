@@ -11,6 +11,19 @@ use nession_protocol::contracts::session::v1::{
     ClientManagedCreate, ManagedImageGrant, ManagedImageRole, ManagedSessionImages,
 };
 
+// How long the Server waits for the Agent's create answer. Production keeps
+// the operator-facing 30s/300s windows; unit tests use short values so an
+// unanswered reply exercises the deadline deterministically without a
+// wall-clock sleep (#3344).
+#[cfg(test)]
+const CREATE_RESPONSE_WAIT: Duration = Duration::from_millis(100);
+#[cfg(not(test))]
+const CREATE_RESPONSE_WAIT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const MANAGED_CREATE_RESPONSE_WAIT: Duration = Duration::from_millis(200);
+#[cfg(not(test))]
+const MANAGED_CREATE_RESPONSE_WAIT: Duration = Duration::from_secs(300);
+
 /// One Managed creation the Server has resolved and authorized (#3062).
 struct PreparedManagedCreate {
     images: ManagedSessionImages,
@@ -293,9 +306,9 @@ impl ConnectionHandler {
         // Session exists, so it gets a bounded longer window than the ordinary
         // create. Both are explicit timeouts; neither retries on its own.
         let response_wait = if managed_context.is_some() {
-            Duration::from_secs(300)
+            MANAGED_CREATE_RESPONSE_WAIT
         } else {
-            Duration::from_secs(30)
+            CREATE_RESPONSE_WAIT
         };
         match tokio::time::timeout(response_wait, rx).await {
             Ok(Ok(response)) => {

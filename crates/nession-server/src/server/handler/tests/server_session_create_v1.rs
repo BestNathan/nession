@@ -632,9 +632,8 @@ async fn ambiguous_duplicate_disconnect_without_profiles_preserves_the_existing_
 
 /// #3344 SC-01: the 30s deadline is the other ambiguous outcome. It uses the
 /// same ownership fence and must preserve the live Session's binding.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn ambiguous_duplicate_timeout_preserves_the_existing_binding() {
-    tokio::time::resume();
     let mut h = handler_with_online_agent().await;
     h.env_service
         .store
@@ -648,9 +647,7 @@ async fn ambiguous_duplicate_timeout_preserves_the_existing_binding() {
         .unwrap();
     bind_for_test(&h, "a1:dev", &[env_file("a.env")]).await;
 
-    tokio::time::pause();
     let reply = create_then_timeout(&mut h, "dev", json!([env_file("b.env")])).await;
-    tokio::time::resume();
 
     assert_eq!(reply["payload"]["success"], false);
     assert!(reply["payload"]["error"]
@@ -666,9 +663,8 @@ async fn ambiguous_duplicate_timeout_preserves_the_existing_binding() {
 
 /// #3344 SC-01: an empty-profile duplicate timeout must not clear the live
 /// Session's binding.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn ambiguous_duplicate_timeout_without_profiles_preserves_the_existing_binding() {
-    tokio::time::resume();
     let mut h = handler_with_online_agent().await;
     h.env_service
         .store
@@ -677,9 +673,7 @@ async fn ambiguous_duplicate_timeout_without_profiles_preserves_the_existing_bin
         .unwrap();
     bind_for_test(&h, "a1:dev", &[env_file("a.env")]).await;
 
-    tokio::time::pause();
     let reply = create_then_timeout(&mut h, "dev", json!([])).await;
-    tokio::time::resume();
 
     assert_eq!(reply["payload"]["success"], false);
     assert_live_binding(
@@ -712,9 +706,8 @@ async fn ambiguous_new_create_disconnect_applies_the_staged_binding() {
 }
 
 /// #3344 SC-02: the same recovery applies under the create deadline.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn ambiguous_new_create_timeout_applies_the_staged_binding() {
-    tokio::time::resume();
     let mut h = handler_with_online_agent().await;
     h.env_service
         .store
@@ -722,9 +715,7 @@ async fn ambiguous_new_create_timeout_applies_the_staged_binding() {
         .await
         .unwrap();
 
-    tokio::time::pause();
     let reply = create_then_timeout(&mut h, "fresh", json!([env_file("b.env")])).await;
-    tokio::time::resume();
 
     assert_eq!(reply["payload"]["success"], false);
     assert_live_binding(
