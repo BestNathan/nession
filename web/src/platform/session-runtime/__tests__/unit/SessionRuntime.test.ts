@@ -944,6 +944,115 @@ describe('SessionRuntime', () => {
     }
   });
 
+  it('waits for the credential issuer instead of consuming candidates when the Server WS is down (#3358 SC-07)', async () => {
+    vi.useFakeTimers();
+    try {
+      const attachInfo: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token_expires_at: new Date(Date.now() + 61_000).toISOString(),
+      };
+      const fresh: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token: 'fresh-token',
+        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      const requestFreshAttach = vi.fn()
+        .mockRejectedValueOnce(new Error('Connection lost'))
+        .mockResolvedValue(fresh);
+      const serverConnection = makeRelayServerConnection('disconnected');
+      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach, serverConnection }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.getSnapshot().phase).toBe('attached');
+
+      // The Agent socket is lost; its next dial needs a renewed credential, but
+      // the Server WS is down so the issuer cannot answer.
+      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+      await vi.advanceTimersByTimeAsync(1_100);
+      await flushMicrotasks();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+
+      // Issuer unavailable is not an Agent endpoint failure: the same route and
+      // Session stay active, no candidate was spent, and Relay was not chosen.
+      expect(rt.activeUrl).toBe('ws://a/ws');
+      expect(rt.getSnapshot().forcedRelay).toBe(false);
+
+      // The Server WS authenticates again: the runtime wakes and dials with the
+      // freshly issued credential.
+      serverConnection.emit('connected');
+      rt.resumeAfterServerAuthenticated();
+      await flushMicrotasks();
+      await flushMicrotasks();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+      expect(lastWs().url).toContain('token=fresh-token');
+      await openWs();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.getSnapshot().phase).toBe('attached');
+      expect(rt.activeUrl).toBe('ws://a/ws');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reissues once after an Agent identity rejection; a repeated rejection follows the candidate policy (#3358 SC-08)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fresh: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token: 'fresh-token',
+        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      const requestFreshAttach = vi.fn().mockResolvedValue(fresh);
+      const rt = new SessionRuntime(makeConfig({
+        attachInfo: makeAttachInfo(),
+        requestFreshAttach,
+        serverConnection: makeRelayServerConnection('connected'),
+      }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.getSnapshot().phase).toBe('attached');
+
+      // Lose the socket; its first recovery dial is explicitly refused by the
+      // Agent's identity handshake.
+      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+      await vi.advanceTimersByTimeAsync(1_100);
+      await flushMicrotasks();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+      const firstRejected = wsInstances.length;
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      answerPending('client.auth', 'client.auth', { status: 'failed', message: 'no' });
+      await drainHandshake();
+
+      // One retry is allowed, and it must acquire a fresh credential first.
+      await vi.advanceTimersByTimeAsync(2_100);
+      await flushMicrotasks();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+      expect(wsInstances.length).toBe(firstRejected + 1);
+
+      // The retry is refused again: this is a real refusal, so the ordinary
+      // candidate policy advances instead of minting forever.
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      answerPending('client.auth', 'client.auth', { status: 'failed', message: 'no' });
+      await drainHandshake();
+      expect(rt.activeUrl).toBe('ws://b/ws');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('builds no agent API when the plan carries no addresses (#1430)', () => {
     // An empty plan is a resolved answer now: there is no "not ready" state
     // left to wait in, so it means the advertisement named no candidate and

@@ -1,6 +1,7 @@
 import { ProtocolDirectory } from '@/platform/protocol';
-import { MessageRouterImpl } from './MessageRouter';
+import { MessageRouterImpl, RequestTimeoutError } from './MessageRouter';
 import type {
+  TransportDiagnostic,
   TransportPlugin,
   ConnectionState,
   HandshakeSurface,
@@ -204,7 +205,7 @@ export class WebSocketService implements PluginSurface {
       this.rejectConnect = null;
       const failure = error instanceof Error ? error : new Error(String(error));
       if (!this.disposed && !this.userClosed) {
-        if (attempt === 0) {
+        if (attempt === 0 && this.options.reconnectOnInitialFailure !== true) {
           this.router.failPending(failure);
           this.rejectWaiters(failure);
           this.setState('disconnected');
@@ -374,7 +375,7 @@ export class WebSocketService implements PluginSurface {
     return this.waitForConnection(timeoutMs).then(() => {
       const remaining = timeoutMs - (Date.now() - startedAt);
       if (remaining <= 0) {
-        return Promise.reject(new Error(`Request timeout: ${type}`));
+        return Promise.reject(new RequestTimeoutError(type));
       }
       // not-protocol: the pass-through; callers name the wire.
       return this.router.request<T>(type, payload, { timeoutMs: remaining });
@@ -445,78 +446,8 @@ export class WebSocketService implements PluginSurface {
         ws.close();
         return;
       }
-      const handshake = this.options.handshake;
-      if (!handshake) {
-        // Nothing gates readiness, so the socket *is* the connection: open is
-        // established, and only here may the reconnect budget reset.
-        this.reconnectAttempt = 0;
-        this.reportedRouteExhaustion = false;
-        this.setState('connected');
-        this.connectPromise = null;
-        this.rejectConnect = null;
-        resolve();
-        return;
-      }
-
-      // Readiness gate: stay 'connecting' until the handshake completes.
-      // The surface's request() bypasses the state gate — the socket is
-      // already OPEN and waiting on 'connected' would self-deadlock.
-      const surface: HandshakeSurface = {
-        send: (type, payload) => {
-          this.router.send({
-            msg_type: type,
-            id: this.generateMessageId(),
-            timestamp: Date.now(),
-            payload,
-          });
-        },
-        request: <T>(type: string, payload: Record<string, unknown>, options?: RequestOptions) =>
-          // not-protocol: the pass-through; callers name the wire.
-          this.router.request<T>(type, payload, options),
-      };
-      handshake(surface).then(() => {
-        // The socket that ran this handshake must still be the live one.
-        // The generation guard covers a superseded physical socket; the
-        // readyState guard covers a loss before the reconnect timer fired.
-        if (
-          this.generation !== myGeneration
-          || this.ws !== ws
-          || ws.readyState !== WebSocket.OPEN
-        ) {
-          return;
-        }
-        // Established — the handshake is what proves it, so this is the only
-        // place a reconnect budget may reset. Resetting in ws.onopen instead
-        // let a socket that opened but never authenticated re-arm itself on
-        // every retry, so the budget never ran out (#692).
-        this.reconnectAttempt = 0;
-        // The route is back, so the reported exhaustion is spent too: a later
-        // loss may report again.
-        this.reportedRouteExhaustion = false;
-        this.connectPromise = null;
-        this.rejectConnect = null;
-        this.setState('connected');
-        resolve();
-      }).catch((error) => {
-        if (this.generation !== myGeneration) {
-          return;
-        }
-        this.connectPromise = null;
-        this.rejectConnect = null;
-        reject(error instanceof Error ? error : new Error(String(error)));
-        // Only a refusal from a socket that is still live settles here. If the
-        // socket died while the handshake was in flight, its onclose already
-        // ran the loss path — retrying there is legitimate, and overriding it
-        // would strand the retry timer behind a 'disconnected' state.
-        if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
-          this.options.onHandshakeRejected?.(error instanceof Error ? error : new Error(String(error)));
-          // The owner may dispose the service on explicit auth rejection.
-          if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
-            this.teardownSocket();
-            this.failConnection();
-          }
-        }
-      });
+      this.diagnose({ event: 'socket-open', generation: myGeneration });
+      this.runHandshake(ws, myGeneration, resolve, reject);
     };
 
     ws.onmessage = (event) => {
@@ -540,16 +471,23 @@ export class WebSocketService implements PluginSurface {
         return;
       }
       const error = new Error('WebSocket connection failed');
+      this.diagnose({ event: 'socket-error', generation: myGeneration });
       if (this.connectPromise) {
         this.connectPromise = null;
         this.rejectConnect = null;
         reject(error);
-        // An initial dial error is terminal until the user explicitly retries.
-        // An error on an *already scheduled reconnect*, however, is another
-        // failed transport attempt. Without the same loss path as onclose, an
-        // offline browser's onerror can silently cancel the entire backoff
-        // chain before the network returns (#1213 SC-15).
-        const retrying = this.reconnectAttempt > 0;
+        // An initial dial error is normally terminal until the user explicitly
+        // retries: a route whose first socket cannot open is a dead candidate,
+        // and the address policy must be allowed to advance (#1926). A caller
+        // with no next candidate — the app's Server connection — opts into
+        // recovery here instead (#3358 SC-02).
+        //
+        // An error on an *already scheduled reconnect* is another failed
+        // transport attempt. Without the same loss path as onclose, an offline
+        // browser's onerror can silently cancel the entire backoff chain
+        // before the network returns (#1213 SC-15).
+        const retrying = this.reconnectAttempt > 0
+          || this.options.reconnectOnInitialFailure === true;
         this.teardownSocket(); // also detaches onclose: never double-count loss
         if (retrying) {
           this.handleSocketLoss();
@@ -563,10 +501,20 @@ export class WebSocketService implements PluginSurface {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (this.generation !== myGeneration || this.userClosed) {
         return;
       }
+      // Bounded, redacted close facts: code/wasClean say whether the peer sent
+      // a close frame or the transport died, which is what distinguishes a
+      // Server-initiated end from a network loss (#3358 SC-05).
+      this.diagnose({
+        event: 'socket-close',
+        generation: myGeneration,
+        code: event?.code,
+        wasClean: event?.wasClean,
+        reason: event?.reason?.slice(0, 200),
+      });
       if (this.connectPromise) {
         this.connectPromise = null;
         this.rejectConnect = null;
@@ -574,6 +522,109 @@ export class WebSocketService implements PluginSurface {
       }
       this.handleSocketLoss();
     };
+  }
+
+  /**
+   * Run (or skip) the readiness handshake for a freshly opened socket.
+   *
+   * Split out of `openSocket` so the event wiring stays readable: this owns
+   * the readiness gate, the generation fences, and the refusal/loss split
+   * (#3358 SC-02).
+   */
+  private runHandshake(
+    ws: WebSocket,
+    myGeneration: number,
+    resolve: () => void,
+    reject: (error: Error) => void,
+  ): void {
+    const handshake = this.options.handshake;
+    if (!handshake) {
+      // Nothing gates readiness, so the socket *is* the connection: open is
+      // established, and only here may the reconnect budget reset.
+      this.reconnectAttempt = 0;
+      this.reportedRouteExhaustion = false;
+      this.setState('connected');
+      this.connectPromise = null;
+      this.rejectConnect = null;
+      resolve();
+      return;
+    }
+
+    // Readiness gate: stay 'connecting' until the handshake completes. The
+    // surface's request() bypasses the state gate — the socket is already OPEN
+    // and waiting on 'connected' would self-deadlock.
+    const surface: HandshakeSurface = {
+      send: (type, payload) => {
+        this.router.send({
+          msg_type: type,
+          id: this.generateMessageId(),
+          timestamp: Date.now(),
+          payload,
+        });
+      },
+      request: <T>(type: string, payload: Record<string, unknown>, options?: RequestOptions) =>
+        // not-protocol: the pass-through; callers name the wire.
+        this.router.request<T>(type, payload, options),
+    };
+    handshake(surface).then(() => {
+      // The socket that ran this handshake must still be the live one. The
+      // generation guard covers a superseded physical socket; the readyState
+      // guard covers a loss before the reconnect timer fired.
+      if (
+        this.generation !== myGeneration
+        || this.ws !== ws
+        || ws.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+      // Established — the handshake is what proves it, so this is the only
+      // place a reconnect budget may reset. Resetting in ws.onopen instead let
+      // a socket that opened but never authenticated re-arm itself on every
+      // retry, so the budget never ran out (#692).
+      this.reconnectAttempt = 0;
+      // The route is back, so the reported exhaustion is spent too: a later
+      // loss may report again.
+      this.reportedRouteExhaustion = false;
+      this.connectPromise = null;
+      this.rejectConnect = null;
+      this.setState('connected');
+      resolve();
+    }).catch((error) => {
+      if (this.generation !== myGeneration) {
+        return;
+      }
+      this.connectPromise = null;
+      this.rejectConnect = null;
+      const failure = error instanceof Error ? error : new Error(String(error));
+      reject(failure);
+      // Only a failure from a socket that is still live settles here. If the
+      // socket died while the handshake was in flight, its onclose already ran
+      // the loss path — retrying there is legitimate, and overriding it would
+      // strand the retry timer behind a 'disconnected' state.
+      if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+        // A handshake that *rejects* is not automatically a refusal: the
+        // socket opened, but the answer may never have arrived (timeout,
+        // unresponsive peer). Only the handshake owner can tell those apart
+        // (#3358 SC-02); the historical default treats every rejection as a
+        // refusal (#692).
+        const refused = this.options.isHandshakeRefusal?.(failure) ?? true;
+        this.diagnose({
+          event: 'handshake-failure',
+          generation: myGeneration,
+          failureClass: refused ? 'auth-rejected' : 'transport',
+        });
+        this.teardownSocket();
+        if (refused) {
+          this.failConnection();
+          // The owner may dispose the service on explicit auth rejection.
+          this.options.onHandshakeRejected?.(failure);
+        } else {
+          // A timeout or unresponsive peer is a loss, not an answer: keep the
+          // logical connection recoverable through the ordinary loss path.
+          this.handleSocketLoss();
+        }
+      }
+    });
   }
 
   /**
@@ -600,6 +651,7 @@ export class WebSocketService implements PluginSurface {
     const maxAttempts = this.options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     const spent = this.reconnectAttempt >= maxAttempts;
     const persistent = this.options.persistentReconnect === true;
+    const reportExhaustion = this.options.reportExhaustion !== false;
 
     if (spent && !persistent) {
       console.error('Max reconnection attempts reached');
@@ -626,7 +678,7 @@ export class WebSocketService implements PluginSurface {
     // `failed`, so the next successful handshake re-attaches on its own).
     // #1263 chose silence because `failed` was a one-way door then; it is not
     // one now, which is what makes reporting this safe.
-    if (spent && !this.reportedRouteExhaustion) {
+    if (spent && persistent && reportExhaustion && !this.reportedRouteExhaustion) {
       this.reportedRouteExhaustion = true;
       this.setState('disconnected');
     }
@@ -637,9 +689,14 @@ export class WebSocketService implements PluginSurface {
     // restarting or away.
     if (!spent) {
       this.reconnectAttempt += 1;
-      // Only the fast phase is "reconnecting" once the verdict above is on
-      // record: re-asserting it here would overwrite the report in the same
-      // tick, which is the silence this exists to end (#1263).
+    }
+    // Only the fast phase is "reconnecting" once the verdict above is on
+    // record: re-asserting it here would overwrite the report in the same
+    // tick, which is the silence this exists to end (#1263). A caller that
+    // suppressed the exhaustion report has no verdict to preserve and must
+    // stay `reconnecting` for the whole tail, so its shell keeps the session
+    // surface instead of falling back to Login (#3358).
+    if (!spent || (persistent && !reportExhaustion)) {
       this.setState('reconnecting');
     }
     const baseDelay = this.options.reconnectBaseDelay ?? DEFAULT_RECONNECT_BASE_DELAY;
@@ -651,6 +708,11 @@ export class WebSocketService implements PluginSurface {
         ? `Reconnect budget spent; still probing every ${delay}ms`
         : `Scheduling reconnect in ${delay}ms (attempt ${this.reconnectAttempt})`,
     );
+    this.diagnose({
+      event: 'reconnect-scheduled',
+      generation: this.generation,
+      delayMs: delay,
+    });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.disposed && !this.userClosed) {
@@ -688,6 +750,22 @@ export class WebSocketService implements PluginSurface {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  /**
+   * Emit a redacted connection fact. Diagnostics are observational: a consumer
+   * callback that throws must never break the transport it is describing.
+   */
+  private diagnose(diagnostic: Omit<TransportDiagnostic, 'attempt'>): void {
+    const callback = this.options.onDiagnostic;
+    if (!callback) {
+      return;
+    }
+    try {
+      callback({ attempt: this.reconnectAttempt, ...diagnostic });
+    } catch {
+      // Diagnostics are best-effort and must stay out of the recovery path.
     }
   }
 

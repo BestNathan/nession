@@ -11,6 +11,19 @@ interface MessageRouterDeps {
   generateId: () => string;
 }
 
+/**
+ * A correlated request was not answered before its deadline.
+ *
+ * Typed so callers can distinguish "the peer is unresponsive" from an explicit
+ * refusal without matching error text (#3358 SC-02/SC-08).
+ */
+export class RequestTimeoutError extends Error {
+  constructor(readonly wire: string) {
+    super(`Request timeout: ${wire}`);
+    this.name = 'RequestTimeoutError';
+  }
+}
+
 export class MessageRouterImpl {
   private readonly handlers = new Map<string, Set<(payload: unknown, raw: SocketMessage) => void>>();
   private readonly pending = new Map<string, Pending>();
@@ -51,7 +64,7 @@ export class MessageRouterImpl {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Request timeout: ${type}`));
+        reject(new RequestTimeoutError(type));
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       try {

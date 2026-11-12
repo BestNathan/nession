@@ -3,6 +3,8 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
@@ -636,6 +638,10 @@ where
         super::execution::LANE_LABEL,
     );
 
+    // A bounded, credential-free classification of *why* this connection ends.
+    // It is logged once below and is what makes a browser's close event
+    // correlatable with the Server's own view (#3358 SC-05).
+    let mut close_reason = "peer-closed";
     while let Some(frame) = read.next().await {
         let frame = frame?;
 
@@ -646,6 +652,7 @@ where
         // still in flight is ended with the connection, further down.
         let Message::Text(text) = frame else {
             if let HandlerAction::Close = handler.handle_message(frame).await? {
+                close_reason = "client-close";
                 break;
             }
             claim_agent_channel(&handler, &command_broker, &sender).await;
@@ -719,6 +726,7 @@ where
                 // exit so the cleanup below still runs, instead of returning
                 // through `?` and skipping it.
                 if sender.send_reply(response).await.is_err() {
+                    close_reason = "outbound-closed";
                     break;
                 }
             }
@@ -790,11 +798,27 @@ where
                         // history bootstrap. A client that asked to stop, or one
                         // whose socket already ended, takes `Ended` instead.
                         warn!(
+                            session = %session_name,
+                            close_reason = "relay-agent-ended",
                             "Relay for session '{}' ended: the Agent's terminal stream ended \
                              while the client was still attached; closing the connection so it \
                              re-attaches",
                             session_name
                         );
+                        close_reason = "relay-agent-ended";
+                        // Tell the browser *why* before dropping the socket. The
+                        // queue is draining here (the client is still reading),
+                        // and the bound keeps a wedged writer from delaying the
+                        // close the reconnect depends on. A client that cannot
+                        // receive it still sees 1006 and reconnects.
+                        let _ = tokio::time::timeout(
+                            terminal_stall_grace,
+                            sender.send_reply(Message::Close(Some(CloseFrame {
+                                code: CloseCode::Normal,
+                                reason: "relay-agent-ended".into(),
+                            }))),
+                        )
+                        .await;
                         break;
                     }
                     Ok(RelayEnd::ClientStalled) => {
@@ -812,20 +836,30 @@ where
                         // the one that never gets written. Breaking here drops
                         // the socket, which is the same fact without the wait.
                         warn!(
+                            session = %session_name,
+                            close_reason = "relay-client-stalled",
                             "Relay for session '{}' ended: the client stopped draining its \
                              terminal; closing the connection",
                             session_name
                         );
+                        // Deliberately no Close frame: the queue this client is
+                        // not draining is exactly where it would wait. The
+                        // browser observes 1006; this log is the Server-side
+                        // reason it correlates with (#3358 SC-05).
+                        close_reason = "relay-client-stalled";
                         break;
                     }
                     Err(e) => return Err(e),
                 }
             }
             HandlerAction::Close => {
+                close_reason = "client-close";
                 break;
             }
         }
     }
+
+    info!(close_reason, "WebSocket connection ended");
 
     // End the work still in flight, before anything below waits on a writer it
     // may be parked in.

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useAppConnection } from '@/app/useAppConnection';
 import { useVisibilityReconnect } from '@/app/useVisibilityReconnect';
 import * as auth from '@/app/auth';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import type { SocketMessage } from '@/platform/socket/types';
 
@@ -114,9 +115,21 @@ describe('useAppConnection', () => {
     expect(vi.mocked(auth.setToken)).toHaveBeenCalledWith('stored-token', true);
   });
 
+  it('signals authenticated-ready to waiting Session runtimes on every Server authentication (#3358 SC-07)', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('stored-token');
+    const resumeAuthenticated = vi.spyOn(sessionRuntimeRegistry, 'resumeServerAuthenticated');
+
+    const { result } = renderHook(() => useAppConnection());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await completeHandshake(MockWebSocket.instances[0]);
+
+    await waitFor(() => expect(result.current.connectionStatus).toBe('connected'));
+    expect(resumeAuthenticated).toHaveBeenCalled();
+    resumeAuthenticated.mockRestore();
+  });
+
   it('surfaces reconnecting when a connected transport drops', async () => {
     vi.mocked(auth.getToken).mockReturnValue('stored-token');
-
     const { result, unmount } = renderHook(() => useAppConnection());
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     const socket = MockWebSocket.instances[0];
@@ -139,7 +152,7 @@ describe('useAppConnection', () => {
     expect(socket.close).toHaveBeenCalled();
   });
 
-  it('keeps a valid stored token after a network connect failure', async () => {
+  it('keeps a valid stored token and keeps retrying after a network connect failure (#3358 SC-02)', async () => {
     vi.mocked(auth.getToken).mockReturnValue('stored-token');
     const { result } = renderHook(() => useAppConnection());
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
@@ -148,7 +161,11 @@ describe('useAppConnection', () => {
       MockWebSocket.instances[0].error();
     });
 
-    await waitFor(() => expect(result.current.connectionStatus).toBe('disconnected'));
+    // A cold-start network failure is not a dead candidate or a bad token:
+    // the Server connection enters its long-tail recovery instead of falling
+    // back to Login.
+    await waitFor(() => expect(result.current.connectionStatus).toBe('reconnecting'));
+    expect(result.current.isRestoringSession).toBe(true);
     expect(vi.mocked(auth.clearToken)).not.toHaveBeenCalled();
   });
 

@@ -115,4 +115,50 @@ describe('mobile foreground resume (#1213)', () => {
     unmount();
     service.dispose();
   });
+
+  it('probes an always-visible half-open transport on the low-frequency interval (#3358 SC-03)', async () => {
+    vi.useFakeTimers();
+    const { service, socket } = await connectedService();
+    const { unmount } = renderHook(() => useVisibilityReconnect(true, service));
+
+    // No lifecycle event: the page simply stayed visible.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(socket.send).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(socket.send.mock.calls[0][0] as string) as SocketMessage;
+    expect(request.msg_type).toBe('server.info');
+
+    // The peer never answers: the generation-fenced probe reports the socket
+    // unresponsive and the existing loss path replaces it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001);
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    await act(async () => { await Promise.resolve(); });
+    expect(service.connectionState).toBe('connected');
+
+    // A late answer on the replaced socket must not disturb the new one.
+    socket.serverClose();
+    await act(async () => { await Promise.resolve(); });
+    expect(service.connectionState).toBe('connected');
+    expect(MockWebSocket.instances).toHaveLength(2);
+    unmount();
+    service.dispose();
+  });
+
+  it('does not probe while the page is hidden (#3358 SC-03)', async () => {
+    vi.useFakeTimers();
+    const { service, socket } = await connectedService();
+    visibility = 'hidden';
+    const { unmount } = renderHook(() => useVisibilityReconnect(true, service));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(socket.send).not.toHaveBeenCalled();
+    unmount();
+    service.dispose();
+  });
 });
