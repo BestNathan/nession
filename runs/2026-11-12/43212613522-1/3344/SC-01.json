@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ddb593f8de873e0274e994018023a64448256919f8602e5ddb30253ab62f07ca",
+  "run_id": 43212613522,
+  "run_attempt": 1,
+  "issue": 3344,
+  "criterion": "SC-01",
+  "criterion_text": "An existing Session with Profile A survives same-name Profile B **and empty-profile** create attempts whose Agent reply times out or disconnects, preserving the original Session instance, desired binding and revision.",
+  "stage": "staging",
+  "target_sha": "0c25065fb9a6a435a90019b77725c4ff03fa4f5f",
+  "contract_sha256": "c3d4e383fc01993fe443d32264017171fbf1e0b2a46125afcbd131a13b9c2c81",
+  "case_revision": "0c25065fb9a6a435a90019b77725c4ff03fa4f5f",
+  "case_tree_sha": "30d7901512cc99f25a41114071bf53d7b55503c3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T11:53:06.001Z",
+  "finished_at": "2026-11-12T11:53:52.494Z",
+  "duration_ms": 46493,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Ambiguous duplicate create replies preserve the live Session instance, desired binding and revision",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0c25065fb9a6a435a90019b77725c4ff03fa4f5f: ambiguous_duplicate_disconnect_preserves_the_existing_binding; ambiguous_duplicate_disconnect_without_profiles_preserves_the_existing_binding; ambiguous_duplicate_timeout_preserves_the_existing_binding; ambiguous_duplicate_timeout_without_profiles_preserves_the_existing_binding each Passed in the target checkout"
+        }
+      ],
+      "duration_ms": 40580,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43212613522,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0c25065fb9a6a435a90019b77725c4ff03fa4f5f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43212613522",
+    "record_path": "runs/2026-11-12/43212613522-1/3344/SC-01.json",
+    "source_result_sha256": "86667da211f32f2878b793e038d6e83da97ceb05e2ac6281d185b27820438ef1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43212613522-1",
+    "sha256": "86667da211f32f2878b793e038d6e83da97ceb05e2ac6281d185b27820438ef1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43212613522",
+    "durability": "time-limited; object archival not configured"
+  }
+}
