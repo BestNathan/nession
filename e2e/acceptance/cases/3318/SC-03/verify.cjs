@@ -45,6 +45,8 @@ run(({ evidence }) => {
   const caseSha = targetSha();
   const release = json('/actions/runs/' + RELEASE_RUN);
   assert.equal(release.id, RELEASE_RUN);
+  assert.equal(release.repository?.full_name, REPO);
+  assert.equal(release.head_repository?.full_name, REPO);
   assert.equal(release.run_attempt, 1);
   assert.equal(release.path, '.github/workflows/release-staging.yml');
   assert.equal(release.head_sha, SOURCE_SHA);
@@ -55,6 +57,8 @@ run(({ evidence }) => {
 
   const identity = json('/actions/runs/' + IDENTITY_RUN);
   assert.equal(identity.id, IDENTITY_RUN);
+  assert.equal(identity.repository?.full_name, REPO);
+  assert.equal(identity.head_repository?.full_name, REPO);
   assert.equal(identity.run_attempt, 1);
   assert.equal(identity.path, '.github/workflows/deploy-identity.yml');
   assert.equal(identity.head_branch, 'main');
