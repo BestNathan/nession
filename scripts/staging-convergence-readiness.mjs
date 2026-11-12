@@ -420,7 +420,8 @@ function selfTest(){
     associations:longAssociations.slice(0,-1)}).reason,'INCOMPLETE_PR_PROVENANCE',
     'partial PR inventory must remain a blocker in large histories');
   assert.equal(evaluatePromotion({...largePromotion,
-    firstParentCommits:[...longHistory,longHistory.at(-1)]}).reason,
+    firstParentCommits:[...longHistory,longHistory.at(-1)],
+    associations:[...longAssociations,longAssociations.at(-1)]}).reason,
     'INVALID_PR_PROVENANCE',
     'duplicate commit identities cannot be used to inflate authenticated history');
   assert.equal(evaluatePromotion({firstParentCommits:[a],
