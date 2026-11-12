@@ -51,7 +51,7 @@ export function GithubIssuesView({
       if (response.state === 'error') {
         throw asGithubError(response) ?? response;
       }
-      return { items: response.issues, nextCursor: response.nextCursor ?? null };
+      return { items: response.issues, nextCursor: response.next_cursor ?? null };
     },
     [filter],
   );
@@ -343,7 +343,7 @@ export function GithubIssueDetailBody({
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>#{issue.number}</p>
         <h2 className={chromeSansRole('title')}>{issue.title}</h2>
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-          {issue.state} · {issue.author.login} · updated {issue.updatedAt}
+          {issue.state} · {issue.author.login} · updated {issue.updated_at}
         </p>
       </header>
       {issue.labels.length > 0 ? (

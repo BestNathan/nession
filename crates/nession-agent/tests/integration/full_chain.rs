@@ -314,6 +314,16 @@ async fn test_client_connects_to_agent_via_p2p() {
         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(parsed["msg_type"], agent_msg_types::OK);
         assert!(parsed["payload"]["sessions"].is_array());
+        // Nession-owned transport fields are snake_case (#3371): the typed
+        // response's multi-word key must arrive under its contract spelling.
+        assert!(
+            parsed["payload"]["stale_agents"].is_array(),
+            "the P2P reply must carry `stale_agents`: {parsed}"
+        );
+        assert!(
+            parsed["payload"].get("staleAgents").is_none(),
+            "the retired camelCase key must not be on the P2P wire: {parsed}"
+        );
     } else {
         panic!("Expected text message");
     }

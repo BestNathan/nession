@@ -254,10 +254,10 @@ mod tests {
             upstream_gone: true,
         };
         let json = serde_json::to_value(&branch).unwrap();
-        assert_eq!(json["upstreamGone"], true);
+        assert_eq!(json["upstream_gone"], true);
         assert!(
-            json.get("upstream_gone").is_none(),
-            "the snake_case key must not be on the wire at all, got: {json}"
+            json.get("upstreamGone").is_none(),
+            "the retired camelCase key must not be on the wire at all, got: {json}"
         );
     }
 
@@ -273,7 +273,7 @@ mod tests {
         };
         let json = serde_json::to_value(&branch).unwrap();
         assert!(json.get("upstream").is_none());
-        assert!(json.get("upstream_gone").is_none());
-        assert_eq!(json["upstreamGone"], false);
+        assert_eq!(json["upstream_gone"], false);
+        assert!(json.get("upstreamGone").is_none());
     }
 }

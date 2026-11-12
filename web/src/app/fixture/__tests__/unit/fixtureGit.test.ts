@@ -105,7 +105,7 @@ describe('fixture git surface', () => {
     }
     expect(response.commit.oid).toBe(first.hash);
     expect(response.commit.subject).toBe(first.subject);
-    expect(response.commit.shortOid).toBe(first.shortHash);
+    expect(response.commit.short_oid).toBe(first.short_hash);
     // The detail's whole point since #1009/#1010 is that it shows what the
     // commit changed, so an empty file list would render the panel the old
     // "not shown here" note existed to explain.

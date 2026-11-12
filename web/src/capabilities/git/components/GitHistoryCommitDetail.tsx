@@ -55,9 +55,9 @@ export function GitHistoryCommitDetail({
       {c.body ? (
         <pre className={cn('whitespace-pre-wrap text-muted-foreground', chromeSansRole('metadata'))}>{c.body}</pre>
       ) : null}
-      {c.messageTruncated ? (
+      {c.message_truncated ? (
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-          Message truncated — {formatBytes(c.messageTruncatedBytes)} not read.
+          Message truncated — {formatBytes(c.message_truncated_bytes)} not read.
         </p>
       ) : null}
       <dl className={cn('grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1', chromeSansRole('metadata'))}>
@@ -68,8 +68,8 @@ export function GitHistoryCommitDetail({
         <dt className="text-muted-foreground">Author</dt>
         <dd className="truncate">{c.author}</dd>
         <dt className="text-muted-foreground">Date</dt>
-        <dd className="truncate" title={c.authorDate}>
-          {c.authorDate}
+        <dd className="truncate" title={c.author_date}>
+          {c.author_date}
         </dd>
         {c.decorations ? (
           <>
@@ -80,7 +80,7 @@ export function GitHistoryCommitDetail({
         {c.parents.length > 1 ? (
           <>
             <dt className="text-muted-foreground">Merge diff</dt>
-            <dd className="truncate">{c.mergeDiffParent.replace('_', ' ')}</dd>
+            <dd className="truncate">{c.merge_diff_parent.replace('_', ' ')}</dd>
           </>
         ) : null}
       </dl>
@@ -89,16 +89,16 @@ export function GitHistoryCommitDetail({
         <ul data-testid="git-commit-files" className="flex flex-col gap-0.5">
           {c.files.map((file) => (
             <ChangedFileRow
-              key={`${file.path}-${file.newPath ?? ''}`}
+              key={`${file.path}-${file.new_path ?? ''}`}
               file={file}
               selected={selectedFile === file.path}
               onSelect={() => onSelectFile(file.path)}
             />
           ))}
         </ul>
-        {c.filesTruncated ? (
+        {c.files_truncated ? (
           <p className={cn('mt-2 text-muted-foreground', chromeSansRole('metadata'))}>
-            File list truncated — {formatBytes(c.filesTruncatedBytes)} not read.
+            File list truncated — {formatBytes(c.files_truncated_bytes)} not read.
           </p>
         ) : null}
       </div>
@@ -115,7 +115,7 @@ function ChangedFileRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const label = file.newPath ? `${file.path} → ${file.newPath}` : file.path;
+  const label = file.new_path ? `${file.path} → ${file.new_path}` : file.path;
   return (
     <li>
       <button

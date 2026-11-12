@@ -43,7 +43,7 @@ const statusResponse = {
     unmerged: [],
   },
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
 } as const;
 
 describe('consumer contract resolution end to end', () => {

@@ -7,8 +7,8 @@ source "${GATE_DIR}/../lib/common.sh"
 GATE_ID='protocol-integrity'
 GATE_NAME='Protocol integrity'
 GATE_COMMAND='node scripts/protocol-gate.mjs'
-GATE_SUCCESS='all referenced protocol wires have valid producers/consumers and advertised units have callers'
-GATE_FAILURE='a protocol wire/unit is malformed, unowned, unanswered, unsent, or otherwise inconsistent'
+GATE_SUCCESS='all referenced protocol wires have valid producers/consumers, advertised units have callers, and Nession-owned transport fields are snake_case'
+GATE_FAILURE='a protocol wire/unit is malformed, unowned, unanswered, unsent, or a Nession-owned transport field is not snake_case'
 GATE_REPAIR='fix the canonical protocol owner/call site; do not suppress or shadow the finding'
 GATE_OWNER='scripts/protocol-gate.mjs + crates/nession-protocol + protocol consumers'
 

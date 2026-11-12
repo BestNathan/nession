@@ -51,6 +51,53 @@ identity.
 Message types therefore live on the contract as data, never as the only
 definition of a protocol.
 
+### Transport field names
+
+**Every Nession-owned object field that crosses a transport boundary is
+`snake_case`**, across WebSocket, HTTP and MCP: request, response,
+notification and control payload properties, envelope fields, typed error
+fields, nested objects, Nession MCP tool arguments/results, and Nession HTTP
+JSON and query names (#3371). A field name is part of the wire contract — a
+producer writing `originalPath` and a consumer reading `original_path` agree
+with themselves and disagree with each other, and the failure is a silent
+`undefined` a long way from either side.
+
+The rule is about **keys that cross the boundary**, not coding-language
+properties:
+
+- Protocol Unit ids, `msg_type`/wire names and operation names are identities,
+  not fields. They keep their lowercase/hyphen spelling (`git.create-commit`,
+  `claude-code.read`); this rule does not ban hyphens in ids.
+- Enum values, statuses and error-code values are not fields.
+- Rust/TS/React field names follow their language conventions internally.
+  A different internal spelling is allowed only behind an explicit typed
+  adapter that translates at the boundary.
+- Keys defined by an external protocol remain standard-compliant: MCP/JSON-RPC
+  `protocolVersion`, `jsonrpc`, `method`, `_meta`, `clientInfo`; HTTP standard
+  headers. Third-party GitHub API responses and Claude Code JSONL are external
+  inputs and are converted at their adapters.
+- Opaque provider maps are not renamed: kernel resource keys such as
+  `memory.max`, Git metadata, user-defined maps and arbitrary blobs.
+
+The canonical spelling is enforced by rule 6 of `scripts/protocol-gate.mjs`
+(the `protocol-integrity` Gate). It inspects the generated protocol bindings
+(the Web's actual projection, nested shapes included), `serde` field renames
+in the protocol contracts, and the hand-written Nession payload producers in
+the server/agent/client/MCP paths.
+
+#### Pre-release in-place normalization (#3371)
+
+These Nession communication contracts had **not been published** when the rule
+was adopted. The existing v1/v2 contracts were therefore corrected **in place**
+— including their fixtures and generated projections — with no new Contract
+Version, no version bump, no dual names and no compatibility alias. This was an
+owner-approved, coordinated pre-release normalization, not a new operation and
+not a claim of released-peer interoperability.
+
+This exception is exhausted once a contract has been published. From then on,
+renaming a transmitted field is a consumer-observable change and follows
+[Publish a new Contract Version](#publish-a-new-contract-version).
+
 ### One wire per operation
 
 **A request and its reply share the same wire name.** They are told apart by the
@@ -446,6 +493,11 @@ permission change that alters observable behaviour.
 Do **not** upgrade for a bug fix, an internal refactor, a new optional field
 whose absence preserves the old meaning, or a new response field consumers
 already tolerate.
+
+The only in-place field rename is the owner-approved **pre-release**
+normalization documented in [Transport field names](#transport-field-names);
+it applies to unpublished contracts only and does not weaken this rule once a
+contract has a released peer.
 
 Add the new contract **beside** the old one: a new `v2.rs` next to `v1.rs`,
 both listed in the family's `mod.rs`. Never edit a shipped version in place to

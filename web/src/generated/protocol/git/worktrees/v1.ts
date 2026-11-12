@@ -23,7 +23,7 @@ export const VERSION = 1;
 
 export type WorktreesRequestV1 = { session: string, };
 export type WorktreesOkV1 = { worktrees: Worktrees, };
-export type Worktrees = { worktrees: Array<Worktree>, truncatedBytes: number, truncated: boolean, };
+export type Worktrees = { worktrees: Array<Worktree>, truncated_bytes: number, truncated: boolean, };
 export type Worktree = { 
 /**
  * Absolute path as git records it.

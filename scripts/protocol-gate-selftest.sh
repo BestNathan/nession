@@ -473,6 +473,76 @@ pub const CONTROL_SILENT: &str = "control.silent";
 RS
 expect_fail "rule 5 — a control wire no runtime carries" '`control.silent` has no branch here'
 
+# ── 6. Nession-owned transport field names are snake_case ──────────────────
+# The rule reads three producers, so each is injected on its own: the clean
+# fixture above proves the positive side, and these prove the negative side is
+# still detected where it can actually appear.
+reset_fixture
+cat >> "$WORK/tree/web/src/generated/protocol/core/alpha-one/v1.ts" <<'TS'
+export type CamelShape = { originalPath: string, truncatedBytes: number, };
+TS
+expect_fail "rule 6 — a generated binding with a camelCase field" '`originalPath` is not a snake_case transport field'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-git/src/protocol/thing"
+cat > "$WORK/tree/crates/nession-git/src/protocol/thing/v1.rs" <<'RS'
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThingV1 {
+    pub original_path: String,
+}
+RS
+expect_fail "rule 6 — a struct-wide camelCase serde rule" '`rename_all = "camelCase"` is not snake_case on a struct'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-git/src/protocol/thing"
+cat > "$WORK/tree/crates/nession-git/src/protocol/thing/v1.rs" <<'RS'
+#[derive(Debug, serde::Serialize)]
+pub struct ThingV1 {
+    #[serde(rename = "originalPath")]
+    pub original_path: String,
+}
+RS
+expect_fail "rule 6 — a field renamed to camelCase" '`originalPath` is not a snake_case transport field'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-git/src/protocol/thing"
+cat > "$WORK/tree/crates/nession-git/src/protocol/thing/v1.rs" <<'RS'
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThingKindV1 {
+    FirstKind,
+}
+RS
+expect_pass "rule 6 — an enum's rename_all values are out of scope"
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-server/src/server"
+cat > "$WORK/tree/crates/nession-server/src/server/handwritten.rs" <<'RS'
+pub fn payload() -> serde_json::Value {
+    serde_json::json!({ "originalPath": "a", "nested": { "truncatedBytes": 0 } })
+}
+RS
+expect_fail "rule 6 — a hand-written payload with camelCase keys" '`originalPath` is not a snake_case transport field'
+
+# The positive side of the same scan: keys defined by an external protocol, an
+# opaque provider map, and a protocol-id-keyed map are not Nession fields and
+# must not be renamed or reported.
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-server/src/server"
+cat > "$WORK/tree/crates/nession-server/src/server/handwritten.rs" <<'RS'
+pub fn payload() -> serde_json::Value {
+    serde_json::json!({
+        "protocolVersion": "2025-03-26",
+        "clientInfo": { "name": "client", "version": "1" },
+        "_meta": {},
+        "protocols": { "git.status": { "versions": [1] } },
+        "resource": { "cgroup_v2": { "memory.max": "1024" } }
+    })
+}
+RS
+expect_pass "rule 6 — external-standard keys and opaque maps are not fields"
+
 # ── 3. The transitional alias path ──────────────────────────────────────────
 # Rust refuses a use of the missing module, so the interesting case is the
 # module coming back — which the compiler would accept.

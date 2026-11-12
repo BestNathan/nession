@@ -419,7 +419,7 @@ fn a_reviewed_stage_is_applied_and_returns_the_new_state() {
     let staged = run(
         &ext,
         "git.stage",
-        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
     )
     .unwrap();
 
@@ -431,6 +431,58 @@ fn a_reviewed_stage_is_applied_and_returns_the_new_state() {
     );
     assert_eq!(staged["status"]["modified"][0]["path"], "a.txt");
     assert_eq!(staged["status"]["modified"][0]["staged"], true);
+}
+
+#[test]
+fn a_mutation_response_uses_the_contract_snake_case_keys() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap();
+    let staged = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
+    )
+    .unwrap();
+
+    assert_eq!(staged["state"], "ok", "got {staged}");
+    assert!(
+        staged.get("truncated_bytes").is_some(),
+        "the contract's snake_case key must be on the wire: {staged}"
+    );
+    assert!(
+        staged.get("truncatedBytes").is_none(),
+        "the retired camelCase key must not be on the wire: {staged}"
+    );
+}
+
+#[test]
+fn the_retired_camel_case_request_spelling_is_refused() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap();
+
+    // The typed boundary rejects the old spelling instead of silently
+    // ignoring it: it never reaches the operation, so nothing is staged.
+    let refused = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+    )
+    .unwrap();
+    assert_eq!(refused["state"], "refused", "got {refused}");
+    let message = refused["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("expected_snapshot"),
+        "the refusal must name the contract key: {message}"
+    );
+    let after = status_v2(&ext);
+    assert_eq!(after["status"]["modified"][0]["staged"], false);
 }
 
 #[test]
@@ -447,7 +499,7 @@ fn a_stale_stage_is_refused_with_the_current_state() {
     let response = run(
         &ext,
         "git.stage",
-        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
     )
     .unwrap();
 
@@ -467,7 +519,7 @@ fn unstage_keeps_the_worktree_bytes() {
     let staged = run(
         &ext,
         "git.stage",
-        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
     )
     .unwrap();
     let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
@@ -475,7 +527,7 @@ fn unstage_keeps_the_worktree_bytes() {
     let unstaged = run(
         &ext,
         "git.unstage",
-        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": staged_token}),
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": staged_token}),
     )
     .unwrap();
 
@@ -497,16 +549,16 @@ fn a_commit_creates_one_commit_and_a_repeated_request_id_replays_it() {
     let staged = run(
         &ext,
         "git.stage",
-        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
     )
     .unwrap();
     let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
 
     let request = json!({
         "session": "agent:s",
-        "expectedSnapshot": staged_token,
+        "expected_snapshot": staged_token,
         "message": "feat: change a",
-        "requestId": "user-commit-1"
+        "request_id": "user-commit-1"
     });
     let first = run(&ext, "git.create-commit", request.clone()).unwrap();
     assert_eq!(first["state"], "ok", "got {first}");
@@ -547,7 +599,7 @@ fn a_commit_without_an_identity_says_so_specifically() {
     let staged = run(
         &ext,
         "git.stage",
-        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
     )
     .unwrap();
     let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
@@ -557,9 +609,9 @@ fn a_commit_without_an_identity_says_so_specifically() {
         "git.create-commit",
         json!({
             "session": "agent:s",
-            "expectedSnapshot": staged_token,
+            "expected_snapshot": staged_token,
             "message": "feat: change",
-            "requestId": "identity-test"
+            "request_id": "identity-test"
         }),
     )
     .unwrap();

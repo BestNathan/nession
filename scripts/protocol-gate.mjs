@@ -42,6 +42,14 @@
 //      has to come back "all of them" or the wire is in the wrong category.
 //      It is also the only thing about the category that is mechanically
 //      checkable — see *The two categories that are not operations* below.
+//   6. Every Nession-owned **transmitted object field name** is `snake_case`
+//      (#3371). The rule is about keys that cross a transport boundary, not
+//      coding-language properties: generated contract bindings, protocol
+//      contract `serde` field renames, and the hand-written Nession payload
+//      producers named below. Wire ids (`git.create-commit`), `msg_type`
+//      values, enum values, external-standard keys (`protocolVersion`),
+//      opaque maps and kernel resource keys (`memory.max`) are not fields and
+//      are not renamed by this rule.
 //
 // Scope is the *call sites*, not the tree. A scan over every dotted string
 // literal was measured first and is unusable: it returns 378 distinct values,
@@ -852,6 +860,165 @@ for (const [wire] of controls) {
     report(relative(ROOT, file), 0,
       `\`${wire}\` has no branch here (rule 5): a control wire is handled by every runtime`, '',
       'handle it in this runtime\'s message loop, beside the route table — or, if it is not control, rename it out of the category');
+  }
+}
+
+// ── Rule 6: Nession-owned transport field names are snake_case ──────────────
+//
+// #3371. A field name is part of the wire contract: a client that reads
+// `originalPath` and a provider that writes `original_path` agree with
+// themselves and disagree with each other, and the failure is a silent
+// `undefined` a long way from either side. The rule is narrower than "all
+// names are snake_case":
+//
+//   * wire ids, `msg_type` values and operation names keep their hyphens and
+//     dots (`git.create-commit` is an identity, not a field);
+//   * enum values and tag *values* are out of scope — only object field keys
+//     are checked;
+//   * keys defined by an external protocol (`protocolVersion`, `clientInfo`,
+//     `_meta`) or an opaque provider map (kernel resource keys such as
+//     `memory.max`, Git metadata, protocol-id-keyed maps) are not
+//     Nession-owned field names.
+//
+// Three producers are inspected, because they fail differently:
+//
+//   * generated bindings — the Web's actual projection, nested shapes included;
+//   * protocol contracts — `serde` field renames, caught before codegen runs;
+//   * hand-written transport payloads — `json!({…})` objects in the crates
+//     that build Nession payloads by hand.
+const SNAKE_FIELD = /^[a-z][a-z0-9_]*$/;
+/** Keys defined by an external standard, not by Nession. */
+const EXTERNAL_STANDARD_FIELDS = new Set([
+  'protocolVersion',
+  'clientInfo',
+  'clientCapabilities',
+  '_meta',
+]);
+/** Protocol contracts and the hand-written payload producers. */
+const CONTRACT_DIRS = [
+  'crates/nession-protocol/src/contracts',
+  'crates/nession-git/src/protocol',
+  'crates/nession-github/src/protocol',
+  'crates/nession-claude-code/src/protocol',
+];
+const HAND_WRITTEN_TRANSPORT_DIRS = [
+  'crates/nession-mcp/src',
+  'crates/nession-protocol/src/kernel',
+  'crates/nession-server/src/server',
+  'crates/nession-agent/src/connection',
+  'crates/nession-client/src',
+];
+
+/**
+ * Why a transmitted key is not a conforming Nession field name, or `null`.
+ *
+ * A dotted/underscored identifier used as a *map key* (a protocol id, a
+ * cgroup resource path) is data, not a field declaration; the external
+ * standard set covers the keys an external protocol requires.
+ */
+function fieldNameProblem(key) {
+  if (SNAKE_FIELD.test(key)) return null;
+  if (EXTERNAL_STANDARD_FIELDS.has(key)) return null;
+  if (key.includes('.') || key.startsWith('_')) return null;
+  return key;
+}
+
+/** Every object field key declared in one generated binding, with its line. */
+function generatedFieldKeys(text) {
+  const masked = maskComments(text, 'ts');
+  const found = [];
+  // A generated binding is only type declarations and constants: a key is a
+  // quoted or bare identifier followed by `?:` inside an object type.
+  for (const m of masked.matchAll(/(?:^|[{,;]\s*)(?:"([^"\\]+)"|([A-Za-z_$][\w$]*))\s*\??\s*:/g)) {
+    const key = m[1] ?? m[2];
+    found.push({ key, line: masked.slice(0, m.index).split('\n').length });
+  }
+  return found;
+}
+
+for (const file of generatedFiles(join(ROOT, GENERATED))) {
+  const rel = relative(ROOT, file);
+  const text = readFileSync(file, 'utf8');
+  for (const { key, line } of generatedFieldKeys(text)) {
+    const problem = fieldNameProblem(key);
+    if (!problem) continue;
+    report(rel, line, '`' + problem + '` is not a snake_case transport field (rule 6)', '',
+      'rename the Rust contract field/`serde` key — do not edit the generated binding');
+  }
+}
+
+/** The next code line after `from`, skipping attributes, comments and blanks. */
+function nextCodeLine(lines, from) {
+  for (let i = from; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('#[') || line.startsWith('//')) continue;
+    return line;
+  }
+  return '';
+}
+
+for (const dir of CONTRACT_DIRS) {
+  const absolute = join(ROOT, dir);
+  if (!existsSync(absolute)) continue;
+  for (const file of sourceFiles(absolute)) {
+    if (!file.endsWith('.rs')) continue;
+    const rel = relative(ROOT, file);
+    const masked = maskComments(readFileSync(file, 'utf8'), 'rs');
+    const lines = masked.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const all = /rename_all\s*=\s*"([^"]+)"/.exec(line);
+      if (all) {
+        // `rename_all` on an enum renames variant *values*, which this rule
+        // deliberately does not govern.
+        if (!/^(?:pub\s+)?struct\b/.test(nextCodeLine(lines, i + 1))) continue;
+        if (all[1] === 'snake_case') continue;
+        report(rel, i + 1, '`rename_all = "' + all[1] + '"` is not snake_case on a struct (rule 6)', line,
+          'Nession-owned transport field names are snake_case; remove the attribute or use `snake_case`');
+        continue;
+      }
+      const one = /(?:^|[,(]\s*)rename\s*=\s*"([^"]+)"/.exec(line);
+      if (!one) continue;
+      const declaration = nextCodeLine(lines, i + 1);
+      // A field declaration has a `:`; an enum variant has none.
+      if (!/^(?:pub\s+)?[A-Za-z_]\w*\s*:/.test(declaration)) continue;
+      const problem = fieldNameProblem(one[1]);
+      if (!problem) continue;
+      report(rel, i + 1, '`' + problem + '` is not a snake_case transport field (rule 6)', line,
+        'rename the `serde` key to the field\'s snake_case spelling, or drop the redundant rename');
+    }
+  }
+}
+
+/** The `json!({…})` object keys in one hand-written producer. */
+function handWrittenJsonKeys(masked) {
+  const found = [];
+  for (const m of masked.matchAll(/json!\s*\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const close = closeParen(masked, open);
+    if (close < 0) continue;
+    const block = masked.slice(open, close + 1);
+    for (const key of block.matchAll(/(?:^|[{,]\s*)"([^"\\]+)"\s*:/g)) {
+      found.push({ key: key[1], line: masked.slice(0, open + key.index).split('\n').length });
+    }
+  }
+  return found;
+}
+
+for (const dir of HAND_WRITTEN_TRANSPORT_DIRS) {
+  const absolute = join(ROOT, dir);
+  if (!existsSync(absolute)) continue;
+  for (const file of sourceFiles(absolute)) {
+    if (!file.endsWith('.rs')) continue;
+    const rel = relative(ROOT, file);
+    if (/(^|\/)(tests?|__tests__)(\/|\.|$)/.test(rel) || /\/tests?\.rs$/.test(rel)) continue;
+    const masked = maskComments(readFileSync(file, 'utf8'), 'rs');
+    for (const { key, line } of handWrittenJsonKeys(masked)) {
+      const problem = fieldNameProblem(key);
+      if (!problem) continue;
+      report(rel, line, '`' + problem + '` is not a snake_case transport field (rule 6)', '',
+        'Nession-owned transport keys are snake_case; external-standard keys and opaque maps are exempt');
+    }
   }
 }
 

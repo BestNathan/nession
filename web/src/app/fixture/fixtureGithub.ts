@@ -28,13 +28,13 @@ const repository = {
   host: 'github.com',
   owner: 'fixture-owner',
   repo: 'nession',
-  remoteName: 'origin',
-  sourceUrl: 'https://github.com/fixture-owner/nession',
+  remote_name: 'origin',
+  source_url: 'https://github.com/fixture-owner/nession',
 };
 
 const choices = [
-  { remoteName: 'origin', host: 'github.com', owner: 'fixture-owner', repo: 'nession' },
-  { remoteName: 'upstream', host: 'github.com', owner: 'upstream-owner', repo: 'nession' },
+  { remote_name: 'origin', host: 'github.com', owner: 'fixture-owner', repo: 'nession' },
+  { remote_name: 'upstream', host: 'github.com', owner: 'upstream-owner', repo: 'nession' },
 ];
 
 const ISSUE_BODY = `## Fixture Issue
@@ -51,7 +51,7 @@ const issues = [
     author: { login: 'fixture-dev' },
     labels: [{ name: 'requirement', color: '0e8a16' }],
     assignees: [{ login: 'fixture-dev' }],
-    updatedAt: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-01T00:00:00Z',
     url: 'https://github.com/fixture-owner/nession/issues/1290',
   },
   {
@@ -61,7 +61,7 @@ const issues = [
     author: { login: 'fixture-owner' },
     labels: [{ name: 'agent', color: '1d76db' }],
     assignees: [],
-    updatedAt: '2026-10-20T00:00:00Z',
+    updated_at: '2026-10-20T00:00:00Z',
     url: 'https://github.com/fixture-owner/nession/issues/2514',
   },
   {
@@ -71,7 +71,7 @@ const issues = [
     author: { login: 'fixture-dev' },
     labels: [],
     assignees: [],
-    updatedAt: '2026-10-10T00:00:00Z',
+    updated_at: '2026-10-10T00:00:00Z',
     url: 'https://github.com/fixture-owner/nession/issues/2323',
   },
 ];
@@ -84,8 +84,8 @@ const pullRequests = [
     draft: false,
     merged: false,
     author: { login: 'fixture-dev' },
-    headRefName: 'feature/git-github',
-    baseRefName: 'main',
+    head_ref_name: 'feature/git-github',
+    base_ref_name: 'main',
     head: {
       owner: 'fixture-owner',
       repo: 'nession',
@@ -93,7 +93,7 @@ const pullRequests = [
       sha: '1111111111111111111111111111111111111111',
     },
     base: { ref: 'main', sha: '2222222222222222222222222222222222222222' },
-    updatedAt: '2026-11-01T00:00:00Z',
+    updated_at: '2026-11-01T00:00:00Z',
     url: 'https://github.com/fixture-owner/nession/pull/2229',
   },
   {
@@ -103,8 +103,8 @@ const pullRequests = [
     draft: true,
     merged: false,
     author: { login: 'fixture-owner' },
-    headRefName: 'draft/layout',
-    baseRefName: 'main',
+    head_ref_name: 'draft/layout',
+    base_ref_name: 'main',
     head: {
       owner: 'fork-owner',
       repo: 'nession',
@@ -112,7 +112,7 @@ const pullRequests = [
       sha: '3333333333333333333333333333333333333333',
     },
     base: { ref: 'main', sha: '2222222222222222222222222222222222222222' },
-    updatedAt: '2026-10-25T00:00:00Z',
+    updated_at: '2026-10-25T00:00:00Z',
     url: 'https://github.com/fixture-owner/nession/pull/2222',
   },
   {
@@ -122,8 +122,8 @@ const pullRequests = [
     draft: false,
     merged: true,
     author: { login: 'fixture-dev' },
-    headRefName: 'fix/history',
-    baseRefName: 'main',
+    head_ref_name: 'fix/history',
+    base_ref_name: 'main',
     head: {
       owner: 'fixture-owner',
       repo: 'nession',
@@ -131,7 +131,7 @@ const pullRequests = [
       sha: '4444444444444444444444444444444444444444',
     },
     base: { ref: 'main', sha: '2222222222222222222222222222222222222222' },
-    updatedAt: '2026-10-01T00:00:00Z',
+    updated_at: '2026-10-01T00:00:00Z',
     url: 'https://github.com/fixture-owner/nession/pull/2218',
   },
 ];
@@ -142,15 +142,15 @@ const workflows: GithubWorkflow[] = [
     name: 'CI',
     path: '.github/workflows/ci.yml',
     state: 'active',
-    latestRun: {
+    latest_run: {
       id: 1001,
       status: 'completed',
       conclusion: 'success',
       branch: 'main',
       sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       event: 'push',
-      createdAt: '2026-11-01T00:00:00Z',
-      updatedAt: '2026-11-01T00:05:00Z',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:05:00Z',
       url: 'https://github.com/fixture-owner/nession/actions/runs/1001',
     },
   },
@@ -159,14 +159,14 @@ const workflows: GithubWorkflow[] = [
     name: 'E2E / Tests',
     path: '.github/workflows/e2e-tests.yml',
     state: 'active',
-    latestRun: {
+    latest_run: {
       id: 1002,
       status: 'queued',
       branch: 'feature/git-github',
       sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       event: 'pull_request',
-      createdAt: '2026-11-02T00:00:00Z',
-      updatedAt: '2026-11-02T00:00:30Z',
+      created_at: '2026-11-02T00:00:00Z',
+      updated_at: '2026-11-02T00:00:30Z',
       url: 'https://github.com/fixture-owner/nession/actions/runs/1002',
     },
   },
@@ -179,7 +179,7 @@ const workflows: GithubWorkflow[] = [
 ];
 
 function error(code: GithubErrorResponse['code'], message: string, retryAfterSeconds?: number): GithubErrorResponse {
-  return { state: 'error', code, message, retryAfterSeconds };
+  return { state: 'error', code, message, retry_after_seconds: retryAfterSeconds };
 }
 
 interface GithubScenario {
@@ -256,7 +256,7 @@ function answerRepository({ scenario, counts }: GithubScenario): GithubRepositor
     resolution,
     repository:
       resolution === 'resolved'
-        ? { ...repository, remoteName: scenario === 'fork' ? 'upstream' : 'origin' }
+        ? { ...repository, remote_name: scenario === 'fork' ? 'upstream' : 'origin' }
         : null,
     branch: 'feature/git-github',
     choices: scenario === 'ambiguous' || scenario === 'fork' ? choices : [choices[0]],
@@ -278,8 +278,8 @@ function answerIssues(context: GithubScenario, payload: Record<string, unknown>)
     state: 'ok',
     repository,
     issues: page,
-    hasMore,
-    nextCursor: hasMore ? String(cursor + 1) : null,
+    has_more: hasMore,
+    next_cursor: hasMore ? String(cursor + 1) : null,
   };
 }
 
@@ -300,7 +300,7 @@ function answerIssueDetail(
     repository,
     issue: {
       ...issue,
-      createdAt: '2026-10-01T00:00:00Z',
+      created_at: '2026-10-01T00:00:00Z',
       body: ISSUE_BODY,
     },
   };
@@ -325,11 +325,11 @@ function answerPullRequests(
   return {
     state: 'ok',
     repository,
-    pullRequests: context.scenario === 'empty' ? [] : filtered,
-    currentBranch: current ? 'matched' : 'none',
-    currentBranchPr: current?.number ?? null,
-    hasMore: false,
-    nextCursor: null,
+    pull_requests: context.scenario === 'empty' ? [] : filtered,
+    current_branch: current ? 'matched' : 'none',
+    current_branch_pr: current?.number ?? null,
+    has_more: false,
+    next_cursor: null,
   };
 }
 
@@ -345,10 +345,10 @@ function answerPullRequestDetail(
   return {
     state: 'ok',
     repository,
-    pullRequest: {
+    pull_request: {
       ...pull,
-      createdAt: '2026-10-01T00:00:00Z',
-      mergedAt: pull.merged ? '2026-10-02T00:00:00Z' : null,
+      created_at: '2026-10-01T00:00:00Z',
+      merged_at: pull.merged ? '2026-10-02T00:00:00Z' : null,
       body: '## Fixture PR\n\nA **read-only** Pull Request body.',
     },
   };
@@ -365,8 +365,8 @@ function answerWorkflows(
     workflow.id === 1 && scope === 'branch'
       ? {
           ...workflow,
-          latestRun: {
-            ...workflow.latestRun!,
+          latest_run: {
+            ...workflow.latest_run!,
             id: 1003,
             branch,
             status: 'in_progress',
@@ -381,7 +381,7 @@ function answerWorkflows(
     scope,
     branch: scope === 'branch' ? branch : null,
     workflows: scoped,
-    hasMore: false,
-    nextCursor: null,
+    has_more: false,
+    next_cursor: null,
   };
 }

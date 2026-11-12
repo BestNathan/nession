@@ -27,16 +27,16 @@ export type CommitRequestV1 = {
  */
 oid: string, session: string, };
 export type CommitOkV1 = { commit: CommitDetail, };
-export type CommitDetail = { oid: string, shortOid: string, parents: Array<string>, author: string, authorDate: string, committer: string, commitDate: string, subject: string, body: string, decorations: string, files: Array<ChangedFileEntry>, filesTruncated: boolean, filesTruncatedBytes: number, messageTruncated: boolean, messageTruncatedBytes: number, 
+export type CommitDetail = { oid: string, short_oid: string, parents: Array<string>, author: string, author_date: string, committer: string, commit_date: string, subject: string, body: string, decorations: string, files: Array<ChangedFileEntry>, files_truncated: boolean, files_truncated_bytes: number, message_truncated: boolean, message_truncated_bytes: number, 
 /**
  * v1 merge diffs use the first parent when showing a file patch via `git.diff`.
  */
-mergeDiffParent: string, };
+merge_diff_parent: string, };
 export type ChangedFileEntry = { path: string, 
 /**
  * Repository-relative path after a rename/copy, when git reports one.
  */
-newPath?: string | null, 
+new_path?: string | null, 
 /**
  * Single-letter `name-status` code: A/M/D/R/C/T/U/X/B.
  */

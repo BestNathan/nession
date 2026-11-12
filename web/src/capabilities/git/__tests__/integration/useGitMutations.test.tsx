@@ -75,7 +75,7 @@ function statusOk(branch: string, token: string, files: GitChangedFile[]): GitSt
     root: '/repo',
     snapshot: { token, head: null, root: '/repo' },
     truncated: false,
-    truncatedBytes: 0,
+    truncated_bytes: 0,
     status: {
       branch,
       detached: false,
@@ -100,7 +100,7 @@ function okFields(status: GitStatusResponse): {
 }
 
 function mutationOk(status: GitStatusResponse): GitMutationResponse {
-  return { state: 'ok', ...okFields(status), truncated: false, truncatedBytes: 0 };
+  return { state: 'ok', ...okFields(status), truncated: false, truncated_bytes: 0 };
 }
 
 function commitOk(status: GitStatusResponse): GitCreateCommitResponse {
@@ -108,7 +108,7 @@ function commitOk(status: GitStatusResponse): GitCreateCommitResponse {
     state: 'ok',
     ...okFields(status),
     truncated: false,
-    truncatedBytes: 0,
+    truncated_bytes: 0,
     commit: { oid: 'created-oid', author: 'Fixture Dev <dev@example.com>' },
   };
 }
@@ -231,7 +231,7 @@ describe('useGitMutations cross-Session ownership (#3327)', () => {
         message: 'The repository changed after it was reviewed.',
         ...okFields(A_STAGED),
         truncated: false,
-        truncatedBytes: 0,
+        truncated_bytes: 0,
       });
       await stageRequests[0].promise;
     });
@@ -308,8 +308,8 @@ describe('useGitMutations cross-Session ownership (#3327)', () => {
     expect(commitBodies[2]).toMatchObject({
       session: 'session-a',
       message: 'commit A',
-      expectedSnapshot: 'snap-a',
-      requestId: commitBodies[0].requestId,
+      expected_snapshot: 'snap-a',
+      request_id: commitBodies[0].request_id,
     });
   });
 });

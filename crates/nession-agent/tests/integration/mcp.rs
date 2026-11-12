@@ -259,6 +259,27 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
             .any(|entry| entry["name"] == name),
         "the real tmux Session is missing from Agent truth: {listed}"
     );
+    // Nession-owned transport fields are snake_case (#3371). The MCP result is
+    // Nession's own object, so its multi-word key must use the contract
+    // spelling, and the retired camelCase argument spelling must be refused
+    // rather than silently ignored.
+    assert!(
+        listed["stale_agents"].is_array() && listed.get("staleAgents").is_none(),
+        "the MCP result must use the contract's snake_case key: {listed}"
+    );
+    let camel = call_tool(
+        addr,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agentId": TEST_AGENT_ID }),
+    )
+    .await;
+    assert_eq!(camel["isError"], true, "{camel}");
+    let camel_text = camel["content"][0]["text"].as_str().expect("text content");
+    assert!(
+        camel_text.contains("agent_id"),
+        "the refusal must name the contract argument: {camel_text}"
+    );
 
     // A different Agent must be refused, never silently redirected to this one.
     let wrong_target = call_tool(

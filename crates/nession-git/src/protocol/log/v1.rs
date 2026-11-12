@@ -13,7 +13,6 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct Commit {
     /// Full object name.
     pub hash: String,
@@ -36,7 +35,6 @@ pub struct Commit {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct History {
     pub commits: Vec<Commit>,
     /// The count that was asked for, so the view can offer "more" honestly.

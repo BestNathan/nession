@@ -234,7 +234,7 @@ export class GitPlugin implements TransportPlugin {
    * Create one local commit from the staged state, conditional on the reviewed
    * snapshot.
    *
-   * `requestId` is the mutation's idempotency identity: a retry that carries
+   * `request_id` is the mutation's idempotency identity: a retry that carries
    * the same id is answered with the first attempt's outcome rather than
    * creating a second commit (#845 SC-09).
    */

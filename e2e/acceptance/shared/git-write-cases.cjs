@@ -256,7 +256,7 @@ function stage(stack, session, file, expectedSnapshot) {
     session,
     contract_version: 1,
     path: file,
-    expectedSnapshot,
+    expected_snapshot: expectedSnapshot,
   });
 }
 
@@ -265,7 +265,7 @@ function unstage(stack, session, file, expectedSnapshot) {
     session,
     contract_version: 1,
     path: file,
-    expectedSnapshot,
+    expected_snapshot: expectedSnapshot,
   });
 }
 
@@ -273,9 +273,9 @@ function createCommit(stack, session, expectedSnapshot, message, requestId) {
   return gitAsk(stack, 'git.create-commit', {
     session,
     contract_version: 1,
-    expectedSnapshot,
+    expected_snapshot: expectedSnapshot,
     message,
-    requestId,
+    request_id: requestId,
   });
 }
 

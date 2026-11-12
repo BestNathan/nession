@@ -32,18 +32,18 @@ number: number, session: string,
  */
 remote_name?: string | null, };
 export type IssueDetailOkV1 = { repository: GithubRepositoryRefV1, issue: GithubIssueDetailV1, };
-export type GithubIssueDetailV1 = { number: number, title: string, state: string, author: GithubUserV1, labels: Array<GithubLabelV1>, assignees: Array<GithubUserV1>, createdAt: string, updatedAt: string, url: string, 
+export type GithubIssueDetailV1 = { number: number, title: string, state: string, author: GithubUserV1, labels: Array<GithubLabelV1>, assignees: Array<GithubUserV1>, created_at: string, updated_at: string, url: string, 
 /**
  * Raw Markdown. Rendering is the Web's, with its own sanitization.
  */
 body: string, };
 export type GithubLabelV1 = { name: string, color?: string | null, };
 export type GithubUserV1 = { login: string, };
-export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remoteName: string, 
+export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remote_name: string, 
 /**
  * The canonical browser source of this repository, never a credential URL.
  */
-sourceUrl: string, };
+source_url: string, };
 export type SessionTargetV1 = { session: string, 
 /**
  * A remote name discovered by the Agent for this Session. The provider
@@ -67,5 +67,5 @@ number: number, session: string,
 remote_name?: string | null, };
 
 /** The payload the provider answers with. */
-export type IssueDetailResponse = { "state": "ok", repository: GithubRepositoryRefV1, issue: GithubIssueDetailV1, } | { "state": "error", code: GithubErrorCodeV1, message: string, retryAfterSeconds?: number | null, };
+export type IssueDetailResponse = { "state": "ok", repository: GithubRepositoryRefV1, issue: GithubIssueDetailV1, } | { "state": "error", code: GithubErrorCodeV1, message: string, retry_after_seconds?: number | null, };
 

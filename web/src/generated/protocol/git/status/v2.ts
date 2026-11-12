@@ -22,7 +22,7 @@ export const VERSION = 2;
 // ── Shapes ──
 
 export type StatusRequestV2 = { session: string, };
-export type StatusOkV2 = { status: RepoStatus, root: string, snapshot: GitSnapshotV1, truncated: boolean, truncatedBytes: number, };
+export type StatusOkV2 = { status: RepoStatus, root: string, snapshot: GitSnapshotV1, truncated: boolean, truncated_bytes: number, };
 export type RepoStatus = { 
 /**
  * Branch name, or `None` when detached.
@@ -48,7 +48,7 @@ export type ChangedFile = { path: string,
 /**
  * Present only for renames/copies.
  */
-originalPath?: string | null, kind: ChangeKind, 
+original_path?: string | null, kind: ChangeKind, 
 /**
  * Staged in the index (porcelain `X`).
  */
@@ -79,5 +79,5 @@ export type SessionTargetV1 = { session: string, };
 export type StatusRequest = { session: string, };
 
 /** The payload the provider answers with. */
-export type StatusResponse = { "state": "ok", status: RepoStatus, root: string, snapshot: GitSnapshotV1, truncated: boolean, truncatedBytes: number, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+export type StatusResponse = { "state": "ok", status: RepoStatus, root: string, snapshot: GitSnapshotV1, truncated: boolean, truncated_bytes: number, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
 
