@@ -51,6 +51,10 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
   const sha = String(process.env.NESSION_ACCEPTANCE_TARGET_SHA ?? '');
   expect(sha).toMatch(/^[0-9a-f]{40}$/);
   await installWebSocketFaultInjector(page);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error?.message ?? error));
+  });
 
   const name = `e2e-3358-sc10-${Date.now()}`;
   await page.goto(
@@ -84,9 +88,17 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
       login: document.querySelector('#authToken') !== null,
       reconnecting: document.body.innerText.includes('Reconnecting'),
       xterms: document.querySelectorAll('.xterm').length,
+      body: document.body.innerText.slice(0, 300),
       url: window.location.href,
     }));
-    throw new Error('shell not visible after compound outage: ' + JSON.stringify(facts));
+    // Surface diagnostics through the verifier's stderr, which the Case record
+    // retains (the Playwright JSON report is temporary).
+    process.stderr.write('SC10_DIAG ' + JSON.stringify({ ...facts, pageErrors }) + '\n');
+    if (facts.login) { throw new Error('SC10 diag: login page'); }
+    if (facts.reconnecting) { throw new Error('SC10 diag: boot reconnecting shell'); }
+    if (facts.shellError) { throw new Error('SC10 diag: shell error notice'); }
+    if (facts.xterms > 0) { throw new Error('SC10 diag: partial workspace'); }
+    throw new Error('SC10 diag: blank page');
   }
   await expect(page.locator('#authToken')).toHaveCount(0);
   await expect(page.getByText('Connect to Server')).toHaveCount(0);
