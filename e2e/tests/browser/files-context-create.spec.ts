@@ -21,6 +21,7 @@ declare global {
     fixtureFiles?: {
       reset: () => void;
       revisionOf: (path: string) => string;
+      contentsOf: (path: string) => string | null;
       writeExternal: (path: string, content: string) => void;
       delayNextWrite: (milliseconds: number) => void;
       failNextWrite: (message?: string) => void;
@@ -208,6 +209,45 @@ test('Web: a save against a changed file offers reload/overwrite', async ({ page
   await page.getByRole('button', { name: 'Reload file' }).click();
   await expect(page.getByTestId('file-conflict-dialog')).toBeHidden();
   await expect(page.locator('.cm-content')).toContainText('external change');
+});
+
+test('Web: edits typed during a pending save stay dirty after it completes (#3322)', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'index.css');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('B1');
+
+  // Commit B1 while holding the response; the editor moves on to C1.
+  await page.evaluate(() => window.fixtureFiles?.delayNextWrite(800));
+  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('C1');
+
+  // B1's successful write must not mark the newer C1 as saved.
+  await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled({ timeout: 5000 });
+  await expect(page.getByTitle('Unsaved changes')).toBeVisible();
+  // Only the submitted snapshot reached the fixture; C1 is still local.
+  const committed = await page.evaluate(() => window.fixtureFiles?.contentsOf('web/src/index.css'));
+  expect(committed).toContain('B1');
+  expect(committed).not.toContain('C1');
+
+  // The next save persists C1 and only then clears dirty.
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTitle('Unsaved changes')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  expect(
+    await page.evaluate(() => window.fixtureFiles?.contentsOf('web/src/index.css')),
+  ).toContain('B1C1');
+
+  // Re-reading the file shows both persisted writes, not a discarded draft.
+  await clickTree(page, 'App.tsx');
+  await clickTree(page, 'index.css');
+  await expect(page.locator('.cm-content')).toContainText('B1C1');
 });
 
 test('App: create in the pushed folder, read-first viewer, unsaved guard', async ({ page }) => {
