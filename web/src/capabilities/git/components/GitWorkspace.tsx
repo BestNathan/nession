@@ -133,6 +133,7 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           selection={selection}
           mutations={mutations}
           onSelect={selectRow}
+          formKey={`${agentId ?? ''}:${sessionId}`}
         />
       )}
     </div>
@@ -264,12 +265,15 @@ function GitBody({
   selection,
   mutations,
   onSelect,
+  formKey,
 }: {
   status: ReturnType<typeof useGitStatus>;
   rows: readonly GitRow[] | null;
   selection: GitSelectionState;
   mutations: GitMutationController;
   onSelect: (row: GitRow) => void;
+  /** Session identity: a switch starts a fresh commit draft (#3327). */
+  formKey: string;
 }) {
   if (status.loading) {
     return <GitNotice testId="git-loading">Reading repository state…</GitNotice>;
@@ -332,6 +336,7 @@ function GitBody({
         ) : null}
         {staged > 0 ? (
           <GitCommitForm
+            key={formKey}
             stagedCount={staged}
             busy={mutations.commitBusy}
             onCommit={mutations.commit}

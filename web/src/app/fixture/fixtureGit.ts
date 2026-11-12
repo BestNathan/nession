@@ -53,6 +53,21 @@ type FixtureGitSelectionOverlapWindow = Window & {
 };
 
 /**
+ * Deterministic controls the `git=mutation-overlap` scenario exposes (#3327).
+ *
+ * A stage on the first Session is held until the Case releases it; the Case
+ * switches to the second Session before releasing, so a late A answer that
+ * still reaches the mounted view must not replace B.
+ */
+type FixtureGitMutationOverlapWindow = Window & {
+  fixtureGitMutationOverlap?: {
+    requests: () => number;
+    settled: () => boolean;
+    release: (fail?: boolean) => void;
+  };
+};
+
+/**
  * The plugin-surface boilerplate shared by the Git fixture scenarios.
  *
  * The real directory is filled by `AgentsPlugin` from the agent list; the
@@ -254,6 +269,9 @@ export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
   if (scenario === 'selection-overlap') {
     return selectionOverlapGitSurface();
+  }
+  if (scenario === 'mutation-overlap') {
+    return mutationOverlapGitSurface();
   }
   const status =
     scenario === 'clean'
@@ -498,8 +516,165 @@ function selectionOverlapGitSurface(): PluginSurface {
   );
 }
 
+/**
+ * The `git=mutation-overlap` surface (#3327).
+ *
+ * Two Sessions have distinct repositories. The first stage/unstage/commit for
+ * the first Session is held until the Case releases it; the Case switches to
+ * the second Session first. A late answer that still reaches the mounted view
+ * must not replace B's repository, notice, busy state, or commit draft.
+ */
+function mutationOverlapGitSurface(): PluginSurface {
+  const SESSION_A = 'devbox-01:fix-terminal-reconnect';
+  const SESSION_B = 'devbox-01:design-system';
+  const repos = new Map<string, FixtureRepoState>([
+    [SESSION_A, createFixtureRepoState('mutation-a', MUTATION_OVERLAP_A)],
+    [SESSION_B, createFixtureRepoState('mutation-b', MUTATION_OVERLAP_B)],
+  ]);
+  let requests = 0;
+  let settled = false;
+  let held: {
+    repo: FixtureRepoState;
+    type: string;
+    payload: Record<string, unknown>;
+    resolve: (value: unknown) => void;
+    reject: (reason: Error) => void;
+  } | null = null;
+
+  const publish = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    (window as FixtureGitMutationOverlapWindow).fixtureGitMutationOverlap = {
+      requests: () => requests,
+      settled: () => settled,
+      release: (fail = false) => {
+        const current = held;
+        held = null;
+        if (!current) {
+          return;
+        }
+        if (fail) {
+          current.reject(new Error('the held stage failed'));
+        } else {
+          current.resolve(mutateFixtureRepository(current.repo, current.type, current.payload));
+        }
+        setTimeout(() => {
+          settled = true;
+          publish();
+        }, 0);
+      },
+    };
+  };
+  publish();
+
+  const repoFor = (payload: Record<string, unknown>) =>
+    repos.get(String(payload.session ?? '')) ?? repos.get(SESSION_A)!;
+
+  return fixtureGitPluginSurface(
+    <T>(type: string, payload: Record<string, unknown>): Promise<T> => {
+      if (type === 'git.status') {
+        return Promise.resolve(repoFor(payload).status as T);
+      }
+      if (type === 'git.stage' || type === 'git.unstage' || type === 'git.create-commit') {
+        const repo = repoFor(payload);
+        // Hold the first mutation for the first Session; every later request
+        // answers immediately so B's own work can complete normally.
+        if (String(payload.session ?? '') === SESSION_A && !settled) {
+          requests += 1;
+          publish();
+          return new Promise<T>((resolve, reject) => {
+            held = {
+              repo,
+              type,
+              payload,
+              resolve: (value) => resolve(value as T),
+              reject,
+            };
+            publish();
+          });
+        }
+        return Promise.resolve(mutateFixtureRepository(repo, type, payload) as T);
+      }
+      if (type === 'git.diff') {
+        return Promise.resolve(
+          diffFor(String(payload.path), 'changed', repoFor(payload).snapshot) as T,
+        );
+      }
+      if (type === 'git.preview') {
+        return Promise.resolve(
+          previewFor(
+            String(payload.path),
+            String(payload.expected),
+            'changed',
+            payload.want === 'media' ? 'media' : 'text',
+          ) as T,
+        );
+      }
+      if (type === 'git.log') {
+        return Promise.resolve(historyFor(payload.limit) as T);
+      }
+      if (type === 'git.commit') {
+        return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
+      }
+      if (type === 'git.branches') {
+        return Promise.resolve(branchesFor(payload.limit) as T);
+      }
+      if (type === 'git.worktrees') {
+        return Promise.resolve(WORKTREES as T);
+      }
+      return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
+    },
+  );
+}
+
 /** The work tree the fixture pretends to be in — a Peek names its basename. */
 const FIXTURE_ROOT = '/Users/dev/code/nession-capsule';
+
+/** The first Session's repository for the `mutation-overlap` scenario. */
+const MUTATION_OVERLAP_A: GitStatusResponse = {
+  state: 'ok',
+  root: '/Users/dev/code/repo-a',
+  snapshot: fixtureSnapshot('fixture-mutation-a-0', 'fixture-head-a'),
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/a',
+    detached: false,
+    upstream: 'origin/feat/a',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      { path: 'a-staged.ts', kind: 'modified', staged: true, unstaged: false },
+      { path: 'a.ts', kind: 'modified', staged: false, unstaged: true },
+    ],
+    untracked: [],
+    unmerged: [],
+  },
+};
+
+/** The second Session's repository; distinct branch, files and root. */
+const MUTATION_OVERLAP_B: GitStatusResponse = {
+  state: 'ok',
+  root: '/Users/dev/code/repo-b',
+  snapshot: fixtureSnapshot('fixture-mutation-b-0', 'fixture-head-b'),
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/b',
+    detached: false,
+    upstream: 'origin/feat/b',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      { path: 'b-staged.ts', kind: 'modified', staged: true, unstaged: false },
+      { path: 'b.ts', kind: 'modified', staged: false, unstaged: true },
+    ],
+    untracked: [],
+    unmerged: [],
+  },
+};
+
 
 /** A snapshot identity for a canned state; only equality is meaningful. */
 function fixtureSnapshot(token: string, head: string | null): GitSnapshot {
