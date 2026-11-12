@@ -440,6 +440,28 @@ async function preMergeRequirementIssues({ owner, name, title = '', body, token 
   return issues;
 }
 
+/**
+ * The Requirements one merged ref owns.
+ *
+ * GitHub's commit→pulls association returns every PR whose branch contains the
+ * commit, including open PRs based on a newer tip and later merges that carry
+ * it. Only the PR that merged **as this exact commit** settles what the ref
+ * introduced; letting the others contribute Issue links makes an unrelated
+ * in-flight PR add or block obligations on a historical merged SHA.
+ */
+export function issuesFromAssociatedPulls(pulls, targetSha, owner, name) {
+  const target = String(targetSha ?? '').toLowerCase();
+  const numbers = new Set();
+  for (const pr of pulls ?? []) {
+    if (!pr?.merged_at) continue;
+    if (String(pr.merge_commit_sha ?? '').toLowerCase() !== target) continue;
+    for (const number of parsePreMergeIssueNumbers(pr.body, owner, name, pr.title)) {
+      numbers.add(number);
+    }
+  }
+  return [...numbers].sort((a, b) => a - b);
+}
+
 async function requirementIssuesForRef({ owner, name, sha, token }) {
   const targetSha = String(sha ?? '').trim();
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) {
@@ -449,15 +471,10 @@ async function requirementIssuesForRef({ owner, name, sha, token }) {
     `/repos/${owner}/${name}/commits/${targetSha}/pulls?per_page=100`,
     { token },
   );
-  const numbers = new Set();
-  for (const pr of pulls ?? []) {
-    for (const number of parsePreMergeIssueNumbers(pr.body, owner, name, pr.title)) {
-      numbers.add(number);
-    }
-  }
+  const numbers = issuesFromAssociatedPulls(pulls, targetSha, owner, name);
 
   const issues = [];
-  for (const number of [...numbers].sort((a, b) => a - b)) {
+  for (const number of numbers) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
     if (isOpenAcceptanceIssue(issue)) {
       issues.push(issue);
@@ -770,6 +787,53 @@ function runSelfTest() {
   assert.deepEqual(
     parsePreMergeIssueNumbers(
       'Depends on #50\nBlocked by #51\nMentions #52\n> Refs #53\n\x60\x60\x60md\nRefs #54\n\x60\x60\x60',
+      'BestNathan',
+      'nession',
+    ),
+    [],
+  );
+
+  // A merged ref owns only the PR that merged as that exact commit. GitHub
+  // also returns open PRs based on a newer tip (their bodies may link an
+  // unrelated in-flight Requirement) and later merges that carry the commit;
+  // neither may add obligations to the historical merge SHA.
+  assert.deepEqual(
+    issuesFromAssociatedPulls(
+      [
+        {
+          number: 3305,
+          merged_at: '2026-11-11T14:33:58Z',
+          merge_commit_sha: 'a'.repeat(40),
+          title: 'refactor: extract EROFS mechanics (#3303)',
+          body: 'Refs #3303',
+        },
+        {
+          number: 3309,
+          merged_at: null,
+          merge_commit_sha: 'b'.repeat(40),
+          title: 'feat(images): capability (#3181)',
+          body: 'Refs #3181',
+        },
+        {
+          number: 3208,
+          merged_at: '2026-11-11T15:00:00Z',
+          merge_commit_sha: 'c'.repeat(40),
+          title: 'release: promote staging to main',
+          body: 'Refs #3181',
+        },
+      ],
+      'A'.repeat(40),
+      'BestNathan',
+      'nession',
+    ),
+    [3303],
+  );
+  // A PR that was never merged cannot own a ref even if its tentative
+  // merge_commit_sha happens to match.
+  assert.deepEqual(
+    issuesFromAssociatedPulls(
+      [{ number: 1, merged_at: null, merge_commit_sha: 'a'.repeat(40), body: 'Refs #9' }],
+      'a'.repeat(40),
       'BestNathan',
       'nession',
     ),
