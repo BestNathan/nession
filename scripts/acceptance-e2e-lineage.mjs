@@ -112,6 +112,16 @@ export function verifyHistoricalArtifact(run,record,metadata) {
 }
 
 
+// #3320: a rejected historical Plan must identify its bounded source Run and
+// which Issue-set invariant failed. Only authenticated Run identity and counts
+// are disclosed; plan-controlled values are never echoed into the job log.
+function historicalPlanSource(run) {
+  const id = goodInt(run?.id) ? run.id : 0;
+  const attempt = goodInt(run?.run_attempt) ? run.run_attempt : 0;
+  const sha = SHA.test(String(run?.head_sha ?? '')) ? run.head_sha : 'unavailable';
+  return 'run ' + id + '/' + attempt + ' SHA ' + sha;
+}
+
 // Historical Plan is read from the GitHub-uploaded artifact, not Issue prose.
 // The main-owned ingest already attested this artifact and pinned its digest
 // in the orphan Run Record; revalidate the immutable Plan shape and ownership.
@@ -121,11 +131,18 @@ export function verifyHistoricalPlan(run,record,plan,prNumber) {
       plan.target_sha!==run.head_sha || plan.plan_digest!==record.plan_digest ||
       !Array.isArray(plan.issues) || !Array.isArray(plan.selected) ||
       plan.selected.length!==record.results.length)
-    throw Error('historical E2E Plan identity is not bound to its Run Record');
-  if(planDigest(plan)!==plan.plan_digest)throw Error('historical E2E Plan digest mismatch');
-  const declared=new Set(),owners=new Set(plan.issues.map(x=>x.issue));
-  if(owners.size!==plan.issues.length || !owners.size ||
-     [...owners].some(x=>!goodInt(x)))throw Error('invalid historical Issue contract set');
+    throw Error('historical E2E Plan identity is not bound to its Run Record (' +
+      historicalPlanSource(run) + ')');
+  if(planDigest(plan)!==plan.plan_digest)throw Error('historical E2E Plan digest mismatch (' +
+    historicalPlanSource(run) + ')');
+  const declared=new Set(),owners=new Set(plan.issues.map(x=>x?.issue));
+  const invalidOwners=[...owners].filter(x=>!goodInt(x));
+  if(owners.size!==plan.issues.length || !owners.size || invalidOwners.length)
+    throw Error('invalid historical Issue contract set (' + historicalPlanSource(run) +
+      '): declared=' + plan.issues.length +
+      ' unique=' + owners.size +
+      ' duplicates=' + Math.max(0, plan.issues.length - owners.size) +
+      ' invalid_ids=' + invalidOwners.length);
   const selected=plan.selected.map(s=>{
     if(typeof s.id!=='string'||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.id)||
        declared.has(s.id)||!Array.isArray(s.owners)||!s.owners.length)
@@ -792,6 +809,35 @@ async function selfTest() {
     ...fixturePlan(old),target_sha:current.head_sha},1718),/identity/);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
     ...fixturePlan(old),selected:[{id:'login',owners:[{issue:9999}]}]},1718),/digest/);
+  // #3320: a rejected historical Plan identifies the bounded source Run and
+  // the exact failed Issue-set invariant, never plan-controlled values.
+  const planWithIssues = (issues) => {
+    const canonical={schema_version:1,kind:'issue_e2e_selection',
+      base_sha:'0'.repeat(40),target_sha:current.head_sha,issues,
+      selected:[{id:'login',owners:[{issue:1702}]}],mode:'selected'};
+    return {...canonical,pr_number:1718,plan_digest:planDigest(canonical)};
+  };
+  const recForPlan = (plan) => ({...rec(current,'Pass'),plan_digest:plan.plan_digest});
+  const emptyPlan = planWithIssues([]);
+  assert.throws(() => verifyHistoricalPlan(current, recForPlan(emptyPlan), emptyPlan, 1718),
+    new RegExp('invalid historical Issue contract set \\(run 20/1 SHA ' + b +
+      '\\): declared=0 unique=0 duplicates=0 invalid_ids=0'));
+  const duplicatePlan = planWithIssues([{issue:1702},{issue:1702}]);
+  assert.throws(() => verifyHistoricalPlan(current, recForPlan(duplicatePlan), duplicatePlan, 1718),
+    /invalid historical Issue contract set \(run 20\/1 SHA [a-f0-9]{40}\): declared=2 unique=1 duplicates=1 invalid_ids=0/);
+  const invalidPlan = planWithIssues([{issue:1702},{issue:'secret-value'}]);
+  assert.throws(() => verifyHistoricalPlan(current, recForPlan(invalidPlan), invalidPlan, 1718),
+    /invalid historical Issue contract set \(run 20\/1 SHA [a-f0-9]{40}\): declared=2 unique=2 duplicates=0 invalid_ids=1/);
+  try {
+    verifyHistoricalPlan(current, recForPlan(invalidPlan), invalidPlan, 1718);
+    assert.fail('invalid historical plan must be rejected');
+  } catch (error) {
+    assert.match(error.message, /run 20\/1/);
+    assert.equal(error.message.includes('secret-value'), false);
+  }
+  // Valid counterexample: a well-formed Plan still verifies.
+  assert.deepEqual(verifyHistoricalPlan(current, rec(current,'Pass'),
+    fixturePlan(current), 1718).issue_numbers, [1702]);
   const log='run_id="10"\nAssertionError [ERR_ASSERTION]: stale PR head\n'+
     "+ 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n"+
     "- 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"+
