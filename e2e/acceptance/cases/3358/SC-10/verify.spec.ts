@@ -6,6 +6,7 @@
 // no reload, no Login, no manual attach. The xterm marker is the remount
 // witness and the pre-outage output proves the buffer survived.
 import fs from 'node:fs';
+import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
 import {
   attachToSession,
@@ -55,6 +56,10 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
   page.on('pageerror', (error) => {
     pageErrors.push(String(error?.message ?? error));
   });
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') { consoleErrors.push(message.text()); }
+  });
 
   const name = `e2e-3358-sc10-${Date.now()}`;
   await page.goto(
@@ -94,6 +99,10 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
     // Surface diagnostics through the verifier's stderr, which the Case record
     // retains (the Playwright JSON report is temporary).
     process.stderr.write('SC10_DIAG ' + JSON.stringify({ ...facts, pageErrors }) + '\n');
+    fs.writeFileSync(
+      '/tmp/nession-sc10-diag.json',
+      JSON.stringify({ facts, pageErrors, consoleErrors }, null, 2),
+    );
     if (facts.login) { throw new Error('SC10 diag: login page'); }
     if (facts.reconnecting) { throw new Error('SC10 diag: boot reconnecting shell'); }
     if (facts.shellError) { throw new Error('SC10 diag: shell error notice'); }

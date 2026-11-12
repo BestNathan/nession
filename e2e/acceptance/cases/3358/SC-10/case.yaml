@@ -6,4 +6,6 @@ runtime: full-stack-local
 verifiers:
   - type: browser
     entry: verify.spec.ts
+  - type: runtime
+    entry: diagnose.cjs
 result_policy: all-pass
