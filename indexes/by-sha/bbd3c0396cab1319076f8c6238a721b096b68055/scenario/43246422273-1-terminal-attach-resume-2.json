@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43246422273,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3358-ws-recovery-credential-lifecycle",
+    "target_sha": "bbd3c0396cab1319076f8c6238a721b096b68055",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43246422273",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "918313b94016867c7040e2cdf36ad7737a9cfaeab7e09fe36a0aa544d46c3ae0"
+  },
+  "record": "runs/2026-11-12/43246422273-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "a3a971a091acde69e53a2446f0390380a5e6cd80be58a7b56f9550a86f137542"
+}
