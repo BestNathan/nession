@@ -17,7 +17,6 @@ const REQUIRED=[
   '.github/workflows/e2e-tests.yml',
 ];
 const DEPLOY='.github/workflows/release-staging.yml';
-const PROMOTION_LIMIT=90;
 const fail=reason=>({ready:false,reason});
 const okay=details=>({ready:true,reason:'QUALIFIED',...details});
 
@@ -75,8 +74,8 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
   authenticatedNative=[],deployRuns=[],laneSha,branch='staging',
   deployment_workflows=['release-staging.yml']}) {
   if(!SHA.test(laneSha)||!Array.isArray(firstParentCommits)||
-      firstParentCommits.length===0||firstParentCommits.length>PROMOTION_LIMIT)
-    return fail('UNBOUNDED_OR_EMPTY_PROMOTION');
+      firstParentCommits.length===0)
+    return fail('EMPTY_PROMOTION');
   const run=deployRuns.filter(r=>deployment_workflows.some(file=>r.path?.split('@')[0]==='.github/workflows/'+file) &&
     r.head_sha===laneSha && r.head_branch===branch && r.event==='push' &&
     r.repository?.full_name===REPO && r.head_repository?.full_name===REPO);
@@ -88,8 +87,13 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     return fail('STAGING_RELEASE_NOT_PROVEN');
   if(!Array.isArray(associations)||associations.length!==firstParentCommits.length)
     return fail('INCOMPLETE_PR_PROVENANCE');
-  if(!Array.isArray(authenticatedNative)||authenticatedNative.length>PROMOTION_LIMIT||
-     authenticatedNative.some(x=>!SHA.test(x)||!firstParentCommits.includes(x))||
+  // History size is not an authorization rule: each unique merged commit must
+  // still be independently bound to its source PR and proof below.
+  const commitSet=new Set(firstParentCommits);
+  if(commitSet.size!==firstParentCommits.length)
+    return fail('INVALID_PR_PROVENANCE');
+  if(!Array.isArray(authenticatedNative)||
+     authenticatedNative.some(x=>!SHA.test(x)||!commitSet.has(x))||
      new Set(authenticatedNative).size!==authenticatedNative.length)
     return fail('INVALID_NATIVE_PROMOTION_PROOF');
   const native=new Set(authenticatedNative),referenced=new Set();
@@ -273,11 +277,12 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
   const tag=git(['ls-remote','--tags','--refs','origin','refs/tags/v'+mainRust]);
   if(!tag||!SHA.test(tag.split(/\s+/)[0]))return fail('CURRENT_RELEASE_TAG_NOT_FOUND');
 
-  // First-parent integration history is bounded. No cherry-pick/direct-push
-  // change is eligible without a normal source PR/Issue acceptance.
+  // Verify the *entire* exact main..staging first-parent history, regardless
+  // of commit count. A cherry-pick/direct push still lacks the required merged
+  // source PR and cannot pass the provenance/Issue acceptance checks below.
   const commits=git(['rev-list','--first-parent','--reverse','origin/main..origin/'+branch])
     .split('\n').filter(Boolean);
-  if(commits.length===0||commits.length>PROMOTION_LIMIT)return fail('UNBOUNDED_PROMOTION');
+  if(commits.length===0)return fail('EMPTY_PROMOTION');
   const associations=commits.map(sha=>read('commits/'+sha+'/pulls?per_page=100'));
   const numberSet=new Set();
   for(const group of associations){
@@ -362,6 +367,9 @@ function selfTest(){
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
     workflowRuns:[latest,{...latest,id:101,run_number:101,conclusion:'failure'},...runs.slice(1)]}).reason,/MISSING/,
     'newer failed check must override historical green');
+  assert.equal(evaluatePromotion({firstParentCommits:[],associations:[],
+    issues:[],deployRuns:[],laneSha:b}).reason,'EMPTY_PROMOTION',
+    'an empty promotion still has no source-bound changes to validate');
   assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[],
     issues:[],deployRuns:[],laneSha:b}).ready,false);
   // A staging sync branch and model-copyable PR body do not attest Issue
@@ -395,6 +403,30 @@ function selfTest(){
   assert.equal(proven.ready,true,'authenticated native source needs no fake Issue');
   assert.deepEqual(proven.issueNumbers,[]);
   assert.deepEqual(proven.nativeMergeShas,[a]);
+  // Development velocity is not an authorization boundary. A history with
+  // >90 source-bound merges must pass, while one missing proof or provenance
+  // record must still prevent promotion.
+  const longHistory=Array.from({length:128},(_,i)=>
+    (i+1).toString(16).padStart(40,'0'));
+  const longAssociations=longHistory.map(merge_commit_sha=>
+    [{...native,merge_commit_sha}]);
+  const largePromotion={firstParentCommits:longHistory,
+    associations:longAssociations,issues:[],
+    authenticatedNative:longHistory,deployRuns:[deployed],laneSha:b};
+  assert.equal(evaluatePromotion(largePromotion).ready,true,
+    'large fully attested staging history is eligible without a count threshold');
+  assert.equal(evaluatePromotion({...largePromotion,
+    authenticatedNative:longHistory.slice(0,-1)}).reason,
+    'UNATTESTED_NATIVE_STAGING_SYNC:'+longHistory.at(-1),
+    'missing native source proof must remain a blocker in large histories');
+  assert.equal(evaluatePromotion({...largePromotion,
+    associations:longAssociations.slice(0,-1)}).reason,'INCOMPLETE_PR_PROVENANCE',
+    'partial PR inventory must remain a blocker in large histories');
+  assert.equal(evaluatePromotion({...largePromotion,
+    firstParentCommits:[...longHistory,longHistory.at(-1)],
+    associations:[...longAssociations,longAssociations.at(-1)]}).reason,
+    'INVALID_PR_PROVENANCE',
+    'duplicate commit identities cannot be used to inflate authenticated history');
   assert.equal(evaluatePromotion({firstParentCommits:[a],
     associations:[[native]],issues:[],authenticatedNative:[b],
     deployRuns:[deployed],laneSha:b}).reason,'INVALID_NATIVE_PROMOTION_PROOF');
