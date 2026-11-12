@@ -2472,6 +2472,148 @@ wires: &["server.commands.update"],
                 schema_of::<nession_protocol::contracts::image::v1::ImageAccessResponsePayload>,
             )),
         },
+        // Asynchronous directory-backed build lifecycle (#3334). The legacy
+        // `server.image.build` v1 above stays the synchronous compatibility
+        // path; these units submit, observe, cancel and retry the same durable
+        // build record without holding the request open.
+        Unit {
+            owner: "core",
+            id: "server.image.build.submit",
+            version: 1,
+            wires: &["server.image.build.submit"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildSubmitPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildSubmitResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildProgress>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStage>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStatus>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+            ],
+            request: Some((
+                "ImageBuildSubmitCall",
+                nession_protocol::contracts::image::v1::ImageBuildSubmitPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildSubmitPayload>,
+            )),
+            response: Some((
+                "ImageBuildSubmitReply",
+                nession_protocol::contracts::image::v1::ImageBuildSubmitResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildSubmitResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.build.get",
+            version: 1,
+            wires: &["server.image.build.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildGetResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildProgress>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStage>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStatus>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+            ],
+            request: Some((
+                "ImageBuildGetCall",
+                nession_protocol::contracts::image::v1::ImageBuildGetPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildGetPayload>,
+            )),
+            response: Some((
+                "ImageBuildGetReply",
+                nession_protocol::contracts::image::v1::ImageBuildGetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildGetResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.build.list",
+            version: 1,
+            wires: &["server.image.build.list"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildListResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildProgress>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStage>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStatus>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+            ],
+            request: Some((
+                "ImageBuildListCall",
+                nession_protocol::contracts::image::v1::ImageBuildListPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildListPayload>,
+            )),
+            response: Some((
+                "ImageBuildListReply",
+                nession_protocol::contracts::image::v1::ImageBuildListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildListResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.build.cancel",
+            version: 1,
+            wires: &["server.image.build.cancel"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildCancelPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildCancelResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildProgress>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStage>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStatus>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+            ],
+            request: Some((
+                "ImageBuildCancelCall",
+                nession_protocol::contracts::image::v1::ImageBuildCancelPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildCancelPayload>,
+            )),
+            response: Some((
+                "ImageBuildCancelReply",
+                nession_protocol::contracts::image::v1::ImageBuildCancelResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildCancelResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.build.retry",
+            version: 1,
+            wires: &["server.image.build.retry"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildRetryPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildRetryResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildProgress>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStage>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageBuildStatus>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+            ],
+            request: Some((
+                "ImageBuildRetryCall",
+                nession_protocol::contracts::image::v1::ImageBuildRetryPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildRetryPayload>,
+            )),
+            response: Some((
+                "ImageBuildRetryReply",
+                nession_protocol::contracts::image::v1::ImageBuildRetryResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageBuildRetryResponsePayload>,
+            )),
+        },
         Unit {
             owner: "core",
             id: "agent.terminal.output.applied",

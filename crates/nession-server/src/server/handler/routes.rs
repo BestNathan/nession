@@ -186,4 +186,11 @@ server_routes!(handler, msg, payload;
     "server.image.list" => "server.image.list" => 1 => Query => handler.handle_client_image_list(msg).await,
     "server.image.get" => "server.image.get" => 1 => Query => handler.handle_client_image_get(msg).await,
     "server.image.access" => "server.image.access" => 1 => Inline => handler.handle_client_image_access(msg).await,
+    // Asynchronous durable build lifecycle (#3334). Submit/cancel/retry are
+    // small writes to the durable build directory; get/list read it.
+    "server.image.build.submit" => "server.image.build.submit" => 1 => Inline => handler.handle_client_image_build_submit(msg).await,
+    "server.image.build.get" => "server.image.build.get" => 1 => Query => handler.handle_client_image_build_get(msg).await,
+    "server.image.build.list" => "server.image.build.list" => 1 => Query => handler.handle_client_image_build_list(msg).await,
+    "server.image.build.cancel" => "server.image.build.cancel" => 1 => Inline => handler.handle_client_image_build_cancel(msg).await,
+    "server.image.build.retry" => "server.image.build.retry" => 1 => Inline => handler.handle_client_image_build_retry(msg).await,
 );

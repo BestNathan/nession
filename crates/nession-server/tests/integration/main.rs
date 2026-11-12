@@ -7,6 +7,7 @@ mod command_broker;
 mod db;
 mod full_stack;
 mod handler;
+mod image_build_restart;
 mod mcp;
 mod offline_grace;
 mod probe_sweep;

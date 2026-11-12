@@ -127,6 +127,17 @@ pub struct ServerConfig {
     /// Maximum image rows one GC sweep may examine (#3180).
     #[serde(default = "default_image_gc_max_candidates")]
     pub image_gc_max_candidates: usize,
+    /// Wall-time bound for one Git or `mkfs.erofs` subprocess in a build
+    /// (#3334). `0` leaves it unbounded; the default bounds a hung remote.
+    #[serde(default = "default_image_build_stage_timeout_secs")]
+    pub image_build_stage_timeout_secs: u64,
+    /// Maximum bytes retained in one durable build's diagnostic log (#3334).
+    #[serde(default = "default_image_build_log_max_bytes")]
+    pub image_build_log_max_bytes: u64,
+    /// Retention for terminal build directories under the configured build
+    /// root (#3334). Published blob bytes and active work are never touched.
+    #[serde(default = "default_image_build_retention_secs")]
+    pub image_build_retention_secs: u64,
     /// How long a relayed terminal frame may wait for room in a client's
     /// outbound queue before the Server gives up on that client (#961).
     ///
@@ -347,6 +358,17 @@ impl ServerConfig {
         if !(1..=8).contains(&self.image_max_concurrent_builds) {
             anyhow::bail!("image_max_concurrent_builds must be in [1, 8]");
         }
+        if self.image_build_stage_timeout_secs != 0
+            && !(30..=86_400).contains(&self.image_build_stage_timeout_secs)
+        {
+            anyhow::bail!("image_build_stage_timeout_secs must be 0 or in [30, 86400]");
+        }
+        if !(4096..=16 * 1024 * 1024).contains(&self.image_build_log_max_bytes) {
+            anyhow::bail!("image_build_log_max_bytes must be in [4096, 16777216]");
+        }
+        if !(60..=31_536_000).contains(&self.image_build_retention_secs) {
+            anyhow::bail!("image_build_retention_secs must be in [60, 31536000]");
+        }
         if !(30..=3600).contains(&self.image_access_token_expiry_secs) {
             anyhow::bail!("image_access_token_expiry_secs must be in [30, 3600]");
         }
@@ -402,6 +424,9 @@ impl Default for ServerConfig {
             image_access_token_expiry_secs: default_image_access_token_expiry(),
             image_gc_interval_secs: default_image_gc_interval(),
             image_gc_max_candidates: default_image_gc_max_candidates(),
+            image_build_stage_timeout_secs: default_image_build_stage_timeout_secs(),
+            image_build_log_max_bytes: default_image_build_log_max_bytes(),
+            image_build_retention_secs: default_image_build_retention_secs(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
             p2p_token_expiry_secs: default_p2p_token_expiry(),
@@ -467,6 +492,18 @@ fn default_image_gc_interval() -> u64 {
 
 fn default_image_gc_max_candidates() -> usize {
     64
+}
+
+fn default_image_build_stage_timeout_secs() -> u64 {
+    30 * 60
+}
+
+fn default_image_build_log_max_bytes() -> u64 {
+    1024 * 1024
+}
+
+fn default_image_build_retention_secs() -> u64 {
+    7 * 24 * 60 * 60
 }
 
 fn default_db_path() -> String {

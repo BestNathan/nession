@@ -1,9 +1,12 @@
 import type { CapabilityId } from '@/product/capability';
 
 export {
+  IMAGE_BUILD_UPDATED_WIRE,
   imagesApi,
   ImagesPlugin,
   type ImageAccessGrant,
+  type ImageBuildDescriptor,
+  type ImageBuildPage,
   type ImageDescriptor,
   type ImagePage,
   type ImageSource,
@@ -25,8 +28,13 @@ export {
   cacheStateLabel,
   cacheStatusByDigest,
   imageAliases,
+  imageBuildProgressLabel,
+  imageBuildStageLabel,
+  imageBuildStatusLabel,
   imageServerStatusLabel,
+  isTerminalBuild,
   shortDigest,
   sourceLabel,
 } from './model';
+export { useImageBuilds, type ImageBuildsState } from './hooks/useImageBuilds';
 export { useImagesPage } from './hooks/useImagesPage';
