@@ -102,7 +102,7 @@ export interface TerminalControllerEvents {
   onRendererReplaced?: () => void;
   /** An individual Agent event is now parsed/applied by the current xterm.
    * Not a cumulative applied cursor, nor an output ACK (#1950). */
-  onStreamEventParsed?: (position: TerminalStreamPosition) => void;
+  onStreamEventParsed?: (position: TerminalStreamPosition, parsedBytes: number) => void;
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
   onResize?: (sessionId: string, cols: number, rows: number) => void;
   onTitleChange?: (sessionId: string, title: string) => void;
@@ -129,6 +129,19 @@ export interface TerminalControllerEvents {
 export interface TerminalTransportBinding {
   /** Subscribe to swap notifications; returns the unsubscribe function. */
   subscribe(listener: () => void): () => void;
+}
+
+/**
+ * One public link-matcher registration (#2879).
+ *
+ * The registration — not the provider it currently owns — is the stable
+ * identity. A renderer replacement swaps `provider`; disposing the public
+ * disposal always releases the *latest* one, exactly once.
+ */
+interface LinkMatcherRegistration {
+  matcher: TerminalLinkMatcher;
+  provider: TerminalDisposable | null;
+  active: boolean;
 }
 
 export interface TerminalControllerOptions {
@@ -207,8 +220,7 @@ export class TerminalController {
   private transport: TerminalTransport | null = null;
   private geometry: TerminalGeometry | null = null;
   /** Link matchers survive a renderer replacement (SC-03). */
-  private readonly linkMatchers: TerminalLinkMatcher[] = [];
-  private linkDisposables: TerminalDisposable[] = [];
+  private readonly linkRegistrations: LinkMatcherRegistration[] = [];
   /** The Session's stated fixed columns, when a caller or the Agent stated one. */
   private sessionCols: number | null;
   private inputRouter: InputRouter | null = null;
@@ -709,7 +721,7 @@ export class TerminalController {
         }
         if (bootstrapSeq === null && position
           && this._terminal === terminal && this.transport === transport) {
-          this.events?.onStreamEventParsed?.(position);
+          this.events?.onStreamEventParsed?.(position, data.byteLength);
         }
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
@@ -725,7 +737,7 @@ export class TerminalController {
       this.adoptSessionCols(cols);
       this.writer.resize(cols, rows, () => {
         if (position && this._terminal === terminal && this.transport === transport) {
-          this.events?.onStreamEventParsed?.(position);
+          this.events?.onStreamEventParsed?.(position, 0);
         }
       });
     };
@@ -846,20 +858,24 @@ export class TerminalController {
    */
   registerLinkMatcher(matcher: TerminalLinkMatcher): TerminalDisposable | null {
     if (this.disposed) { return null; }
-    if (!this.linkMatchers.includes(matcher)) {
-      this.linkMatchers.push(matcher);
-    }
-    const disposable = this.instance.registerLinkMatcher(matcher);
-    this.linkDisposables.push(disposable);
-    let active = true;
+    // The registration owns whichever provider xterm currently has. A later
+    // renderer replacement rewires `provider` in place, so the returned
+    // disposal never goes stale (#2879).
+    const registration: LinkMatcherRegistration = {
+      matcher,
+      provider: this.instance.registerLinkMatcher(matcher),
+      active: true,
+    };
+    this.linkRegistrations.push(registration);
     return {
       dispose: () => {
-        if (!active) { return; }
-        active = false;
-        const index = this.linkMatchers.indexOf(matcher);
-        if (index >= 0) { this.linkMatchers.splice(index, 1); }
-        disposable.dispose();
-        this.linkDisposables = this.linkDisposables.filter((entry) => entry !== disposable);
+        if (!registration.active) { return; }
+        registration.active = false;
+        const index = this.linkRegistrations.indexOf(registration);
+        if (index >= 0) { this.linkRegistrations.splice(index, 1); }
+        const provider = registration.provider;
+        registration.provider = null;
+        provider?.dispose();
       },
     };
   }
@@ -868,14 +884,14 @@ export class TerminalController {
    * Re-install every active link matcher on the current emulator. A halted
    * writer replaces the xterm instance (#2196); the matcher registry is the
    * controller's, so the replacement gets the same links without a React
-   * effect replay.
+   * effect replay. Each registration keeps its identity and receives the new
+   * provider, so a pending public disposal still releases the latest one.
    */
   private rewireLinkMatchers(): void {
-    for (const disposable of this.linkDisposables) {
-      disposable.dispose();
+    for (const registration of this.linkRegistrations) {
+      registration.provider?.dispose();
+      registration.provider = this.instance.registerLinkMatcher(registration.matcher);
     }
-    this.linkDisposables = this.linkMatchers.map((matcher) =>
-      this.instance.registerLinkMatcher(matcher));
   }
 
   /**

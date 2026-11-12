@@ -946,6 +946,36 @@ describe('StreamReconciler bounded reorder window (#1961)', () => {
     h.reconciler.dispose();
   });
 
+  it('proves recovery from the trusted prefix and resolves only on a complete same-epoch answer (#2877)', async () => {
+    const h = makeHarness();
+    // An attach seed has already asked for history from the received frontier.
+    h.reconciler.seed(1, 5);
+    expect(h.requests).toHaveLength(1);
+    const recovery = h.reconciler.requestReconcile(1, 3);
+    // The live frame at 5 was already delivered; asking from 3 would duplicate
+    // its xterm write, so the existing frontier bounds the request.
+    expect(h.requests[0]).toMatchObject({ epoch: 1, afterSeq: 5 });
+    // Single-flight: a repeated notice shares the outstanding proof.
+    expect(h.reconciler.requestReconcile(1, 3)).toBe(recovery);
+    expect(h.requests).toHaveLength(1);
+    h.requests[0].resolve(reply([], 1, { firstAvailableSeq: 6, complete: true }));
+    await expect(recovery).resolves.toBe(true);
+    h.reconciler.dispose();
+  });
+
+  it('refuses to reconcile across a replaced epoch and reports an incomplete replay as no proof (#2877)', async () => {
+    const h = makeHarness();
+    h.reconciler.seed(2, 4);
+    await expect(h.reconciler.requestReconcile(1, 4)).resolves.toBe(false);
+    expect(h.requests).toHaveLength(1); // only the seed's request
+    expect(h.requests[0].epoch).toBe(2);
+
+    const recovery = h.reconciler.requestReconcile(2, 4);
+    h.requests[0].resolve(reply([], 2, { firstAvailableSeq: 9, complete: false }));
+    await expect(recovery).resolves.toBe(false);
+    h.reconciler.dispose();
+  });
+
   it('rejects invalid resource limits rather than silently disabling backpressure', () => {
     for (const invalid of [0, -1, 0.25, Number.POSITIVE_INFINITY]) {
       expect(() => makeHarness({ maxFrames: invalid })).toThrow(RangeError);

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
@@ -8,7 +9,8 @@ use tracing::{debug, error, info, warn};
 use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
-use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
+use crate::image::{ImageHttpService, ImageManager};
+use crate::registry::{AgentRegistry, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use crate::server::execution::{
@@ -47,6 +49,10 @@ pub struct WebSocketServer {
     /// The MCP endpoint (`#565`), when `[mcp] enabled = true`. It shares this
     /// listener and the Server's business services.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// Global EROFS image manager (#3022), shared by every connection.
+    image_manager: Arc<ImageManager>,
+    /// Authorized blob HTTP route mounted on this listener.
+    image_http: Arc<ImageHttpService>,
     listener: Option<TcpListener>,
 }
 
@@ -92,6 +98,26 @@ impl WebSocketServer {
             config.p2p_token_expiry_secs,
         ));
 
+        // The global image manager (#3022): one content-addressed blob store,
+        // one bounded build worker, one owner of image metadata.
+        let blob_store = nession_erofs::BlobStore::new(&config.image_blob_dir)
+            .context("failed to open the image blob store")?;
+        let image_builder = nession_erofs::ErofsBuilder::new(
+            Arc::new(nession_erofs::ProcessGitRunner::default()),
+            Arc::new(nession_erofs::ProcessMkfsRunner::default()),
+            blob_store.clone(),
+            &config.image_build_dir,
+        )
+        .context("failed to open the image build workspace")?;
+        let image_manager = Arc::new(ImageManager::new(
+            Arc::clone(&db),
+            Arc::new(image_builder),
+            blob_store,
+            config.image_max_concurrent_builds,
+            config.image_access_token_expiry_secs,
+        ));
+        let image_http = Arc::new(ImageHttpService::new(Arc::clone(&image_manager)));
+
         // Mount MCP on this listener when configured. Building it here (rather
         // than on first request) means a fail-closed configuration error stops
         // the start, before `ready` is announced. It shares the runtime's
@@ -107,6 +133,7 @@ impl WebSocketServer {
                 client_registry: Arc::clone(&client_registry),
                 web_client_registry: Arc::clone(&web_client_registry),
                 env_service: Arc::clone(&env_service),
+                image_manager: Arc::clone(&image_manager),
                 db: Arc::clone(&db),
                 p2p_broker: Arc::clone(&p2p_broker),
             },
@@ -125,6 +152,8 @@ impl WebSocketServer {
             db,
             mutations,
             mcp,
+            image_manager,
+            image_http,
             listener: Some(listener),
         })
     }
@@ -153,6 +182,39 @@ impl WebSocketServer {
         // which cannot fail.
         ready.announce();
 
+        // Background sweep: bounded image GC (#3180). The interval and the
+        // per-sweep candidate/byte bounds are configuration; a sweep that hits
+        // its bound leaves the remainder in the database for the next tick.
+        // `0` disables the schedule — an explicit operator sweep still works.
+        if self.config.image_gc_interval_secs > 0 {
+            let image_manager = Arc::clone(&self.image_manager);
+            let interval = std::time::Duration::from_secs(self.config.image_gc_interval_secs);
+            let limits = crate::image::GcLimits {
+                max_candidates: self.config.image_gc_max_candidates,
+                ..Default::default()
+            };
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(interval);
+                ticker.tick().await; // consume the immediate first tick
+                loop {
+                    ticker.tick().await;
+                    match image_manager.gc_bounded(limits).await {
+                        Ok(report) => info!(
+                            removed_images = report.removed_images,
+                            removed_blobs = report.removed_blobs,
+                            reclaimed_bytes = report.reclaimed_bytes,
+                            deferred_by_limit = report.deferred_by_limit,
+                            skipped_active_transfers = report.skipped_active_transfers,
+                            "bounded image GC sweep completed"
+                        ),
+                        Err(error) => {
+                            warn!("bounded image GC sweep failed and will retry: {error:#}")
+                        }
+                    }
+                }
+            });
+        }
+
         let heartbeat_interval_secs = self.config.heartbeat_interval_secs;
 
         // Background sweeper: periodically mark agents that have missed their
@@ -174,7 +236,8 @@ impl WebSocketServer {
                 loop {
                     ticker.tick().await;
                     let offline = agent_registry.check_offline_agents().await;
-                    for agent_id in offline {
+                    for transition in offline {
+                        let agent_id = transition.agent_id;
                         info!("Agent {} marked offline (heartbeat timeout)", agent_id);
                         // A liveness verdict, not a disconnect: nobody is
                         // heartbeating for this agent, so there is no owner to
@@ -184,49 +247,32 @@ impl WebSocketServer {
                         // went quiet without dropping its WebSocket.
                         command_broker.evict_agent(&agent_id).await;
 
-                        // Schedule session cleanup after 30s grace period.
-                        // If the agent reconnects before the grace period
-                        // expires, its sessions are preserved.
-                        let session_registry = Arc::clone(&session_registry);
-                        let agent_registry = Arc::clone(&agent_registry);
-                        let env_service = Arc::clone(&env_service);
-                        let web_client_registry = Arc::clone(&web_client_registry);
-                        let agent_id_clone = agent_id.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                            // Only clean if agent is still offline after grace period.
-                            if let Some(agent) = agent_registry.get(&agent_id_clone).await {
-                                if agent.status == AgentStatus::Offline {
-                                    info!(
-                                        "Cleaning sessions for offline agent {} (grace period expired)",
-                                        agent_id_clone
-                                    );
-                                    // Collect session IDs first so we can clear their
-                                    // env usage locks after removal.
-                                    let removed =
-                                        session_registry.remove_by_agent(&agent_id_clone).await;
-                                    for session_id in &removed {
-                                        env_service.clear_session_state(session_id).await;
-                                    }
-                                    if !removed.is_empty() {
-                                        // Push the shrunken list so browsers stop
-                                        // showing sessions that are now gone.
-                                        web_client_registry
-                                            .broadcast_sessions_changed(Arc::clone(
-                                                &session_registry,
-                                            ))
-                                            .await;
-                                    }
-                                }
-                            }
-                        });
+                        // Schedule session cleanup after the grace period,
+                        // bound to the offline episode this transition opened.
+                        // If the agent heartbeats or re-registers before the
+                        // grace expires, the cleanup stands down; if a later
+                        // offline interval begins, this task cannot remove its
+                        // Sessions (#2997).
+                        tokio::spawn(super::offline_grace::schedule_expired_offline_cleanup(
+                            Arc::clone(&agent_registry),
+                            Arc::clone(&session_registry),
+                            Arc::clone(&env_service),
+                            Arc::clone(&web_client_registry),
+                            agent_id,
+                            transition.offline_generation,
+                        ));
                     }
                 }
             });
         }
 
-        // Background sweep: periodically clean up orphaned sessions whose
-        // agent has been unreachable for more than 24 hours.
+        // Background sweep: periodically clean up recovering Sessions whose
+        // Agent has not restored them within the retention window.
+        //
+        // Selection and deletion are deliberately separate: the selection is
+        // only a candidate list, and the reclamation re-checks that same
+        // stale-recovering predicate at the destructive boundary while holding
+        // the Session's lifecycle guard (#2848).
         {
             let session_registry = Arc::clone(&self.session_registry);
             let env_service = Arc::clone(&self.env_service);
@@ -238,24 +284,29 @@ impl WebSocketServer {
                 ticker.tick().await; // consume the immediate first tick
                 loop {
                     ticker.tick().await;
-                    // 24 hours in seconds
-                    let cutoff = 24 * 3600i64;
-                    match db.list_sessions_older_than(cutoff).await {
-                        Ok(rows) => {
+                    match super::orphan_sweep::select_stale_recovering(
+                        &db,
+                        super::orphan_sweep::RECOVERING_RETENTION,
+                    )
+                    .await
+                    {
+                        Ok((cutoff, rows)) => {
                             if rows.is_empty() {
                                 continue;
                             }
-                            for row in &rows {
-                                info!(
-                                    "Cleaning orphaned session {} (agent: {}, last activity: {})",
-                                    row.session_id, row.agent_id, row.last_activity
-                                );
-                                session_registry.remove(&row.session_id).await;
-                                // The Session is gone; its desired binding and
-                                // observed cache are no longer a live claim.
-                                env_service.clear_session_state(&row.session_id).await;
-                            }
-                            tracing::info!("Cleaned {} orphaned sessions", rows.len());
+                            let outcome = super::orphan_sweep::reclaim_selected(
+                                &rows,
+                                cutoff,
+                                &session_registry,
+                                &env_service,
+                            )
+                            .await;
+                            info!(
+                                selected = outcome.selected,
+                                reclaimed = outcome.reclaimed,
+                                skipped = outcome.skipped,
+                                "recovering Session sweep complete"
+                            );
                         }
                         Err(e) => {
                             error!("Orphan session sweep failed: {:#}", e);
@@ -285,6 +336,8 @@ impl WebSocketServer {
                 mutations: Arc::clone(&self.mutations),
                 p2p_broker: Arc::clone(&self.p2p_broker),
                 mcp: self.mcp.clone(),
+                image_manager: Arc::clone(&self.image_manager),
+                image_http: Arc::clone(&self.image_http),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
                 terminal_cols: self.config.terminal_cols,
@@ -355,6 +408,9 @@ struct ServerContext {
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// Global EROFS image manager and its authorized HTTP route (#3022).
+    image_manager: Arc<ImageManager>,
+    image_http: Arc<ImageHttpService>,
     auth_token: String,
     heartbeat_interval_secs: u64,
     /// The release-selected fixed column count (#2487).
@@ -391,16 +447,29 @@ async fn route_connection<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let Some(mcp) = ctx.mcp.clone() else {
-        return handle_ws_stream(stream, ctx).await;
-    };
-
     match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
         Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
-        Ok(Sniffed::Http { stream, .. }) => mcp
-            .serve(stream)
-            .await
-            .map_err(|error| anyhow::anyhow!("MCP response failed: {error}")),
+        Ok(Sniffed::Http { head, stream }) => {
+            let is_image = head
+                .path()
+                .starts_with(nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX);
+            if is_image {
+                return ctx
+                    .image_http
+                    .serve(head, stream)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("image blob response failed: {error}"));
+            }
+            if let Some(mcp) = ctx.mcp.clone() {
+                mcp.serve(stream)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("MCP response failed: {error}"))
+            } else {
+                // No service owns this route. The connection closes without a
+                // body; the client sees the closed connection, not a hang.
+                Ok(())
+            }
+        }
         Err(error) => {
             // A non-WebSocket, non-HTTP peer (a scanner or a health check that
             // sent garbage). The stream is gone with the parser, so this is a
@@ -434,7 +503,9 @@ where
         terminal_stall_grace,
         query_concurrency,
         p2p_broker,
+        image_manager,
         mcp: _,
+        image_http: _,
     } = ctx;
 
     let ws_stream = accept_async(stream).await?;
@@ -454,6 +525,7 @@ where
             client_registry: client_registry.clone(),
             web_client_registry: web_client_registry.clone(),
             env_service,
+            image_manager,
             db,
             p2p_broker,
         },
@@ -1056,6 +1128,15 @@ fn agent_attached_relay_ready(
     if let Some(client_id) = payload.get("controller_client_id").and_then(|v| v.as_str()) {
         if !client_id.is_empty() {
             out_payload["controller_client_id"] = serde_json::json!(client_id);
+        }
+    }
+    // Notification-only capabilities (#2877) are the Agent's statement, so the
+    // Server forwards them unchanged — it neither adds nor validates an entry.
+    // The browser negotiates the response-less progress wire from this list;
+    // absent means an older Agent and keeps the v1 operation.
+    if let Some(capabilities) = payload.get("terminal_capabilities") {
+        if capabilities.is_array() {
+            out_payload["terminal_capabilities"] = capabilities.clone();
         }
     }
     Some(tokio_tungstenite::tungstenite::Message::Text(
@@ -2292,6 +2373,48 @@ mod tests {
     }
 
     #[test]
+    fn relay_ready_forwards_notification_capabilities_verbatim_and_never_invents_them() {
+        let stated = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41,
+                "stream_epoch": 52,
+                "terminal_capabilities": ["terminal-progress-notifications-v1"]
+            }
+        });
+        let ready = agent_attached_relay_ready(&stated, "sess", "browser-a", "begin-123")
+            .expect("verified Agent subscription");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert_eq!(
+            ready["payload"]["terminal_capabilities"],
+            json!(["terminal-progress-notifications-v1"]),
+            "the Server forwards the Agent's list unchanged"
+        );
+
+        // An older Agent states nothing; the receipt must not invent support.
+        let legacy = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52
+            }
+        });
+        let ready = agent_attached_relay_ready(&legacy, "sess", "browser-a", "begin-123")
+            .expect("legacy Agent remains attachable");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("terminal_capabilities").is_none());
+
+        // A malformed value is not reinterpreted as a capability list.
+        let malformed = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52,
+                "terminal_capabilities": "terminal-progress-notifications-v1"
+            }
+        });
+        let ready = agent_attached_relay_ready(&malformed, "sess", "browser-a", "begin-123")
+            .expect("the rest of the receipt stands");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("terminal_capabilities").is_none());
+    }
+
+    #[test]
     fn relay_ready_is_never_minted_from_legacy_partial_or_forged_agent_frames() {
         for reply in [
             json!({"msg_type":"ok","payload":{"session_name":"sess"}}),
@@ -2521,6 +2644,42 @@ mod tests {
         .await;
 
         (agent_write.sent, outcome)
+    }
+
+    /// #2877: the response-less progress notification is an ordinary forwarded
+    /// wire, not a Server-served unit and not a coalescable input burst.
+    ///
+    /// The Agent is the only party that may authenticate or credit it; the
+    /// Relay must hand it over unchanged, in arrival order, with no synthetic
+    /// reply. A classifier that routed `client.*` as a Server unit, or an
+    /// input-throttle arm that swallowed it, fails here.
+    #[tokio::test]
+    async fn a_progress_notification_is_forwarded_unchanged_to_the_agent() {
+        let payload = json!({
+            "session_name": "sess",
+            "subscriber_generation": 41,
+            "stream_epoch": 7,
+            "renderer_generation": 3,
+            "applied_through": 12,
+        });
+        let (sent, outcome) = drive(vec![frame_with_payload(
+            "client.terminal.output.progress",
+            "progress-1",
+            payload.clone(),
+        )])
+        .await;
+
+        assert_eq!(
+            sent.len(),
+            1,
+            "the notification reaches the Agent: {sent:?}"
+        );
+        let forwarded: serde_json::Value =
+            serde_json::from_str(sent[0].to_text().unwrap()).unwrap();
+        assert_eq!(forwarded["msg_type"], "client.terminal.output.progress");
+        assert_eq!(forwarded["id"], "progress-1");
+        assert_eq!(forwarded["payload"], payload);
+        assert!(matches!(outcome, ClientToAgent::Ended));
     }
 
     /// #962: a relay end that arrives inside the throttle window ends the relay

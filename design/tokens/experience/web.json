@@ -1,7 +1,7 @@
 {
   "$description": "Web experience density. Emitted as CSS variables in generated web.css.",
   "typography": {
-    "$description": "Chrome typography roles (#1216). A role names the text's job and owns the coherent size / weight / leading treatment for that job at Web density. Family (product sans vs technical mono) stays with the text's meaning at the call site — a path is mono at the code role's metrics, not mono because the role is smaller. Workload renderers (xterm, CodeMirror, Markdown document prose) stay on their own surfaces.",
+    "$description": "Chrome typography roles (#1216). A role names the text's job and owns the coherent size / weight / leading treatment for that job at Web density. Family (product sans vs technical mono) stays with the text's meaning at the call site \u2014 a path is mono at the code role's metrics, not mono because the role is smaller. Workload renderers (xterm, CodeMirror, Markdown document prose) stay on their own surfaces.",
     "title": {
       "$description": "The surface's own name when Web chrome renders a page header or pushed detail title.",
       "size": {
@@ -15,7 +15,7 @@
       }
     },
     "primary": {
-      "$description": "Work / local primary — highest within its region. Session name, active file, focused input.",
+      "$description": "Work / local primary \u2014 highest within its region. Session name, active file, focused input.",
       "size": {
         "value": "14px"
       },
@@ -27,7 +27,7 @@
       }
     },
     "body": {
-      "$description": "Ordinary readable product text and controls — button labels, menu items, filters.",
+      "$description": "Ordinary readable product text and controls \u2014 button labels, menu items, filters.",
       "size": {
         "value": "13px"
       },
@@ -51,7 +51,7 @@
       }
     },
     "metadata": {
-      "$description": "Quiet factual context. Agent/location, recency, status details — never outweighs the thing it describes.",
+      "$description": "Quiet factual context. Agent/location, recency, status details \u2014 never outweighs the thing it describes.",
       "size": {
         "value": "11.5px"
       },
@@ -63,7 +63,7 @@
       }
     },
     "caption": {
-      "$description": "Lowest deliberate readable hierarchy — keyboard hints, tiny helper copy, sidebar service state.",
+      "$description": "Lowest deliberate readable hierarchy \u2014 keyboard hints, tiny helper copy, sidebar service state.",
       "size": {
         "value": "11px"
       },
@@ -75,7 +75,7 @@
       }
     },
     "code": {
-      "$description": "Chrome-side technical identity — paths, commands, env keys. Not xterm/CodeMirror workload glyphs.",
+      "$description": "Chrome-side technical identity \u2014 paths, commands, env keys. Not xterm/CodeMirror workload glyphs.",
       "size": {
         "value": "12.5px"
       },
@@ -102,7 +102,7 @@
       "value": "36px"
     },
     "visualSize": {
-      "$description": "The affordance actually painted inside a control — the circle a capsule icon action draws — as opposed to the box that receives the tap. Equal to `control.md` (32px) by construction: a pointer has no minimum hit area, so on Web the drawn affordance may fill the control it sits in and the split is a no-op. The leaf exists so a single shared binding resolves on both experiences — an App-only token would be written into [data-experience=app] only and resolve to nothing at `:root` — and so the drawn-affordance check can be stated once against both. See the App side for where the two deliberately differ.",
+      "$description": "The affordance actually painted inside a control \u2014 the circle a capsule icon action draws \u2014 as opposed to the box that receives the tap. Equal to `control.md` (32px) by construction: a pointer has no minimum hit area, so on Web the drawn affordance may fill the control it sits in and the split is a no-op. The leaf exists so a single shared binding resolves on both experiences \u2014 an App-only token would be written into [data-experience=app] only and resolve to nothing at `:root` \u2014 and so the drawn-affordance check can be stated once against both. See the App side for where the two deliberately differ.",
       "value": "32px"
     }
   },
@@ -149,12 +149,13 @@
     "iconButtonSize": {
       "ref": "experience.web.control.lg"
     },
-    "railWidth": {
-      "value": "50px"
-    },
     "sidebarWidth": {
       "$description": "Expanded sidebar column. The mockup draws 246px; the shell's grid is `246px 1fr`.",
       "value": "246px"
+    },
+    "railWidth": {
+      "$description": "Collapsed Web navigation column (#3075). A reserved in-flow rail, not a floating overlay: the work surface starts at its right edge and the shell keeps its shortcuts reachable. 56px holds one 36px control band plus the shell's edge insets.",
+      "value": "56px"
     },
     "sessionRowPadY": {
       "$owner": "pattern.session-item",
@@ -166,21 +167,21 @@
       "value": "7px"
     },
     "nodeRowPadY": {
-      "$description": "Agent/node row vertical padding. The mockup draws 6px — tighter than a session row's 7px, because a node row carries one line where a session row carries two.",
+      "$description": "Agent/node row vertical padding. The mockup draws 6px \u2014 tighter than a session row's 7px, because a node row carries one line where a session row carries two.",
       "value": "6px"
     },
     "nodeFontSize": {
-      "$description": "Agent/node row text — the secondary role at Web density (#1216). Product face: a node row is infrastructure context (a name and a count), not technical workload identity (#1050 stage 4).",
+      "$description": "Agent/node row text \u2014 the secondary role at Web density (#1216). Product face: a node row is infrastructure context (a name and a count), not technical workload identity (#1050 stage 4).",
       "ref": "experience.web.typography.secondary.size"
     },
     "sessionRowTitleFontSize": {
       "$owner": "pattern.session-item",
-      "$description": "Session name — the sidebar's primary role. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
+      "$description": "Session name \u2014 the sidebar's primary role. The mockup's 12.5px, a half step below `text-sm` so two lines plus padding fit the row.",
       "ref": "experience.web.typography.primary.size"
     },
     "sessionRowMetaFontSize": {
       "$owner": "pattern.session-item",
-      "$description": "Session metadata (agent / recency) — the metadata role. A full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules). Family is per slot since #1050 stage 4: the line's workload slot is the pane's foreground command, so it keeps monospace, while the node name and the recency are the metadata role's own \"Agent/location, recency\" and are set in the product face. The size is shared by all three because a role owns size, not family.",
+      "$description": "Session metadata (agent / recency) \u2014 the metadata role. A full step below the title, so the title leads and the metadata never outweighs the thing it describes (visual-language.md typography rules). Family is per slot since #1050 stage 4: the line's workload slot is the pane's foreground command, so it keeps monospace, while the node name and the recency are the metadata role's own \"Agent/location, recency\" and are set in the product face. The size is shared by all three because a role owns size, not family.",
       "ref": "experience.web.typography.metadata.size"
     },
     "footPadY": {
@@ -192,28 +193,24 @@
       "value": "7px"
     },
     "statusDotSize": {
-      "$description": "The sidebar's status mark, shared by the foot's service dot, the collapsed rail's and the agent/node rows — one object in three places. Small on purpose: the mockup's comment on the foot is 'Healthy stays quiet; degraded may gain emphasis', so a steady state is a 5px mark beside quiet text rather than a badge.",
+      "$description": "The sidebar's status mark, shared by the Server footer's service dot and the Agent/node rows \u2014 one object in two places. Small on purpose: the mockup's comment on the foot is 'Healthy stays quiet; degraded may gain emphasis', so a steady state is a 5px mark beside quiet text rather than a badge.",
       "value": "5px"
     },
     "footFontSize": {
-      "$description": "Sidebar foot text — the caption role (#1216). A service state and a node count: quiet infrastructure chrome, not session metadata.",
+      "$description": "Sidebar foot text \u2014 the caption role (#1216). A service state and a node count: quiet infrastructure chrome, not session metadata.",
       "ref": "experience.web.typography.caption.size"
     },
     "sectionHeadFontSize": {
-      "$description": "Sidebar section label (Agents / Sessions) — the secondary role. Muted and below `text-xs`, so a section label never competes with the rows it names. Top padding is `shell.space-1` (4px) and the sides `shell.space-2` (8px), which is what the mockup draws.",
+      "$description": "Sidebar section label (Agents / Sessions) \u2014 the secondary role. Muted and below `text-xs`, so a section label never competes with the rows it names. Top padding is `shell.space-1` (4px) and the sides `shell.space-2` (8px), which is what the mockup draws.",
       "ref": "experience.web.typography.secondary.size"
     },
     "sectionHeadPadBottom": {
       "$description": "Sidebar section label bottom padding. The mockup draws 7px, tighter than the sides so the label sits with the rows it names rather than floating between sections.",
       "value": "7px"
-    },
-    "sectionSepMargin": {
-      "$description": "Inset separator between sidebar sections. The mockup draws `margin: 8px`, so the rule does not run edge to edge — it reads as a division inside the column, not as another panel edge.",
-      "value": "8px"
     }
   },
   "focus": {
-    "$description": "Focus is a modality-aware interaction state, not outer decoration (#2750). Pointer/touch interaction adds no halo and no second frame around the control; keyboard focus stays inside the control's own geometry. Bordered field primitives (Input, Textarea, SelectTrigger) repaint their existing border in `ring`. Controls and surfaces without a usable border to repaint (Button, Toggle, Tabs, Checkbox, ScrollArea, borderless list rows) draw an inset outline `ringWidth` thick in `ring`, placed `ringOffset` inside the border edge — the negative offset is what keeps the indicator inside the control instead of drawing the old shell's outset halo. Invalid owns the border (`destructive`) and keeps the same inset outline while focused, so focus never disappears on an invalid control. Focus visibility is never globally suppressed.",
+    "$description": "Focus is a modality-aware interaction state, not outer decoration (#2750). Pointer/touch interaction adds no halo and no second frame around the control; keyboard focus stays inside the control's own geometry. Bordered field primitives (Input, Textarea, SelectTrigger) repaint their existing border in `ring`. Controls and surfaces without a usable border to repaint (Button, Toggle, Tabs, Checkbox, ScrollArea, borderless list rows) draw an inset outline `ringWidth` thick in `ring`, placed `ringOffset` inside the border edge \u2014 the negative offset is what keeps the indicator inside the control instead of drawing the old shell's outset halo. Invalid owns the border (`destructive`) and keeps the same inset outline while focused, so focus never disappears on an invalid control. Focus visibility is never globally suppressed.",
     "ringWidth": {
       "value": "2px"
     },
@@ -223,12 +220,12 @@
   },
   "terminal": {
     "$owner": "pattern.terminal-surface",
-    "$description": "The Web work surface's own typography and inset. terminal-surface.md §Resize and typography: 'font/scrollback/control metrics come from Experience tokens, not ad-hoc breakpoint values' — until this group existed the xterm boundary read hardcoded 14px / line-height 1.2 literals that no token owned. The mockup's `.term` draws `font-size: 12.5px; line-height: 1.62; padding: 18px 18px 52px`. Two channels, because xterm is a canvas renderer: the inset is CSS (`--terminal-pad-*`), the font metrics are xterm options read from `TERMINAL_METRICS` in `design/generated/terminal.ts` — xterm takes a JS object, which is the same reason the ANSI theme is emitted there. The mockup's third padding value is deliberately NOT a token: 52px is the capsule's own box (14px bottom margin + 36px capsule + 2), i.e. the clearance `--terminal-content-bottom-inset` already measures, and freezing it would reserve fixed space for chrome that may not be drawn — terminal-surface.md's 'shrink the terminal grid with large fixed padding to reserve hypothetical UI'. Deliberately not a ref to `typography.primary.size`: visual-language.md keeps terminal glyph rendering separate from chrome typography even where the sizes coincide.",
+    "$description": "The Web work surface's own typography and inset. terminal-surface.md \u00a7Resize and typography: 'font/scrollback/control metrics come from Experience tokens, not ad-hoc breakpoint values' \u2014 until this group existed the xterm boundary read hardcoded 14px / line-height 1.2 literals that no token owned. The mockup's `.term` draws `font-size: 12.5px; line-height: 1.62; padding: 18px 18px 52px`. Two channels, because xterm is a canvas renderer: the inset is CSS (`--terminal-pad-*`), the font metrics are xterm options read from `TERMINAL_METRICS` in `design/generated/terminal.ts` \u2014 xterm takes a JS object, which is the same reason the ANSI theme is emitted there. The mockup's third padding value is deliberately NOT a token: 52px is the capsule's own box (14px bottom margin + 36px capsule + 2), i.e. the clearance `--terminal-content-bottom-inset` already measures, and freezing it would reserve fixed space for chrome that may not be drawn \u2014 terminal-surface.md's 'shrink the terminal grid with large fixed padding to reserve hypothetical UI'. Deliberately not a ref to `typography.primary.size`: visual-language.md keeps terminal glyph rendering separate from chrome typography even where the sizes coincide.",
     "fontSize": {
       "value": "12.5px"
     },
     "lineHeight": {
-      "$description": "Converted, not transcribed — because the unit differs. The mockup's CSS `line-height: 1.62` multiplies the *font size*: 12.5px × 1.62 = a 20.25px line box. xterm's `lineHeight` multiplies the font's *measured box* instead, which for JetBrains Mono is 1.36em — 17px at 12.5px. Handing xterm the mockup's raw `1.62` therefore draws a 27px row, 33% looser than the mockup, so the number that reproduces the mockup's leading is 20.25 ÷ 17 = 1.19. The target is the mockup's *appearance*; its literal number means something else in this unit, and copying it would have been the divergence.",
+      "$description": "Converted, not transcribed \u2014 because the unit differs. The mockup's CSS `line-height: 1.62` multiplies the *font size*: 12.5px \u00d7 1.62 = a 20.25px line box. xterm's `lineHeight` multiplies the font's *measured box* instead, which for JetBrains Mono is 1.36em \u2014 17px at 12.5px. Handing xterm the mockup's raw `1.62` therefore draws a 27px row, 33% looser than the mockup, so the number that reproduces the mockup's leading is 20.25 \u00f7 17 = 1.19. The target is the mockup's *appearance*; its literal number means something else in this unit, and copying it would have been the divergence.",
       "value": 1.19
     },
     "padX": {
@@ -421,19 +418,19 @@
   "contextCapsule": {
     "$owner": "pattern.context-capsule",
     "marginBottom": {
-      "$description": "The inter-Capsule gap: the deliberate space between the upper Context Capsule and the resting Conversation Capsule below it (#1347 SC-43). The same value as projectionMarginBottom so a list-to-Peek swap does not jump the gap, but a separate leaf because the two pairs may diverge — a Peek is read while typing, the list is a place you stop.",
+      "$description": "The inter-Capsule gap: the deliberate space between the upper Context Capsule and the resting Conversation Capsule below it (#1347 SC-43). The same value as projectionMarginBottom so a list-to-Peek swap does not jump the gap, but a separate leaf because the two pairs may diverge \u2014 a Peek is read while typing, the list is a place you stop.",
       "value": "0.5rem"
     },
     "maxHeight": {
-      "$description": "Ceiling for the upper Context Capsule (#1347 SC-44). The surface takes its content's natural height and only clamps here, so a short list is short instead of reserving room for rows that do not exist; content beyond the ceiling scrolls inside it. A ceiling rather than a height because the flat list renders every capability, so quiet, working and context-only differ in row ORDER and never in row COUNT — the pair still does not resize as senses come and go, which is the stability a fixed height was protecting, but it now comes from the list's own invariant rather than from a box. Equal to this experience's projectionMaxHeight, so deepening the list into a Peek can reach the same ceiling, and the region above this dock has already been proven to hold that much.",
+      "$description": "Ceiling for the upper Context Capsule (#1347 SC-44). The surface takes its content's natural height and only clamps here, so a short list is short instead of reserving room for rows that do not exist; content beyond the ceiling scrolls inside it. A ceiling rather than a height because the flat list renders every capability, so quiet, working and context-only differ in row ORDER and never in row COUNT \u2014 the pair still does not resize as senses come and go, which is the stability a fixed height was protecting, but it now comes from the list's own invariant rather than from a box. Equal to this experience's projectionMaxHeight, so deepening the list into a Peek can reach the same ceiling, and the region above this dock has already been proven to hold that much.",
       "value": "18rem"
     },
     "rowHeight": {
-      "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences — two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
+      "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences \u2014 two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
       "value": "2.75rem"
     },
     "markerSize": {
-      "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose — both are 'a quiet mark beside text' rather than a badge — but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",
+      "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose \u2014 both are 'a quiet mark beside text' rather than a badge \u2014 but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",
       "value": "5px"
     }
   },
@@ -450,7 +447,7 @@
   },
   "conversation": {
     "$owner": "pattern.conversation",
-    "$description": "Web density for an AI conversation transcript (#1363). The rhythm is the design: work rows sit close together so a long process reads as one block, and the answer is separated from that block by the loose gap so it reads as the thing you came for. Only the measurements live here — the hierarchy that motivates them is owned by the pattern doc.",
+    "$description": "Web density for an AI conversation transcript (#1363). The rhythm is the design: work rows sit close together so a long process reads as one block, and the answer is separated from that block by the loose gap so it reads as the thing you came for. Only the measurements live here \u2014 the hierarchy that motivates them is owned by the pattern doc.",
     "rowGap": {
       "$description": "Between two rows of the same process group. Tight, because a group is scanned as one unit rather than read.",
       "value": "8px"
@@ -464,7 +461,7 @@
       "value": "16px"
     },
     "turnGap": {
-      "$description": "Between a turn's own parts — the process control, the answer, the actions.",
+      "$description": "Between a turn's own parts \u2014 the process control, the answer, the actions.",
       "value": "16px"
     },
     "processToAnswerGap": {
@@ -472,7 +469,7 @@
       "value": "8px"
     },
     "groupTitleGap": {
-      "$description": "Below an expanded group's title — the space that says the title belongs to the body rather than to the next title.",
+      "$description": "Below an expanded group's title \u2014 the space that says the title belongs to the body rather than to the next title.",
       "value": "16px"
     },
     "groupMaxHeight": {
@@ -480,7 +477,7 @@
       "value": "min(400px, 50vh)"
     },
     "groupFade": {
-      "$description": "The edge fade that says a capped group body continues past the cap — the affordance, since a scrollbar gutter may be hidden.",
+      "$description": "The edge fade that says a capped group body continues past the cap \u2014 the affordance, since a scrollbar gutter may be hidden.",
       "value": "24px"
     },
     "readingColumnMax": {
@@ -488,7 +485,7 @@
       "value": "720px"
     },
     "bubbleMaxWidth": {
-      "$description": "The user's bubble as a fraction of the reading column — deliberately well under it, so a short prompt is a short bubble and the assistant's answer owns the full measure. App states the wider value.",
+      "$description": "The user's bubble as a fraction of the reading column \u2014 deliberately well under it, so a short prompt is a short bubble and the assistant's answer owns the full measure. App states the wider value.",
       "value": "70%"
     },
     "foldControlHeight": {
@@ -498,12 +495,12 @@
   },
   "workspace": {
     "$owner": "pattern.file-workspace",
-    "$description": "Web Workspace master/detail. The mockup draws the tree at a fixed 208px — a navigation column sized to its content, not a fraction of the pane — with the editor taking the rest.",
+    "$description": "Web Workspace master/detail. The mockup draws the tree at a fixed 208px \u2014 a navigation column sized to its content, not a fraction of the pane \u2014 with the editor taking the rest.",
     "treeWidth": {
       "value": "208px"
     },
     "treeFontSize": {
-      "$description": "Tree text — the secondary role. Monospace: a path is workload identity, and the mockup sets the whole tree in mono rather than only the filenames.",
+      "$description": "Tree text \u2014 the secondary role. Monospace: a path is workload identity, and the mockup sets the whole tree in mono rather than only the filenames.",
       "ref": "experience.web.typography.secondary.size"
     },
     "treeRowRadius": {
@@ -514,7 +511,7 @@
       "value": "1.85"
     },
     "treeRowPadY": {
-      "$description": "Tree row vertical padding. 1px, because `lineHeight: 1.85` already carries the row's breathing room — padding and leading together would double it.",
+      "$description": "Tree row vertical padding. 1px, because `lineHeight: 1.85` already carries the row's breathing room \u2014 padding and leading together would double it.",
       "value": "1px"
     },
     "treeIndentStep": {
@@ -522,11 +519,11 @@
       "value": "13px"
     },
     "editorFontSize": {
-      "$description": "The code surface — the code role. Terminal glyph rendering stays with the terminal; this is chrome-side code text.",
+      "$description": "The code surface \u2014 the code role. Terminal glyph rendering stays with the terminal; this is chrome-side code text.",
       "ref": "experience.web.typography.code.size"
     },
     "editorLineHeight": {
-      "$description": "Code line box. The mockup's 1.75, looser than the tree's 1.85 ratio at a larger size — line numbers have to line up with their line.",
+      "$description": "Code line box. The mockup's 1.75, looser than the tree's 1.85 ratio at a larger size \u2014 line numbers have to line up with their line.",
       "value": "1.75"
     },
     "editorGutterWidth": {
@@ -538,11 +535,11 @@
       "value": "14px"
     },
     "editorGutterPadEnd": {
-      "$description": "Space between the line numbers and the code. The mockup's 14px — wide enough that a number and the first glyph do not read as one token.",
+      "$description": "Space between the line numbers and the code. The mockup's 14px \u2014 wide enough that a number and the first glyph do not read as one token.",
       "value": "14px"
     },
     "envProfileTitleFontSize": {
-      "$description": "Environment profile detail/editor page title — the title role (#1216). Bridges the role into workspace chrome tokens so the ref graph reaches production consumers.",
+      "$description": "Environment profile detail/editor page title \u2014 the title role (#1216). Bridges the role into workspace chrome tokens so the ref graph reaches production consumers.",
       "ref": "experience.web.typography.title.size"
     },
     "editorHeadFontSize": {
@@ -550,16 +547,47 @@
       "value": "11.5px"
     },
     "listRowTitleFontSize": {
-      "$description": "A file/directory row's own name — the `text-sm` literal `FileList` used to carry. It is stated here as well as on App (#1073) because one class serves both: the leaf exists so the class resolves either way, and an App-only leaf would be dropped silently at `:root`. Not a ref to `typography.primary.size`: this is Web's desktop row size, and the size in the App's scale is the App group's business. `FileList` is composed by `FilesAppLayout` today, so this leaf's App value is the one that reaches a screen — the Web value is the fallback the shared class needs, not a claim about a Web surface that renders it.",
+      "$description": "A file/directory row's own name \u2014 the `text-sm` literal `FileList` used to carry. It is stated here as well as on App (#1073) because one class serves both: the leaf exists so the class resolves either way, and an App-only leaf would be dropped silently at `:root`. Not a ref to `typography.primary.size`: this is Web's desktop row size, and the size in the App's scale is the App group's business. `FileList` is composed by `FilesAppLayout` today, so this leaf's App value is the one that reaches a screen \u2014 the Web value is the fallback the shared class needs, not a claim about a Web surface that renders it.",
       "value": "14px"
     },
     "editorActionFontSize": {
-      "$description": "The viewer toolbar's own controls (Edit / Save / View / Raw / close) — the body role (#1216). Stated on both experiences for the same reason as `listRowTitleFontSize`: `FileViewer` is composed by both layouts, so the leaf has one consumer class and two densities (#1073).",
+      "$description": "The viewer toolbar's own controls (Edit / Save / View / Raw / close) \u2014 the body role (#1216). Stated on both experiences for the same reason as `listRowTitleFontSize`: `FileViewer` is composed by both layouts, so the leaf has one consumer class and two densities (#1073).",
       "ref": "experience.web.typography.body.size"
     },
     "editorHeadPadX": {
-      "$description": "Header horizontal inset. The mockup's 18px, which is wider than the shell's `space-4` — the header is inside the code surface, so it aligns to the code's own measure rather than to the pane's chrome padding.",
+      "$description": "Header horizontal inset. The mockup's 18px, which is wider than the shell's `space-4` \u2014 the header is inside the code surface, so it aligns to the code's own measure rather than to the pane's chrome padding.",
       "value": "18px"
+    }
+  },
+  "overlay": {
+    "$description": "Overlay surface roles (#3142). Semantic size roles for product dialogs and the viewport clamp every centered overlay shares; consumers select a role rather than writing a max-width literal.",
+    "compactMaxWidth": {
+      "value": "30rem"
+    },
+    "standardMaxWidth": {
+      "value": "40rem"
+    },
+    "wideMaxWidth": {
+      "value": "45rem"
+    },
+    "viewportMaxWidth": {
+      "value": "calc(100% - 2rem)"
+    },
+    "viewportMaxHeight": {
+      "value": "calc(100dvh - 2rem)"
+    },
+    "choiceMaxWidth": {
+      "$description": "The intentional growth ceiling for a resource-rich anchored choice list (#3164). The list is never narrower than its trigger and wraps its content rather than clipping; Base UI's available width remains the final viewport clamp.",
+      "value": "30rem"
+    },
+    "dialogZ": {
+      "value": 50
+    },
+    "anchoredZ": {
+      "value": 100
+    },
+    "tooltipZ": {
+      "value": 110
     }
   }
 }

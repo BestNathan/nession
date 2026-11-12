@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 2999
+criterion: SC-01
+stage: pre-merge
+runtime: full-stack-local
+verifiers:
+  - type: protocol
+    entry: verify-live.js
+  - type: runtime
+    entry: verify-pinned.js
+result_policy: all-pass

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { Terminal } from '@xterm/xterm';
-import { readLogicalLine } from '../../XtermMetrics';
+import { logicalLinePoint, readLogicalLine } from '../../XtermMetrics';
 
 /** xterm.open() needs matchMedia in jsdom, the same stub the other suites use. */
 Object.defineProperty(window, 'matchMedia', {
@@ -80,6 +80,49 @@ describe('readLogicalLine (#2581 SC-05)', () => {
     // A continuation is not the start of a logical line; answering there would
     // duplicate every match once per visual row.
     expect(readLogicalLine(term, 2).text).toBe('');
+    term.dispose();
+  });
+});
+
+describe('logicalLinePoint (#3187)', () => {
+  function stubPoint(term: Terminal, x: number, y: number): void {
+    (term as unknown as {
+      _core: { _mouseService: { getCoords: () => [number, number] } };
+    })._core._mouseService.getCoords = () => [x, y];
+  }
+
+  it('maps a drawn cell back to the UTF-16 offset under it', async () => {
+    const term = makeTerminal();
+    await write(term, 'ab 中文 src/foo.rs:12');
+    stubPoint(term, 9, 1);
+
+    const point = logicalLinePoint(term, 0, 0);
+
+    expect(point?.line.text).toBe('ab 中文 src/foo.rs:12');
+    // 1-based x=9 is the 0-based cell 8, which is the `s` of `src`.
+    expect(point?.offset).toBe(point!.line.text.indexOf('src'));
+    term.dispose();
+  });
+
+  it('walks a wrapped continuation back to its logical line', async () => {
+    const term = makeTerminal(10, 4);
+    await write(term, '0123456789ABC');
+    // Second viewport row, first column: the physical continuation of line 1.
+    stubPoint(term, 1, 2);
+
+    const point = logicalLinePoint(term, 0, 0);
+
+    expect(point?.line.text).toBe('0123456789ABC');
+    expect(point?.offset).toBe(10);
+    term.dispose();
+  });
+
+  it('reports an empty cell as no offset', async () => {
+    const term = makeTerminal();
+    await write(term, 'a');
+    stubPoint(term, 20, 1);
+
+    expect(logicalLinePoint(term, 0, 0)?.offset).toBe(-1);
     term.dispose();
   });
 });

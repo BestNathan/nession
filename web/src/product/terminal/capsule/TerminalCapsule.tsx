@@ -50,6 +50,11 @@ export interface TerminalCapsuleProps {
    */
   statusAction?: ReactNode;
   /**
+   * Contextual Session identity/action (#3082). Present only while the focused
+   * Session has something to say — never a permanent toolbar slot.
+   */
+  sessionContextAction?: ReactNode;
+  /**
    * Work-awareness context (#1347): whether any capability is working.
    *
    * The disclosed Context Capsule is the only consumer of this (#2663): the
@@ -86,6 +91,7 @@ export function TerminalCapsule({
   capabilityProjection,
   adjacentAction,
   statusAction,
+  sessionContextAction,
   workContext,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
@@ -206,6 +212,7 @@ export function TerminalCapsule({
           capabilityDisclosure={capabilityDisclosure}
           onFieldFocus={handleFieldFocus}
           fieldRef={fieldRef}
+          sessionContextAction={sessionContextAction}
           statusAction={statusAction}
         />
       </CapsuleShell>

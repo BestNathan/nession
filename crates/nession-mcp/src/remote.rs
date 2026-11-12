@@ -204,8 +204,10 @@ impl NodeBackend for ServerRoutedNodeBackend {
         working_dir: Option<&str>,
     ) -> Result<Value, ToolError> {
         let mut connection = self.connect_to_agent(agent_id).await?;
+        // The MCP Tool has no Sandbox parameter; omitting the policy lets the
+        // Server's create path apply its default (#2681).
         let reply = connection
-            .create_session_in(agent_id, name, working_dir)
+            .create_session_in(agent_id, name, working_dir, None)
             .await
             .map_err(map_client_error)?;
         close_server(connection).await;

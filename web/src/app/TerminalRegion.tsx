@@ -20,9 +20,11 @@ export interface TerminalRegionProps {
   /** What the capsule may show: the chip that earned presence, plus the rest on demand. */
   capsuleCapabilities?: CapsuleCapabilityContribution;
   capsuleProjection?: CapsuleCapabilityProjection;
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   /** The shell's surface-navigation action beside the capsule (#1204). */
   surfaceAction?: ReactNode;
+  /** Contextual Session Project identity/action (#3082). */
+  sessionContextAction?: ReactNode;
   /** Work-awareness context (#1347): whether any capability is working. */
   workContext?: ResolvedWorkContext;
 }
@@ -39,6 +41,7 @@ export function TerminalRegion({
   capsuleProjection,
   onOpenWorkspaceFile,
   surfaceAction,
+  sessionContextAction,
   workContext,
 }: TerminalRegionProps) {
   const {
@@ -92,6 +95,7 @@ export function TerminalRegion({
           capsuleCapabilities={capsuleCapabilities}
           capsuleProjection={capsuleProjection}
           surfaceAction={surfaceAction}
+          sessionContextAction={sessionContextAction}
           terminalControl={terminalControl}
           historyDegraded={historyDegraded}
           streamState={streamState}

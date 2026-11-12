@@ -206,4 +206,24 @@ describe('FixtureApp', () => {
     expect(didNotRespond[0].className).toContain('text-agent-error');
     expect(screen.getAllByText('Agent offline')).toHaveLength(1);
   });
+
+  it('opens a pushed Project detail from Sessions and returns with one Back', async () => {
+    const user = userEvent.setup();
+    await openSessions();
+    const projects = await screen.findAllByTestId('project-item-row');
+    expect(projects).toHaveLength(2);
+
+    await user.click(projects[0]);
+    expect(await screen.findByTestId('app-project-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('project-detail-title')).toHaveTextContent('Nession');
+    // Exactly one host-owned page header at this depth.
+    expect(screen.getAllByTestId('app-page-header')).toHaveLength(1);
+    // The Terminal stays mounted beneath the Sessions layer.
+    expect(screen.getByTestId('fixture-terminal')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('app-page-back'));
+    expect(await screen.findByTestId('app-sessions-surface')).toBeInTheDocument();
+    expect(screen.getAllByTestId('project-item-row')).toHaveLength(2);
+    expect(screen.queryByTestId('app-project-detail')).not.toBeInTheDocument();
+  });
 });

@@ -107,6 +107,23 @@ export function advanceTouchScrollGesture(
 
 export type ScrollMode = 'following' | 'history';
 
+/**
+ * The animation-frame boundary the follow-bottom scheduler runs on (#2879).
+ *
+ * Injectable so the coalescing/cancellation contract can be proved with a
+ * deterministic harness: the production scheduler is the browser's
+ * `requestAnimationFrame`, and a test advances frames itself.
+ */
+export interface AnimationFrameScheduler {
+  schedule(callback: FrameRequestCallback): number;
+  cancel(handle: number): void;
+}
+
+const browserFrameScheduler: AnimationFrameScheduler = {
+  schedule: (callback) => requestAnimationFrame(callback),
+  cancel: (handle) => cancelAnimationFrame(handle),
+};
+
 /** Read published occlusion height from the capsule host (inline style wins). */
 export function readOcclusionPx(host: HTMLElement): number {
   const inline = host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion');
@@ -191,15 +208,28 @@ export class CapsuleOcclusionScroll {
   private wasFollowing = true;
   private currentMode: ScrollMode = 'following';
   private observedDock: HTMLElement | null = null;
+  private readonly frameScheduler: AnimationFrameScheduler;
+  /**
+   * The follow-bottom job is a *logical* unit (#2879): while one is pending,
+   * additional output joins it instead of scheduling another double-rAF. Both
+   * queued handles are recorded so `dispose` can cancel them; a callback that
+   * still runs afterwards sees `disposed` and never touches the retired host.
+   */
+  private pendingOuterFrame: number | null = null;
+  private pendingInnerFrame: number | null = null;
+  private followFramePending = false;
+  private disposed = false;
 
   constructor(
     terminal: CapsuleScrollTerminalPort,
     host: HTMLElement,
     getCellHeight: () => number,
+    frameScheduler: AnimationFrameScheduler = browserFrameScheduler,
   ) {
     this.terminal = terminal;
     this.host = host;
     this.getCellHeight = getCellHeight;
+    this.frameScheduler = frameScheduler;
     // Read once so a surface that opens before `bind()` already knows the
     // clearance; the event keeps it current afterwards.
     this.panelClearancePx = readPanelClearancePx(host);
@@ -292,6 +322,8 @@ export class CapsuleOcclusionScroll {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.cancelScheduledScroll();
     if (this.occlusionListener) {
       this.host.removeEventListener(TERMINAL_CAPSULE_OCCLUSION_EVENT, this.occlusionListener);
       this.occlusionListener = null;
@@ -646,14 +678,47 @@ export class CapsuleOcclusionScroll {
     }));
   }
 
+  /**
+   * Schedule one follow-bottom reconciliation for the next two frames.
+   *
+   * Output can arrive many times per frame; every caller joins the pending
+   * logical job instead of queueing another pair of closures (#2879). The
+   * second frame is deliberate: xterm applies a write on its own parser queue,
+   * and scrolling before that frame would pin the previous buffer bottom.
+   */
   scheduleScrollToMarginBottom(): void {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (this.wasFollowing) {
-          this.scrollToMarginBottom();
+    if (this.disposed || this.followFramePending) {
+      return;
+    }
+    this.followFramePending = true;
+    this.pendingOuterFrame = this.frameScheduler.schedule(() => {
+      this.pendingOuterFrame = null;
+      if (this.disposed) {
+        this.followFramePending = false;
+        return;
+      }
+      this.pendingInnerFrame = this.frameScheduler.schedule(() => {
+        this.pendingInnerFrame = null;
+        this.followFramePending = false;
+        if (this.disposed || !this.wasFollowing) {
+          return;
         }
+        this.scrollToMarginBottom();
       });
     });
+  }
+
+  /** Cancel a queued follow job; a callback already running is guarded by `disposed`. */
+  private cancelScheduledScroll(): void {
+    if (this.pendingOuterFrame !== null) {
+      this.frameScheduler.cancel(this.pendingOuterFrame);
+      this.pendingOuterFrame = null;
+    }
+    if (this.pendingInnerFrame !== null) {
+      this.frameScheduler.cancel(this.pendingInnerFrame);
+      this.pendingInnerFrame = null;
+    }
+    this.followFramePending = false;
   }
 
   /** Call after terminal.write when output arrived while pinned to live bottom. */

@@ -12,6 +12,7 @@ import {
   useEnvironmentWorkspace,
 } from '@/capabilities/env';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import { WorkspaceMasterDetail } from '@/app/workspace/layout/workspaceLayout';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
@@ -99,11 +100,9 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
 
   return (
     <div data-testid="env-workspace" className="h-full min-h-0 overflow-hidden">
-      <div
+      <WorkspaceMasterDetail
         data-testid="env-web-layout"
-        className="grid h-full min-h-0 grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
-      >
-        <div className="bg-workspace-navigation min-h-0 overflow-hidden">
+        navigation={
           <EnvironmentNavigator
             profiles={profiles.profiles}
             agents={ctx.agents}
@@ -116,9 +115,10 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
             onImport={env.openImport}
             onRetry={() => void profiles.refresh()}
           />
-        </div>
-        <div className="min-h-0 overflow-hidden">{main()}</div>
-      </div>
+        }
+      >
+        {main()}
+      </WorkspaceMasterDetail>
 
       <EnvironmentGuardDialog
         open={screen.guardOpen}

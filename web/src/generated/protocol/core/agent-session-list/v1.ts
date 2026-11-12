@@ -44,7 +44,17 @@ foreground_command: string | null,
 /**
  * Live cwd of the session's active pane when the agent last reported it.
  */
-working_dir?: string | null, };
+working_dir?: string | null, 
+/**
+ * Durable tmux Session instance identity (`@nession_instance_id`).
+ *
+ * A recyclable `agent_id:session_name` is not an incarnation: this id is
+ * created with the tmux Session, survives Agent restarts and is replaced
+ * when the name is killed and recreated. Project membership (#3082) and
+ * Session metadata (#2789) key on it. Absent only for a legacy Session
+ * that has not been asked yet.
+ */
+instance_id?: string | null, };
 
 // ── Operations ──
 

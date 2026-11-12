@@ -9,6 +9,7 @@ export type {
   EnvFileRef,
   KillSessionResponse,
   Session,
+  SessionProjectBindingResponse,
   SessionsListResponse,
 } from '@/types';
 

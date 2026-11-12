@@ -1964,24 +1964,30 @@ dependencies = [
  "base64 0.21.7",
  "chrono",
  "futures-util",
+ "httptest",
  "if-addrs",
  "libc",
  "mime_guess",
  "nession-claude-code",
  "nession-common",
+ "nession-erofs",
  "nession-git",
+ "nession-github",
  "nession-mcp",
  "nession-protocol",
  "nession-runtime",
+ "nession-sandbox",
  "nession-server",
  "nession-tmux",
  "portable-pty",
  "rand 0.8.7",
  "rcgen",
+ "reqwest 0.12.28",
  "rustls 0.22.4",
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "system-configuration",
  "tempfile",
  "thiserror 1.0.69",
@@ -2046,6 +2052,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml",
+ "toml_edit 0.22.27",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2094,11 +2101,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-erofs"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "httptest",
+ "libc",
+ "reqwest 0.12.28",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nession-git"
 version = "0.35.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.21.7",
  "nession-common",
  "nession-protocol",
  "notify 7.0.0",
@@ -2109,6 +2132,27 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "tokio",
+ "tracing",
+ "ts-rs",
+]
+
+[[package]]
+name = "nession-github"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "nession-common",
+ "nession-git",
+ "nession-protocol",
+ "reqwest 0.12.28",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "ts-rs",
@@ -2152,6 +2196,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-persistence-probes"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "nession-agent",
+ "nession-common",
+ "nession-erofs",
+ "nession-protocol",
+ "nession-server",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "nession-protocol"
 version = "0.35.0"
 dependencies = [
@@ -2169,6 +2229,7 @@ dependencies = [
  "nession-agent",
  "nession-claude-code",
  "nession-git",
+ "nession-github",
  "nession-protocol",
  "nession-server",
  "schemars",
@@ -2186,6 +2247,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-sandbox"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nession-erofs",
+ "nession-protocol",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nession-server"
 version = "0.35.0"
 dependencies = [
@@ -2196,6 +2274,7 @@ dependencies = [
  "futures-util",
  "nession-agent",
  "nession-common",
+ "nession-erofs",
  "nession-mcp",
  "nession-protocol",
  "nession-runtime",

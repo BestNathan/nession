@@ -16,6 +16,7 @@ use nession_protocol::contracts::agent::v1::{
     ClientAgentDeletePayload, ClientAgentDeleteResponsePayload,
 };
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
+use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoResponse};
 use nession_protocol::contracts::session::v1::{
     ClientRelayBeginPayload, ClientSessionAttachPayload, ClientSessionAttachReply,
@@ -381,20 +382,24 @@ impl ClientConnection {
         &mut self,
         agent_id: &str,
         name: &str,
+        sandbox: Option<SandboxPolicy>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
-        self.create_session_in(agent_id, name, None).await
+        self.create_session_in(agent_id, name, None, sandbox).await
     }
 
     /// `server.session.create` with an explicit initial working directory.
     ///
     /// The Server passes `working_dir` to the target Agent on the same
     /// canonical create route; an MCP caller that names a directory must not
-    /// silently lose it (`#3264`).
+    /// silently lose it (`#3264`). The Sandbox policy is an explicit parameter
+    /// of the same call (`#2681`): Nession MCP Tools do not expose it, so they
+    /// pass `None` and the Server's create path applies its default.
     pub async fn create_session_in(
         &mut self,
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        sandbox: Option<SandboxPolicy>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
         self.request_within(
             proto_msg(
@@ -404,6 +409,9 @@ impl ClientConnection {
                     name: name.to_string(),
                     working_dir: working_dir.map(str::to_owned),
                     env_files: Vec::new(),
+                    sandbox,
+                    project_id: None,
+                    managed: None,
                 },
             ),
             SESSION_CREATE_TIMEOUT,

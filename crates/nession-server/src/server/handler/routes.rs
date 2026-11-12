@@ -82,6 +82,21 @@ pub(super) fn env_file_key(payload: &Value) -> ResourceKey {
     }
 }
 
+/// The Project a payload names by its Server-minted identity (#3021).
+///
+/// Update and delete both address one stored declaration, so they share this
+/// key and are serialised against each other. Create mints a new identity and
+/// therefore takes no existing resource's queue.
+pub(super) fn project_by_id(payload: &Value) -> ResourceKey {
+    ResourceKey::Project(
+        payload
+            .get("project_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
 server_routes!(handler, msg, payload;
     "server.agent.register" => "server.agent.register" => 1 => Ordered => handler.handle_agent_register(msg).await,
     // `control.heartbeat` is deliberately **not** an arm here. It is a control
@@ -102,6 +117,15 @@ server_routes!(handler, msg, payload;
     // Read-only and Agent-scoped (#2514): it observes the Panes of one
     // Session on that Session's Agent and never enumerates the host.
     "server.session.processes" => "server.session.processes" => 1 => Query => handler.handle_client_session_processes(msg).await,
+    // Sandbox context capability (#3124). Reads observe the Agent's active
+    // Pane; Enter/Return/Focus are session-serialized mutations. Generation
+    // and Enter idempotency are owned by the Agent, which alone can prove the
+    // Pane and execution identity.
+    "server.session.sandbox.context" => "server.session.sandbox.context" => 1 => Query => handler.handle_client_session_sandbox_context(msg).await,
+    "server.session.sandbox.preflight" => "server.session.sandbox.preflight" => 1 => Query => handler.handle_client_session_sandbox_preflight(msg).await,
+    "server.session.sandbox.enter" => "server.session.sandbox.enter" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_enter(msg).await,
+    "server.session.sandbox.return-to-native" => "server.session.sandbox.return-to-native" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_return(msg).await,
+    "server.session.sandbox.focus" => "server.session.sandbox.focus" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_focus(msg).await,
     "server.session.attach" => "server.session.attach" => 1 => Ordered => handler.handle_client_session_attach(msg).await,
     "server.session.relay.begin" => "server.session.relay.begin" => 1 => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function
@@ -122,6 +146,9 @@ server_routes!(handler, msg, payload;
     // `session_id` the rest of the Session family uses, so they share its key.
     "server.session.metadata.get" => "server.session.metadata.get" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_metadata_get(msg).await,
     "server.session.metadata.update" => "server.session.metadata.update" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_metadata_update(msg).await,
+    // The Server-owned Session→Project membership (#3082). One unit replaces
+    // the whole membership: `project_id: null` removes it.
+    "server.session.project.set" => "server.session.project.set" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_project_set(msg).await,
     "server.session.capture-preview" => "server.session.capture-preview" => 1 => Query => handler.handle_client_session_capture_preview(msg).await,
     "server.env.list" => "server.env.list" => 1 => Query => handler.handle_client_env_list(msg).await,
     "server.env.get" => "server.env.get" => 1 => Query => handler.handle_client_env_get(msg).await,
@@ -144,4 +171,19 @@ server_routes!(handler, msg, payload;
     "server.commands.add" => "server.commands.add" => 1 => Inline => handler.handle_client_commands_add(msg).await,
     "server.commands.remove" => "server.commands.remove" => 1 => Inline => handler.handle_client_commands_remove(msg).await,
     "server.commands.update" => "server.commands.update" => 1 => Inline => handler.handle_client_commands_update(msg).await,
+    // First-class Project declarations (#3021). Reads are independent of
+    // Session/Agent selection; the two units that address an existing
+    // declaration share its key lane so concurrent edits of one Project are
+    // ordered, while create mints a new identity and needs no existing key.
+    "server.project.list" => "server.project.list" => 1 => Query => handler.handle_client_project_list(msg).await,
+    "server.project.get" => "server.project.get" => 1 => Query => handler.handle_client_project_get(msg).await,
+    "server.project.create" => "server.project.create" => 1 => Inline => handler.handle_client_project_create(msg).await,
+    "server.project.update" => "server.project.update" => 1 => Key(project_by_id(payload)) => handler.handle_client_project_update(msg).await,
+    "server.project.delete" => "server.project.delete" => 1 => Key(project_by_id(payload)) => handler.handle_client_project_delete(msg).await,
+    // Global image manager (#3022). Build is a bounded worker on the
+    // connection's inline lane; reads are queries; a grant is a small write.
+    "server.image.build" => "server.image.build" => 1 => Inline => handler.handle_client_image_build(msg).await,
+    "server.image.list" => "server.image.list" => 1 => Query => handler.handle_client_image_list(msg).await,
+    "server.image.get" => "server.image.get" => 1 => Query => handler.handle_client_image_get(msg).await,
+    "server.image.access" => "server.image.access" => 1 => Inline => handler.handle_client_image_access(msg).await,
 );

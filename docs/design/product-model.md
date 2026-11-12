@@ -9,7 +9,13 @@ The current implementation is built around remote tmux-backed Sessions, but tmux
 ## Core model
 
 ```text
-Logical Workspace
+Project                                 DECLARATION
+├── Git Source (optional)
+├── Existing Locations {agent_id, path}
+├── Session defaults (optional)
+└── EROFS image digest reference (optional)
+
+Logical Workspace                       CONTEXTUAL DEPTH
       │
       ├── Workspace Location A ── Agent / provider ── directory / environment
       │          │
@@ -22,6 +28,18 @@ Logical Workspace
                  │
                  └── Session(s)
 ```
+
+Project declares work resources and Session presets; Workspace remains the
+contextual UI/capability surface around the current work. Neither is a
+mandatory parent of the other.
+
+### Project
+
+A Project is a first-class, long-lived **declaration** of work resources and Session presets. It is not an Agent, a Sandbox, an EROFS image, a Workspace, or a persistent `ProjectEnvironment`.
+
+A Project can exist with no Agent and no Git source. Its Existing Locations are references to user-owned directories on Agents, which may be offline; editing or deleting the Project never clones, mutates or deletes those directories. Optional Session defaults describe what a new Session should start from, while the actual environment binding remains Session-owned. An optional image digest references globally shared EROFS content without owning its bytes.
+
+Project is a first-class selectable resource in the navigation layer, with a standalone detail independent of any selected Session. It is not a mandatory navigation parent. See [project.md](project.md) for the canonical ownership map and the explicit mapping of previously inferred Workspace Locations.
 
 ### Workspace
 
@@ -99,7 +117,7 @@ Extensions contribute capability and state; Nession owns how that presence is in
 
 The current downstream product model can be summarized as:
 
-> **Session is the primary active work object. Terminal is the primary live surface today. Workspace provides contextual depth around the work. Agent and execution topology are infrastructure context. Capabilities emerge according to relevance and activity.**
+> **Session is the primary active work object. Terminal is the primary live surface today. Workspace provides contextual depth around the work. Project is a persistent declaration of resources and Session presets, not a mandatory navigation parent. Agent and execution topology are infrastructure context. Capabilities emerge according to relevance and activity.**
 
 This summary is intentionally downstream from the root Vision and Principles. If the implementation changes, the Vision should not need to change with it.
 
@@ -143,9 +161,9 @@ This boundary allows Nession to stay workload-agnostic at the core while still b
 
 ## Current implementation versus target model
 
-Today, logical Workspace identity and Workspace Locations may be inferred from Session, Agent, and current-directory information rather than represented as complete first-class persisted entities.
+Project is now a first-class persisted declaration owned by the Server (backend contract #3021); Web/App presentation and Session-creation integration belong to #3025. Logical Workspace identity and Workspace Locations may still be inferred from Session, Agent, and current-directory information rather than represented as complete first-class persisted entities.
 
-That is an implementation stage, not a reason to redefine Workspace permanently as "the tools beside one Session". Lower-level code and migration documents should move toward this model incrementally.
+That is an implementation stage, not a reason to redefine Workspace permanently as "the tools beside one Session". A Session without a Project association remains valid. Lower-level code and migration documents should move toward this model incrementally, mapping inferred locations explicitly rather than silently redefining them.
 
 ## Shared semantics, specialized interaction
 

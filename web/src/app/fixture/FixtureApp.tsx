@@ -2,32 +2,53 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AppLayout } from '@/app/experiences/app/AppLayout';
 import { useAppLayer } from '@/app/experiences/app/useAppLayer';
-import { filterSessions } from '@/app/useDashboard';
+import { useSessionDetails } from '@/app/useSessionDetails';
+import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
+import { filterSessions, type SortDirection, type SortField, type StatusFilter } from '@/app/useDashboard';
 import { useDashboardFilter } from '@/app/useDashboardFilter';
-import { mapDomainState } from '@/product/session/model/domainState';
+import { mapDomainState, type DomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
-import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import { useFixtureProjectShell } from './fixtureProjects';
+import { FixtureProjectDialogs } from './FixtureProjectDialogs';
+import { FixtureAppProjectDetail } from './FixtureAppProjectDetail';
+import type { ProjectShellProps, SessionProjectContext } from '@/product/project/types';
+import { SessionProjectDialog } from '@/product/project/components/SessionProjectDialog';
+import { useSessionProjectBinding } from '@/app/useSessionProjectBinding';
 import type { TerminalChrome } from '@/app/ShellMain';
+import type { Agent, Session } from '@/types';
+import type { SidebarProps } from '@/app/Sidebar';
 import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
+import { sandboxApi } from '@/capabilities/sandbox';
 import { envApi } from '@/capabilities/env';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureCommandsSurface } from './fixtureCommands';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
+import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureGithubSurface } from './fixtureGithub';
+import { useFixtureImages } from './fixtureImages';
 import { fixtureInputDrop } from './fixtureInputDrop';
 import { fixtureStatusInputs } from './fixtureStatusNotices';
 import { fixturePaneCommand } from './fixturePaneCommand';
 import { fixtureSelectedId } from './fixtureSelection';
-import { fixtureSessions } from './fixtureSessions';
+import { useFixtureSessions } from './useFixtureSessions';
+import {
+  resolveFocusedProject,
+  relatedSessionsFor,
+} from '@/product/project/model/focusedProject';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
+import { fixtureOperation } from './fixtureOperations';
+import { fixtureSelectedSession } from './fixtureSelectedSession';
+import { AppAttachSurface } from '@/app/experiences/app/AppAttachSurface';
+import { AppCreateSessionSurface } from '@/app/experiences/app/AppCreateSessionSurface';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
 // FixtureWorkspace's fixtureOps).
@@ -54,11 +75,285 @@ const fixtureOps = fixtureFileOps();
  * list) made the field inert and left the canonical screen showing a Session
  * order no sort in the product produces.
  */
+/**
+ * The App fixture's details/edit owner (#2875). Extracted so the canonical
+ * fixture component stays within the one-screen size budget while composing
+ * the same `useSessionDetails` + `SessionDetailsDialog` pair as the shipped
+ * App; the row menu's first two actions become reachable here.
+ */
+function useFixtureSessionDetails(
+  agents: Agent[],
+  staleAgents: string[],
+) {
+  const details = useSessionDetails({
+    agents,
+    staleAgentIds: staleAgents,
+    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+  });
+  return {
+    onViewDetails: (session: Session) => details.show(session, false),
+    onEditDetails: (session: Session) => details.show(session, true),
+    dialog: (
+      <SessionDetailsDialog
+        session={details.target?.session ?? null}
+        state={details.domain}
+        editing={details.target?.editing ?? false}
+        onClose={details.close}
+      />
+    ),
+  };
+}
+
+
+/**
+ * The App fixture's `SidebarProps`, split out so the canonical fixture
+ * component stays within the one-screen code budget. The row actions forward
+ * the shipped details/edit owner (#2875); the remaining handlers stay inert.
+ */
+function fixtureSidebarProps({
+  agents,
+  filteredSessions,
+  sessions,
+  staleAgents,
+  selectedId,
+  searchQuery,
+  setSearchQuery,
+  statusFilter,
+  setStatusFilter,
+  sortField,
+  sortDirection,
+  toggleSort,
+  isSearchActive,
+  connectionStatus,
+  domain,
+  sessionDetails,
+  projectShell,
+  onAssociateProject,
+  onCreate,
+  onConfigure,
+}: {
+  agents: Agent[];
+  filteredSessions: Session[];
+  sessions: Session[];
+  staleAgents: string[];
+  selectedId: SidebarProps['selectedId'];
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  statusFilter: StatusFilter;
+  setStatusFilter: (value: StatusFilter) => void;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  toggleSort: (field: SortField) => void;
+  isSearchActive: boolean;
+  connectionStatus: SidebarProps['connectionStatus'];
+  domain: DomainState | null;
+  sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
+  projectShell: ProjectShellProps;
+  onAssociateProject: (session: Session) => void;
+  onCreate: () => void;
+  onConfigure: (session: Session) => void;
+}) {
+  return {
+    onAssociateProject,
+    agents,
+    filteredSessions,
+    // The unfiltered population: this fixture exercises real filters.
+    totalSessionCount: sessions.length,
+    staleAgents,
+    selectedId,
+    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+    loadingSessions: false,
+    searchQuery,
+    setSearchQuery,
+    statusFilter,
+    setStatusFilter,
+    sortField,
+    sortDirection,
+    toggleSort,
+    isSearchActive,
+    connectionStatus,
+    domain,
+    onCreate,
+    onRefresh: () => {},
+    onConfigure,
+    onKill: () => {},
+    onViewDetails: sessionDetails.onViewDetails,
+    onEditDetails: sessionDetails.onEditDetails,
+    projectShell,
+  };
+}
+
+function fixtureAppMainShared({
+  selectedSession,
+  selectedAgent,
+  agents,
+  domain,
+  tool,
+  setSurface,
+  setTool,
+  sessionProject,
+  onCreate,
+}: {
+  selectedSession: Session | null;
+  selectedAgent: Agent | undefined;
+  agents: Agent[];
+  domain: DomainState | null;
+  tool: CapabilityId;
+  setSurface: (surface: Surface) => void;
+  setTool: (tool: CapabilityId) => void;
+  sessionProject?: SessionProjectContext;
+  onCreate: () => void;
+}) {
+  return {
+    selectedSession,
+    sessionProject,
+    selectedAgent,
+    agents,
+    domain,
+    tool,
+    fileOps: fixtureOps,
+    connectionStatus: 'connected' as const,
+    onSurfaceChange: setSurface,
+    onToolChange: setTool,
+    onOpenAgent: () => {},
+    // Inert, like every other handler here: the home's "New Session" opens the
+    // product's dialog, and a fixture that opened one would be asserting on a
+    // flow it does not own (#1082).
+    onCreate,
+  };
+}
+
+function fixtureSessionProject(
+  selectedSession: Session | null,
+  sessions: Session[],
+  projectShell: ProjectShellProps,
+): SessionProjectContext | undefined {
+  if (!selectedSession) {
+    return undefined;
+  }
+  return {
+    focusedProject: resolveFocusedProject(
+      selectedSession,
+      projectShell.projects,
+      projectShell.loading,
+    ),
+    relatedSessions: relatedSessionsFor(selectedSession, sessions),
+    onAssociate: () => {},
+    onOpenSession: () => {},
+    onProjectSettings: projectShell.onSettings,
+    onCreateProjectSession: projectShell.onCreateSession,
+  };
+}
+
+function FixtureAppDialogs({
+  sessionDetails,
+  projectBinding,
+  projectLayer,
+  agents,
+  selectedSession,
+  attachIntent,
+  onAttachClose,
+  createOpen,
+  onCreateClose,
+}: {
+  sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
+  projectBinding: ReturnType<typeof useSessionProjectBinding>;
+  projectLayer: ReturnType<typeof useFixtureProjectShell>;
+  agents: Agent[];
+  selectedSession: Session | null;
+  attachIntent: 'attach' | 'configure' | null;
+  onAttachClose: () => void;
+  createOpen: boolean;
+  onCreateClose: () => void;
+}) {
+  return (
+    <>
+      {sessionDetails.dialog}
+      <SessionProjectDialog
+        session={projectBinding.target}
+        projects={projectLayer.projectShell.projects}
+        busy={projectBinding.busy}
+        error={projectBinding.error}
+        onSave={(projectId) => {
+          void projectBinding.save(projectId);
+        }}
+        onClose={projectBinding.close}
+      />
+      <FixtureProjectDialogs shell={projectLayer} agents={agents} experience="app" />
+      <AppAttachSurface
+        isOpen={attachIntent !== null}
+        intent={attachIntent ?? 'attach'}
+        session={selectedSession}
+        agents={agents}
+        onClose={onAttachClose}
+        onConfirm={onAttachClose}
+      />
+      <AppCreateSessionSurface
+        isOpen={createOpen}
+        agents={agents}
+        onClose={onCreateClose}
+        onCreated={onCreateClose}
+      />
+    </>
+  );
+}
+
+/** The route-named App operation state (#3089). */
+function useFixtureAppOperations(search: string) {
+  const operation = fixtureOperation(search);
+  const [createOpen, setCreateOpen] = useState(operation === 'create-session');
+  const [attachIntent, setAttachIntent] = useState<'attach' | 'configure' | null>(
+    operation === 'attach'
+      ? 'attach'
+      : operation === 'attach-settings'
+        ? 'configure'
+        : null,
+  );
+  const [ready, setReady] = useState(false);
+  useFixtureImages(search);
+  useEffect(() => setReady(true), []);
+  return { createOpen, setCreateOpen, attachIntent, setAttachIntent, ready };
+}
+
+/** The selected Session, its Agent and the domain state the shell reads. */
+function fixtureAppSelection({
+  sessions,
+  agents,
+  selectedId,
+  paneCommand,
+  staleAgents,
+}: {
+  sessions: Session[];
+  agents: Agent[];
+  selectedId: string | null;
+  paneCommand: string | null;
+  staleAgents: string[];
+}) {
+  const selectedSession = fixtureSelectedSession(sessions, selectedId, paneCommand);
+  const selectedAgent = agents.find(
+    (agent) => agent.agent_id === selectedSession?.agent_id,
+  );
+  const domain = selectedSession
+    ? mapDomainState({
+        session: selectedSession,
+        agent: selectedAgent,
+        staleAgentIds: staleAgents,
+        clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+        attachInFlightId: null,
+        attachFailedId: null,
+      })
+    : null;
+  return { selectedSession, selectedAgent, domain };
+}
+
 export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
   // #2789: rows and the Workspace Session view read the Agent-owned store.
-  useFixtureSessionMetadata(search);
+  const projectLayer = useFixtureProjectShell(search);
+  const projectBinding = useSessionProjectBinding();
+  const { createOpen, setCreateOpen, attachIntent, setAttachIntent, ready: operationsReady } =
+    useFixtureAppOperations(search);
 
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
@@ -68,7 +363,7 @@ export function FixtureApp() {
   // route's input, so it is read here too: this install is the last one for
   // the route and therefore the surface the Git capability actually talks to
   // (#2787's controlled overlap needs it).
-  useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
+  useFixtureGitSurfaces(search);
 
   // The conversation stub, one layer down and for the same reason (#1128).
   // Claude Code's Workspace draws a conversation, and the fixture advertised no
@@ -89,6 +384,10 @@ export function FixtureApp() {
   // `server.commands.list` owner the product does, so the fixture answers that
   // wire rather than injecting a list into the component.
   useEffect(() => commandsApi.install(fixtureCommandsSurface(search)), [search]);
+
+  // The Sandbox Agent stub (#3124): the App reaches the capability from the
+  // tool strip after mount, so the binding only has to be in place by then.
+  useEffect(() => sandboxApi.install(fixtureSandboxSurface(search)), [search]);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
@@ -112,57 +411,41 @@ export function FixtureApp() {
   // The other three status inputs (#2621), on the same rule: the route names
   // what the runtime answered and the surface decides what to draw.
   const { historyDegraded, terminalControl, clipboardNotice } = fixtureStatusInputs(search);
-  const sessions = useMemo(() => fixtureSessions(search), [search]);
+  const sessions = useFixtureSessions(search);
   const agents = useMemo(() => fixtureAgents(search), [search]);
+  // The shipped details/edit owner (#2875), against the deterministic stub.
+  const sessionDetails = useFixtureSessionDetails(agents, staleAgents);
   const connectionStatus = fixtureConnection(search);
 
   const filteredSessions = useMemo(
-    () =>
-      filterSessions(sessions, agents, {
-        statusFilter,
-        searchQuery,
-        sortField,
-        sortDirection,
-      }),
+    () => filterSessions(sessions, agents, { statusFilter, searchQuery, sortField, sortDirection }),
     [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
   );
 
   const selectedId = fixtureSelectedId(search);
-  // The pane's reported foreground command (`fixturePaneCommand`): the input
-  // the work sense resolves from, so `?pane=claude.exe` is the canonical screen
-  // as if the agent had reported Claude Code in the pane.
+  // The reported foreground command: `?pane=claude.exe` is the canonical
+  // screen as if the agent had reported Claude Code in the pane.
   const paneCommand = fixturePaneCommand(search);
-  const selectedSession = useMemo(() => {
-    const base = sessions.find((s) => s.session_id === selectedId) ?? null;
-    return base && paneCommand ? { ...base, foreground_command: paneCommand } : base;
-  }, [sessions, selectedId, paneCommand]);
-  const selectedAgent = agents.find(
-    (a) => a.agent_id === selectedSession?.agent_id,
-  );
-  const domain = selectedSession
-    ? mapDomainState({
-        session: selectedSession,
-        agent: selectedAgent,
-        // The same input the rows are given (`useShellState` hands the product's
-        // footer the whole stale list): a footer that stayed healthy while the
-        // list said otherwise would be a disagreement the product does not have.
-        staleAgentIds: staleAgents,
-        clientSessionId: FIXTURE_CLIENT_SESSION_ID,
-        attachInFlightId: null,
-        attachFailedId: null,
-      })
-    : null;
+  const { selectedSession, selectedAgent, domain } = fixtureAppSelection({
+    sessions,
+    agents,
+    selectedId,
+    paneCommand,
+    staleAgents,
+  });
 
-  const sidebarProps = {
+  const sessionProject = fixtureSessionProject(
+    selectedSession,
+    sessions,
+    projectLayer.projectShell,
+  );
+
+  const sidebarProps = fixtureSidebarProps({
     agents,
     filteredSessions,
-    // The unfiltered population, not `filteredSessions.length` — the fixture
-    // exercises real filters, so this is the one place the two can differ.
-    totalSessionCount: sessions.length,
+    sessions,
     staleAgents,
     selectedId,
-    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
-    loadingSessions: false,
     searchQuery,
     setSearchQuery,
     statusFilter,
@@ -173,28 +456,18 @@ export function FixtureApp() {
     isSearchActive,
     connectionStatus,
     domain,
-    onCreate: () => {},
-    onRefresh: () => {},
-    onConfigure: () => {},
-    onKill: () => {},
-  };
+    sessionDetails,
+    projectShell: projectLayer.projectShell,
+    onAssociateProject: (session) => projectBinding.open(session),
+    onCreate: () => setCreateOpen(true),
+    onConfigure: () => setAttachIntent('configure'),
+  });
 
-  const mainShared = {
-    selectedSession,
-    selectedAgent,
-    agents,
-    domain,
-    tool,
-    fileOps: fixtureOps,
-    connectionStatus,
-    onSurfaceChange: setSurface,
-    onToolChange: setTool,
-    onOpenAgent: () => {},
-    // Inert, like every other handler here: the home's "New Session" opens the
-    // product's dialog, and a fixture that opened one would be asserting on a
-    // flow it does not own (#1082).
-    onCreate: () => {},
-  };
+
+  const mainShared = fixtureAppMainShared({
+    selectedSession, selectedAgent, agents, domain, tool, setSurface, setTool, sessionProject,
+    onCreate: () => setCreateOpen(true),
+  });
 
   const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
     selectedId,
@@ -218,6 +491,11 @@ export function FixtureApp() {
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
         workspaceAvailable={workspaceAvailable}
+        projectDetail={
+          projectLayer.projectShell.selectedProjectId ? (
+            <FixtureAppProjectDetail shell={projectLayer.projectShell} agents={agents} />
+          ) : null
+        }
         terminal={(chrome: TerminalChrome) => (
           <FixtureTerminal
             chrome={chrome}
@@ -229,6 +507,30 @@ export function FixtureApp() {
           />
         )}
       />
+      <FixtureAppDialogs
+        sessionDetails={sessionDetails}
+        projectBinding={projectBinding}
+        projectLayer={projectLayer}
+        agents={agents}
+        selectedSession={selectedSession}
+        attachIntent={operationsReady ? attachIntent : null}
+        onAttachClose={() => setAttachIntent(null)}
+        createOpen={operationsReady && createOpen}
+        onCreateClose={() => setCreateOpen(false)}
+      />
     </div>
   );
+}
+
+
+/** Glue the Git and GitHub transport stubs to the route's lifetime. */
+function useFixtureGitSurfaces(search: string): void {
+  useEffect(() => {
+    const releaseGit = gitApi.install(fixtureGitSurface(search));
+    const releaseGithub = githubApi.install(fixtureGithubSurface(search));
+    return () => {
+      releaseGit();
+      releaseGithub();
+    };
+  }, [search]);
 }

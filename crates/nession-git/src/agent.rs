@@ -50,6 +50,7 @@ use crate::protocol::create_commit::v1::{
 use crate::protocol::diff::v2::{DiffOkV2, DiffRequestV2};
 use crate::protocol::diff::{DiffOkV1, DiffRequestV1};
 use crate::protocol::log::{LogOkV1, LogRequestV1};
+use crate::protocol::preview::v1::PreviewWantV1;
 use crate::protocol::preview::{PreviewOkV1, PreviewRequestV1};
 use crate::protocol::root::{RootOkV1, RootRequestV1};
 use crate::protocol::stage::v1::{StageOkV1, StageRequestV1, StageResponseV1};
@@ -452,10 +453,15 @@ impl GitAgentExtension {
         let cmd = self.cmd_for(&request.target.session).await?;
         let root = self.ready(&cmd).await?;
 
-        Ok(PreviewOkV1 {
-            preview: preview_runtime::file_preview(&cmd, &root, &request.path, request.expected)
-                .await?,
-        })
+        let preview = match request.want.unwrap_or_default() {
+            PreviewWantV1::Text => {
+                preview_runtime::file_preview(&cmd, &root, &request.path, request.expected).await?
+            }
+            PreviewWantV1::Media => {
+                preview_runtime::file_media(&cmd, &root, &request.path, request.expected).await?
+            }
+        };
+        Ok(PreviewOkV1 { preview })
     }
 
     /// Recent commits on the current branch (#826 §4: History).

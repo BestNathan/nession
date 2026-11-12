@@ -251,6 +251,63 @@ The invariants below are no longer design claims: each has a deterministic witne
 
 Still unverified by design and not implied by the table: the **already-attached** separate-process tmux capture (explicitly `unverified`, no `throughSeq`), full-VT/alt-screen fidelity, and the deterministic staging fault-injection matrix (SC-10).
 
+### One-way progress and exception reconciliation — measured 2026-11-07 (#2877)
+
+The parser-applied report is no longer a routine request/reply operation on a
+negotiated connection. The v1 `agent.terminal.output.applied` operation stays
+for compatibility; a client that negotiated
+`terminal-progress-notifications-v1` on `agent.attach` sends the cumulative
+frontier as `client.terminal.output.progress`, and **nothing answers it**. The
+Agent's only outbound reaction is the exception-only
+`agent.terminal.reconcile-required` notification, addressed to the exact
+authenticated subscription.
+
+Ownership and verdicts:
+
+- **Agent Stream Owner** authenticates the socket peer, session, subscriber
+  generation, stream epoch and pinned renderer before touching bookkeeping. The
+  bound for a progress claim is **that subscriber's actually issued frontier**
+  (its attach-cut floor, then the last ordinal its forwarder issued), not the
+  session-global head. Ordinary head-vs-applied lag is normal and silent.
+- **Web SessionRuntime** owns recovery. A current notice atomically starts one
+  single-flight reconcile: no progress is submitted while the proof is
+  outstanding, `agent.terminal.stream.resume` proves a complete contiguous
+  same-epoch run from the trusted parser-applied prefix, and only then does
+  progress reporting resume. An incomplete/unavailable replay takes the
+  existing proven checkpoint/reattach path and stays explicitly degraded.
+  A stale, foreign, malformed or replaced-subscription notice starts nothing.
+- **Relay** forwards both notifications unchanged. It never synthesizes a
+  reply, notice, subscriber generation or head.
+
+Witnesses:
+
+| Invariant | Witness |
+| --- | --- |
+| A progress notification produces no ok/error reply; an ahead claim earns exactly one notice, and the notice names the current subscription, epoch, head and retained floor. | `crates/nession-agent/tests/integration/full_chain.rs::test_terminal_progress_notification_is_response_less_and_coalesces_one_reconcile` |
+| The Agent's acceptance bound is the subscriber's own issued frontier (attach cut as floor), and a stale subscription/renderer is handled distinctly. | `crates/nession-agent/src/server/websocket.rs::tests::progress_is_response_less_and_only_an_actionable_current_inconsistency_opens_one_episode`; `crates/nession-agent/src/server/issued_credit.rs::tests::subscription_frontier_starts_at_the_attach_cut_and_tracks_only_its_own_issues` |
+| The capability is negotiated through the Agent attach reply and forwarded verbatim by the Relay. | `crates/nession-server/src/server/websocket.rs::tests::relay_ready_forwards_notification_capabilities_verbatim_and_never_invents_them` |
+| The Relay forwards progress with no reply and returns the notice to the current browser subscription. | `crates/nession-server/tests/integration/relay.rs::relay_forwards_progress_without_a_reply_and_returns_the_current_subscriptions_notice` |
+| The Web sends progress only after negotiation, submits nothing during recovery, and resumes after a complete same-epoch proof. | `web/src/platform/session-runtime/__tests__/unit/SessionRuntime.test.ts` (#2877 cases); `web/src/platform/terminal-runtime/__tests__/unit/streamReconciler.test.ts` |
+
+**Measured 2026-11-07 (#2877 SC-06).** One bounded scripted workload on the CI
+runner compares the notification-mode candidate with the v1 operation baseline
+over the same 257 events (256 × 4 KiB plus one 256 KiB high-output event, one
+slow subscriber that opts into credit then stops acknowledging, and a
+duplicate quiet tail). Measured counts: **0 notification Progress response
+frames** versus **17 v1 operation replies**, **1** coalesced reconcile
+notice, healthy credit peak **262,144 bytes**, slow-subscriber credit peak
+**1,306,624 bytes** (both inside the 2 MiB window), **0** missed events,
+**0** credit-capacity violations, quiet tail silent, teardown clean. This is a
+deterministic ledger/verdict measurement, not an absolute-throughput or
+long-run soak claim.
+
+Witness:
+`crates/nession-agent/src/server/websocket.rs::tests::sc06_bounded_workload_measures_zero_progress_replies_and_per_subscriber_credit_peaks`;
+Case `e2e/acceptance/cases/2877/SC-06`. Multi-subscriber credit-pressure
+behaviour on real Relay/P2P routes beyond the deterministic cases above
+remains covered by the separate full-stack integration tests, not this
+measurement.
+
 ## 10. External references and non-goals
 
 - [Microsoft AHP Terminal Channel](https://github.com/microsoft/agent-host-protocol/blob/main/docs/specification/terminal-channel.md) is a reference for resource/subscribe/reconciliation semantics, not a drop-in VT checkpoint or global Channel Registry requirement.

@@ -17,6 +17,7 @@ description = "Generates the Web's TypeScript bindings from the Rust contracts (
 [dependencies]
 nession-protocol = { path = "../nession-protocol", features = ["codegen"] }
 nession-git = { path = "../nession-git", features = ["codegen"] }
+nession-github = { path = "../nession-github", features = ["codegen"] }
 nession-claude-code = { path = "../nession-claude-code", features = ["codegen"] }
 ts-rs.workspace = true
 schemars = { workspace = true, features = ["derive"] }

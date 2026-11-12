@@ -11,7 +11,7 @@ import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { TerminalWell } from '@/app/TerminalWell';
-import type { CapabilityId } from '@/product/capability';
+import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
@@ -20,6 +20,9 @@ import { WorkspacePanel } from '@/app/WorkspacePanel';
 import { useCapsuleCapability } from '@/app/useCapsuleCapability';
 import { useCapsuleMorph } from '@/product/terminal/capsule/useCapsuleMorph';
 import { useWorkSignals } from '@/app/useWorkSignals';
+import { Button } from '@/components/ui/button';
+import { PROJECT_CAPABILITY_ID } from '@/capabilities/project';
+import type { SessionProjectContext } from '@/product/project/types';
 import type { Agent, Session } from '@/types';
 
 export interface ShellMainProps {
@@ -75,7 +78,9 @@ export interface ShellMainProps {
   incomingFocus?: CapabilityFocus;
   onIncomingFocusApplied?: () => void;
   /** App Terminal: open a workspace-relative file in Files. */
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
+  /** Focused Session's Project context and actions (#3082). */
+  sessionProject?: SessionProjectContext;
 }
 
 /**
@@ -95,6 +100,8 @@ export interface TerminalChrome {
    */
   workContext?: ResolvedWorkContext;
   capsuleProjection?: CapsuleCapabilityProjection;
+  /** Contextual Session Project identity/action inside the composer (#3082). */
+  sessionContextAction?: ReactNode;
   /**
    * The Web's "Open Workspace" destination action beside the capsule (#1204) —
    * resolved here because the action is the shell's navigation, and a supplied
@@ -127,11 +134,13 @@ function NoSessionSurface({
   onCreate,
   onBrowse,
   createDisabled,
+  onOpenImages,
 }: {
   experience: Experience;
   onCreate: () => void;
   onBrowse: () => void;
   createDisabled: boolean;
+  onOpenImages: () => void;
 }) {
   if (experience === 'app') {
     return (
@@ -139,6 +148,7 @@ function NoSessionSurface({
         onCreate={onCreate}
         onBrowse={onBrowse}
         createDisabled={createDisabled}
+        onOpenImages={onOpenImages}
       />
     );
   }
@@ -148,7 +158,91 @@ function NoSessionSurface({
       className={cn('flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}
     >
       <p>Select a session to start working</p>
+      <Button
+        type="button"
+        variant="ghost"
+        data-testid="session-empty-open-images"
+        onClick={() => onOpenImages()}
+      >
+        Server Images
+      </Button>
     </div>
+  );
+}
+
+/**
+ * The no-Session work area: either the Workspace (where Images is discoverable
+ * without a Session) or the experience's ordinary empty/home screen.
+ */
+function NoSessionWorkArea({
+  surface,
+  showWorkspace,
+  agents,
+  tool,
+  fileOps,
+  experience,
+  facts,
+  onSurfaceChange,
+  onToolChange,
+  onWorkspaceDepthChange,
+  focus,
+  onFocusConsumed,
+  openWorktreeSession,
+  sessionProject,
+  onCreate,
+  onOpenDrawer,
+}: {
+  surface: Surface;
+  showWorkspace: boolean;
+  agents: Agent[];
+  tool: CapabilityId;
+  fileOps: FileOps | null;
+  experience: Experience;
+  facts: CapabilityFacts | undefined;
+  onSurfaceChange: (surface: Surface) => void;
+  onToolChange: (tool: CapabilityId) => void;
+  onWorkspaceDepthChange?: (pushed: boolean) => void;
+  focus: CapabilityFocus | undefined;
+  onFocusConsumed: (() => void) | undefined;
+  openWorktreeSession: ShellMainProps['onOpenWorktreeSession'];
+  sessionProject: SessionProjectContext | undefined;
+  onCreate: () => void;
+  onOpenDrawer?: () => void;
+}) {
+  if (surface === 'workspace' && showWorkspace) {
+    return (
+      <WorkspacePanel
+        selectedSession={null}
+        selectedAgent={undefined}
+        agents={agents}
+        domain={null}
+        surface={surface}
+        tool={tool}
+        fileOps={fileOps}
+        experience={experience}
+        facts={facts}
+        onSurfaceChange={onSurfaceChange}
+        onToolChange={onToolChange}
+        onDepthChange={onWorkspaceDepthChange}
+        focus={focus}
+        onFocusConsumed={onFocusConsumed}
+        openWorktreeSession={openWorktreeSession}
+        focusedProject={sessionProject?.focusedProject}
+        sessionProject={sessionProject}
+      />
+    );
+  }
+  return (
+    <NoSessionSurface
+      experience={experience}
+      onCreate={onCreate}
+      onBrowse={() => onOpenDrawer?.()}
+      createDisabled={agents.every((agent) => agent.status !== 'online')}
+      onOpenImages={() => {
+        onToolChange('images');
+        onSurfaceChange('workspace');
+      }}
+    />
   );
 }
 
@@ -183,6 +277,7 @@ function ShellTerminal({
   capsuleCapabilities,
   capsuleProjection,
   surfaceAction,
+  sessionContextAction,
   onOpenWorkspaceFile,
   workContext,
 }: {
@@ -193,7 +288,8 @@ function ShellTerminal({
   capsuleCapabilities?: CapsuleCapabilityContribution;
   capsuleProjection?: CapsuleCapabilityProjection;
   surfaceAction?: ReactNode;
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  sessionContextAction?: ReactNode;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   workContext?: ResolvedWorkContext;
 }) {
   return (
@@ -204,6 +300,7 @@ function ShellTerminal({
         capsuleCapabilities,
         capsuleProjection,
         surfaceAction,
+        sessionContextAction,
         workContext,
       }) ?? (
         <TerminalRegion
@@ -213,12 +310,106 @@ function ShellTerminal({
           capsuleCapabilities={capsuleCapabilities}
           capsuleProjection={capsuleProjection}
           surfaceAction={surfaceAction}
+          sessionContextAction={sessionContextAction}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
           workContext={workContext}
         />
       )}
     </TerminalWell>
   );
+}
+
+/**
+ * The compact Session Project identity (#3082).
+ *
+ * Conditional: absent for an unbound Session. A ready or loading Project opens
+ * its capability Peek; an unavailable Project offers the association dialog
+ * rather than disclosing stale data. It is a contextual composer action, not a
+ * permanent toolbar slot.
+ */
+function SessionProjectChip({
+  context,
+  onOpen,
+}: {
+  context: SessionProjectContext;
+  onOpen: () => void;
+}) {
+  const focused = context.focusedProject;
+  if (focused.status === 'unbound') {
+    return null;
+  }
+  const label =
+    focused.status === 'ready'
+      ? focused.project.name
+      : focused.status === 'loading'
+        ? 'Project'
+        : 'Project unavailable';
+  const projectId = focused.status === 'ready' ? focused.project.project_id : focused.projectId;
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      data-testid="session-project-chip"
+      data-project-id={projectId}
+      title="Project"
+      className="min-w-0 max-w-36 px-2 text-muted-foreground hover:text-foreground"
+      onClick={() => (focused.status === 'unavailable' ? context.onAssociate() : onOpen())}
+    >
+      <span className="truncate">{label}</span>
+    </Button>
+  );
+}
+
+function useSessionCapsuleChrome({
+  selectedSession,
+  selectedAgent,
+  agents,
+  domain,
+  fileOps,
+  experience,
+  openTool,
+  onSurfaceChange,
+  openWorkspaceFromCapsule,
+  sessionProject,
+}: {
+  selectedSession: Session | null;
+  selectedAgent: Agent | undefined;
+  agents: Agent[];
+  domain: DomainState | null;
+  fileOps: FileOps | null;
+  experience: Experience;
+  openTool: (id: CapabilityId) => void;
+  onSurfaceChange: (surface: Surface) => void;
+  openWorkspaceFromCapsule: (id: CapabilityId, resourceId?: string) => void;
+  sessionProject?: SessionProjectContext;
+}) {
+  const result = useCapsuleCapability({
+    session: selectedSession,
+    agent: selectedAgent,
+    agents,
+    domain,
+    fileOps,
+    experience,
+    onToolChange: openTool,
+    onSurfaceChange: () => onSurfaceChange('workspace'),
+    onOpenWorkspace: openWorkspaceFromCapsule,
+    focusedProject: sessionProject?.focusedProject,
+    projectContext: sessionProject,
+  });
+  const sessionContextAction =
+    sessionProject && selectedSession ? (
+      <SessionProjectChip
+        context={sessionProject}
+        onOpen={() => result.chooseCapability(PROJECT_CAPABILITY_ID)}
+      />
+    ) : undefined;
+  return {
+    facts: result.facts,
+    capsuleCapabilities: result.capabilities,
+    projection: result.projection,
+    sessionContextAction,
+  };
 }
 
 export function ShellMain({
@@ -243,27 +434,14 @@ export function ShellMain({
   incomingFocus,
   onIncomingFocusApplied,
   onOpenWorkspaceFile,
+  sessionProject,
 }: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
-  const { focus, setFocus, consumeFocus } = useIncomingCapabilityFocus(
-    incomingFocus,
-    onIncomingFocusApplied,
-  );
-  const { openTool, openWorkspaceFromCapsule } = useShellMainFocusTooling(
-    setFocus,
-    onToolChange,
-    onSurfaceChange,
-  );
-  const { facts, capabilities: capsuleCapabilities, projection } = useCapsuleCapability({
-    session: selectedSession,
-    agent: selectedAgent,
-    agents,
-    domain,
-    fileOps,
-    experience,
-    onToolChange: openTool,
-    onSurfaceChange: () => onSurfaceChange('workspace'),
-    onOpenWorkspace: openWorkspaceFromCapsule,
+  const { focus, setFocus, consumeFocus } = useIncomingCapabilityFocus(incomingFocus, onIncomingFocusApplied);
+  const { openTool, openWorkspaceFromCapsule } = useShellMainFocusTooling(setFocus, onToolChange, onSurfaceChange);
+  const { facts, capsuleCapabilities, projection, sessionContextAction } = useSessionCapsuleChrome({
+    selectedSession, selectedAgent, agents, domain, fileOps, experience,
+    openTool, onSurfaceChange, openWorkspaceFromCapsule, sessionProject,
   });
   const workContext = useWorkSignals(facts);
   const surfaceAction = hasSession && experience === 'web' ? <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} /> : undefined;
@@ -296,11 +474,23 @@ export function ShellMain({
         data-testid="main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
         {!hasSession ? (
-          <NoSessionSurface
+          <NoSessionWorkArea
+            surface={surface}
+            showWorkspace={showWorkspace}
+            agents={agents}
+            tool={tool}
+            fileOps={fileOps}
             experience={experience}
+            facts={facts}
+            onSurfaceChange={onSurfaceChange}
+            onToolChange={openTool}
+            onWorkspaceDepthChange={onWorkspaceDepthChange}
+            focus={focus}
+            onFocusConsumed={consumeFocus}
+            openWorktreeSession={onOpenWorktreeSession}
+            sessionProject={sessionProject}
             onCreate={() => onCreate?.()}
-            onBrowse={() => onOpenDrawer?.()}
-            createDisabled={agents.every((agent) => agent.status !== 'online')}
+            onOpenDrawer={onOpenDrawer}
           />
         ) : (
           <>
@@ -313,6 +503,7 @@ export function ShellMain({
                 capsuleCapabilities={capsuleCapabilities}
                 capsuleProjection={projection}
                 surfaceAction={surfaceAction}
+                sessionContextAction={sessionContextAction}
                 onOpenWorkspaceFile={onOpenWorkspaceFile}
                 workContext={workContext}
               />
@@ -334,6 +525,8 @@ export function ShellMain({
                 focus={focus}
                 onFocusConsumed={consumeFocus}
                 openWorktreeSession={onOpenWorktreeSession}
+                focusedProject={sessionProject?.focusedProject}
+                sessionProject={sessionProject}
               />
             ) : null}
           </>

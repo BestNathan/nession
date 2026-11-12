@@ -131,6 +131,42 @@
           "$ref": "#/$defs/tokenRef",
           "description": "Height of one row *inside* the block, for a surface whose rows are not the block's own band (pattern.context-capsule: a sensed row carries two lines of text, so it is taller than any control band and is deliberately not held to one). Resolved value must be px-measurable. The distinction from heightToken and visualSizeToken is the axis it measures: heightToken is the block, visualSizeToken is what a control paints inside it, this is the row a list repeats."
         },
+        "controlHeightToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "The Experience control band every shared control/action in the recipe resolves (a form field, an operation's Cancel/Save). Distinct from heightToken, which pins the recipe's own surface: a recipe with several controls needs one statement rather than a copy of control.md at each consumer (#3138). Resolved value must be px-measurable."
+        },
+        "parts": {
+          "type": "object",
+          "description": "Per-`data-recipe-part` approved roles (#3138). The shared recipes emit stable part names on the DOM; this map is the single owner of which typography/geometry role each part must resolve. A browser check consumes it instead of re-declaring sizes, so a contract change and a check change are one edit.",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "properties": {
+              "typographyToken": {
+                "$ref": "#/$defs/tokenRef",
+                "description": "Experience typography role group (e.g. experience.web.typography.title). The check compares size, weight and leading; the role must expose size/weight/lineHeight leaves."
+              },
+              "typographyTokens": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/tokenRef" },
+                "description": "The approved alternatives for a part whose domain content chooses between roles — a fact value is body for product text and code for technical identity. The browser check accepts any listed role; it never accepts one outside the list."
+              },
+              "heightToken": {
+                "$ref": "#/$defs/tokenRef",
+                "description": "A measurable height for this part, when the part's own box is a stable band."
+              },
+              "touchTargetToken": {
+                "$ref": "#/$defs/tokenRef",
+                "description": "Minimum hit area for this part on App."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
         "visibility": {
           "$ref": "#/$defs/visibility"
         }

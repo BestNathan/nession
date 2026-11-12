@@ -8,6 +8,17 @@ import { sessionIdAtom } from '@/product/session/state';
 import { toast } from 'sonner';
 import type { Agent, Session } from '@/types';
 
+async function openSessionAction(
+  id: string,
+  action: 'settings' | 'kill',
+): Promise<void> {
+  await userEvent.click(screen.getByTestId(`session-actions-${id}`));
+  const item = await screen.findByTestId(`session-actions-${action}-${id}`);
+  await waitFor(() => expect(item).not.toHaveStyle({ pointerEvents: 'none' }));
+  await userEvent.click(item);
+}
+
+
 const agent: Agent = {
   agent_id: 'a1', hostname: 'devbox-01', display_name: 'devbox-01',
   ip_address: '10.0.0.1', port: 1, status: 'offline', session_count: 1,
@@ -96,6 +107,27 @@ vi.mock('@/product/session/components/CreateSessionDialog', () => ({
       </div>
     ) : null,
 }));
+vi.mock('@/app/experiences/app/AppCreateSessionSurface', () => ({
+  // The App composition replaces the Web dialog under `experience=app`
+  // (#3089); the stub still exposes the ACK's created id, which is what these
+  // composition tests consume.
+  AppCreateSessionSurface: ({
+    isOpen,
+    onCreated,
+  }: {
+    isOpen: boolean;
+    onCreated: (sessionId?: string) => void;
+  }) =>
+    isOpen ? (
+      <div data-testid="create-session-dialog">
+        <button
+          type="button"
+          data-testid="create-session-submit"
+          onClick={() => onCreated('a1:created')}
+        />
+      </div>
+    ) : null,
+}));
 vi.mock('@/product/session/components/KillConfirmDialog', () => ({
   KillConfirmDialog: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="kill-session-dialog" /> : null,
@@ -120,6 +152,30 @@ vi.mock('@/product/session/components/AttachDialog', () => ({
         <span data-testid="attach-dialog-intent">{intent}</span>
         {/* The session the flow selected, so a case can assert *which* row
             became current rather than only that something did. */}
+        <span data-testid="attach-dialog-session">{session.session_id}</span>
+        <button
+          type="button"
+          data-testid="attach-confirm"
+          onClick={() => onConfirm(session, attachChoice)}
+        />
+      </div>
+    ) : null,
+}));
+vi.mock('@/app/experiences/app/AppAttachSurface', () => ({
+  AppAttachSurface: ({
+    isOpen,
+    onConfirm,
+    session,
+    intent = 'attach',
+  }: {
+    isOpen: boolean;
+    onConfirm: (s: Session, c: typeof attachChoice) => void;
+    session: Session | null;
+    intent?: string;
+  }) =>
+    isOpen && session ? (
+      <div data-testid="attach-dialog">
+        <span data-testid="attach-dialog-intent">{intent}</span>
         <span data-testid="attach-dialog-session">{session.session_id}</span>
         <button
           type="button"
@@ -277,7 +333,8 @@ describe('Shell', () => {
     renderShell();
     expect(screen.getByTestId('sidebar-column')).toBeInTheDocument();
     expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-agents-entry')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-agents')).not.toBeInTheDocument();
     expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
   });
 
@@ -550,7 +607,7 @@ describe('Shell', () => {
   it('routes the configure action to a configure-intent dialog whose Save persists without attaching', async () => {
     deepLink.sessionIdFromUrl = sess.session_id;
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    await openSessionAction(sess.session_id, 'settings');
     expect(screen.getByTestId('attach-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('attach-dialog-intent')).toHaveTextContent('configure');
     // The Save-equivalent confirm must route to the configure handler (persist

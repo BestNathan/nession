@@ -22,7 +22,7 @@ A **Workspace Location** describes where part of the work physically exists or e
 
 A Session normally executes in one location and carries its current directory/context. Moving between Sessions or devices should not force the user to rebuild the meaning of the Workspace.
 
-The current implementation may infer this relationship from Agent + Session + cwd until logical Workspace identity becomes explicitly persisted.
+The current implementation may infer this relationship from Agent + Session + cwd until logical Workspace identity becomes explicitly persisted. The explicit path is [project.md](project.md): a Project declares zero or more **Existing Locations** (`{agent_id, path}` references to user-owned directories). Those references are mapped from inference only when the user declares them; they never clone, mutate or delete the directory, and they do not turn Workspace into a Project copy. A Session with no Project association remains valid.
 
 ## What Workspace should answer
 
@@ -204,4 +204,4 @@ Do not force users to understand the infrastructure graph before they can work.
 
 The current Web implementation contains Workspace tool registries, tool bars, Agent/Session detail tools, and other structures created during the Session-first migration. They remain useful implementation assets, but they are not automatically the long-term information architecture.
 
-When those structures conflict with [`PRINCIPLE.md`](../../PRINCIPLE.md), converge them toward contextual presence rather than preserving them because they already ship.
+Project provides the persistent declaration that the earlier inferred model lacked ([#739](https://github.com/BestNathan/nession/issues/739)), but it does not replace Workspace. When those inferred structures conflict with [`PRINCIPLE.md`](../../PRINCIPLE.md), converge them toward contextual presence, and map any inferred location to an explicit Project Existing Location rather than silently redefining what it meant.

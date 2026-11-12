@@ -36,7 +36,7 @@ test('canonical Workspace fixture renders the plugin shell', async ({ page }) =>
   // name — so a capability quietly dropping out of the row fails here instead
   // of passing as a shorter run.
   await expect(page.getByTestId('workspace-capability-scroll')).toBeVisible();
-  for (const id of ['session', 'agent', 'env', 'claude-code', 'git']) {
+  for (const id of ['session', 'agent', 'env', 'sandbox', 'claude-code', 'git']) {
     await expect(page.getByTestId(`workspace-tool-${id}`)).toBeVisible();
   }
 });

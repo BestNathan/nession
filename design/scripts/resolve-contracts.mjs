@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  cssVarForTokenPath,
   loadTokens,
   namespaceTokenValue,
   resolveRef,
@@ -55,6 +56,17 @@ const BLOCK_FIELDS = {
   // than any control band on purpose, so `heightToken` (the surface) and
   // `visualSizeToken` (what a control paints) both name the wrong thing.
   rowHeightToken: 'token',
+  // The band every shared control/action in this recipe resolves — a form
+  // field, an operation's Cancel/Save. It is not the surface's own height
+  // (`heightToken`), and a recipe with several controls needs one statement
+  // rather than a copy of `control.md` at each consumer (#3138).
+  controlHeightToken: 'token',
+  // Per-`data-recipe-part` constraints (#3138). The parts are the shared
+  // recipe's executable anatomy: the DOM names its roles, and this map says
+  // which approved typography/geometry role each one must resolve. A missing
+  // entry is a genuine gap in the contract, not a reason for a browser check
+  // to silently skip.
+  parts: 'parts',
   visibility: 'visibility',
 };
 
@@ -68,6 +80,7 @@ const TOKEN_TARGET_FIELDS = new Set([
   'padXToken',
   'visualSizeToken',
   'rowHeightToken',
+  'controlHeightToken',
 ]);
 
 /** Fields emitted as a resolved CSS expression (`<field>Css`), not as px. */
@@ -207,6 +220,103 @@ function checkVisibility(node, where) {
   return errors;
 }
 
+const PART_FIELDS = ['typographyToken', 'typographyTokens', 'heightToken', 'touchTargetToken'];
+
+function typographyLeaves(index, token) {
+  return {
+    size: index.get(`${token}.size`),
+    weight: index.get(`${token}.weight`),
+    lineHeight: index.get(`${token}.lineHeight`),
+  };
+}
+
+/**
+ * A `typographyToken` must name a **role group**, not one leaf: the browser
+ * check compares size, weight and leading together, because a role whose size
+ * matches while its weight does not still reads as a different type voice.
+ */
+function validateTypographyToken(token, where, index, tokens) {
+  const errors = [];
+  if (typeof token !== 'string') {
+    return [`✗ ${where}.typographyToken must be a token id string (got ${JSON.stringify(token)})\n  Fix: reference a role group like "experience.web.typography.title"`];
+  }
+  const leaves = typographyLeaves(index, token);
+  const missing = Object.entries(leaves).filter(([, node]) => node === undefined).map(([key]) => key);
+  if (missing.length > 0) {
+    errors.push(
+      `✗ ${where}.typographyToken "${token}" is not a typography role (missing ${missing.join(', ')})\n  Fix: reference an experience typography role group, e.g. "experience.app.typography.secondary"`,
+    );
+    return errors;
+  }
+  const size = pxForTokenId(index, tokens, `${token}.size`);
+  if (!size.known || size.px === null) {
+    errors.push(`✗ ${where}.typographyToken "${token}".size does not resolve to px\n  Fix: reference a role whose size is a length`);
+  }
+  for (const leaf of ['weight', 'lineHeight']) {
+    let value;
+    try {
+      value = resolveRef(leaves[leaf], tokens, new Set(), 'light').value;
+    } catch {
+      value = undefined;
+    }
+    if (typeof value !== 'number' && !(typeof value === 'string' && Number.isFinite(Number(value)))) {
+      errors.push(`✗ ${where}.typographyToken "${token}".${leaf} does not resolve to a number (got ${JSON.stringify(value)})\n  Fix: reference a role with a numeric ${leaf}`);
+    }
+  }
+  return errors;
+}
+
+function validateParts(node, where, index, tokens) {
+  const errors = [];
+  if (!node || typeof node !== 'object' || Array.isArray(node)) {
+    return [`✗ ${where}.parts must be an object of data-recipe-part names\n  Fix: map a part name to its approved role, e.g. { "detail-title": { "typographyToken": "…" } }`];
+  }
+  for (const [part, spec] of Object.entries(node)) {
+    const partWhere = `${where}.parts.${part}`;
+    if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(part)) {
+      errors.push(`✗ ${partWhere} must be a kebab-case data-recipe-part name\n  Fix: use the part's data-recipe-part value`);
+      continue;
+    }
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+      errors.push(`✗ ${partWhere} must be an object\n  Fix: use { "typographyToken": "…" } and/or a geometry token`);
+      continue;
+    }
+    errors.push(...checkKeys(spec, PART_FIELDS, partWhere));
+    if (Object.keys(spec).length === 0) {
+      errors.push(`✗ ${partWhere} declares no approved role\n  Fix: name a typographyToken or geometry token, or remove the part`);
+    }
+    if (spec.typographyToken !== undefined && spec.typographyTokens !== undefined) {
+      errors.push(`✗ ${partWhere} names both typographyToken and typographyTokens\n  Fix: use one string for a single role, a list only when the recipe approves alternatives`);
+    }
+    if (spec.typographyToken !== undefined) {
+      errors.push(...validateTypographyToken(spec.typographyToken, partWhere, index, tokens));
+    }
+    if (spec.typographyTokens !== undefined) {
+      if (!Array.isArray(spec.typographyTokens) || spec.typographyTokens.length === 0) {
+        errors.push(`✗ ${partWhere}.typographyTokens must be a non-empty array of role ids\n  Fix: list each approved alternative role, e.g. ["experience.web.typography.body", "experience.web.typography.code"]`);
+      } else {
+        for (const token of spec.typographyTokens) {
+          errors.push(...validateTypographyToken(token, partWhere, index, tokens));
+        }
+      }
+    }
+    for (const field of ['heightToken', 'touchTargetToken']) {
+      if (spec[field] === undefined) continue;
+      if (typeof spec[field] !== 'string') {
+        errors.push(`✗ ${partWhere}.${field} must be a token id string\n  Fix: reference a design/tokens id like "experience.web.control.md"`);
+        continue;
+      }
+      const { known, px } = pxForTokenId(index, tokens, spec[field]);
+      if (!known) {
+        errors.push(`✗ unknown token id "${spec[field]}" in ${partWhere}.${field}\n  Fix: reference an existing token id (design/tokens/*) or add the token first`);
+      } else if (px === null) {
+        errors.push(`✗ token "${spec[field]}" in ${partWhere}.${field} does not resolve to a px/rem value\n  Fix: reference a size/density token; colors are not measurable heights`);
+      }
+    }
+  }
+  return errors;
+}
+
 function validateBlock(block, where, index, tokens) {
   const errors = [];
   if (!block || typeof block !== 'object') return errors;
@@ -225,6 +335,8 @@ function validateBlock(block, where, index, tokens) {
       if (!ok) errors.push(`✗ ${ctx} must be true/false or a non-empty region name (got ${JSON.stringify(value)})\n  Fix: use true/false or name the scroll region`);
     } else if (kind === 'visibility') {
       errors.push(...checkVisibility(value, where));
+    } else if (kind === 'parts') {
+      errors.push(...validateParts(value, where, index, tokens));
     } else if (kind === 'token') {
       if (typeof value !== 'string') {
         errors.push(`✗ ${ctx} must be a token id string (got ${JSON.stringify(value)})\n  Fix: reference a design/tokens id like "experience.web.control.md"`);
@@ -398,6 +510,60 @@ function mergeExperience(layers) {
   return out;
 }
 
+/**
+ * Resolve a typography role group into the numbers a browser check can compare
+ * plus the CSS variables the role actually paints through.
+ *
+ * The variables matter for `lineHeight`: the token source is a unitless
+ * multiplier, so comparing it to a computed `line-height` would compare `1.3`
+ * with `16.25px`. The browser resolves the same variable the recipe uses, which
+ * is the only comparison that survives browser rounding.
+ */
+function resolveTypographyRole(index, tokens, token) {
+  const segments = token.split('.');
+  if (segments[0] !== 'experience' || !['web', 'app'].includes(segments[1])) {
+    throw new Error(`typographyToken "${token}" is not an experience typography role`);
+  }
+  const rolePath = segments.slice(2);
+  const read = (leaf) => resolveRef(index.get(`${token}.${leaf}`), tokens, new Set(), 'light').value;
+  return {
+    sizePx: pxForTokenId(index, tokens, `${token}.size`).px,
+    weight: Number(read('weight')),
+    lineHeight: Number(read('lineHeight')),
+    sizeVar: cssVarForTokenPath([...rolePath, 'size']),
+    weightVar: cssVarForTokenPath([...rolePath, 'weight']),
+    lineHeightVar: cssVarForTokenPath([...rolePath, 'lineHeight']),
+  };
+}
+
+/**
+ * Resolve each declared `data-recipe-part` to its approved role.
+ *
+ * Values are arguments to the assertion, never content the test re-derives:
+ * the browser spec reads this block and compares computed style against the
+ * tokens here, so a contract change and a check change are one edit.
+ */
+function enrichParts(parts, tokens, index) {
+  const out = {};
+  for (const [part, spec] of Object.entries(parts ?? {})) {
+    const entry = { ...spec };
+    if (typeof spec.typographyToken === 'string') {
+      entry.typography = resolveTypographyRole(index, tokens, spec.typographyToken);
+    }
+    if (Array.isArray(spec.typographyTokens)) {
+      entry.typographies = spec.typographyTokens.map((token) => resolveTypographyRole(index, tokens, token));
+    }
+    if (typeof spec.heightToken === 'string') {
+      entry.heightTokenPx = pxForTokenId(index, tokens, spec.heightToken).px;
+    }
+    if (typeof spec.touchTargetToken === 'string') {
+      entry.touchTargetTokenPx = pxForTokenId(index, tokens, spec.touchTargetToken).px;
+    }
+    out[part] = entry;
+  }
+  return out;
+}
+
 function enrichPx(block, tokens, index) {
   const out = { ...block };
   for (const field of TOKEN_TARGET_FIELDS) {
@@ -413,6 +579,9 @@ function enrichPx(block, tokens, index) {
       const { known, css } = cssForTokenId(index, tokens, id);
       if (known && css !== null) out[`${field}Css`] = css;
     }
+  }
+  if (out.parts !== undefined) {
+    out.parts = enrichParts(out.parts, tokens, index);
   }
   return out;
 }

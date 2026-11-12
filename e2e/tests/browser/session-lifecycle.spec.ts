@@ -1,6 +1,13 @@
 import { test as base, expect } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
 import { watchSessionReports } from '../../helpers/sessionReport';
+import { installAttachResponseControl } from '../../helpers/attachResponseControl';
+import {
+  abaKeepsThirdFlightGuard,
+  sameSessionDoubleClickStartsOneValidation,
+  staleAttachReplyKeepsNewerSelection,
+  staleDialogDoesNotOpenOverNewerSelection,
+} from '../../helpers/attachLatestIntent';
 
 /**
  * Watch the session lists from **before the page navigates** (#1326).
@@ -151,12 +158,14 @@ test.describe('Session lifecycle', () => {
     ).toContainText(`${reportedCommand} · ${agentLabel} ·`);
 
     // ── Kill session ──
-    // The Kill button is in the same row as the session name.  Use the
-    // row-level hover class to scope the search, since CSS-selector
-    // traversal with ".." is fragile across the nested flex layout.
-    // The Kill button appears on row hover (or when the row is selected).
+    // Since #2851 every row action lives in the one `…` menu (the row no
+    // longer renders a direct Kill button). Open the trigger inside the row,
+    // then choose the menu's Kill item; the popup is portaled outside the row.
     await sessionRow.hover();
-    await sessionRow.getByRole('button', { name: 'Kill session' }).click();
+    await sessionRow.locator('[data-testid^="session-actions-"]').first().click();
+    const killItem = page.locator('[data-testid^="session-actions-kill-"]').first();
+    await expect(killItem).toBeVisible();
+    await killItem.click();
 
     // KillConfirmDialog should open (it's an AlertDialog)
     const killDialog = page.getByRole('alertdialog');
@@ -179,4 +188,54 @@ test.describe('Session lifecycle', () => {
     // ── Verify session disappears ──
     await expect(sessionRow).not.toBeVisible({ timeout: 10_000 });
   });
+});
+
+// ── Latest-intent attach ownership (#2873) ────────────────────────────────
+//
+// Two Session selections can each own a pending attach-profile validation.
+// The reply order is controlled at the transport boundary: the page's
+// `WebSocket` parks `server.session.attach` replies for a held Session and
+// releases them verbatim, so the app runs its real attach flow against the
+// real Server. Nothing here decides the race by sleeping; the scenario steps
+// live in `helpers/attachLatestIntent.ts` and are shared with the
+// source-aligned acceptance Cases.
+
+// Separate describe: the interceptor must be installed before `goto`, which
+// the shared lifecycle `beforeEach` has already performed.
+test.describe('Attach latest-intent ownership (#2873)', () => {
+  test.beforeEach(async ({ page }) => {
+    await installAttachResponseControl(page);
+    await page.goto(
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    );
+    await waitForShell(page);
+  });
+
+  test('#2873 SC-01: a stale attach reply cannot replace the newer Session selection',
+    async ({ page }, testInfo) => {
+      test.skip(!process.env.CI, 'real stack available in CI only');
+      test.setTimeout(240_000);
+      await staleAttachReplyKeepsNewerSelection(page, testInfo);
+    });
+
+  test('#2873 SC-01: a stale dialog result cannot open over the newer Session',
+    async ({ page }, testInfo) => {
+      test.skip(!process.env.CI, 'real stack available in CI only');
+      test.setTimeout(240_000);
+      await staleDialogDoesNotOpenOverNewerSelection(page, testInfo);
+    });
+
+  test('#2873 SC-02: A→B→A keeps the third flight and its guard',
+    async ({ page }, testInfo) => {
+      test.skip(!process.env.CI, 'real stack available in CI only');
+      test.setTimeout(240_000);
+      await abaKeepsThirdFlightGuard(page, testInfo);
+    });
+
+  test('#2873 SC-02: a same-Session double click starts one validation',
+    async ({ page }, testInfo) => {
+      test.skip(!process.env.CI, 'real stack available in CI only');
+      test.setTimeout(180_000);
+      await sameSessionDoubleClickStartsOneValidation(page, testInfo);
+    });
 });

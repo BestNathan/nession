@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';import use
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitWorkspace } from '../../GitWorkspace';
 import { gitApi } from '../../../GitPlugin';
+import { githubApi } from '../../../GithubPlugin';
 import type {
   GitDiffResponse,
   GitFilePreview,
@@ -11,6 +12,10 @@ import type {
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
+
+vi.mock('../../../GithubPlugin', () => ({
+  githubApi: { repository: vi.fn() },
+}));
 
 vi.mock('../../../GitPlugin', () => ({
   gitApi: {
@@ -26,6 +31,7 @@ vi.mock('../../../GitPlugin', () => ({
 }));
 
 const mockedStatus = vi.mocked(gitApi.gitStatus);
+const mockedRepository = vi.mocked(githubApi.repository);
 const mockedDiff = vi.mocked(gitApi.gitDiff);
 const mockedPreview = vi.mocked(gitApi.gitPreview);
 const mockedStage = vi.mocked(gitApi.gitStage);
@@ -120,6 +126,53 @@ describe('GitWorkspace', () => {
     vi.clearAllMocks();
     mockedStatus.mockResolvedValue(statusResponse());
     mockedDiff.mockResolvedValue(diffResponse(''));
+    mockedRepository.mockResolvedValue({
+      state: 'ok',
+      resolution: 'resolved',
+      repository: {
+        host: 'github.com',
+        owner: 'acme',
+        repo: 'repo',
+        remoteName: 'origin',
+        sourceUrl: 'https://github.com/acme/repo',
+      },
+      branch: 'main',
+      choices: [],
+      authenticated: true,
+    });
+  });
+
+  it('keeps local Git functional when the GitHub provider is unavailable (#1290 SC-13)', async () => {
+    mockedRepository.mockResolvedValueOnce({
+      state: 'error',
+      code: 'not_authenticated',
+      message: 'no token',
+    });
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-workspace');
+    await userEvent.click(screen.getByTestId('git-surface-github'));
+    expect(await screen.findByTestId('github-repository-error')).toHaveTextContent(
+      'GITHUB_TOKEN',
+    );
+    await userEvent.click(screen.getByTestId('git-surface-repository'));
+    expect(screen.getByTestId('git-workspace')).toBeVisible();
+    expect(screen.getByTestId('git-refresh')).toBeInTheDocument();
+  });
+
+  it('groups Repository and GitHub without flattening seven peer tabs (#1290)', async () => {
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-branch');
+
+    expect(screen.getByRole('tab', { name: 'Changes' })).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('git-surface-github'));
+
+    await waitFor(() => expect(mockedRepository).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('github-hosting')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Changes' })).toBeNull();
+
+    await userEvent.click(screen.getByTestId('git-surface-repository'));
+    expect(screen.getByRole('tab', { name: 'Changes' })).toBeInTheDocument();
+    expect(screen.queryByTestId('github-hosting')).toBeNull();
   });
 
   it('asks for the state of the Session’s repository, naming the agent to route to', async () => {
@@ -249,6 +302,7 @@ describe('GitWorkspace', () => {
       session: 'agent-1:work',
       path: 'notes.txt',
       expected: 'untracked',
+      want: 'text',
     });
     expect(mockedDiff).not.toHaveBeenCalled();
 
@@ -933,5 +987,102 @@ describe('GitWorkspace', () => {
 
     expect(screen.getByTestId('git-no-session')).toHaveTextContent('Select a Session');
     expect(mockedStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('shared presentation and bounded media (#2876)', () => {
+  function statusWithUntracked(path: string) {
+    return statusResponse({
+      status: {
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        modified: [],
+        untracked: [path],
+        unmerged: [],
+      },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedDiff.mockResolvedValue(diffResponse(''));
+  });
+
+  it('renders untracked code in the shared CodeMirror source view, not a <pre>', async () => {
+    mockedStatus.mockResolvedValue(
+      statusWithUntracked('notes/example.ts'),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({ path: 'notes/example.ts', text: 'export const x = 1;\n' }),
+    );
+
+    const { container } = render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    const text = await screen.findByTestId('git-file-preview-text');
+    await waitFor(() => expect(text.querySelector('.cm-editor')).not.toBeNull());
+    expect(text.querySelector('.cm-lineNumbers')).not.toBeNull();
+    expect(text.querySelectorAll('pre')).toHaveLength(0);
+    expect(text).toHaveTextContent('export const x = 1;');
+    expect(screen.getByTestId('git-file-preview-status')).toHaveTextContent(
+      'Untracked · File preview (no Git baseline)',
+    );
+    expect(container.querySelector('[data-testid="file-content-code"]')).not.toBeNull();
+  });
+
+  it('offers the shared Preview/Raw leaves for untracked JSON', async () => {
+    mockedStatus.mockResolvedValue(
+      statusWithUntracked('notes/data.json'),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({
+        path: 'notes/data.json',
+        text: '{"name":"git-viewer","items":[1,2,3]}',
+        size: 34,
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    expect(await screen.findByRole('tree')).toBeInTheDocument();
+    expect(screen.getByText('"name"')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Raw' }));
+    const text = screen.getByTestId('git-file-preview-text');
+    await waitFor(() => expect(text.querySelector('.cm-editor')).not.toBeNull());
+    expect(text).toHaveTextContent('{"name":"git-viewer"');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('tree')).toBeInTheDocument();
+  });
+
+  it('renders an authorized untracked image through the shared media viewer', async () => {
+    mockedStatus.mockResolvedValue(
+      statusWithUntracked('assets/photo.png'),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({
+        path: 'assets/photo.png',
+        state: 'ready',
+        text: '',
+        binary: true,
+        size: 80,
+        media: { content_base64: 'AAAA', mime_type: 'image/png', complete: true },
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    expect(await screen.findByTestId('image-viewer')).toBeInTheDocument();
+    expect(mockedPreview).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      session: 'agent-1:work',
+      path: 'assets/photo.png',
+      expected: 'untracked',
+      want: 'media',
+    });
+    expect(screen.queryByTestId('git-file-preview-text')).not.toBeInTheDocument();
   });
 });

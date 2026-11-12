@@ -13,6 +13,8 @@ export interface AppPageHeaderProps {
   onBack: () => void;
   /** The page's own name. */
   title: string;
+  /** Optional test hook for the host's title node. */
+  titleTestId?: string;
   /**
    * The title is technical identity — a path, a resource id — rather than
    * product text, so it is set in mono.
@@ -47,7 +49,13 @@ export interface AppPageHeaderProps {
  * meaningful while the editor is on screen and dirty. What must not happen is
  * what did: a second bar whose Back and Close were two names for one leave.
  */
-export function AppPageHeader({ backLabel, onBack, title, technical }: AppPageHeaderProps) {
+export function AppPageHeader({
+  backLabel,
+  onBack,
+  title,
+  titleTestId,
+  technical,
+}: AppPageHeaderProps) {
   return (
     <header
       data-testid="app-page-header"
@@ -61,6 +69,7 @@ export function AppPageHeader({ backLabel, onBack, title, technical }: AppPageHe
           Web's `text-sm` that once stood here was the primitive's desktop
           default doing a title's job. */}
       <h1
+        data-testid={titleTestId}
         className={cn('min-w-0 truncate', technical ? chromeMonoRole('title') : titleAppClass)}
       >
         {title}

@@ -1,0 +1,30 @@
+[package]
+name = "nession-erofs"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# The default composition is the Server's: deterministic build + blob store.
+default = ["build", "store"]
+store = []
+build = ["store", "dep:tempfile"]
+cache = ["dep:futures-util", "dep:reqwest", "dep:tokio", "dep:libc"]
+mount = []
+
+[dependencies]
+anyhow.workspace = true
+futures-util = { workspace = true, optional = true }
+libc = { version = "0.2", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
+sha2.workspace = true
+tempfile = { version = "3.8", optional = true }
+tokio = { workspace = true, optional = true }
+uuid.workspace = true
+
+[dev-dependencies]
+httptest = "0.16"
+tempfile = "3.8"
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[lints]
+workspace = true

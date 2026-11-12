@@ -27,6 +27,7 @@ export function useAppFilesNavigator(
     filename: string;
     size: number;
     initialLine?: number;
+    initialColumn?: number;
   } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
@@ -99,7 +100,7 @@ export function useAppFilesNavigator(
   const openFile = useCallback(
     (
       entry: { path: string; name: string; size: number },
-      options?: { initialLine?: number },
+      options?: { initialLine?: number; initialColumn?: number },
     ) => {
       setDirty(false);
       setShowDiscardDialog(false);
@@ -112,6 +113,7 @@ export function useAppFilesNavigator(
         filename: entry.name,
         size: entry.size,
         initialLine: options?.initialLine,
+        initialColumn: options?.initialColumn,
       });
     },
     [closeSearch, searchOpen, sourceId],

@@ -27,6 +27,7 @@ import { GitFilePreviewView } from './GitFilePreviewView';
 import { GitHistoryView } from './GitHistoryView';
 import { GitNotice } from './GitNotice';
 import { GitWorktreesView } from './GitWorktreesView';
+import { GithubHostingView } from './GithubHostingView';
 
 /**
  * What the Git surface can show (`#826` §4).
@@ -41,6 +42,7 @@ import { GitWorktreesView } from './GitWorktreesView';
  * capability shows, and is not a second navigation shell.
  */
 type GitSection = 'changes' | 'history' | 'branches' | 'worktrees';
+type GitSurface = 'repository' | 'github';
 
 /**
  * The file the entry said to open, if any (`#826`).
@@ -83,6 +85,7 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     rows,
   });
   const [section, setSection] = useState<GitSection>('changes');
+  const [surface, setSurface] = useState<GitSurface>('repository');
 
   if (!sessionId) {
     return (
@@ -98,6 +101,8 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         status={status.status}
         loading={status.loading}
         onRefresh={status.refresh}
+        surface={surface}
+        onSurfaceChange={setSurface}
         section={section}
         onSectionChange={setSection}
       />
@@ -107,7 +112,15 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
         who never looked at it — a log, a ref listing, or a worktree listing
         nobody asked for.
       */}
-      {section === 'history' ? (
+      {surface === 'github' ? (
+        agentId ? (
+          <GithubHostingView agentId={agentId} sessionId={sessionId} />
+        ) : (
+          <GitNotice testId="github-no-agent">
+            Select an Agent-backed Session to read its GitHub context.
+          </GitNotice>
+        )
+      ) : section === 'history' ? (
         <GitHistoryView ctx={ctx} />
       ) : section === 'branches' ? (
         <GitBranchesView ctx={ctx} />
@@ -130,12 +143,16 @@ function GitHeader({
   status,
   loading,
   onRefresh,
+  surface,
+  onSurfaceChange,
   section,
   onSectionChange,
 }: {
   status: GitStatusResponse | null;
   loading: boolean;
   onRefresh: () => void;
+  surface: GitSurface;
+  onSurfaceChange: (surface: GitSurface) => void;
   section: GitSection;
   onSectionChange: (section: GitSection) => void;
 }) {
@@ -161,17 +178,33 @@ function GitHeader({
         </p>
       </div>
       <Tabs
-        value={section}
-        onValueChange={(value) => onSectionChange(value as GitSection)}
+        value={surface}
+        onValueChange={(value) => onSurfaceChange(value as GitSurface)}
         className="shrink-0"
       >
         <TabsList>
-          <TabsTrigger value="changes">Changes</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-          <TabsTrigger value="branches">Branches</TabsTrigger>
-          <TabsTrigger value="worktrees">Worktrees</TabsTrigger>
+          <TabsTrigger value="repository" data-testid="git-surface-repository">
+            Repository
+          </TabsTrigger>
+          <TabsTrigger value="github" data-testid="git-surface-github">
+            GitHub
+          </TabsTrigger>
         </TabsList>
       </Tabs>
+      {surface === 'repository' ? (
+        <Tabs
+          value={section}
+          onValueChange={(value) => onSectionChange(value as GitSection)}
+          className="shrink-0"
+        >
+          <TabsList>
+            <TabsTrigger value="changes">Changes</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
+            <TabsTrigger value="branches">Branches</TabsTrigger>
+            <TabsTrigger value="worktrees">Worktrees</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      ) : null}
       {/*
         Kept available while a read is in flight: a manual re-read is the
         recovery path, and the shared hook publishes only the latest-started
@@ -321,6 +354,7 @@ function GitBody({
             path={selection.selectedPath}
             expected={selection.previewKind ?? 'untracked'}
             response={selection.preview}
+            media={selection.media}
             loading={selection.loading}
             error={selection.error}
           />

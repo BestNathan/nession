@@ -103,6 +103,30 @@ pub struct ServerConfig {
     pub heartbeat_timeout_secs: u64,
     #[serde(default = "default_db_path")]
     pub db_path: String,
+    /// Content-addressed EROFS blob root (#3022). The Server is its only
+    /// writer; Projects only reference digests.
+    #[serde(default = "default_image_blob_dir")]
+    pub image_blob_dir: String,
+    /// Private workspace for Git checkout + `mkfs.erofs` builds (#3022).
+    #[serde(default = "default_image_build_dir")]
+    pub image_build_dir: String,
+    /// Maximum concurrent EROFS builds. Bounded so a burst of requests cannot
+    /// exhaust the host's disk or process table.
+    #[serde(default = "default_image_max_concurrent_builds")]
+    pub image_max_concurrent_builds: usize,
+    /// Lifetime of a Project-scoped blob access grant, in seconds.
+    #[serde(default = "default_image_access_token_expiry")]
+    pub image_access_token_expiry_secs: u64,
+    /// Interval between bounded image GC sweeps (#3180). `0` disables the
+    /// scheduled sweep; an operator can still run one explicit sweep.
+    ///
+    /// The sweep is bounded by [`Self::image_gc_max_candidates`] and a byte
+    /// budget, so the schedule can never turn into an unbounded delete loop.
+    #[serde(default = "default_image_gc_interval")]
+    pub image_gc_interval_secs: u64,
+    /// Maximum image rows one GC sweep may examine (#3180).
+    #[serde(default = "default_image_gc_max_candidates")]
+    pub image_gc_max_candidates: usize,
     /// How long a relayed terminal frame may wait for room in a client's
     /// outbound queue before the Server gives up on that client (#961).
     ///
@@ -317,6 +341,23 @@ impl ServerConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
         validate_terminal_web_font_size(self.terminal_web_font_size).map_err(anyhow::Error::msg)?;
+        if self.image_blob_dir.trim().is_empty() || self.image_build_dir.trim().is_empty() {
+            anyhow::bail!("image_blob_dir and image_build_dir must not be empty");
+        }
+        if !(1..=8).contains(&self.image_max_concurrent_builds) {
+            anyhow::bail!("image_max_concurrent_builds must be in [1, 8]");
+        }
+        if !(30..=3600).contains(&self.image_access_token_expiry_secs) {
+            anyhow::bail!("image_access_token_expiry_secs must be in [30, 3600]");
+        }
+        if self.image_gc_interval_secs != 0
+            && !(60..=7 * 24 * 60 * 60).contains(&self.image_gc_interval_secs)
+        {
+            anyhow::bail!("image_gc_interval_secs must be 0 (disabled) or in [60, 604800]");
+        }
+        if !(1..=1024).contains(&self.image_gc_max_candidates) {
+            anyhow::bail!("image_gc_max_candidates must be in [1, 1024]");
+        }
         self.mcp.validate_for_host(&self.auth_token, "auth_token")?;
         Ok(())
     }
@@ -355,6 +396,12 @@ impl Default for ServerConfig {
             heartbeat_interval_secs: default_heartbeat_interval(),
             heartbeat_timeout_secs: default_heartbeat_timeout(),
             db_path: default_db_path(),
+            image_blob_dir: default_image_blob_dir(),
+            image_build_dir: default_image_build_dir(),
+            image_max_concurrent_builds: default_image_max_concurrent_builds(),
+            image_access_token_expiry_secs: default_image_access_token_expiry(),
+            image_gc_interval_secs: default_image_gc_interval(),
+            image_gc_max_candidates: default_image_gc_max_candidates(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
             p2p_token_expiry_secs: default_p2p_token_expiry(),
@@ -394,6 +441,34 @@ fn default_heartbeat_timeout() -> u64 {
     30
 }
 
+fn default_image_blob_dir() -> String {
+    crate::paths::server_image_blob_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "images/blobs".to_string())
+}
+
+fn default_image_build_dir() -> String {
+    crate::paths::server_image_build_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "images/build".to_string())
+}
+
+fn default_image_max_concurrent_builds() -> usize {
+    2
+}
+
+fn default_image_access_token_expiry() -> u64 {
+    300
+}
+
+fn default_image_gc_interval() -> u64 {
+    6 * 60 * 60
+}
+
+fn default_image_gc_max_candidates() -> usize {
+    64
+}
+
 fn default_db_path() -> String {
     crate::paths::server_db_path()
         .unwrap_or_else(|_| std::path::PathBuf::from("nession.db"))
@@ -415,6 +490,22 @@ mod tests {
         assert_eq!(config.heartbeat_interval_secs, 10);
         assert_eq!(config.heartbeat_timeout_secs, 30);
         assert!(!config.db_path.is_empty());
+    }
+
+    /// Explicit paths are the operator's declaration (#3179 SC-01): the
+    /// environment projection must not rewrite them.
+    #[test]
+    fn explicit_image_and_db_paths_are_not_rewritten() {
+        let mut config = ServerConfig {
+            db_path: "/srv/nession/server.db".to_string(),
+            image_blob_dir: "/srv/nession/blobs".to_string(),
+            image_build_dir: "/srv/nession/build".to_string(),
+            ..Default::default()
+        };
+        config.apply_env_overrides_from(|_| None).unwrap();
+        assert_eq!(config.db_path, "/srv/nession/server.db");
+        assert_eq!(config.image_blob_dir, "/srv/nession/blobs");
+        assert_eq!(config.image_build_dir, "/srv/nession/build");
     }
 
     /// MCP is off unless asked for, and disabling it never demands a token.
@@ -542,6 +633,45 @@ mod tests {
             config.query_concurrency_per_connection,
             DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
         );
+
+        // #3180: a config written before scheduled image GC existed must get a
+        // bounded sweep, never "disabled" or "unbounded".
+        assert_eq!(config.image_gc_interval_secs, 6 * 60 * 60);
+        assert_eq!(config.image_gc_max_candidates, 64);
+        config
+            .validate()
+            .expect("the default scheduled image GC bounds are valid");
+    }
+
+    /// #3180: the GC schedule is either disabled or within the documented
+    /// bounded range, and the candidate bound is never zero.
+    #[test]
+    fn scheduled_image_gc_bounds_are_validated() {
+        for (interval, candidates) in [(0_u64, 1_usize), (60, 1), (604800, 1024)] {
+            let config = ServerConfig {
+                image_gc_interval_secs: interval,
+                image_gc_max_candidates: candidates,
+                ..Default::default()
+            };
+            config.validate().expect("a documented GC bound is valid");
+        }
+        for (interval, candidates) in [
+            (1_u64, 64_usize),
+            (59, 64),
+            (604801, 64),
+            (3600, 0),
+            (3600, 1025),
+        ] {
+            let config = ServerConfig {
+                image_gc_interval_secs: interval,
+                image_gc_max_candidates: candidates,
+                ..Default::default()
+            };
+            assert!(
+                config.validate().is_err(),
+                "interval {interval} / candidates {candidates} must be refused"
+            );
+        }
     }
 
     #[test]

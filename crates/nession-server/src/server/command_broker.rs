@@ -76,6 +76,19 @@ pub struct RegistrationGuard {
     _gate: OwnedMutexGuard<()>,
 }
 
+/// Proof that an Agent deletion holds the same per-agent gate as a
+/// registration.
+///
+/// Deletion is the other transition that can destroy an Agent record, so it
+/// must not interleave with a registration of the same id. Held from the
+/// Offline revalidation through the last removal, it makes a registration that
+/// arrives second wait until the Agent is gone (and then register as a new
+/// incarnation), while a registration that arrives first publishes Online
+/// before the deletion can revalidate it.
+pub struct DeletionGuard {
+    _gate: OwnedMutexGuard<()>,
+}
+
 /// Bridges client requests to agent control connections.
 ///
 /// Uses a nested map: agent_id → (request_id → oneshot::Sender).
@@ -194,6 +207,23 @@ impl CommandBroker {
             agent_id, generation
         );
         Some(RegistrationGuard { _gate: gate_guard })
+    }
+
+    /// Take the per-Agent gate that [`Self::begin_registration`] also uses, so
+    /// a deletion and a registration of the same Agent cannot interleave.
+    ///
+    /// Unlike registration this does not read or write the generation
+    /// high-water mark: a deletion has no connection identity to record. It
+    /// only orders the destructive transition against registrations of the
+    /// same id.
+    pub async fn begin_deletion(&self, agent_id: &str) -> DeletionGuard {
+        let gate = {
+            let mut gates = self.registration_gates.lock().await;
+            Arc::clone(gates.entry(agent_id.to_string()).or_default())
+        };
+        DeletionGuard {
+            _gate: gate.lock_owned().await,
+        }
     }
 
     /// Point an agent's control channel at this connection's sender.

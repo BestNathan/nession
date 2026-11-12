@@ -116,34 +116,6 @@ test.describe('App 390×844', () => {
     });
   });
 
-  // #1102: the Peek is the surface #1046 creates, and until this test it was in
-  // no image at all. Every capsule state *around* it was captured (the entry
-  // and the accessory below) and the one the requirement is about was not, so a
-  // regression inside the Peek had nothing that could fail.
-  test('Git Peek on the Terminal', async ({ page }) => {
-    await gotoFixtureApp(page);
-    await waitForFixtureTerminal(page);
-
-    await openCapsuleCapability(page, 'git');
-    // The row is already the step to the detail — picking a capability opens
-    // it, so there is no title click here any more. Visibility is the whole
-    // assertion now: the attribute that used to witness the step (`data-depth`)
-    // went with the depth axis, and `git-peek-body` below is what says the open
-    // surface is Git's own body rather than the frame.
-    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
-
-    await expect(page.getByTestId('git-peek-body')).toBeVisible();
-    // The capability's own Workspace action, which the Host no longer draws
-    // (#1046). An image can show that something is there; this is the assertion
-    // that the something is the plugin's, not the frame's.
-    await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
-
-    await expect(page).toHaveScreenshot('app-git-peek.png', {
-      fullPage: true,
-      ...FIXTURE_SCREENSHOT,
-    });
-  });
-
   // #1034's other three capsule states. Resting had the only baseline; the
   // entry, Terminal Keys and the multiline composer had none, so a change to
   // any of them had no image that could fail.
@@ -195,7 +167,7 @@ test.describe('App 390×844', () => {
     await expect(page.getByText('Working in this session')).toHaveCount(0);
     await expect(page.getByTestId('capsule-context-item-claude-code')).toHaveCount(0);
     // The ordinary entries are in this same list (SC-35 as amended).
-    await expect(page.getByTestId('capsule-capability-picker-git')).toBeVisible();
+    await expect(page.getByTestId('capsule-capability-picker-quick-commands')).toBeVisible();
     // Nothing about this is a modal: no dialog role, no backdrop (SC-33).
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
@@ -618,7 +590,7 @@ test.describe('App 390×844', () => {
     await waitForFixtureTerminal(page);
 
     await openCapsuleCapability(page, 'claude-code');
-    // The step happens on the row itself — the walk `app-git-peek` documents —
+    // The step happens on the row itself — the walk `app-files-folder` documents —
     // and `claude-code-peek-body` below is what says the open surface is this
     // capability's body.
     await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
@@ -645,6 +617,39 @@ test.describe('App 390×844', () => {
     await expect(overlay.locator('.katex-error')).toHaveCount(0);
 
     await expect(page).toHaveScreenshot('app-claude-code-chat-dialect.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  // #3138 — the same content-recipe family on the App's own density. Two
+  // states, because they make different claims: a resource destination where
+  // the host header owns the name, and a capability's observed state where the
+  // facts must read as facts rather than disabled inputs.
+  test('Project detail', async ({ page }) => {
+    await gotoFixtureApp(page, '?projects=canonical');
+    await page.getByTestId('app-header-sessions').first().click();
+    await page.getByTestId('project-item-row').first().click();
+    await expect(page.getByTestId('app-project-detail')).toBeVisible();
+    await expect(page.getByTestId('project-detail-title')).toBeVisible();
+    await expect(
+      page.getByTestId('app-project-detail').getByTestId('app-page-header'),
+    ).toHaveCount(1);
+
+    await expect(page).toHaveScreenshot('app-project-detail.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Workspace / Sandbox inside', async ({ page }) => {
+    await gotoFixtureApp(page, '?sandbox=inside');
+    await page.getByTestId('app-header-workspace').click();
+    await page.getByTestId('workspace-tool-sandbox').click();
+    await expect(page.getByTestId('sandbox-inside')).toBeVisible();
+    await expect(page.getByTestId('sandbox-status')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-sandbox-inside.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

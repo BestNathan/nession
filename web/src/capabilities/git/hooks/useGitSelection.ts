@@ -2,8 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { gitApi } from '../GitPlugin';
 import type { GitRow } from '../state';
 import type { GitDiffResponse, GitPreviewResponse } from '../types';
+import { mediaHintForPath } from '@/shared/file-viewer';
+import { base64ToBlobUrl } from '@/shared/lib/blob';
 
 export type GitPreviewKind = 'untracked' | 'unmerged';
+/** Caller-owned Blob URL for the selected Git preview. Revoked on replacement. */
+export interface GitMediaView {
+  url: string;
+  mimeType: string;
+}
 
 export interface GitSelectionState {
   selectedKey: string | null;
@@ -12,6 +19,7 @@ export interface GitSelectionState {
   previewKind: GitPreviewKind | null;
   diff: GitDiffResponse | null;
   preview: GitPreviewResponse | null;
+  media: GitMediaView | null;
   loading: boolean;
   error: string | null;
 }
@@ -23,6 +31,7 @@ const NO_SELECTION: GitSelectionState = {
   previewKind: null,
   diff: null,
   preview: null,
+  media: null,
   loading: false,
   error: null,
 };
@@ -33,6 +42,26 @@ function message(error: unknown): string {
 
 function isDiffRow(row: GitRow): row is Extract<GitRow, { kind: 'staged' | 'unstaged' }> {
   return row.kind === 'staged' || row.kind === 'unstaged';
+}
+
+/** Create the preview URL away from the Session hook's request/state owner. */
+function materializeMedia(
+  response: GitPreviewResponse,
+  isCurrent: () => boolean,
+): GitMediaView | null {
+  const payload =
+    response.state === 'ok' && response.preview.state === 'ready'
+      ? response.preview.media
+      : null;
+  if (!payload) {
+    return null;
+  }
+  const url = base64ToBlobUrl(payload.content_base64, payload.mime_type);
+  if (!isCurrent()) {
+    URL.revokeObjectURL(url);
+    return null;
+  }
+  return { url, mimeType: payload.mime_type };
 }
 
 /**
@@ -61,6 +90,15 @@ export function useGitSelection({
 }) {
   const [state, setState] = useState<GitSelectionState>(NO_SELECTION);
   const generation = useRef(0);
+  const selectionToken = useRef(0);
+  const mediaUrlRef = useRef<string | null>(null);
+  const clearMediaUrl = useCallback(() => {
+    if (mediaUrlRef.current) {
+      URL.revokeObjectURL(mediaUrlRef.current);
+      mediaUrlRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearMediaUrl(), [clearMediaUrl]);
   const target = useRef<{ agent_id: string; session: string } | null>(null);
   const lastHandoff = useRef<string | null>(null);
 
@@ -70,9 +108,14 @@ export function useGitSelection({
       return;
     }
     const forGeneration = generation.current;
+    const token = ++selectionToken.current;
     const mode = isDiffRow(row) ? 'diff' : 'preview';
     const previewKind = isDiffRow(row) ? null : row.kind;
+    const wantsMedia = !isDiffRow(row) && mediaHintForPath(row.path) !== null;
+    const isCurrent = () =>
+      generation.current === forGeneration && selectionToken.current === token;
 
+    clearMediaUrl();
     setState({
       selectedKey: row.key,
       selectedPath: row.path,
@@ -80,6 +123,7 @@ export function useGitSelection({
       previewKind,
       diff: null,
       preview: null,
+      media: null,
       loading: true,
       error: null,
     });
@@ -91,7 +135,7 @@ export function useGitSelection({
           path: row.path,
           source: { kind: row.kind },
         });
-        if (generation.current !== forGeneration) {
+        if (!isCurrent()) {
           return;
         }
         setState((previous) =>
@@ -104,18 +148,23 @@ export function useGitSelection({
           ...current,
           path: row.path,
           expected: row.kind,
+          want: wantsMedia ? 'media' : 'text',
         });
-        if (generation.current !== forGeneration) {
+        if (!isCurrent()) {
           return;
+        }
+        const media = materializeMedia(response, isCurrent);
+        if (media) {
+          mediaUrlRef.current = media.url;
         }
         setState((previous) =>
           previous.selectedKey === row.key && previous.mode === 'preview'
-            ? { ...previous, preview: response, loading: false, error: null }
+            ? { ...previous, preview: response, media, loading: false, error: null }
             : previous,
         );
       }
     } catch (failure) {
-      if (generation.current !== forGeneration) {
+      if (!isCurrent()) {
         return;
       }
       setState((previous) =>
@@ -124,14 +173,16 @@ export function useGitSelection({
           : previous,
       );
     }
-  }, []);
+  }, [clearMediaUrl]);
 
   useEffect(() => {
     generation.current += 1;
+    selectionToken.current += 1;
+    clearMediaUrl();
     target.current = agentId && sessionId ? { agent_id: agentId, session: sessionId } : null;
     lastHandoff.current = null;
     setState(NO_SELECTION);
-  }, [agentId, sessionId]);
+  }, [agentId, sessionId, clearMediaUrl]);
 
   // The Terminal Peek hands over a path, not a response. Wait until the status
   // listing can tell which kind of row that path is, then ask the matching

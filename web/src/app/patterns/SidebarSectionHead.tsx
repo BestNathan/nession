@@ -6,14 +6,14 @@ export interface SidebarSectionHeadProps {
   /** The section's name. Sentence case; these are not eyebrow labels. */
   label: string;
   /**
-   * Optional trailing control, rendered opposite the label. Both sidebar
-   * sections share this row so a label never drifts out of step with the other.
+   * Optional trailing control, rendered opposite the label — a count or a
+   * disclosure action the caller owns.
    */
   action?: ReactNode;
 }
 
 /**
- * A sidebar section label, above the rows it names.
+ * A sidebar section label, above the rows it names (the Web column's `Sessions`).
  *
  * Muted and smaller than the rows themselves — `visual-language.md`'s
  * typography rules put a section label below the things it labels, and
@@ -31,22 +31,5 @@ export function SidebarSectionHead({ label, action }: SidebarSectionHeadProps) {
       <span className="truncate">{label}</span>
       {action}
     </div>
-  );
-}
-
-/**
- * The inset rule between sidebar sections.
- *
- * Inset rather than edge-to-edge: the mockup draws `margin: 8px`, so it reads as
- * a division inside one column instead of a second panel edge — which matters
- * here because the column already has a surface of its own.
- */
-export function SidebarSectionSeparator() {
-  return (
-    <div
-      data-testid="sidebar-section-separator"
-      role="separator"
-      className="mx-[var(--nession-shell-section-sep-margin)] my-[var(--nession-shell-section-sep-margin)] h-px shrink-0 bg-border"
-    />
   );
 }

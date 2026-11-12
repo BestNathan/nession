@@ -125,21 +125,41 @@ describe('readFileChunked', () => {
     await expect(handle.promise).resolves.toBe('solo');
   });
 
-  it('cancel while a read is in flight aborts at the next loop top', async () => {
+  it('cancel while a read is in flight rejects after that read settles without reporting it', async () => {
     let resolveRead: ((data: FileData) => void) | undefined;
     const readFile = vi.fn(() => new Promise<FileData>((resolve) => { resolveRead = resolve; }));
     const fileOps = stubFileOps({ readFile });
     const progress = vi.fn();
 
-    // The loop-top check only runs between reads — an already-issued read
-    // always completes, then cancellation stops any further reads.
+    // An already-issued read always settles; the post-await check rejects it
+    // instead of decoding it or reporting progress for a cancelled read.
     const handle = readFileChunked(fileOps, '/f.txt', progress);
     handle.cancel();
     resolveRead?.(chunk(0, 'x', true));
 
     await expect(handle.promise).rejects.toMatchObject({ name: 'AbortError', message: 'Read cancelled' });
     expect(readFile).toHaveBeenCalledTimes(1);
-    expect(progress).toHaveBeenCalledWith(1, 12);
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it('rejects when cancel lands while the final chunk is in flight', async () => {
+    let resolveFinal: ((data: FileData) => void) | undefined;
+    const readFile = vi.fn()
+      .mockResolvedValueOnce(chunk(0, 'first ', true))
+      .mockImplementationOnce(() => new Promise<FileData>((resolve) => { resolveFinal = resolve; }));
+    const fileOps = stubFileOps({ readFile });
+    const progress = vi.fn();
+
+    const handle = readFileChunked(fileOps, '/f.txt', progress);
+    await vi.waitFor(() => expect(readFile).toHaveBeenCalledTimes(2));
+    handle.cancel();
+    resolveFinal?.(chunk(6, 'final', false));
+
+    // The last chunk completing before the cancel arrived must not turn the
+    // read into a successful, complete document.
+    await expect(handle.promise).rejects.toMatchObject({ name: 'AbortError', message: 'Read cancelled' });
+    expect(progress).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith(6, 12);
   });
 
   it('advances by bytes and decodes a multi-byte sequence split across chunks', async () => {

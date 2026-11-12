@@ -25,6 +25,7 @@ struct TestDeps {
     client_registry: Arc<ClientRegistry>,
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
+    image_manager: Arc<crate::image::ImageManager>,
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
@@ -40,6 +41,13 @@ impl TestDeps {
     /// read failure is reported rather than swallowed — needs the handler
     /// reading from the same `Database` the test broke.
     fn with_db(db: Arc<Database>) -> Self {
+        let image_manager = Arc::new(
+            crate::image::ImageManager::unavailable(
+                Arc::clone(&db),
+                std::env::temp_dir().join(format!("nession-image-test-{}", uuid::Uuid::new_v4())),
+            )
+            .expect("test image manager"),
+        );
         Self {
             agent_registry: Arc::new(AgentRegistry::new(60, Arc::clone(&db))),
             session_registry: Arc::new(SessionRegistry::new(Arc::clone(&db))),
@@ -48,6 +56,7 @@ impl TestDeps {
             web_client_registry: Arc::new(WebClientRegistry::new()),
             env_service: EnvService::new(Arc::clone(&db)),
             p2p_broker: Arc::new(crate::broker::ConnectionBroker::new(300)),
+            image_manager,
             db,
         }
     }
@@ -66,6 +75,7 @@ impl TestDeps {
                 client_registry: Arc::clone(&self.client_registry),
                 web_client_registry: Arc::clone(&self.web_client_registry),
                 env_service: Arc::clone(&self.env_service),
+                image_manager: Arc::clone(&self.image_manager),
                 db: Arc::clone(&self.db),
                 p2p_broker: Arc::clone(&self.p2p_broker),
             },
@@ -170,6 +180,7 @@ async fn register_agent_id(
             active_sessions: 0,
             protocol_manifest: manifest,
             probe_generation: 0,
+            offline_generation: 0,
         })
         .await;
 }
@@ -845,9 +856,7 @@ async fn unauthenticated_session_kill_rejected() {
 /// Registering via `agent.register` marks the agent Online but does not
 /// give it a CommandBroker control connection, so a force refresh will
 /// find it unreachable — exactly the "agent went away" case.
-async fn handler_with_online_agent() -> ConnectionHandler {
-    let mut h = test_handler("").await;
-    h.authenticated_client = true;
+async fn register_online_agent(h: &mut ConnectionHandler) {
     h.handle_message(proto_msg(
         "server.agent.register",
         json!({
@@ -864,6 +873,12 @@ async fn handler_with_online_agent() -> ConnectionHandler {
     ))
     .await
     .unwrap();
+}
+
+async fn handler_with_online_agent() -> ConnectionHandler {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    register_online_agent(&mut h).await;
     h
 }
 
@@ -1681,6 +1696,7 @@ pub(super) async fn bind_for_test(
             attached_clients: 0,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: now,
             last_activity: now,
         })
@@ -1716,6 +1732,11 @@ mod server_env_delete_v1;
 mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
+mod server_project_create_v1;
+mod server_project_delete_v1;
+mod server_project_get_v1;
+mod server_project_list_v1;
+mod server_project_update_v1;
 mod server_session_attach_v1;
 mod server_session_create_v1;
 mod server_session_env_active_v1;
@@ -1725,5 +1746,8 @@ mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
+mod server_session_managed_v1;
 mod server_session_metadata_v1;
 mod server_session_processes_v1;
+mod server_session_project_v1;
+mod server_session_sandbox_v1;

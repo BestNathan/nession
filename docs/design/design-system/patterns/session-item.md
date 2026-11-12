@@ -39,7 +39,7 @@ Possible parts:
 | Recency | Optional last-activity signal |
 | Selection | Shows the active Session |
 | Degraded state | Local, explicit signal only when continuity is affected |
-| Secondary actions | Progressive-disclosure actions such as rename/kill |
+| Secondary actions | One anchored `···` menu: Session details, Edit details, Attach settings, Kill session |
 
 Tags and descriptions belong to the Session's Workspace details, not to its
 navigation row: a row states what the work is, not its full description or a
@@ -144,20 +144,27 @@ The App's floor belongs to the row's **controls**, not to the row's box. The row
 ## Progressive disclosure
 
 Secondary actions and technical detail should not occupy permanent row width.
+Web rows reveal one anchored `···` trigger on hover/focus/selection; narrow Web
+and every App row keep the same trigger visible with a 44px touch target. Both
+experiences expose the same four task-level actions and the same floating
+overlay, separate from row selection:
 
 ```text
-rest
-    -> identify work
-
-hover / focus / selection
-    -> small actions
-
-degraded
-    -> affected state becomes visible
-
-explicit detail
-    -> deeper Session / Location / capability information
+Session details     read the target Session without selecting it
+Edit details        edit title / description / tags through the existing metadata owner
+Attach settings     the existing configure dialog
+──────────────
+Kill session        destructive, separated from the three non-destructive actions
 ```
+
+The menu dismisses on Escape, outside click, or scroll of the **owning list**
+(the Web sidebar viewport or the App Sessions layer's own viewport — never a
+single global container). Viewing details never moves the current Session, and
+the App keeps the Terminal mounted underneath the Sessions layer while details
+or settings are open. Editing changes only the display alias, not the tmux name
+or `session_id`; an offline Agent keeps details readable while editing is
+explicitly unavailable. Kill reuses the existing typed exact-tmux-name
+confirmation, where the display title is not accepted.
 
 ## Tokens
 

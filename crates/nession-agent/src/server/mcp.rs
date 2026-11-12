@@ -155,7 +155,7 @@ impl NodeBackend for AgentNodeBackend {
             .tmux
             .list_sessions()
             .await
-            .map_err(|error| ToolError::backend(error.to_string()))?;
+            .map_err(|error| ToolError::backend(format!("{error:#}")))?;
         serde_json::to_value(SessionListResponse {
             sessions,
             stale_agents: Vec::new(),
@@ -181,7 +181,7 @@ impl NodeBackend for AgentNodeBackend {
         let queued_name = session_name.clone();
         let response = self
             .run_keyed(&session_name, async move {
-                let warnings = tmux
+                let outcome = tmux
                     .create_session_with_binding(
                         &queued_name,
                         terminal_cols,
@@ -194,10 +194,12 @@ impl NodeBackend for AgentNodeBackend {
                         },
                     )
                     .await
-                    .map_err(|error| ToolError::backend(error.to_string()))?;
+                    .map_err(|error| ToolError::backend(format!("{error:#}")))?;
                 Ok(SessionCreateResponse {
                     name: queued_name,
-                    warnings,
+                    warnings: outcome.warnings,
+                    sandbox: outcome.sandbox,
+                    workspace: None,
                 })
             })
             .await?;
@@ -214,7 +216,7 @@ impl NodeBackend for AgentNodeBackend {
             .run_keyed(&session_name, async move {
                 tmux.kill_session(&queued_name)
                     .await
-                    .map_err(|error| ToolError::backend(error.to_string()))?;
+                    .map_err(|error| ToolError::backend(format!("{error:#}")))?;
                 // The tmux Session is gone; an attachment left behind would
                 // answer the next attach with a dead backend. Same retirement
                 // the P2P route runs.

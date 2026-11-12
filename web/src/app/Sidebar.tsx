@@ -1,12 +1,17 @@
-import { PanelLeftClose } from 'lucide-react';
+import { useMemo, type RefObject } from 'react';
+import { SearchX } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { SessionList } from '@/product/session/patterns/SessionList';
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { Button } from '@/components/ui/button';
+import { SessionList, type SessionGroup } from '@/product/session/patterns/SessionList';
+import { bucketSessions, type SessionBucket } from '@/product/session/model/sessionHistory';
+import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
+import { SidebarAgentsEntry } from '@/app/patterns/SidebarAgentsEntry';
+import { SidebarServerStatus } from '@/app/patterns/SidebarServerStatus';
+import { SidebarTopActions } from '@/app/patterns/SidebarTopActions';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
-import { SidebarAgents } from '@/app/patterns/SidebarAgents';
-import { SidebarSectionSeparator } from '@/app/patterns/SidebarSectionHead';
-import { SidebarRail } from '@/app/patterns/SidebarRail';
-import { SidebarFooter } from '@/app/SidebarFooter';
-import { shellIconButtonClass } from '@/app/shellStyles';
+import { ProjectNavSection } from '@/app/patterns/ProjectsSection';
+import { emptyProjectShell, type ProjectShellProps } from '@/product/project/types';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/platform/socket';
@@ -17,9 +22,9 @@ export interface SidebarProps {
   agents: Agent[];
   filteredSessions: Session[];
   /**
-   * Total Sessions before search/filter. The rail quotes this — a collapsed
-   * rail saying "2 Sessions" because a hidden filter is active reads as a
-   * work count, not as "2 current matches" (#1196 §3).
+   * Total Sessions before search/filter. Retained for the App's composition,
+   * which owns its own counts; the Web column states the rows it actually
+   * shows.
    */
   totalSessionCount: number;
   staleAgents: string[];
@@ -35,69 +40,104 @@ export interface SidebarProps {
   toggleSort: (field: SortField) => void;
   isSearchActive: boolean;
   connectionStatus: ConnectionState;
-  /** The active Session's domain state, for the footer's status line. */
+  /** Kept for the shared SidebarProps contract; the Web footer shows server state only. */
   domain: DomainState | null;
-  /** False when the sidebar is an overlay drawer, where collapsing is meaningless. */
+  /** False in the narrow overlay, where there is no column to collapse. */
   collapsible?: boolean;
   /**
-   * Controlled collapse state, owned by the composition (`WebLayout`) — the
-   * column geometry and this rendering are two views of one state (#1196 §5),
-   * never two booleans that can disagree.
+   * Controlled collapse state. The WebLayout owns the column geometry; this is
+   * only the sidebar's view of it, used for `data-collapsed` and accessibility.
    */
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** The narrow overlay's close path. */
+  onCloseDrawer?: () => void;
   onCreate: () => void;
   onRefresh: () => void;
   onSelect: (session: Session) => void;
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
+  onViewDetails?: (session: Session) => void;
+  onEditDetails?: (session: Session) => void;
+  onAssociateProject?: (session: Session) => void;
+  /** Projects are a first-class sibling destination, not a Session parent (#3025). */
+  projectShell?: ProjectShellProps;
+  /** The canonical search input, focused when the rail's Search shortcut expands. */
+  searchInputRef?: RefObject<HTMLInputElement | null>;
+  /** Focus target after the rail expands the column (#3075). */
+  collapseButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
-/**
- * The Web shell's sidebar: three sections, and a rail.
- *
- * Top is infrastructure identity (Agents), middle is the flat Session list,
- * bottom is service status. That distribution is #748's answer to removing the
- * Web header — the header's duties moved here rather than disappearing:
- * Session identity to the selected row below, location context to Agents, and
- * service status to the footer.
- *
- * Sessions are **not** grouped under their Agent. `session-list.md` makes flat
- * the default and names Agent-grouped sections an anti-pattern; the Agents
- * section above reports infrastructure, it is not a hierarchy to file Sessions
- * into.
- *
- * Collapse is #1196's model: one control, in the Agents section head — the
- * same top-edge navigation zone the rail's Expand occupies — while the footer
- * keeps only service status. The state itself is the composition's, passed in
- * controlled, because collapsing changes the shell's column geometry (#1195).
- */
-/**
- * The one collapse control (#1196 §1). It lives in the Agents section head —
- * the same top navigation zone the rail's Expand returns to — not in the
- * service footer, where it read as a service action and "jumped" to the rail's
- * top on collapse.
- */
-function CollapseControl({ onCollapse }: { onCollapse: () => void }) {
+function WebSearchMiss({
+  searchQuery,
+  onClearSearch,
+  onClearFilter,
+}: {
+  searchQuery: string;
+  onClearSearch: () => void;
+  onClearFilter: () => void;
+}) {
+  const searching = searchQuery.trim().length > 0;
   return (
-    <button
-      type="button"
-      data-testid="sidebar-collapse"
-      aria-label="Collapse sidebar"
-      title="Collapse sidebar"
-      onClick={onCollapse}
-      className={cn(shellIconButtonClass, 'rounded-[var(--nession-radius-control)] hover:bg-accent hover:text-accent-foreground')}
+    <div
+      data-testid="session-search-miss"
+      className="flex flex-col items-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] py-8 text-center text-muted-foreground"
     >
-      <PanelLeftClose className="size-[length:var(--nession-icon-md)]" aria-hidden />
-    </button>
+      <SearchX aria-hidden className="size-8" />
+      <p className={chromeSansRole('secondary')}>
+        {searching ? `No sessions match “${searchQuery}”` : 'No sessions match this filter.'}
+      </p>
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => (searching ? onClearSearch() : onClearFilter())}
+        data-testid={searching ? 'session-search-clear' : 'session-filter-clear'}
+        className={chromeSansRole('body')}
+      >
+        {searching ? 'Clear search' : 'Clear filter'}
+      </Button>
+    </div>
   );
 }
 
+
+function sessionGroups(buckets: SessionBucket[]): SessionGroup[] {
+  return buckets.map((bucket) => ({
+    key: bucket.key,
+    header: (
+      <h2
+        data-testid="session-group-label"
+        className={cn(
+          'px-[var(--nession-shell-space-2)] pt-[var(--nession-shell-space-3)] pb-[var(--nession-shell-space-1)] text-muted-foreground',
+          chromeSansRole('secondary'),
+        )}
+      >
+        {bucket.label}
+      </h2>
+    ),
+    sessions: bucket.sessions,
+  }));
+}
+
+/**
+ * The Web shell's Session-first navigation column (#2851).
+ *
+ * Sessions lead: one top row with the shell toggle and explicit creation, a
+ * single search field, then flat history grouped by when the work last
+ * happened. Agents are infrastructure, revealed from one entry below history;
+ * the Server footer reports only the server link. No Agent roster occupies the
+ * top of the column.
+ *
+ * Collapse is the composition's state (`WebLayout`), never a second sidebar
+ * boolean: when the column is tucked away its width goes to zero and this
+ * component stays mounted so search, selection and the list's scroll position
+ * survive. The narrow overlay renders the same content with the close action
+ * in place of the collapse toggle.
+ */
 export function Sidebar({
   className,
   agents,
   filteredSessions,
-  totalSessionCount,
   staleAgents,
   selectedId,
   clientSessionId,
@@ -111,78 +151,77 @@ export function Sidebar({
   toggleSort,
   isSearchActive,
   connectionStatus,
-  domain,
   collapsible = true,
   collapsed = false,
   onCollapsedChange,
+  onCloseDrawer,
   onCreate,
   onRefresh,
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
+  onAssociateProject,
+  projectShell = emptyProjectShell(),
+  searchInputRef,
+  collapseButtonRef,
 }: SidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
-  const offlineCount = agents.filter((agent) => agent.status !== 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
-
   const selectedSession = filteredSessions.find((s) => s.session_id === selectedId) ?? null;
   const activeAgentId = selectedSession?.agent_id ?? null;
 
-  if (collapsible && collapsed) {
-    return (
-      <aside
-        data-testid="sidebar"
-        data-collapsed="true"
-        /* No border anywhere in the collapsed state: the column wrapper no
-           longer draws one, and the rail sits inside `shell.railWidth` exactly. */
-        className="bg-sidebar flex h-full shrink-0 flex-col"
-      >
-        <SidebarRail
-          connectionStatus={connectionStatus}
-          agentCount={agents.length}
-          onlineAgentCount={onlineCount}
-          sessionCount={totalSessionCount}
-          shownSessionCount={filteredSessions.length}
-          onExpand={() => onCollapsedChange?.(false)}
-        />
-      </aside>
-    );
-  }
+  // One read of the clock per list input, like the App's history navigator: a
+  // re-render must not move rows between buckets mid-scroll.
+  const buckets = useMemo(
+    () => bucketSessions(filteredSessions, Date.now()),
+    [filteredSessions],
+  );
+  const grouped = buckets.length > 1;
+  const groups = grouped ? sessionGroups(buckets) : undefined;
 
   return (
     <aside
       data-testid="sidebar"
-      className={cn('bg-sidebar flex h-full w-full shrink-0 flex-col', className)}
+      data-collapsed={collapsed ? 'true' : undefined}
+      aria-label="Session navigation"
+      className={cn('bg-sidebar flex h-full w-full shrink-0 flex-col overflow-hidden', className)}
     >
-      <SidebarAgents
-        agents={agents}
-        activeAgentId={activeAgentId}
-        action={
-          collapsible ? (
-            <CollapseControl onCollapse={() => onCollapsedChange?.(true)} />
-          ) : undefined
-        }
+      <SidebarTopActions
+        collapsible={collapsible}
+        onCollapse={() => onCollapsedChange?.(true)}
+        onCloseDrawer={onCloseDrawer}
+        onCreate={onCreate}
+        createDisabled={createDisabled}
+        collapseButtonRef={collapseButtonRef}
       />
-      {/* Inset rule, not a full-bleed border: the mockup draws `margin: 8px`,
-          so the sections read as divisions inside one column rather than as
-          separate panels. */}
-      <SidebarSectionSeparator />
       <SessionListHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
         onlineCount={onlineCount}
-        offlineCount={offlineCount}
+        offlineCount={agents.length - onlineCount}
         sortField={sortField}
         sortDirection={sortDirection}
         toggleSort={toggleSort}
-        onCreate={onCreate}
-        createDisabled={createDisabled}
         onRefresh={onRefresh}
         loadingSessions={loadingSessions}
+        searchInputRef={searchInputRef}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <SidebarSectionHead
+          label="Sessions"
+          action={
+            <span
+              data-testid="sidebar-session-count"
+              className={cn('tabular-nums text-muted-foreground', chromeSansRole('caption'))}
+            >
+              {filteredSessions.length}
+            </span>
+          }
+        />
         <SessionList
           sessions={filteredSessions}
           agents={agents}
@@ -194,20 +233,27 @@ export function Sidebar({
           onSelect={onSelect}
           onConfigure={onConfigure}
           onKill={onKill}
+          onViewDetails={onViewDetails}
+          onEditDetails={onEditDetails}
+          onAssociateProject={onAssociateProject}
+          groups={groups}
+          showRowRecency={!grouped}
+          searchMissState={
+            <WebSearchMiss
+              searchQuery={searchQuery}
+              onClearSearch={() => setSearchQuery('')}
+              onClearFilter={() => setStatusFilter('all')}
+            />
+          }
         />
       </div>
-      <div
-        data-testid="sidebar-footer"
-        className="flex shrink-0 items-center gap-[var(--nession-shell-foot-gap)] border-t px-[var(--nession-shell-space-3)] py-[var(--nession-shell-foot-pad-y)] pb-[max(var(--nession-shell-foot-pad-y),env(safe-area-inset-bottom))]"
-      >
-        {/* Service status only — the collapse control moved to the Agents
-            section head (#1196 §1). */}
-        <SidebarFooter
-          domain={domain}
-          connectionStatus={connectionStatus}
-          nodeCount={agents.length}
-        />
-      </div>
+      <ProjectNavSection shell={projectShell} />
+      <SidebarAgentsEntry
+        agents={agents}
+        activeAgentId={activeAgentId}
+        onlineCount={onlineCount}
+      />
+      <SidebarServerStatus connectionStatus={connectionStatus} />
     </aside>
   );
 }

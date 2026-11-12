@@ -33,6 +33,58 @@ type FixtureGitOverlapWindow = Window & {
   fixtureGitDiffRequests?: readonly string[];
 };
 
+/**
+ * Deterministic controls the `git=selection-overlap` scenario exposes (#2972).
+ *
+ * The first diff/preview read is held; later reads answer the newer repository
+ * state immediately. The Case releases the held answer to prove it can no
+ * longer replace the newer selection, whether the user reselected the same row
+ * or moved to another path/Session.
+ */
+type FixtureGitSelectionOverlapWindow = Window & {
+  fixtureGitSelectionOverlap?: {
+    diffRequests: () => number;
+    previewRequests: () => number;
+    olderDiffSettled: () => boolean;
+    olderPreviewSettled: () => boolean;
+    releaseOlderDiff: (fail?: boolean) => void;
+    releaseOlderPreview: (fail?: boolean) => void;
+  };
+};
+
+/**
+ * The plugin-surface boilerplate shared by the Git fixture scenarios.
+ *
+ * The real directory is filled by `AgentsPlugin` from the agent list; the
+ * fixture has no agent list request, so it fills the same directory from the
+ * same `FIXTURE_AGENTS` the rest of the fixture renders. Built with the same
+ * `manifestsOf`, so the fixture cannot present a directory the app would not.
+ */
+function fixtureGitPluginSurface(
+  request: <T>(type: string, payload: Record<string, unknown>) => Promise<T>,
+): PluginSurface {
+  const protocols = new ProtocolDirectory();
+  protocols.publish(manifestsOf(FIXTURE_AGENTS));
+  return {
+    connectionState: 'connected',
+    protocols,
+    request,
+    send(): void {},
+    subscribe(): () => void {
+      return () => {};
+    },
+    onBinary(): () => void {
+      return () => {};
+    },
+    waitForConnection(): Promise<void> {
+      return Promise.resolve();
+    },
+    onConnectionStateChange(): () => void {
+      return () => {};
+    },
+  };
+}
+
 interface FixtureRepoState {
   scenario: string;
   status: GitStatusResponse;
@@ -200,6 +252,9 @@ function mutateFixtureRepository(
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
+  if (scenario === 'selection-overlap') {
+    return selectionOverlapGitSurface();
+  }
   const status =
     scenario === 'clean'
       ? CLEAN_STATUS
@@ -288,7 +343,7 @@ export function fixtureGitSurface(search: string): PluginSurface {
       }
       if (type === 'git.preview') {
         return Promise.resolve(
-          previewFor(String(payload.path), String(payload.expected), scenario) as T,
+          previewFor(String(payload.path), String(payload.expected), scenario, payload.want === 'media' ? 'media' : 'text') as T,
         );
       }
       if (type === 'git.log') {
@@ -319,6 +374,128 @@ export function fixtureGitSurface(search: string): PluginSurface {
       return () => {};
     },
   };
+}
+
+/**
+ * The `git=selection-overlap` surface (#2972).
+ *
+ * The first diff/preview read is held; every later read answers the newer
+ * repository state immediately. The Case releases the held answer to prove the
+ * hook's request identity fence, not a timer.
+ */
+function selectionOverlapGitSurface(): PluginSurface {
+  const diffRequests: string[] = [];
+  const previewRequests: string[] = [];
+  let settleHeldDiff: ((value: GitDiffResponse) => void) | null = null;
+  let failHeldDiff: ((reason: Error) => void) | null = null;
+  let heldDiffPath: string | null = null;
+  let settleHeldPreview: ((value: GitPreviewResponse) => void) | null = null;
+  let failHeldPreview: ((reason: Error) => void) | null = null;
+  let heldPreviewPath: string | null = null;
+  let olderDiffSettled = false;
+  let olderPreviewSettled = false;
+
+  const publish = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    (window as FixtureGitSelectionOverlapWindow).fixtureGitSelectionOverlap = {
+      diffRequests: () => diffRequests.length,
+      previewRequests: () => previewRequests.length,
+      olderDiffSettled: () => olderDiffSettled,
+      olderPreviewSettled: () => olderPreviewSettled,
+      releaseOlderDiff: (fail = false) => {
+        const settle = settleHeldDiff;
+        const reject = failHeldDiff;
+        const path = heldDiffPath;
+        settleHeldDiff = null;
+        failHeldDiff = null;
+        heldDiffPath = null;
+        if (!settle || !reject || path === null) {
+          return;
+        }
+        if (fail) {
+          reject(new Error('the older selection diff failed'));
+        } else {
+          settle(selectionOverlapDiff(path, 'OLD'));
+        }
+        setTimeout(() => {
+          olderDiffSettled = true;
+          publish();
+        }, 0);
+      },
+      releaseOlderPreview: (fail = false) => {
+        const settle = settleHeldPreview;
+        const reject = failHeldPreview;
+        const path = heldPreviewPath;
+        settleHeldPreview = null;
+        failHeldPreview = null;
+        heldPreviewPath = null;
+        if (!settle || !reject || path === null) {
+          return;
+        }
+        if (fail) {
+          reject(new Error('the older selection preview failed'));
+        } else {
+          settle(selectionOverlapPreview(path, 'OLD'));
+        }
+        setTimeout(() => {
+          olderPreviewSettled = true;
+          publish();
+        }, 0);
+      },
+    };
+  };
+  publish();
+
+  return fixtureGitPluginSurface(
+    <T>(type: string, payload: Record<string, unknown>): Promise<T> => {
+      if (type === 'git.status') {
+        return Promise.resolve(SELECTION_OVERLAP_STATUS as T);
+      }
+      if (type === 'git.diff') {
+        const path = String(payload.path);
+        diffRequests.push(path);
+        publish();
+        if (diffRequests.length === 1) {
+          heldDiffPath = path;
+          return new Promise<T>((resolve, reject) => {
+            settleHeldDiff = (value) => resolve(value as T);
+            failHeldDiff = reject;
+            publish();
+          });
+        }
+        return Promise.resolve(selectionOverlapDiff(path, 'NEW') as T);
+      }
+      if (type === 'git.preview') {
+        const path = String(payload.path);
+        previewRequests.push(path);
+        publish();
+        if (previewRequests.length === 1) {
+          heldPreviewPath = path;
+          return new Promise<T>((resolve, reject) => {
+            settleHeldPreview = (value) => resolve(value as T);
+            failHeldPreview = reject;
+            publish();
+          });
+        }
+        return Promise.resolve(selectionOverlapPreview(path, 'NEW') as T);
+      }
+      if (type === 'git.log') {
+        return Promise.resolve(historyFor(payload.limit) as T);
+      }
+      if (type === 'git.commit') {
+        return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
+      }
+      if (type === 'git.branches') {
+        return Promise.resolve(branchesFor(payload.limit) as T);
+      }
+      if (type === 'git.worktrees') {
+        return Promise.resolve(WORKTREES as T);
+      }
+      return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
+    },
+  );
 }
 
 /** The work tree the fixture pretends to be in — a Peek names its basename. */
@@ -398,6 +575,76 @@ function changedDiff(path: string): string {
     '-  readonly name = "claude-code";',
     '+  readonly name = "git";',
   ].join('\n');
+}
+
+/**
+ * The repository for #2972's selection-overlap Case.
+ *
+ * One tracked row, two untracked rows and one conflicted row: enough to
+ * reselect the same row, move to a different path, or move the Session while
+ * the first read is still in flight. The answers themselves are held by the
+ * surface, not by the repository, so this stays an input shape.
+ */
+const SELECTION_OVERLAP_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-selection-overlap-0', 'fixture-head-selection'),
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/selection-overlap',
+    detached: false,
+    upstream: 'origin/feat/selection-overlap',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      {
+        path: 'src/reselect.ts',
+        kind: 'modified',
+        staged: false,
+        unstaged: true,
+      },
+    ],
+    untracked: ['notes/reselect.ts', 'notes/reselect-other.ts'],
+    unmerged: ['src/reselect-conflict.ts'],
+  },
+};
+
+/**
+ * One side of the #2972 race, with a marker the Case can assert in the DOM.
+ *
+ * The older answer is also marked truncated, so a stale publication is visible
+ * even if a renderer chooses not to expose the patch text.
+ */
+function selectionOverlapDiff(path: string, marker: 'OLD' | 'NEW'): GitDiffResponse {
+  const text = [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,2 +1,2 @@',
+    ' const before = 1;',
+    `-const selection = "${marker}_DIFF_RESPONSE";`,
+    `+const selection = "${marker}_DIFF_RESPONSE";`,
+  ].join('\n');
+  return {
+    state: 'ok',
+    diff: {
+      path,
+      text,
+      binary: false,
+      truncated: marker === 'OLD',
+      truncated_bytes: marker === 'OLD' ? 4096 : 0,
+    },
+    snapshot: fixtureSnapshot('fixture-selection-overlap-0', 'fixture-head-selection'),
+  };
+}
+
+function selectionOverlapPreview(path: string, marker: 'OLD' | 'NEW'): GitPreviewResponse {
+  const text = path.endsWith('conflict.ts')
+    ? `<<<<<<< HEAD\n${marker}_PREVIEW_RESPONSE ${path}\n=======\ntheirs\n>>>>>>> other\n`
+    : `${marker}_PREVIEW_RESPONSE ${path}\n`;
+  return readyPreview(path, text);
 }
 
 /**
@@ -496,7 +743,177 @@ function readyPreview(
   };
 }
 
-function previewFor(path: string, expected: string, scenario: string): GitPreviewResponse {
+const FIXTURE_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGP4z8BAEiJN9aiGUQ1DSgMAkPn/Afnh+ngAAAAASUVORK5CYII=';
+const FIXTURE_WAV_BASE64 = 'UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+const FIXTURE_PDF_BASE64 = 'JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDEyMF0vQ29udGVudHMgNCAwIFIvUmVzb3VyY2VzPDwvRm9udDw8L0YxIDUgMCBSPj4+Pj4+ZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNDQ+PnN0cmVhbQpCVCAvRjEgMTIgVGYgMjAgNjAgVGQgKE5lc3Npb24gbWVkaWEgc2FtcGxlKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCjUgMCBvYmo8PC9UeXBlL0ZvbnQvU3VidHlwZS9UeXBlMS9CYXNlRm9udC9IZWx2ZXRpY2E+PmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCnRyYWlsZXI8PC9TaXplIDYvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgowCiUlRU9GCg==';
+const FIXTURE_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAK3EU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEnTbuMU6uEHFO7a1OsggKh7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjEuMS4xMDBXQYxMYXZmNjEuMS4xMDBEiYhAj0AAAAAAABZUrmvMrgEAAAAAAABD14EBc8WIoFP3VVktqNucgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4QF9eEA4JSwgRC6gRCagQJVsIhVt4ECVbiBAhJUw2f6c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2MS4xLjEwMHNz1WPAi2PFiKBT91VZLajbZ8igRaOHRU5DT0RFUkSHk0xhdmM2MS4zLjEwMCBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAxLjAwMDAwMDAwMAAfQ7Z1QPXngQCjoYEAAIAQAgCdASoQABAAAEcIhYWIhYSIAgIADA5gAP5oAKOVgQBkALEBAAEQEAAYABhYL/QACAAAo5WBAMgAsQEAARAQABgAGFgv9AAIAACjlYEBLACxAQABEBAAGAAYWC/0AAgAAKOVgQGQALEBAAEQEAAYABhYL/QACAAAo5WBAfQAsQEAARAQABgAGFgv9AAIAACjlYECWACxAQABEBAAGAAYWC/0AAgAAKOVgQK8ALEBAAEQEBRgAGFgv9AAIAAAo5WBAyAAsQEAARAQABgAGFgv9AAIAACjlYEDhACxAQABEBAAGAAYWC/0AAgAABxTu2uRu4+zgQC3iveBAfGCAabwgQM=';
+
+function readyMedia(
+  path: string,
+  mimeType: string,
+  contentBase64: string,
+  size: number,
+): GitPreviewResponse {
+  return {
+    state: 'ok',
+    preview: {
+      path,
+      state: 'ready',
+      text: '',
+      binary: true,
+      size,
+      truncated: false,
+      truncated_bytes: 0,
+      media: { content_base64: contentBase64, mime_type: mimeType, complete: true },
+    },
+  };
+}
+
+function mediaFixture(path: string): GitPreviewResponse | null {
+  if (path === 'assets/photo.png') {
+    return readyMedia(path, 'image/png', FIXTURE_PNG_BASE64, 80);
+  }
+  if (path === 'assets/sample.webm') {
+    return readyMedia(path, 'video/webm', FIXTURE_WEBM_BASE64, 743);
+  }
+  if (path === 'assets/sample.wav') {
+    return readyMedia(path, 'audio/wav', FIXTURE_WAV_BASE64, 2044);
+  }
+  if (path === 'assets/spec.pdf') {
+    return readyMedia(path, 'application/pdf', FIXTURE_PDF_BASE64, 445);
+  }
+  if (path === 'assets/fake.png') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'unsupported',
+        text: '',
+        binary: false,
+        size: 14,
+        truncated: false,
+        truncated_bytes: 0,
+        message: "The file's content does not match its extension.",
+      },
+    };
+  }
+  if (path === 'assets/oversized.png') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'too_large',
+        text: '',
+        binary: false,
+        size: 9 * 1024 * 1024,
+        truncated: false,
+        truncated_bytes: 0,
+        message: 'This file is 9437184 bytes, larger than the 8388608-byte media preview limit.',
+      },
+    };
+  }
+  return null;
+}
+
+function previewStateFor(path: string): GitPreviewResponse | null {
+  if (path === 'notes/new.ts') {
+    return readyPreview(path, 'export const note = "untracked";\n');
+  }
+  if (path === 'notes/example.ts') {
+    return readyPreview(path, 'export const greeting: string = "hello";\nconsole.log(greeting);\n');
+  }
+  if (path === 'src/conflict.rs') {
+    return readyPreview(path, '<<<<<<< HEAD\nfn mine() {}\n=======\nfn theirs() {}\n>>>>>>> other\n');
+  }
+  if (path === 'notes/data.json') {
+    return readyPreview(path, '{\n  "name": "git-viewer",\n  "nested": { "ok": true },\n  "items": [1, 2, 3]\n}\n');
+  }
+  if (path === 'notes/events.jsonl') {
+    return readyPreview(path, '{"line":1,"ok":true}\n{"line":2,"ok":true}\n');
+  }
+  if (path === 'notes/README.md') {
+    return readyPreview(path, '# Git preview\n\nStructured and source views share one policy.\n');
+  }
+  if (path === 'notes/broken.json') {
+    return readyPreview(path, '{ "broken": true, }\n');
+  }
+  if (path === 'notes/truncated.json') {
+    const text = '{"name":"truncated"';
+    return readyPreview(path, text, {
+      size: 4103,
+      truncated: true,
+      truncated_bytes: 4103 - text.length,
+    });
+  }
+  if (path === 'src/conflict.ts') {
+    return readyPreview(
+      path,
+      '<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n',
+    );
+  }
+  if (path === 'assets/logo.bin') {
+    return readyPreview(path, '', { binary: true, size: 4096 });
+  }
+  if (path === 'src/large.txt') {
+    return readyPreview(path, 'first line\n', {
+      size: 4103,
+      truncated: true,
+      truncated_bytes: 4096,
+    });
+  }
+  if (path === 'src/missing.txt' || path === 'src/unmerged-missing.ts') {
+    return { state: 'ok', preview: { path, state: 'missing', text: '', binary: false, size: 0, truncated: false, truncated_bytes: 0 } };
+  }
+  if (path === 'src/long-preview.txt') {
+    const lines = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`);
+    return readyPreview(path, lines.join('\n'));
+  }
+  if (path === 'src/link') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'unsupported',
+        text: '',
+        binary: false,
+        size: 0,
+        truncated: false,
+        truncated_bytes: 0,
+        message: 'This path is a symbolic link; previews do not follow links.',
+      },
+    };
+  }
+  if (path === 'src/moved.txt') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'changed',
+        text: '',
+        binary: false,
+        size: 0,
+        truncated: false,
+        truncated_bytes: 0,
+        message: 'The file changed while it was being read. Refresh Git Changes.',
+      },
+    };
+  }
+  return null;
+}
+
+function previewFor(path: string, expected: string, scenario: string, want: 'text' | 'media'): GitPreviewResponse {
+  if (want === 'media') {
+    const media = mediaFixture(path);
+    if (media) {
+      return media;
+    }
+  }
+  if (scenario === 'preview-states') {
+    const extra = previewStateFor(path);
+    if (extra) {
+      return extra;
+    }
+  }
   if (scenario === 'preview-states') {
     if (path === 'notes/new.ts') {
       return readyPreview(path, 'export const note = "untracked";\n');

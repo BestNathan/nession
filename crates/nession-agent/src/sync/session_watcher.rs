@@ -52,6 +52,7 @@ pub async fn publish_session_snapshot(
             session.window_count,
             session.attached_clients,
             session.foreground_command.as_deref(),
+            session.instance_id.as_deref(),
         )?;
 
         if has_command {
@@ -170,7 +171,7 @@ impl SessionWatcher {
         //      upsert, so duplicate updates are harmless).
         //   2. Mark any previously-known sessions that no longer exist as gone.
         // This guarantees eventual consistency even across rapid reconnect cycles.
-        if self.handle.is_sync_needed() {
+        if let Some(sync_token) = self.handle.sync_needed_token() {
             debug!("Full session re-sync triggered after reconnection");
 
             // A failed enumeration is not an observed empty Session list. The
@@ -189,22 +190,53 @@ impl SessionWatcher {
                 }
             };
 
-            // Only a successful query satisfies the intent. The snapshot below
-            // is a full re-derivation of the Server's view, so a reconnect that
-            // re-marks the flag after this point simply schedules another one.
-            self.handle.take_sync_needed();
-
-            // Re-report all *current* sessions first (idempotent upsert).
+            // Successful enumeration is not a completed re-sync. Every frame
+            // must be accepted by the outbound owner before the intent is
+            // satisfied: a failed enqueue leaves `prev_sessions` untouched, and
+            // a later poll re-derives the whole snapshot. An accepted frame is
+            // enqueued, not proof of remote receipt (#2976).
             for session in &current_sessions {
-                self.send_update(session).await?;
+                if let Err(e) = self.send_update(session).await {
+                    warn!(
+                        "Session publication failed during full re-sync; keeping the reconnect \
+                         intent and retrying next poll: {:#}",
+                        e
+                    );
+                    return Ok(());
+                }
             }
 
-            // Mark sessions that disappeared while we were disconnected.
+            // Mark sessions that disappeared while we were disconnected. A
+            // refused removal must be retried too; otherwise a Session known to
+            // be gone could stay visible on the Server while the intent was
+            // consumed (#2976).
+            let mut gone_failure = None;
             for name in self.prev_sessions.keys() {
                 if !current_sessions.iter().any(|s| s.name == *name) {
                     debug!("Reporting stale session as gone: {}", name);
-                    let _ = self.handle.send_session_update(name, "gone", 0, 0, None);
+                    if let Err(e) = self.send_gone(name) {
+                        gone_failure = Some(e);
+                        break;
+                    }
                 }
+            }
+            if let Some(e) = gone_failure {
+                warn!(
+                    "Removal publication failed during full re-sync; keeping the reconnect \
+                     intent and retrying next poll: {:#}",
+                    e
+                );
+                return Ok(());
+            }
+
+            // Only the exact request observed before enumeration may be
+            // satisfied. A reconnect or refused publish that arrived while this
+            // snapshot was being published is newer and keeps the intent owed.
+            if !self.handle.clear_sync_needed_if(sync_token) {
+                debug!(
+                    "A newer full re-sync request arrived during this snapshot; keeping it \
+                     pending for the next poll"
+                );
             }
 
             // Rebuild the local cache from the current tmux state.
@@ -267,7 +299,8 @@ impl SessionWatcher {
             if !current_map.contains_key(name) {
                 debug!("Session removed: {}", name);
                 // Send a "removed" update with status "gone".
-                self.handle.send_session_update(name, "gone", 0, 0, None)?;
+                self.handle
+                    .send_session_update(name, "gone", 0, 0, None, None)?;
             }
         }
 
@@ -285,9 +318,16 @@ impl SessionWatcher {
             session.window_count,
             session.attached_clients,
             session.foreground_command.as_deref(),
+            session.instance_id.as_deref(),
         )?;
 
         Ok(())
+    }
+
+    /// Report a Session that no longer exists in tmux as gone.
+    fn send_gone(&self, name: &str) -> Result<()> {
+        self.handle
+            .send_session_update(name, "gone", 0, 0, None, None)
     }
 
     /// Get a snapshot of the currently tracked sessions (for testing).
@@ -323,6 +363,7 @@ mod tests {
             height: 24,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
         }
     }
 
@@ -417,7 +458,7 @@ mod enumeration_failure {
         manager
     }
 
-    fn watcher_at(dir: &Path) -> (SessionWatcher, ServerClientHandle, OutboxFrames) {
+    pub(super) fn watcher_at(dir: &Path) -> (SessionWatcher, ServerClientHandle, OutboxFrames) {
         let (handle, frames) = ServerClientHandle::test_handle(true);
         let watcher = SessionWatcher::new(handle.clone(), Arc::new(manager_at(dir)), 5);
         (watcher, handle, frames)
@@ -435,7 +476,7 @@ mod enumeration_failure {
     }
 
     /// Install a fake tmux whose successful answer lists exactly `sessions`.
-    fn listing(dir: &Path, sessions: &[&str]) {
+    pub(super) fn listing(dir: &Path, sessions: &[&str]) {
         let mut script = String::new();
         for name in sessions {
             script.push_str(&format!(
@@ -446,7 +487,7 @@ mod enumeration_failure {
     }
 
     /// Drain every pending frame as `(session_name, status)`.
-    fn updates(frames: &mut OutboxFrames) -> Vec<(String, String)> {
+    pub(super) fn updates(frames: &mut OutboxFrames) -> Vec<(String, String)> {
         let mut updates = Vec::new();
         while let Some(frame) = frames.try_next() {
             let WsMessage::Text(text) = frame else {
@@ -608,5 +649,154 @@ mod enumeration_failure {
             watcher.tracked_sessions().contains_key("api"),
             "the unaffected Session stays tracked and visible"
         );
+    }
+}
+
+/// Publication-failure coverage (#2976).
+///
+/// These drive the real [`SessionWatcher`] against a manager whose injected tmux
+/// the test owns, publish into the real bounded outbox, and arm only the publish
+/// outcome through the handle's test-only fault seam. The frames are read back
+/// in publication order, so the assertions are about what the Server would
+/// actually receive — an accepted enqueue, not a claimed remote receipt.
+#[cfg(all(test, unix))]
+mod publication_failure {
+    use super::enumeration_failure::{listing, updates, watcher_at};
+
+    #[tokio::test]
+    async fn an_enqueue_failure_after_enumeration_keeps_resync_pending_and_republishes_after_recovery(
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev"]);
+        let (mut watcher, handle, mut frames) = watcher_at(dir.path());
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(
+            updates(&mut frames),
+            vec![("dev".to_string(), "detached".to_string())]
+        );
+
+        // Reconnect marks the intent; enumeration succeeds, the enqueue fails.
+        handle.mark_sync_needed();
+        handle.inject_session_update_fault(Some("dev"), true, false);
+        watcher.poll_and_sync().await.expect("failed resync poll");
+        assert!(
+            updates(&mut frames).is_empty(),
+            "a failed enqueue publishes no snapshot"
+        );
+        assert!(
+            handle.is_sync_needed(),
+            "the reconnect intent survives an enqueue failure"
+        );
+        assert!(
+            watcher.tracked_sessions().contains_key("dev"),
+            "the previous snapshot survives an enqueue failure"
+        );
+
+        // The outbound owner recovers; no new reconnect event is delivered.
+        watcher.poll_and_sync().await.expect("recovery poll");
+        assert_eq!(
+            updates(&mut frames),
+            vec![("dev".to_string(), "detached".to_string())],
+            "the later poll republishes the still-live Session"
+        );
+        assert!(
+            !handle.is_sync_needed(),
+            "the accepted snapshot satisfies the observed intent"
+        );
+        assert!(
+            watcher.tracked_sessions().contains_key("dev"),
+            "the recovered snapshot remains tracked"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_gone_enqueue_during_resync_retries_and_removes_only_the_absent_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev", "api"]);
+        let (mut watcher, handle, mut frames) = watcher_at(dir.path());
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(updates(&mut frames).len(), 2);
+
+        // `dev` disappears while disconnected. The surviving `api` is
+        // re-reported first; publishing the removal of `dev` is refused.
+        handle.mark_sync_needed();
+        listing(dir.path(), &["api"]);
+        handle.inject_session_update_fault(Some("dev"), true, false);
+        watcher.poll_and_sync().await.expect("failed resync poll");
+        let failed = updates(&mut frames);
+        assert_eq!(
+            failed,
+            vec![("api".to_string(), "detached".to_string())],
+            "no removal was accepted: {failed:?}"
+        );
+        assert!(handle.is_sync_needed());
+        assert!(
+            watcher.tracked_sessions().contains_key("dev"),
+            "an absent Session is forgotten only after its removal is accepted"
+        );
+        assert!(watcher.tracked_sessions().contains_key("api"));
+
+        // Recovery retries the full snapshot and the pending removal.
+        watcher.poll_and_sync().await.expect("recovery poll");
+        let recovered = updates(&mut frames);
+        assert!(
+            recovered.contains(&("api".to_string(), "detached".to_string())),
+            "the surviving Session is preserved: {recovered:?}"
+        );
+        assert!(
+            recovered.contains(&("dev".to_string(), "gone".to_string())),
+            "the truly absent Session is removed on retry: {recovered:?}"
+        );
+        assert!(
+            !recovered
+                .iter()
+                .any(|(name, status)| name == "api" && status == "gone"),
+            "the live Session is never reported gone: {recovered:?}"
+        );
+        assert!(!handle.is_sync_needed());
+        assert!(!watcher.tracked_sessions().contains_key("dev"));
+        assert!(watcher.tracked_sessions().contains_key("api"));
+
+        // An all-success snapshot clears the intent; the next poll is
+        // incremental and publishes no redundant full snapshot.
+        watcher.poll_and_sync().await.expect("idle poll");
+        assert!(updates(&mut frames).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_request_during_resync_is_not_cleared_by_the_older_attempt() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev"]);
+        let (mut watcher, handle, mut frames) = watcher_at(dir.path());
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(updates(&mut frames).len(), 1);
+
+        // The snapshot publish succeeds, but a new reconnect request arrives
+        // while it is being published.
+        handle.mark_sync_needed();
+        handle.inject_session_update_fault(Some("dev"), false, true);
+        watcher
+            .poll_and_sync()
+            .await
+            .expect("overlapping resync poll");
+        assert_eq!(
+            updates(&mut frames),
+            vec![("dev".to_string(), "detached".to_string())]
+        );
+        assert!(
+            handle.is_sync_needed(),
+            "the newer reconnect request survives the older attempt's success"
+        );
+
+        // The next poll serves the latest request and then settles.
+        watcher.poll_and_sync().await.expect("latest request poll");
+        assert_eq!(
+            updates(&mut frames),
+            vec![("dev".to_string(), "detached".to_string())]
+        );
+        assert!(!handle.is_sync_needed());
+
+        watcher.poll_and_sync().await.expect("idle poll");
+        assert!(updates(&mut frames).is_empty());
     }
 }

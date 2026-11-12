@@ -114,6 +114,74 @@ export interface LogicalTerminalLine {
   readonly cells: readonly LogicalLineCell[];
 }
 
+/** The logical line and UTF-16 offset under one pointer position. */
+export interface LogicalLinePoint {
+  readonly line: LogicalTerminalLine;
+  /** Offset of the character drawn at that cell, or -1 when the cell is empty. */
+  readonly offset: number;
+}
+
+/**
+ * Resolve a client point to the logical-line character drawn there.
+ *
+ * Touch activation needs the same cell → text mapping the mouse linkifier
+ * uses. Reading xterm's mouse service is the sanctioned `_core` use in this
+ * adapter; the caller supplies the point (a real or synthetic touch).
+ */
+export function logicalLinePoint(
+  terminal: Terminal,
+  clientX: number,
+  clientY: number,
+): LogicalLinePoint | null {
+  const element = terminal.element;
+  const core = (terminal as unknown as {
+    _core?: {
+      _mouseService?: {
+        getCoords(
+          event: { clientX: number; clientY: number },
+          element: HTMLElement,
+          cols: number,
+          rows: number,
+        ): [number, number] | undefined;
+      };
+    };
+  })._core;
+  const mouseService = core?._mouseService;
+  if (!element || !mouseService) {
+    return null;
+  }
+  const coords = mouseService.getCoords(
+    { clientX, clientY },
+    element,
+    terminal.cols,
+    terminal.rows,
+  );
+  if (!coords) {
+    return null;
+  }
+  const [column, row] = coords;
+  const buffer = terminal.buffer.active;
+  const tappedBufferLine = buffer.viewportY + row;
+  // The link provider addresses a logical line by its first physical line, so
+  // a tap on a wrapped continuation must walk back to the start it belongs to.
+  let bufferLineNumber = tappedBufferLine;
+  while (bufferLineNumber > 1 && buffer.getLine(bufferLineNumber - 1)?.isWrapped === true) {
+    bufferLineNumber -= 1;
+  }
+  const line = readLogicalLine(terminal, bufferLineNumber);
+  if (line.text.length === 0) {
+    return null;
+  }
+  const cell = column - 1;
+  const offset = line.cells.findIndex(
+    (entry) =>
+      entry.bufferLine === tappedBufferLine &&
+      cell >= entry.cell &&
+      cell < entry.cell + entry.width,
+  );
+  return { line, offset };
+}
+
 /**
  * Read the logical line beginning at `bufferLineNumber` (1-based).
  *

@@ -6,6 +6,7 @@ import type { DomainState } from '@/product/session/model/domainState';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { GitWorktree } from '@/capabilities/git';
+import type { FocusedProject, SessionProjectContext } from '@/product/project/types';
 
 export type Experience = CapsuleExperience;
 
@@ -18,7 +19,7 @@ export type Experience = CapsuleExperience;
  * absent: it draws the same view in both experiences, so its binding is
  * contributed whole by the capability instead.
  */
-export type WorkspaceViewId = 'files' | 'session' | 'agent' | 'env';
+export type WorkspaceViewId = 'files' | 'session' | 'agent' | 'env' | 'sandbox' | 'images';
 
 /**
  * What caused the Workspace to open, when something did.
@@ -35,6 +36,8 @@ export interface CapabilityFocus {
   resourceId?: string;
   /** 1-based line when opening a file from the Terminal (#1175). */
   line?: number;
+  /** 1-based column when the Terminal reference carried one (#3187). */
+  column?: number;
 }
 
 /** Everything a Workspace view layout needs from the workspace framework. */
@@ -54,7 +57,14 @@ export interface WorkspaceContext {
   onFocusConsumed?: () => void;
   /** Nession-owned Session handoff from Git worktrees (#1010). */
   openWorktreeSession?: (worktree: GitWorktree) => Promise<void>;
+  /** Focused Session's explicit Project resolution (#3082). */
+  focusedProject?: FocusedProject;
+  /** The capability currently open on this surface, for the active state. */
+  activeCapabilityId?: CapabilityId;
+  /** Project-owned content/actions for the focused Session (#3082). */
+  sessionProject?: SessionProjectContext;
 }
+
 
 /**
  * A depth a Workspace capability has pushed over its own root (`#1051`).

@@ -1,11 +1,7 @@
-import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {
-  Sidebar,
-  type SidebarProps,
-} from '@/app/Sidebar';
+import { Sidebar, type SidebarProps } from '@/app/Sidebar';
 import type { Agent, Session } from '@/types';
 
 const agents: Agent[] = [
@@ -34,10 +30,11 @@ const sessions: Session[] = [
     session_id: 'a1:fix',
     session_name: 'fix-terminal-reconnect',
     agent_id: 'a1',
-    created_at: '2026-09-16T00:00:00Z',
-    attached_clients: 0,
     status: 'active',
-  } as unknown as Session,
+    window_count: 1,
+    attached_clients: 0,
+    last_activity: '2026-11-06T10:00:00Z',
+  },
 ];
 
 function props(overrides: Partial<SidebarProps> = {}): SidebarProps {
@@ -68,156 +65,108 @@ function props(overrides: Partial<SidebarProps> = {}): SidebarProps {
   };
 }
 
-/**
- * The composition harness: collapse state is owned outside the Sidebar
- * (#1196 §5 — `WebLayout` in the product), so tests drive it the same
- * controlled way.
- */
-function Harness({ overrides }: { overrides?: Partial<SidebarProps> }) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <Sidebar
-      {...props(overrides)}
-      collapsed={collapsed}
-      onCollapsedChange={setCollapsed}
-    />
-  );
-}
+describe('Session-first Web sidebar (#2851)', () => {
+  it('leads with Session navigation and keeps infrastructure below it', () => {
+    render(<Sidebar {...props()} />);
 
-describe('sidebar sections (SC2)', () => {
-  it('shows Agents, Sessions and service status at once when expanded', () => {
-    render(<Harness />);
+    const top = screen.getByTestId('sidebar-top-actions');
+    const list = screen.getByTestId('sidebar').querySelector('[data-testid="session-item-row"]');
+    const agentsEntry = screen.getByTestId('sidebar-agents-entry');
+    const footer = screen.getByTestId('sidebar-footer');
 
-    expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
-    expect(screen.getByTestId('session-item-a1:fix')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-footer')).toBeInTheDocument();
+    expect(top).toHaveTextContent('New Session');
+    expect(screen.getByPlaceholderText('Search sessions...')).toBeInTheDocument();
+    expect(list).not.toBeNull();
+    // Sessions are before infrastructure in document order.
+    expect(list!.compareDocumentPosition(agentsEntry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(agentsEntry.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('marks the active node and leaves the others unmarked', () => {
-    render(<Harness />);
+  it('does not put an Agent roster at the top until its entry is opened', async () => {
+    render(<Sidebar {...props()} />);
 
-    // Location context lives here now that Web has no header. Only the node the
-    // active Session runs on is marked — this is not a navigation hierarchy.
+    expect(screen.queryByTestId('sidebar-agents')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-agents-entry')).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(screen.getByTestId('sidebar-agents-entry'));
+
+    expect(screen.getByTestId('sidebar-agents-entry')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('sidebar-agents')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-agent-a1')).toHaveAttribute('data-agent-active', 'true');
     expect(screen.getByTestId('sidebar-agent-a2')).not.toHaveAttribute('data-agent-active');
   });
 
-  it('does not file sessions under their agent', () => {
-    // `session-list.md` anti-pattern 1: flat by default, Agent is not a parent.
-    render(<Harness />);
+  it('offers exactly one collapse control, in the top navigation row', () => {
+    render(<Sidebar {...props()} />);
 
-    expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
-    const rows = screen.getAllByTestId('session-item-row');
-    expect(rows).toHaveLength(1);
+    expect(within(screen.getByTestId('sidebar-top-actions')).getByTestId('sidebar-collapse')).toBeInTheDocument();
+    expect(within(screen.getByTestId('sidebar-footer')).queryByTestId('sidebar-collapse')).not.toBeInTheDocument();
   });
 
-  it('puts the one Collapse control in the Agents head, not the service footer', () => {
-    // #1196 §1: collapse is a shell action in the top navigation zone — the
-    // same zone the rail's Expand returns to — while the footer keeps only
-    // service status.
-    render(<Harness />);
-
-    const agentsSection = screen.getByTestId('sidebar-agents');
-    expect(within(agentsSection).getByTestId('sidebar-collapse')).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId('sidebar-footer')).queryByTestId('sidebar-collapse'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('keeps the Collapse control when there are zero Agents', () => {
-    // A shell control that vanishes with the data is the "jumping control"
-    // #1196 removes; the Agents head stays so the control does too.
-    render(<Harness overrides={{ agents: [] }} />);
-
+  it('keeps the collapse control when there are zero Agents', () => {
+    render(<Sidebar {...props({ agents: [] })} />);
     expect(screen.getByTestId('sidebar-collapse')).toBeInTheDocument();
+    expect(screen.getByTestId('create-session')).toBeDisabled();
   });
 
-  it('collapses to a rail and offers a way back', async () => {
-    render(<Harness />);
-
-    await userEvent.click(screen.getByTestId('sidebar-collapse'));
-
-    expect(screen.getByTestId('sidebar-rail')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-rail-expand')).toBeInTheDocument();
-    expect(screen.queryByTestId('session-item-row')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('sidebar-agents')).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId('sidebar-rail-expand'));
-    expect(screen.getByTestId('session-item-row')).toBeInTheDocument();
-  });
-
-  it('the rail has exactly one interactive control: Expand', async () => {
-    // #1196 §2 — Agents/Sessions summaries are information, not controls: no
-    // button role, no tab stop, and clicking them does not expand.
-    render(<Harness />);
-    await userEvent.click(screen.getByTestId('sidebar-collapse'));
-
-    const rail = screen.getByTestId('sidebar-rail');
-    const buttons = within(rail).getAllByRole('button');
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0]).toHaveAccessibleName('Expand sidebar');
-
-    for (const summary of ['sidebar-rail-agents', 'sidebar-rail-sessions']) {
-      const el = screen.getByTestId(summary);
-      expect(el.tagName).not.toBe('BUTTON');
-      expect(el).not.toHaveAttribute('tabindex');
-    }
-
-    await userEvent.click(screen.getByTestId('sidebar-rail-agents'));
-    await userEvent.click(screen.getByTestId('sidebar-rail-sessions'));
-    expect(screen.getByTestId('sidebar-rail')).toBeInTheDocument();
-  });
-
-  it('the rail summaries report truthful totals, not the filtered population', async () => {
-    // #1196 §3 — the rail quotes the unfiltered population; a narrow filter
-    // result is made explicit ("1 shown · 3 total") instead of redefining the
-    // number.
+  it('uses the narrow overlay close action instead of a collapse control', () => {
+    const onCloseDrawer = vi.fn();
     render(
-      <Harness
-        overrides={{ totalSessionCount: 3, isSearchActive: true }}
+      <Sidebar
+        {...props()}
+        collapsible={false}
+        onCloseDrawer={onCloseDrawer}
       />,
     );
-    await userEvent.click(screen.getByTestId('sidebar-collapse'));
-
-    const sessionsSummary = screen.getByTestId('sidebar-rail-sessions');
-    expect(sessionsSummary).toHaveTextContent('3');
-    expect(sessionsSummary).toHaveAttribute('aria-label', '1 shown of 3 sessions');
-    expect(sessionsSummary).toHaveAttribute('title', '1 shown · 3 total');
-
-    const agentsSummary = screen.getByTestId('sidebar-rail-agents');
-    expect(agentsSummary).toHaveTextContent('2');
-    expect(agentsSummary).toHaveAttribute('aria-label', '2 agents · 1 online');
-  });
-
-  it('one offline Agent does not turn the rail summaries into an error state', async () => {
-    // a2 is offline. The count stays neutral — `session-list.md` names a
-    // global health indicator that collapses independent state dimensions an
-    // anti-pattern; only the server dot carries connection state.
-    render(<Harness />);
-    await userEvent.click(screen.getByTestId('sidebar-collapse'));
-
-    const summary = screen.getByTestId('sidebar-rail-agents');
-    expect(summary.className).not.toMatch(/destructive/);
-    expect(screen.getByTestId('sidebar-rail-status').className).not.toMatch(/destructive/);
-  });
-
-  it('shows the connection state on the rail, not a roll-up of node health', async () => {
-    // One node is offline above. That must not alarm the shell:
-    // `session-list.md` names a global health indicator that collapses
-    // independent state dimensions an anti-pattern.
-    render(<Harness overrides={{ connectionStatus: 'reconnecting' }} />);
-
-    await userEvent.click(screen.getByTestId('sidebar-collapse'));
-
-    expect(screen.getByTestId('sidebar-rail-status')).toHaveAttribute(
-      'aria-label',
-      'Server reconnecting',
-    );
-  });
-
-  it('cannot be collapsed when it is an overlay drawer', () => {
-    render(<Harness overrides={{ collapsible: false }} />);
 
     expect(screen.queryByTestId('sidebar-collapse')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-drawer-close')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-drawer-close')).toHaveAccessibleName('Close sessions');
+  });
+
+  it('does not turn one offline Agent into an error in the server footer', () => {
+    render(<Sidebar {...props({ connectionStatus: 'reconnecting' })} />);
+
+    const footer = screen.getByTestId('sidebar-footer');
+    expect(within(footer).getByTestId('sidebar-server-status')).toHaveTextContent('Server reconnecting');
+    expect(within(footer).getByTestId('sidebar-server-dot').className).toMatch(/destructive/);
+    expect(screen.getByTestId('sidebar-agents-entry')).not.toHaveTextContent('offline');
+  });
+
+  it('groups history by time and drops recency from the grouped rows', () => {
+    const today = new Date().toISOString();
+    render(
+      <Sidebar
+        {...props({
+          filteredSessions: [
+            { ...sessions[0], session_id: 'a1:today', last_activity: today },
+            { ...sessions[0], session_id: 'a1:old', last_activity: '2020-01-01T00:00:00Z' },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getAllByTestId('session-group-label').map((label) => label.textContent)).toEqual([
+      'Today',
+      'Older',
+    ]);
+    for (const meta of screen.getAllByTestId('session-item-meta')) {
+      expect(meta).not.toHaveTextContent(/ago/);
+    }
+  });
+
+  it('keeps the Session rows flat under their time labels, never under an Agent', () => {
+    render(
+      <Sidebar
+        {...props({
+          filteredSessions: [
+            { ...sessions[0], session_id: 'a1:one', last_activity: new Date().toISOString() },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('session-item-a1:one')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-grid')).not.toBeInTheDocument();
   });
 });

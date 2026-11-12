@@ -10,6 +10,7 @@ export function readAttachControlFields(payload: unknown): {
   inputEpoch?: number;
   inputAppliedThrough?: number;
   terminalCols?: number;
+  terminalCapabilities?: string[];
 } {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -48,7 +49,18 @@ export function readAttachControlFields(payload: unknown): {
     terminalCols:
       Number.isSafeInteger(p.terminal_cols) && (p.terminal_cols as number) > 0
         ? p.terminal_cols as number : undefined,
+    // Notification-only negotiation (#2877): the Agent states the wires an
+    // older client must not send. Absent is an older Agent, never "supports
+    // everything"; a malformed list is treated as absent rather than guessed.
+    terminalCapabilities: readCapabilities(p.terminal_capabilities),
   };
+}
+
+function readCapabilities(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
 }
 
 /** Where the agent said the session's input cursor stands (#1307). */

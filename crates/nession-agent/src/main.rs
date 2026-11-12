@@ -10,8 +10,18 @@ use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use std::path::Path;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // The hidden in-sandbox bridge subcommand (#2681). Dispatched before the
+    // tokio runtime exists: inside a sandbox this process is PID 1, must not
+    // load a config, and installs its own signal handlers for the child.
+    let arguments: Vec<String> = std::env::args().collect();
+    if nession_sandbox::bridge::is_bridge_invocation(&arguments) {
+        std::process::exit(nession_sandbox::bridge::run_from_std_args());
+    }
+    tokio::runtime::Runtime::new()?.block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     // Loaded before the runtime initializes logging, so a config that cannot be
     // read fails without a log destination to report to — the error goes to the
     // shell, which is where the operator is.

@@ -57,6 +57,11 @@ fn declared() -> BTreeMap<(String, u32), BTreeSet<String>> {
                 .iter(),
         )
         .chain(
+            nession_github::protocol::descriptors()
+                .expect("nession-github can name its contracts")
+                .iter(),
+        )
+        .chain(
             nession_agent::protocol::served_descriptors()
                 .expect("the agent can name what it serves")
                 .iter(),

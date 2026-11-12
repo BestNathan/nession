@@ -3,9 +3,36 @@
 # bookworm, not bullseye: Debian 11 reached end of LTS on 2026-08-31 and its
 # security pool is gone, so the `apt-get install` below 404s on every package.
 # This is the file both `staging.yml` and `release.yml` actually build.
-FROM debian:bookworm-slim
-ENV DEBIAN_FRONTEND=noninteractive
 
+# Build the pinned EROFS helper tools (#3178). Debian bookworm's erofs-utils
+# 1.5 cannot run the V1 packaging argv and packages no erofsfuse; both binaries
+# come from the same pinned upstream build the from-source path uses.
+FROM debian:bookworm-slim AS erofs-utils-builder
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential autoconf automake libtool pkg-config libfuse3-dev \
+        ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+COPY deploy/build-erofs-utils.sh /usr/local/bin/build-erofs-utils.sh
+RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
+    /usr/local/bin/build-erofs-utils.sh
+
+# Final Server runtime base (#3178). `Dockerfile.server` extends the identical
+# stage, so both final Server images carry one packaging definition. `git` and
+# `mkfs.erofs` are runtime dependencies of `crates/nession-erofs/src/build.rs`;
+# the probe below fails the image build if either executable is absent.
+FROM debian:bookworm-slim AS runtime-tools
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        nginx ca-certificates curl gettext-base git && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /etc/nginx/sites-enabled/default
+COPY --from=erofs-utils-builder /usr/local/bin/mkfs.erofs /usr/local/bin/mkfs.erofs
+RUN command -v git mkfs.erofs
+
+# Final image
+FROM runtime-tools AS runtime
 # The release-selected fixed terminal configuration (#2487). The release
 # workflow passes these values from the same parameters that built the Web
 # bundle, so the image's ENV is the traceable carrier to the running Server.
@@ -14,10 +41,6 @@ ARG NESSION_TERMINAL_COLS=96
 ARG NESSION_TERMINAL_WEB_FONT_SIZE=14
 ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 ENV NESSION_TERMINAL_WEB_FONT_SIZE=${NESSION_TERMINAL_WEB_FONT_SIZE}
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -f /etc/nginx/sites-enabled/default
 
 # Stable files first — rarely change, always cache-hit
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template

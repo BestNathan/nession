@@ -18,6 +18,21 @@ export function nessionCssVar(name) {
   return `--${nessionVarName(name)}`;
 }
 
+/**
+ * The emitted CSS custom property for a token path, relative to the group that
+ * emits it (`experience.web.*` and `experience.app.*` emit the same names, the
+ * App group under `[data-experience="app"]`).
+ *
+ * A contract may need the *variable* rather than the resolved number — a
+ * typography role's line-height is unitless in the source and only the browser
+ * can turn it into the computed length the role paints. Keeping the naming
+ * rule here means `design/contracts` never re-derives `toKebab` or the
+ * `--nession-` namespace on its own.
+ */
+export function cssVarForTokenPath(path) {
+  return nessionCssVar(toKebab(path));
+}
+
 function nessionVarRef(name) {
   return `var(${nessionCssVar(name)})`;
 }

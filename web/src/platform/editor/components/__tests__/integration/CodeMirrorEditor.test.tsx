@@ -200,4 +200,64 @@ describe('CodeMirrorEditor', () => {
     expect(view.state.selection.main.from).toBe(0);
     expect(view.state.selection.main.to).toBe(view.state.doc.length);
   });
+
+  it('positions the cursor at a 1-based line and column', async () => {
+    const value = 'one\ntwo\nthree\nfour';
+    renderEditor({ value, initialLine: 3, initialColumn: 4 });
+    await waitForEditor();
+
+    await waitFor(() => {
+      const view = getEditorView();
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      expect(line.number).toBe(3);
+      expect(head - line.from + 1).toBe(4);
+      const dom = document.querySelector('.cm-editor')!;
+      expect(dom.getAttribute('data-selection-line')).toBe('3');
+      expect(dom.getAttribute('data-selection-column')).toBe('4');
+    });
+  });
+
+  it('clamps an out-of-range line and column to the document', async () => {
+    const value = 'one\ntwo\nthree';
+    renderEditor({ value, initialLine: 99, initialColumn: 99 });
+    await waitForEditor();
+
+    await waitFor(() => {
+      const view = getEditorView();
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      expect(line.number).toBe(3);
+      expect(head).toBe(line.to);
+    });
+  });
+
+  it('repositions the same editor when the requested location changes', async () => {
+    const value = 'one\ntwo\nthree\nfour';
+    const { rerender } = renderEditor({ value, initialLine: 2, initialColumn: 2 });
+    await waitForEditor();
+    await waitFor(() => {
+      const view = getEditorView();
+      expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(2);
+    });
+
+    rerender(
+      <CodeMirrorEditor
+        value={value}
+        onChange={vi.fn()}
+        readOnly={false}
+        filename="test.js"
+        initialLine={4}
+        initialColumn={3}
+      />,
+    );
+
+    await waitFor(() => {
+      const view = getEditorView();
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      expect(line.number).toBe(4);
+      expect(head - line.from + 1).toBe(3);
+    });
+  });
 });

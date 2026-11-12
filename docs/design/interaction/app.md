@@ -51,10 +51,10 @@ The Sessions layer is a **navigator**, and its resting composition is one screen
 one job: pick or start work (#1083).
 
 It is also a **full spatial layer, never a collapsible sidebar** (#1196 §8). The Web
-shell may tuck its navigation column into a compact rail; the App has no such concept —
-no collapse control, no expand control, no icon-strip rail. Leaving and opening
-Sessions belongs to the App's spatial navigation (Session selection and its visible
-navigation affordances), not to a width state.
+shell may fully tuck away its navigation column; the App has no such concept — no
+collapse control, no expand control, no icon-strip rail. Leaving and opening Sessions
+belongs to the App's spatial navigation (Session selection and its visible navigation
+affordances), not to a width state.
 
 ```text
 Sessions                         ＋        ← the page's name and its one action
@@ -85,6 +85,29 @@ rather than a history list:
 
 The layer's header is the App's title band, and it is a *page* title: the muted section
 label the screen used to open with described the list rather than naming the screen.
+
+### Row actions
+
+Each Session row carries one touch-safe `···` trigger (44px control band) and one
+anchored overlay with the same four task-level actions the Web sidebar exposes
+(#2875):
+
+```text
+Session details     read the target Session without selecting it
+Edit details        edit title / description / tags through the existing metadata owner
+Attach settings     the existing configure dialog, without attaching
+──────────────
+Kill session        destructive, separated; requires the exact immutable tmux name
+```
+
+Opening the menu or choosing details/settings never selects or attaches another
+Session; the Terminal stays mounted under the Sessions layer and the user returns
+to the same layer when the dialog closes. The overlay is not a replacement screen
+and never becomes a permanent toolbar. It dismisses on outside click, Escape, or a
+scroll of the App-owned Session list viewport, then restores focus to the row's
+trigger. These actions reuse the canonical owners — `SessionDetailsDialog` and the
+metadata store, `AttachDialog` in configure intent, and `KillConfirmDialog` — so
+App does not gain a second editor, attach flow, or kill path.
 
 ## Contextual interaction capsule
 

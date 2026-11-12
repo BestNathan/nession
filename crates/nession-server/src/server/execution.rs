@@ -200,6 +200,8 @@ pub enum ResourceKey {
     Session(String),
     /// An env file, by the source it lives on and its name.
     Env(String),
+    /// A Project declaration, by its Server-minted `project_id` (#3021).
+    Project(String),
 }
 
 impl std::fmt::Display for ResourceKey {
@@ -207,6 +209,7 @@ impl std::fmt::Display for ResourceKey {
         match self {
             Self::Session(id) => write!(f, "session:{id}"),
             Self::Env(id) => write!(f, "env:{id}"),
+            Self::Project(id) => write!(f, "project:{id}"),
         }
     }
 }
@@ -276,8 +279,9 @@ pub enum ExecutionPolicy {
     /// mutation a connection depends on (auth, register, attach, relay mode) is
     /// a connection transition and belongs on [`ExecutionPolicy::Ordered`], not
     /// here. Every unit declared `Key` today is a registry mutation
-    /// (session create/kill), an agent mutation, or an env-file mutation, and
-    /// none of them changes what this connection *is*.
+    /// (session create/kill), an agent mutation, an env-file mutation, or a
+    /// Project declaration mutation (#3021), and none of them changes what this
+    /// connection *is*.
     Key(ResourceKey),
 }
 
@@ -358,10 +362,14 @@ mod tests {
     /// string — the kind of merge that shows up later as an unexplained stall on
     /// a session somebody happened to name after a file.
     #[test]
-    fn the_two_key_spaces_have_distinct_spellings() {
+    fn the_key_spaces_have_distinct_spellings() {
         assert_ne!(
             ResourceKey::Session("staging.env".to_string()),
             ResourceKey::Env("staging.env".to_string())
+        );
+        assert_ne!(
+            ResourceKey::Session("project-1".to_string()),
+            ResourceKey::Project("project-1".to_string())
         );
         assert_eq!(
             ResourceKey::Session("a:s1".to_string()).to_string(),
@@ -370,6 +378,10 @@ mod tests {
         assert_eq!(
             ResourceKey::Env("a.env".to_string()).to_string(),
             "env:a.env"
+        );
+        assert_eq!(
+            ResourceKey::Project("project-1".to_string()).to_string(),
+            "project:project-1"
         );
     }
 }

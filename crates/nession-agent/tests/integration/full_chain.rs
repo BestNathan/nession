@@ -435,10 +435,167 @@ async fn test_terminal_io_through_full_chain() {
     assert!(got_output, "expected terminal output containing 'test123'");
 }
 
+/// #2877 SC-01/SC-03: a negotiated progress notification has **no reply**, and
+/// an authenticated claim beyond the subscriber's actually issued frontier
+/// produces exactly one reconcile-required notice for the episode.
+#[tokio::test]
+async fn test_terminal_progress_notification_is_response_less_and_coalesces_one_reconcile() {
+    use nession_agent::server::websocket::{
+        TerminalOutputProgressPayload, TerminalReconcileAction, TerminalReconcileReason,
+    };
+    use tokio::time::Instant;
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("e2e-progress");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+        start_test_agent_server().await.unwrap();
+    let (mut sink, mut stream) = connect_for(&credentials, agent_addr, &session_name)
+        .await
+        .unwrap();
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.to_string(),
+        width: 80,
+        height: 24,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(agent_msg_types::CLIENT_ATTACH, attach);
+    sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+        .await
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let attached = loop {
+        let response = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for attach response")
+            .expect("stream ended")
+            .expect("error reading attach response");
+        if let WsMessage::Text(text) = response {
+            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if parsed["msg_type"] == agent_msg_types::OK {
+                break parsed;
+            }
+        }
+        assert!(
+            Instant::now() <= deadline,
+            "timed out waiting for attach reply"
+        );
+    };
+    let subscriber_generation = attached["payload"]["subscriber_generation"]
+        .as_u64()
+        .expect("the Agent mints a subscription generation");
+    let stream_epoch = attached["payload"]["stream_epoch"]
+        .as_u64()
+        .expect("the Agent names its stream epoch");
+    assert!(
+        attached["payload"]["terminal_capabilities"]
+            .as_array()
+            .expect("a new Agent negotiates notification support")
+            .iter()
+            .any(|cap| cap == "terminal-progress-notifications-v1"),
+        "the attach reply must state the progress capability"
+    );
+
+    // Two reports beyond the issued frontier. The first opens one episode; the
+    // second is the same unresolved episode and must not add a notice.
+    let mut progress_ids = Vec::new();
+    for _ in 0..2 {
+        let payload = TerminalOutputProgressPayload {
+            session_name: session_name.clone(),
+            subscriber_generation,
+            stream_epoch,
+            renderer_generation: 7,
+            applied_through: 1_000_000,
+        };
+        let req = new_message(agent_msg_types::TERMINAL_OUTPUT_PROGRESS, payload);
+        progress_ids.push(req.id.clone());
+        sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+            .await
+            .unwrap();
+    }
+
+    let mut notices = Vec::new();
+    let mut replied_to_progress = false;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if progress_ids
+                    .iter()
+                    .any(|id| Some(id.as_str()) == parsed["id"].as_str())
+                {
+                    replied_to_progress = true;
+                }
+                if parsed["msg_type"] == agent_msg_types::TERMINAL_RECONCILE_REQUIRED {
+                    notices.push(parsed);
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(error))) => panic!("agent stream failed: {error}"),
+            Ok(None) => panic!("agent stream ended before the notice"),
+            Err(_) => {} // idle tick; keep reading until the deadline
+        }
+    }
+
+    assert!(
+        !replied_to_progress,
+        "an ordinary progress notification must never receive an ok/error reply"
+    );
+    assert_eq!(notices.len(), 1, "one notice per unresolved episode");
+    let notice = &notices[0]["payload"];
+    assert_eq!(notice["session_name"], session_name);
+    assert_eq!(notice["subscriber_generation"], subscriber_generation);
+    assert_eq!(notice["stream_epoch"], stream_epoch);
+    assert_eq!(notice["reason"], "progress-ahead-of-issued");
+    assert_eq!(notice["action"], "resume");
+    assert!(
+        notice["renderer_generation"].is_null(),
+        "no renderer is pinned by an unauditable ahead claim"
+    );
+    assert!(
+        notice["head_seq"].as_u64().is_some(),
+        "the notice names the Agent's authoritative head"
+    );
+    assert!(
+        notice["first_available_seq"]
+            .as_u64()
+            .is_some_and(|floor| floor >= 1),
+        "the notice names the retained-window floor it can replay"
+    );
+    // The reason/action strings are the contract's stable spelling.
+    assert_eq!(
+        serde_json::to_value(TerminalReconcileReason::ProgressAheadOfIssued).unwrap(),
+        "progress-ahead-of-issued"
+    );
+    assert_eq!(
+        serde_json::to_value(TerminalReconcileAction::Resume).unwrap(),
+        "resume"
+    );
+
+    let detach = ClientDetachPayload {
+        session_name: session_name.clone(),
+    };
+    let req = new_message(agent_msg_types::CLIENT_DETACH, detach);
+    sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+        .await
+        .unwrap();
+    tmux.kill_session(&session_name).await.ok();
+    agent_handle.shutdown().await.ok();
+}
+
 // ---------------------------------------------------------------------------
 // 4. Session Lifecycle
 // ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn test_session_lifecycle() {
     let _tmux = SessionManager::new();
@@ -462,6 +619,8 @@ async fn test_session_lifecycle() {
         binding_profiles: Vec::new(),
         binding_revision: None,
         terminal_cols: None,
+        sandbox: None,
+        managed: None,
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();

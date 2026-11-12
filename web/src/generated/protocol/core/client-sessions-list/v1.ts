@@ -37,7 +37,15 @@ export type WebSessionInfo = { session_id: string, agent_id: string, session_nam
  * On the wire since the list existed; this type did not name it, so a
  * consumer reading the schema could not know it was there.
  */
-foreground_command?: string | null, working_dir?: string | null, last_activity: string, };
+foreground_command?: string | null, working_dir?: string | null, 
+/**
+ * The focused Session's Server-owned Project membership (#3082).
+ *
+ * Absent for a Session with no Project. This is durable membership, not an
+ * inference from cwd, Git or the Agent; a newer Session incarnation that
+ * reuses the same `agent_id:session_name` does not inherit it.
+ */
+project_id?: string | null, last_activity: string, };
 
 // ── Operations ──
 

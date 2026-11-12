@@ -1,7 +1,7 @@
 import { Terminal, type ITerminalOptions, type ITheme, type ILink } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { TERMINAL_METRICS } from '../../../../../design/generated/terminal';
-import { measuredCellDimensionsOf, readBufferSnapshot, readLogicalLine, readModeSnapshot, cellSizeOf } from './XtermMetrics';
+import { measuredCellDimensionsOf, readBufferSnapshot, readLogicalLine, logicalLinePoint, readModeSnapshot, cellSizeOf } from './XtermMetrics';
 import { mapLineLinks } from './LineLinks';
 import { XtermAddonHost } from './XtermAddonHost';
 import { XtermRenderer, type TerminalRendererType } from './XtermRenderer';
@@ -98,6 +98,13 @@ export class XtermEmulator implements TerminalEmulator {
   private readonly addons: XtermAddonHost;
   private readonly renderer: XtermRenderer;
   private disposed = false;
+  /**
+   * The host this terminal is currently mounted in (#2879). The debug/E2E
+   * `xtermInstance` property lives on the host; ownership must be released by
+   * identity on detach/reparent/dispose so a host (or a test holding it) can
+   * never retain a replaced Terminal.
+   */
+  private mountHost: HTMLElement | null = null;
   private fontSizeCallback: (reason: CellSizeChangeReason) => void = () => {};
   /**
    * Provenance of the write xterm is parsing right now (#2598). The ordered
@@ -106,6 +113,21 @@ export class XtermEmulator implements TerminalEmulator {
    */
   private writeOrigin: TerminalWriteOrigin = { source: 'live' };
   private clipboardDisposable: TerminalDisposable | null = null;
+  /**
+   * Product matchers, kept beside the xterm link providers (#3187). xterm's
+   * linkifier only listens to mouse events, so a touch tap never reaches it;
+   * this registry lets the tap handler ask the same matchers about the cell
+   * the finger landed on.
+   */
+  private readonly linkMatchers = new Map<TerminalLinkMatcher, number>();
+  private linkTouchDisposable: TerminalDisposable | null = null;
+  private tapCandidate: {
+    identifier: number;
+    x: number;
+    y: number;
+    moved: boolean;
+    startedAt: number;
+  } | null = null;
 
   constructor(options: XtermEmulatorOptions) {
     const initialFontSize = options.fontSize ?? BASELINE_METRICS.fontSize;
@@ -171,22 +193,49 @@ export class XtermEmulator implements TerminalEmulator {
       return;
     }
     if (this.terminal.element?.parentElement === host) {
+      // Re-assert ownership: the property is the host's debug/E2E reference,
+      // and this instance still owns the element inside it.
+      this.setHostReference(host);
       return;
     }
     if (this.terminal.element) {
       // xterm.open() is one-shot: once the terminal has been opened it returns
       // early when called again. Reparent the existing DOM tree so detach /
       // reattach preserves both the buffer and the renderer state.
+      this.releaseHostReference();
       host.appendChild(this.terminal.element);
-      (host as XtermMountElement).xtermInstance = this.terminal;
+      this.setHostReference(host);
       this.terminal.refresh(0, this.terminal.rows - 1);
       return;
     }
     this.terminal.open(host);
     // Expose the Terminal instance on the container element so E2E tests can
     // read the buffer (canvas/webgl renderers don't put text in the DOM).
-    (host as XtermMountElement).xtermInstance = this.terminal;
+    this.setHostReference(host);
     this.remeasureOnFontLoad();
+    this.ensureLinkTouchHandler();
+  }
+
+  private setHostReference(host: HTMLElement): void {
+    (host as XtermMountElement).xtermInstance = this.terminal;
+    this.mountHost = host;
+  }
+
+  /**
+   * Drop the debug/E2E reference only when it still names *this* Terminal.
+   *
+   * A host can be reused by a replacement renderer before the old instance is
+   * disposed; an unconditional `delete` would then hide the live reference and
+   * leave a stale one unaccounted for (#2879).
+   */
+  private releaseHostReference(): void {
+    for (const host of [this.mountHost, this.terminal.element?.parentElement ?? null]) {
+      const mount = host as XtermMountElement | null;
+      if (mount && mount.xtermInstance === this.terminal) {
+        delete mount.xtermInstance;
+      }
+    }
+    this.mountHost = null;
   }
 
   /**
@@ -215,7 +264,11 @@ export class XtermEmulator implements TerminalEmulator {
     if (this.disposed) {
       return;
     }
-    this.terminal.element?.remove();
+    const element = this.terminal.element;
+    // Release before remove(): the element's parent is how the reference is
+    // found when no host was recorded (or was externally moved).
+    this.releaseHostReference();
+    element?.remove();
   }
 
   dispose(): void {
@@ -223,6 +276,10 @@ export class XtermEmulator implements TerminalEmulator {
       return;
     }
     this.disposed = true;
+    this.releaseHostReference();
+    this.linkTouchDisposable?.dispose();
+    this.linkTouchDisposable = null;
+    this.linkMatchers.clear();
     this.renderer.dispose();
     // xterm's own addon manager disposes every registered addon exactly once.
     this.terminal.dispose();
@@ -307,7 +364,9 @@ export class XtermEmulator implements TerminalEmulator {
    * so a stale match cannot underline the wrong cells.
    */
   registerLinkMatcher(matcher: TerminalLinkMatcher): TerminalDisposable {
-    return this.terminal.registerLinkProvider({
+    this.linkMatchers.set(matcher, (this.linkMatchers.get(matcher) ?? 0) + 1);
+    this.ensureLinkTouchHandler();
+    const provider = this.terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber: number, callback: (links: ILink[] | undefined) => void) => {
         const line = readLogicalLine(this.terminal, bufferLineNumber);
         if (line.text.length === 0) {
@@ -323,6 +382,126 @@ export class XtermEmulator implements TerminalEmulator {
         callback(links.length > 0 ? links : undefined);
       },
     });
+    return {
+      dispose: () => {
+        provider.dispose();
+        const count = this.linkMatchers.get(matcher) ?? 0;
+        if (count <= 1) {
+          this.linkMatchers.delete(matcher);
+        } else {
+          this.linkMatchers.set(matcher, count - 1);
+        }
+        this.releaseLinkTouchHandlerIfIdle();
+      },
+    };
+  }
+
+  /**
+   * Install the tap → link activation listeners (#3187).
+   *
+   * A tap is a single finger that moved less than the shell's own 10px
+   * gesture slop and lifted within 500ms. Longer presses (the direction pad)
+   * and drags (scroll/selection) are left to their owners. The handler never
+   * writes to the PTY: it asks the registered Product matchers about the drawn
+   * cell and invokes the same activation the mouse linkifier would.
+   */
+  private ensureLinkTouchHandler(): void {
+    if (this.linkTouchDisposable || this.linkMatchers.size === 0) {
+      return;
+    }
+    const element = this.terminal.element;
+    if (!element) {
+      return;
+    }
+    const onStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        this.tapCandidate = null;
+        return;
+      }
+      const touch = event.touches[0]!;
+      this.tapCandidate = {
+        identifier: touch.identifier,
+        x: touch.clientX,
+        y: touch.clientY,
+        moved: false,
+        startedAt: Date.now(),
+      };
+    };
+    const onMove = (event: TouchEvent) => {
+      const candidate = this.tapCandidate;
+      if (!candidate) {
+        return;
+      }
+      const touch = Array.from(event.touches).find(
+        (item) => item.identifier === candidate.identifier,
+      );
+      if (!touch) {
+        return;
+      }
+      if (Math.hypot(touch.clientX - candidate.x, touch.clientY - candidate.y) > 10) {
+        candidate.moved = true;
+      }
+    };
+    const onEnd = (event: TouchEvent) => {
+      const candidate = this.tapCandidate;
+      this.tapCandidate = null;
+      if (!candidate) {
+        return;
+      }
+      const touch = Array.from(event.changedTouches).find(
+        (item) => item.identifier === candidate.identifier,
+      );
+      if (
+        !touch ||
+        candidate.moved ||
+        Date.now() - candidate.startedAt > 500
+      ) {
+        return;
+      }
+      this.activateLinkAtPoint(touch.clientX, touch.clientY);
+    };
+    const onCancel = () => {
+      this.tapCandidate = null;
+    };
+    element.addEventListener('touchstart', onStart, { passive: true });
+    element.addEventListener('touchmove', onMove, { passive: true });
+    element.addEventListener('touchend', onEnd, { passive: true });
+    element.addEventListener('touchcancel', onCancel, { passive: true });
+    this.linkTouchDisposable = {
+      dispose: () => {
+        element.removeEventListener('touchstart', onStart);
+        element.removeEventListener('touchmove', onMove);
+        element.removeEventListener('touchend', onEnd);
+        element.removeEventListener('touchcancel', onCancel);
+      },
+    };
+  }
+
+  private releaseLinkTouchHandlerIfIdle(): void {
+    if (this.linkMatchers.size > 0) {
+      return;
+    }
+    this.linkTouchDisposable?.dispose();
+    this.linkTouchDisposable = null;
+    this.tapCandidate = null;
+  }
+
+  /** Activate the Product link drawn at a client point, if any (#3187). */
+  private activateLinkAtPoint(clientX: number, clientY: number): boolean {
+    const point = logicalLinePoint(this.terminal, clientX, clientY);
+    if (!point || point.offset < 0) {
+      return false;
+    }
+    for (const matcher of this.linkMatchers.keys()) {
+      const hit = matcher({ text: point.line.text }).find(
+        (range) => point.offset >= range.startIndex && point.offset < range.endIndex,
+      );
+      if (hit) {
+        hit.activate();
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

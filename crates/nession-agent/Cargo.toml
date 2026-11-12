@@ -23,6 +23,11 @@ nession-tmux = { path = "../nession-tmux" }
 nession-runtime = { path = "../nession-runtime" }
 nession-claude-code = { path = "../nession-claude-code" }
 nession-git = { path = "../nession-git" }
+nession-github = { path = "../nession-github" }
+nession-sandbox = { path = "../nession-sandbox" }
+# The reusable EROFS cache mechanics (#3303). The Agent adapter supplies the
+# configured root and identity; the crate owns download/verify/publish/pin.
+nession-erofs = { path = "../nession-erofs", default-features = false, features = ["cache"] }
 # The shared MCP access layer (#565). The Agent supplies the node backend and
 # reuses the Server client for the cluster backend.
 nession-mcp = { path = "../nession-mcp", features = ["remote"] }
@@ -46,6 +51,9 @@ futures-util.workspace = true
 tokio-rustls.workspace = true
 base64.workspace = true
 mime_guess.workspace = true
+# Durable EROFS cache download (#3023): bounded authenticated streaming.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+sha2.workspace = true
 portable-pty.workspace = true
 if-addrs.workspace = true
 
@@ -63,6 +71,7 @@ nession-server = { path = "../nession-server" }
 base64.workspace = true
 rand.workspace = true
 tempfile = "3"
+httptest = "0.16"
 # A self-signed identity for the TLS half of the P2P handshake-deadline tests
 # (#2653). Generated per test rather than committed as PEM material.
 rcgen = "0.13"

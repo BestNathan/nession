@@ -2,6 +2,20 @@
   "$note": "generated — do not edit; run: node design/scripts/resolve-contracts.mjs",
   "viewports": [
     {
+      "id": "web.small-laptop",
+      "experience": "web",
+      "role": "Small laptop",
+      "width": 1024,
+      "height": 768
+    },
+    {
+      "id": "web.narrow-laptop",
+      "experience": "web",
+      "role": "Narrow laptop",
+      "width": 1180,
+      "height": 900
+    },
+    {
       "id": "web.compact-laptop",
       "experience": "web",
       "role": "Compact laptop",
@@ -52,6 +66,142 @@
     }
   ],
   "patterns": {
+    "pattern.choice-item": {
+      "id": "pattern.choice-item",
+      "patternRef": "docs/design/design-system/patterns/popup-menu.md",
+      "extends": [],
+      "web": {
+        "overflow": "wrap",
+        "wrap": true,
+        "minHeightToken": "experience.web.control.sm",
+        "maxWidthToken": "experience.web.overlay.choiceMaxWidth",
+        "scrollOwner": false,
+        "minHeightTokenPx": 28,
+        "maxWidthTokenPx": 480
+      },
+      "app": {
+        "overflow": "wrap",
+        "wrap": true,
+        "minHeightToken": "experience.app.control.sm",
+        "maxWidthToken": "experience.app.overlay.choiceMaxWidth",
+        "scrollOwner": false,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "minHeightTokenPx": 44,
+        "touchTargetTokenPx": 44,
+        "maxWidthTokenPx": 480
+      }
+    },
+    "pattern.configuration-form": {
+      "id": "pattern.configuration-form",
+      "patternRef": "docs/design/design-system/patterns/configuration-form.md",
+      "extends": [],
+      "web": {
+        "overflow": "wrap",
+        "wrap": true,
+        "controlHeightToken": "experience.web.control.md",
+        "parts": {
+          "form-section-title": {
+            "typographyToken": "experience.web.typography.secondary",
+            "typography": {
+              "sizePx": 12.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-secondary-size",
+              "weightVar": "--nession-typography-secondary-weight",
+              "lineHeightVar": "--nession-typography-secondary-line-height"
+            }
+          },
+          "form-section-description": {
+            "typographyToken": "experience.web.typography.caption",
+            "typography": {
+              "sizePx": 11,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          },
+          "form-help": {
+            "typographyToken": "experience.web.typography.caption",
+            "typography": {
+              "sizePx": 11,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          },
+          "form-error": {
+            "typographyToken": "experience.web.typography.caption",
+            "typography": {
+              "sizePx": 11,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          }
+        },
+        "controlHeightTokenPx": 32
+      },
+      "app": {
+        "overflow": "wrap",
+        "wrap": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "controlHeightToken": "experience.app.control.md",
+        "parts": {
+          "form-section-title": {
+            "typographyToken": "experience.app.typography.secondary",
+            "typography": {
+              "sizePx": 13,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-secondary-size",
+              "weightVar": "--nession-typography-secondary-weight",
+              "lineHeightVar": "--nession-typography-secondary-line-height"
+            }
+          },
+          "form-section-description": {
+            "typographyToken": "experience.app.typography.caption",
+            "typography": {
+              "sizePx": 11.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          },
+          "form-help": {
+            "typographyToken": "experience.app.typography.caption",
+            "typography": {
+              "sizePx": 11.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          },
+          "form-error": {
+            "typographyToken": "experience.app.typography.caption",
+            "typography": {
+              "sizePx": 11.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          }
+        },
+        "touchTargetTokenPx": 44,
+        "controlHeightTokenPx": 44
+      }
+    },
     "pattern.context-capsule": {
       "id": "pattern.context-capsule",
       "patternRef": "docs/design/design-system/patterns/context-capsule.md",
@@ -91,6 +241,83 @@
         "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       }
     },
+    "pattern.operation-surface": {
+      "id": "pattern.operation-surface",
+      "patternRef": "docs/design/design-system/patterns/operation-surface.md",
+      "extends": [],
+      "web": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": true,
+        "controlHeightToken": "experience.web.control.md",
+        "parts": {
+          "operation-title": {
+            "typographyToken": "experience.web.typography.title",
+            "typography": {
+              "sizePx": 16,
+              "weight": 600,
+              "lineHeight": 1.25,
+              "sizeVar": "--nession-typography-title-size",
+              "weightVar": "--nession-typography-title-weight",
+              "lineHeightVar": "--nession-typography-title-line-height"
+            }
+          },
+          "operation-error": {
+            "typographyToken": "experience.web.typography.secondary",
+            "typography": {
+              "sizePx": 12.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-secondary-size",
+              "weightVar": "--nession-typography-secondary-weight",
+              "lineHeightVar": "--nession-typography-secondary-line-height"
+            }
+          }
+        },
+        "controlHeightTokenPx": 32
+      },
+      "app": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "controlHeightToken": "experience.app.control.md",
+        "parts": {
+          "operation-error": {
+            "typographyToken": "experience.app.typography.secondary",
+            "typography": {
+              "sizePx": 13,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-secondary-size",
+              "weightVar": "--nession-typography-secondary-weight",
+              "lineHeightVar": "--nession-typography-secondary-line-height"
+            }
+          }
+        },
+        "touchTargetTokenPx": 44,
+        "controlHeightTokenPx": 44
+      }
+    },
+    "pattern.overlay-surfaces": {
+      "id": "pattern.overlay-surfaces",
+      "patternRef": "docs/design/design-system/patterns/overlay-surfaces.md",
+      "extends": [],
+      "web": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": "dialog-body",
+        "maxWidthToken": "experience.web.overlay.standardMaxWidth",
+        "maxWidthTokenPx": 640
+      },
+      "app": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": "dialog-body",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "touchTargetTokenPx": 44
+      }
+    },
     "pattern.popup-menu": {
       "id": "pattern.popup-menu",
       "patternRef": "docs/design/design-system/patterns/popup-menu.md",
@@ -109,6 +336,128 @@
         "scrollOwner": true,
         "touchTargetToken": "experience.app.touchTarget.min",
         "heightTokenPx": 44,
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.resource-detail": {
+      "id": "pattern.resource-detail",
+      "patternRef": "docs/design/design-system/patterns/resource-detail.md",
+      "extends": [],
+      "web": {
+        "overflow": "wrap",
+        "wrap": true,
+        "parts": {
+          "detail-title": {
+            "typographyToken": "experience.web.typography.title",
+            "typography": {
+              "sizePx": 16,
+              "weight": 600,
+              "lineHeight": 1.25,
+              "sizeVar": "--nession-typography-title-size",
+              "weightVar": "--nession-typography-title-weight",
+              "lineHeightVar": "--nession-typography-title-line-height"
+            }
+          },
+          "detail-section-title": {
+            "typographyToken": "experience.web.typography.secondary",
+            "typography": {
+              "sizePx": 12.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-secondary-size",
+              "weightVar": "--nession-typography-secondary-weight",
+              "lineHeightVar": "--nession-typography-secondary-line-height"
+            }
+          },
+          "detail-fact-label": {
+            "typographyToken": "experience.web.typography.caption",
+            "typography": {
+              "sizePx": 11,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          },
+          "detail-fact-value": {
+            "typographyTokens": [
+              "experience.web.typography.body",
+              "experience.web.typography.code"
+            ],
+            "typographies": [
+              {
+                "sizePx": 13,
+                "weight": 450,
+                "lineHeight": 1.35,
+                "sizeVar": "--nession-typography-body-size",
+                "weightVar": "--nession-typography-body-weight",
+                "lineHeightVar": "--nession-typography-body-line-height"
+              },
+              {
+                "sizePx": 12.5,
+                "weight": 475,
+                "lineHeight": 1.35,
+                "sizeVar": "--nession-typography-code-size",
+                "weightVar": "--nession-typography-code-weight",
+                "lineHeightVar": "--nession-typography-code-line-height"
+              }
+            ]
+          }
+        }
+      },
+      "app": {
+        "overflow": "wrap",
+        "wrap": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "parts": {
+          "detail-section-title": {
+            "typographyToken": "experience.app.typography.secondary",
+            "typography": {
+              "sizePx": 13,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-secondary-size",
+              "weightVar": "--nession-typography-secondary-weight",
+              "lineHeightVar": "--nession-typography-secondary-line-height"
+            }
+          },
+          "detail-fact-label": {
+            "typographyToken": "experience.app.typography.caption",
+            "typography": {
+              "sizePx": 11.5,
+              "weight": 500,
+              "lineHeight": 1.3,
+              "sizeVar": "--nession-typography-caption-size",
+              "weightVar": "--nession-typography-caption-weight",
+              "lineHeightVar": "--nession-typography-caption-line-height"
+            }
+          },
+          "detail-fact-value": {
+            "typographyTokens": [
+              "experience.app.typography.body",
+              "experience.app.typography.code"
+            ],
+            "typographies": [
+              {
+                "sizePx": 14,
+                "weight": 450,
+                "lineHeight": 1.4,
+                "sizeVar": "--nession-typography-body-size",
+                "weightVar": "--nession-typography-body-weight",
+                "lineHeightVar": "--nession-typography-body-line-height"
+              },
+              {
+                "sizePx": 13,
+                "weight": 475,
+                "lineHeight": 1.35,
+                "sizeVar": "--nession-typography-code-size",
+                "weightVar": "--nession-typography-code-weight",
+                "lineHeightVar": "--nession-typography-code-line-height"
+              }
+            ]
+          }
+        },
         "touchTargetTokenPx": 44
       }
     },

@@ -135,6 +135,11 @@ impl AgentConnection {
                         binding_profiles: Vec::new(),
                         binding_revision: None,
                         terminal_cols: None,
+                        // #565's node tool has no Sandbox parameter; omitting
+                        // the policy lets the Agent apply its configured
+                        // default (#2681).
+                        sandbox: None,
+                        managed: None,
                     },
                 ),
                 CREATE_TIMEOUT,

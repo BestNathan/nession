@@ -166,7 +166,7 @@ async fn a_session_create_round_trips() {
             .await
             .unwrap();
         let reply = client
-            .create_session("a1", "work")
+            .create_session("a1", "work", None)
             .await
             .expect("the reply arrives");
         assert!(reply.success);
@@ -205,7 +205,7 @@ async fn a_refused_session_create_comes_back_as_a_reply() {
             .await
             .unwrap();
         let reply = client
-            .create_session("a1", "work")
+            .create_session("a1", "work", None)
             .await
             .expect("a refusal is a reply, not a failure");
         assert!(!reply.success);

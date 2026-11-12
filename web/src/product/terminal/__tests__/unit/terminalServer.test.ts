@@ -90,6 +90,35 @@ describe('TerminalServerPlugin', () => {
       }
       expect(cb).toHaveBeenCalledTimes(1);
     });
+
+    it('carries the Agent\'s notification capabilities verbatim (#2877)', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      const cb = vi.fn();
+      plugin.onRelayReady('work', cb);
+      surface.pushMessage('server.session.relay.ready', {
+        ...valid,
+        terminal_capabilities: [
+          'terminal-progress-notifications-v1',
+          'some-future-capability',
+          7,
+        ],
+      });
+      expect(cb).toHaveBeenCalledExactlyOnceWith({
+        sessionName: 'work', browserClientId: 'unit-client',
+        relayRequestId: 'real-wire-id', routeId,
+        subscriberGeneration: 41, streamEpoch: 7,
+        terminalCapabilities: [
+          'terminal-progress-notifications-v1',
+          'some-future-capability',
+        ],
+      }, 3);
+      // Absent is an older Agent, never invented support.
+      cb.mockClear();
+      surface.pushMessage('server.session.relay.ready', valid);
+      expect(cb).toHaveBeenCalledTimes(1);
+      const proof = cb.mock.calls[0][0] as Record<string, unknown>;
+      expect('terminalCapabilities' in proof).toBe(false);
+    });
   });
 
   describe('relay lifecycle sends', () => {
@@ -223,6 +252,63 @@ describe('TerminalServerPlugin', () => {
         expect(plugin.sendRelayOutputApplied('work', invalid)).toBe(false);
       }
       expect(surface.sent).toHaveLength(1);
+    });
+
+    it('sends the negotiated response-less progress notification on its own wire (#2877)', () => {
+      const ack = {
+        subscriberGeneration: 41, streamEpoch: 7, rendererGeneration: 3, appliedThrough: 12,
+      };
+      expect(plugin.sendRelayOutputProgress('work', ack)).toBe(true);
+      expect(surface.sent).toEqual([{
+        type: 'client.terminal.output.progress',
+        payload: {
+          session_name: 'work', subscriber_generation: 41,
+          stream_epoch: 7, renderer_generation: 3, applied_through: 12,
+        },
+      }]);
+      for (const invalid of [
+        { ...ack, subscriberGeneration: 0 },
+        { ...ack, streamEpoch: 0 },
+        { ...ack, rendererGeneration: 0 },
+        { ...ack, appliedThrough: -1 },
+        { ...ack, appliedThrough: Number.MAX_SAFE_INTEGER + 1 },
+      ]) {
+        expect(plugin.sendRelayOutputProgress('work', invalid)).toBe(false);
+      }
+      expect(surface.sent).toHaveLength(1);
+    });
+  });
+
+  describe('Agent reconcile notice over Relay (#2877)', () => {
+    it('routes a strict current-subscription notice by session and drops malformed ones', () => {
+      const cb = vi.fn();
+      plugin.onRelayReconcileRequired('work', cb);
+      plugin.onRelayReconcileRequired('other', vi.fn());
+
+      const notice = {
+        session_name: 'work', subscriber_generation: 41, stream_epoch: 7,
+        renderer_generation: 3, head_seq: 12, first_available_seq: 4,
+        reason: 'progress-ahead-of-issued', action: 'resume',
+      };
+      surface.pushMessage('agent.terminal.reconcile-required', notice);
+      expect(cb).toHaveBeenCalledExactlyOnceWith({
+        sessionName: 'work', subscriberGeneration: 41, streamEpoch: 7,
+        rendererGeneration: 3, headSeq: 12, firstAvailableSeq: 4,
+        reason: 'progress-ahead-of-issued', action: 'resume',
+      });
+
+      for (const bad of [
+        { ...notice, session_name: 'other' },
+        { ...notice, subscriber_generation: 0 },
+        { ...notice, stream_epoch: undefined },
+        { ...notice, head_seq: -1 },
+        { ...notice, reason: 'made-up' },
+        { ...notice, action: 'give-up' },
+        { ...notice, reason: undefined },
+      ]) {
+        surface.pushMessage('agent.terminal.reconcile-required', bad);
+      }
+      expect(cb).toHaveBeenCalledTimes(1);
     });
   });
 

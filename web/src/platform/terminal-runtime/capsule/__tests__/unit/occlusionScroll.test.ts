@@ -7,6 +7,7 @@ import {
   isFollowingMarginBottom,
   marginLinesFromOcclusion,
   targetViewportY,
+  type AnimationFrameScheduler,
   type CapsuleScrollTerminalPort,
 } from '@/platform/terminal-runtime/capsule/occlusionScroll';
 import type { TerminalMouseTrackingMode } from '@/platform/terminal-runtime/emulator';
@@ -69,10 +70,55 @@ function makeHost(
     style: {
       getPropertyValue: (name: string) => styleValues.get(name) ?? '',
       setProperty: (name: string, value: string) => styleValues.set(name, value),
+      removeProperty: (name: string) => { styleValues.delete(name); },
     },
     dataset: {} as DOMStringMap,
   } as unknown as HTMLElement;
   return { host };
+}
+
+/**
+ * A deterministic `requestAnimationFrame` (#2879 SC-01).
+ *
+ * Callbacks are recorded, not executed: a test decides which frame runs and
+ * can deliver a callback after `cancel` as a browser may already have queued.
+ */
+function makeFrameScheduler(): {
+  scheduler: AnimationFrameScheduler;
+  callbacks: FrameRequestCallback[];
+  cancelled: number[];
+  requestIds: number[];
+  runNextFrame(): void;
+} {
+  let nextId = 1;
+  const callbacks: FrameRequestCallback[] = [];
+  const cancelled: number[] = [];
+  const requestIds: number[] = [];
+  const queued = new Map<number, FrameRequestCallback>();
+  return {
+    scheduler: {
+      schedule: (callback) => {
+        const id = nextId++;
+        requestIds.push(id);
+        queued.set(id, callback);
+        callbacks.push(callback);
+        return id;
+      },
+      cancel: (id) => {
+        cancelled.push(id);
+        queued.delete(id);
+      },
+    },
+    callbacks,
+    cancelled,
+    requestIds,
+    runNextFrame() {
+      const entry = [...queued.entries()][0];
+      if (!entry) { throw new Error('no queued animation frame'); }
+      queued.delete(entry[0]);
+      entry[1](0);
+    },
+  };
 }
 
 
@@ -226,6 +272,88 @@ describe('occlusionScroll helpers', () => {
     occlusion.enterHistory();
 
     expect(occlusion.snapshotFollowing()).toBe(false);
+  });
+});
+
+describe('follow-bottom scheduling (#2879 SC-01)', () => {
+  function makeOcclusion() {
+    const frames = makeFrameScheduler();
+    const { port } = makePort({ viewportY: 16, length: 40 });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16, frames.scheduler);
+    return { frames, port, host, occlusion };
+  }
+
+  it('coalesces high-frequency output into at most one pending logical job', () => {
+    const { frames, port, occlusion } = makeOcclusion();
+
+    for (let index = 0; index < 1_000; index += 1) {
+      occlusion.afterOutputWhileFollowing();
+    }
+    // One outer frame for the whole burst — not one pair per write callback.
+    expect(frames.requestIds).toHaveLength(1);
+
+    frames.runNextFrame();
+    // The job is still pending (inner frame), so further output joins it.
+    expect(frames.requestIds).toHaveLength(2);
+    for (let index = 0; index < 1_000; index += 1) {
+      occlusion.afterOutputWhileFollowing();
+    }
+    expect(frames.requestIds).toHaveLength(2);
+
+    frames.runNextFrame();
+    expect(port.scrollToBottom).toHaveBeenCalledTimes(1);
+
+    // The coalescing window closes after the job completes: the next output
+    // schedules a fresh reconciliation instead of being swallowed.
+    occlusion.afterOutputWhileFollowing();
+    expect(frames.requestIds).toHaveLength(3);
+    frames.runNextFrame();
+    frames.runNextFrame();
+    expect(port.scrollToBottom).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels queued frames on disposal and ignores a callback that still runs', () => {
+    const { frames, host, occlusion } = makeOcclusion();
+    occlusion.afterOutputWhileFollowing();
+    const lateOuter = frames.callbacks[0]!;
+    expect(frames.requestIds).toEqual([1]);
+
+    occlusion.dispose();
+
+    expect(frames.cancelled).toEqual([1]);
+    lateOuter(0);
+    // The stale callback neither schedules another frame nor mutates the host.
+    expect(frames.requestIds).toEqual([1]);
+    expect(host.dataset.terminalScrollMode).toBeUndefined();
+  });
+
+  it('cancels the inner frame and ignores it when disposal lands between frames', () => {
+    const { frames, port, host, occlusion } = makeOcclusion();
+    occlusion.afterOutputWhileFollowing();
+    frames.runNextFrame(); // outer frame runs and queues the inner one
+    const lateInner = frames.callbacks[1]!;
+    const innerId = frames.requestIds[1]!;
+
+    const scroll = vi.spyOn(occlusion, 'scrollToMarginBottom');
+    occlusion.dispose();
+
+    expect(frames.cancelled).toContain(innerId);
+    lateInner(0);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(port.scrollToBottom).not.toHaveBeenCalled();
+    expect(host.dataset.terminalScrollMode).toBeUndefined();
+  });
+
+  it('does not follow when the user entered history before the frame fired', () => {
+    const { frames, port, occlusion } = makeOcclusion();
+    occlusion.afterOutputWhileFollowing();
+    occlusion.enterHistory();
+
+    frames.runNextFrame();
+    frames.runNextFrame();
+
+    expect(port.scrollToBottom).not.toHaveBeenCalled();
   });
 });
 

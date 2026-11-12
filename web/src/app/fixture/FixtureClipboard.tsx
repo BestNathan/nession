@@ -31,12 +31,77 @@ export interface ClipboardHarness {
   readonly takeControlCalls: number;
   sent: string[];
   focus(): void;
+  /** Lifecycle/memory machinery (#2879); test-only, like the rest of the harness. */
+  lifecycle: LifecycleHarness;
+}
+
+/** A host the terminal was mounted in, observed by reference ownership. */
+export interface LifecycleHostObservation {
+  /** `live` names the attached Terminal, `other` a different one, `none` no Terminal. */
+  reference: 'none' | 'live' | 'other';
+  connected: boolean;
+}
+
+/** One read-only view of the controller's retained resources (#2879). */
+export interface LifecycleSnapshot {
+  terminalId: number | null;
+  /** Last non-empty buffer line, proving a buffer survived a reattach. */
+  bufferTail: string;
+  bufferLength: number;
+  hosts: LifecycleHostObservation[];
+  controllersLive: number;
+  rendererReplacements: number;
+  scrollback: number;
+}
+
+/**
+ * Lifecycle operations a Case performs on the production `TerminalController`.
+ *
+ * These mirror real transitions — viewport reparent/reattach, Session
+ * replacement, renderer overflow repair and link cleanup — instead of
+ * reimplementing them in the Case. Provider inspection and activation stay in
+ * the Case's page context, where the xterm-private check does not apply.
+ */
+export interface LifecycleHarness {
+  /** Mount the same controller in a new host (the reparent path). */
+  attachNewHost(): void;
+  /** Detach the controller from its current host, preserving its buffer. */
+  detach(): void;
+  /** Dispose the controller (Session teardown). */
+  disposeController(): void;
+  snapshot(): LifecycleSnapshot;
+  /** Register the Case link matcher; one line containing LINK becomes a link. */
+  installLinks(): void;
+  /** Dispose the public link registration exactly once. */
+  disposeLinks(): void;
+  /** Links activated through the provider currently registered on the live xterm. */
+  activations(): number;
+  /** Create/attach/parse/detach/dispose one replacement controller (Session switch). */
+  rotateSession(): Promise<void>;
+  /** Queue more events than the production writer admits, forcing a rebuild. */
+  forceOverflow(): void;
 }
 
 declare global {
   interface Window {
     clipboardHarness?: ClipboardHarness;
   }
+}
+
+/** The debug/E2E reference `mount()` places on a host (see XtermEmulator). */
+interface DebugHost extends HTMLElement {
+  xtermInstance?: unknown;
+}
+
+/** The private slice of the raw Terminal the lifecycle Case observes. */
+interface DebugTerminal {
+  options: { scrollback?: number };
+  buffer: {
+    active: {
+      length: number;
+      getLine(index: number): { translateToString(trimRight?: boolean): string } | undefined;
+    };
+  };
 }
 
 /**
@@ -69,6 +134,153 @@ function createHarnessTransport() {
     },
   };
   return { transport, sent };
+}
+
+type HarnessTransport = ReturnType<typeof createHarnessTransport>['transport'];
+
+/** Stable numeric identities for raw Terminals (never serialize the object). */
+function createTerminalIdMap(): (terminal: object | null) => number | null {
+  const ids = new WeakMap<object, number>();
+  let nextId = 1;
+  return (terminal) => {
+    if (!terminal) { return null; }
+    let id = ids.get(terminal);
+    if (id === undefined) {
+      id = nextId;
+      nextId += 1;
+      ids.set(terminal, id);
+    }
+    return id;
+  };
+}
+
+interface LifecycleHarnessOptions {
+  instance: TerminalController;
+  transport: HarnessTransport;
+  session: TerminalSession;
+  rendererReplacements(): number;
+}
+
+/** The #2879 lifecycle/memory operations, over the real controller. */
+function createLifecycleHarness({
+  instance,
+  transport,
+  session,
+  rendererReplacements,
+}: LifecycleHarnessOptions): LifecycleHarness {
+  const createdHosts: HTMLElement[] = [];
+  const viewportHost = document.querySelector('[data-terminal-viewport]');
+  if (viewportHost instanceof HTMLElement) {
+    createdHosts.push(viewportHost);
+  }
+  let rotationsLive = 0;
+  let mainDisposed = false;
+  let linkDisposable: { dispose(): void } | null = null;
+  let activatedLinks = 0;
+  const terminalIdOf = createTerminalIdMap();
+
+  const lifecycle: LifecycleHarness = {
+    attachNewHost() {
+      const root = document.querySelector('[data-testid="fixture-clipboard-host"]');
+      if (!(root instanceof HTMLElement)) { throw new Error('fixture host is missing'); }
+      const host = document.createElement('div');
+      host.style.width = '480px';
+      host.style.height = '160px';
+      root.appendChild(host);
+      createdHosts.push(host);
+      instance.attach(host);
+    },
+    detach() {
+      instance.detach();
+    },
+    disposeController() {
+      mainDisposed = true;
+      instance.dispose();
+    },
+    snapshot() {
+      const terminal = instance.terminal as unknown as DebugTerminal | null;
+      const buffer = terminal?.buffer.active;
+      let bufferTail = '';
+      if (buffer) {
+        // The newest non-empty line anywhere: a short write lands near the top
+        // of an otherwise empty screen, so a fixed tail window would miss it.
+        for (let index = buffer.length - 1; index >= 0; index -= 1) {
+          const text = buffer.getLine(index)?.translateToString(true) ?? '';
+          if (text) { bufferTail = text; break; }
+        }
+      }
+      return {
+        terminalId: terminalIdOf(instance.terminal as unknown as object | null),
+        bufferTail,
+        bufferLength: buffer?.length ?? 0,
+        hosts: createdHosts.map((host) => {
+          const reference = (host as DebugHost).xtermInstance;
+          return {
+            reference: reference === undefined
+              ? 'none'
+              : reference === instance.terminal ? 'live' : 'other',
+            connected: host.isConnected,
+          };
+        }),
+        controllersLive: (mainDisposed ? 0 : 1) + rotationsLive,
+        rendererReplacements: rendererReplacements(),
+        scrollback: terminal?.options.scrollback ?? 0,
+      };
+    },
+    installLinks() {
+      lifecycle.disposeLinks();
+      activatedLinks = 0;
+      linkDisposable = instance.registerLinkMatcher((line) => (
+        line.text.includes('LINK')
+          ? [{ startIndex: 0, endIndex: 4, activate: () => { activatedLinks += 1; } }]
+          : []
+      ));
+    },
+    disposeLinks() {
+      linkDisposable?.dispose();
+      linkDisposable = null;
+    },
+    activations() {
+      return activatedLinks;
+    },
+    async rotateSession() {
+      const root = document.querySelector('[data-testid="fixture-clipboard-host"]');
+      if (!(root instanceof HTMLElement)) { throw new Error('fixture host is missing'); }
+      const hostElement = document.createElement('div');
+      hostElement.style.width = '480px';
+      hostElement.style.height = '120px';
+      root.appendChild(hostElement);
+      const rotatedTransport = createHarnessTransport().transport;
+      rotationsLive += 1;
+      const rotated = new TerminalController(
+        { ...session, id: 'fixture:rotation:' + rotationsLive },
+        () => rotatedTransport,
+        { rendererType: 'canvas', scrollbackMode: 'local-buffer' },
+      );
+      try {
+        rotated.attach(hostElement);
+        rotatedTransport.emit('ROTATE\r\n');
+        await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); });
+        rotated.detach();
+      } finally {
+        rotated.dispose();
+        rotationsLive -= 1;
+      }
+      const retained = (hostElement as DebugHost).xtermInstance;
+      hostElement.remove();
+      if (retained !== undefined) {
+        throw new Error('a rotated Session host retained its xterm instance');
+      }
+    },
+    forceOverflow() {
+      // More events than the production writer admits (4096): this is the
+      // real overflow path, not a fixture-only disposal.
+      for (let index = 0; index < 4_500; index += 1) {
+        transport.emit('OVERFLOW ' + index + '\r\n');
+      }
+    },
+  };
+  return lifecycle;
 }
 
 /**
@@ -137,10 +349,14 @@ export function FixtureClipboard() {
   useEffect(() => {
     let sequence = 0;
     const { transport, sent } = createHarnessTransport();
+    let rendererReplacements = 0;
     const events: TerminalControllerEvents = {
       onClipboardNotice: (state: ClipboardNotice) => {
         sequence += 1;
         setNotice({ id: sequence, notice: state });
+      },
+      onRendererReplaced: () => {
+        rendererReplacements += 1;
       },
     };
     const session: TerminalSession = {
@@ -158,6 +374,7 @@ export function FixtureClipboard() {
       scrollbackMode: 'local-buffer',
       events,
     });
+
     // TerminalViewport owns attach/detach, exactly as it does in the product,
     // so the touch gesture (#2657) is mounted over the real surface here too.
     setController(instance);
@@ -168,6 +385,12 @@ export function FixtureClipboard() {
       takeControl: () => { takeControlRef.current += 1; },
       get takeControlCalls() { return takeControlRef.current; },
       focus: () => instance.focus(),
+      lifecycle: createLifecycleHarness({
+        instance,
+        transport,
+        session,
+        rendererReplacements: () => rendererReplacements,
+      }),
     };
     return () => {
       delete window.clipboardHarness;

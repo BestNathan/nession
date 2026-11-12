@@ -6,11 +6,14 @@ import type {
   EnvFileRef,
   EnvGetResponse,
   EnvListResponse,
+  EnvSource,
+  EnvWriteResponse,
   SessionEnvActiveResponse,
   SessionEnvBindingResponse,
 } from '@/capabilities/env';
 import { WIRE as ENV_LIST_WIRE } from '@/generated/protocol/core/server-env-list/v1';
 import { WIRE as ENV_GET_WIRE } from '@/generated/protocol/core/server-env-get/v1';
+import { WIRE as ENV_WRITE_WIRE } from '@/generated/protocol/core/server-env-write/v1';
 import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/server-session-env-active/v1';
 import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
 import { WIRE as SESSION_ENV_BINDING_SET_WIRE } from '@/generated/protocol/core/server-session-env-binding-set/v1';
@@ -50,6 +53,7 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   /#/fixture/workspace?capability=env&env=unsupported  → tmux applied, shell unsupported
  *   /#/fixture/workspace?capability=env&env=error        → materialization failed
  *   /#/fixture/workspace?capability=env&env=unavailable  → Agent did not report
+ *   /#/fixture/workspace?capability=env&env=race         → first list answer held; imports mutate
  */
 
 /**
@@ -324,12 +328,110 @@ function afterReapply(binding: SessionEnvBindingResponse): SessionEnvBindingResp
   });
 }
 
+/**
+ * Test-only control for the `env=race` scenario (#2878).
+ *
+ * The first list answer is held so a test can commit an import while that
+ * older request is still in flight; releasing it answers with the snapshot
+ * taken when the request was issued. This is the ordering the real server
+ * produces when a slow response was computed before the import, not a state
+ * the product cannot reach.
+ */
+export interface FixtureEnvControl {
+  /** Resolve the held first list with the snapshot captured at request time. */
+  releaseList: () => void;
+  /** True while the held first list is waiting to be released. */
+  isHeld: () => boolean;
+}
+
+/** Read one mutable `env=race` profile, including a just-imported one. */
+function raceEnvContent(
+  contents: ReadonlyMap<string, string>,
+  payload: Record<string, unknown>,
+): EnvGetResponse {
+  const key = `${String(payload.source)}:${String(payload.agent_id ?? '')}:${String(payload.name)}`;
+  const content = contents.get(key);
+  if (content === undefined) {
+    return { success: false, error: `env file not found: ${String(payload.name)}` };
+  }
+  const inUse = key === 'agent:devbox-01:prod.env' ? PROD_IN_USE_BY : [];
+  return { success: true, content, in_use_by: inUse };
+}
+
+function countAssignments(content: string): number {
+  return content
+    .split('\n')
+    .filter((line) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(line)).length;
+}
+
+/**
+ * Apply the one write `env=race` accepts: a successful import adds its file
+ * to the list the next read returns. This is the state a real import produces;
+ * the fixture still refuses writes in every other scenario.
+ */
+function raceEnvWrite(
+  files: EnvFileInfo[],
+  contents: Map<string, string>,
+  payload: Record<string, unknown>,
+): EnvWriteResponse {
+  const name = String(payload.name ?? '');
+  if (!name) {
+    return { success: false, error: 'name required' };
+  }
+  const source: EnvSource = payload.source === 'agent' ? 'agent' : 'server';
+  const agentId = source === 'agent' && payload.agent_id ? String(payload.agent_id) : undefined;
+  const key = `${source}:${agentId ?? ''}:${name}`;
+  if (contents.has(key) && payload.overwrite !== true) {
+    return { success: false, exists: true };
+  }
+  const content = String(payload.content ?? '');
+  contents.set(key, content);
+  const entry: EnvFileInfo = {
+    name,
+    source,
+    agent_id: agentId,
+    size: content.length,
+    modified: Date.now(),
+    var_count: countAssignments(content),
+  };
+  const index = files.findIndex(
+    (file) => `${file.source}:${file.agent_id ?? ''}:${file.name}` === key,
+  );
+  if (index >= 0) {
+    files[index] = entry;
+  } else {
+    files.push(entry);
+  }
+  return { success: true };
+}
+
 export function fixtureEnvSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('env') ?? 'profiles';
-  const list: EnvListResponse = scenario === 'empty' ? { files: [] } : { files: FILES };
+  const race = scenario === 'race';
+  const files: EnvFileInfo[] = scenario === 'empty' ? [] : [...FILES];
   // The binding is the one mutable piece: SET and REAPPLY change the revision
   // this surface answers from then on.
   let binding = bindingFor(scenario);
+  // Only `env=race` mutates the list and accepts writes: the Case needs an
+  // import that really adds a Profile and a first list answer that can settle
+  // after it. Every other scenario keeps the stateless read-only answers.
+  const contents = new Map<string, string>([
+    ['server::staging.env', STAGING_CONTENT],
+    ['agent:devbox-01:prod.env', PROD_CONTENT],
+    ['agent:devbox-01:local.env', LOCAL_CONTENT],
+  ]);
+  let holdNextList = race;
+  let releaseHeldList: (() => void) | null = null;
+
+  if (race && typeof window !== 'undefined') {
+    (window as Window & { fixtureEnv?: FixtureEnvControl }).fixtureEnv = {
+      releaseList: () => {
+        releaseHeldList?.();
+        releaseHeldList = null;
+      },
+      isHeld: () => releaseHeldList !== null,
+    };
+  }
 
   // The real directory is filled from the agent list; the fixture fills the
   // same directory from the same FIXTURE_AGENTS the rest of the route renders
@@ -342,10 +444,22 @@ export function fixtureEnvSurface(search: string): PluginSurface {
     protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       if (type === ENV_LIST_WIRE) {
-        return Promise.resolve(list as T);
+        if (holdNextList) {
+          holdNextList = false;
+          const snapshot: EnvListResponse = { files: [...files] };
+          return new Promise<EnvListResponse>((resolve) => {
+            releaseHeldList = () => resolve(snapshot);
+          }) as Promise<T>;
+        }
+        return Promise.resolve({ files: [...files] } as T);
       }
       if (type === ENV_GET_WIRE) {
-        return Promise.resolve(contentFor(payload) as T);
+        return Promise.resolve(
+          (race ? raceEnvContent(contents, payload) : contentFor(payload)) as T,
+        );
+      }
+      if (type === ENV_WRITE_WIRE && race) {
+        return Promise.resolve(raceEnvWrite(files, contents, payload) as T);
       }
       if (type === SESSION_ENV_ACTIVE_WIRE) {
         return Promise.resolve(activeFor(payload.session_id) as T);

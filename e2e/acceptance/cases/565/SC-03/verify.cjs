@@ -1,7 +1,7 @@
 'use strict';
 // #565 SC-03: both embedders mount /mcp on their existing listener and serve
 // initialization, discovery and real reads/writes.
-const { run, targetSha, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -11,7 +11,12 @@ run(({ evidence }) => {
     'mcp::embedded_mcp_answers_cluster_reads_from_the_server',
     'mcp::embedded_mcp_node_tools_route_to_the_named_agent',
   ]);
-  const agent = crateTests('nession-agent', ['--test', 'integration', 'mcp::'], 900000);
+  const agent = crateTests(
+    'nession-agent',
+    ['--test', 'integration', 'mcp::'],
+    900000,
+    isolatedTmuxEnv('nession-565-sc03'),
+  );
   assertRan(agent, [
     'mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server',
     'mcp::agent_mcp_refuses_an_anonymous_request',

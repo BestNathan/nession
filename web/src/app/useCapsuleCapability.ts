@@ -22,6 +22,8 @@ import type {
 
 export interface CapsuleCapability {
   facts: CapabilityFacts | undefined;
+  /** Offer a capability's Peek explicitly (the Session Project chip uses it). */
+  chooseCapability: (id: CapabilityId) => void;
   capabilities: CapsuleCapabilityContribution;
   /** The capability emerging beside the capsule, if Nession decided one should. */
   projection: CapsuleCapabilityProjection | undefined;
@@ -63,7 +65,11 @@ export function useCapsuleCapability(
     }
   }, [sessionId]);
 
-  const resolution = resolveCapsuleCapabilities({ ...input, facts });
+  const resolution = resolveCapsuleCapabilities({
+    ...input,
+    facts,
+    activeCapabilityId: chosen ?? input.activeCapabilityId,
+  });
   const presences = resolveCapabilityPresences(resolution.snapshots, { surface: 'capsule' });
   // The capability the capsule is drawing, if any. Deliberately not named
   // `active`: that word is a `CapabilityState`, and this is a display choice.
@@ -136,6 +142,7 @@ export function useCapsuleCapability(
 
   return {
     facts,
+    chooseCapability: choose,
     capabilities:
       resolution.entries.length > 0
         ? {
@@ -179,6 +186,7 @@ export function useCapsuleCapability(
                 // The state the registry resolved, read back rather than
                 // re-derived — one decision, one place.
                 state: stateOf(shown),
+                projectContext: input.projectContext,
                 onFocusChange: setFocus,
               }),
           }

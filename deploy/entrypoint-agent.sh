@@ -21,6 +21,11 @@ AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 # point it at the PVC mount: /data is NFS in this deployment and binding a unix
 # socket there is not reliable.
 AGENT_TMUX_SOCKET="${AGENT_TMUX_SOCKET:-}"
+# Durable EROFS image cache (#3023). The Kubernetes manifest points this at the
+# existing PVC mounted at /data; leaving it unset uses the Agent's documented
+# default. The Agent validates the path and fails closed when an explicitly
+# declared cache is not durable.
+AGENT_EROFS_STORAGE_DIR="${AGENT_EROFS_STORAGE_DIR:-}"
 # The fixed column count this Agent creates Sessions at (#2487). The release
 # pipeline sets NESSION_TERMINAL_COLS from the same parameter that built the
 # Web bundle; AGENT_TERMINAL_COLS lets a standalone operator override it
@@ -28,6 +33,20 @@ AGENT_TMUX_SOCKET="${AGENT_TMUX_SOCKET:-}"
 # its own value in a central deployment, and an existing Session keeps its
 # pane width regardless.
 AGENT_TERMINAL_COLS="${AGENT_TERMINAL_COLS:-${NESSION_TERMINAL_COLS:-96}}"
+# Sandbox backend. The policy document is requested per Session; this section
+# only states what this host provides. `enabled=false` refuses every explicit
+# policy request but leaves Native Sessions unaffected. bubblewrap ships in the
+# image; an override is an operator path. `cgroup_root` is the **kernel-relative**
+# cgroup v2 path (as /proc/<pid>/cgroup reports it) of a delegated, writable
+# subtree with no processes of its own — not a /sys/fs/cgroup mount path.
+AGENT_SANDBOX_ENABLED="${AGENT_SANDBOX_ENABLED:-true}"
+AGENT_SANDBOX_BUBBLEWRAP_PATH="${AGENT_SANDBOX_BUBBLEWRAP_PATH:-}"
+AGENT_SANDBOX_CGROUP_ROOT="${AGENT_SANDBOX_CGROUP_ROOT:-}"
+AGENT_SANDBOX_STATE_DIR="${AGENT_SANDBOX_STATE_DIR:-}"
+case "${AGENT_SANDBOX_ENABLED}" in
+  true|false) ;;
+  *) echo "AGENT_SANDBOX_ENABLED must be true or false" >&2; exit 1 ;;
+esac
 # Config directory, overridable for an entrypoint test that must not write /etc.
 NESSON_CONFIG_DIR="${NESSON_CONFIG_DIR:-/etc/nession}"
 
@@ -67,6 +86,38 @@ fi
 if [ -n "${AGENT_TMUX_SOCKET}" ]; then
     echo "tmux_socket_path = \"${AGENT_TMUX_SOCKET}\"" >> /etc/nession/agent-config.toml
 fi
+
+# Only add the EROFS cache section if explicitly set. This table must follow
+# every top-level key above; otherwise a later top-level assignment would be
+# parsed as a member of `[erofs]`.
+if [ -n "${AGENT_EROFS_STORAGE_DIR}" ]; then
+    case "${AGENT_EROFS_STORAGE_DIR}" in
+        /*) ;;
+        *) echo "AGENT_EROFS_STORAGE_DIR must be absolute" >&2; exit 1 ;;
+    esac
+    if printf '%s' "${AGENT_EROFS_STORAGE_DIR}" | grep -q '[[:cntrl:]"]'; then
+        echo "AGENT_EROFS_STORAGE_DIR contains invalid characters" >&2; exit 1
+    fi
+    printf '\n[erofs]\nstorage_dir = "%s"\n' "${AGENT_EROFS_STORAGE_DIR}" >> "${NESSON_CONFIG_DIR}/agent-config.toml"
+fi
+
+# Sandbox configuration is an operator statement about this host. The table
+# must follow every top-level key; optional paths stay absent when unset so the
+# Agent's own defaults apply.
+{
+    echo ""
+    echo "[sandbox]"
+    echo "enabled = ${AGENT_SANDBOX_ENABLED}"
+    if [ -n "${AGENT_SANDBOX_BUBBLEWRAP_PATH}" ]; then
+        echo "bubblewrap_path = \"${AGENT_SANDBOX_BUBBLEWRAP_PATH}\""
+    fi
+    if [ -n "${AGENT_SANDBOX_CGROUP_ROOT}" ]; then
+        echo "cgroup_root = \"${AGENT_SANDBOX_CGROUP_ROOT}\""
+    fi
+    if [ -n "${AGENT_SANDBOX_STATE_DIR}" ]; then
+        echo "state_dir = \"${AGENT_SANDBOX_STATE_DIR}\""
+    fi
+} >> "${NESSON_CONFIG_DIR}/agent-config.toml"
 
 # Initialize Claude Code settings on first run only.
 # /root/.claude is backed by PVC — once created, survives restarts.

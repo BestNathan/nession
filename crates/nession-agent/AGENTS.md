@@ -28,6 +28,51 @@ Nession never relies on the user's default tmux server.
   Membership is observed, never asserted; the OS readers and command
   sanitization live under `src/session/process_discovery/`.
 
+## Sandbox execution (#2681)
+
+Execution isolation belongs to `nession-sandbox`, not to this Agent:
+
+- The Agent compiles/prepares a Session's Sandbox policy **before**
+  `new-session`, passes the trusted launcher argv as `NewSession.command`, and
+  verifies/releases the launch barrier after the Session exists. An explicit
+  policy this host cannot honour refuses the create; there is no Native
+  fallback.
+- Sandbox host configuration lives under `[sandbox]` in the Agent config. Do
+  not read policy keys from the environment or invent a second backend switch.
+- Owned-resource cleanup is tied to Session termination and a reaper; a failed
+  tmux listing is never treated as "the Session is gone".
+- The Agent never spawns Bubblewrap or `sandbox-exec` itself. The only process
+  construction is the trusted launcher argv handed to `nession-tmux`; the
+  in-sandbox bridge is dispatched by `main.rs` before the Agent runtime starts.
+- Do not add a second isolation, cgroup or proxy owner beside
+  `crates/nession-sandbox/AGENTS.md`.
+
+## Sandbox context capability (#3124)
+
+- The subject is the Session's **active Pane**, resolved on this Agent's
+  private tmux server (`window_active` + `pane_active`). Track executions by
+  tmux `pane_id` (with the recorded root PID as the legacy fallback), and
+  require the Session's `@nession_instance_id` to match; a same-named
+  recreation must never inherit an older execution.
+- `tmux/sandbox_context.rs` owns the context/preflight/Enter/Return/Focus
+  transitions. Preflight is a hint: Enter re-probes through
+  `nession-sandbox::prepare` and fails closed.
+- Preflight and Enter bind both the context generation and the catalog
+  `probe_generation`; a mismatch is a `stale-generation` field error before
+  any host resource exists. Explicitly unsupported implementations/options come
+  back as canonical field-path errors from
+  `nession-sandbox::unsupported_requests`, never a dropped-and-continue
+  policy.
+- Enter uses a detached `new-window` in the same logical Session, never
+  `send-keys` into an existing shell. Focus moves only after the launch
+  barrier verifies; a failure removes exactly the Window this attempt created.
+  A repeated client `enter_id` replays its outcome instead of launching again.
+- Return to Native and Focus are focus switches. They never release the
+  execution; the Pane-keyed reaper does that when the Pane disappears.
+- The durable execution record carries the normalized effective policy, the
+  verified mechanisms and the Pane/Window/instance identity, so the inside
+  view survives an Agent restart.
+
 The deterministic enforcement owner is `scripts/check-tmux-socket.sh`:
 
 ```bash

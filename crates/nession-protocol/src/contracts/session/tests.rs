@@ -1,4 +1,7 @@
 use super::v1::*;
+use crate::contracts::sandbox::v1::{
+    SandboxActionResult, SandboxFieldError, SandboxPreflightResult,
+};
 
 #[test]
 fn a_process_snapshot_round_trips_with_its_honest_unknowns() {
@@ -222,6 +225,8 @@ fn test_server_session_create_payload() {
         binding_profiles: Vec::new(),
         binding_revision: None,
         terminal_cols: None,
+        sandbox: None,
+        managed: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -259,6 +264,7 @@ fn test_agent_command_response_payload() {
         success: true,
         error: None,
         session_name: Some("new-session".to_string()),
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -274,6 +280,7 @@ fn test_agent_command_response_payload_failure() {
         success: false,
         error: Some("session already exists".to_string()),
         session_name: None,
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -289,12 +296,39 @@ fn test_client_session_create_payload() {
         name: "new-session".to_string(),
         working_dir: None,
         env_files: Vec::new(),
+        sandbox: None,
+        project_id: None,
+        managed: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.agent_id, "agent-1");
     assert_eq!(decoded.name, "new-session");
     assert!(decoded.env_files.is_empty());
+    assert!(decoded.project_id.is_none());
+}
+
+#[test]
+fn test_client_session_create_project_reference_is_optional_and_round_trips() {
+    // #3025: a Project reference is additive. An old client omits it and is
+    // unchanged; a Project-aware client names it together with the Existing
+    // Location's Agent and directory.
+    let json = serde_json::json!({
+        "agent_id": "agent-1",
+        "name": "new-session",
+        "working_dir": "/srv/project",
+        "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+    });
+    let decoded: ClientSessionCreatePayload = serde_json::from_value(json).unwrap();
+    assert_eq!(
+        decoded.project_id.as_deref(),
+        Some("project-123e4567-e89b-42d3-a456-426614174000")
+    );
+    assert_eq!(decoded.working_dir.as_deref(), Some("/srv/project"));
+
+    let legacy: ClientSessionCreatePayload =
+        serde_json::from_value(serde_json::json!({ "agent_id": "a", "name": "n" })).unwrap();
+    assert!(legacy.project_id.is_none());
 }
 
 #[test]
@@ -314,6 +348,79 @@ fn test_client_session_create_env_files_are_part_of_the_contract() {
 }
 
 #[test]
+fn test_client_session_create_response_carries_project_membership() {
+    let json = serde_json::json!({
+        "success": true,
+        "session_id": "a1:s1",
+        "warnings": [],
+        "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+    });
+    let decoded: ClientSessionCreateResponsePayload = serde_json::from_value(json).unwrap();
+    assert_eq!(
+        decoded.project_id.as_deref(),
+        Some("project-123e4567-e89b-42d3-a456-426614174000")
+    );
+    let legacy: ClientSessionCreateResponsePayload =
+        serde_json::from_value(serde_json::json!({ "success": true, "session_id": "a1:s1" }))
+            .unwrap();
+    assert!(legacy.project_id.is_none());
+}
+
+#[test]
+fn test_session_project_binding_payload_removes_with_null_and_carries_expected_revision() {
+    let json = serde_json::json!({
+        "session_id": "a1:s1",
+        "project_id": null,
+        "expected_revision": 2,
+    });
+    let decoded: SessionProjectBindingUpdatePayload = serde_json::from_value(json).unwrap();
+    assert!(decoded.project_id.is_none());
+    assert_eq!(decoded.expected_revision, Some(2));
+
+    let absent: SessionProjectBindingUpdatePayload =
+        serde_json::from_value(serde_json::json!({ "session_id": "a1:s1" })).unwrap();
+    assert!(absent.project_id.is_none());
+    assert!(absent.expected_revision.is_none());
+}
+
+#[test]
+fn test_session_instance_identity_is_optional_on_updates_and_reports() {
+    let update: AgentSessionUpdatePayload = serde_json::from_value(serde_json::json!({
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "active",
+        "window_count": 1,
+        "attached_clients": 0,
+        "instance_id": "instance-1",
+    }))
+    .unwrap();
+    assert_eq!(update.instance_id.as_deref(), Some("instance-1"));
+
+    let legacy_update: AgentSessionUpdatePayload = serde_json::from_value(serde_json::json!({
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "active",
+        "window_count": 1,
+        "attached_clients": 0,
+    }))
+    .unwrap();
+    assert!(legacy_update.instance_id.is_none());
+
+    let report: SessionInfo = serde_json::from_value(serde_json::json!({
+        "name": "s1",
+        "created_at": 1,
+        "window_count": 1,
+        "attached_clients": 0,
+        "width": 80,
+        "height": 24,
+        "foreground_command": null,
+        "instance_id": "instance-1",
+    }))
+    .unwrap();
+    assert_eq!(report.instance_id.as_deref(), Some("instance-1"));
+}
+
+#[test]
 fn test_client_session_kill_payload() {
     let payload = ClientSessionKillPayload {
         session_id: "agent-1:doomed".to_string(),
@@ -330,6 +437,8 @@ fn test_client_session_create_response_payload() {
         session_id: Some("agent-1:new-sess".to_string()),
         error: None,
         warnings: Vec::new(),
+        project_id: None,
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreateResponsePayload = serde_json::from_str(&json).unwrap();
@@ -461,5 +570,192 @@ fn metadata_validation_rejects_invalid_tags() {
         SessionMetadataValidationError::TooManyTags {
             max: SESSION_METADATA_TAG_LIMIT
         }
+    );
+}
+
+#[test]
+fn sandbox_command_payloads_round_trip_with_empty_first_rows() {
+    // #3124: the client sends the Web-safe draft; empty Resource/Syscall rows
+    // survive the wire as an empty list, not as a fabricated option.
+    let enter: ClientSessionSandboxEnterPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent:work",
+        "generation": "gen-1",
+        "probe_generation": "probe-1",
+        "enter_id": "enter-1",
+        "policy": {
+            "enabled": true,
+            "filesystem": { "access": { "read": ["/usr"], "write": ["/workspace"] } },
+            "network": { "mode": "deny" },
+            "resource": [],
+            "syscall": []
+        },
+        "working_dir": "/workspace"
+    }))
+    .expect("the client draft must parse");
+    assert!(enter.policy.resource.is_empty());
+    let value = serde_json::to_value(&enter).unwrap();
+    assert_eq!(value["policy"]["resource"], serde_json::json!([]));
+    let parsed: ClientSessionSandboxEnterPayload = serde_json::from_value(value).unwrap();
+    assert_eq!(parsed.enter_id, "enter-1");
+    assert_eq!(parsed.probe_generation, "probe-1");
+
+    // The Agent side carries the broker request id *and* the client's enter
+    // id: correlation and idempotency are different identities.
+    let agent: ServerSessionSandboxEnterPayload = serde_json::from_value(serde_json::json!({
+        "request_id": "broker-1",
+        "session_name": "work",
+        "generation": "gen-1",
+        "probe_generation": "probe-1",
+        "enter_id": "enter-1",
+        "policy": { "enabled": true, "resource": [{ "key": "memory.max", "value": "max" }] }
+    }))
+    .expect("the agent draft must parse");
+    assert_eq!(agent.request_id, "broker-1");
+    assert_eq!(agent.enter_id, "enter-1");
+    assert_eq!(agent.probe_generation, "probe-1");
+    assert_eq!(agent.policy.resource[0].key, "memory.max");
+
+    // A client built before catalog v2 omits the probe generation; it parses
+    // as empty and the Agent treats that as a stale, refused binding.
+    let legacy: ClientSessionSandboxPreflightPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent:work",
+        "generation": "gen-1",
+        "policy": { "enabled": true }
+    }))
+    .expect("legacy payload remains readable");
+    assert_eq!(legacy.probe_generation, "");
+}
+
+#[test]
+fn sandbox_context_and_action_replies_round_trip() {
+    let context = SandboxContextResponse {
+        success: false,
+        error: Some("Agent 'a' is offline".to_string()),
+        context: None,
+        cache_statuses: Vec::new(),
+    };
+    let value = serde_json::to_value(&context).unwrap();
+    assert_eq!(value["success"], false);
+    assert!(value.get("context").is_none());
+
+    let action = SandboxActionResult {
+        success: false,
+        error_kind: Some(crate::contracts::sandbox::v1::SandboxActionErrorKind::Conflict),
+        error: Some("the Sandbox context changed; re-run preflight".to_string()),
+        field_errors: None,
+        context: None,
+    };
+    let value = serde_json::to_value(&action).unwrap();
+    assert_eq!(value["error_kind"], "conflict");
+
+    let preflight = SandboxPreflightResult {
+        ok: false,
+        error: None,
+        generation: "gen-1".to_string(),
+        policy_digest: None,
+        backend: None,
+        mechanisms: Vec::new(),
+        errors: vec![SandboxFieldError {
+            field: "resource[0].key".to_string(),
+            code: "unknown-key".to_string(),
+            message: "only the four V1 cgroup keys are accepted".to_string(),
+        }],
+        warnings: Vec::new(),
+        catalog: crate::contracts::sandbox::v1::SandboxCapabilityCatalog {
+            catalog_version: crate::contracts::sandbox::v1::SANDBOX_CATALOG_VERSION,
+            status: crate::contracts::sandbox::v1::SandboxCatalogStatus::Available,
+            platform: "linux".to_string(),
+            backend: Some("linux-bwrap".to_string()),
+            probe_generation: "probe-1".to_string(),
+            source: "agent-host-probe".to_string(),
+            detail: Vec::new(),
+            reason: None,
+            implementations: Vec::new(),
+            resource_fields: Vec::new(),
+            syscall_fields: Vec::new(),
+        },
+    };
+    let value = serde_json::to_value(&preflight).unwrap();
+    assert_eq!(value["errors"][0]["code"], "unknown-key");
+    assert!(value.get("error").is_none());
+}
+
+// ---- Managed EROFS creation (#3062) ----
+
+const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+#[test]
+fn a_client_managed_create_round_trips_its_pinned_artifacts() {
+    let payload: ClientSessionCreatePayload = serde_json::from_value(serde_json::json!({
+        "agent_id": "agent-a",
+        "name": "managed",
+        "project_id": "project-00000000-0000-0000-0000-000000000001",
+        "managed": {
+            "base_digest": DIGEST_A,
+            "toolchains": [{ "digest": DIGEST_B, "target": "/opt/rust" }]
+        }
+    }))
+    .expect("a managed create parses");
+    let managed = payload.managed.clone().expect("managed request");
+    assert_eq!(managed.base_digest, DIGEST_A);
+    assert_eq!(managed.toolchains.len(), 1);
+    assert_eq!(managed.toolchains[0].digest, DIGEST_B);
+    assert_eq!(managed.toolchains[0].target, "/opt/rust");
+
+    let encoded = serde_json::to_value(&payload).unwrap();
+    let decoded: ClientSessionCreatePayload = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded.managed.unwrap().toolchains[0].target, "/opt/rust");
+}
+
+#[test]
+fn a_server_managed_create_carries_one_grant_per_role() {
+    let payload: ServerSessionCreatePayload = serde_json::from_value(serde_json::json!({
+        "request_id": "req-1",
+        "name": "managed",
+        "managed": {
+            "images": [
+                { "role": "base", "digest": DIGEST_A, "path": "/images/blobs/aaa", "token": "t1" },
+                { "role": "workspace", "digest": DIGEST_B, "path": "/images/blobs/bbb", "token": "t2" },
+                { "role": "toolchain", "digest": DIGEST_B, "path": "/images/blobs/bbb", "token": "t3", "target": "/opt/rust" }
+            ]
+        }
+    }))
+    .expect("a server managed create parses");
+    let images = payload.managed.clone().expect("managed images").images;
+    assert_eq!(images[0].role, ManagedImageRole::Base);
+    assert_eq!(images[1].role, ManagedImageRole::Workspace);
+    assert_eq!(images[2].role, ManagedImageRole::Toolchain);
+    assert_eq!(images[2].target.as_deref(), Some("/opt/rust"));
+    let encoded = serde_json::to_value(&payload).unwrap();
+    assert_eq!(encoded["managed"]["images"][0]["role"], "base");
+    assert!(encoded["managed"]["images"][0].get("target").is_none());
+}
+
+#[test]
+fn unknown_managed_fields_are_refused() {
+    let client = serde_json::from_value::<ClientManagedCreate>(serde_json::json!({
+        "base_digest": DIGEST_A,
+        "unexpected": true
+    }));
+    assert!(client.is_err(), "an unknown managed key must be refused");
+
+    let grant = serde_json::from_value::<ManagedImageGrant>(serde_json::json!({
+        "role": "base",
+        "digest": DIGEST_A,
+        "path": "/images/blobs/aaa",
+        "token": "t",
+        "unexpected": true
+    }));
+    assert!(grant.is_err(), "an unknown grant key must be refused");
+
+    let toolchain = serde_json::from_value::<ManagedToolchainRequest>(serde_json::json!({
+        "digest": DIGEST_A,
+        "target": "/opt/rust",
+        "unexpected": true
+    }));
+    assert!(
+        toolchain.is_err(),
+        "an unknown toolchain key must be refused"
     );
 }

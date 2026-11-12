@@ -39,7 +39,11 @@ status: string, window_count: number, attached_clients: number,
  * same thing downstream. The contract says so rather than leaving a caller
  * to discover it.
  */
-foreground_command?: string | null, };
+foreground_command?: string | null, 
+/**
+ * Durable tmux Session instance identity. See `SessionInfo::instance_id`.
+ */
+instance_id?: string | null, };
 
 // ── Operations ──
 
@@ -62,7 +66,11 @@ status: string, window_count: number, attached_clients: number,
  * same thing downstream. The contract says so rather than leaving a caller
  * to discover it.
  */
-foreground_command?: string | null, };
+foreground_command?: string | null, 
+/**
+ * Durable tmux Session instance identity. See `SessionInfo::instance_id`.
+ */
+instance_id?: string | null, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

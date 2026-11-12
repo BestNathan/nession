@@ -111,6 +111,19 @@ function delayedParser(controller: TerminalController) {
   return { callbacks, spy, finish };
 }
 
+/**
+ * The link providers xterm holds right now (#2879 SC-03).
+ *
+ * xterm registers its OSC 8 provider at construction, so the baseline is one;
+ * each emulator registration adds exactly one entry.
+ */
+function linkProviderCount(terminal: unknown): number {
+  const core = (terminal as {
+    _core: { _linkProviderService: { linkProviders: unknown[] } };
+  })._core;
+  return core._linkProviderService.linkProviders.length;
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('TerminalController', () => {
@@ -389,8 +402,81 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
-  it('reports sequenced Agent events after FIFO xterm parse, not when delivered (#1950)', () => {
-    const transport = makeTransport();
+  it('keeps one link registration across renderer replacement and disposes its latest provider (#2879 SC-03)', async () => {
+    const transports: MockTransport[] = [];
+    const events = {
+      onStreamTruncated: vi.fn(),
+      onRendererReplaced: vi.fn(),
+    };
+    const controller = new TerminalController(makeSession(), () => {
+      const transport = makeTransport();
+      transports.push(transport);
+      return transport;
+    }, {
+      rendererType: 'canvas',
+      events,
+      writerLimits: { maxEvents: 2 },
+    });
+    const el = host();
+    controller.attach(el);
+
+    const baseline = linkProviderCount(controller.terminal);
+    const activation = vi.fn();
+    const disposable = controller.registerLinkMatcher((line) => (
+      line.text.includes('LINK')
+        ? [{ startIndex: 0, endIndex: 4, activate: activation }]
+        : []
+    ));
+    expect(disposable).not.toBeNull();
+    expect(linkProviderCount(controller.terminal)).toBe(baseline + 1);
+
+    // Halt the writer and replace the xterm instance. The matcher must follow
+    // the replacement as one registration, not accumulate a second provider.
+    const first = controller.terminal!;
+    const h = delayedParser(controller);
+    const transport = transports[0]!;
+    transport.onOutput!(new Uint8Array([1]));
+    transport.onOutput!(new Uint8Array([2]));
+    transport.onOutput!(new Uint8Array([3]));
+    h.spy.mockRestore();
+    await flush();
+
+    expect(events.onRendererReplaced).toHaveBeenCalledTimes(1);
+    expect(controller.terminal).not.toBe(first);
+    expect(linkProviderCount(controller.terminal)).toBe(baseline + 1);
+
+    // The public disposal must release the provider on the live replacement —
+    // the stale provider captured at registration time is long gone.
+    disposable!.dispose();
+    expect(linkProviderCount(controller.terminal)).toBe(baseline);
+    // Idempotent: disposing once must not remove a provider registered later.
+    const second = controller.registerLinkMatcher(() => []);
+    expect(linkProviderCount(controller.terminal)).toBe(baseline + 1);
+    disposable!.dispose();
+    expect(linkProviderCount(controller.terminal)).toBe(baseline + 1);
+    second!.dispose();
+    expect(linkProviderCount(controller.terminal)).toBe(baseline);
+    controller.dispose();
+  });
+
+  it('does not duplicate a matcher registered before attach (#2879 SC-03)', () => {
+    const controller = new TerminalController(makeSession(), () => makeTransport(), {
+      rendererType: 'canvas',
+    });
+    const disposable = controller.registerLinkMatcher(() => []);
+    const el = host();
+    controller.attach(el);
+
+    // attach() rewires the registration onto the mounted instance; the
+    // pre-attach provider is disposed, so exactly one remains.
+    expect(linkProviderCount(controller.terminal)).toBe(1 + 1);
+
+    disposable!.dispose();
+    expect(linkProviderCount(controller.terminal)).toBe(1);
+    controller.dispose();
+  });
+
+  it('reports sequenced Agent events after FIFO xterm parse, not when delivered (#1950)', () => {    const transport = makeTransport();
     const onStreamEventParsed = vi.fn();
     const controller = new TerminalController(makeSession(), () => transport, {
       rendererType: 'canvas', events: { onStreamEventParsed },
@@ -414,6 +500,7 @@ describe('TerminalController', () => {
     expect(h.spy).toHaveBeenCalledTimes(2);
     h.finish();
     expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized, last]);
+    expect(onStreamEventParsed.mock.calls.map((call) => call[1])).toEqual([1, 0, 1]);
 
     // Legacy frames and local display bytes are not Agent timeline events.
     transport.onOutput!(new Uint8Array([67]));
@@ -450,7 +537,7 @@ describe('TerminalController', () => {
     second.onOutput!(new Uint8Array([51]), undefined, { streamEpoch: 7, streamSeq: 3 });
     h.finish();
     expect(onStreamEventParsed).toHaveBeenCalledOnce();
-    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 });
+    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 }, 1);
     second.onOutput!(new Uint8Array([52]), undefined, { streamEpoch: 7, streamSeq: 4 });
     controller.dispose();
     h.finish(); // disposed instance ignores even a previously queued callback

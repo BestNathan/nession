@@ -5,6 +5,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ShellDialogs } from '@/app/ShellDialogs';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { useShellState } from '@/app/useShellState';
+import { currentExperienceMode, resolveExperienceMode } from '@/app/experienceMode';
+import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
+import { useSessionDetails } from '@/app/useSessionDetails';
+import { useProjectShell } from '@/app/useProjectShell';
 import type { ConnectionState } from '@/platform/socket';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -14,10 +18,67 @@ export interface ShellProps {
   onRetry?: () => void;
 }
 
+
+function ShellNotices({
+  error,
+  onDismiss,
+  connectionStatus,
+  onRetry,
+}: {
+  error: string | null;
+  onDismiss: () => void;
+  connectionStatus: ConnectionState;
+  onRetry?: () => void;
+}) {
+  return (
+    <>
+      {error ? (
+        <div
+          data-testid="shell-error"
+          className={cn('flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive', chromeSansRole('body'))}
+        >
+          <span className="min-w-0 flex-1">{error}</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-5"
+                  aria-label="Dismiss error"
+                  onClick={() => onDismiss()}
+                />
+              }
+            >
+              <X className="size-3" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Dismiss</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
+      {connectionStatus === 'disconnected' && onRetry ? (
+        <div role="status" className="flex shrink-0 items-center justify-center gap-2 px-3 py-1 text-muted-foreground">
+          <span className={chromeSansRole('secondary')}>Connection unavailable</span>
+          <Button type="button" size="sm" variant="ghost" onClick={onRetry}>Retry</Button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function Shell({ connectionStatus, onRetry }: ShellProps) {
   const state = useShellState();
   const { data } = state;
-
+  const experienceOverride = currentExperienceMode();
+  // One Experience decision for the whole shell: the composition and the
+  // operation surfaces it opens must not disagree about web vs app (#3089).
+  const experience = resolveExperienceMode(state.isWide, experienceOverride);
+  const sessionDetails = useSessionDetails({
+    agents: data.agents,
+    staleAgentIds: data.staleAgents,
+    clientSessionId: state.clientSessionId,
+  });
   // Creating and selecting are two hooks' jobs, so they are composed here
   // rather than one reaching into the other's state (#1082): the dashboard
   // refreshes its lists, and the shell state makes the created Session current
@@ -32,21 +93,33 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
     [data, state],
   );
 
+  const { projectShell, projectDialogs } = useProjectShell(state, handleSessionCreated, experience);
+
   const dialogs = (
-    <ShellDialogs
-      showCreateModal={data.showCreateModal}
-      setShowCreateModal={data.setShowCreateModal}
-      agents={data.agents}
-      handleSessionCreated={handleSessionCreated}
-      sessionToKill={data.sessionToKill}
-      setSessionToKill={data.setSessionToKill}
-      onKilled={state.onKilled}
-      attachDialogSession={state.attachDialogSession}
-      attachDialogIntent={state.attachDialogIntent}
-      onAttachConfirm={state.confirmAttach}
-      onConfigureConfirm={state.saveAttachSettings}
-      onAttachClose={state.cancelAttach}
-    />
+    <>
+      <SessionDetailsDialog
+        session={sessionDetails.target?.session ?? null}
+        state={sessionDetails.domain}
+        editing={sessionDetails.target?.editing ?? false}
+        onClose={sessionDetails.close}
+      />
+      <ShellDialogs
+        experience={experience}
+        showCreateModal={data.showCreateModal}
+        setShowCreateModal={data.setShowCreateModal}
+        agents={data.agents}
+        handleSessionCreated={handleSessionCreated}
+        sessionToKill={data.sessionToKill}
+        setSessionToKill={data.setSessionToKill}
+        onKilled={state.onKilled}
+        attachDialogSession={state.attachDialogSession}
+        attachDialogIntent={state.attachDialogIntent}
+        onAttachConfirm={state.confirmAttach}
+        onConfigureConfirm={state.saveAttachSettings}
+        onAttachClose={state.cancelAttach}
+      />
+      {projectDialogs}
+    </>
   );
 
   return (
@@ -56,37 +129,12 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
         data-sf-design="polish"
         className="shell flex h-[100dvh] flex-col bg-background"
       >
-        {data.error ? (
-          <div
-            data-testid="shell-error"
-            className={cn('flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive', chromeSansRole('body'))}
-          >
-            <span className="min-w-0 flex-1">{data.error}</span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-5"
-                    aria-label="Dismiss error"
-                    onClick={() => data.clearError()}
-                  />
-                }
-              >
-                <X className="size-3" />
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Dismiss</TooltipContent>
-            </Tooltip>
-          </div>
-        ) : null}
-        {connectionStatus === 'disconnected' && onRetry ? (
-          <div role="status" className="flex shrink-0 items-center justify-center gap-2 px-3 py-1 text-muted-foreground">
-            <span className={chromeSansRole('secondary')}>Connection unavailable</span>
-            <Button type="button" size="sm" variant="ghost" onClick={onRetry}>Retry</Button>
-          </div>
-        ) : null}
+        <ShellNotices
+          error={data.error}
+          onDismiss={() => data.clearError()}
+          connectionStatus={connectionStatus}
+          onRetry={onRetry}
+        />
         {state.isRestoringDeepLink ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Loader2 className="size-8 animate-spin text-muted-foreground" />
@@ -97,6 +145,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             connectionStatus={connectionStatus}
             agents={data.agents}
             filteredSessions={data.filteredSessions}
+            sessions={data.sessions}
             totalSessionCount={data.sessions.length}
             staleAgents={data.staleAgents}
             selectedId={state.selectedId}
@@ -122,13 +171,17 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             onOpenWorktreeSession={state.handleOpenWorktreeSession}
             onConfigure={state.openAttachSettings}
             onKill={(s) => data.setSessionToKill(s)}
+            onViewSessionDetails={(session) => sessionDetails.show(session, false)}
+            onEditSessionDetails={(session) => sessionDetails.show(session, true)}
             onSurfaceChange={state.setSurface}
             onToolChange={state.setTool}
             isWide={state.isWide}
+            experienceOverride={experienceOverride}
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}
             onCloseDrawer={state.openDetail}
+            projectShell={projectShell}
           />
         )}
       </div>

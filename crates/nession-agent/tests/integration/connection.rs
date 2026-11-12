@@ -368,7 +368,14 @@ async fn integration_session_update_message_format() {
 
     // Send session update. Not `async` any more, and for the heartbeat's reason.
     handle
-        .send_session_update("my-session", "active", 5, 2, Some("claude"))
+        .send_session_update(
+            "my-session",
+            "active",
+            5,
+            2,
+            Some("claude"),
+            Some("instance-1"),
+        )
         .expect("session update failed");
 
     // Wait for session update message.
@@ -624,6 +631,8 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             binding_profiles: profiles.clone(),
             binding_revision: Some(7),
             terminal_cols: None,
+            sandbox: None,
+            managed: None,
         },
     );
     let reply: ProtocolMessage<SessionCreateResponse> =
@@ -652,6 +661,8 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             binding_profiles: profiles,
             binding_revision: Some(7),
             terminal_cols: None,
+            sandbox: None,
+            managed: None,
         })
         .await
         .unwrap();

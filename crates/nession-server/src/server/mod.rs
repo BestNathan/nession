@@ -4,6 +4,8 @@ pub mod command_broker;
 pub mod execution;
 mod handler;
 mod mcp;
+pub mod offline_grace;
+mod orphan_sweep;
 pub mod outbound;
 
 // `server_descriptors` is generated in `handler` because the handlers it

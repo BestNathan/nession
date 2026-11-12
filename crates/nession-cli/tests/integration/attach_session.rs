@@ -1,6 +1,6 @@
 //! Integration tests for session attach command
 
-use nession_cli::commands::client::attach_session;
+use nession_cli::commands::sessions::attach::attach_session;
 use nession_common::config::ServerConfig;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;

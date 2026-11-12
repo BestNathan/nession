@@ -63,7 +63,7 @@ export function useOpenWorktreeSession(opts: {
       }
 
       const name = sessionNameForWorktree(worktree.path);
-      const created = await sessionsApi.createSession(agentId, name, [], worktree.path);
+      const created = await sessionsApi.createSession(agentId, name, [], { workingDir: worktree.path });
       if (!created.success || !created.session_id) {
         toast.error(created.error ?? 'Could not create a Session for this worktree.');
         return;
