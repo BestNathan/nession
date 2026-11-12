@@ -690,6 +690,17 @@ describe('WebSocketService', () => {
 
     const close = diagnostics.find((entry) => entry.event === 'socket-close');
     expect(close).toMatchObject({ code: 1006, wasClean: false, reason: 'abnormal' });
+
+    // A peer-supplied reason that could carry a URL or token is dropped, not
+    // merely truncated.
+    (socket.onclose as unknown as ((event: CloseEvent) => void) | null)?.({
+      code: 1000,
+      wasClean: true,
+      reason: 'ws://server/ws?token=secret-token',
+    } as CloseEvent);
+    const closes = diagnostics.filter((entry) => entry.event === 'socket-close');
+    expect(closes[closes.length - 1].reason).toBeUndefined();
+
     const serialized = JSON.stringify(diagnostics);
     expect(serialized).not.toContain('secret-token');
     expect(serialized).not.toContain('ws://server/ws');

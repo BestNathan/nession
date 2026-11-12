@@ -507,13 +507,18 @@ export class WebSocketService implements PluginSurface {
       }
       // Bounded, redacted close facts: code/wasClean say whether the peer sent
       // a close frame or the transport died, which is what distinguishes a
-      // Server-initiated end from a network loss (#3358 SC-05).
+      // Server-initiated end from a network loss (#3358 SC-05). A peer-supplied
+      // reason is logged only when it is a plain reason token — never a URL,
+      // token or free-form payload that could carry either.
+      const reason = typeof event?.reason === 'string' && /^[a-z0-9-]{1,64}$/.test(event.reason)
+        ? event.reason
+        : undefined;
       this.diagnose({
         event: 'socket-close',
         generation: myGeneration,
         code: event?.code,
         wasClean: event?.wasClean,
-        reason: event?.reason?.slice(0, 200),
+        reason,
       });
       if (this.connectPromise) {
         this.connectPromise = null;
