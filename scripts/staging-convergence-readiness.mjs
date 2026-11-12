@@ -20,10 +20,28 @@ const DEPLOY='.github/workflows/release-staging.yml';
 const fail=reason=>({ready:false,reason});
 const okay=details=>({ready:true,reason:'QUALIFIED',...details});
 
+// GitHub may empty workflow run.pull_requests after a native sync PR merges.
+// Only a separately Git-verified historic native source may use immutable
+// source SHA/branch/repository and creation-to-merge-time identity instead.
+function historicalNativeRunAssociation(run,pr,expectedHead){
+  if(!pr||!isNativeConvergencePr(pr)||!pr.merged_at||
+     pr.head?.sha!==expectedHead||pr.head?.repo?.full_name!==REPO||
+     pr.base?.ref!=='staging'||pr.base?.repo?.full_name!==REPO||
+     !Array.isArray(run.pull_requests)||run.pull_requests.length!==0||
+     run.head_branch!==pr.head.ref||run.repository?.full_name!==REPO||
+     run.head_repository?.full_name!==REPO)return false;
+  const started=Date.parse(run.created_at??'');
+  const opened=Date.parse(pr.created_at??'');
+  const merged=Date.parse(pr.merged_at??'');
+  return Number.isFinite(started)&&Number.isFinite(opened)&&
+    Number.isFinite(merged)&&opened<=started&&started<=merged;
+}
+
 // One authoritative exact-HEAD checks policy for initial Staging sync and
 // later main promotion. A merged PR never inherits a status from its newer
 // branch tip, and skipped/missing/failed source jobs cannot authorize release.
-export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[]){
+export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[],
+  historicalNativePr=null){
   if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(expectedHead)||
       !Array.isArray(workflowRuns)||workflowRuns.length>100)
     return fail('INVALID_RUN_INVENTORY');
@@ -31,8 +49,10 @@ export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[]){
     const matches=workflowRuns.filter(run=>run.path?.split('@')[0]===path &&
       run.head_sha===expectedHead&&run.event==='pull_request'&&
       run.head_repository?.full_name===REPO&&
-      Array.isArray(run.pull_requests)&&
-      run.pull_requests.some(p=>p.number===prNumber));
+      (Array.isArray(run.pull_requests)&&
+        run.pull_requests.some(p=>p.number===prNumber)||
+        historicalNativePr?.number===prNumber&&
+        historicalNativeRunAssociation(run,historicalNativePr,expectedHead)));
     const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
       (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
     if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
@@ -210,7 +230,7 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
   }
   const approval=convergenceApproval(batch,fullReceipt);
   if(!approval.approved)return fail('NATIVE_'+approval.reason+':'+batch.integration_head);
-  const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns);
+  const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns,pr);
   if(!source.ready){
     const denial=nativeSourceCheckDenial(pr,mergeSha,batch.integration_head,
       source,sourceRuns);
@@ -355,6 +375,48 @@ function selfTest(){
   const runs=REQUIRED.map((path,n)=>({id:n+1,path,head_sha:syncHead,event:'pull_request',
     status:'completed',conclusion:'success',run_number:n+1,run_attempt:1,
     head_repository:{full_name:REPO},pull_requests:[{number:88}]}));
+  // #3248: GitHub returns no PR association on a merged #3176-shaped
+  // native source despite its valid exact-HEAD Quality/Case/E2E receipts.
+  const nativePrFixture={number:3176,created_at:'2026-11-10T10:32:08Z',
+    merged_at:'2026-11-10T11:09:28Z',
+    head:{ref:'chore/staging-sync-staging-15086f7b3784-d466197f3fec',
+      sha:syncHead,repo:{full_name:REPO}},
+    base:{ref:'staging',repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence)'+
+      ' <!-- nession-convergence-pr:v1 source=test -->'};
+  const orphanRuns=runs.map(r=>({...r,pull_requests:[],
+    head_branch:nativePrFixture.head.ref,
+    repository:{full_name:REPO},
+    created_at:'2026-11-10T10:32:12Z'}));
+  assert.equal(requiredSourceRuns(3176,syncHead,orphanRuns).ready,false,
+    'ordinary PR check cannot use an orphaned native source');
+  assert.equal(requiredSourceRuns(3176,syncHead,orphanRuns,nativePrFixture).ready,true,
+    'verified historical native source requires exact-HEAD three-run success');
+  const blockedOrphan=(index,patch,label)=>{
+    const changed=orphanRuns.map((r,i)=>i===index?{...r,...patch}:r);
+    assert.equal(requiredSourceRuns(3176,syncHead,changed,nativePrFixture).ready,
+      false,label);
+  };
+  blockedOrphan(0,{head_branch:'other-branch'},'wrong native branch');
+  blockedOrphan(1,{head_sha:b},'wrong native SHA');
+  blockedOrphan(1,{event:'push'},'not a PR event');
+  blockedOrphan(1,{repository:{full_name:'other/repo'}},'foreign repository');
+  blockedOrphan(1,{pull_requests:[{number:999}]},'different explicit PR');
+  blockedOrphan(1,{pull_requests:null},'no association inventory');
+  blockedOrphan(1,{created_at:'2026-11-10T10:00:00Z'},'run predates PR');
+  blockedOrphan(1,{created_at:'2026-11-10T12:00:00Z'},'run postdates merge');
+  blockedOrphan(1,{status:'in_progress',conclusion:null},'pending native run');
+  blockedOrphan(1,{conclusion:'failure'},'failed native run');
+  assert.equal(requiredSourceRuns(3176,syncHead,orphanRuns,
+    {...nativePrFixture,created_at:null}).ready,false,'unknown PR creation time');
+  assert.equal(requiredSourceRuns(3176,syncHead,orphanRuns,
+    {...nativePrFixture,body:'not a native PR'}).ready,false,'untrusted PR');
+  assert.equal(requiredSourceRuns(3176,syncHead,orphanRuns,
+    {...nativePrFixture,merged_at:null}).ready,false,'unmerged PR');
+  assert.equal(requiredSourceRuns(3176,syncHead,
+    [...orphanRuns,{...orphanRuns[1],id:999,run_number:999,
+      conclusion:'failure'}],nativePrFixture).ready,false,
+    'newer failed native run must override previous success');
   assert.equal(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,true);
   assert.equal(evaluatePull({pr:{...pr,mergeable_state:'behind'},action:'sync-main-to-lane',
     plan,baseSha:b,workflowRuns:runs}).ready,false,
