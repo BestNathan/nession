@@ -75,7 +75,7 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
   deployment_workflows=['release-staging.yml']}) {
   if(!SHA.test(laneSha)||!Array.isArray(firstParentCommits)||
       firstParentCommits.length===0)
-    return fail('UNBOUNDED_OR_EMPTY_PROMOTION');
+    return fail('EMPTY_PROMOTION');
   const run=deployRuns.filter(r=>deployment_workflows.some(file=>r.path?.split('@')[0]==='.github/workflows/'+file) &&
     r.head_sha===laneSha && r.head_branch===branch && r.event==='push' &&
     r.repository?.full_name===REPO && r.head_repository?.full_name===REPO);
@@ -367,6 +367,9 @@ function selfTest(){
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
     workflowRuns:[latest,{...latest,id:101,run_number:101,conclusion:'failure'},...runs.slice(1)]}).reason,/MISSING/,
     'newer failed check must override historical green');
+  assert.equal(evaluatePromotion({firstParentCommits:[],associations:[],
+    issues:[],deployRuns:[],laneSha:b}).reason,'EMPTY_PROMOTION',
+    'an empty promotion still has no source-bound changes to validate');
   assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[],
     issues:[],deployRuns:[],laneSha:b}).ready,false);
   // A staging sync branch and model-copyable PR body do not attest Issue
