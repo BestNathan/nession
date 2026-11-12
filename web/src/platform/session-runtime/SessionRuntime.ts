@@ -368,6 +368,12 @@ export class SessionRuntime {
   /** One extra chance after an Agent identity rejection; reset on success. */
   private p2pAuthRejectedOnce = false;
   /**
+   * The current loss was a retryable Agent identity rejection. Consumed by the
+   * terminal-disconnect path so the reissue retry still happens when the
+   * transport's ordinary budget is already spent (#3358 SC-08).
+   */
+  private pendingAgentAuthRetry = false;
+  /**
    * The credential issuer (the Server WS) was unavailable when a dial needed a
    * fresh P2P credential. The Session and route stay active; no candidate is
    * consumed and no relay fallback is chosen while this is set (#3358 SC-07).
@@ -1618,6 +1624,17 @@ export class SessionRuntime {
       this.scheduleCredentialIssuerRetry();
       return;
     }
+    // A retryable identity rejection spends the one reissue chance even when
+    // the transport budget is already exhausted. The next dial renews the
+    // credential before the Agent sees it (#3358 SC-08).
+    if (this.pendingAgentAuthRetry) {
+      this.pendingAgentAuthRetry = false;
+      const transport = this.agentWs;
+      if (transport && transport.connectionState !== 'connected') {
+        void transport.reconnectNow().catch(() => {});
+        return;
+      }
+    }
     if (this.disconnectHandling) {
       return;
     }
@@ -1929,6 +1946,7 @@ export class SessionRuntime {
         this.startLivenessProbe();
         // A completed identity handshake is a fresh authorization episode.
         this.p2pAuthRejectedOnce = false;
+        this.pendingAgentAuthRetry = false;
         // The issuer dependency (if any) is satisfied: the socket is live.
         this.clearCredentialIssuerWait();
         this.maybeStartP2PAttach();
@@ -1994,6 +2012,7 @@ export class SessionRuntime {
     // issuer wait: both are answers about the credential being replaced.
     this.credentialRefreshRequired = false;
     this.p2pAuthRejectedOnce = false;
+    this.pendingAgentAuthRetry = false;
     this.clearCredentialIssuerWait();
   }
 
@@ -2254,7 +2273,10 @@ export class SessionRuntime {
           if (error instanceof P2PAuthenticationRejectedError && !this.p2pAuthRejectedOnce) {
             this.p2pAuthRejectedOnce = true;
             error.retryable = true;
+            this.pendingAgentAuthRetry = true;
             this.requireFreshCredential();
+          } else {
+            this.pendingAgentAuthRetry = false;
           }
           throw error;
         }
