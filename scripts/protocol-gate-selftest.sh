@@ -505,6 +505,24 @@ pub struct ThingV1 {
 RS
 expect_fail "rule 6 — a field renamed to camelCase" '`originalPath` is not a snake_case transport field'
 
+# The shape the old `retryAfterSeconds` key actually had: a `serde` attribute
+# spread over several lines. Reading only the attribute's first line would
+# miss it, which is why the scan resolves the declaration past the closing
+# `)]` instead.
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-git/src/protocol/thing"
+cat > "$WORK/tree/crates/nession-git/src/protocol/thing/v1.rs" <<'RS'
+#[derive(Debug, serde::Serialize)]
+pub struct ThingV1 {
+    #[serde(
+        rename = "originalPath",
+        default
+    )]
+    pub original_path: String,
+}
+RS
+expect_fail "rule 6 — a multi-line field rename is still read" '`originalPath` is not a snake_case transport field'
+
 reset_fixture
 mkdir -p "$WORK/tree/crates/nession-git/src/protocol/thing"
 cat > "$WORK/tree/crates/nession-git/src/protocol/thing/v1.rs" <<'RS'

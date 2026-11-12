@@ -957,6 +957,20 @@ function nextCodeLine(lines, from) {
   return '';
 }
 
+/**
+ * The declaration a `serde` attribute applies to.
+ *
+ * Scans past the attribute's closing `)]` first, so a multi-line
+ * `#[serde(\n rename = …\n)]` is read the same as a one-line attribute. The
+ * old `retryAfterSeconds` key was exactly that multi-line shape, which a
+ * line-local reader would have skipped.
+ */
+function declarationAfter(masked, index) {
+  const close = masked.indexOf(')]', index);
+  const rest = masked.slice(close < 0 ? index : close + 2);
+  return nextCodeLine(rest.split('\n'), 0);
+}
+
 for (const dir of CONTRACT_DIRS) {
   const absolute = join(ROOT, dir);
   if (!existsSync(absolute)) continue;
@@ -964,27 +978,23 @@ for (const dir of CONTRACT_DIRS) {
     if (!file.endsWith('.rs')) continue;
     const rel = relative(ROOT, file);
     const masked = maskComments(readFileSync(file, 'utf8'), 'rs');
-    const lines = masked.split('\n');
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i];
-      const all = /rename_all\s*=\s*"([^"]+)"/.exec(line);
-      if (all) {
+    for (const m of masked.matchAll(/\brename(_all)?\s*=\s*"([^"]+)"/g)) {
+      const line = masked.slice(0, m.index).split('\n').length;
+      const declaration = declarationAfter(masked, m.index);
+      if (m[1]) {
         // `rename_all` on an enum renames variant *values*, which this rule
         // deliberately does not govern.
-        if (!/^(?:pub\s+)?struct\b/.test(nextCodeLine(lines, i + 1))) continue;
-        if (all[1] === 'snake_case') continue;
-        report(rel, i + 1, '`rename_all = "' + all[1] + '"` is not snake_case on a struct (rule 6)', line,
+        if (!/^(?:pub\s+)?struct\b/.test(declaration)) continue;
+        if (m[2] === 'snake_case') continue;
+        report(rel, line, '`rename_all = "' + m[2] + '"` is not snake_case on a struct (rule 6)', '',
           'Nession-owned transport field names are snake_case; remove the attribute or use `snake_case`');
         continue;
       }
-      const one = /(?:^|[,(]\s*)rename\s*=\s*"([^"]+)"/.exec(line);
-      if (!one) continue;
-      const declaration = nextCodeLine(lines, i + 1);
       // A field declaration has a `:`; an enum variant has none.
       if (!/^(?:pub\s+)?[A-Za-z_]\w*\s*:/.test(declaration)) continue;
-      const problem = fieldNameProblem(one[1]);
+      const problem = fieldNameProblem(m[2]);
       if (!problem) continue;
-      report(rel, i + 1, '`' + problem + '` is not a snake_case transport field (rule 6)', line,
+      report(rel, line, '`' + problem + '` is not a snake_case transport field (rule 6)', '',
         'rename the `serde` key to the field\'s snake_case spelling, or drop the redundant rename');
     }
   }
