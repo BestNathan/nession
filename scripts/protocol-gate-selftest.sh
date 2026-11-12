@@ -484,6 +484,12 @@ TS
 expect_fail "rule 6 — a generated binding with a camelCase field" '`originalPath` is not a snake_case transport field'
 
 reset_fixture
+cat >> "$WORK/tree/web/src/generated/protocol/core/alpha-one/v1.ts" <<'TS'
+export type HyphenShape = { "original-path": string, };
+TS
+expect_fail "rule 6 — a generated binding with a hyphenated field" '`original-path` is not a snake_case transport field'
+
+reset_fixture
 mkdir -p "$WORK/tree/crates/nession-git/src/protocol/thing"
 cat > "$WORK/tree/crates/nession-git/src/protocol/thing/v1.rs" <<'RS'
 #[derive(Debug, serde::Serialize)]
