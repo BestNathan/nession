@@ -30,6 +30,80 @@ export function deploymentReadinessRetryable(error) {
     /^missing (agent|server|ui) deployment nession-(agent|server|ui)-(staging|staging-01)$/.test(message);
 }
 
+// #3318: a failed attestation previously surfaced only a generic workflow
+// message, because the collector's stderr was redirected to a runner-local
+// file. This bounded receipt lets the trusted workflow print the *rejection
+// class* and its already-sanitized message without dumping arbitrary stderr.
+// Only messages produced by this collector/policy (bounded charset, bounded
+// length, known owner prefix) are disclosed; anything else is withheld.
+export const DEPLOYMENT_IDENTITY_REJECTION_LOG_PREFIX = 'DEPLOYMENT_IDENTITY_REJECTION_V1 ';
+const SAFE_REJECTION_MESSAGE = /^[A-Za-z0-9 .,_:/@()-]{1,160}$/;
+const SAFE_REJECTION_PREFIXES = [
+  /^(agent|server|ui) /,
+  /^build provenance /,
+  /^cluster observation /,
+  /^observation /,
+  /^overlay /,
+  /^trusted GitOps overlay /,
+  /^trusted environment inventory /,
+  /^environment [a-z][a-z0-9-]{0,62} /,
+  /^GitOps revision /,
+  /^duplicate (agent|server|ui) /,
+  /^missing --[a-z-]+$/,
+  /^usage: attest /,
+  /^(provenance|deployments|pods) is (not valid JSON|unreadable)$/,
+  /^deployment attestation receipt /,
+  /^invalid attested /,
+  /^invalid attestation /,
+  /^attestation receipt /,
+  /^only an Attested deployment may emit a receipt$/,
+  /^missing or ambiguous deployment attestation receipt$/,
+  /^invalid deployment attestation receipt /,
+];
+const WITHHELD_REJECTION_MESSAGE = 'unclassified deployment identity rejection';
+
+function safeRejectionMessage(error) {
+  const message = String(error instanceof Error ? error.message : error ?? '');
+  if (!SAFE_REJECTION_MESSAGE.test(message)) return null;
+  return SAFE_REJECTION_PREFIXES.some((pattern) => pattern.test(message)) ? message : null;
+}
+
+function rejectionClass(message, retryable) {
+  if (retryable) return 'readiness';
+  if (/(namespace|env label|environment does not match)/.test(message)) return 'namespace';
+  if (/(source_sha|source SHA|deployed tag disagrees)/.test(message)) return 'source';
+  if (/(imageID|digest|workload image tag|image does not match the trusted overlay tag)/.test(message)) {
+    return 'digest';
+  }
+  if (/(is unreadable|is not valid JSON|missing --|usage:)/.test(message)) return 'input';
+  if (/(overlay|GitOps revision|kustomization)/.test(message)) return 'overlay';
+  if (/provenance/.test(message)) return 'provenance';
+  if (/(observation|timestamp|must be an array|container statuses)/.test(message)) return 'observation';
+  if (/environment/.test(message)) return 'environment';
+  return 'unknown';
+}
+
+// Deterministic, sanitized view of one rejected attestation attempt. The
+// omitted raw message must never be reconstructed by callers: this object is
+// the only diagnostic the workflow may print.
+export function deploymentIdentityRejection(error) {
+  const retryable = deploymentReadinessRetryable(error);
+  const safe = safeRejectionMessage(error);
+  const message = safe ?? WITHHELD_REJECTION_MESSAGE;
+  return Object.freeze({
+    schema_version: 1,
+    kind: 'nession_deployment_identity_rejection',
+    class: safe ? rejectionClass(message, retryable) : 'unknown',
+    retryable,
+    message,
+  });
+}
+
+export function formatDeploymentIdentityRejection(error) {
+  return DEPLOYMENT_IDENTITY_REJECTION_LOG_PREFIX +
+    JSON.stringify(deploymentIdentityRejection(error));
+}
+
 // A bounded, single-line log receipt for the trusted Acceptance collector.
 // The Acceptance harness never reads artifacts or step summaries; the job log
 // is the channel it can attest. The receipt carries only identity that is
@@ -584,6 +658,46 @@ function selfTest() {
     'unexpected parameter',
   ]) assert.equal(deploymentReadinessRetryable(Error(critical)), false, critical);
 
+  // #3318: the workflow may print only this bounded rejection receipt.
+  // Known collector/policy messages keep their class and exact text; a
+  // hostile or unexpected message is withheld without leaking its body.
+  const digestRejection = deploymentIdentityRejection(
+    Error('agent workload imageID does not match the immutable provenance digest'));
+  assert.deepEqual(digestRejection, {
+    schema_version: 1,
+    kind: 'nession_deployment_identity_rejection',
+    class: 'digest',
+    retryable: false,
+    message: 'agent workload imageID does not match the immutable provenance digest',
+  });
+  const namespaceRejection = deploymentIdentityRejection(
+    Error('server deployment namespace does not match the trusted overlay'));
+  assert.equal(namespaceRejection.class, 'namespace');
+  const readinessRejection = deploymentIdentityRejection(Error('server pod is not Running'));
+  assert.equal(readinessRejection.class, 'readiness');
+  assert.equal(readinessRejection.retryable, true);
+  const sourceRejection = deploymentIdentityRejection(
+    Error('build provenance source_sha must be a 40-character hex SHA'));
+  assert.equal(sourceRejection.class, 'source');
+  const inputRejection = deploymentIdentityRejection(Error('missing --overlay'));
+  assert.equal(inputRejection.class, 'input');
+  for (const hostile of [
+    'token=ghs_secretvalue',
+    'first line\nsecond line',
+    'unexpected TypeError: cannot read properties of undefined',
+    'agent ' + 'x'.repeat(200),
+  ]) {
+    const rejection = deploymentIdentityRejection(Error(hostile));
+    assert.equal(rejection.class, 'unknown', hostile);
+    assert.equal(rejection.message, WITHHELD_REJECTION_MESSAGE, hostile);
+    assert.equal(JSON.stringify(rejection).includes('secretvalue'), false, hostile);
+    assert.equal(formatDeploymentIdentityRejection(Error(hostile)).split('\n').length, 1, hostile);
+  }
+  assert.equal(
+    formatDeploymentIdentityRejection(Error('agent pod is not Running'))
+      .startsWith(DEPLOYMENT_IDENTITY_REJECTION_LOG_PREFIX),
+    true);
+
   console.log('deployment-identity-collect: Kubernetes observation mapping scenarios passed');
 }
 
@@ -591,10 +705,13 @@ if (process.argv[1]?.endsWith('deployment-identity-collect.mjs')) {
   try {
     main(process.argv.slice(2));
   } catch (error) {
+    const rejection = deploymentIdentityRejection(error);
     console.error('deployment-identity-collect: ' + error.message);
+    // The structured line is the only diagnostic the trusted workflow may
+    // surface; arbitrary stderr stays runner-local (#3318).
+    console.error(DEPLOYMENT_IDENTITY_REJECTION_LOG_PREFIX + JSON.stringify(rejection));
     // EX_TEMPFAIL is handled only by the trusted workflow's bounded retry
     // loop. No retryable attempt writes an attestation or an Acceptance Pass.
-    process.exitCode = process.argv[2] === 'attest' &&
-      deploymentReadinessRetryable(error) ? 75 : 2;
+    process.exitCode = process.argv[2] === 'attest' && rejection.retryable ? 75 : 2;
   }
 }
