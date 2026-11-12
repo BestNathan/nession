@@ -1203,6 +1203,15 @@ default in production; the E2E/acceptance fixture uses a shorter lease so the
 expiry boundary is tested without waiting five minutes. Neither the token nor a
 credential-bearing URL is logged.
 
+**The issuer can be unavailable, and that is not an Agent failure (#3358).** A
+renewal needs an authenticated Server connection, so a Server outage must not be
+read as a dead Agent endpoint. The Session runtime keeps the active Session and
+route while the issuer is away — it does not spend P2P candidates or force
+Relay — and resumes from the Server's authenticated-ready signal, with a
+bounded, low-frequency fallback check. The credential still authorizes only a
+*new* upgrade: a healthy established socket is never torn down because its
+lease crossed the deadline.
+
 The credential travels as a query parameter (`?token=`) because a browser cannot
 set a header on `new WebSocket()`. **That means it reaches every access log on
 the path**, which is a known cost of this design and not an oversight: it is why

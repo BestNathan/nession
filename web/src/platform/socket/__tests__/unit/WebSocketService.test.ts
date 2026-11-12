@@ -554,6 +554,158 @@ describe('WebSocketService', () => {
     expect(MockWebSocket.instances).toHaveLength(3);
   });
 
+  it('recovers a failed first dial when reconnectOnInitialFailure is set (#3358 SC-02)', async () => {
+    const service = new WebSocketService('ws://server/ws', [], {
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+      reconnectOnInitialFailure: true,
+    });
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
+
+    const first = service.connect();
+    void first.catch(() => {});
+    MockWebSocket.instances[0].error();
+
+    // Not a dead candidate: the logical connection is retained and retried.
+    expect(service.connectionState).toBe('reconnecting');
+    expect(states).not.toContain('disconnected');
+
+    await flushTimers(20);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connected');
+  });
+
+  it('reports the spent budget once but never leaves reconnecting when reportExhaustion is false (#3358 SC-01/04)', async () => {
+    const handshake = vi.fn(() => new Promise<void>(() => {}));
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+      persistentReconnect: true,
+      reportExhaustion: false,
+    });
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
+    void service.connect().catch(() => {});
+
+    const connectAndLose = (): void => {
+      const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+      socket.open();
+      socket.serverClose();
+    };
+
+    connectAndLose();
+    await flushTimers(50);
+    connectAndLose();
+    await flushTimers(50);
+    connectAndLose();
+    await flushTimers(50);
+
+    // The long tail keeps probing and the shell-visible state is recoverable;
+    // it must never flip to the terminal `disconnected` state that is what
+    // sends an already-authenticated workspace back to Login.
+    expect(service.reconnectAttempts).toBe(2);
+    expect(service.connectionState).toBe('reconnecting');
+    expect(states).not.toContain('disconnected');
+    await flushTimers(20_000);
+    expect(MockWebSocket.instances).toHaveLength(4);
+    // The tail attempt is in flight: `connecting` while it tries, never the
+    // terminal `disconnected` that would unmount the workspace.
+    expect(['connecting', 'reconnecting']).toContain(service.connectionState);
+    expect(states).not.toContain('disconnected');
+  });
+
+  it('treats a handshake timeout as a recoverable loss when the caller classifies it so (#3358 SC-02)', async () => {
+    const onHandshakeRejected = vi.fn();
+    let attempts = 0;
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake: async () => {
+        attempts += 1;
+        throw new Error('Request timeout: server.auth');
+      },
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+      isHandshakeRefusal: (error) => !error.message.includes('timeout'),
+      onHandshakeRejected,
+    });
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
+
+    void service.connect().catch(() => {});
+    MockWebSocket.instances[0].open();
+    await drainMicrotasks();
+
+    // The socket opened but never answered: this is a loss, not a refusal.
+    expect(onHandshakeRejected).not.toHaveBeenCalled();
+    expect(service.connectionState).toBe('reconnecting');
+    expect(states).not.toContain('disconnected');
+
+    await flushTimers(20);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].open();
+    await drainMicrotasks();
+    expect(attempts).toBe(2);
+    expect(service.connectionState).toBe('reconnecting');
+  });
+
+  it('keeps an explicit handshake refusal terminal and reports it to the owner (#692)', async () => {
+    const onHandshakeRejected = vi.fn();
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake: async () => {
+        throw new Error('bad token');
+      },
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+      isHandshakeRefusal: () => true,
+      onHandshakeRejected,
+    });
+    void service.connect().catch(() => {});
+    MockWebSocket.instances[0].open();
+    await drainMicrotasks();
+
+    expect(onHandshakeRejected).toHaveBeenCalledTimes(1);
+    expect(service.connectionState).toBe('disconnected');
+    await flushTimers(60_000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('emits redacted close facts and never the URL or credential (#3358 SC-05)', async () => {
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const service = new WebSocketService('ws://server/ws?token=secret-token', [], {
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic }),
+    });
+    void service.connect().catch(() => {});
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await drainMicrotasks();
+
+    (socket.onclose as unknown as ((event: CloseEvent) => void) | null)?.({
+      code: 1006,
+      wasClean: false,
+      reason: 'abnormal',
+    } as CloseEvent);
+
+    const close = diagnostics.find((entry) => entry.event === 'socket-close');
+    expect(close).toMatchObject({ code: 1006, wasClean: false, reason: 'abnormal' });
+
+    // A peer-supplied reason that could carry a URL or token is dropped, not
+    // merely truncated.
+    (socket.onclose as unknown as ((event: CloseEvent) => void) | null)?.({
+      code: 1000,
+      wasClean: true,
+      reason: 'ws://server/ws?token=secret-token',
+    } as CloseEvent);
+    const closes = diagnostics.filter((entry) => entry.event === 'socket-close');
+    expect(closes[closes.length - 1].reason).toBeUndefined();
+
+    const serialized = JSON.stringify(diagnostics);
+    expect(serialized).not.toContain('secret-token');
+    expect(serialized).not.toContain('ws://server/ws');
+  });
+
   it('correlates handshake requests via HandshakeSurface and still dispatches pushes during the handshake', async () => {
     let verified = false;
     const handshake = vi.fn(async (surface: HandshakeSurface) => {

@@ -1,0 +1,9 @@
+schema_version: 1
+issue: 3358
+criterion: SC-04
+stage: pre-merge
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify.spec.ts
+result_policy: all-pass

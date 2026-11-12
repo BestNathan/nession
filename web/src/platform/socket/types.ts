@@ -78,6 +78,33 @@ export interface TransportPlugin {
   install(connection: PluginSurface): () => void;
 }
 
+/**
+ * A bounded, redacted transport fact for client diagnostics (#3358).
+ *
+ * Never carries a URL, auth token or credential: `generation` and `attempt`
+ * identify the physical/logical connection, and `code`/`wasClean`/`reason` are
+ * the browser's own close facts. The consumer decides where this goes.
+ */
+export interface TransportDiagnostic {
+  event:
+    | 'socket-open'
+    | 'socket-error'
+    | 'socket-close'
+    | 'handshake-failure'
+    | 'reconnect-scheduled';
+  generation: number;
+  attempt: number;
+  /** Browser CloseEvent code and cleanliness, for `socket-close`. */
+  code?: number;
+  wasClean?: boolean;
+  /** Server/peer close reason, bounded by the consumer, never a credential. */
+  reason?: string;
+  /** Distinguishes an explicit refusal from a timeout/transport failure. */
+  failureClass?: 'auth-rejected' | 'transport';
+  /** Delay of the scheduled retry, for `reconnect-scheduled`. */
+  delayMs?: number;
+}
+
 export interface WebSocketServiceOptions {
   handshake?: (surface: HandshakeSurface) => Promise<void>;
   maxReconnectAttempts?: number; // default 10
@@ -97,6 +124,40 @@ export interface WebSocketServiceOptions {
    * `disconnected` so the address policy can pick the next candidate.
    */
   persistentReconnect?: boolean;
+  /**
+   * Whether a spent budget is reported once as `disconnected` while the
+   * persistent tail keeps probing (default `true`).
+   *
+   * The report is a verdict for callers whose policy rotates candidates away
+   * from a spent route. A caller that has nothing to rotate to and whose UI
+   * must keep its session surface mounted — the app's one Server connection —
+   * sets this to `false`; the transport then stays `reconnecting` for the whole
+   * tail, so the shell does not fall back to Login during a transient outage
+   * (#3358).
+   */
+  reportExhaustion?: boolean;
+  /**
+   * Treat a failed **first** dial as recoverable instead of terminal.
+   *
+   * The default keeps the historical candidate-rotation semantics: a route
+   * whose first socket cannot open is a dead candidate, and the address policy
+   * must be allowed to advance immediately (#1926). The app's Server
+   * connection has no next candidate and must recover from a cold start with
+   * no network (#3358 SC-02).
+   */
+  reconnectOnInitialFailure?: boolean;
+  /**
+   * Classify a handshake rejection as the peer's **explicit refusal** (default
+   * `true`), which stops retrying (#692), versus a timeout/unresponsive peer,
+   * which is a loss that may be retried (#3358 SC-02).
+   *
+   * The handshake owner knows which errors are refusals; the transport cannot.
+   * A default of `true` preserves the historical one-rejection-stops rule for
+   * every existing caller.
+   */
+  isHandshakeRefusal?: (error: Error) => boolean;
+  /** Redacted, bounded connection diagnostics (#3358 SC-05). */
+  onDiagnostic?: (diagnostic: TransportDiagnostic) => void;
   /**
    * Resolve the URL to dial immediately before **every** connection attempt.
    *

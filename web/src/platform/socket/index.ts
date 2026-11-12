@@ -1,5 +1,7 @@
 export { WebSocketService, buildAgentWsUrl } from './WebSocketService';
+export { RequestTimeoutError } from './MessageRouter';
 export type {
+  TransportDiagnostic,
   TransportPlugin,
   ConnectionState,
   HandshakeSurface,
