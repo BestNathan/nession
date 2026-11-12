@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43220958687,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3334-async-erofs-builds",
+    "target_sha": "5a04565653f3c52099b29033789892daeb7a2e1f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43220958687",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "5566333dd9b2a9957d1c36f19b106e12635fe3106702017a6bd991c915b2bc6d"
+  },
+  "record": "runs/2026-11-12/43220958687-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ed3c31834885bb4e734df251b03f9df727e47318a7762db1b7013e4d399ba27f"
+}
