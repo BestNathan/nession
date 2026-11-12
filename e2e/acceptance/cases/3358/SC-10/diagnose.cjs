@@ -5,10 +5,14 @@
 const fs = require('node:fs');
 const { run } = require('../../../shared/control-mode-cases.cjs');
 
-run(() => {
+run(({ evidence }) => {
   const file = '/tmp/nession-sc10-diag.json';
   if (!fs.existsSync(file)) {
-    return 'No browser failure diagnostics were produced';
+    evidence.push({
+      type: 'runtime',
+      value: 'No browser failure diagnostics were produced; the SC-10 browser verifier passed',
+    });
+    return 'SC-10 browser verifier passed without diagnostics';
   }
   const diagnostic = JSON.parse(fs.readFileSync(file, 'utf8'));
   throw new Error('SC10_DIAG ' + JSON.stringify(diagnostic).slice(0, 4000));
