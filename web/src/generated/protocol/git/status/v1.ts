@@ -27,7 +27,7 @@ export type StatusOkV1 = { status: RepoStatus, root: string,
  * True when the listing itself was cut off. A partial listing presented as
  * a whole one is the failure `#750` C3 names.
  */
-truncated: boolean, truncatedBytes: number, };
+truncated: boolean, truncated_bytes: number, };
 export type RepoStatus = { 
 /**
  * Branch name, or `None` when detached.
@@ -53,7 +53,7 @@ export type ChangedFile = { path: string,
 /**
  * Present only for renames/copies.
  */
-originalPath?: string | null, kind: ChangeKind, 
+original_path?: string | null, kind: ChangeKind, 
 /**
  * Staged in the index (porcelain `X`).
  */
@@ -76,5 +76,5 @@ export type StatusResponse = { "state": "ok", status: RepoStatus, root: string,
  * True when the listing itself was cut off. A partial listing presented as
  * a whole one is the failure `#750` C3 names.
  */
-truncated: boolean, truncatedBytes: number, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
+truncated: boolean, truncated_bytes: number, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
 

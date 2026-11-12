@@ -23,16 +23,13 @@ pub struct StatusRequestV1 {
     pub target: SessionTargetV1,
 }
 
-/// `camelCase` because that is what the client reads, and every other field on
-/// this wire already is: the hand-written `truncatedBytes` beside it in
-/// `agent.rs`, and every single-word field whose spelling the case rule cannot
-/// touch. Without it this struct alone emitted `original_path`, so a renamed
-/// file's tooltip read `undefined → new-name` — a field that is only populated
-/// for renames, which is exactly the case no fixture exercised over the wire.
+/// One changed path in a status listing.
+///
+/// Nession-owned transport field names are snake_case (#3371). `original_path`
+/// is present only for renames/copies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct ChangedFile {
     pub path: String,
     /// Present only for renames/copies.
@@ -99,7 +96,6 @@ pub struct StatusOkV1 {
     /// True when the listing itself was cut off. A partial listing presented as
     /// a whole one is the failure `#750` C3 names.
     pub truncated: bool,
-    #[serde(rename = "truncatedBytes")]
     pub truncated_bytes: usize,
 }
 
@@ -152,7 +148,7 @@ mod tests {
         assert_eq!(value["state"], "ok");
         assert_eq!(value["root"], "/repo");
         assert_eq!(value["truncated"], false);
-        assert_eq!(value["truncatedBytes"], 0);
+        assert_eq!(value["truncated_bytes"], 0);
         assert_eq!(value["status"]["branch"], "main");
         assert_eq!(value["status"]["ahead"], 2);
     }

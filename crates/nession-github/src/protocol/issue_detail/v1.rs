@@ -23,7 +23,6 @@ pub struct IssueDetailRequestV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubIssueDetailV1 {
     pub number: u64,
     pub title: String,
@@ -41,7 +40,6 @@ pub struct GithubIssueDetailV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct IssueDetailOkV1 {
     pub repository: GithubRepositoryRefV1,
     pub issue: GithubIssueDetailV1,

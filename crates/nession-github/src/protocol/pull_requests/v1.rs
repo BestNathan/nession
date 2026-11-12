@@ -35,7 +35,6 @@ pub enum BranchRelationV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubBaseRefV1 {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -45,7 +44,6 @@ pub struct GithubBaseRefV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubHeadRefV1 {
     /// The head repository's owner; empty when the fork was deleted.
     pub owner: String,
@@ -74,7 +72,6 @@ pub struct PullRequestsRequestV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubPullRequestSummaryV1 {
     pub number: u64,
     pub title: String,
@@ -93,7 +90,6 @@ pub struct GithubPullRequestSummaryV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct PullRequestsOkV1 {
     pub repository: GithubRepositoryRefV1,
     pub pull_requests: Vec<GithubPullRequestSummaryV1>,

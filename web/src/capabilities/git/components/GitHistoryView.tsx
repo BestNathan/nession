@@ -87,7 +87,7 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
     );
   }
 
-  const { limit, truncated, truncatedBytes } = history.history;
+  const { limit, truncated, truncated_bytes } = history.history;
   if (commits.length === 0) {
     return (
       <GitNotice testId="git-history-none">
@@ -102,7 +102,7 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
         commits={commits}
         limit={limit}
         truncated={truncated}
-        truncatedBytes={truncatedBytes}
+        truncatedBytes={truncated_bytes}
         selected={selected}
         endOfHistory={endOfHistory}
         nextCursor={nextCursor}

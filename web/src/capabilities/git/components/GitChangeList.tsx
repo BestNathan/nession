@@ -174,8 +174,8 @@ function rowLabel(row: GitRow): string | null {
  * readable and the detail is one hover away.
  */
 function rowTitle(row: GitRow): string {
-  if ((row.kind === 'staged' || row.kind === 'unstaged') && row.file.originalPath) {
-    return `${row.file.originalPath} → ${row.path}`;
+  if ((row.kind === 'staged' || row.kind === 'unstaged') && row.file.original_path) {
+    return `${row.file.original_path} → ${row.path}`;
   }
   return row.path;
 }

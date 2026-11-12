@@ -30,13 +30,13 @@ path: string,
  * The snapshot the caller reviewed. A stale token is refused and the index
  * is left untouched.
  */
-expectedSnapshot: string, session: string, };
-export type GitMutationResponseV1<T> = { "state": "ok", } & T | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncatedBytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
+expected_snapshot: string, session: string, };
+export type GitMutationResponseV1<T> = { "state": "ok", } & T | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncated_bytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
 export type MutationStateOkV1 = { snapshot: GitSnapshotV1, status: RepoStatus, 
 /**
  * True when the post-mutation listing had to be cut off.
  */
-truncated: boolean, truncatedBytes: number, };
+truncated: boolean, truncated_bytes: number, };
 export type GitSnapshotV1 = { 
 /**
  * Compare for equality; never parse or construct.
@@ -75,7 +75,7 @@ export type ChangedFile = { path: string,
 /**
  * Present only for renames/copies.
  */
-originalPath?: string | null, kind: ChangeKind, 
+original_path?: string | null, kind: ChangeKind, 
 /**
  * Staged in the index (porcelain `X`).
  */
@@ -99,12 +99,12 @@ path: string,
  * The snapshot the caller reviewed. A stale token is refused and the index
  * is left untouched.
  */
-expectedSnapshot: string, session: string, };
+expected_snapshot: string, session: string, };
 
 /** The payload the provider answers with. */
 export type UnstageResponse = { "state": "ok", snapshot: GitSnapshotV1, status: RepoStatus, 
 /**
  * True when the post-mutation listing had to be cut off.
  */
-truncated: boolean, truncatedBytes: number, } | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncatedBytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
+truncated: boolean, truncated_bytes: number, } | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncated_bytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
 

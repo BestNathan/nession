@@ -254,7 +254,7 @@ function headerSummary(
   if (status.truncated) {
     // A partial listing presented as a whole one is the failure C3 names; the
     // count is the first thing that would be wrong, so it says so here.
-    summary += ` — listing truncated, ${formatBytes(status.truncatedBytes)} not read`;
+    summary += ` — listing truncated, ${formatBytes(status.truncated_bytes)} not read`;
   }
   return summary;
 }

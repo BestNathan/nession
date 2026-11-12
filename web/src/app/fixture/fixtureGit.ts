@@ -143,14 +143,14 @@ function mutateFixtureRepository(
       message: 'This Session is not in a git repository.',
     };
   }
-  if (String(payload.expectedSnapshot ?? '') !== repo.snapshot.token) {
+  if (String(payload.expected_snapshot ?? '') !== repo.snapshot.token) {
     return {
       state: 'repository_changed',
       message: 'The repository changed after it was reviewed.',
       snapshot: repo.snapshot,
       status: repo.status.status,
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     };
   }
 
@@ -171,14 +171,14 @@ function mutateFixtureRepository(
       root: repo.status.state === 'ok' ? repo.status.root : FIXTURE_ROOT,
       snapshot: repo.snapshot,
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     };
     return {
       state: 'ok' as const,
       snapshot: repo.snapshot,
       status: next,
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     };
   };
 
@@ -639,7 +639,7 @@ const MUTATION_OVERLAP_A: GitStatusResponse = {
   root: '/Users/dev/code/repo-a',
   snapshot: fixtureSnapshot('fixture-mutation-a-0', 'fixture-head-a'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'feat/a',
     detached: false,
@@ -661,7 +661,7 @@ const MUTATION_OVERLAP_B: GitStatusResponse = {
   root: '/Users/dev/code/repo-b',
   snapshot: fixtureSnapshot('fixture-mutation-b-0', 'fixture-head-b'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'feat/b',
     detached: false,
@@ -688,7 +688,7 @@ const CLEAN_STATUS: GitStatusResponse = {
   root: FIXTURE_ROOT,
   snapshot: fixtureSnapshot('fixture-clean-0', 'fixture-head-clean'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'main',
     detached: false,
@@ -711,7 +711,7 @@ const CHANGED_STATUS: GitStatusResponse = {
   root: FIXTURE_ROOT,
   snapshot: fixtureSnapshot('fixture-changed-0', 'fixture-head-changed'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'feat/repo-status',
     detached: false,
@@ -767,7 +767,7 @@ const SELECTION_OVERLAP_STATUS: GitStatusResponse = {
   root: FIXTURE_ROOT,
   snapshot: fixtureSnapshot('fixture-selection-overlap-0', 'fixture-head-selection'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'feat/selection-overlap',
     detached: false,
@@ -839,7 +839,7 @@ const DIFF_STATE_STATUS: GitStatusResponse = {
   root: FIXTURE_ROOT,
   snapshot: fixtureSnapshot('fixture-diff-states-0', 'fixture-head-diff'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'feat/diff-rendering',
     detached: false,
@@ -877,7 +877,7 @@ const PREVIEW_STATE_STATUS: GitStatusResponse = {
   root: FIXTURE_ROOT,
   snapshot: fixtureSnapshot('fixture-preview-states-0', 'fixture-head-preview'),
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
   status: {
     branch: 'feat/file-preview',
     detached: false,
@@ -1217,27 +1217,27 @@ function malformedDiff(path: string): string {
 const COMMITS = [
   {
     hash: '4f2a1c9e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39',
-    shortHash: '4f2a1c9',
+    short_hash: '4f2a1c9',
     author: 'Nathan',
-    relativeDate: '2 hours ago',
+    relative_date: '2 hours ago',
     date: '2026-09-19T14:20:00+08:00',
     subject: 'feat(capability): let a capability emerge beside the capsule (#826)',
     refs: 'HEAD -> feat/repo-status',
   },
   {
     hash: '9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c',
-    shortHash: '9b8c7d6',
+    short_hash: '9b8c7d6',
     author: 'Nathan',
-    relativeDate: '1 day ago',
+    relative_date: '1 day ago',
     date: '2026-09-18T09:05:00+08:00',
     subject: 'fix(git): stack the view when the pane is narrow, and stop repeating the heading',
     refs: '',
   },
   {
     hash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
-    shortHash: '1a2b3c4',
+    short_hash: '1a2b3c4',
     author: 'Ada',
-    relativeDate: '3 days ago',
+    relative_date: '3 days ago',
     date: '2026-09-16T18:44:00+08:00',
     subject: 'docs: a subject with | punctuation — and a dash (so the parser is honest)',
     refs: 'tag: v0.35.0',
@@ -1277,7 +1277,7 @@ const COMMIT_FILES: Record<string, { path: string; status: string }[]> = {
  * one yet, so this answers the state every repository is in.
  */
 function commitDetailFor(oid: string): GitCommitResponse {
-  const commit = COMMITS.find((c) => c.hash === oid || c.shortHash === oid);
+  const commit = COMMITS.find((c) => c.hash === oid || c.short_hash === oid);
   if (!commit) {
     // The agent validates the object name and answers an error for one it cannot
     // resolve. A fixture that invented a commit for an unknown revision would let
@@ -1288,23 +1288,23 @@ function commitDetailFor(oid: string): GitCommitResponse {
     state: 'ok',
     commit: {
       oid: commit.hash,
-      shortOid: commit.shortHash,
+      short_oid: commit.short_hash,
       // The oldest commit in the fixture is the root, so it has no parent; the
       // others chain onto the one below them in `COMMITS`.
       parents: COMMITS[COMMITS.indexOf(commit) + 1] ? [COMMITS[COMMITS.indexOf(commit) + 1].hash] : [],
       author: commit.author,
-      authorDate: commit.date,
+      author_date: commit.date,
       committer: commit.author,
-      commitDate: commit.date,
+      commit_date: commit.date,
       subject: commit.subject,
       body: '',
       decorations: commit.refs,
-      files: (COMMIT_FILES[commit.shortHash] ?? []).map((f) => ({ ...f, binary: false })),
-      filesTruncated: false,
-      filesTruncatedBytes: 0,
-      messageTruncated: false,
-      messageTruncatedBytes: 0,
-      mergeDiffParent: '',
+      files: (COMMIT_FILES[commit.short_hash] ?? []).map((f) => ({ ...f, binary: false })),
+      files_truncated: false,
+      files_truncated_bytes: 0,
+      message_truncated: false,
+      message_truncated_bytes: 0,
+      merge_diff_parent: '',
     },
   };
 }
@@ -1330,10 +1330,10 @@ function historyFor(limit: unknown): GitLogResponse {
     history: {
       commits,
       limit: asked,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
       truncated: false,
-      endOfHistory: commits.length < asked,
-      nextCursor:
+      end_of_history: commits.length < asked,
+      next_cursor:
         commits.length >= asked ? commits[commits.length - 1]?.hash : undefined,
     },
   };
@@ -1361,7 +1361,7 @@ const BRANCHES = [
     upstream: 'origin/feat/repo-status',
     ahead: 2,
     behind: 1,
-    upstreamGone: false,
+    upstream_gone: false,
   },
   {
     name: 'main',
@@ -1369,14 +1369,14 @@ const BRANCHES = [
     upstream: 'origin/main',
     ahead: 0,
     behind: 0,
-    upstreamGone: false,
+    upstream_gone: false,
   },
   {
     name: 'local-only',
     current: false,
     ahead: 0,
     behind: 0,
-    upstreamGone: false,
+    upstream_gone: false,
   },
   {
     name: 'chore/old-remote',
@@ -1384,7 +1384,7 @@ const BRANCHES = [
     upstream: 'origin/chore/old-remote',
     ahead: 0,
     behind: 0,
-    upstreamGone: true,
+    upstream_gone: true,
   },
 ];
 
@@ -1394,7 +1394,7 @@ function branchesFor(limit: unknown): GitBranchesResponse {
   const branches = BRANCHES.slice(0, Math.min(asked, BRANCHES.length));
   return {
     state: 'ok',
-    branches: { branches, limit: asked, truncatedBytes: 0, truncated: false },
+    branches: { branches, limit: asked, truncated_bytes: 0, truncated: false },
   };
 }
 
@@ -1430,7 +1430,7 @@ const WORKTREES: GitWorktreesResponse = {
         prunable: 'gitdir file points to non-existent location',
       },
     ],
-    truncatedBytes: 0,
+    truncated_bytes: 0,
     truncated: false,
   },
 };

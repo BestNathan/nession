@@ -25,12 +25,12 @@ describe('fixture GitHub surface', () => {
     );
     expect(repository).toMatchObject({ state: 'ok', resolution: 'resolved' });
 
-    const list = await surface.request<{ issues: { number: number }[]; nextCursor: string | null }>(
+    const list = await surface.request<{ issues: { number: number }[]; next_cursor: string | null }>(
       'github.issues',
       { state: 'all' },
     );
     expect(list.issues.map((issue) => issue.number)).toEqual([1290, 2514]);
-    expect(list.nextCursor).toBe('2');
+    expect(list.next_cursor).toBe('2');
 
     const detail = await surface.request<{ issue: { body: string } }>('github.issue-detail', {
       number: 1290,
@@ -39,12 +39,12 @@ describe('fixture GitHub surface', () => {
   });
 
   it('distinguishes empty, missing, unauthenticated and remote states', async () => {
-    const empty = await fixtureGithubSurface('?github=empty').request<{ issues: unknown[]; hasMore: boolean }>(
+    const empty = await fixtureGithubSurface('?github=empty').request<{ issues: unknown[]; has_more: boolean }>(
       'github.issues',
       {},
     );
     expect(empty.issues).toEqual([]);
-    expect(empty.hasMore).toBe(false);
+    expect(empty.has_more).toBe(false);
 
     const missing = await fixtureGithubSurface('').request<{ state: string; code: string }>(
       'github.issue-detail',
@@ -67,19 +67,19 @@ describe('fixture GitHub surface', () => {
 
   it('scopes Actions runs and preserves queued/in-progress/disabled states', async () => {
     const surface = fixtureGithubSurface('');
-    const repo = await surface.request<{ workflows: { state: string; latestRun?: { status: string } }[] }>(
+    const repo = await surface.request<{ workflows: { state: string; latest_run?: { status: string } }[] }>(
       'github.workflows',
       { scope: 'repository' },
     );
     expect(repo.workflows.some((workflow) => workflow.state === 'disabled')).toBe(true);
-    expect(repo.workflows.some((workflow) => workflow.latestRun?.status === 'queued')).toBe(true);
+    expect(repo.workflows.some((workflow) => workflow.latest_run?.status === 'queued')).toBe(true);
 
-    const branch = await surface.request<{ branch: string; workflows: { latestRun?: { status: string; branch: string } }[] }>(
+    const branch = await surface.request<{ branch: string; workflows: { latest_run?: { status: string; branch: string } }[] }>(
       'github.workflows',
       { scope: 'branch' },
     );
     expect(branch.branch).toBe('feature/git-github');
-    expect(branch.workflows[0]?.latestRun).toMatchObject({
+    expect(branch.workflows[0]?.latest_run).toMatchObject({
       status: 'in_progress',
       branch: 'feature/git-github',
     });

@@ -60,7 +60,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
     );
   }
 
-  const { branches: rows, limit, truncated, truncatedBytes } = branches.branches;
+  const { branches: rows, limit, truncated, truncated_bytes } = branches.branches;
 
   if (rows.length === 0) {
     // A repository with no commits has no branches. That is `git init` and
@@ -92,7 +92,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
             data-testid="git-branches-truncated"
             className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
           >
-            Branch listing truncated — {formatBytes(truncatedBytes)} not read.
+            Branch listing truncated — {formatBytes(truncated_bytes)} not read.
           </p>
         ) : null}
       </div>
@@ -152,7 +152,7 @@ function BranchTracking({ branch }: { branch: GitBranch }) {
   }
 
   const parts = [branch.upstream];
-  if (branch.upstreamGone) {
+  if (branch.upstream_gone) {
     parts.push('upstream deleted');
   } else {
     if (branch.ahead > 0) {

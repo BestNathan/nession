@@ -51,7 +51,7 @@ function statusFromMutation(ok: GitMutationOk): GitStatusResponse {
     root: ok.snapshot.root,
     snapshot: ok.snapshot,
     truncated: ok.truncated,
-    truncatedBytes: ok.truncatedBytes,
+    truncated_bytes: ok.truncated_bytes,
   };
 }
 
@@ -69,7 +69,7 @@ function statusFromState(failure: StateBearingFailure): GitStatusResponse | null
     root: failure.snapshot.root,
     snapshot: failure.snapshot,
     truncated: failure.state === 'repository_changed' ? failure.truncated : false,
-    truncatedBytes: failure.state === 'repository_changed' ? failure.truncatedBytes : 0,
+    truncated_bytes: failure.state === 'repository_changed' ? failure.truncated_bytes : 0,
   };
 }
 
@@ -105,7 +105,7 @@ type RowRequest = {
   agent_id: string;
   session: string;
   path: string;
-  expectedSnapshot: string;
+  expected_snapshot: string;
 };
 
 type RowOutcome =
@@ -131,7 +131,7 @@ async function requestRowMutation({
       agent_id: agentId,
       session: sessionId,
       path: row.path,
-      expectedSnapshot: snapshot.token,
+      expected_snapshot: snapshot.token,
     });
     return { ok: true, response };
   } catch (error) {
@@ -297,9 +297,9 @@ function useGitCommit({
         const response = await gitApi.gitCreateCommit({
           agent_id: agentId,
           session: sessionId,
-          expectedSnapshot: snapshotToken,
+          expected_snapshot: snapshotToken,
           message,
-          requestId,
+          request_id: requestId,
         });
         const created = adopt(response, forTarget);
         if (created) {

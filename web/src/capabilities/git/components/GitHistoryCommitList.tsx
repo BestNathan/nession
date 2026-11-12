@@ -96,9 +96,9 @@ function CommitRow({
     >
       <span className={cn('truncate', chromeSansRole('secondary'))}>{commit.subject}</span>
       <span className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('metadata'))}>
-        <span className="font-mono">{commit.shortHash}</span>
+        <span className="font-mono">{commit.short_hash}</span>
         <span className="truncate">{commit.author}</span>
-        <span className="shrink-0">{commit.relativeDate}</span>
+        <span className="shrink-0">{commit.relative_date}</span>
       </span>
     </button>
   );

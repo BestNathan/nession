@@ -39,9 +39,9 @@ function ctx(): WorkspaceContext {
 function commit(overrides: Partial<GitCommit> = {}): GitCommit {
   return {
     hash: 'a'.repeat(40),
-    shortHash: 'aaaaaaa',
+    short_hash: 'aaaaaaa',
     author: 'Nathan',
-    relativeDate: '2 hours ago',
+    relative_date: '2 hours ago',
     date: '2026-09-19T14:20:00+08:00',
     subject: 'feat: something',
     refs: '',
@@ -56,10 +56,10 @@ function ok(commits: GitCommit[], extra: Partial<GitLogResponse & { state: 'ok' 
     history: {
       commits,
       limit,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
       truncated: false,
-      endOfHistory: true,
-      nextCursor: undefined,
+      end_of_history: true,
+      next_cursor: undefined,
     },
     ...extra,
   } as GitLogResponse;
@@ -70,21 +70,21 @@ function commitDetailFrom(row: GitCommit) {
     state: 'ok' as const,
     commit: {
       oid: row.hash,
-      shortOid: row.shortHash,
+      short_oid: row.short_hash,
       parents: ['p'.repeat(40)],
       author: row.author,
-      authorDate: row.date,
+      author_date: row.date,
       committer: row.author,
-      commitDate: row.date,
+      commit_date: row.date,
       subject: row.subject,
       body: '',
       decorations: row.refs,
       files: [{ path: 'README.md', status: 'M', binary: false }],
-      filesTruncated: false,
-      filesTruncatedBytes: 0,
-      messageTruncated: false,
-      messageTruncatedBytes: 0,
-      mergeDiffParent: row.hash,
+      files_truncated: false,
+      files_truncated_bytes: 0,
+      message_truncated: false,
+      message_truncated_bytes: 0,
+      merge_diff_parent: row.hash,
     },
   } satisfies GitCommitResponse;
 }
@@ -94,7 +94,7 @@ describe('GitHistoryView', () => {
     vi.clearAllMocks();
     mockedLog.mockResolvedValue(ok([commit()]));
     mockedCommit.mockImplementation(async (req) => {
-      const row = commit({ hash: req.oid, shortHash: req.oid.slice(0, 7) });
+      const row = commit({ hash: req.oid, short_hash: req.oid.slice(0, 7) });
       return commitDetailFrom(row);
     });
   });
@@ -109,8 +109,8 @@ describe('GitHistoryView', () => {
   it('lists commits newest-first with what identifies each one', async () => {
     mockedLog.mockResolvedValue(
       ok([
-        commit({ hash: 'b'.repeat(40), shortHash: 'bbbbbbb', subject: 'newer' }),
-        commit({ hash: 'a'.repeat(40), shortHash: 'aaaaaaa', subject: 'older' }),
+        commit({ hash: 'b'.repeat(40), short_hash: 'bbbbbbb', subject: 'newer' }),
+        commit({ hash: 'a'.repeat(40), short_hash: 'aaaaaaa', subject: 'older' }),
       ]),
     );
 
@@ -175,9 +175,9 @@ describe('GitHistoryView', () => {
         history: {
           commits,
           limit: 2,
-          truncatedBytes: 0,
+          truncated_bytes: 0,
           truncated: false,
-          endOfHistory: true,
+          end_of_history: true,
         },
       }),
     );
@@ -197,9 +197,9 @@ describe('GitHistoryView', () => {
         history: {
           commits: [commit()],
           limit: 50,
-          truncatedBytes: 0,
+          truncated_bytes: 0,
           truncated: false,
-          endOfHistory: true,
+          end_of_history: true,
         },
       }),
     );
@@ -216,9 +216,9 @@ describe('GitHistoryView', () => {
         history: {
           commits: [commit()],
           limit: 1,
-          truncatedBytes: 4096,
+          truncated_bytes: 4096,
           truncated: true,
-          endOfHistory: true,
+          end_of_history: true,
         },
       }),
     );

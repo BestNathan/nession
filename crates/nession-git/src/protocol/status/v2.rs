@@ -26,7 +26,6 @@ pub struct StatusRequestV2 {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct StatusOkV2 {
     pub status: RepoStatus,
     pub root: String,
@@ -79,6 +78,6 @@ mod tests {
         assert_eq!(value["state"], "ok");
         assert_eq!(value["snapshot"]["token"], "abc123");
         assert_eq!(value["snapshot"]["head"], "0123456789abcdef");
-        assert_eq!(value["truncatedBytes"], 0);
+        assert_eq!(value["truncated_bytes"], 0);
     }
 }

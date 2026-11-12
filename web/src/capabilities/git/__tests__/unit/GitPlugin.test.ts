@@ -58,7 +58,7 @@ const statusResponse = {
   root: '/repo',
   snapshot: { token: 'token-1', head: 'head-1', root: '/repo' },
   truncated: false,
-  truncatedBytes: 0,
+  truncated_bytes: 0,
 } as const;
 
 describe('GitPlugin', () => {
@@ -129,7 +129,7 @@ describe('GitPlugin', () => {
 
       surface.resolveNext('git.diff', {
         state: 'ok',
-        diff: { path: 'src/a.ts', text: '+x', binary: false, truncatedBytes: 0, truncated: false },
+        diff: { path: 'src/a.ts', text: '+x', binary: false, truncated_bytes: 0, truncated: false },
       });
       await expect(pending).resolves.toMatchObject({ state: 'ok' });
     });
@@ -139,7 +139,7 @@ describe('GitPlugin', () => {
         agent_id: 'a1',
         session: 'a1:work',
         path: 'src/a.ts',
-        expectedSnapshot: 'token-1',
+        expected_snapshot: 'token-1',
       } as const;
       const pending = plugin.gitStage(request);
       expect(surface.requests[0]).toMatchObject({
@@ -155,9 +155,9 @@ describe('GitPlugin', () => {
       const request = {
         agent_id: 'a1',
         session: 'a1:work',
-        expectedSnapshot: 'token-1',
+        expected_snapshot: 'token-1',
         message: 'feat: change',
-        requestId: 'commit-1',
+        request_id: 'commit-1',
       } as const;
       const pending = plugin.gitCreateCommit(request);
       expect(surface.requests[0]).toMatchObject({
