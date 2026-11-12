@@ -116,6 +116,7 @@ jobs:
             exit 1
           fi
           {
+            echo "ENVIRONMENT=$ENVIRONMENT"
             echo "NAMESPACE=$NAMESPACE"
             echo "OVERLAY_PATH=$OVERLAY_PATH"
             echo "DEPLOYED_SHORT=$SHORT"
@@ -239,7 +240,7 @@ jobs:
               --overlay "$RUNNER_TEMP/overlay.yaml" \
               --gitops-revision "$(cat "$RUNNER_TEMP/gitops-revision")" \
               --provenance "$RUNNER_TEMP/provenance/nession-build-provenance.json" \
-              --environment "${{ github.event.inputs.environment }}" \
+              --environment "$ENVIRONMENT" \
               --cluster-context "$CLUSTER_CONTEXT" \
               --observed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               --deployments "$RUNNER_TEMP/deployments.json" \
@@ -315,7 +316,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nession-deployment-attestation-${{ github.event.inputs.environment }}
+          name: nession-deployment-attestation-${{ github.event.inputs.environment || 'staging' }}
           path: ${{ runner.temp }}/deployment-attestation.json
           retention-days: 90
 
