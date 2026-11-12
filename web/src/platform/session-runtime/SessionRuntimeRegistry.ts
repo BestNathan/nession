@@ -84,6 +84,19 @@ export class SessionRuntimeRegistry {
     }
   }
 
+  /**
+   * The app's Server WS completed authentication. This is the dependency that
+   * wakes a runtime waiting for a P2P credential issuer; runtimes that are not
+   * waiting treat it as a no-op (#3358).
+   */
+  resumeServerAuthenticated(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.leases.size > 0) {
+        entry.runtime.resumeAfterServerAuthenticated();
+      }
+    }
+  }
+
   get(sessionId: string): SessionRuntime | null {
     return this.entries.get(sessionId)?.runtime ?? null;
   }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { WebSocketService } from '../platform/socket';
-import type { ConnectionState } from '../platform/socket/types';
+import type { ConnectionState, TransportDiagnostic, WebSocketServiceOptions } from '../platform/socket/types';
 import type { AuthResponse } from '../types';
 import { WIRE as AUTH_WIRE } from '@/generated/protocol/core/server-auth/v1';
 import { agentsApi } from '@/product/agent';
@@ -58,6 +58,49 @@ function retryCurrentTransport(service: WebSocketService | null): void {
   void service?.reconnectNow().catch((error) => console.error('[connection] Retry failed:', error));
 }
 
+/** Redacted by construction: no URL, token, or credential (#3358 SC-05). */
+function logTransportDiagnostic(diagnostic: TransportDiagnostic): void {
+  console.info('[connection] transport', diagnostic);
+}
+
+/**
+ * The one logical Server connection's transport policy.
+ *
+ * There is no next candidate to rotate to, and losing the link must not tear
+ * down the Workspace or send an authenticated user back to Login: keep the
+ * low-frequency tail, stay `reconnecting`, recover a cold-start failure, and
+ * treat only an explicit auth refusal as terminal (#3358 SC-01/02/04).
+ */
+function serverTransportOptions(
+  authToken: string,
+  wasAuthenticated: () => boolean,
+  onExplicitRefusal: () => void,
+): WebSocketServiceOptions {
+  return {
+    maxReconnectAttempts: 5,
+    persistentReconnect: true,
+    reportExhaustion: false,
+    reconnectOnInitialFailure: true,
+    isHandshakeRefusal: (error) => error instanceof AuthenticationRejectedError,
+    onDiagnostic: logTransportDiagnostic,
+    onHandshakeRejected: (error) => {
+      if (wasAuthenticated() && error instanceof AuthenticationRejectedError) {
+        onExplicitRefusal();
+      }
+    },
+    handshake: (surface) => surface
+      .request<AuthResponse>(AUTH_WIRE, {
+        auth_token: authToken,
+        client_id: getOrCreateClientId(),
+      })
+      .then((res) => {
+        if (res.status !== 'success') {
+          throw new AuthenticationRejectedError(res.message || 'Authentication failed');
+        }
+      }),
+  };
+}
+
 export function useAppConnection() {
   const params = new URLSearchParams(window.location.search);
   // Whether to restore a session on load, frozen at the first render. Reading
@@ -112,31 +155,21 @@ export function useAppConnection() {
       // A previous service (StrictMode twin, reconnect after disconnect) must
       // stop before the new one opens — two transports would race the state.
       serviceRef.current?.dispose();
-      const clientId = getOrCreateClientId();
       let authenticatedOnce = false;
-      service = new WebSocketService(serverUrl, SERVER_PLUGINS, {
-        maxReconnectAttempts: 5,
-        onHandshakeRejected: (error) => {
-          // A post-resume *explicit refusal* is different from network loss.
-          // The service could recover transparently before this refusal;
-          // once rejected, preserve the error's auth meaning and exit to Login.
-          if (!authenticatedOnce || !(error instanceof AuthenticationRejectedError)
-            || serviceRef.current !== service) { return; }
-          serviceRef.current = null;
-          service?.dispose();
-          setWsService(null);
-          clearToken();
-          setWasEverAuthed(false);
-          setConnectionStatus('disconnected');
-        },
-        handshake: (surface) => surface
-          .request<AuthResponse>(AUTH_WIRE, { auth_token: authToken, client_id: clientId })
-          .then((res) => {
-            if (res.status !== 'success') {
-              throw new AuthenticationRejectedError(res.message || 'Authentication failed');
-            }
-          }),
-      });
+      const onExplicitRefusal = (): void => {
+        // A post-resume explicit refusal is different from network loss:
+        // preserve its auth meaning and exit to Login. A superseded service's
+        // late refusal must not dispose its successor.
+        if (!service || serviceRef.current !== service) { return; }
+        serviceRef.current = null;
+        service.dispose();
+        setWsService(null);
+        clearToken();
+        setWasEverAuthed(false);
+        setConnectionStatus('disconnected');
+      };
+      service = new WebSocketService(serverUrl, SERVER_PLUGINS,
+        serverTransportOptions(authToken, () => authenticatedOnce, onExplicitRefusal));
       serviceRef.current = service;
       setWsService(service);
 
@@ -148,6 +181,10 @@ export function useAppConnection() {
         if (status === 'connected') {
           authenticatedOnce = true;
           setWasEverAuthed(true);
+          // Server WS authenticated-ready is the wake signal for every
+          // SessionRuntime that is waiting for a P2P credential issuer
+          // (#3358). Runtimes that are not waiting ignore it.
+          sessionRuntimeRegistry.resumeServerAuthenticated();
         }
         setConnectionStatus(status);
       });
@@ -174,7 +211,12 @@ export function useAppConnection() {
           setConnectionStatus('disconnected');
         } else if (!auto) {
           toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          setConnectionStatus('disconnected');
+          // The transport owns recovery now: a transient failure is already
+          // retrying as `reconnecting`, and only an explicit refusal (or a
+          // disposed service) actually landed at `disconnected`. Forcing
+          // `disconnected` here would show Login over a transport that is
+          // still recovering (#3358 SC-04).
+          setConnectionStatus(service?.connectionState ?? 'disconnected');
         }
       }
       throw error;
