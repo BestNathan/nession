@@ -332,6 +332,8 @@ export function fixtureFileOps(): FileOps {
 export interface FixtureFilesControl {
   reset: () => void;
   revisionOf: (path: string) => string;
+  /** Current stored content, so a Case can assert what a write persisted. */
+  contentsOf: (path: string) => string | null;
   writeExternal: (path: string, content: string) => void;
   /** Delay exactly the next write, so a pending save is observable. */
   delayNextWrite: (milliseconds: number) => void;
@@ -347,6 +349,7 @@ export function fixtureFilesControl(): FixtureFilesControl {
       nextWriteError = null;
     },
     revisionOf: (path: string) => knownRevision(current(), path),
+    contentsOf: (path: string) => current().contents.get(path) ?? null,
     delayNextWrite: (milliseconds: number) => {
       nextWriteDelayMs = Math.max(0, Math.min(milliseconds, 5_000));
     },
