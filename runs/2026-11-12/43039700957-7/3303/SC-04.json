@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "01dd9fa6c1d89f098d1c8a084c959dbff2ace84bb468897bb7f65a16fd10aa42",
+  "run_id": 43039700957,
+  "run_attempt": 7,
+  "issue": 3303,
+  "criterion": "SC-04",
+  "criterion_text": "On a supported real Linux FUSE runner, an already verified EROFS image mounts read-only into an existing Sandbox composition and unmounts with owned-resource cleanup; digest mismatch, missing helpers/capabilities and invalid source root fail closed without Native fallback. The Sandbox retains root composition and execution authority.",
+  "stage": "staging",
+  "target_sha": "73851ebdad033d6241245c1c70434c0b01b99cf2",
+  "contract_sha256": "ba5e3ad827b757b586898f494fa48047ac562d56160f6f817e2004dfe7479cf1",
+  "case_revision": "73851ebdad033d6241245c1c70434c0b01b99cf2",
+  "case_tree_sha": "29a1055f59ca0c14f0cacd347031658b9b372f88",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T01:00:14.278Z",
+  "finished_at": "2026-11-12T01:00:49.306Z",
+  "duration_ms": 35028,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A verified EROFS image mounts read-only into an existing Sandbox composition and cleans up only owned mounts, while missing helpers, wrong bytes, unauthorized sources and unsupported capabilities fail closed without Native fallback",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact runner capability receipt: platform=linux backend=linux-bwrap namespaces={\"cgroup\":true,\"ipc\":true,\"net\":true,\"pid\":true,\"user\":true,\"uts\":true} seccomp=true filesystem=true erofs=true erofs_overlay=true network_deny=true network_restricted=true cgroup_v2=[\"cpu\",\"cpuset\",\"io\",\"memory\",\"pids\"]"
+        },
+        {
+          "type": "runtime",
+          "value": "executions 54a9e6a7-5dc4-49ef-ab1d-bf57cf8f4b73 and d3b3dc42-e161-4482-be41-d4b4b71d71a6 mounted the same Base/Project/toolchain images read-only through the extracted primitive; cleaning the first unmounted only its 4 mounts and left the second's 4 live"
+        },
+        {
+          "type": "runtime",
+          "value": "missing erofsfuse/fusermount, a non-executable helper, a digest mismatch, a source outside the authorized image root and unsupported EROFS/overlay capabilities all failed closed; no Native fallback substituted"
+        }
+      ],
+      "duration_ms": 29154,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43039700957,
+      "run_attempt": 7,
+      "event": "push",
+      "head_sha": "73851ebdad033d6241245c1c70434c0b01b99cf2",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43039700957",
+    "record_path": "runs/2026-11-12/43039700957-7/3303/SC-04.json",
+    "source_result_sha256": "49ac81cea0429f68143170019ca68e61df25780ee29ef0e4922e5f71372d19a8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43039700957-7",
+    "sha256": "49ac81cea0429f68143170019ca68e61df25780ee29ef0e4922e5f71372d19a8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43039700957",
+    "durability": "time-limited; object archival not configured"
+  }
+}

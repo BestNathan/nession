@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "19d42e856bbb5326045c5e90fbdcf6764fb383ea52f0b30bbc4a899927b65c28",
+  "run_id": 43039700957,
+  "run_attempt": 7,
+  "issue": 3303,
+  "criterion": "SC-03",
+  "criterion_text": "After cache extraction, one cold authorized Range download and one warm cache hit exhibit the existing byte-transfer/verification semantics; interrupted downloads resume correctly, corrupted downloads are rejected, per-Agent namespaces remain isolated, concurrent callers do not publish conflicting partials, and pin-protected in-use images cannot be evicted. The test must exercise the real extracted cache API, not a reimplemented test-only downloader.",
+  "stage": "staging",
+  "target_sha": "73851ebdad033d6241245c1c70434c0b01b99cf2",
+  "contract_sha256": "ba5e3ad827b757b586898f494fa48047ac562d56160f6f817e2004dfe7479cf1",
+  "case_revision": "73851ebdad033d6241245c1c70434c0b01b99cf2",
+  "case_tree_sha": "f9a76d3c86e112d0ef3bc7ff215a4edaa484168d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T00:58:55.793Z",
+  "finished_at": "2026-11-12T01:00:14.278Z",
+  "duration_ms": 78485,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The extracted EROFS cache preserves cold/warm transfer, resume, verification, namespace isolation, concurrency and pin/eviction semantics through the real production adapter",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 73851ebdad033d6241245c1c70434c0b01b99cf2: the extracted cache API performed one cold authenticated fetch and a warm hit with zero body transfers; an interrupted partial resumed with one Range request; a mismatched or corrupted body was rejected and never published; two identities on one root never shared ready or partial files; concurrent callers shared one fetch; a pinned digest was not evicted"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 73851ebdad033d6241245c1c70434c0b01b99cf2: the Agent Managed preparation used the extracted cache through its thin adapter, reusing the warm cache for a second attempt while creating a distinct Agent-owned workspace"
+        }
+      ],
+      "duration_ms": 72362,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43039700957,
+      "run_attempt": 7,
+      "event": "push",
+      "head_sha": "73851ebdad033d6241245c1c70434c0b01b99cf2",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43039700957",
+    "record_path": "runs/2026-11-12/43039700957-7/3303/SC-03.json",
+    "source_result_sha256": "64b2d0aec80848cf3419bd26778b355bc74515607540b908a47cff79a351bfb8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43039700957-7",
+    "sha256": "64b2d0aec80848cf3419bd26778b355bc74515607540b908a47cff79a351bfb8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43039700957",
+    "durability": "time-limited; object archival not configured"
+  }
+}
