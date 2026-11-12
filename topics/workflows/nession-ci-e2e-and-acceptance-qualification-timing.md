@@ -5,8 +5,8 @@ topic: workflows
 categories: ["acceptance","ci","e2e","release"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-08T07:34:05Z
-sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/docs/architecture/acceptance-sc-format.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.github/workflows/e2e-full-regression.yml","https://github.com/BestNathan/nession/issues/2323","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/ci-quality.yml","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/scripts/ci/quality-scope.mjs","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/acceptance-case-smoke.yml","https://github.com/BestNathan/nession/issues/2917","https://github.com/BestNathan/nession/pull/2931"]
+updated_at: 2026-11-12T15:48:00Z
+sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/docs/architecture/acceptance-sc-format.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.github/workflows/e2e-full-regression.yml","https://github.com/BestNathan/nession/issues/2323","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/ci-quality.yml","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/scripts/ci/quality-scope.mjs","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/acceptance-case-smoke.yml","https://github.com/BestNathan/nession/issues/2917","https://github.com/BestNathan/nession/pull/2931","https://github.com/BestNathan/nession/blob/185cd5fbcf9934a5ad4adeccbdca75ec2f178262/scripts/acceptance-sources.mjs","https://github.com/BestNathan/nession/blob/185cd5fbcf9934a5ad4adeccbdca75ec2f178262/.github/workflows/agent-sc-acceptance.yml","https://github.com/BestNathan/nession/issues/3068"]
 ---
 
 # Nession CI, E2E and acceptance qualification timing
@@ -25,6 +25,14 @@ Nession separates **development correctness** from **release qualification**, so
 Every Success Criterion has one `when: pr | merged | deployed` and one `method: agent | case` in its canonical Acceptance Plan. Choose the earliest **provable** boundary, not the current Worker topology. `agent` can evaluate source and authenticated records read-only; executed runtime assertions require `case`. Preserve missing evidence as Pending rather than passing a skipped check.
 
 The Issue lifecycle distinguishes **Development Complete → Main Promoted → Regression Qualified → Released**. Normal Issue completion does not automatically depend on Full E2E, product deployment or a production release.
+
+## Immutable orphan-source evidence for read-only Acceptance (#3068)
+
+A selected `method: agent` Success Criterion may declare immutable evidence inputs in an optional, separate Issue `## Acceptance Sources` section. The canonical `Acceptance Plan` remains limited to `when / branch / environment / method`; declarations do not select a proof stage or create a third proof method. Trusted-main `scripts/acceptance-sources.mjs` permits only the explicitly approved `prototype`, `knowledge` and `gitops` orphan branches, an existing reachable full 40-character source commit, and precisely enumerated allowlisted text files within fixed file/byte budgets. It validates source Git tree modes, UTF-8, safe paths and target staging-root collisions, then creates an SC-scoped read-only view and content-addressed manifest. A changing branch tip cannot change a pinned source.
+
+The trusted `Agent / SC Acceptance` router stages only currently eligible Agent SCs; model tools remain read-only, and source/comment instructions and model citations cannot expand trusted authority. Source declarations and manifest identity bind verdict and reuse digests without changing the historical digest of no-source Issues. A narrowly cutoff-bounded historical GitOps archive path remains for older explicitly marked Issues; new and no-source Issues must never implicitly archive entire branches or comments.
+
+A source file proves only its pinned bytes and structure: prototype HTML does **not** prove Pages publication, Knowledge content does **not** prove a public readback, and a desired-state GitOps file does **not** prove reconciliation. These still require independently authenticated publication/runtime evidence and the applicable `method: case`. The [#3068 Case Smoke run](https://github.com/BestNathan/nession/actions/runs/42569458181) observed five source-aligned pre-merge Case Pass results at head `1086b28a3ac7333cbd68a470d6c14a09cba0db66`; Smoke is supporting development evidence, **not** the formal `Acceptance / Cases` → immutable `Acceptance / Case Ingest` → Issue-projection chain.
 
 ## Full E2E and cost
 

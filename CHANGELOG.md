@@ -717,3 +717,10 @@
 - Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
 - Reason: Record #3334's directory-backed asynchronous build lifecycle: durable build state authority versus the Image Registry, explicit stages and measured progress, verified-snapshot stage-level restart recovery, cancel/retry, the single build-root owner condition, bounded cleanup and GC protection, the new asynchronous protocol units with the legacy synchronous compatibility path, and the Web/Project observation surfaces
 - Source: https://github.com/BestNathan/nession/issues/3334
+
+## 2026-11-12T15:48:00Z | update | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Document #3068 exact-SHA bounded orphan evidence, trusted Agent-only staging, legacy GitOps cutoff, and separate Case/public-readback proof authority
+- Source: https://github.com/BestNathan/nession/issues/3068
