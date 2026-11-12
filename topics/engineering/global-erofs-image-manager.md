@@ -1,12 +1,12 @@
 ---
 title: "Global EROFS Image Manager"
-description: "Server-owned immutable EROFS artifacts with complete paged inventory, Project-or-Session scoped access, and a durable Agent cache: deterministic public-GitHub/local builds, content-addressed bytes, mutable aliases, reference-safe GC, Workspace Images discovery, and Sandbox image composition"
+description: "Server-owned immutable EROFS artifacts with complete paged inventory, Project-or-Session scoped access, a durable Agent cache and a directory-backed asynchronous build lifecycle: deterministic public-GitHub/local builds, stage observation, cancel/retry, restart recovery, content-addressed bytes, mutable aliases, reference-safe GC, Workspace Images discovery, and Sandbox image composition"
 topic: engineering
 categories: ["architecture", "erofs", "images", "server", "storage", "security", "agent", "workspace", "sandbox"]
 status: verified
 created_at: 2026-11-09T12:54:48Z
-updated_at: 2026-11-11T17:42:44Z
-sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/issues/3023", "https://github.com/BestNathan/nession/pull/3125", "https://github.com/BestNathan/nession/issues/3181", "https://github.com/BestNathan/nession/pull/3309", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/sandbox-policy-and-execution.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/cache.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/sandbox/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/db/migration/m009_image_access_grants_consumers.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-agent/src/sandbox_images.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/web/src/capabilities/images/ImagesPlugin.ts"]
+updated_at: 2026-11-12T12:24:38Z
+sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/issues/3023", "https://github.com/BestNathan/nession/pull/3125", "https://github.com/BestNathan/nession/issues/3181", "https://github.com/BestNathan/nession/pull/3309", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/sandbox-policy-and-execution.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/cache.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/sandbox/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/db/migration/m009_image_access_grants_consumers.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-agent/src/sandbox_images.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/web/src/capabilities/images/ImagesPlugin.ts", "https://github.com/BestNathan/nession/issues/3334", "https://github.com/BestNathan/nession/pull/3354", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/builds.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/web/src/capabilities/images/ImagesPlugin.ts"]
 ---
 
 
@@ -78,6 +78,77 @@ Packaging is fixed: uncompressed EROFS, `-T 0`, fixed UUID
 of the final bytes, so identical source+parameters produce one digest and reuse
 one physical blob; a different revision can never overwrite a referenced digest.
 
+## Asynchronous durable build lifecycle (#3334)
+
+Delivered by #3334 (PR #3354). Every Image build runs in the background and is
+directory-backed. One build ID is one directory under the existing configured
+`image_build_dir` (default `~/.nession/server/images/build`):
+
+```text
+<image_build_dir>/<build-id>/
+  state.json          versioned execution state, atomically replaced
+  snapshot/           private validated source snapshot (weeks-to-retry window)
+  snapshot.json       source + packaging identity and content manifest
+  image.erofs.part    in-progress mkfs output; never published
+  build.log           bounded operator diagnostics
+```
+
+`state.json` is the execution-state authority. It is written through a private
+temporary file, fsync, rename and parent-directory fsync, and records the
+canonical source, pinned Git commit, packaging identity,
+`queued|running|succeeded|failed|canceled`, current stage, real measured
+file/byte counts, elapsed time, the last bounded diagnostic, attempt history and
+the result digest. It is **not** a second Image Registry: a succeeded build
+publishes immutable bytes through the existing Blob Store and is referenced by
+the existing registry, aliases and grants.
+
+Stages are `fetching`, `snapshotting`, `validating`, `packaging` and
+`publishing`. File/byte counts appear only after the deterministic snapshot
+manifest measured them. `mkfs.erofs` has no native progress report, so the
+packaging stage reports the stage and elapsed time and never an invented
+percentage. A client that missed a push re-reads the durable record.
+
+The asynchronous units are `server.image.build.submit|get|list|cancel|retry`
+plus the `server.image.build.updated` push. `server.image.build` remains the
+explicit synchronous compatibility path: it submits the same durable build and
+waits for the terminal record before returning an Image descriptor; it is never
+reinterpreted as a job.
+
+**Stage-level restart recovery.** The manager holds an exclusive advisory lock on
+`<image_build_dir>/.owner.lock` for its lifetime and refuses to start if another
+process owns the root. After acquiring it, every `running` record is an orphan.
+Startup recovery reuses a snapshot only after its source identity, packaging
+identity and recomputed content manifest match; a Git record may refetch its
+pinned commit (a branch is pinned once for the build's lifetime), a local source
+with no trustworthy snapshot fails explicitly instead of re-copying a changed
+directory, a corrupted checkpoint is rejected, an unreadable `state.json`
+directory is moved aside as `<build-id>.rejected`, and an incomplete
+`image.erofs.part` is discarded before packaging reruns. There is no resume
+inside `mkfs.erofs`, Git transfer or an arbitrary partial write.
+
+**Cancel/retry.** Cancellation sets the build's control, the owned Git/mkfs run
+loop kills and reaps its child, and a canceled build publishes no bytes and
+changes no reference. Retry creates a new attempt in the same record, preserves
+terminal attempt history, reuses a verified snapshot without the source, and
+refuses a local source that has no validated snapshot. A succeeded build cannot
+be retried.
+
+**Concurrency and cleanup.** `image_max_concurrent_builds` bounds simultaneous
+workers; one build ID has at most one execution; duplicate client submissions
+with the same `client_request_id` are serialized and idempotent; publication,
+digest dedupe and alias application are serialized so a stale completion cannot
+move a newer alias intent. Live build directories protect their `building`
+registry rows from GC. Terminal build directories expire after
+`image_build_retention_secs` (default 7 days); successful builds release their
+snapshot and partial image immediately, and cleanup never removes published
+blobs, aliases, leases, Agent caches or active work.
+
+**V1 single-owner condition.** Exactly one active Server build manager may own a
+shared build root. The advisory lock detects a same-host second owner and the
+Server fails closed. This is not a multi-Pod NFS locking claim; multi-writer
+build ownership remains unsupported until a verified cross-instance mechanism
+exists.
+
 ## Registry, authorization and lifecycle
 
 - **Atomic blob store.** `sha256/<hex>` is written through a private temp file,
@@ -103,16 +174,22 @@ one physical blob; a different revision can never overwrite a referenced digest.
   persisted source. The reply carries `total`, `next_offset` while more rows
   remain, and each descriptor's sorted `aliases`. The UI pages a >200-image
   registry rather than silently truncating it.
-- **Protocol units.** `server.image.build`, `.list`, `.get` and `.access`; the
-  Web `ImagesPlugin` (now in `capabilities/images`) is the typed projection.
+- **Protocol units.** The asynchronous `server.image.build.submit|get|list|cancel|retry`
+  family plus `server.image.build.updated`; the registry units `.list`, `.get`
+  and `.access`; and the legacy synchronous `server.image.build` compatibility
+  path. The Web `ImagesPlugin` (in `capabilities/images`) is the typed
+  projection and reads the durable inventory again after reconnect.
   `server.session.sandbox.context` accepts `cache_digests` and returns
   Agent-observed `cache_statuses`.
 - **Failure/GC.** A build row is `building`, becomes `ready` only after the
-  digest is computed from stored bytes, or `failed` with a bounded error.
-  Failed/stale builds never expose bytes. GC removes failed/stale rows and an
-  unreferenced blob only when no Project references the digest, no alias points
-  at it, no unexpired lease exists, and no in-process transfer is active.
-  Restart preserves metadata, aliases and Project references in SQLite.
+  verified digest is published from stored bytes, or `failed` with a bounded
+  error. Failed, canceled and stale builds never expose bytes. GC removes
+  failed/stale rows and an unreferenced blob only when no Project references the
+  digest, no alias points at it, no unexpired lease exists, and no in-process
+  transfer is active; a `building` row protected by a live durable build
+  directory is skipped (`skipped_active_builds`). Restart preserves metadata,
+  aliases and Project references in SQLite; durable build directories are
+  reconciled separately.
 
 ## Agent cache and durable storage (#3023)
 
@@ -239,9 +316,17 @@ observed Running at that image.
   surfaces, not a second registry or blob owner.
 - Private GitHub authentication, OCI/layered snapshotters, cross-digest dedupe,
   P2P distribution and automatic refresh of live Sessions remain non-goals.
-- Builds require `mkfs.erofs` (erofs-utils) and disk for one snapshot+image per
-  concurrent build. The accepted packaging set is deliberately exact; adding a
-  compressor or block size is a contract change, not a tuning knob.
+- Builds require `mkfs.erofs` (erofs-utils) and durable disk for one
+  snapshot+image per concurrent build. The accepted packaging set is
+  deliberately exact; adding a compressor or block size is a contract change,
+  not a tuning knob. Build storage that cannot be created or written fails the
+  Server start closed; there is no ephemeral-storage fallback.
+- The durable build directory is execution state, not a registry, job platform,
+  scheduler or multi-writer queue. Resume is stage-level only (no byte-offset
+  resume inside `mkfs.erofs`), and exactly one Server build manager per build
+  root is the V1 deployment condition. Build retention is
+  `image_build_retention_secs`; a disabled GC schedule also disables the
+  scheduled build-directory cleanup.
 - Digest dedupe is physical only; every consumer authorization is checked
   independently. A Project referencing a missing digest remains a declaration;
   `server.image.access` refuses until the image is ready. An Agent cache

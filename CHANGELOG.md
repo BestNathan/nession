@@ -710,3 +710,10 @@
 - Categories: git, files, media, presentation, protocol, safety, read-only, ownership, web
 - Reason: Cross-link the new Git capability/hosting ownership article: the GitHub provider is layered over the same Session repository boundary and never becomes local Git authority (#1290)
 - Source: https://github.com/BestNathan/nession/issues/1290
+
+## 2026-11-12T12:24:38Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
+- Reason: Record #3334's directory-backed asynchronous build lifecycle: durable build state authority versus the Image Registry, explicit stages and measured progress, verified-snapshot stage-level restart recovery, cancel/retry, the single build-root owner condition, bounded cleanup and GC protection, the new asynchronous protocol units with the legacy synchronous compatibility path, and the Web/Project observation surfaces
+- Source: https://github.com/BestNathan/nession/issues/3334
