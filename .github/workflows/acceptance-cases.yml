@@ -237,6 +237,25 @@ jobs:
             "${RUNNER_TEMP}/macos-case-coverage.json"
           echo "count=$(jq 'length' "${RUNNER_TEMP}/macos-selected-cases.json")" >> "${GITHUB_OUTPUT}"
 
+      # #3318: trusted Main fetches protected original GitHub Run/Job log.
+      # Target Case receives only a bounded source record, never a token.
+      - name: Pre-stage authenticated Staging identity source for SC-03
+        if: steps.target.outputs.stage == 'staging' && steps.select.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! jq -e 'any(.[]; .issue == 3318 and .criterion == "SC-03")' \
+            "$RUNNER_TEMP/selected-cases.json" >/dev/null; then
+            echo "SC-03 original identity source not applicable"
+            exit 0
+          fi
+          node trusted/scripts/ci/deployment-identity-3318-evidence.mjs self-test
+          file="$RUNNER_TEMP/nession-3318-identity-source.json"
+          node trusted/scripts/ci/deployment-identity-3318-evidence.mjs stage "$file"
+          echo "NSESSION_3318_IDENTITY_SOURCE_FILE=$file" >> "$GITHUB_ENV"
+
       # #1974: only the trusted Main source-preparation step receives an
       # Actions read token. Original Worker/Publisher ZIPs are authenticated
       # and staged in runner temp; Case/target code receives NO GH_TOKEN and
