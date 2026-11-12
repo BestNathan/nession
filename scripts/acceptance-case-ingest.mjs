@@ -19,6 +19,9 @@ const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
 const DEPLOYMENT_ROLES = Object.freeze(['agent', 'server', 'ui']);
 const DEPLOYMENT_ENVIRONMENT = /^[a-z][a-z0-9-]{0,62}$/;
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+// GitHub evaluates this step name from the original workflow_dispatch inputs;
+// target-controlled Case code cannot mutate the GitHub Jobs/Steps API metadata.
+const MANUAL_STAGING_STEP = /^Authenticate manual Staging Case ([1-9][0-9]*) (SC-[0-9]{2,}) ([0-9a-f]{40})$/;
 
 function positiveInt(value, label) {
   const n = Number(value);
@@ -233,14 +236,30 @@ export function assertDeploymentBinding(record, planEntry) {
 
 export function assertSourceBoundRecord(record, source) {
   const item = assertRunIdentity(record, source);
-  // A manually dispatched run may check out a different SHA, but that SHA is
-  // not authenticated by workflow_run.head_sha. Reject rather than project it.
-  if (item.target_sha !== source.head_sha) {
-    throw new Error('Case target SHA is not the authenticated source workflow head');
-  }
-  const expectedStage = source.head_branch === 'main' ? 'post-merge' : 'staging';
-  if (item.stage !== expectedStage) {
-    throw new Error('Case stage disagrees with authenticated workflow source branch');
+  // A trusted-main workflow_dispatch can target a different Staging commit.
+  // The binding is NOT taken from the Case artifact: attestCaseRecord first
+  // reads its GitHub-owned pre-target step identity at this exact Run/Attempt.
+  const manual = source.event === 'workflow_dispatch' &&
+    source.head_branch === 'main' && item.stage === 'staging' && !item.deployment;
+  if (manual) {
+    const binding = source.dispatch_binding;
+    if (!binding || binding.stage !== 'staging' ||
+        binding.target_sha !== item.target_sha ||
+        binding.issue !== item.issue || binding.criterion !== item.criterion ||
+        !Number.isSafeInteger(binding.job_id) || binding.job_id < 1 ||
+        !Number.isSafeInteger(binding.step_number) || binding.step_number < 1) {
+      throw new Error('manual Staging Case target is not bound to authenticated dispatch inputs');
+    }
+  } else {
+    // Push and ordinary main-head manual records keep the strict existing
+    // branch-head binding. Deployed records have their own attestation owner.
+    if (item.target_sha !== source.head_sha) {
+      throw new Error('Case target SHA is not the authenticated source workflow head');
+    }
+    const expectedStage = source.head_branch === 'main' ? 'post-merge' : 'staging';
+    if (item.stage !== expectedStage) {
+      throw new Error('Case stage disagrees with authenticated workflow source branch');
+    }
   }
   return assertExecutionIdentity(item);
 }
@@ -299,11 +318,60 @@ export function assertDeployedSourceRecord(record, source, deploymentRecords) {
   return assertExecutionIdentity(item);
 }
 
+/**
+ * Derive the manual Staging target independently of an untrusted Case JSON.
+ * Unlike logs or uploaded artifacts, Jobs/Steps names are evaluated by GitHub
+ * from original workflow_dispatch inputs in the trusted-main workflow. The
+ * step must succeed BEFORE the exact-target checkout / untrusted execution.
+ */
+export async function attestManualStagingSource(record, source, {
+  repository, token, request = githubRequest,
+} = {}) {
+  const item = validateCaseRecord(record);
+  if (source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
+      item.stage !== 'staging' || item.deployment) return source;
+  if (source.repository !== repository) throw new Error('manual Case repository mismatch');
+  const jobs = await request('/repos/' + repository +
+    '/actions/runs/' + source.run_id + '/attempts/' + source.run_attempt +
+    '/jobs?per_page=100', { token });
+  if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100) {
+    throw new Error('manual Case GitHub source job readback is unavailable or unbounded');
+  }
+  const matches = [];
+  for (const job of jobs.jobs) {
+    if (!['execute', 'execute-macos'].includes(job.name) || job.conclusion === 'skipped') continue;
+    if (job.run_id !== source.run_id || job.run_attempt !== source.run_attempt ||
+        job.head_sha !== source.head_sha || job.status !== 'completed' ||
+        !['success', 'failure'].includes(job.conclusion) ||
+        !Number.isSafeInteger(job.id) || job.id < 1 ||
+        !Array.isArray(job.steps)) {
+      throw new Error('manual Case GitHub source job identity is unverified');
+    }
+    const checkoutIndex = job.steps.findIndex(step => step.name === 'Checkout exact target SHA');
+    for (const [index, step] of job.steps.entries()) {
+      if (!String(step.name ?? '').startsWith('Authenticate manual Staging Case ')) continue;
+      const fields = MANUAL_STAGING_STEP.exec(step.name);
+      if (!fields || index >= checkoutIndex ||
+          step.status !== 'completed' || step.conclusion !== 'success' ||
+          !Number.isSafeInteger(step.number) || step.number < 1) {
+        throw new Error('manual Case target dispatch step is invalid or executed after target checkout');
+      }
+      matches.push({
+        target_sha: fields[3], stage: 'staging', issue: Number(fields[1]),
+        criterion: fields[2], job_id: job.id, step_number: step.number,
+      });
+    }
+  }
+  if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual Staging target step');
+  return { ...source, dispatch_binding: matches[0] };
+}
+
 async function attestCaseRecord(record, {
   event, repository, token, request = githubRequest, deploymentRecords = null,
 }) {
-  const source = sourceRunIdentity(event, repository);
   const candidate = validateCaseRecord(record);
+  const source = await attestManualStagingSource(candidate, sourceRunIdentity(event, repository),
+    { repository, token, request });
   const item = candidate.deployment
     ? assertDeployedSourceRecord(candidate, source, deploymentRecords)
     : assertSourceBoundRecord(candidate, source);
@@ -823,6 +891,117 @@ async function selfTest() {
   const attestation = { event: fixtureEvent, repository: 'BestNathan/nession',
     token: 'self-test', request: attestationRequest };
   assert.equal((await attestCaseRecord(valid, attestation)).item.case_tree_sha, valid.case_tree_sha);
+  // #3316: GitHub-owned step metadata (evaluated from workflow_dispatch
+  // inputs before target checkout) binds manual Staging proof separately from
+  // the trusted-main workflow code SHA. A Case artifact cannot create it.
+  const manualSource = {
+    ...source, event: 'workflow_dispatch', head_branch: 'main',
+    head_sha: 'e'.repeat(40),
+  };
+  const manualStep = {
+    number: 3, status: 'completed', conclusion: 'success',
+    name: 'Authenticate manual Staging Case 1474 SC-14 ' + valid.target_sha,
+  };
+  const manualJob = {
+    id: 700, name: 'execute', run_id: valid.run_id,
+    run_attempt: valid.run_attempt, head_sha: manualSource.head_sha,
+    status: 'completed', conclusion: 'success',
+    steps: [
+      { number: 2, name: 'Checkout trusted discovery tooling' },
+      manualStep,
+      { number: 4, name: 'Resolve target identity' },
+      { number: 5, name: 'Checkout exact target SHA' },
+    ],
+  };
+  const manualJobPath = '/repos/BestNathan/nession/actions/runs/100/attempts/1/jobs?per_page=100';
+  const manualJobs = { jobs: [manualJob, {
+    id: 701, name: 'execute-macos', conclusion: 'skipped',
+    status: 'completed', run_id: 100, run_attempt: 1,
+  }] };
+  const manuallyBound = await attestManualStagingSource(valid, manualSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async (apiPath) => {
+      assert.equal(apiPath, manualJobPath);
+      return manualJobs;
+    },
+  });
+  assert.equal(manuallyBound.dispatch_binding.target_sha, valid.target_sha);
+  assert.equal(manuallyBound.dispatch_binding.job_id, 700);
+  // The same GitHub-derived proof works when manual selection runs only
+  // on macOS; the platform-skipped Linux job must not block ingestion.
+  const macOSBound = await attestManualStagingSource(valid, manualSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async () => ({ jobs: [
+      { ...manualJob, status: 'completed', conclusion: 'skipped', steps: [] },
+      { ...manualJob, id: 702, name: 'execute-macos' },
+    ] }),
+  });
+  assert.equal(macOSBound.dispatch_binding.job_id, 702);
+  assert.equal(assertSourceBoundRecord(valid, manuallyBound).criterion, valid.criterion);
+  assert.throws(() => assertSourceBoundRecord(valid, manualSource), /not bound/);
+  const manualEvent = { workflow_run: {
+    ...fixtureEvent.workflow_run, event: 'workflow_dispatch',
+    head_sha: manualSource.head_sha, head_branch: 'main',
+    path: '.github/workflows/acceptance-cases.yml',
+  } };
+  const manualRequest = async (apiPath) =>
+    apiPath === manualJobPath ? manualJobs : attestationRequest(apiPath);
+  const manualAttested = await attestCaseRecord(valid, {
+    event: manualEvent, repository: 'BestNathan/nession',
+    token: 'self-test', request: manualRequest,
+  });
+  assert.equal(manualAttested.source.dispatch_binding.issue, 1474);
+  assert.equal(caseIndexRecord(enrichCaseRecord(valid, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(valid), source: manualAttested.source,
+  })).target_sha, valid.target_sha);
+  for (const bad of [
+    { jobs: [{ ...manualJob, steps: manualJob.steps.filter(s => s !== manualStep) }] },
+    { jobs: [{ ...manualJob, steps: [{ number: 2, name: 'Checkout exact target SHA' }, manualStep] }] },
+    { jobs: [{ ...manualJob, steps: [{ ...manualStep, conclusion: 'failure' },
+      { number: 5, name: 'Checkout exact target SHA' }] }] },
+    { jobs: [{ ...manualJob, run_attempt: 2 }] },
+    { jobs: [{ ...manualJob, head_sha: 'f'.repeat(40) }] },
+    { jobs: [{ ...manualJob, steps: [
+      { ...manualStep, name: 'Authenticate manual Staging Case 1474 SC-14 ' + 'c'.repeat(40) },
+      { number: 5, name: 'Checkout exact target SHA' },
+    ] }] },
+    { jobs: [{ ...manualJob, steps: [manualStep, manualStep,
+      { number: 5, name: 'Checkout exact target SHA' }] }] },
+  ]) {
+    if (bad.jobs[0].steps?.length === 2 &&
+        bad.jobs[0].steps[0]?.name?.endsWith('c'.repeat(40))) {
+      const forged = await attestManualStagingSource(valid, manualSource, {
+        repository: 'BestNathan/nession', token: 'self-test',
+        request: async () => bad,
+      });
+      assert.throws(() => assertSourceBoundRecord(valid, forged), /not bound/);
+    } else {
+      await assert.rejects(() => attestManualStagingSource(valid, manualSource, {
+        repository: 'BestNathan/nession', token: 'self-test',
+        request: async () => bad,
+      }), /manual Case|missing or ambiguous/);
+    }
+  }
+  assert.throws(() => assertSourceBoundRecord(
+    { ...valid, issue: 1499 }, manuallyBound), /not bound/);
+  assert.throws(() => assertSourceBoundRecord(
+    { ...valid, criterion: 'SC-15' }, manuallyBound), /not bound/);
+  assert.throws(() => assertSourceBoundRecord(
+    { ...valid, run_attempt: 2 }, manuallyBound), /run identity/);
+  // Correct run/attempt and input target still cannot attest a forged Case
+  // tree; the tree must physically exist at the GitHub target commit.
+  const forgedTree = { ...valid, case_tree_sha: 'f'.repeat(40) };
+  forgedTree.execution_id = crypto.createHash('sha256').update(JSON.stringify({
+    schema_version: 1, run_id: forgedTree.run_id, run_attempt: forgedTree.run_attempt,
+    target_sha: forgedTree.target_sha, issue: forgedTree.issue,
+    criterion: forgedTree.criterion, contract_sha256: forgedTree.contract_sha256,
+    case_tree_sha: forgedTree.case_tree_sha,
+  })).digest('hex');
+  await assert.rejects(() => attestCaseRecord(forgedTree, {
+    event: manualEvent, repository: 'BestNathan/nession',
+    token: 'self-test', request: manualRequest,
+  }), /Case Git tree does not match/);
   const replaceSourceTrees = (transform) => async (apiPath) => {
     const response = await attestationRequest(apiPath);
     if (response.tree && Array.isArray(response.tree)) return { ...response, tree: transform(response.tree) };
