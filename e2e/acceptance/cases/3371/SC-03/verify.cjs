@@ -22,12 +22,11 @@ run(({ evidence }) => {
   );
   assertRan(p2p, ['full_chain::test_client_connects_to_agent_via_p2p']);
 
-  const mcp = crateTests(
-    'nession-agent',
-    ['--test', 'integration', 'mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server'],
-    600_000,
-  );
-  assertRan(mcp, ['mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server']);
+  const mcp = crateTests('nession-mcp', ['--test', 'integration', 'protocol::'], 600_000);
+  assertRan(mcp, [
+    'protocol::modern_tool_calls_reach_the_semantic_backend',
+    'protocol::a_retired_camel_case_tool_argument_is_refused_by_its_contract_name',
+  ]);
 
   const relay = crateTests(
     'nession-server',
@@ -56,8 +55,8 @@ run(({ evidence }) => {
   evidence.push({
     type: 'protocol',
     value:
-      'exact SHA ' + sha + ': MCP tools/call over real HTTP returns stale_agents and refuses the ' +
-      'retired agentId argument, naming agent_id',
+      'exact SHA ' + sha + ': MCP tools/call over real HTTP uses the snake_case Tool contract ' +
+      'and refuses the retired agentId argument, naming agent_id',
   });
   return 'Server/Agent WebSocket relay and P2P, MCP HTTP and typed request/reply paths accept snake_case wire keys, answer with matching keys, and refuse the retired camelCase spelling';
 });

@@ -461,6 +461,32 @@ async fn invalid_and_unknown_tool_calls_are_tool_errors_not_transport_errors() {
 }
 
 #[tokio::test]
+async fn a_retired_camel_case_tool_argument_is_refused_by_its_contract_name() {
+    let harness = start(Arc::default()).await;
+    let refused = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_agent_list_sessions",
+            json!({ "agentId": "agent-1" }),
+        ),
+        Some("nession_agent_list_sessions"),
+    )
+    .await;
+    assert_eq!(refused.status, 200, "{}", refused.body);
+    let result = &refused.json()["result"];
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().expect("text content");
+    // #3371: Nession's own argument spelling is `agent_id`; the typed Tool
+    // contract refuses the retired camelCase form instead of ignoring it.
+    assert!(
+        text.contains("agent_id"),
+        "the refusal must name the argument: {text}"
+    );
+    assert!(harness.recorder.calls().is_empty());
+}
+
+#[tokio::test]
 async fn a_modern_request_without_standard_headers_is_a_header_mismatch() {
     let harness = start(Arc::default()).await;
     let body = json!({
