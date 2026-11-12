@@ -161,6 +161,26 @@ function git(args){
 // marker, Issue label or model verdict is never enough to promote a native
 // Staging integration. Reconstruct Git bytes, verified Full proof and
 // independent exact-source PR Runs for EVERY merged sync commit.
+// A missing historic native-source check is NOT necessarily a missing
+// check on today's promotion PR. Bind the failure to its real source PR,
+// integration HEAD and merged SHA; keep the original fail-closed predicate.
+function nativeSourceCheckDenial(pr,mergeSha,headSha,source,sourceRuns){
+  const candidates=sourceRuns.filter(r=>REQUIRED.includes(r.path?.split('@')[0]))
+    .slice(0,20).map(r=>({
+      id:r.id,path:r.path,head_sha:r.head_sha,event:r.event,
+      status:r.status,conclusion:r.conclusion,run_attempt:r.run_attempt,
+      head_repo:r.head_repository?.full_name??null,
+      associated_prs:Array.isArray(r.pull_requests)
+        ?r.pull_requests.map(p=>p.number):null,
+    }));
+  return {
+    reason:'NATIVE_SOURCE_'+source.reason+':PR_'+pr.number+
+      ':HEAD_'+headSha+':MERGE_'+mergeSha,
+    diagnostic:{source_pr:pr.number,source_head:headSha,merge_sha:mergeSha,
+      reason:source.reason,run_count:sourceRuns.length,candidates},
+  };
+}
+
 export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
   branch='staging',sourceRuns=[],fullReceipt=null}){
   if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
@@ -191,7 +211,13 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
   const approval=convergenceApproval(batch,fullReceipt);
   if(!approval.approved)return fail('NATIVE_'+approval.reason+':'+batch.integration_head);
   const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns);
-  if(!source.ready)return source;
+  if(!source.ready){
+    const denial=nativeSourceCheckDenial(pr,mergeSha,batch.integration_head,
+      source,sourceRuns);
+    console.error('staging convergence native source diagnostic: '+
+      JSON.stringify(denial.diagnostic));
+    return fail(denial.reason);
+  }
   return okay({integrationHead:batch.integration_head,
     sourceBatchDigest:convergenceBatchDigest(batch)});
 }
@@ -434,6 +460,20 @@ function selfTest(){
     associations:[[{...native,body:native.body+'\nRefs #123'}]],issues:[],
     authenticatedNative:[a],deployRuns:[deployed],laneSha:b}).reason,
     'NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+a);
+  // #3248: a missing historic native source must identify the offending
+  // original PR/SHA, not look like today's #3208 promotion Quality failure.
+  const nativeMissing=nativeSourceCheckDenial({number:77},a,b,
+    fail('MISSING_EXACT_HEAD_PR_CHECK:'+REQUIRED[0]),runs);
+  assert.equal(nativeMissing.reason,
+    'NATIVE_SOURCE_MISSING_EXACT_HEAD_PR_CHECK:'+REQUIRED[0]+
+    ':PR_77:HEAD_'+b+':MERGE_'+a);
+  assert.deepEqual(nativeMissing.diagnostic.candidates.map(r=>r.id),
+    [1,2,3],'native diagnostics preserve bounded source run identities');
+  const unassociated=runs.map(r=>({...r,pull_requests:[]}));
+  assert.deepEqual(nativeSourceCheckDenial({number:77},a,b,
+    fail('MISSING_EXACT_HEAD_PR_CHECK:'+REQUIRED[0]),unassociated)
+    .diagnostic.candidates[0].associated_prs,[],
+    'diagnostics expose the missing PR association without treating it as Pass');
   assert.equal(certifyNativeMerge({pr:native,mergeSha:a}).reason,
     'NATIVE_MERGE_COMMIT_UNAVAILABLE',
     'an unavailable forged PR merge SHA must fail closed, not crash or pass');
