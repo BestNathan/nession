@@ -2,8 +2,9 @@
 //
 // #3319 — a read that was already in flight when a save succeeded must never
 // publish its older answer over the revision the Agent just committed. The
-// cache owner fences by per-Session order and keeps revisions monotonic; the
-// negative controls keep failed writes and concurrent Sessions independent.
+// cache owner fences by per-Session request order (not by revision: a Session
+// recreated under the same name starts again at revision 0), and the negative
+// controls keep failed writes and concurrent Sessions independent.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sessionsApiMock = vi.hoisted(() => ({
@@ -40,6 +41,20 @@ function metadata(revision: number, title: string): SessionMetadata {
 
 function loaded(revision: number, title: string): SessionMetadataResponse {
   return { success: true, metadata: metadata(revision, title) };
+}
+
+function legacy(): SessionMetadataResponse {
+  return {
+    success: true,
+    metadata: {
+      revision: 0,
+      title: null,
+      description: null,
+      tags: [],
+      created_at: null,
+      updated_at: null,
+    },
+  };
 }
 
 function conflict(): SessionMetadataResponse {
@@ -123,7 +138,7 @@ describe('Session metadata cache ordering', () => {
     });
   });
 
-  it('keeps the committed revision when an answer is older than it', async () => {
+  it('lets a later read publish a lower revision from a recreated Session', async () => {
     sessionsApiMock.getMetadata.mockResolvedValueOnce(loaded(4, 'Before'));
     await loadSessionMetadata(SESSION_A);
 
@@ -135,15 +150,15 @@ describe('Session metadata cache ordering', () => {
       expectedRevision: 4,
     });
 
-    // The request is newer than the save, but the Agent's answer predates the
-    // committed revision. It must not roll the cache back, and the read's
-    // loading state must not be left behind.
-    sessionsApiMock.getMetadata.mockResolvedValueOnce(loaded(4, 'Before'));
+    // Killing and recreating the tmux Session starts a new metadata instance
+    // at revision 0. A read this client starts after the save is authoritative;
+    // the fence orders answers, it does not enforce revision monotonicity.
+    sessionsApiMock.getMetadata.mockResolvedValueOnce(legacy());
     await loadSessionMetadata(SESSION_A, { force: true });
 
     expect(getSessionMetadataEntry(SESSION_A)).toMatchObject({
       status: 'loaded',
-      metadata: { revision: 5, title: 'After' },
+      metadata: { revision: 0, title: null },
     });
   });
 

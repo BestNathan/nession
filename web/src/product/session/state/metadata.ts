@@ -37,15 +37,12 @@ const listeners = new Set<() => void>();
  * Per-session request order: only the newest answer may write the cache. A
  * successful save advances the same order, because a read that started before
  * the Agent committed its revision must not republish the older one (#3319).
+ *
+ * The order fences *answers*, not revisions: a Session recreated under the
+ * same name legitimately starts again at revision 0, so a read this client
+ * starts after a save is authoritative even if its revision is lower.
  */
 const requestSequence = new Map<string, number>();
-/**
- * The newest loaded answer this client has published per Session. Revisions
- * only move forward, so an older answer — including one from a read that
- * started after the save but was serviced before the Agent committed — must
- * keep the newer value instead of rolling the projection back.
- */
-const lastLoaded = new Map<string, SessionMetadataEntry>();
 
 function publish(sessionId: string, entry: SessionMetadataEntry): void {
   entries.set(sessionId, entry);
@@ -61,23 +58,13 @@ function advanceRequestSequence(sessionId: string): number {
   return sequence;
 }
 
-/** Publish a loaded answer unless it predates one this client already has. */
 function publishLoaded(sessionId: string, metadata: SessionMetadata): void {
-  const known = lastLoaded.get(sessionId);
-  if (known?.metadata && metadata.revision < known.metadata.revision) {
-    // The read's loading state is still in the cache; restore the newer value
-    // so rejected answers do not leave the view stuck on "loading".
-    publish(sessionId, known);
-    return;
-  }
-  const entry: SessionMetadataEntry = {
+  publish(sessionId, {
     status: 'loaded',
     metadata,
     error: null,
     errorKind: null,
-  };
-  lastLoaded.set(sessionId, entry);
-  publish(sessionId, entry);
+  });
 }
 
 export function getSessionMetadataEntry(sessionId: string): SessionMetadataEntry {
@@ -125,7 +112,6 @@ export async function loadSessionMetadata(
     response = await sessionsApi.getMetadata(sessionId);
   } catch (error) {
     if (requestSequence.get(sessionId) === sequence) {
-      lastLoaded.delete(sessionId);
       publish(sessionId, {
         status: 'error',
         metadata: null,
@@ -143,9 +129,7 @@ export async function loadSessionMetadata(
 
   if (!response.success || !response.metadata) {
     // A failed load discards the previously loaded value rather than letting
-    // it masquerade as the current one; the next successful answer restores
-    // monotonicity from the Agent.
-    lastLoaded.delete(sessionId);
+    // it masquerade as the current one.
     publish(sessionId, {
       status: 'error',
       metadata: null,
@@ -195,6 +179,5 @@ export async function saveSessionMetadata(
 export function resetSessionMetadataCache(): void {
   entries.clear();
   requestSequence.clear();
-  lastLoaded.clear();
   listeners.clear();
 }
