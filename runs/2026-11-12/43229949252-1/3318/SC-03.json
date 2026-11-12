@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "697432fd5e317d30742285afd0cc07803bb0afd595b516817d0554cbb32fdaf6",
+  "run_id": 43229949252,
+  "run_attempt": 1,
+  "issue": 3318,
+  "criterion": "SC-03",
+  "criterion_text": "One real staging identity run demonstrates the structured reason (or a valid authenticated attestation) bound to source run/attempt and exact deployed SHA; no false Pass is claimed.",
+  "stage": "staging",
+  "target_sha": "77374af4f49c98b7e9b51d312d210558d0e46953",
+  "contract_sha256": "5825b0938a0679011567a8bbff152f87d23af1065ea9198f2554449d211707b9",
+  "case_revision": "77374af4f49c98b7e9b51d312d210558d0e46953",
+  "case_tree_sha": "30ac0ac7bd0d4a1ecbb956eedd52f9daec872175",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T13:46:13.912Z",
+  "finished_at": "2026-11-12T13:46:19.862Z",
+  "duration_ms": 5949,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "missing trusted-main source staging path",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 34,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43229949252,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "77374af4f49c98b7e9b51d312d210558d0e46953",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43229949252",
+    "record_path": "runs/2026-11-12/43229949252-1/3318/SC-03.json",
+    "source_result_sha256": "2abec9ece14bd5d57a8ef809b3ab0ef9a592437d9c15394cf0df03196a134c01"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43229949252-1",
+    "sha256": "2abec9ece14bd5d57a8ef809b3ab0ef9a592437d9c15394cf0df03196a134c01",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43229949252",
+    "durability": "time-limited; object archival not configured"
+  }
+}
