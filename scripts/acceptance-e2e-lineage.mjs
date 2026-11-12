@@ -29,15 +29,11 @@ function recordFromApi(payload) {
   throw Error('missing or invalid GitHub Run Record envelope');
 }
 
-// GitHub may erase workflow_run.pull_requests after a PR is merged.
-// The immutable commit SHA's GitHub Commit→PR association is the bounded
-// fallback. Both the PR head identity and same-repository merge are required;
-// the Run Record and Selection Plan are still verified independently.
 // PR-native Staging sync/promotion selected E2E has issues:[] and owners:[]
- // by contract. It is CI source proof, not historical Issue E2E evidence.
- // Only exclude a GitHub-authored native PR with independently identifiable
- // publisher, repository and exact pinned source identity. Ordinary Issue
- // Plans (including malformed empty owner sets) still reach verifyHistoricalPlan.
+// by contract. It is CI source proof, not historical Issue E2E evidence.
+// Only exclude a GitHub-authored native PR with independently identifiable
+// publisher, repository and exact pinned source identity. Ordinary Issue
+// Plans (including malformed empty owner sets) still reach verifyHistoricalPlan.
 export function isNativeNoIssueE2EPull(pr) {
   if(pr?.user?.login!=='nession-publisher[bot]'||
      pr.head?.repo?.full_name!==REPO||pr.base?.repo?.full_name!==REPO||
@@ -56,6 +52,10 @@ export function isNativeNoIssueE2EPull(pr) {
       marker[1].slice(0,12)+'-'+marker[2].slice(0,12);
 }
 
+// GitHub may erase workflow_run.pull_requests after a PR is merged.
+// The immutable commit SHA's GitHub Commit→PR association is the bounded
+// fallback. Both the PR head identity and same-repository merge are required;
+// the Run Record and Selection Plan are still verified independently.
 export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,allowTestOnly=false) {
   return SHA.test(String(expectedHeadSha??'')) && Array.isArray(pulls) &&
     pulls.some(pr=>pr.number===prNumber &&
@@ -727,7 +727,7 @@ async function selfTest() {
     user:{login:'nession-publisher[bot]'},
     head:{sha:b,ref:nativeRef,repo:{full_name:REPO}},
     base:{ref:'staging',sha:nativeLane,repo:{full_name:REPO}},
-    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\\n'+
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\n'+
       '<!-- nession-convergence-pr:v1 branch=staging main='+nativeMain+
       ' lane='+nativeLane+' head='+b+' digest='+'e'.repeat(64)+' -->'};
   assert.equal(isNativeNoIssueE2EPull(nativePr),true);
@@ -741,15 +741,15 @@ async function selfTest() {
     {...nativePr,base:{...nativePr.base,ref:'main'}},
     {...nativePr,head:{...nativePr.head,repo:{full_name:'other/repo'}}},
     {...nativePr,body:nativePr.body.replace('digest=','digest=bad')},
-    {...nativePr,body:nativePr.body+'\\n'+nativePr.body.split('\\n')[1]},
+    {...nativePr,body:nativePr.body+'\n'+nativePr.body.split('\n')[1]},
   ]) assert.equal(isNativeNoIssueE2EPull(forged),false);
   const promotionPr={title:'release: promote staging to main',
     user:{login:'nession-publisher[bot]'},
     head:{sha:b,ref:'staging',repo:{full_name:REPO}},
     base:{ref:'main',sha:a,repo:{full_name:REPO}},
-    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\\n'+
-      '- Direction: staging -> main\\n- Planned main SHA: '+a+
-      '\\n- Planned lane SHA: '+b};
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\n'+
+      '- Direction: staging -> main\n- Planned main SHA: '+a+
+      '\n- Planned lane SHA: '+b};
   assert.equal(isNativeNoIssueE2EPull(promotionPr),true);
   assert.equal(isNativeNoIssueE2EPull({...promotionPr,user:{login:'forged'}}),false);
   const run=(id,sha,conclusion)=>({
