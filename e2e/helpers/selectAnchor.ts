@@ -66,62 +66,70 @@ export async function expectSelectAnchored(
     requireNoCollision = false,
   }: { sideOffset?: number; tolerance?: number; requireNoCollision?: boolean } = {},
 ): Promise<SelectAnchorMeasurement> {
-  const popup = page.locator('[data-slot="select-content"]:visible');
-  await expect(popup).toBeVisible();
-  await expect(popup).toHaveAttribute('data-align-trigger', 'false');
+  // Dialog/portal placement and scroll lock may briefly shift both boxes.
+  // Retry the *original* settled geometry assertions, not their tolerances:
+  // persistent drift, missing popup, and illegal collision still fail.
+  let measurement: SelectAnchorMeasurement | undefined;
+  await expect(async () => {
+    const popup = page.locator('[data-slot="select-content"]:visible');
+    await expect(popup).toBeVisible();
+    await expect(popup).toHaveAttribute('data-align-trigger', 'false');
 
-  const popupBox = await settledBox(page, popup);
-  const triggerBox = await box(trigger);
-  const viewport = page.viewportSize();
-  if (!viewport) throw new Error('the page must have a viewport');
+    const popupBox = await settledBox(page, popup);
+    const triggerBox = await box(trigger);
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error('the page must have a viewport');
 
-  const side = (await popup.getAttribute('data-side')) ?? '';
-  expect(['bottom', 'top']).toContain(side);
+    const side = (await popup.getAttribute('data-side')) ?? '';
+    expect(['bottom', 'top']).toContain(side);
 
-  const dx = popupBox.x - triggerBox.x;
-  const gap =
-    side === 'bottom'
-      ? popupBox.y - (triggerBox.y + triggerBox.height)
-      : triggerBox.y - (popupBox.y + popupBox.height);
+    const dx = popupBox.x - triggerBox.x;
+    const gap =
+      side === 'bottom'
+        ? popupBox.y - (triggerBox.y + triggerBox.height)
+        : triggerBox.y - (popupBox.y + popupBox.height);
 
-  // The start-aligned popup would overflow the viewport's start/end edge;
-  // Base UI then shifts it. That displacement is the collision policy, not a
-  // broken anchor, so the strict edge assertion only applies when it fits.
-  const startAlignedOverflows =
-    triggerBox.x < -tolerance ||
-    triggerBox.x + popupBox.width > viewport.width + tolerance;
-  const horizontalCollision = startAlignedOverflows || Math.abs(dx) > tolerance;
-  if (requireNoCollision) {
+    // The start-aligned popup would overflow the viewport's start/end edge;
+    // Base UI then shifts it. That displacement is the collision policy, not a
+    // broken anchor, so the strict edge assertion only applies when it fits.
+    const startAlignedOverflows =
+      triggerBox.x < -tolerance ||
+      triggerBox.x + popupBox.width > viewport.width + tolerance;
+    const horizontalCollision = startAlignedOverflows || Math.abs(dx) > tolerance;
+    if (requireNoCollision) {
+      expect(
+        startAlignedOverflows,
+        'the fixture should leave room for a start-aligned popup at this viewport',
+      ).toBe(false);
+      expect(
+        horizontalCollision,
+        `popup start edge ${popupBox.x} should match trigger start edge ${triggerBox.x} by ≤${tolerance}px`,
+      ).toBe(false);
+    }
+
+    if (horizontalCollision) {
+      // The list must remain inside the viewport and still overlap the control
+      // it belongs to; a shift that detaches it is not a valid collision repair.
+      expect(popupBox.x).toBeGreaterThanOrEqual(-tolerance);
+      expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width + tolerance);
+      expect(popupBox.x).toBeLessThan(triggerBox.x + triggerBox.width);
+      expect(popupBox.x + popupBox.width).toBeGreaterThan(triggerBox.x);
+    }
+
     expect(
-      startAlignedOverflows,
-      'the fixture should leave room for a start-aligned popup at this viewport',
-    ).toBe(false);
-    expect(
+      Math.abs(gap - sideOffset),
+      `popup ${side} gap should be sideOffset (${sideOffset}) ±${tolerance}px`,
+    ).toBeLessThanOrEqual(tolerance);
+
+    measurement = {
+      trigger: triggerBox,
+      popup: popupBox,
+      dx,
+      gap,
+      side,
       horizontalCollision,
-      `popup start edge ${popupBox.x} should match trigger start edge ${triggerBox.x} by ≤${tolerance}px`,
-    ).toBe(false);
-  }
-
-  if (horizontalCollision) {
-    // The list must remain inside the viewport and still overlap the control
-    // it belongs to; a shift that detaches it is not a valid collision repair.
-    expect(popupBox.x).toBeGreaterThanOrEqual(-tolerance);
-    expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width + tolerance);
-    expect(popupBox.x).toBeLessThan(triggerBox.x + triggerBox.width);
-    expect(popupBox.x + popupBox.width).toBeGreaterThan(triggerBox.x);
-  }
-
-  expect(
-    Math.abs(gap - sideOffset),
-    `popup ${side} gap should be sideOffset (${sideOffset}) ±${tolerance}px`,
-  ).toBeLessThanOrEqual(tolerance);
-
-  return {
-    trigger: triggerBox,
-    popup: popupBox,
-    dx,
-    gap,
-    side,
-    horizontalCollision,
-  };
+    };
+  }).toPass({ timeout: 10_000, intervals: [100, 200, 400] });
+  if (!measurement) throw new Error('Select popup has no settled measurement');
+  return measurement;
 }
