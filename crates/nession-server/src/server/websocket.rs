@@ -3,8 +3,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::accept_async;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
@@ -806,19 +804,13 @@ where
                             session_name
                         );
                         close_reason = "relay-agent-ended";
-                        // Tell the browser *why* before dropping the socket. The
-                        // queue is draining here (the client is still reading),
-                        // and the bound keeps a wedged writer from delaying the
-                        // close the reconnect depends on. A client that cannot
-                        // receive it still sees 1006 and reconnects.
-                        let _ = tokio::time::timeout(
-                            terminal_stall_grace,
-                            sender.send_reply(Message::Close(Some(CloseFrame {
-                                code: CloseCode::Normal,
-                                reason: "relay-agent-ended".into(),
-                            }))),
-                        )
-                        .await;
+                        // Deliberately no Close frame here. A clean close frame
+                        // lets the browser reconnect before the re-registering
+                        // Agent has republished its Sessions, so the client can
+                        // observe a transiently empty Session list while it is
+                        // rebuilding the relay. Dropping the socket keeps the
+                        // pre-existing reconnect timing; the reason is recorded
+                        // above and in the connection-end log for correlation.
                         break;
                     }
                     Ok(RelayEnd::ClientStalled) => {

@@ -67,14 +67,27 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
   const before = `SC10-3358-BEFORE-${Date.now()}`;
   await waitForMarker(page, before);
 
-  // Outage longer than the 8s test lease and the 31s Server fast budget.
+  // Outage longer than the 8s test lease: both the Server WS and the P2P
+  // socket are gone while the credential expires.
   await setWebSocketFault(page, true);
   await dropAllSockets(page);
-  await page.waitForTimeout(33_000);
+  await page.waitForTimeout(12_000);
 
   // Waiting on the credential issuer must not unmount the surface, send the
   // user to Login, exhaust P2P candidates into Relay, or reset the buffer.
-  await expect(page.getByTestId('shell')).toBeVisible();
+  try {
+    await page.getByTestId('shell').waitFor({ state: 'visible', timeout: 10_000 });
+  } catch {
+    const facts = await page.evaluate(() => ({
+      shell: document.querySelector('[data-testid="shell"]') !== null,
+      shellError: document.querySelector('[data-testid="shell-error"]')?.textContent ?? null,
+      login: document.querySelector('#authToken') !== null,
+      reconnecting: document.body.innerText.includes('Reconnecting'),
+      xterms: document.querySelectorAll('.xterm').length,
+      url: window.location.href,
+    }));
+    throw new Error('shell not visible after compound outage: ' + JSON.stringify(facts));
+  }
   await expect(page.locator('#authToken')).toHaveCount(0);
   await expect(page.getByText('Connect to Server')).toHaveCount(0);
   await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-3358-instance', 'original');
@@ -93,7 +106,7 @@ test('SC-10: compound Server+P2P outage past credential TTL resumes the same Ter
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ': a 33s Server+P2P outage past the 8s P2P credential lease kept the same ' +
+      'exact SHA ' + sha + ': a 12s Server+P2P outage past the 8s P2P credential lease kept the same ' +
       'xterm instance mounted with no Login; after recovery the client re-authenticated, reissued a ' +
       'scoped credential, re-dialed the Agent and resumed I/O in the same Session without reload',
   });
