@@ -20,6 +20,12 @@ run(({ evidence }) => {
   assert.ok(file && file.startsWith('/'), 'missing trusted-main source staging path');
   // Target Case never receives GH_TOKEN, Kubeconfig or unfiltered Job logs.
   const source = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // A trusted-source transport is not a raw Job-log transport. Assert the
+  // entire top-level allowlist, so additional log/credential fields fail closed.
+  assert.deepEqual(Object.keys(source).sort(), [
+    'schema_version', 'kind', 'repository', 'release', 'identity',
+    'job', 'source_receipt', 'rejection', 'job_log_sha256',
+  ].sort(), 'pre-staged source contains an unapproved field');
   assert.equal(source.schema_version, 1);
   assert.equal(source.kind, 'nession_3318_trusted_identity_source_v1');
   assert.equal(source.repository, REPO);
