@@ -1906,11 +1906,21 @@ export class SessionRuntime {
       rows: resize?.rows,
       needsBootstrap: this.requestBootstrapForAttach(),
     };
-    // Legacy continues non-credit; never fabricate an envelope id.
-    if (conn.beginRelayTracked) {
-      this.relayBeginWire = conn.beginRelayTracked(this.sessionId, opts);
-    } else {
-      conn.beginRelay(this.sessionId, opts);
+    // `isReady()` is a check, not a lock: the Server socket can close between
+    // that check and the send. This method runs from `updateContext`, which
+    // React calls during render/effect — letting a transport error escape here
+    // unmounts the application root instead of recovering the Session. Drop
+    // the attempt; the next Server connection state re-drives it.
+    try {
+      // Legacy continues non-credit; never fabricate an envelope id.
+      if (conn.beginRelayTracked) {
+        this.relayBeginWire = conn.beginRelayTracked(this.sessionId, opts);
+      } else {
+        conn.beginRelay(this.sessionId, opts);
+      }
+    } catch {
+      this.relayBeginWire = null;
+      return;
     }
     const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });

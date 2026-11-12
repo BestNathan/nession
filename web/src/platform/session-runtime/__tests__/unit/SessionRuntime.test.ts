@@ -2173,6 +2173,31 @@ describe('SessionRuntime', () => {
     });
   });
 
+  it('keeps a relay-begin send race out of the React update path (#3358 SC-10)', async () => {
+    const serverConnection = makeRelayServerConnection('connected');
+    // `isReady()` passed, then the socket closed before the send: the legacy
+    // path throws synchronously from inside updateContext.
+    let allowRelay = false;
+    serverConnection.beginRelay.mockImplementation(() => {
+      if (!allowRelay) { throw new Error('WebSocket not connected'); }
+    });
+    const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
+
+    expect(() => rt.setTransportReady(true)).not.toThrow();
+    await flushMicrotasks();
+    expect(serverConnection.beginRelay).toHaveBeenCalled();
+    expect(rt.attachState.phase).toBe('connecting');
+
+    // The next authenticated state re-drives the relay; the failed attempts
+    // were not terminal and never escaped into React.
+    allowRelay = true;
+    serverConnection.emit('reconnecting');
+    serverConnection.emit('connected');
+    await flushMicrotasks();
+    expect(rt.attachState.phase).toBe('attached');
+    rt.dispose();
+  });
+
   it('re-begins relay after server websocket reconnect', async () => {
     const serverConnection = makeRelayServerConnection('connected');
     const rt = new SessionRuntime(makeConfig({
