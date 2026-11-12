@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c12d6bb1417ae5679e9d702f91d0ff4072a1d4659cb4eba2fedc5a15ce9ac628",
+  "run_id": 43233238561,
+  "run_attempt": 1,
+  "issue": 3327,
+  "criterion": "SC-01",
+  "criterion_text": "A deterministic deferred mutation (success, repository_changed and transport failure) initiated on Session A and settled after switching to B never changes B's status, notice, busy state, or commit form; B's own request can complete normally. No Agent write is retargeted.",
+  "stage": "staging",
+  "target_sha": "cbb5a1e5860278c7591977fc34bbfce995d5b20a",
+  "contract_sha256": "83067d714705278bb34ae151128e3693ea9bc8f0586bc3cbae17fb58dffbacba",
+  "case_revision": "cbb5a1e5860278c7591977fc34bbfce995d5b20a",
+  "case_tree_sha": "d8610f85095b41cdd276f4f4ccdafa8d9d44de73",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T14:06:27.108Z",
+  "finished_at": "2026-11-12T14:06:29.230Z",
+  "duration_ms": 2122,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A deferred Git mutation from the previous Session cannot change the current Session; same-Session adoption and A retry identity remain intact",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA cbb5a1e5860278c7591977fc34bbfce995d5b20a: A stage success, repository_changed and transport failure settled after the Session moved to B without changing B; B's own stage adopted its post-state; A's commit retry reused its dispatch-time request identity"
+        }
+      ],
+      "duration_ms": 2058,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43233238561,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cbb5a1e5860278c7591977fc34bbfce995d5b20a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43233238561",
+    "record_path": "runs/2026-11-12/43233238561-1/3327/SC-01.json",
+    "source_result_sha256": "4c98d0f427b4d47ccd93715706dc2ed8d8c17feda0b0be3eb65576dc493a7123"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43233238561-1",
+    "sha256": "4c98d0f427b4d47ccd93715706dc2ed8d8c17feda0b0be3eb65576dc493a7123",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43233238561",
+    "durability": "time-limited; object archival not configured"
+  }
+}

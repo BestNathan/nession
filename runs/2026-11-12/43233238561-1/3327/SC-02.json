@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2cd0fff1d50992063d343bccda596d9c92168ca4b36d30c23760576cb73f0acf",
+  "run_id": 43233238561,
+  "run_attempt": 1,
+  "issue": 3327,
+  "criterion": "SC-02",
+  "criterion_text": "In the real Git Workspace rendered in Chromium, A's stage/commit request is held, the user switches to B and observes B's repository, and releasing A's reply leaves B's branch, file list and controls unchanged; switching back to A can recover its authoritative state. Existing same-Session successful mutation adoption and idempotent commit retry remain intact.",
+  "stage": "staging",
+  "target_sha": "cbb5a1e5860278c7591977fc34bbfce995d5b20a",
+  "contract_sha256": "83067d714705278bb34ae151128e3693ea9bc8f0586bc3cbae17fb58dffbacba",
+  "case_revision": "cbb5a1e5860278c7591977fc34bbfce995d5b20a",
+  "case_tree_sha": "923f6750fa1ebf6f8a2102b2205e1b3177a96a31",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Error",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T14:06:29.231Z",
+  "finished_at": "2026-11-12T14:08:29.290Z",
+  "duration_ms": 120059,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Error",
+      "summary": "browser verifier timed out",
+      "evidence": [],
+      "duration_ms": 120019,
+      "infrastructure_error": "timeout"
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43233238561,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cbb5a1e5860278c7591977fc34bbfce995d5b20a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43233238561",
+    "record_path": "runs/2026-11-12/43233238561-1/3327/SC-02.json",
+    "source_result_sha256": "d39167e4f88492f47ec03ae0804973da4c166e431bf3585553a5f41a14dea8be"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43233238561-1",
+    "sha256": "d39167e4f88492f47ec03ae0804973da4c166e431bf3585553a5f41a14dea8be",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43233238561",
+    "durability": "time-limited; object archival not configured"
+  }
+}
