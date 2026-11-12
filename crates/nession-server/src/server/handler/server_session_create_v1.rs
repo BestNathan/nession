@@ -444,10 +444,12 @@ impl ConnectionHandler {
                 ))
             }
             // The Agent may have processed the create even though its answer
-            // did not arrive. Preserve the existing ambiguous-disconnect
-            // semantics: apply the staged candidate, because losing a real
-            // Session's intent is worse than a stale row a later session list
-            // can clean up.
+            // did not arrive. A genuinely new Session keeps the ambiguous-create
+            // recovery semantics: apply the staged candidate, because losing a
+            // real Session's intent is worse than a stale row a later session
+            // list can clean up. An attempt that targeted an already-live
+            // Session owns no new incarnation, so it must not replace or clear
+            // that Session's desired binding (#3344).
             Ok(Err(_)) => {
                 if let Some(context) = &managed_context {
                     let _ = self
@@ -459,16 +461,13 @@ impl ConnectionHandler {
                         )
                         .await;
                 }
-                let _ = self
-                    .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
-                    .await;
-                if !session_pre_existed {
-                    if let Some(pid) = project_id.as_deref() {
-                        let _ = self
-                            .apply_create_project_binding(&session_id_for_binding, pid)
-                            .await;
-                    }
-                }
+                self.apply_ambiguous_create_binding(
+                    &session_id_for_binding,
+                    candidate_binding.as_ref(),
+                    project_id.as_deref(),
+                    session_pre_existed,
+                )
+                .await;
                 Ok(session_create_reply(&msg.id, refusal("Agent disconnected")))
             }
             Err(_) => {
@@ -482,16 +481,14 @@ impl ConnectionHandler {
                         )
                         .await;
                 }
-                let _ = self
-                    .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
-                    .await;
-                if !session_pre_existed {
-                    if let Some(pid) = project_id.as_deref() {
-                        let _ = self
-                            .apply_create_project_binding(&session_id_for_binding, pid)
-                            .await;
-                    }
-                }
+                // Same ownership fence as the disconnect branch (#3344).
+                self.apply_ambiguous_create_binding(
+                    &session_id_for_binding,
+                    candidate_binding.as_ref(),
+                    project_id.as_deref(),
+                    session_pre_existed,
+                )
+                .await;
                 Ok(session_create_reply(
                     &msg.id,
                     refusal("Timeout waiting for agent response"),
@@ -654,6 +651,31 @@ impl ConnectionHandler {
             updated_at: chrono::Utc::now().timestamp(),
         };
         self.db.upsert_session_project_binding(&row).await
+    }
+
+    /// Reconcile the staged binding for an ambiguous create outcome (reply
+    /// channel closed, or the create deadline elapsed).
+    ///
+    /// An attempt that targeted an already-live Session (`session_pre_existed`)
+    /// owns no new Session incarnation: its speculative candidate must not
+    /// replace or clear that Session's desired binding or Project membership
+    /// (#3344). A genuinely new Session keeps the ambiguous-create recovery
+    /// semantics — the Agent may have created it — so the candidate is applied
+    /// exactly as before.
+    async fn apply_ambiguous_create_binding(
+        &self,
+        session_id: &str,
+        candidate: Option<&crate::env::BindingRecord>,
+        project_id: Option<&str>,
+        session_pre_existed: bool,
+    ) {
+        if session_pre_existed {
+            return;
+        }
+        let _ = self.apply_create_binding(session_id, candidate).await;
+        if let Some(pid) = project_id {
+            let _ = self.apply_create_project_binding(session_id, pid).await;
+        }
     }
 
     /// Apply a create's staged Environment Binding once the Agent has answered.
