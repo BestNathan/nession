@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cc9db604cbffa4937e890749882533b8bccc68c654ec117d0fc625bd2cc7f7b5",
+  "run_id": 43257900501,
+  "run_attempt": 1,
+  "issue": 3371,
+  "criterion": "SC-03",
+  "criterion_text": "Representative WebSocket Server/Agent (including Relay/P2P), HTTP and Nession MCP request/reply paths accept the normalized wire keys and produce matching responses; executed protocol Cases assert positive round-trips and reject the former camelCase property spelling on owned typed boundaries where unknown fields are rejected.",
+  "stage": "staging",
+  "target_sha": "39e332e0aa190873c5bcb0d3bf29b70a3ce83a8d",
+  "contract_sha256": "486636413ac03fb0902fa340f17381cfd088272c8619b12b6acc87ab3c41a21d",
+  "case_revision": "39e332e0aa190873c5bcb0d3bf29b70a3ce83a8d",
+  "case_tree_sha": "13c40eef5eac430d9f57d746f10369234138147b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T16:24:33.511Z",
+  "finished_at": "2026-11-12T16:26:07.910Z",
+  "duration_ms": 94399,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Server/Agent WebSocket relay and P2P, MCP HTTP and typed request/reply paths accept snake_case wire keys, answer with matching keys, and refuse the retired camelCase spelling",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "exact SHA 39e332e0aa190873c5bcb0d3bf29b70a3ce83a8d: a typed git stage request with expected_snapshot is applied and its response carries truncated_bytes; the retired expectedSnapshot spelling is refused with a decode error naming expected_snapshot and leaves the index unchanged"
+        },
+        {
+          "type": "protocol",
+          "value": "exact SHA 39e332e0aa190873c5bcb0d3bf29b70a3ce83a8d: P2P agent.session.list reply carries stale_agents (never staleAgents); the Server relay path and its post-relay reply use the same contract key"
+        },
+        {
+          "type": "protocol",
+          "value": "exact SHA 39e332e0aa190873c5bcb0d3bf29b70a3ce83a8d: MCP tools/call over real HTTP uses the snake_case Tool contract and refuses the retired agentId argument, naming agent_id"
+        }
+      ],
+      "duration_ms": 88502,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43257900501,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "39e332e0aa190873c5bcb0d3bf29b70a3ce83a8d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43257900501",
+    "record_path": "runs/2026-11-12/43257900501-1/3371/SC-03.json",
+    "source_result_sha256": "e9a33294ba5b8fbaee5432785d50cecbfb5a192e12d71cef889d4b17242eec8a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43257900501-1",
+    "sha256": "e9a33294ba5b8fbaee5432785d50cecbfb5a192e12d71cef889d4b17242eec8a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43257900501",
+    "durability": "time-limited; object archival not configured"
+  }
+}
