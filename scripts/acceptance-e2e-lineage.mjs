@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { createProjectionReceipt, verifyArchivedProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { planDigest } from './issue-e2e-plan.mjs';
+import { isNativeConvergencePr, isNativePromotionPr } from './staging-convergence-pr.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -32,6 +33,29 @@ function recordFromApi(payload) {
 // The immutable commit SHA's GitHub Commit→PR association is the bounded
 // fallback. Both the PR head identity and same-repository merge are required;
 // the Run Record and Selection Plan are still verified independently.
+// PR-native Staging sync/promotion selected E2E has issues:[] and owners:[]
+ // by contract. It is CI source proof, not historical Issue E2E evidence.
+ // Only exclude a GitHub-authored native PR with independently identifiable
+ // publisher, repository and exact pinned source identity. Ordinary Issue
+ // Plans (including malformed empty owner sets) still reach verifyHistoricalPlan.
+export function isNativeNoIssueE2EPull(pr) {
+  if(pr?.user?.login!=='nession-publisher[bot]'||
+     pr.head?.repo?.full_name!==REPO||pr.base?.repo?.full_name!==REPO||
+     !SHA.test(String(pr.head?.sha??'')))return false;
+  if(isNativePromotionPr(pr))return true;
+  if(!isNativeConvergencePr(pr)||
+     pr.title!=='chore(release): integrate main into staging via checked head'||
+     pr.base?.ref!=='staging')return false;
+  const lines=String(pr.body).split(/\r?\n/)
+    .filter(s=>s.startsWith('<!-- nession-convergence-pr:v1 '));
+  if(lines.length!==1)return false;
+  const marker=/^<!-- nession-convergence-pr:v1 branch=staging main=([a-f0-9]{40}) lane=([a-f0-9]{40}) head=([a-f0-9]{40}) digest=([a-f0-9]{64}) -->$/
+    .exec(lines[0]);
+  return marker!==null&&marker[3]===pr.head.sha&&
+    pr.head?.ref==='chore/staging-sync-staging-'+
+      marker[1].slice(0,12)+'-'+marker[2].slice(0,12);
+}
+
 export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,allowTestOnly=false) {
   return SHA.test(String(expectedHeadSha??'')) && Array.isArray(pulls) &&
     pulls.some(pr=>pr.number===prNumber &&
@@ -347,6 +371,10 @@ export async function recentPullCommits(repo,pull,get) {
 }
 
 export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay,loadReceipts=collectAuthenticatedProjectionReceipts) {
+  // The native PR's Issue-free source Plan is authenticated elsewhere. Do not
+  // reinterpret it as a failed Issue-owned historical Plan solely because
+  // GitHub's commit→PR association returned the native integration PR.
+  if(isNativeNoIssueE2EPull(pull))return [];
   const selected=await recentPullCommits(repo,pull,get);
   const testDrill=pull.state==='closed'&&!pull.merged_at&&
     pull.head?.repo?.full_name===REPO&&pull.base?.repo?.full_name===REPO&&
@@ -689,6 +717,41 @@ async function selfTest() {
     {number:2943,head:{sha:'d'.repeat(40)}},getMany),/missing from bounded/);
 
   const pr={number:1718,head:{sha:'b'.repeat(40)}},a='a'.repeat(40),b='b'.repeat(40);
+  // #3357: a real publisher-owned native convergence/promotion PR has a
+  // selected CI plan with no Issue owners. Do not make it a fake historical
+  // Issue regression, but reject lookalike ordinary/untrusted PRs.
+  const nativeMain='c'.repeat(40),nativeLane='d'.repeat(40);
+  const nativeRef='chore/staging-sync-staging-'+
+    nativeMain.slice(0,12)+'-'+nativeLane.slice(0,12);
+  const nativePr={title:'chore(release): integrate main into staging via checked head',
+    user:{login:'nession-publisher[bot]'},
+    head:{sha:b,ref:nativeRef,repo:{full_name:REPO}},
+    base:{ref:'staging',sha:nativeLane,repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\\n'+
+      '<!-- nession-convergence-pr:v1 branch=staging main='+nativeMain+
+      ' lane='+nativeLane+' head='+b+' digest='+'e'.repeat(64)+' -->'};
+  assert.equal(isNativeNoIssueE2EPull(nativePr),true);
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,nativePr,async()=>{
+    throw Error('native PR must not be queried as Issue-owned E2E history');
+  }),[]);
+  for(const forged of [
+    {...nativePr,user:{login:'somebody'}},
+    {...nativePr,head:{...nativePr.head,sha:a}},
+    {...nativePr,head:{...nativePr.head,ref:'fix/ordinary'}},
+    {...nativePr,base:{...nativePr.base,ref:'main'}},
+    {...nativePr,head:{...nativePr.head,repo:{full_name:'other/repo'}}},
+    {...nativePr,body:nativePr.body.replace('digest=','digest=bad')},
+    {...nativePr,body:nativePr.body+'\\n'+nativePr.body.split('\\n')[1]},
+  ]) assert.equal(isNativeNoIssueE2EPull(forged),false);
+  const promotionPr={title:'release: promote staging to main',
+    user:{login:'nession-publisher[bot]'},
+    head:{sha:b,ref:'staging',repo:{full_name:REPO}},
+    base:{ref:'main',sha:a,repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\\n'+
+      '- Direction: staging -> main\\n- Planned main SHA: '+a+
+      '\\n- Planned lane SHA: '+b};
+  assert.equal(isNativeNoIssueE2EPull(promotionPr),true);
+  assert.equal(isNativeNoIssueE2EPull({...promotionPr,user:{login:'forged'}}),false);
   const run=(id,sha,conclusion)=>({
     id,run_attempt:1,head_sha:sha,created_at:'2026-10-14T01:00:00Z',
     path:'.github/workflows/e2e-tests.yml',event:'pull_request',status:'completed',
