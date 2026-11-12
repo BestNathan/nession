@@ -123,14 +123,30 @@ function selfTest() {
   assert.throws(() => checkSource(release, identity, jobs, log.replace('source_run_attempt":1', 'source_run_attempt":2')));
   assert.throws(() => checkSource(release, identity, jobs, log + '\n2026-11-12T06:55:00Z DEPLOYMENT_ATTESTATION_V1 {}'));
   assert.throws(() => checkSource(release, identity, jobs, ''));
+  assert.deepEqual(ghArgs('/actions/jobs/' + IDENTITY_JOB + '/logs'),
+    ['api', 'repos/' + REPO + '/actions/jobs/' + IDENTITY_JOB + '/logs',
+      '--allow-escape-sequences']);
+  assert.deepEqual(ghArgs('/actions/runs/' + RELEASE_RUN),
+    ['api', 'repos/' + REPO + '/actions/runs/' + RELEASE_RUN]);
   console.log('deployment-identity #3318 source self-test: exact Run/Job/Attempt/source, sanitized reason and adversarial negatives passed');
 }
 
 function readGhJson(endpoint) {
   return JSON.parse(readGh(endpoint));
 }
+function ghArgs(endpoint) {
+  const args = ['api', 'repos/' + REPO + endpoint];
+  // Original Job logs may contain ANSI sequences from shell command markup.
+  // gh intentionally refuses these by default. Permit only this fixed source
+  // endpoint, capture bytes in memory, and extract only allowlisted receipts;
+  // never print or pass raw logs to the uncredentialed Case.
+  if (endpoint === '/actions/jobs/' + IDENTITY_JOB + '/logs') {
+    args.push('--allow-escape-sequences');
+  }
+  return args;
+}
 function readGh(endpoint) {
-  return execFileSync('gh', ['api', 'repos/' + REPO + endpoint], {
+  return execFileSync('gh', ghArgs(endpoint), {
     encoding: 'utf8', maxBuffer: 6 * 1024 * 1024, timeout: 30000,
     env: process.env,
   });
