@@ -429,6 +429,181 @@ pub struct SandboxPolicyDraft {
     pub enforcement: SandboxEnforcement,
 }
 
+/// Which prepared image role a Sandbox image selection asks for.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxImageRole {
+    /// The Base Runtime image at `/`.
+    Base,
+    /// The workspace image at `/workspace`, merged with a writable overlay.
+    Workspace,
+    /// A read-only toolchain image at `/opt/<name>`.
+    Toolchain,
+}
+
+/// How a selected image participates in the composed root.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxImageMode {
+    ReadOnly,
+    /// The writable upper/work workspace is Agent-owned; only a workspace
+    /// image may use this mode.
+    Overlay,
+}
+
+/// One image the client asks the Server to resolve and the Agent to prepare
+/// for a Sandbox Enter.
+///
+/// This is not a native composition: it carries no local source path. The
+/// Server authorizes the digest and mints a scoped grant; the Agent resolves
+/// the verified cache path and builds the canonical composition.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxImageSelection {
+    pub role: SandboxImageRole,
+    /// `sha256:<64 lowercase hex>` of a Server Ready image.
+    pub digest: String,
+    /// `/opt/<name>` for a toolchain; absent for the other roles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default = "default_sandbox_image_mode")]
+    pub mode: SandboxImageMode,
+}
+
+fn default_sandbox_image_mode() -> SandboxImageMode {
+    SandboxImageMode::ReadOnly
+}
+
+fn field_error(field: &str, code: &str, message: &str) -> SandboxFieldError {
+    SandboxFieldError {
+        field: field.to_string(),
+        code: code.to_string(),
+        message: message.to_string(),
+    }
+}
+
+/// Validate the Web-safe image-selection shape before the Server mints grants.
+///
+/// The canonical composition and target rules remain owned by
+/// `nession-sandbox::compile`; this function only refuses roles, duplicate
+/// roots and modes that can never become a valid composition.
+pub fn validate_image_selections(
+    selections: &[SandboxImageSelection],
+) -> Result<(), Vec<SandboxFieldError>> {
+    let mut errors = Vec::new();
+    let mut base = 0;
+    let mut workspace = 0;
+    for (index, selection) in selections.iter().enumerate() {
+        if !crate::contracts::image::v1::is_valid_image_digest(&selection.digest) {
+            errors.push(field_error(
+                &format!("images[{index}].digest"),
+                "invalid-digest",
+                "image digest must be a sha256:<64 lowercase hex> digest",
+            ));
+        }
+        match selection.role {
+            SandboxImageRole::Base => {
+                base += 1;
+                if selection.mode != SandboxImageMode::ReadOnly {
+                    errors.push(field_error(
+                        &format!("images[{index}].mode"),
+                        "invalid-mode",
+                        "the Base Runtime image is read-only",
+                    ));
+                }
+                if selection
+                    .target
+                    .as_deref()
+                    .is_some_and(|target| target != "/")
+                {
+                    errors.push(field_error(
+                        &format!("images[{index}].target"),
+                        "invalid-target",
+                        "the Base Runtime image target is /",
+                    ));
+                }
+            }
+            SandboxImageRole::Workspace => {
+                workspace += 1;
+                if selection.mode != SandboxImageMode::Overlay {
+                    errors.push(field_error(
+                        &format!("images[{index}].mode"),
+                        "invalid-mode",
+                        "the workspace image requires the overlay mode",
+                    ));
+                }
+                if selection
+                    .target
+                    .as_deref()
+                    .is_some_and(|target| target != "/workspace")
+                {
+                    errors.push(field_error(
+                        &format!("images[{index}].target"),
+                        "invalid-target",
+                        "the workspace image target is /workspace",
+                    ));
+                }
+            }
+            SandboxImageRole::Toolchain => {
+                if selection.mode != SandboxImageMode::ReadOnly {
+                    errors.push(field_error(
+                        &format!("images[{index}].mode"),
+                        "invalid-mode",
+                        "a toolchain image is read-only",
+                    ));
+                }
+                let Some(target) = selection.target.as_deref() else {
+                    errors.push(field_error(
+                        &format!("images[{index}].target"),
+                        "missing-target",
+                        "a toolchain image requires an /opt/<name> target",
+                    ));
+                    continue;
+                };
+                if !target.starts_with("/opt/") || target.len() <= 5 || target.contains("..") {
+                    errors.push(field_error(
+                        &format!("images[{index}].target"),
+                        "invalid-target",
+                        "a toolchain target must be /opt/<name>",
+                    ));
+                }
+            }
+        }
+    }
+    if base > 1 {
+        errors.push(field_error(
+            "images.base",
+            "duplicate-role",
+            "a Sandbox composition has at most one Base Runtime image",
+        ));
+    }
+    if workspace > 1 {
+        errors.push(field_error(
+            "images.workspace",
+            "duplicate-role",
+            "a Sandbox composition has at most one workspace image",
+        ));
+    }
+    if !selections.is_empty() && base == 0 {
+        errors.push(field_error(
+            "images.base",
+            "missing-role",
+            "a Sandbox image composition requires a Base Runtime image",
+        ));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
 /// Field-level preflight/Enter error.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
@@ -1199,5 +1374,64 @@ mod tests {
             }))
             .expect_err("status is a closed set");
         assert!(unknown_status.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn sandbox_image_selections_validate_roles_targets_and_modes() {
+        let digest = |hex: char| format!("sha256:{}", hex.to_string().repeat(64));
+        let valid = vec![
+            SandboxImageSelection {
+                role: SandboxImageRole::Base,
+                digest: digest('a'),
+                target: None,
+                mode: SandboxImageMode::ReadOnly,
+            },
+            SandboxImageSelection {
+                role: SandboxImageRole::Workspace,
+                digest: digest('b'),
+                target: None,
+                mode: SandboxImageMode::Overlay,
+            },
+            SandboxImageSelection {
+                role: SandboxImageRole::Toolchain,
+                digest: digest('c'),
+                target: Some("/opt/rust".to_string()),
+                mode: SandboxImageMode::ReadOnly,
+            },
+        ];
+        validate_image_selections(&valid).expect("a coherent composition passes");
+
+        let mut missing_base = valid[1..].to_vec();
+        let errors = validate_image_selections(&missing_base).unwrap_err();
+        assert!(errors.iter().any(|error| error.field == "images.base"));
+
+        let mut duplicate_base = valid.clone();
+        duplicate_base.push(SandboxImageSelection {
+            role: SandboxImageRole::Base,
+            digest: digest('d'),
+            target: None,
+            mode: SandboxImageMode::ReadOnly,
+        });
+        let errors = validate_image_selections(&duplicate_base).unwrap_err();
+        assert!(errors.iter().any(|error| error.field == "images.base"));
+
+        let mut workspace_read_only = valid.clone();
+        workspace_read_only[1].mode = SandboxImageMode::ReadOnly;
+        let errors = validate_image_selections(&workspace_read_only).unwrap_err();
+        assert!(errors.iter().any(|error| error.field == "images[1].mode"));
+
+        let mut toolchain_without_target = valid.clone();
+        toolchain_without_target[2].target = None;
+        let errors = validate_image_selections(&toolchain_without_target).unwrap_err();
+        assert!(errors.iter().any(|error| error.field == "images[2].target"));
+
+        let mut base_overlay = valid;
+        base_overlay[0].mode = SandboxImageMode::Overlay;
+        let errors = validate_image_selections(&base_overlay).unwrap_err();
+        assert!(errors.iter().any(|error| error.field == "images[0].mode"));
+
+        missing_base.clear();
+        validate_image_selections(&missing_base)
+            .expect("no selection is the existing Native policy");
     }
 }

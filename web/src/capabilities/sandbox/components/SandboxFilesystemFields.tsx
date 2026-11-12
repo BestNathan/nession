@@ -6,9 +6,11 @@ import {
 } from '@/components/ui/configuration-form';
 import type { SandboxCurrentContext } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
+import type { SandboxImagesState } from '../hooks/useSandboxImages';
 import { filesystemDisabledReason, IMPLEMENTATION_PATHS } from '../model';
 import { SandboxStringListEditor } from './SandboxStringListEditor';
 import { SandboxImplementationStatus } from './SandboxImplementationStatus';
+import { SandboxImageComposition } from './SandboxImageComposition';
 
 export interface SandboxFilesystemFieldsProps {
   context: SandboxCurrentContext;
@@ -16,6 +18,7 @@ export interface SandboxFilesystemFieldsProps {
   workingDir: string;
   workingDirError: string | undefined;
   onWorkingDirChange: (value: string) => void;
+  images: SandboxImagesState;
 }
 
 /** Working directory and the explicit filesystem allow-list. */
@@ -25,6 +28,7 @@ export function SandboxFilesystemFields({
   workingDir,
   workingDirError,
   onWorkingDirChange,
+  images,
 }: SandboxFilesystemFieldsProps) {
   const disabledReason = filesystemDisabledReason(context.catalog);
   return (
@@ -54,10 +58,12 @@ export function SandboxFilesystemFields({
         path={IMPLEMENTATION_PATHS.filesystemAccess}
         label="Filesystem access"
       />
-      <SandboxImplementationStatus
-        catalog={context.catalog}
-        path={IMPLEMENTATION_PATHS.filesystemComposition}
-        label="Prepared root composition (Server/Agent input, not editable)"
+      <SandboxImageComposition
+        context={context}
+        draft={draft}
+        images={images}
+        workingDir={workingDir}
+        onWorkingDirChange={onWorkingDirChange}
       />
       <FormGrid>
         <SandboxStringListEditor

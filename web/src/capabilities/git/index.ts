@@ -52,4 +52,7 @@ export type {
 } from './types';
 
 /** What this capability contributes to the shell: its presence state, its views. */
-export { GIT_ID, GIT_TITLE, gitProjection, gitView, resolveGitState } from './contribution';
+export { GIT_ID, GIT_TITLE, gitView, resolveGitState } from './contribution';
+
+export { GithubPlugin, githubApi } from './GithubPlugin';
+export type * from './githubTypes';

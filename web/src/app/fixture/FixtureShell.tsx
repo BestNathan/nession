@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import type { TerminalChrome } from '@/app/ShellMain';
 import { FIXTURE_CLIENT_SESSION_ID, FIXTURE_SELECTED_ID } from '@/app/fixture/fixtureData';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
@@ -19,6 +19,8 @@ import type { Agent, Session } from '@/types';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureGithubSurface } from './fixtureGithub';
+import { useFixtureImages } from './fixtureImages';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { fixturePaneCommand } from './fixturePaneCommand';
@@ -170,6 +172,8 @@ export function FixtureShell() {
   // show the capability entry but not a Peek behind it, which is why #1046's
   // second depth had no Web baseline at all (#1102).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
+  useEffect(() => githubApi.install(fixtureGithubSurface(search)), [search]);
+  useFixtureImages(search);
 
   const {
     agents,

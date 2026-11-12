@@ -31,6 +31,7 @@ impl ConnectionHandler {
                     success: false,
                     error: Some(message.to_string()),
                     context: None,
+                    cache_statuses: Vec::new(),
                 })
                 .unwrap_or_else(|_| json!({ "success": false, "error": "refused" })),
             )
@@ -53,14 +54,19 @@ impl ConnectionHandler {
         };
 
         info!(
-            "Requesting the Sandbox context: agent_id={}, session_name={}",
-            agent_id, session_name
+            "Requesting the Sandbox context: agent_id={}, session_name={}, cache_digests={}",
+            agent_id,
+            session_name,
+            payload.cache_digests.len()
         );
         match self
             .agent_command_with_timeout(
                 &agent_id,
                 "agent.session.sandbox.context",
-                json!({ "session_name": session_name }),
+                json!({
+                    "session_name": session_name,
+                    "cache_digests": payload.cache_digests,
+                }),
                 SANDBOX_CONTEXT_TIMEOUT,
             )
             .await
@@ -80,6 +86,11 @@ impl ConnectionHandler {
                             success: true,
                             error: None,
                             context: Some(context),
+                            cache_statuses: response
+                                .get("cache_statuses")
+                                .cloned()
+                                .and_then(|value| serde_json::from_value(value).ok())
+                                .unwrap_or_default(),
                         })
                         .unwrap_or_else(|_| json!({ "success": false, "error": "refused" })),
                     )),

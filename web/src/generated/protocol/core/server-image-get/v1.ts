@@ -35,7 +35,11 @@ source_sha?: string | null, packaging: ImagePackaging, status: ImageStatus, erro
 /**
  * The alias that was set by the build request, when one was supplied.
  */
-alias?: string | null, created_at: number, updated_at: number, };
+alias?: string | null, 
+/**
+ * Every mutable tag currently resolving to this digest, sorted.
+ */
+aliases: Array<string>, created_at: number, updated_at: number, };
 export type ImageSource = { "kind": "github", repository_url: string, ref: string, } | { "kind": "local_directory", path: string, };
 export type ImagePackaging = { compression: string, block_size: number, fixed_timestamp: number, fixed_uuid: string, };
 export type ImageStatus = "building" | "ready" | "failed";

@@ -26,6 +26,7 @@
 pub mod branches;
 pub mod cmd;
 pub mod commit;
+pub mod context;
 pub mod diff;
 pub mod log;
 pub mod mutate;

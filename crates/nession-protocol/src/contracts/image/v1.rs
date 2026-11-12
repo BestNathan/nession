@@ -173,6 +173,13 @@ impl ImageStatus {
     }
 }
 
+/// The default page size for an older client that sends no limit. This keeps
+/// the pre-pagination bound and remains truthful: the reply always reports
+/// `total` and a `next_offset` when more images exist.
+pub const IMAGE_LIST_DEFAULT_LIMIT: u32 = 200;
+/// The largest page a caller may request.
+pub const IMAGE_LIST_MAX_LIMIT: u32 = 200;
+
 /// An immutable image record as list/get/build replies return it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
@@ -194,6 +201,9 @@ pub struct ImageDescriptor {
     /// The alias that was set by the build request, when one was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+    /// Every mutable tag currently resolving to this digest, sorted.
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -226,11 +236,30 @@ pub struct ImageBuildResponsePayload {
     pub error_kind: Option<String>,
 }
 
-/// `server.image.list`'s request — empty.
+/// `server.image.list`'s request.
+///
+/// A page is addressed by an absolute offset, not an opaque cursor: the
+/// registry is ordered by immutable creation time plus image id, so a caller
+/// can request the next page without holding hidden state. The default keeps
+/// the pre-pagination bound for older clients; a caller that wants the complete
+/// inventory follows `next_offset` until it is absent.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImageListPayload {}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageListPayload {
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default = "default_image_list_limit")]
+    pub limit: u32,
+    /// Case-sensitive substring filter over alias, digest, image id and
+    /// persisted source. Empty returns the unfiltered registry page.
+    #[serde(default)]
+    pub query: String,
+}
+
+fn default_image_list_limit() -> u32 {
+    IMAGE_LIST_DEFAULT_LIMIT
+}
 
 /// `server.image.list`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -238,6 +267,12 @@ pub struct ImageListPayload {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageListResponsePayload {
     pub images: Vec<ImageDescriptor>,
+    /// The number of images visible to this authenticated client.
+    #[serde(default)]
+    pub total: u64,
+    /// The offset of the next page, or absent when this page reaches `total`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -268,13 +303,69 @@ pub struct ImageGetResponsePayload {
     pub error_kind: Option<String>,
 }
 
-/// `server.image.access`'s request: a Project-scoped read grant for one digest.
+/// One Agent cache state for a selected image (#3181).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageCacheState {
+    /// A verified blob exists in this Agent's identity-namespaced cache.
+    Verified,
+    /// A partial download exists; it is not mount-ready.
+    Preparing,
+    /// No verified bytes and no partial download.
+    Absent,
+    /// The cache contains a blob that failed verification or a recorded
+    /// preparation failure.
+    Failed,
+    /// This Agent has no EROFS cache configured, so it cannot prepare images.
+    Unavailable,
+}
+
+/// One digest's cache state as the owning Agent observed it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageCacheStatus {
+    pub digest: String,
+    pub state: ImageCacheState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `server.image.access`'s request: a scoped read grant for one digest.
+///
+/// Exactly one consumer context authorizes the grant. A Project grant requires
+/// the Project's durable `image_digest` reference. A Session grant requires
+/// that the digest is one of that Managed Session's resolved images; knowing a
+/// digest or another Session's identity is not authorization.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageAccessPayload {
-    pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub digest: String,
+}
+
+/// The one consumer context a client names for an image grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageAccessConsumer<'a> {
+    Project(&'a str),
+    Session(&'a str),
+}
+
+impl ImageAccessPayload {
+    /// Require exactly one consumer context.
+    pub fn consumer(&self) -> Result<ImageAccessConsumer<'_>, ImageValidationError> {
+        match (self.project_id.as_deref(), self.session_id.as_deref()) {
+            (Some(project_id), None) => Ok(ImageAccessConsumer::Project(project_id)),
+            (None, Some(session_id)) => Ok(ImageAccessConsumer::Session(session_id)),
+            _ => Err(ImageValidationError::AccessRequiresExactlyOneConsumer),
+        }
+    }
 }
 
 /// `server.image.access`'s reply.
@@ -326,6 +417,7 @@ pub enum ImageValidationError {
     InvalidFixedTimestamp,
     InvalidFixedUuid,
     GetRequiresExactlyOneLocator,
+    AccessRequiresExactlyOneConsumer,
     ErrorTooLong { max: usize },
 }
 
@@ -391,6 +483,9 @@ impl ImageValidationError {
             }
             Self::GetRequiresExactlyOneLocator => {
                 "server.image.get requires exactly one of digest or alias".to_string()
+            }
+            Self::AccessRequiresExactlyOneConsumer => {
+                "server.image.access requires exactly one of project_id or session_id".to_string()
             }
             Self::ErrorTooLong { max } => {
                 format!("image error must be at most {max} characters")

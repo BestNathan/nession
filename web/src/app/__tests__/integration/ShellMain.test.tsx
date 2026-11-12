@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ShellMain, type TerminalChrome } from '@/app/ShellMain';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
@@ -44,6 +45,27 @@ vi.mock('@/app/experiences/web/FilesWebLayout', () => ({
 }));
 
 describe('ShellMain', () => {
+  it('offers Server Images from the no-Session surface (#3181)', async () => {
+    const onSurfaceChange = vi.fn();
+    const onToolChange = vi.fn();
+    render(
+      <ShellMain
+        selectedSession={null}
+        selectedAgent={undefined}
+        agents={[agent]}
+        domain={null}
+        surface="terminal"
+        tool="files"
+        fileOps={null}
+        onSurfaceChange={onSurfaceChange}
+        onToolChange={onToolChange}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('session-empty-open-images'));
+    expect(onToolChange).toHaveBeenCalledWith('images');
+    expect(onSurfaceChange).toHaveBeenCalledWith('workspace');
+  });
+
   it('uses a full-bleed content column (no inset padding)', () => {
     render(
       <ShellMain

@@ -9,7 +9,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub token_hash: String,
     pub image_digest: String,
-    pub project_id: String,
+    /// Exactly one of `project_id` or `session_id` is set for a new grant.
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
     pub expires_at: i64,
 }
 

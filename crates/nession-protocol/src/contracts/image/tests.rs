@@ -161,3 +161,72 @@ fn normalize_image_source_carries_the_requested_commit_for_a_pinned_ref() {
         source("https://github.com/BestNathan/nession", &sha)
     );
 }
+
+#[test]
+fn image_list_pagination_defaults_keep_the_legacy_bound_and_reports_next_offset() {
+    let default_page: ImageListPayload = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert_eq!(default_page.offset, 0);
+    assert_eq!(default_page.limit, IMAGE_LIST_DEFAULT_LIMIT);
+    assert_eq!(default_page.query, "");
+
+    let explicit: ImageListPayload =
+        serde_json::from_value(serde_json::json!({ "offset": 200, "limit": 20, "query": "node" }))
+            .unwrap();
+    assert_eq!(explicit.offset, 200);
+    assert_eq!(explicit.limit, 20);
+    assert_eq!(explicit.query, "node");
+
+    let reply = ImageListResponsePayload {
+        images: Vec::new(),
+        total: 235,
+        next_offset: Some(200),
+        error: None,
+    };
+    let value = serde_json::to_value(reply).unwrap();
+    assert_eq!(value["total"], 235);
+    assert_eq!(value["next_offset"], 200);
+    assert!(value.get("error").is_none());
+
+    let older_reply: ImageListResponsePayload =
+        serde_json::from_value(serde_json::json!({ "images": [] })).unwrap();
+    assert_eq!(older_reply.total, 0);
+    assert_eq!(older_reply.next_offset, None);
+}
+
+#[test]
+fn access_requires_exactly_one_consumer_and_keeps_project_compatibility() {
+    let project: ImageAccessPayload = serde_json::from_value(serde_json::json!({
+        "project_id": "project-00000000-0000-0000-0000-000000000001",
+        "digest": format!("sha256:{}", "a".repeat(64)),
+    }))
+    .unwrap();
+    assert_eq!(
+        project.consumer().unwrap(),
+        ImageAccessConsumer::Project("project-00000000-0000-0000-0000-000000000001")
+    );
+
+    let session: ImageAccessPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent-1:work",
+        "digest": format!("sha256:{}", "b".repeat(64)),
+    }))
+    .unwrap();
+    assert_eq!(
+        session.consumer().unwrap(),
+        ImageAccessConsumer::Session("agent-1:work")
+    );
+
+    for value in [
+        serde_json::json!({ "digest": format!("sha256:{}", "c".repeat(64)) }),
+        serde_json::json!({
+            "project_id": "project-00000000-0000-0000-0000-000000000001",
+            "session_id": "agent-1:work",
+            "digest": format!("sha256:{}", "d".repeat(64)),
+        }),
+    ] {
+        let payload: ImageAccessPayload = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            payload.consumer().unwrap_err().message(),
+            "server.image.access requires exactly one of project_id or session_id"
+        );
+    }
+}

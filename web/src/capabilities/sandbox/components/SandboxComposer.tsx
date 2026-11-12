@@ -8,8 +8,9 @@ import { FormSurface } from '@/components/ui/configuration-form';
 import { DetailHeader, DetailSurface } from '@/components/ui/resource-detail';
 import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
+import type { SandboxImagesState } from '../hooks/useSandboxImages';
 import {
-  draftSignature,
+  sandboxDraftSignature,
   fieldErrorsByField,
   IMPLEMENTATION_PATHS,
   preflightIsValid,
@@ -45,6 +46,7 @@ export interface SandboxComposerProps {
   actionError: SandboxActionError | null;
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
+  images: SandboxImagesState;
   onPreflight: () => void;
   onRequestEnter: () => void;
   onFocusPane: (paneId: string) => void;
@@ -175,7 +177,7 @@ export function SandboxComposer(props: SandboxComposerProps) {
     activeTab,
     onTabChange,
   } = props;
-  const signature = draftSignature(draft.draft);
+  const signature = sandboxDraftSignature(draft.draft, props.images.selections);
   const preflightValid = preflightIsValid(
     preflight,
     signature,
@@ -212,6 +214,7 @@ export function SandboxComposer(props: SandboxComposerProps) {
           workingDir={workingDir}
           workingDirError={fieldErrors['working_dir']}
           onWorkingDirChange={onWorkingDirChange}
+          images={props.images}
         />
       </FormSurface>
     ),
