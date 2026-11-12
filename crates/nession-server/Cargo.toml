@@ -42,6 +42,9 @@ sha2.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+# `start_paused` lets the create-deadline tests advance virtual time instead of
+# sleeping 30 wall-clock seconds (#3344).
+tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3.8"
 nession-agent = { path = "../nession-agent" }
 

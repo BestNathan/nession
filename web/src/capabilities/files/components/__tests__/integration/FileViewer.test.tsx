@@ -334,6 +334,129 @@ Run the deploy script.
     expect(onSavingChange).toHaveBeenLastCalledWith(false);
   });
 
+  it('keeps edits made during a pending save dirty after that save completes (#3322)', async () => {
+    let finishFirstWrite: ((value: { path: string; written: number; revision: string }) => void) | null = null;
+    const writeFile = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          finishFirstWrite = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ path: '/test/notes.txt', written: 7, revision: 'rev-3' });
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      }),
+      writeFile,
+    });
+    const onDirtyChange = vi.fn();
+    render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer
+          fileOps={ops}
+          path="/test/notes.txt"
+          filename="notes.txt"
+          onClose={vi.fn()}
+          onDirtyChange={onDirtyChange}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    expect(view).not.toBeNull();
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'B' } });
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    // The write of B is still pending when the editor moves on to C.
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'C' } });
+    });
+    await act(async () => {
+      finishFirstWrite?.({ path: '/test/notes.txt', written: 6, revision: 'rev-2' });
+    });
+
+    // B is committed remotely, but the editor holds BC: the newer edit stays
+    // dirty and a second guarded save is available.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(writeFile).toHaveBeenCalledTimes(2));
+    expect(writeFile.mock.calls[1]?.[1]).toBe('helloBC');
+    // The second write is guarded by the revision the first one committed.
+    expect(writeFile.mock.calls[1]?.[2]).toEqual({ expectedRevision: 'rev-2' });
+
+    // Only the save whose snapshot matches the editor clears dirty.
+    await waitFor(() => expect(screen.queryByTitle('Unsaved changes')).not.toBeInTheDocument());
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('keeps newer edits dirty when the pending write is rejected (#3322)', async () => {
+    let rejectWrite: ((err: Error) => void) | null = null;
+    const writeFile = vi.fn().mockImplementation(
+      () => new Promise((_resolve, reject) => {
+        rejectWrite = reject;
+      }),
+    );
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      }),
+      writeFile,
+    });
+    const onDirtyChange = vi.fn();
+    render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer
+          fileOps={ops}
+          path="/test/notes.txt"
+          filename="notes.txt"
+          onClose={vi.fn()}
+          onDirtyChange={onDirtyChange}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'B' } });
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'C' } });
+    });
+    await act(async () => {
+      rejectWrite?.(new Error('write failed'));
+    });
+
+    // The rejected write leaves the draft and its dirty report intact, so the
+    // navigation guard still asks before leaving.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    expect(writeFile).toHaveBeenCalledWith(
+      '/test/notes.txt',
+      'helloB',
+      { expectedRevision: 'rev-1' },
+    );
+  });
+
   it('sizes the toolbar controls by role, not by the Button size they use', async () => {
     // #1073. The viewer is composed by both layouts, so the size is one leaf with
     // two densities rather than a literal: `text-xs` came from `Button
