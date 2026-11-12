@@ -48,6 +48,32 @@ impl TestDeps {
             )
             .expect("test image manager"),
         );
+        Self::assemble(db, image_manager)
+    }
+
+    /// One Server whose image manager owns a durable build root (#3334).
+    fn with_db_and_builds(db: Arc<Database>, build_root: std::path::PathBuf) -> Self {
+        let blobs = nession_erofs::BlobStore::new(build_root.join("blobs")).unwrap();
+        let image_manager = Arc::new(
+            crate::image::ImageManager::new(
+                Arc::clone(&db),
+                Arc::new(crate::image::UnavailableBackend),
+                blobs,
+                crate::image::ImageManagerOptions {
+                    max_concurrent_builds: 1,
+                    access_token_ttl_secs: 60,
+                    build_root,
+                    build_stage_timeout: Some(std::time::Duration::from_secs(30)),
+                    build_log_max_bytes: crate::image::DEFAULT_BUILD_LOG_MAX_BYTES,
+                    build_retention_secs: crate::image::DEFAULT_BUILD_RETENTION_SECS,
+                },
+            )
+            .expect("test image manager with durable builds"),
+        );
+        Self::assemble(db, image_manager)
+    }
+
+    fn assemble(db: Arc<Database>, image_manager: Arc<crate::image::ImageManager>) -> Self {
         Self {
             agent_registry: Arc::new(AgentRegistry::new(60, Arc::clone(&db))),
             session_registry: Arc::new(SessionRegistry::new(Arc::clone(&db))),
@@ -1732,6 +1758,7 @@ mod server_env_delete_v1;
 mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
+mod server_image_build_lifecycle_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;
 mod server_project_get_v1;

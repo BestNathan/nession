@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { imageAliases, imagesApi, type ImageDescriptor } from '@/capabilities/images';
+import {
+  imageAliases,
+  imageBuildProgressLabel,
+  imageBuildStageLabel,
+  imageBuildStatusLabel,
+  isTerminalBuild,
+  type ImageBuildDescriptor,
+  type ImageDescriptor,
+} from '@/capabilities/images';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import type { ProjectDraft } from '../types';
+import { useProjectImageBuild } from '../hooks/useProjectImageBuild';
 import { ProjectImagePicker } from './ProjectImagePicker';
 
 function ProjectImageBuildResult({
@@ -41,12 +50,71 @@ function ProjectImageBuildResult({
   );
 }
 
+function ProjectImageBuildLifecycle({
+  build,
+  onCancel,
+  onRetry,
+}: {
+  build: ImageBuildDescriptor;
+  onCancel: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-[var(--nession-radius-surface)] border border-border p-3"
+      data-testid="project-image-build-progress"
+      data-build-id={build.build_id}
+    >
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
+        {imageBuildStatusLabel(build)} — {imageBuildStageLabel(build)}. The build continues
+        in the Server&apos;s durable build directory if you leave this view.
+      </p>
+      <p
+        className={cn('text-muted-foreground', chromeMonoRole('code'))}
+        data-testid="project-image-build-progress-detail"
+      >
+        {imageBuildProgressLabel(build)}
+      </p>
+      {build.error ? (
+        <p className="text-destructive" data-testid="project-image-build-error">
+          Build failed: {build.error}. The current reference is unchanged.
+        </p>
+      ) : null}
+      <div className="flex items-center gap-1">
+        {!isTerminalBuild(build) ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="project-image-build-cancel"
+            onClick={onCancel}
+          >
+            Cancel build
+          </Button>
+        ) : null}
+        {build.status === 'failed' || build.status === 'canceled' ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="project-image-build-retry"
+            onClick={onRetry}
+          >
+            Retry build
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
- * Project image reference and its explicit build path (#3181).
+ * Project image reference and its explicit build path (#3181, #3334).
  *
- * A Git Source build is a Server action; this field only shows its result and
- * requires an explicit "Use this image" before the draft changes. Closing or
- * failing preserves the old reference.
+ * A Git Source build is a Server action. This field submits the asynchronous
+ * build unit, observes the durable record (including after navigation or a
+ * reconnect) and requires an explicit "Use this image" before the draft
+ * changes. Closing or failing preserves the old reference.
  */
 export function ProjectImageReferenceField({
   draft,
@@ -58,33 +126,22 @@ export function ProjectImageReferenceField({
   disabled: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [buildState, setBuildState] = useState<
-    | { phase: 'idle' }
-    | { phase: 'building' }
-    | { phase: 'failed'; error: string }
-    | { phase: 'ready'; image: ImageDescriptor }
-  >({ phase: 'idle' });
-  const gitSource = draft.source && 'repository_url' in draft.source ? { repository_url: draft.source.repository_url, ref: draft.source.ref } : null;
-
-  const startBuild = async () => {
-    if (!gitSource) {
-      return;
-    }
-    setBuildState({ phase: 'building' });
-    try {
-      const image = await imagesApi.buildImage({
-        kind: 'github',
-        repository_url: gitSource.repository_url,
-        ref: gitSource.ref,
-      });
-      setBuildState({ phase: 'ready', image });
-    } catch (cause: unknown) {
-      setBuildState({
-        phase: 'failed',
-        error: cause instanceof Error ? cause.message : 'The image build failed',
-      });
-    }
-  };
+  const gitSource =
+    draft.source && 'repository_url' in draft.source
+      ? { repository_url: draft.source.repository_url, ref: draft.source.ref }
+      : null;
+  const {
+    build,
+    builtImage,
+    submitting,
+    submitError,
+    active,
+    start,
+    cancel,
+    retry,
+    clear,
+  } = useProjectImageBuild(gitSource);
+  const succeeded = build?.status === 'succeeded';
 
   return (
     <div className="flex flex-col gap-2" data-testid="project-image-reference">
@@ -113,11 +170,11 @@ export function ProjectImageReferenceField({
             type="button"
             size="sm"
             variant="outline"
-            disabled={disabled || gitSource === null || buildState.phase === 'building'}
+            disabled={disabled || gitSource === null || submitting || active}
             data-testid="project-image-build"
-            onClick={() => void startBuild()}
+            onClick={() => void start()}
           >
-            {buildState.phase === 'building' ? 'Building…' : 'Build from Git Source'}
+            {submitting ? 'Submitting…' : active ? 'Building…' : 'Build from Git Source'}
           </Button>
           {draft.image_digest ? (
             <Button
@@ -137,24 +194,36 @@ export function ProjectImageReferenceField({
           className={cn('text-muted-foreground', chromeSansRole('caption'))}
         >
           A reference only. The Project never owns image bytes. The build requires this
-          Project's GitHub source.
+          Project&apos;s GitHub source.
         </p>
       </div>
 
-      {buildState.phase === 'failed' ? (
-        <p className="text-destructive" data-testid="project-image-build-error">
-          Build failed: {buildState.error}. The current reference is unchanged.
+      {submitError ? (
+        <p className="text-destructive" data-testid="project-image-build-submit-error">
+          {submitError}. The current reference is unchanged.
         </p>
       ) : null}
-      {buildState.phase === 'ready' ? (
+      {build && !succeeded ? (
+        <ProjectImageBuildLifecycle
+          build={build}
+          onCancel={() => void cancel()}
+          onRetry={() => void retry()}
+        />
+      ) : null}
+      {succeeded && builtImage ? (
         <ProjectImageBuildResult
-          image={buildState.image}
+          image={builtImage}
           disabled={disabled}
           onUse={() => {
-            onChange({ ...draft, image_digest: buildState.image.digest ?? undefined });
-            setBuildState({ phase: 'idle' });
+            onChange({ ...draft, image_digest: builtImage.digest ?? undefined });
+            clear();
           }}
         />
+      ) : null}
+      {succeeded && !builtImage ? (
+        <p className="text-muted-foreground" data-testid="project-image-build-loading">
+          The build succeeded; reading its immutable registry descriptor…
+        </p>
       ) : null}
 
       <ProjectImagePicker

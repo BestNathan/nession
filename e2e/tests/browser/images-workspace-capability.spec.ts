@@ -110,6 +110,46 @@ test.describe('Server-owned Images capability (#3181)', () => {
     await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
   });
 
+  test('Workspace observes a durable build stage, cancels and retries it', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=images&images=lifecycle');
+    await expect(page.getByTestId('images-builds')).toBeVisible();
+    await expect(page.getByTestId('image-build-row')).toHaveCount(4);
+
+    const running = page.locator('[data-build-id="build-fixture-running"]');
+    await expect(running.getByTestId('image-build-status')).toHaveText('Building');
+    await expect(running.getByTestId('image-build-stage')).toHaveText(
+      'Packaging with mkfs.erofs',
+    );
+    // Measured counts only: no invented percentage during mkfs.
+    await expect(running.getByTestId('image-build-progress')).toContainText('214 files');
+    await expect(running.getByTestId('image-build-progress')).toContainText('2,400,000 bytes');
+    await expect(running.getByTestId('image-build-progress')).not.toContainText('%');
+
+    await running.getByTestId('image-build-cancel').click();
+    await expect(running.getByTestId('image-build-status')).toHaveText('Canceled');
+
+    const failed = page.locator('[data-build-id="build-fixture-failed"]');
+    await expect(failed.getByTestId('image-build-error')).toContainText('mkfs.erofs failed');
+    await failed.getByTestId('image-build-retry').click();
+    await expect(failed.getByTestId('image-build-status')).toHaveText('Succeeded', {
+      timeout: 5000,
+    });
+
+    // Navigating away and back reads the same durable inventory; the canceled
+    // record is still canceled and no Project reference was rebound.
+    await page.goto('/#/fixture?projects=canonical');
+    await expect(page.getByTestId('project-detail')).toHaveCount(0);
+    await page.goto('/#/fixture/workspace?capability=images&images=lifecycle');
+    await expect(
+      page.locator('[data-build-id="build-fixture-running"]').getByTestId('image-build-status'),
+    ).toHaveText('Canceled');
+    test.info().annotations.push({
+      type: 'evidence',
+      description:
+        'exact SHA fixture: the Images workspace showed the durable build stage with measured file/byte counts and no percentage, canceled an owned build, retried a failed build, and reloaded the same states after navigating away',
+    });
+  });
+
   test('a failed Agent cache is never shown as mount-ready', async ({ page }) => {
     await page.goto(
       '/#/fixture/workspace?capability=sandbox&sandbox=agent-cache-failed',

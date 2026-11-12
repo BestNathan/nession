@@ -1,75 +1,112 @@
-//! Server-owned global EROFS Image Manager (#3022).
+//! Server-owned global EROFS Image Manager (#3022, #3334).
 //!
-//! The manager composes canonical source validation, a bounded build worker,
-//! the content-addressed blob store, Project-scoped access grants and GC. It is
-//! the only writer of image metadata and blob bytes; Projects reference a
-//! digest and never own either.
+//! The manager composes canonical source validation, durable directory-backed
+//! background builds, the content-addressed blob store, Project-scoped access
+//! grants and GC. It is the only writer of image metadata and blob bytes;
+//! Projects reference a digest and never own either.
+//!
+//! # Build lifecycle (#3334)
+//!
+//! Every build is asynchronous. `submit` validates the input, creates one
+//! durable directory under the configured build root, records the `building`
+//! registry row, starts a background worker and returns the build identity
+//! immediately. `get`/`list` read the directory state, which is the
+//! authoritative execution snapshot after a reconnect or restart. The legacy
+//! `server.image.build` unit remains a documented compatibility path: it
+//! submits the same durable build and waits for the terminal state instead of
+//! reinterpreting a legacy reply as a job.
 
+pub mod builds;
 pub mod http;
+
+#[cfg(test)]
+mod async_build_tests;
+pub use builds::{
+    BuildCleanupReport, BuildState, BuildStore, DEFAULT_BUILD_LOG_MAX_BYTES,
+    DEFAULT_BUILD_RETENTION_SECS,
+};
 pub use http::ImageHttpService;
 
 use anyhow::Result;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
 use nession_erofs::build::Packaging as ErofsPackaging;
-use nession_erofs::{BlobStore, BuiltImage, ErofsBuilder};
+use nession_erofs::{
+    discard_packaged_image, discard_snapshot_artifacts, verify_snapshot, BlobStore, BuildObserver,
+    BuildRequest, BuildSource, BuiltImage, ErofsBuilder, ProcessControl, ResumePoint,
+    SnapshotSource, Stage, TreeStats,
+};
 use nession_protocol::contracts::image::v1::{
-    is_valid_image_digest, normalize_alias, normalize_image_digest, normalize_image_source,
-    validate_packaging, ImageDescriptor, ImagePackaging, ImageSource, ImageStatus,
-    NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX, IMAGE_LIST_MAX_LIMIT,
+    is_valid_image_digest, normalize_alias, normalize_client_request_id, normalize_image_build_id,
+    normalize_image_digest, normalize_image_source, validate_packaging, ImageBuildDescriptor,
+    ImageBuildProgress, ImageBuildStage, ImageBuildStatus, ImageDescriptor, ImagePackaging,
+    ImageSource, ImageStatus, NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX,
+    IMAGE_BUILD_LIST_MAX_LIMIT, IMAGE_DIAGNOSTIC_MAX_CHARS, IMAGE_LIST_MAX_LIMIT,
 };
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 
 use crate::db::{Database, ImageGrantRow, ImageLeaseRow, ImageRow};
 
+/// One stage-level build execution handed to the mechanical backend.
+pub struct BuildExecution {
+    /// The durable build directory this execution owns.
+    pub build_dir: PathBuf,
+    pub source: NormalizedImageSource,
+    pub packaging: ImagePackaging,
+    pub resume: ResumePoint,
+    /// The commit a prior attempt pinned, when one exists.
+    pub pinned_sha: Option<String>,
+    pub control: Arc<ProcessControl>,
+    pub observer: Arc<dyn BuildObserver>,
+}
+
 /// The bounded build seam. Production is [`ErofsBuilder`]; Server tests inject
 /// a deterministic backend so build policy is exercised without `mkfs.erofs`.
 pub trait ImageBuildBackend: Send + Sync {
-    fn build(
-        &self,
-        source: &NormalizedImageSource,
-        packaging: &ImagePackaging,
-    ) -> Result<BuiltImage>;
+    fn execute(&self, execution: BuildExecution) -> Result<BuiltImage>;
 }
 
 impl ImageBuildBackend for ErofsBuilder {
-    fn build(
-        &self,
-        source: &NormalizedImageSource,
-        packaging: &ImagePackaging,
-    ) -> Result<BuiltImage> {
+    fn execute(&self, execution: BuildExecution) -> Result<BuiltImage> {
         // This impl is the Server's adapter boundary: the versioned wire DTO is
         // validated here, then translated into the crate's mechanical inputs.
         // `nession-erofs` never learns the wire shape.
-        validate_packaging(packaging)?;
+        validate_packaging(&execution.packaging)?;
         let packaging = ErofsPackaging {
-            compression: packaging.compression.clone(),
-            block_size: packaging.block_size,
-            fixed_timestamp: packaging.fixed_timestamp,
-            fixed_uuid: packaging.fixed_uuid.clone(),
+            compression: execution.packaging.compression.clone(),
+            block_size: execution.packaging.block_size,
+            fixed_timestamp: execution.packaging.fixed_timestamp,
+            fixed_uuid: execution.packaging.fixed_uuid.clone(),
         };
-        match source {
+        let source = match &execution.source {
             NormalizedImageSource::GitHub {
                 repository_url,
                 reference,
                 requested_sha,
-            } => self.build_git(
-                &nession_erofs::GitTarget {
-                    repository_url: repository_url.clone(),
-                    reference: reference.clone(),
-                    requested_sha: requested_sha.clone(),
-                },
-                &packaging,
-            ),
-            NormalizedImageSource::LocalDirectory { path } => {
-                self.build_local(std::path::Path::new(path), &packaging)
-            }
-        }
+            } => BuildSource::GitHub {
+                repository_url,
+                reference,
+                requested_sha: requested_sha.as_deref(),
+                pinned_sha: execution.pinned_sha.as_deref(),
+            },
+            NormalizedImageSource::LocalDirectory { path } => BuildSource::LocalDirectory {
+                path: Path::new(path),
+            },
+        };
+        self.run(BuildRequest {
+            build_dir: &execution.build_dir,
+            source,
+            packaging: &packaging,
+            resume: execution.resume,
+            control: &execution.control,
+            observer: execution.observer.as_ref(),
+        })
     }
 }
 
@@ -121,6 +158,14 @@ pub struct ImageListPage {
     pub next_offset: Option<u32>,
 }
 
+/// One page of the durable build inventory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildListPage {
+    pub builds: Vec<ImageBuildDescriptor>,
+    pub total: u64,
+    pub next_offset: Option<u32>,
+}
+
 /// The single consumer context a grant is scoped to.
 enum GrantConsumer<'a> {
     Project(&'a str),
@@ -152,6 +197,8 @@ pub struct GcReport {
     pub removed_blobs: u64,
     pub reclaimed_bytes: u64,
     pub skipped_active_transfers: u64,
+    /// `building` rows protected by a live durable build directory (#3334).
+    pub skipped_active_builds: u64,
     /// Candidates left for a later sweep by `max_candidates` or
     /// `max_deleted_bytes`. A bounded sweep is resumable: the next call
     /// re-evaluates these from the database, not from in-memory state.
@@ -189,6 +236,167 @@ pub struct ImageStorageDiagnostics {
     pub temp_bytes: u64,
 }
 
+/// Construction options for the image manager.
+#[derive(Debug, Clone)]
+pub struct ImageManagerOptions {
+    pub max_concurrent_builds: usize,
+    pub access_token_ttl_secs: u64,
+    /// The existing configured Server build root (`image_build_dir`).
+    pub build_root: PathBuf,
+    /// Bound for one Git/`mkfs.erofs` subprocess.
+    pub build_stage_timeout: Option<Duration>,
+    pub build_log_max_bytes: u64,
+    /// Retention for terminal build directories.
+    pub build_retention_secs: u64,
+}
+
+/// The in-process handle for one executing build.
+struct BuildRun {
+    control: Arc<ProcessControl>,
+    done: Arc<tokio::sync::Notify>,
+    /// Fired after the worker task released its `Arc<ImageManager>`, which is
+    /// what lets a test that simulates a Server restart re-acquire the build
+    /// root lock deterministically.
+    finished: Arc<tokio::sync::Notify>,
+}
+
+/// Durable build state shared with the blocking build thread.
+struct SharedBuild {
+    store: Arc<BuildStore>,
+    state: Mutex<BuildState>,
+    notifier: SharedNotifier,
+    control: Arc<ProcessControl>,
+    storage_error: Mutex<Option<String>>,
+}
+
+type BuildNotifier = Arc<dyn Fn(&ImageBuildDescriptor) + Send + Sync>;
+type SharedNotifier = Arc<Mutex<Option<BuildNotifier>>>;
+
+impl SharedBuild {
+    fn new(
+        store: Arc<BuildStore>,
+        state: BuildState,
+        notifier: SharedNotifier,
+        control: Arc<ProcessControl>,
+    ) -> Self {
+        Self {
+            store,
+            state: Mutex::new(state),
+            notifier,
+            control,
+            storage_error: Mutex::new(None),
+        }
+    }
+
+    fn snapshot(&self) -> BuildState {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn storage_error(&self) -> Option<String> {
+        self.storage_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn update(&self, change: impl FnOnce(&mut BuildState)) {
+        let (state, descriptor) = {
+            let mut guard = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            change(&mut guard);
+            guard.updated_at = now_secs();
+            let descriptor = guard.descriptor(now_secs());
+            (guard.clone(), descriptor)
+        };
+        if let Err(error) = self.store.write_state(&state) {
+            *self
+                .storage_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(format!("build state could not be persisted: {error:#}"));
+            // Unwritable durable state means the build must not continue to a
+            // publication whose progress it cannot record. The subprocess loop
+            // observes this and terminates its owned child.
+            self.control.cancel();
+        }
+        if let Some(notifier) = self
+            .notifier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            notifier(&descriptor);
+        }
+    }
+}
+
+impl BuildObserver for SharedBuild {
+    fn stage(&self, stage: Stage) {
+        let stage = protocol_stage(stage);
+        self.update(|state| {
+            state.status = ImageBuildStatus::Running;
+            state.stage = Some(stage);
+        });
+    }
+
+    fn pinned_source(&self, sha: &str) {
+        let sha = sha.to_string();
+        self.update(|state| {
+            state.pinned_sha = Some(sha);
+        });
+    }
+
+    fn snapshot_ready(&self, checkpoint: &nession_erofs::SnapshotCheckpoint) {
+        let files = checkpoint.files;
+        let bytes = checkpoint.bytes;
+        self.update(|state| {
+            state.progress = ImageBuildProgress {
+                files: Some(files),
+                bytes: Some(bytes),
+                elapsed_ms: 0,
+            };
+        });
+    }
+
+    fn progress(&self, stats: &TreeStats) {
+        let files = stats.files;
+        let bytes = stats.bytes;
+        self.update(|state| {
+            state.progress.files = Some(files);
+            state.progress.bytes = Some(bytes);
+        });
+    }
+
+    fn diagnostic(&self, message: &str) {
+        let message = bounded_diagnostic(message);
+        let build_id = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .build_id
+            .clone();
+        self.store.append_log(&build_id, &message);
+        self.update(|state| {
+            state.diagnostic = Some(message);
+        });
+    }
+}
+
+fn protocol_stage(stage: Stage) -> ImageBuildStage {
+    match stage {
+        Stage::Fetching => ImageBuildStage::Fetching,
+        Stage::Snapshotting => ImageBuildStage::Snapshotting,
+        Stage::Validating => ImageBuildStage::Validating,
+        Stage::Packaging => ImageBuildStage::Packaging,
+        Stage::Publishing => ImageBuildStage::Publishing,
+    }
+}
+
 /// Server-owned image manager.
 pub struct ImageManager {
     db: Arc<Database>,
@@ -199,6 +407,22 @@ pub struct ImageManager {
     /// In-process active transfers, keyed by digest. GC consults this so a
     /// reader is never racing a delete.
     transfers: Arc<Mutex<HashMap<String, usize>>>,
+    /// Durable build directories. `None` only on a read-only diagnostics host.
+    builds: Option<Arc<BuildStore>>,
+    runtime: Mutex<HashMap<String, Arc<BuildRun>>>,
+    /// Client idempotency keys, rebuilt from durable state on recovery.
+    request_index: Mutex<HashMap<String, String>>,
+    /// Latest submitted build per alias, ordered by submission sequence.
+    alias_intents: Mutex<HashMap<String, (u64, String)>>,
+    notifier: SharedNotifier,
+    stage_timeout: Option<Duration>,
+    retention_secs: u64,
+    /// Serializes publication, dedupe and alias application so one digest
+    /// cannot gain competing ready rows or a stale alias write.
+    publication: tokio::sync::Mutex<()>,
+    /// Serializes the idempotency check and creation of a new build record, so
+    /// two concurrent submissions with one client key cannot create two.
+    submit_lock: tokio::sync::Mutex<()>,
 }
 
 /// A backend that refuses every build. Used by handler/integration fixtures
@@ -207,29 +431,61 @@ pub struct ImageManager {
 pub struct UnavailableBackend;
 
 impl ImageBuildBackend for UnavailableBackend {
-    fn build(
-        &self,
-        _source: &NormalizedImageSource,
-        _packaging: &ImagePackaging,
-    ) -> Result<BuiltImage> {
+    fn execute(&self, _execution: BuildExecution) -> Result<BuiltImage> {
         anyhow::bail!("image build backend is unavailable in this test host")
     }
 }
 
 impl ImageManager {
     /// Build a manager whose backend refuses builds. Test/support only.
+    ///
+    /// This manager owns no build root: it can answer registry reads and
+    /// diagnostics but never submits or recovers a build.
     pub fn unavailable(db: Arc<Database>, blob_dir: impl Into<std::path::PathBuf>) -> Result<Self> {
         let blob_dir = blob_dir.into();
         let blobs = BlobStore::new(&blob_dir)?;
-        Ok(Self::new(db, Arc::new(UnavailableBackend), blobs, 1, 60))
+        Ok(Self::assemble(
+            db,
+            Arc::new(UnavailableBackend),
+            blobs,
+            None,
+            1,
+            60,
+            None,
+            DEFAULT_BUILD_RETENTION_SECS,
+        ))
     }
 
     pub fn new(
         db: Arc<Database>,
         builder: Arc<dyn ImageBuildBackend>,
         blobs: BlobStore,
+        options: ImageManagerOptions,
+    ) -> Result<Self> {
+        let store = BuildStore::open(&options.build_root, options.build_log_max_bytes)
+            .map_err(|error| anyhow::anyhow!("image build storage is unusable: {error:#}"))?;
+        Ok(Self::assemble(
+            db,
+            builder,
+            blobs,
+            Some(Arc::new(store)),
+            options.max_concurrent_builds,
+            options.access_token_ttl_secs,
+            options.build_stage_timeout,
+            options.build_retention_secs,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        db: Arc<Database>,
+        builder: Arc<dyn ImageBuildBackend>,
+        blobs: BlobStore,
+        builds: Option<Arc<BuildStore>>,
         max_concurrent_builds: usize,
         access_token_ttl_secs: u64,
+        stage_timeout: Option<Duration>,
+        retention_secs: u64,
     ) -> Self {
         Self {
             db,
@@ -238,25 +494,167 @@ impl ImageManager {
             semaphore: Arc::new(Semaphore::new(max_concurrent_builds.max(1))),
             access_token_ttl_secs: access_token_ttl_secs.max(1),
             transfers: Arc::new(Mutex::new(HashMap::new())),
+            builds,
+            runtime: Mutex::new(HashMap::new()),
+            request_index: Mutex::new(HashMap::new()),
+            alias_intents: Mutex::new(HashMap::new()),
+            notifier: Arc::new(Mutex::new(None)),
+            stage_timeout,
+            retention_secs,
+            publication: tokio::sync::Mutex::new(()),
+            submit_lock: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// Build one source and publish it atomically. A failed build leaves an
-    /// explicit `failed` row and no ready bytes.
+    /// Install the one push notifier for build state changes.
+    pub fn set_build_notifier(&self, notifier: BuildNotifier) {
+        *self
+            .notifier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(notifier);
+    }
+
+    pub fn build_root(&self) -> Option<&Path> {
+        self.builds.as_ref().map(|store| store.root())
+    }
+
+    fn store(&self) -> std::result::Result<&Arc<BuildStore>, ImageError> {
+        self.builds.as_ref().ok_or_else(|| {
+            ImageError::Unavailable("image build storage is unavailable".to_string())
+        })
+    }
+
+    /// Legacy synchronous `server.image.build` compatibility path.
+    ///
+    /// The build still runs in the durable background worker; this method
+    /// submits it and waits for the terminal state before returning the ready
+    /// descriptor (or a bounded failure). It is never reinterpreted as a job.
     pub async fn build(
-        &self,
+        self: &Arc<Self>,
         source: &ImageSource,
         alias: Option<&str>,
     ) -> std::result::Result<ImageDescriptor, ImageError> {
+        let build = self.submit_build(source, alias, None).await?;
+        let state = self.wait_terminal(&build.build_id).await?;
+        match state.status {
+            ImageBuildStatus::Succeeded => {
+                let digest = state.digest.clone().ok_or_else(|| {
+                    ImageError::Unavailable("image build succeeded without a digest".to_string())
+                })?;
+                let row = self
+                    .db
+                    .get_image_by_digest(&digest)
+                    .await
+                    .map_err(|e| ImageError::Unavailable(format!("image read failed: {e:#}")))?
+                    .ok_or_else(|| {
+                        ImageError::BuildFailed(
+                            "image build succeeded but its registry row is missing".to_string(),
+                        )
+                    })?;
+                self.descriptor_with_aliases(&row, state.alias.clone())
+                    .await
+            }
+            ImageBuildStatus::Canceled => Err(ImageError::BuildFailed(
+                "image build was canceled".to_string(),
+            )),
+            _ => Err(ImageError::BuildFailed(
+                state
+                    .error
+                    .unwrap_or_else(|| "image build failed".to_string()),
+            )),
+        }
+    }
+
+    /// Create one durable asynchronous build and return its record promptly.
+    ///
+    /// Input validation, the durable state directory and the registry row are
+    /// created before this returns; no Git or `mkfs.erofs` work has to finish.
+    pub async fn submit_build(
+        self: &Arc<Self>,
+        source: &ImageSource,
+        alias: Option<&str>,
+        client_request_id: Option<&str>,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        let _submit = self.submit_lock.lock().await;
+        let store = self.store()?.clone();
         let normalized = normalize_image_source(source)?;
         let alias = alias.map(normalize_alias).transpose()?;
+        let request_id = client_request_id
+            .map(normalize_client_request_id)
+            .transpose()?;
+        let canonical_source = normalized.source();
+
+        if let Some(request_id) = &request_id {
+            if let Some(existing) = self.indexed_build(request_id) {
+                match store.try_read_state(&existing) {
+                    Ok(Some(state)) => {
+                        if state.source != canonical_source || state.alias != alias {
+                            return Err(ImageError::Invalid(
+                                "client_request_id was already used for a different build request"
+                                    .to_string(),
+                            ));
+                        }
+                        return Ok(state.descriptor(now_secs()));
+                    }
+                    _ => {
+                        self.request_index
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .remove(request_id);
+                    }
+                }
+            }
+        }
+
+        self.submit_new(store, canonical_source, alias, request_id)
+            .await
+    }
+
+    async fn submit_new(
+        self: &Arc<Self>,
+        store: Arc<BuildStore>,
+        canonical_source: ImageSource,
+        alias: Option<String>,
+        client_request_id: Option<String>,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
         let packaging = ImagePackaging::default();
-        let now = now_i64();
+        let now = now_secs();
+        let build_id = format!("build-{}", uuid::Uuid::new_v4().simple());
         let image_id = format!("image-{}", uuid::Uuid::new_v4().simple());
-        let source_json = serde_json::to_string(&normalized.source())
+        let sequence = now_sequence();
+        let source_json = serde_json::to_string(&canonical_source)
             .map_err(|e| ImageError::Unavailable(format!("image source encoding failed: {e}")))?;
         let packaging_json = serde_json::to_string(&packaging).map_err(|e| {
             ImageError::Unavailable(format!("image packaging encoding failed: {e}"))
+        })?;
+        let state = BuildState {
+            version: builds::BUILD_STATE_VERSION,
+            build_id: build_id.clone(),
+            image_id: image_id.clone(),
+            attempt: 1,
+            sequence,
+            client_request_id: client_request_id.clone(),
+            source: canonical_source,
+            alias: alias.clone(),
+            packaging: packaging.clone(),
+            status: ImageBuildStatus::Queued,
+            stage: None,
+            pinned_sha: None,
+            progress: ImageBuildProgress::default(),
+            diagnostic: None,
+            error: None,
+            digest: None,
+            size_bytes: 0,
+            deduplicated: false,
+            created_at: now,
+            updated_at: now,
+            started_at: None,
+            finished_at: None,
+            attempts: Vec::new(),
+            recovered: false,
+        };
+        store.create(&state).map_err(|e| {
+            ImageError::Unavailable(format!("image build storage is unusable: {e:#}"))
         })?;
         let row = ImageRow {
             image_id: image_id.clone(),
@@ -267,77 +665,753 @@ impl ImageManager {
             packaging_json,
             status: ImageStatus::Building.as_str().to_string(),
             error: None,
-            created_at: now,
-            updated_at: now,
+            created_at: now_i64(),
+            updated_at: now_i64(),
         };
-        self.db.insert_image(&row).await.map_err(|e| {
-            ImageError::Unavailable(format!("image build could not be recorded: {e:#}"))
-        })?;
+        if let Err(error) = self.db.insert_image(&row).await {
+            let _ = store.remove(&build_id);
+            return Err(ImageError::Unavailable(format!(
+                "image build could not be recorded: {error:#}"
+            )));
+        }
+        if let Some(request_id) = &client_request_id {
+            self.request_index
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(request_id.clone(), build_id.clone());
+        }
+        if let Some(alias) = &alias {
+            self.note_alias_intent(alias, sequence, &build_id);
+        }
+        let descriptor = state.descriptor(now_secs());
+        self.start_build(state, ResumePoint::Source).await?;
+        self.publish_descriptor(&descriptor);
+        Ok(descriptor)
+    }
 
-        let permit = self.semaphore.clone().acquire_owned().await.map_err(|_| {
-            ImageError::Unavailable("image build worker is unavailable".to_string())
+    fn indexed_build(&self, request_id: &str) -> Option<String> {
+        self.request_index
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(request_id)
+            .cloned()
+    }
+
+    fn note_alias_intent(&self, alias: &str, sequence: u64, build_id: &str) {
+        let mut intents = self
+            .alias_intents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match intents.get(alias) {
+            Some((existing, _)) if *existing > sequence => {}
+            _ => {
+                intents.insert(alias.to_string(), (sequence, build_id.to_string()));
+            }
+        }
+    }
+
+    fn alias_intent_is_current(&self, alias: &str, build_id: &str) -> bool {
+        self.alias_intents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(alias)
+            .is_some_and(|(_, owner)| owner == build_id)
+    }
+
+    fn publish_descriptor(&self, descriptor: &ImageBuildDescriptor) {
+        if let Some(notifier) = self
+            .notifier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            notifier(descriptor);
+        }
+    }
+
+    fn publish_state(&self, state: &BuildState) {
+        self.publish_descriptor(&state.descriptor(now_secs()));
+    }
+
+    /// Start one build worker. A build ID can have at most one execution.
+    async fn start_build(
+        self: &Arc<Self>,
+        state: BuildState,
+        resume: ResumePoint,
+    ) -> std::result::Result<(), ImageError> {
+        let control = match self.stage_timeout {
+            Some(timeout) => ProcessControl::with_timeout(timeout),
+            None => ProcessControl::new(),
+        };
+        let run = Arc::new(BuildRun {
+            control: Arc::new(control),
+            done: Arc::new(tokio::sync::Notify::new()),
+            finished: Arc::new(tokio::sync::Notify::new()),
+        });
+        {
+            let mut runtime = self
+                .runtime
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if runtime.contains_key(&state.build_id) {
+                return Err(ImageError::Invalid(
+                    "this build already has an active execution".to_string(),
+                ));
+            }
+            runtime.insert(state.build_id.clone(), Arc::clone(&run));
+        }
+        let worker_manager = Arc::clone(self);
+        let runner = Arc::clone(&run);
+        let finished = Arc::clone(&run.finished);
+        let worker_state = state;
+        tokio::spawn(async move {
+            let manager = worker_manager;
+            manager.run_build(worker_state, runner, resume).await;
+            drop(manager);
+            finished.notify_one();
+        });
+        Ok(())
+    }
+
+    /// Wait for one build's terminal record (including worker quiescence).
+    pub async fn wait_for_build(
+        &self,
+        build_id: &str,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        let state = self.wait_terminal(build_id).await?;
+        Ok(state.descriptor(now_secs()))
+    }
+
+    async fn wait_terminal(&self, build_id: &str) -> std::result::Result<BuildState, ImageError> {
+        let Some(store) = self.builds.as_ref() else {
+            return Err(ImageError::Unavailable(
+                "image build storage is unavailable".to_string(),
+            ));
+        };
+        loop {
+            let state = store.read_state(build_id).map_err(|e| {
+                ImageError::Unavailable(format!("image build state is unreadable: {e:#}"))
+            })?;
+            if state.is_terminal() {
+                return Ok(state);
+            }
+            let run = self
+                .runtime
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(build_id)
+                .cloned();
+            let Some(run) = run else {
+                return Ok(state);
+            };
+            run.done.notified().await;
+            // Let the worker fully release the manager (and therefore the
+            // build-root ownership lock) before the caller observes the
+            // terminal record. This is what makes a simulated Server restart
+            // deterministic in tests.
+            let _ = tokio::time::timeout(Duration::from_secs(5), run.finished.notified()).await;
+        }
+    }
+
+    /// Read one durable build record.
+    pub async fn get_build(
+        &self,
+        build_id: &str,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        let build_id = normalize_image_build_id(build_id)?;
+        let store = self.store()?;
+        let state = store.try_read_state(&build_id).map_err(|e| {
+            ImageError::Unavailable(format!("image build state is unreadable: {e:#}"))
         })?;
-        let builder = Arc::clone(&self.builder);
-        let source_for_build = normalized.clone();
-        let built = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            builder.build(&source_for_build, &packaging)
+        state
+            .map(|state| state.descriptor(now_secs()))
+            .ok_or_else(|| ImageError::NotFound("build not found".to_string()))
+    }
+
+    /// Read one page of the durable build inventory, newest first.
+    pub async fn list_builds(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> std::result::Result<BuildListPage, ImageError> {
+        let store = self.store()?;
+        let limit = limit.clamp(1, IMAGE_BUILD_LIST_MAX_LIMIT);
+        let (builds, total) = store
+            .list_page(offset, limit)
+            .map_err(|e| ImageError::Unavailable(format!("image build list failed: {e:#}")))?;
+        let descriptors = builds
+            .iter()
+            .map(|state| state.descriptor(now_secs()))
+            .collect::<Vec<_>>();
+        let consumed = u32::try_from(descriptors.len()).map_err(|_| {
+            ImageError::Unavailable(
+                "image build page is larger than the protocol offset".to_string(),
+            )
+        })?;
+        let next_offset = if u64::from(offset) + u64::from(consumed) < total {
+            Some(offset.saturating_add(consumed))
+        } else {
+            None
+        };
+        Ok(BuildListPage {
+            builds: descriptors,
+            total,
+            next_offset,
         })
-        .await;
-        let built = match built {
-            Ok(Ok(built)) => built,
+    }
+
+    /// Cancel one build, terminating its owned subprocesses before returning.
+    pub async fn cancel_build(
+        &self,
+        build_id: &str,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        let build_id = normalize_image_build_id(build_id)?;
+        let store = self.store()?.clone();
+        let state = store.try_read_state(&build_id).map_err(|e| {
+            ImageError::Unavailable(format!("image build state is unreadable: {e:#}"))
+        })?;
+        let Some(state) = state else {
+            return Err(ImageError::NotFound("build not found".to_string()));
+        };
+        if state.is_terminal() {
+            return Ok(state.descriptor(now_secs()));
+        }
+        let run = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&build_id)
+            .cloned();
+        let Some(run) = run else {
+            // An orphaned record whose owner is gone: cancel it directly.
+            self.finish_failed(state, "build was canceled".to_string(), true, None)
+                .await?;
+            let state = store.read_state(&build_id).map_err(|e| {
+                ImageError::Unavailable(format!("image build state is unreadable: {e:#}"))
+            })?;
+            return Ok(state.descriptor(now_secs()));
+        };
+        run.control.cancel();
+        // Wait for the worker to reap its subprocess and record the terminal
+        // state. The bound keeps a pathological build from blocking the reply;
+        // the returned record is truthful either way.
+        let _ = tokio::time::timeout(Duration::from_secs(10), run.done.notified()).await;
+        let state = store.read_state(&build_id).map_err(|e| {
+            ImageError::Unavailable(format!("image build state is unreadable: {e:#}"))
+        })?;
+        Ok(state.descriptor(now_secs()))
+    }
+
+    /// Retry one failed or canceled build as a new attempt in the same record.
+    pub async fn retry_build(
+        self: &Arc<Self>,
+        build_id: &str,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        let build_id = normalize_image_build_id(build_id)?;
+        let store = self.store()?.clone();
+        let state = store.try_read_state(&build_id).map_err(|e| {
+            ImageError::Unavailable(format!("image build state is unreadable: {e:#}"))
+        })?;
+        let Some(mut state) = state else {
+            return Err(ImageError::NotFound("build not found".to_string()));
+        };
+        if !state.is_terminal() {
+            return Err(ImageError::Invalid(
+                "build is still active; cancel it before retrying".to_string(),
+            ));
+        }
+        if state.status == ImageBuildStatus::Succeeded {
+            return Err(ImageError::Invalid(
+                "a succeeded build cannot be retried".to_string(),
+            ));
+        }
+        let (resume, checkpoint) = self.resume_point(&state)?;
+        // The terminal attempt is already in `state.attempts`; this method only
+        // opens the next attempt in the same record.
+        state.attempt += 1;
+        state.status = ImageBuildStatus::Queued;
+        state.stage = None;
+        state.error = None;
+        state.diagnostic = None;
+        state.digest = None;
+        state.size_bytes = 0;
+        state.deduplicated = false;
+        state.started_at = None;
+        state.finished_at = None;
+        state.updated_at = now_secs();
+        if let Some(checkpoint) = checkpoint {
+            if state.pinned_sha.is_none() {
+                state.pinned_sha = checkpoint.pinned_sha.clone();
+            }
+            state.progress = ImageBuildProgress {
+                files: Some(checkpoint.files),
+                bytes: Some(checkpoint.bytes),
+                elapsed_ms: 0,
+            };
+        } else if resume == ResumePoint::Source {
+            state.progress = ImageBuildProgress::default();
+        }
+        store.write_state(&state).map_err(|e| {
+            ImageError::Unavailable(format!("image build state is not writable: {e:#}"))
+        })?;
+        let source_json = serde_json::to_string(&state.source)
+            .map_err(|e| ImageError::Unavailable(format!("image source encoding failed: {e}")))?;
+        let packaging_json = serde_json::to_string(&state.packaging).map_err(|e| {
+            ImageError::Unavailable(format!("image packaging encoding failed: {e}"))
+        })?;
+        self.db
+            .set_image_building(&ImageRow {
+                image_id: state.image_id.clone(),
+                digest: None,
+                size_bytes: 0,
+                source_json,
+                source_sha: state.pinned_sha.clone(),
+                packaging_json,
+                status: ImageStatus::Building.as_str().to_string(),
+                error: None,
+                created_at: state.created_at as i64,
+                updated_at: now_i64(),
+            })
+            .await
+            .map_err(|e| {
+                ImageError::Unavailable(format!("image retry could not be recorded: {e:#}"))
+            })?;
+        let descriptor = state.descriptor(now_secs());
+        self.start_build(state, resume).await?;
+        self.publish_descriptor(&descriptor);
+        Ok(descriptor)
+    }
+
+    /// The furthest trustworthy stage a failed/canceled record may resume from.
+    fn resume_point(
+        &self,
+        state: &BuildState,
+    ) -> std::result::Result<(ResumePoint, Option<nession_erofs::SnapshotCheckpoint>), ImageError>
+    {
+        let store = self.store()?;
+        let decision = resume_decision(store, state);
+        match decision {
+            Ok((resume, checkpoint)) => Ok((resume, checkpoint)),
+            Err(reason) => Err(ImageError::Invalid(reason)),
+        }
+    }
+
+    /// Reconcile durable build records after a Server restart.
+    ///
+    /// The exclusive build-root lock this manager holds proves the previous
+    /// owner is gone. A record with a verified snapshot resumes at packaging; a
+    /// Git record whose commit was pinned may refetch that same commit; a local
+    /// record with no trustworthy snapshot fails explicitly rather than
+    /// re-copying a possibly changed source. Unreadable state directories were
+    /// moved aside by [`BuildStore::scan`] and are never resumed.
+    pub async fn recover_builds(self: &Arc<Self>) -> std::result::Result<(), ImageError> {
+        let Some(store) = self.builds.clone() else {
+            return Ok(());
+        };
+        let states = store.scan().map_err(|e| {
+            ImageError::Unavailable(format!("image build recovery scan failed: {e:#}"))
+        })?;
+        // Newest intent wins for both indexes.
+        for state in &states {
+            if let Some(request_id) = &state.client_request_id {
+                self.request_index
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .entry(request_id.clone())
+                    .or_insert_with(|| state.build_id.clone());
+            }
+            if let Some(alias) = &state.alias {
+                let mut intents = self
+                    .alias_intents
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                match intents.get(alias) {
+                    Some((existing, _)) if *existing > state.sequence => {}
+                    _ => {
+                        intents.insert(alias.clone(), (state.sequence, state.build_id.clone()));
+                    }
+                }
+            }
+        }
+        let mut known_images = HashSet::new();
+        for mut state in states {
+            known_images.insert(state.image_id.clone());
+            if state.is_terminal() {
+                continue;
+            }
+            if self
+                .runtime
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains_key(&state.build_id)
+            {
+                continue;
+            }
+            match resume_decision(&store, &state) {
+                Ok((resume, checkpoint)) => {
+                    state.status = ImageBuildStatus::Queued;
+                    state.stage = None;
+                    state.recovered = true;
+                    state.started_at = None;
+                    state.updated_at = now_secs();
+                    if let Some(checkpoint) = checkpoint {
+                        if state.pinned_sha.is_none() {
+                            state.pinned_sha = checkpoint.pinned_sha.clone();
+                        }
+                        state.progress = ImageBuildProgress {
+                            files: Some(checkpoint.files),
+                            bytes: Some(checkpoint.bytes),
+                            elapsed_ms: 0,
+                        };
+                    }
+                    if let Err(error) = store.write_state(&state) {
+                        tracing::error!(
+                            build_id = %state.build_id,
+                            error = %format!("{error:#}"),
+                            "recovered image build state is not writable"
+                        );
+                        continue;
+                    }
+                    let descriptor = state.descriptor(now_secs());
+                    self.start_build(state, resume).await?;
+                    self.publish_descriptor(&descriptor);
+                }
+                Err(reason) => {
+                    let error = reason;
+                    self.finish_failed(state, error, false, None).await?;
+                }
+            }
+        }
+        // A `building` registry row with no durable build directory is a stale
+        // record from an interrupted publication or an older Server; it is not
+        // a runnable build and must not be offered as ready.
+        let building = self
+            .db
+            .list_images_by_status("building")
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("image recovery read failed: {e:#}")))?;
+        for row in building {
+            if known_images.contains(&row.image_id) {
+                continue;
+            }
+            let error = "image build state is missing; the build cannot be resumed";
+            let _ = self.db.fail_image(&row.image_id, error, now_i64()).await;
+        }
+        Ok(())
+    }
+
+    /// Remove expired terminal build directories without touching active work,
+    /// published blob bytes, aliases or leases.
+    pub async fn cleanup_builds(&self) -> std::result::Result<BuildCleanupReport, ImageError> {
+        let Some(store) = self.builds.clone() else {
+            return Ok(BuildCleanupReport::default());
+        };
+        let active = store.active_builds();
+        let mut ids = active.keys().cloned().collect::<HashSet<_>>();
+        ids.extend(
+            self.runtime
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .keys()
+                .cloned(),
+        );
+        store
+            .cleanup(self.retention_secs, &ids, now_secs())
+            .map_err(|e| ImageError::Unavailable(format!("image build cleanup failed: {e:#}")))
+    }
+
+    async fn run_build(
+        self: &Arc<Self>,
+        mut state: BuildState,
+        run: Arc<BuildRun>,
+        resume: ResumePoint,
+    ) {
+        let Some(store) = self.builds.clone() else {
+            self.release_runtime(&state.build_id);
+            return;
+        };
+        let permit = match self.semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                let _ = self
+                    .finish_failed(
+                        state,
+                        "image build worker is unavailable".to_string(),
+                        false,
+                        None,
+                    )
+                    .await;
+                return;
+            }
+        };
+        let now = now_secs();
+        state.status = ImageBuildStatus::Running;
+        state.stage = None;
+        state.error = None;
+        state.updated_at = now;
+        if state.started_at.is_none() {
+            state.started_at = Some(now);
+        }
+        if let Err(error) = store.write_state(&state) {
+            tracing::error!(
+                build_id = %state.build_id,
+                error = %format!("{error:#}"),
+                "image build state is not writable; refusing to run the build"
+            );
+            let _ = self
+                .db
+                .fail_image(
+                    &state.image_id,
+                    "image build storage is not writable",
+                    now_i64(),
+                )
+                .await;
+            self.release_runtime(&state.build_id);
+            drop(permit);
+            return;
+        }
+        self.publish_state(&state);
+
+        let source = match normalize_image_source(&state.source) {
+            Ok(source) => source,
+            Err(error) => {
+                let _ = self
+                    .finish_failed(state, error.message(), false, None)
+                    .await;
+                drop(permit);
+                return;
+            }
+        };
+        let observer = Arc::new(SharedBuild::new(
+            Arc::clone(&store),
+            state.clone(),
+            Arc::clone(&self.notifier),
+            Arc::clone(&run.control),
+        ));
+        let observer_dyn: Arc<dyn BuildObserver> = observer.clone();
+        let execution = BuildExecution {
+            build_dir: store.build_dir(&state.build_id),
+            source,
+            packaging: state.packaging.clone(),
+            resume,
+            pinned_sha: state.pinned_sha.clone(),
+            control: Arc::clone(&run.control),
+            observer: observer_dyn,
+        };
+        let builder = Arc::clone(&self.builder);
+        let outcome = tokio::task::spawn_blocking(move || builder.execute(execution)).await;
+        drop(permit);
+        let observed = observer.snapshot();
+        if let Some(error) = observer.storage_error() {
+            let _ = self
+                .finish_failed(observed, bounded_error(&error), false, None)
+                .await;
+            return;
+        }
+        match outcome {
+            Ok(Ok(built)) => {
+                self.finish_success(observed, built).await;
+            }
             Ok(Err(error)) => {
                 let text = bounded_error(&format!("{error:#}"));
-                let _ = self.db.fail_image(&image_id, &text, now_i64()).await;
-                return Err(ImageError::BuildFailed(text));
+                let canceled = run.control.is_canceled();
+                let _ = self
+                    .finish_failed(observed, text, canceled, Some(run))
+                    .await;
             }
-            Err(error) => {
-                let text = bounded_error(&format!("image build worker failed: {error}"));
-                let _ = self.db.fail_image(&image_id, &text, now_i64()).await;
-                return Err(ImageError::Unavailable(text));
+            Err(join_error) => {
+                let text = format!("image build worker failed: {join_error}");
+                let _ = self.finish_failed(observed, text, false, Some(run)).await;
             }
+        }
+    }
+
+    async fn finish_success(&self, mut state: BuildState, built: BuiltImage) {
+        let Some(store) = self.builds.clone() else {
+            return;
         };
-
-        // The same content may already have a ready row. One physical blob and
-        // one immutable metadata row are the identity; the second attempt is
-        // retired rather than duplicated.
-        if let Ok(Some(existing)) = self.db.get_image_by_digest(&built.blob.digest).await {
-            if existing.status == ImageStatus::Ready.as_str() {
-                let _ = self.db.delete_image_row(&image_id).await;
-                if let Some(alias) = &alias {
-                    self.db
-                        .upsert_image_alias(alias, &built.blob.digest, now_i64())
-                        .await
-                        .map_err(|e| {
-                            ImageError::Unavailable(format!("image alias failed: {e:#}"))
-                        })?;
+        let _publication = self.publication.lock().await;
+        let now = now_secs();
+        let digest = built.blob.digest.clone();
+        let mut deduplicated = false;
+        let existing = self.db.get_image_by_digest(&digest).await.ok().flatten();
+        if existing.is_some_and(|row| row.status == ImageStatus::Ready.as_str()) {
+            // One immutable metadata row and one physical blob are the
+            // identity; this attempt is retired rather than duplicated.
+            let _ = self.db.delete_image_row(&state.image_id).await;
+            deduplicated = true;
+        } else {
+            let finished = self
+                .db
+                .finish_image(
+                    &state.image_id,
+                    &digest,
+                    built.blob.size_bytes,
+                    built.source_sha.as_deref(),
+                    now_i64(),
+                )
+                .await;
+            match finished {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    // The registry row was removed (for example by a GC sweep
+                    // that raced recovery). The bytes are already verified and
+                    // published, so recreate the ready row rather than dropping
+                    // a completed immutable image.
+                    let source_json = match serde_json::to_string(&state.source) {
+                        Ok(value) => value,
+                        Err(_) => String::from("{}"),
+                    };
+                    let packaging_json = match serde_json::to_string(&state.packaging) {
+                        Ok(value) => value,
+                        Err(_) => String::from("{}"),
+                    };
+                    let row = ImageRow {
+                        image_id: state.image_id.clone(),
+                        digest: Some(digest.clone()),
+                        size_bytes: built.blob.size_bytes,
+                        source_json,
+                        source_sha: built.source_sha.clone(),
+                        packaging_json,
+                        status: ImageStatus::Ready.as_str().to_string(),
+                        error: None,
+                        created_at: state.created_at as i64,
+                        updated_at: now_i64(),
+                    };
+                    if let Err(error) = self.db.insert_image(&row).await {
+                        tracing::error!(
+                            build_id = %state.build_id,
+                            error = %format!("{error:#}"),
+                            "completed image ready row could not be recreated"
+                        );
+                    }
                 }
-                return self.descriptor_with_aliases(&existing, alias.clone()).await;
+                Err(error) => {
+                    tracing::error!(
+                        build_id = %state.build_id,
+                        error = %format!("{error:#}"),
+                        "image publication could not finish its registry row"
+                    );
+                }
             }
         }
-
-        let finished = self
-            .db
-            .finish_image(
-                &image_id,
-                &built.blob.digest,
-                built.blob.size_bytes,
-                now_i64(),
-            )
-            .await
-            .map_err(|e| ImageError::Unavailable(format!("image publication failed: {e:#}")))?
-            .ok_or_else(|| {
-                ImageError::Unavailable(
-                    "image build row disappeared before publication".to_string(),
-                )
-            })?;
-        if let Some(alias) = &alias {
-            self.db
-                .upsert_image_alias(alias, &built.blob.digest, now_i64())
-                .await
-                .map_err(|e| ImageError::Unavailable(format!("image alias failed: {e:#}")))?;
+        if let Some(alias) = state.alias.clone() {
+            if self.alias_intent_is_current(&alias, &state.build_id) {
+                if let Err(error) = self.db.upsert_image_alias(&alias, &digest, now_i64()).await {
+                    tracing::error!(
+                        build_id = %state.build_id,
+                        error = %format!("{error:#}"),
+                        "image alias could not be applied"
+                    );
+                }
+            } else {
+                state.diagnostic = Some(
+                    "a newer build requested this alias; the stale completion did not move it"
+                        .to_string(),
+                );
+                store.append_log(
+                    &state.build_id,
+                    "a newer build requested this alias; the stale completion did not move it",
+                );
+            }
         }
-        self.descriptor_with_aliases(&finished, alias).await
+        if let Err(error) = discard_snapshot_artifacts(&store.build_dir(&state.build_id)) {
+            tracing::warn!(
+                build_id = %state.build_id,
+                error = %format!("{error:#}"),
+                "successful image build scratch bytes could not be released"
+            );
+        }
+        state.status = ImageBuildStatus::Succeeded;
+        state.digest = Some(digest);
+        state.size_bytes = built.blob.size_bytes;
+        state.deduplicated = deduplicated;
+        state.error = None;
+        state.finished_at = Some(now);
+        state.updated_at = now;
+        push_attempt(&mut state, ImageBuildStatus::Succeeded, None);
+        state.stage = None;
+        if let Err(error) = store.write_state(&state) {
+            tracing::error!(
+                build_id = %state.build_id,
+                error = %format!("{error:#}"),
+                "successful image build state could not be persisted"
+            );
+        }
+        // Release the runtime slot before announcing the terminal state: a
+        // client that reacts to the push with a retry must not race a worker
+        // that is only finalizing.
+        self.release_runtime(&state.build_id);
+        self.publish_state(&state);
+    }
+
+    async fn finish_failed(
+        &self,
+        mut state: BuildState,
+        error: String,
+        canceled: bool,
+        run: Option<Arc<BuildRun>>,
+    ) -> std::result::Result<(), ImageError> {
+        let Some(store) = self.builds.clone() else {
+            return Ok(());
+        };
+        let now = now_secs();
+        let text = bounded_error(&error);
+        state.status = if canceled {
+            ImageBuildStatus::Canceled
+        } else {
+            ImageBuildStatus::Failed
+        };
+        state.error = Some(text.clone());
+        if state.diagnostic.is_none() {
+            state.diagnostic = Some(bounded_diagnostic(&text));
+        }
+        state.finished_at = Some(now);
+        state.updated_at = now;
+        let terminal_status = state.status;
+        push_attempt(&mut state, terminal_status, Some(text.clone()));
+        state.stage = None;
+        // A failed/canceled build never changes a Project reference or a
+        // published digest; it only fails its own registry row.
+        if let Ok(Some(row)) = self.db.get_image_by_id(&state.image_id).await {
+            if row.status == ImageStatus::Building.as_str() {
+                let _ = self.db.fail_image(&state.image_id, &text, now_i64()).await;
+            }
+        }
+        if let Err(error) = discard_packaged_image(&store.build_dir(&state.build_id)) {
+            tracing::warn!(
+                build_id = %state.build_id,
+                error = %format!("{error:#}"),
+                "incomplete image build output could not be removed"
+            );
+        }
+        store.append_log(&state.build_id, &text);
+        if let Err(error) = store.write_state(&state) {
+            tracing::error!(
+                build_id = %state.build_id,
+                error = %format!("{error:#}"),
+                "failed image build state could not be persisted"
+            );
+        }
+        if let Some(run) = run {
+            run.done.notify_one();
+        }
+        // A retry may follow the terminal push immediately; the runtime slot is
+        // free before that push is sent.
+        self.release_runtime(&state.build_id);
+        self.publish_state(&state);
+        Ok(())
+    }
+
+    fn release_runtime(&self, build_id: &str) {
+        let run = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(build_id);
+        if let Some(run) = run {
+            run.done.notify_one();
+        }
     }
 
     pub async fn list(
@@ -691,6 +1765,20 @@ impl ImageManager {
                 continue;
             }
             report.examined_images += 1;
+            // A `building` row protected by a live durable build directory is
+            // active work, not stale metadata. The build directory is the
+            // execution authority, so its liveness protects the row even when
+            // the row's own timestamp is older than the stale threshold.
+            if row.status == ImageStatus::Building.as_str()
+                && self
+                    .builds
+                    .as_ref()
+                    .and_then(|store| store.active_build_for_image(&row.image_id))
+                    .is_some()
+            {
+                report.skipped_active_builds += 1;
+                continue;
+            }
             if let Some(digest) = &row.digest {
                 let active = self
                     .transfers
@@ -791,6 +1879,72 @@ impl ImageManager {
     }
 }
 
+/// The furthest trustworthy resume point for a durable build record.
+fn resume_decision(
+    store: &BuildStore,
+    state: &BuildState,
+) -> std::result::Result<(ResumePoint, Option<nession_erofs::SnapshotCheckpoint>), String> {
+    let normalized = normalize_image_source(&state.source).map_err(|error| error.message())?;
+    let identity = match &normalized {
+        NormalizedImageSource::GitHub {
+            repository_url,
+            reference,
+            requested_sha,
+        } => SnapshotSource::GitHub {
+            repository_url: repository_url.clone(),
+            reference: reference.clone(),
+            requested_sha: requested_sha.clone(),
+        },
+        NormalizedImageSource::LocalDirectory { path } => {
+            SnapshotSource::LocalDirectory { path: path.clone() }
+        }
+    };
+    let packaging = ErofsPackaging {
+        compression: state.packaging.compression.clone(),
+        block_size: state.packaging.block_size,
+        fixed_timestamp: state.packaging.fixed_timestamp,
+        fixed_uuid: state.packaging.fixed_uuid.clone(),
+    };
+    let build_dir = store.build_dir(&state.build_id);
+    match verify_snapshot(&build_dir, &identity, &packaging) {
+        Ok(Some(checkpoint)) => Ok((ResumePoint::Packaging, Some(checkpoint))),
+        Ok(None) => match &normalized {
+            // A Git source is content-addressed by the commit it resolves;
+            // re-fetching is deterministic. A local directory has no immutable
+            // identity, so it is never silently re-copied.
+            NormalizedImageSource::GitHub { .. } => Ok((ResumePoint::Source, None)),
+            NormalizedImageSource::LocalDirectory { .. } => {
+                Err("local source has no validated snapshot; a new build is required".to_string())
+            }
+        },
+        Err(error) => match &normalized {
+            // A rejected checkpoint is never reused. Git may fetch the pinned
+            // commit again; a local source must be declared anew.
+            NormalizedImageSource::GitHub { .. } => Ok((ResumePoint::Source, None)),
+            NormalizedImageSource::LocalDirectory { .. } => {
+                Err(format!("image build checkpoint is not usable: {error:#}"))
+            }
+        },
+    }
+}
+
+/// Record one terminal attempt in the bounded history.
+fn push_attempt(state: &mut BuildState, status: ImageBuildStatus, error: Option<String>) {
+    if state.attempts.len() >= 16 {
+        state.attempts.remove(0);
+    }
+    let started = state.started_at.unwrap_or(state.updated_at);
+    let finished = state.finished_at.unwrap_or(state.updated_at);
+    state.attempts.push(builds::BuildAttempt {
+        attempt: state.attempt,
+        status: status.as_str().to_string(),
+        stage: state.stage.map(|stage| stage.as_str().to_string()),
+        error,
+        started_at: started,
+        finished_at: finished,
+    });
+}
+
 /// Decrements the active transfer count when dropped.
 pub struct TransferGuard {
     digest: String,
@@ -831,6 +1985,22 @@ fn bounded_error(value: &str) -> String {
     value.chars().take(1024).collect()
 }
 
+fn bounded_diagnostic(value: &str) -> String {
+    let trimmed = value.trim();
+    let line = trimmed.lines().next().unwrap_or(trimmed);
+    line.chars().take(IMAGE_DIAGNOSTIC_MAX_CHARS).collect()
+}
+
+fn now_sequence() -> u64 {
+    u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    )
+    .unwrap_or(u64::MAX)
+}
+
 /// The default blob root below a Server component directory.
 pub fn default_blob_root(base: &std::path::Path) -> std::path::PathBuf {
     base.join("images").join("blobs")
@@ -859,7 +2029,6 @@ pub fn valid_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use std::sync::Mutex;
 
     use nession_protocol::contracts::image::v1::{
@@ -905,15 +2074,11 @@ mod tests {
     }
 
     impl ImageBuildBackend for FakeBackend {
-        fn build(
-            &self,
-            source: &NormalizedImageSource,
-            _packaging: &ImagePackaging,
-        ) -> Result<BuiltImage> {
+        fn execute(&self, execution: BuildExecution) -> Result<BuiltImage> {
             if let Some(message) = self.fail_next.lock().unwrap().take() {
                 anyhow::bail!("{message}");
             }
-            let key = key_for(source);
+            let key = key_for(&execution.source);
             let bytes = self
                 .content
                 .lock()
@@ -921,17 +2086,30 @@ mod tests {
                 .get(&key)
                 .cloned()
                 .unwrap_or_else(|| key.into_bytes());
-            let mut file = tempfile::NamedTempFile::new()?;
-            file.write_all(&bytes)?;
-            let blob = self.blobs.put_file(file.path())?;
+            execution.observer.stage(Stage::Packaging);
+            std::fs::create_dir_all(&execution.build_dir)?;
+            let image = execution.build_dir.join("image.erofs.part");
+            std::fs::write(&image, &bytes)?;
+            let blob = self.blobs.put_file(&image)?;
             Ok(BuiltImage {
                 blob,
-                source_sha: match source {
+                source_sha: match &execution.source {
                     NormalizedImageSource::GitHub { requested_sha, .. } => requested_sha.clone(),
                     NormalizedImageSource::LocalDirectory { .. } => None,
                 },
                 packaging: ErofsPackaging::default(),
             })
+        }
+    }
+
+    fn test_options(dir: &std::path::Path) -> ImageManagerOptions {
+        ImageManagerOptions {
+            max_concurrent_builds: 2,
+            access_token_ttl_secs: 60,
+            build_root: dir.join("builds"),
+            build_stage_timeout: Some(Duration::from_secs(60)),
+            build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
+            build_retention_secs: DEFAULT_BUILD_RETENTION_SECS,
         }
     }
 
@@ -941,13 +2119,9 @@ mod tests {
         let db = Arc::new(Database::new(":memory:").await.unwrap());
         let blobs = BlobStore::new(dir.join("blobs")).unwrap();
         let backend = Arc::new(FakeBackend::new(blobs.clone()));
-        let manager = Arc::new(ImageManager::new(
-            Arc::clone(&db),
-            backend.clone(),
-            blobs,
-            2,
-            60,
-        ));
+        let manager = Arc::new(
+            ImageManager::new(Arc::clone(&db), backend.clone(), blobs, test_options(dir)).unwrap(),
+        );
         (manager, backend, db)
     }
 
@@ -1600,7 +2774,15 @@ mod tests {
         backend.set("/source/persist", b"persistent image");
         let digest = {
             let db = Arc::new(Database::new(db_path.to_str().unwrap()).await.unwrap());
-            let manager = ImageManager::new(Arc::clone(&db), backend.clone(), blobs.clone(), 1, 60);
+            let manager = Arc::new(
+                ImageManager::new(
+                    Arc::clone(&db),
+                    backend.clone(),
+                    blobs.clone(),
+                    test_options(dir.path()),
+                )
+                .unwrap(),
+            );
             let image = manager
                 .build(&local("/source/persist"), None)
                 .await
@@ -1615,7 +2797,8 @@ mod tests {
             image.digest.unwrap()
         };
         let db = Arc::new(Database::new(db_path.to_str().unwrap()).await.unwrap());
-        let manager = ImageManager::new(Arc::clone(&db), backend, blobs, 1, 60);
+        let manager =
+            ImageManager::new(Arc::clone(&db), backend, blobs, test_options(dir.path())).unwrap();
         let image = manager.get(Some(&digest), None).await.unwrap();
         assert_eq!(image.digest.as_deref(), Some(digest.as_str()));
         assert!(db

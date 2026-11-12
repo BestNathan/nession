@@ -45,6 +45,8 @@ async fn test_server_accepts_connection() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -67,6 +69,8 @@ async fn test_agent_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -123,6 +127,8 @@ async fn test_invalid_auth_token() {
         auth_token: "correct_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -172,6 +178,8 @@ async fn test_heartbeat_without_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -223,6 +231,8 @@ async fn test_client_agents_list_unauthenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -262,6 +272,8 @@ async fn test_close_frame_triggers_disconnect() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -293,6 +305,8 @@ async fn test_agent_registration_with_connect_url() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -340,6 +354,8 @@ async fn test_server_local_addr() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -362,6 +378,8 @@ async fn test_client_sessions_list_authenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -498,6 +516,8 @@ fn ownership_server_config(db_path: String) -> nession_common::config::ServerCon
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     }

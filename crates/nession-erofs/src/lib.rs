@@ -32,7 +32,12 @@ pub mod cache;
 pub mod mount;
 
 #[cfg(feature = "build")]
-pub use build::{BuiltImage, ErofsBuilder, MkfsRunner, Packaging, ProcessMkfsRunner};
+pub use build::{
+    discard_packaged_image, discard_snapshot_artifacts, manifest_tree, packaged_image_path,
+    snapshot_dir, verify_snapshot, BuildObserver, BuildRequest, BuildSource, BuiltImage,
+    ErofsBuilder, MkfsRunner, NoopObserver, Packaging, ProcessControl, ProcessMkfsRunner,
+    ResumePoint, SnapshotCheckpoint, SnapshotSource, Stage, TreeManifest, TreeStats,
+};
 #[cfg(feature = "cache")]
 pub use cache::{CachedImage, DownloadGrant, ErofsCache, PinGuard};
 pub use digest::{
