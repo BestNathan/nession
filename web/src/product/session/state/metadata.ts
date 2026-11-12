@@ -33,14 +33,51 @@ const EMPTY_ENTRY: SessionMetadataEntry = Object.freeze({
 
 const entries = new Map<string, SessionMetadataEntry>();
 const listeners = new Set<() => void>();
-/** Per-session request order: only the newest answer may write the cache. */
+/**
+ * Per-session request order: only the newest answer may write the cache. A
+ * successful save advances the same order, because a read that started before
+ * the Agent committed its revision must not republish the older one (#3319).
+ */
 const requestSequence = new Map<string, number>();
+/**
+ * The newest loaded answer this client has published per Session. Revisions
+ * only move forward, so an older answer — including one from a read that
+ * started after the save but was serviced before the Agent committed — must
+ * keep the newer value instead of rolling the projection back.
+ */
+const lastLoaded = new Map<string, SessionMetadataEntry>();
 
 function publish(sessionId: string, entry: SessionMetadataEntry): void {
   entries.set(sessionId, entry);
   for (const listener of listeners) {
     listener();
   }
+}
+
+/** Start a request, or fence every request older than a successful write. */
+function advanceRequestSequence(sessionId: string): number {
+  const sequence = (requestSequence.get(sessionId) ?? 0) + 1;
+  requestSequence.set(sessionId, sequence);
+  return sequence;
+}
+
+/** Publish a loaded answer unless it predates one this client already has. */
+function publishLoaded(sessionId: string, metadata: SessionMetadata): void {
+  const known = lastLoaded.get(sessionId);
+  if (known?.metadata && metadata.revision < known.metadata.revision) {
+    // The read's loading state is still in the cache; restore the newer value
+    // so rejected answers do not leave the view stuck on "loading".
+    publish(sessionId, known);
+    return;
+  }
+  const entry: SessionMetadataEntry = {
+    status: 'loaded',
+    metadata,
+    error: null,
+    errorKind: null,
+  };
+  lastLoaded.set(sessionId, entry);
+  publish(sessionId, entry);
 }
 
 export function getSessionMetadataEntry(sessionId: string): SessionMetadataEntry {
@@ -75,8 +112,7 @@ export async function loadSessionMetadata(
     return current;
   }
 
-  const sequence = (requestSequence.get(sessionId) ?? 0) + 1;
-  requestSequence.set(sessionId, sequence);
+  const sequence = advanceRequestSequence(sessionId);
   publish(sessionId, {
     status: 'loading',
     metadata: null,
@@ -89,6 +125,7 @@ export async function loadSessionMetadata(
     response = await sessionsApi.getMetadata(sessionId);
   } catch (error) {
     if (requestSequence.get(sessionId) === sequence) {
+      lastLoaded.delete(sessionId);
       publish(sessionId, {
         status: 'error',
         metadata: null,
@@ -105,6 +142,10 @@ export async function loadSessionMetadata(
   }
 
   if (!response.success || !response.metadata) {
+    // A failed load discards the previously loaded value rather than letting
+    // it masquerade as the current one; the next successful answer restores
+    // monotonicity from the Agent.
+    lastLoaded.delete(sessionId);
     publish(sessionId, {
       status: 'error',
       metadata: null,
@@ -112,12 +153,7 @@ export async function loadSessionMetadata(
       errorKind: response.error_kind ?? 'unavailable',
     });
   } else {
-    publish(sessionId, {
-      status: 'loaded',
-      metadata: response.metadata,
-      error: null,
-      errorKind: null,
-    });
+    publishLoaded(sessionId, response.metadata);
   }
   return getSessionMetadataEntry(sessionId);
 }
@@ -143,13 +179,15 @@ export async function saveSessionMetadata(
     };
   }
   if (response.success && response.metadata) {
-    publish(sessionId, {
-      status: 'loaded',
-      metadata: response.metadata,
-      error: null,
-      errorKind: null,
-    });
+    // The Agent committed a newer revision. Fence every read that was already
+    // in flight: its answer predates this write and must not overwrite it,
+    // even if no newer read starts before it settles (#3319).
+    advanceRequestSequence(sessionId);
+    publishLoaded(sessionId, response.metadata);
   }
+  // A refused or failed save changes neither the order nor the cache: the
+  // caller keeps its draft, and a pending read may still publish the Agent's
+  // current answer.
   return response;
 }
 
@@ -157,5 +195,6 @@ export async function saveSessionMetadata(
 export function resetSessionMetadataCache(): void {
   entries.clear();
   requestSequence.clear();
+  lastLoaded.clear();
   listeners.clear();
 }
