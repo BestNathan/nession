@@ -96,7 +96,10 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 
   const dormant = await geometry();
 
-  await openCapsuleCapability(page, 'git');
+  // #1290 removed the Terminal Git Peek; Git is now a Workspace capability.
+  // #826's no-reflow proof must open an actual Terminal projection instead.
+  await openCapsuleCapability(page, 'terminal-keys');
+  await expect(page.getByTestId('terminal-keys-body')).toBeVisible();
   await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
 
   const emerged = await geometry();

@@ -230,3 +230,106 @@ fn access_requires_exactly_one_consumer_and_keeps_project_compatibility() {
         );
     }
 }
+
+// ── Asynchronous build lifecycle (#3334) ────────────────────────────────
+
+#[test]
+fn build_ids_and_client_request_ids_have_one_bounded_shape() {
+    assert!(is_valid_image_build_id(
+        "build-12345678-1234-4234-8234-123456789abc"
+    ));
+    assert_eq!(
+        normalize_image_build_id("  build-abc  ").unwrap(),
+        "build-abc"
+    );
+    for invalid in ["", "image-abc", "build-", "build-a/b", "build-a b"] {
+        assert_eq!(
+            normalize_image_build_id(invalid).unwrap_err().message(),
+            "build_id is not a valid image build identity",
+            "{invalid}"
+        );
+    }
+
+    assert_eq!(
+        normalize_client_request_id("project-abc_build.1").unwrap(),
+        "project-abc_build.1"
+    );
+    assert_eq!(
+        normalize_client_request_id("").unwrap_err().message(),
+        "client_request_id must not be empty"
+    );
+    assert_eq!(
+        normalize_client_request_id("bad key")
+            .unwrap_err()
+            .message(),
+        "client_request_id must contain only ASCII letters, digits, '.', '_', '-' or ':'"
+    );
+    assert_eq!(
+        normalize_client_request_id(&"a".repeat(IMAGE_BUILD_REQUEST_ID_MAX_CHARS + 1))
+            .unwrap_err()
+            .message(),
+        "client_request_id must be at most 128 characters"
+    );
+}
+
+#[test]
+fn build_statuses_and_stages_round_trip_their_wire_names() {
+    for status in [
+        ImageBuildStatus::Queued,
+        ImageBuildStatus::Running,
+        ImageBuildStatus::Succeeded,
+        ImageBuildStatus::Failed,
+        ImageBuildStatus::Canceled,
+    ] {
+        assert_eq!(ImageBuildStatus::parse(status.as_str()), Some(status));
+    }
+    assert!(ImageBuildStatus::Succeeded.is_terminal());
+    assert!(ImageBuildStatus::Failed.is_terminal());
+    assert!(ImageBuildStatus::Canceled.is_terminal());
+    assert!(!ImageBuildStatus::Running.is_terminal());
+
+    for stage in [
+        ImageBuildStage::Fetching,
+        ImageBuildStage::Snapshotting,
+        ImageBuildStage::Validating,
+        ImageBuildStage::Packaging,
+        ImageBuildStage::Publishing,
+    ] {
+        assert_eq!(ImageBuildStage::parse(stage.as_str()), Some(stage));
+    }
+}
+
+#[test]
+fn a_build_descriptor_never_serializes_an_unmeasured_progress_fraction() {
+    let build = ImageBuildDescriptor {
+        build_id: "build-abc".to_string(),
+        image_id: "image-abc".to_string(),
+        attempt: 1,
+        source: source("https://github.com/BestNathan/nession", "main"),
+        source_sha: None,
+        packaging: ImagePackaging::default(),
+        status: ImageBuildStatus::Running,
+        stage: Some(ImageBuildStage::Packaging),
+        progress: ImageBuildProgress {
+            files: None,
+            bytes: None,
+            elapsed_ms: 42,
+        },
+        diagnostic: None,
+        error: None,
+        digest: None,
+        size_bytes: 0,
+        alias: None,
+        deduplicated: false,
+        created_at: 1,
+        updated_at: 2,
+    };
+    let value = serde_json::to_value(&build).unwrap();
+    assert!(value["progress"].get("files").is_none());
+    assert!(value["progress"].get("bytes").is_none());
+    assert_eq!(value["progress"]["elapsed_ms"], 42);
+    assert_eq!(value["stage"], "packaging");
+    assert_eq!(value["status"], "running");
+    let decoded: ImageBuildDescriptor = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded, build);
+}

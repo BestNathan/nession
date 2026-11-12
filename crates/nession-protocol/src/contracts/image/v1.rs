@@ -419,6 +419,10 @@ pub enum ImageValidationError {
     GetRequiresExactlyOneLocator,
     AccessRequiresExactlyOneConsumer,
     ErrorTooLong { max: usize },
+    InvalidBuildId,
+    EmptyClientRequestId,
+    ClientRequestIdTooLong { max: usize },
+    ClientRequestIdInvalid,
 }
 
 impl ImageValidationError {
@@ -489,6 +493,15 @@ impl ImageValidationError {
             }
             Self::ErrorTooLong { max } => {
                 format!("image error must be at most {max} characters")
+            }
+            Self::InvalidBuildId => "build_id is not a valid image build identity".to_string(),
+            Self::EmptyClientRequestId => "client_request_id must not be empty".to_string(),
+            Self::ClientRequestIdTooLong { max } => {
+                format!("client_request_id must be at most {max} characters")
+            }
+            Self::ClientRequestIdInvalid => {
+                "client_request_id must contain only ASCII letters, digits, '.', '_', '-' or ':'"
+                    .to_string()
             }
         }
     }
@@ -744,4 +757,325 @@ pub fn validate_error_text(raw: &str) -> Result<(), ImageValidationError> {
         });
     }
     Ok(())
+}
+
+// ── Asynchronous build lifecycle (#3334) ────────────────────────────────
+//
+// `server.image.build` v1 remains the documented synchronous compatibility
+// path: it submits the same durable background build and waits for the terminal
+// state. These contracts are the asynchronous family a client uses to submit,
+// observe, cancel and retry without holding a request open. A build record is
+// execution state; only a succeeded build publishes an immutable Image.
+
+/// Prefix of a durable build identity.
+pub const IMAGE_BUILD_ID_PREFIX: &str = "build-";
+/// Maximum length of a client-supplied idempotency key.
+pub const IMAGE_BUILD_REQUEST_ID_MAX_CHARS: usize = 128;
+/// Default page size for `server.image.build.list`.
+pub const IMAGE_BUILD_LIST_DEFAULT_LIMIT: u32 = 64;
+/// The largest page `server.image.build.list` accepts.
+pub const IMAGE_BUILD_LIST_MAX_LIMIT: u32 = 200;
+/// Maximum length of the last bounded build diagnostic.
+pub const IMAGE_DIAGNOSTIC_MAX_CHARS: usize = 1024;
+
+/// The lifecycle of one durable build record.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageBuildStatus {
+    /// Recorded and waiting for a build worker slot.
+    Queued,
+    /// A worker owns this build and is executing a stage.
+    Running,
+    /// An immutable verified blob exists at `digest`.
+    Succeeded,
+    /// The build failed; `error` is the bounded recoverable reason.
+    Failed,
+    /// The client canceled the build; no bytes were published.
+    Canceled,
+}
+
+impl ImageBuildStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "queued" => Some(Self::Queued),
+            "running" => Some(Self::Running),
+            "succeeded" => Some(Self::Succeeded),
+            "failed" => Some(Self::Failed),
+            "canceled" => Some(Self::Canceled),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Succeeded | Self::Failed | Self::Canceled)
+    }
+}
+
+/// The current stage of a running build.
+///
+/// `mkfs.erofs` has no native progress report, so a packaging build reports
+/// this stage and elapsed time, never an invented percentage.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageBuildStage {
+    Fetching,
+    Snapshotting,
+    Validating,
+    Packaging,
+    Publishing,
+}
+
+impl ImageBuildStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fetching => "fetching",
+            Self::Snapshotting => "snapshotting",
+            Self::Validating => "validating",
+            Self::Packaging => "packaging",
+            Self::Publishing => "publishing",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "fetching" => Some(Self::Fetching),
+            "snapshotting" => Some(Self::Snapshotting),
+            "validating" => Some(Self::Validating),
+            "packaging" => Some(Self::Packaging),
+            "publishing" => Some(Self::Publishing),
+            _ => None,
+        }
+    }
+}
+
+/// Measured build progress. Counts are absent until the snapshot manifest has
+/// measured them; no field is a guessed total.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageBuildProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// Time since this attempt started, in milliseconds.
+    #[serde(default)]
+    pub elapsed_ms: u64,
+}
+
+/// One durable build record as the asynchronous units return it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildDescriptor {
+    pub build_id: String,
+    /// The registry row this build will publish (or reuse).
+    pub image_id: String,
+    /// 1 for the first attempt; each retry increments it within this record.
+    pub attempt: u32,
+    pub source: ImageSource,
+    /// The exact resolved Git commit, once pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_sha: Option<String>,
+    pub packaging: ImagePackaging,
+    pub status: ImageBuildStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<ImageBuildStage>,
+    pub progress: ImageBuildProgress,
+    /// The last bounded diagnostic, such as a failed subprocess line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The immutable digest once `status = succeeded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// Whether this build reused bytes that were already published.
+    #[serde(default)]
+    pub deduplicated: bool,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// `server.image.build.submit`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildSubmitPayload {
+    pub source: ImageSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// Optional idempotency key: a repeated submission with the same key and
+    /// the same source returns the existing build record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_request_id: Option<String>,
+}
+
+/// `server.image.build.submit`'s reply: the durable record, returned promptly.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildSubmitResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.build.get`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildGetPayload {
+    pub build_id: String,
+}
+
+/// `server.image.build.get`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildGetResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.build.list`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildListPayload {
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default = "default_build_list_limit")]
+    pub limit: u32,
+}
+
+fn default_build_list_limit() -> u32 {
+    IMAGE_BUILD_LIST_DEFAULT_LIMIT
+}
+
+/// `server.image.build.list`'s reply: the durable inventory, newest first.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildListResponsePayload {
+    pub builds: Vec<ImageBuildDescriptor>,
+    pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `server.image.build.cancel`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildCancelPayload {
+    pub build_id: String,
+}
+
+/// `server.image.build.cancel`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildCancelResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.build.retry`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildRetryPayload {
+    pub build_id: String,
+}
+
+/// `server.image.build.retry`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildRetryResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `build-` followed by a non-empty UUID-shaped identity.
+pub fn is_valid_image_build_id(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix(IMAGE_BUILD_ID_PREFIX) else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest.len() <= 64
+        && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// Validate a build identity supplied by a caller.
+pub fn normalize_image_build_id(raw: &str) -> Result<String, ImageValidationError> {
+    let value = raw.trim();
+    if value.is_empty() || !is_valid_image_build_id(value) {
+        return Err(ImageValidationError::InvalidBuildId);
+    }
+    Ok(value.to_string())
+}
+
+/// Validate an optional client idempotency key.
+///
+/// The key is opaque to the Server except for its bounded shape; it is scoped to
+/// one Server's build root. An empty key is invalid rather than "absent" so a
+/// caller cannot accidentally lose idempotency to a blank field.
+pub fn normalize_client_request_id(raw: &str) -> Result<String, ImageValidationError> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(ImageValidationError::EmptyClientRequestId);
+    }
+    if value.chars().count() > IMAGE_BUILD_REQUEST_ID_MAX_CHARS {
+        return Err(ImageValidationError::ClientRequestIdTooLong {
+            max: IMAGE_BUILD_REQUEST_ID_MAX_CHARS,
+        });
+    }
+    if !value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':'))
+    {
+        return Err(ImageValidationError::ClientRequestIdInvalid);
+    }
+    Ok(value.to_string())
 }

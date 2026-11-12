@@ -65,6 +65,19 @@ async fn start_test_server(
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: db_path.clone(),
+        // Each test Server owns its own durable image roots (#3334). Sharing
+        // the ambient default would make a parallel test Server a second owner
+        // of one build directory, which the Server correctly refuses.
+        image_blob_dir: db_dir
+            .path()
+            .join("images/blobs")
+            .to_string_lossy()
+            .into_owned(),
+        image_build_dir: db_dir
+            .path()
+            .join("images/build")
+            .to_string_lossy()
+            .into_owned(),
         ..Default::default()
     };
 
