@@ -34,7 +34,7 @@ import {
 import {
   fixtureOwnershipSessionId,
   fixtureSessionMetadataScenario,
-  isFixtureOwnershipScenario,
+  isFixtureControlledScenario,
   subscribeFixtureOwnershipSession,
   useFixtureSessionMetadata,
 } from './fixtureSessionMetadata';
@@ -117,10 +117,12 @@ export function FixtureWorkspace() {
   const agents = agentProcessScenario
     ? fixtureAgentProcessesAgents(agentProcessScenario)
     : FIXTURE_AGENTS;
-  // The metadata ownership route (#2970) moves between two Sessions on the
-  // same Agent through the same in-place selection store; the capability view
-  // observes a changed Session without remounting.
-  const metadataOwnership = isFixtureOwnershipScenario(fixtureSessionMetadataScenario(search));
+  // The controlled metadata routes (#2970, #3319) move between two Sessions on
+  // the same Agent through the same in-place selection store; the capability
+  // view observes a changed Session without remounting.
+  const metadataControlled = isFixtureControlledScenario(
+    fixtureSessionMetadataScenario(search),
+  );
   const ownershipSessionId = useSyncExternalStore(
     subscribeFixtureOwnershipSession,
     fixtureOwnershipSessionId,
@@ -129,7 +131,7 @@ export function FixtureWorkspace() {
     ? agentProcessSessionId
     : gitScenario === 'selection-overlap'
       ? gitSessionId
-      : metadataOwnership
+      : metadataControlled
         ? ownershipSessionId
         : FIXTURE_SELECTED_ID;
   const selectedSession = noSession
