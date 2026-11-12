@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d903869b164bab3545ed7ba12d236f7bd9cf8add655e97ce2ff26566177ecd86",
+  "run_id": 43231255014,
+  "run_attempt": 2,
+  "issue": 3318,
+  "criterion": "SC-03",
+  "criterion_text": "One real staging identity run demonstrates the structured reason (or a valid authenticated attestation) bound to source run/attempt and exact deployed SHA; no false Pass is claimed.",
+  "stage": "staging",
+  "target_sha": "c70acdb5207371d06574f82718faf85463a88aa0",
+  "contract_sha256": "5825b0938a0679011567a8bbff152f87d23af1065ea9198f2554449d211707b9",
+  "case_revision": "c70acdb5207371d06574f82718faf85463a88aa0",
+  "case_tree_sha": "30ac0ac7bd0d4a1ecbb956eedd52f9daec872175",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-12T14:02:27.451Z",
+  "finished_at": "2026-11-12T14:02:33.420Z",
+  "duration_ms": 5969,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Original authenticated staging identity Run/Job produced a bounded, source-bound rejection",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "trusted original Deploy / Identity Run 43171332212/1, Job 131025084704 attest failure classified namespace, retryable=false"
+        },
+        {
+          "type": "runtime",
+          "value": "original Release / Staging Artifacts Run 43169643789/1 successful at exact deployed SHA 45f620373dff92ea296dfadebf5f2be83769f0f4"
+        },
+        {
+          "type": "runtime",
+          "value": "source receipt binds release Run/Attempt and staging environment; sanitized reason=observation environment does not match the trusted overlay"
+        },
+        {
+          "type": "runtime",
+          "value": "trusted Main pre-staged original Job log hash sha256:bc7a616c576c9ad9d5a68d8b42904a31ac3b5c5d0e38d84b0621b52c4df840f0; Case checkout=c70acdb5207371d06574f82718faf85463a88aa0"
+        }
+      ],
+      "duration_ms": 49,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43231255014,
+      "run_attempt": 2,
+      "event": "push",
+      "head_sha": "c70acdb5207371d06574f82718faf85463a88aa0",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43231255014",
+    "record_path": "runs/2026-11-12/43231255014-2/3318/SC-03.json",
+    "source_result_sha256": "913880028f601ce1fd36e157e386ca5bf7a538fda14bacb6e713ead6ac34973a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43231255014-2",
+    "sha256": "913880028f601ce1fd36e157e386ca5bf7a538fda14bacb6e713ead6ac34973a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43231255014",
+    "durability": "time-limited; object archival not configured"
+  }
+}
