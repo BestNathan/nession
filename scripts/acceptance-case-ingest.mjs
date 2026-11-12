@@ -19,6 +19,9 @@ const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
 const DEPLOYMENT_ROLES = Object.freeze(['agent', 'server', 'ui']);
 const DEPLOYMENT_ENVIRONMENT = /^[a-z][a-z0-9-]{0,62}$/;
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+// GitHub evaluates this step name from the original workflow_dispatch inputs;
+// target-controlled Case code cannot mutate the GitHub Jobs/Steps API metadata.
+const MANUAL_STAGING_STEP = /^Authenticate manual Staging Case ([1-9][0-9]*) (SC-[0-9]{2,}) ([0-9a-f]{40})$/;
 
 function positiveInt(value, label) {
   const n = Number(value);
@@ -233,14 +236,30 @@ export function assertDeploymentBinding(record, planEntry) {
 
 export function assertSourceBoundRecord(record, source) {
   const item = assertRunIdentity(record, source);
-  // A manually dispatched run may check out a different SHA, but that SHA is
-  // not authenticated by workflow_run.head_sha. Reject rather than project it.
-  if (item.target_sha !== source.head_sha) {
-    throw new Error('Case target SHA is not the authenticated source workflow head');
-  }
-  const expectedStage = source.head_branch === 'main' ? 'post-merge' : 'staging';
-  if (item.stage !== expectedStage) {
-    throw new Error('Case stage disagrees with authenticated workflow source branch');
+  // A trusted-main workflow_dispatch can target a different Staging commit.
+  // The binding is NOT taken from the Case artifact: attestCaseRecord first
+  // reads its GitHub-owned pre-target step identity at this exact Run/Attempt.
+  const manual = source.event === 'workflow_dispatch' &&
+    source.head_branch === 'main' && item.stage === 'staging' && !item.deployment;
+  if (manual) {
+    const binding = source.dispatch_binding;
+    if (!binding || binding.stage !== 'staging' ||
+        binding.target_sha !== item.target_sha ||
+        binding.issue !== item.issue || binding.criterion !== item.criterion ||
+        !Number.isSafeInteger(binding.job_id) || binding.job_id < 1 ||
+        !Number.isSafeInteger(binding.step_number) || binding.step_number < 1) {
+      throw new Error('manual Staging Case target is not bound to authenticated dispatch inputs');
+    }
+  } else {
+    // Push and ordinary main-head manual records keep the strict existing
+    // branch-head binding. Deployed records have their own attestation owner.
+    if (item.target_sha !== source.head_sha) {
+      throw new Error('Case target SHA is not the authenticated source workflow head');
+    }
+    const expectedStage = source.head_branch === 'main' ? 'post-merge' : 'staging';
+    if (item.stage !== expectedStage) {
+      throw new Error('Case stage disagrees with authenticated workflow source branch');
+    }
   }
   return assertExecutionIdentity(item);
 }
@@ -299,11 +318,60 @@ export function assertDeployedSourceRecord(record, source, deploymentRecords) {
   return assertExecutionIdentity(item);
 }
 
+/**
+ * Derive the manual Staging target independently of an untrusted Case JSON.
+ * Unlike logs or uploaded artifacts, Jobs/Steps names are evaluated by GitHub
+ * from original workflow_dispatch inputs in the trusted-main workflow. The
+ * step must succeed BEFORE the exact-target checkout / untrusted execution.
+ */
+export async function attestManualStagingSource(record, source, {
+  repository, token, request = githubRequest,
+} = {}) {
+  const item = validateCaseRecord(record);
+  if (source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
+      item.stage !== 'staging' || item.deployment) return source;
+  if (source.repository !== repository) throw new Error('manual Case repository mismatch');
+  const jobs = await request('/repos/' + repository +
+    '/actions/runs/' + source.run_id + '/attempts/' + source.run_attempt +
+    '/jobs?per_page=100', { token });
+  if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100) {
+    throw new Error('manual Case GitHub source job readback is unavailable or unbounded');
+  }
+  const matches = [];
+  for (const job of jobs.jobs) {
+    if (!['execute', 'execute-macos'].includes(job.name)) continue;
+    if (job.run_id !== source.run_id || job.run_attempt !== source.run_attempt ||
+        job.head_sha !== source.head_sha || job.status !== 'completed' ||
+        !['success', 'failure'].includes(job.conclusion) ||
+        !Number.isSafeInteger(job.id) || job.id < 1 ||
+        !Array.isArray(job.steps)) {
+      throw new Error('manual Case GitHub source job identity is unverified');
+    }
+    const checkoutIndex = job.steps.findIndex(step => step.name === 'Checkout exact target SHA');
+    for (const [index, step] of job.steps.entries()) {
+      if (!String(step.name ?? '').startsWith('Authenticate manual Staging Case ')) continue;
+      const fields = MANUAL_STAGING_STEP.exec(step.name);
+      if (!fields || index >= checkoutIndex ||
+          step.status !== 'completed' || step.conclusion !== 'success' ||
+          !Number.isSafeInteger(step.number) || step.number < 1) {
+        throw new Error('manual Case target dispatch step is invalid or executed after target checkout');
+      }
+      matches.push({
+        target_sha: fields[3], stage: 'staging', issue: Number(fields[1]),
+        criterion: fields[2], job_id: job.id, step_number: step.number,
+      });
+    }
+  }
+  if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual Staging target step');
+  return { ...source, dispatch_binding: matches[0] };
+}
+
 async function attestCaseRecord(record, {
   event, repository, token, request = githubRequest, deploymentRecords = null,
 }) {
-  const source = sourceRunIdentity(event, repository);
   const candidate = validateCaseRecord(record);
+  const source = await attestManualStagingSource(candidate, sourceRunIdentity(event, repository),
+    { repository, token, request });
   const item = candidate.deployment
     ? assertDeployedSourceRecord(candidate, source, deploymentRecords)
     : assertSourceBoundRecord(candidate, source);
