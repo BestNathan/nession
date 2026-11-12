@@ -6,7 +6,6 @@
 // no reload, no Login, no manual attach. The xterm marker is the remount
 // witness and the pre-outage output proves the buffer survived.
 import fs from 'node:fs';
-import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
 import {
   attachToSession,
