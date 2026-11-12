@@ -24,7 +24,10 @@ async function selectSession(page, sessionId) {
 }
 
 test('SC-02: A held stage released after switching to B leaves B unchanged, and A recovers', async ({ page }, testInfo) => {
-  test.setTimeout(180_000);
+  // The Case process has a 120s cap; fail fast with a diagnostic instead of
+  // waiting for a missing control until that cap kills the verifier.
+  test.setTimeout(100_000);
+  page.setDefaultTimeout(15_000);
   const { sha } = verifiedRuntime('SC-02');
   await page.setViewportSize({ width: 1440, height: 900 });
   await openMutationOverlap(page);
@@ -35,7 +38,9 @@ test('SC-02: A held stage released after switching to B leaves B unchanged, and 
   await expect(aRow).toHaveCount(1);
 
   // Hold A's stage response. The request reached the fixture; nothing applied.
-  await aRow.getByTestId('git-stage').click();
+  const stageA = page.getByRole('button', { name: 'Stage a.ts', exact: true });
+  await expect(stageA).toBeVisible();
+  await stageA.click();
   await expect.poll(() => page.evaluate(() => window.fixtureGitMutationOverlap.requests())).toBe(1);
   await expect(page.getByTestId('git-row-unstaged').filter({ hasText: 'a.ts' })).toHaveCount(1);
 
@@ -55,10 +60,11 @@ test('SC-02: A held stage released after switching to B leaves B unchanged, and 
   await expect(bRow).toHaveCount(1);
   await expect(page.getByTestId('git-commit-message')).toHaveValue('draft for B');
   await expect(page.getByTestId('git-mutation-notice')).toHaveCount(0);
-  await expect(bRow.getByTestId('git-stage')).toBeEnabled();
+  const stageB = page.getByRole('button', { name: 'Stage b.ts', exact: true });
+  await expect(stageB).toBeEnabled();
 
   // B's own mutation still adopts its authoritative post-state.
-  await bRow.getByTestId('git-stage').click();
+  await stageB.click();
   await expect(page.getByTestId('git-row-staged').filter({ hasText: 'b.ts' })).toHaveCount(1);
   await expect(page.getByTestId('git-branch')).toHaveText('feat/b');
 

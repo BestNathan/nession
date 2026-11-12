@@ -166,7 +166,9 @@ function mutateFixtureRepository(
     repo.status = {
       state: 'ok',
       status: next,
-      root: FIXTURE_ROOT,
+      // Preserve the repository the scenario declared; the shared sample
+      // statuses all use FIXTURE_ROOT, while per-Session scenarios do not.
+      root: repo.status.state === 'ok' ? repo.status.root : FIXTURE_ROOT,
       snapshot: repo.snapshot,
       truncated: false,
       truncatedBytes: 0,
