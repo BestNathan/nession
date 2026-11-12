@@ -98,6 +98,29 @@ The repository-owned `Acceptance / Cases` workflow uses the same runner for both
 
 Manual `workflow_dispatch` accepts one Issue/SC/SHA/stage/runtime tuple and follows the same runner.
 
+For a **manual Staging Case dispatched from trusted `main`**, GitHub's
+`workflow_run.head_sha` identifies the **workflow code** and intentionally
+does not equal the explicitly selected Staging `target_sha`. The source
+workflow records the original GitHub-evaluated dispatch Issue, SC, and exact
+target SHA in a successful pre-target-checkout Job step name (on Linux or
+macOS). Trusted Case ingestion independently reads the original GitHub
+Run/Attempt/Job/Step metadata, requires the recorded inputs to match the Case
+result, re-derives its deterministic execution identity, and confirms that
+the claimed Case Git tree exists uniquely under the exact target commit.
+Only the trusted ingester writes the resulting immutable source/target-bound
+record and SHA index. Case-controlled artifacts, job logs, comments, or a
+different Run/Attempt cannot substitute for that GitHub-owned input binding.
+Historical manual runs without that authenticated step remain un-ingestible;
+rerun the Case through the updated workflow rather than retroactively
+weakening SHA checks.
+
+Automatic push Cases remain bound to the push `head_sha`. Deployed Cases
+continue to use their separately authenticated deployment/digest binding.
+Projection of a Staging Case still requires the target SHA to be the current
+Staging head or an independently verified ancestor, with the corresponding
+Issue association and unchanged SC contract; persisting a Case record alone
+never implies an authorized Issue Pass.
+
 ## Immutable results and Issue projection
 
 Case execution has only read permissions. Compact results are uploaded as artifacts. The trusted `Acceptance / Case Ingest` workflow on `main` runs afterward with write permissions and serializes ingestion through one concurrency group.
