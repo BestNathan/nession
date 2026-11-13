@@ -315,7 +315,7 @@ async function graphql(query, variables, token) {
   return payload.data;
 }
 
-function parseClosingIssueNumbers(body, owner, name) {
+export function parseClosingIssueNumbers(body, owner, name) {
   const text = String(body ?? '').replace(/<!--[^]*?-->/g, '');
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const numbers = new Set();
