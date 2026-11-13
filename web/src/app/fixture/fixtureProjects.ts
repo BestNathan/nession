@@ -74,7 +74,8 @@ export type FixtureProjectsScenario =
   | 'error'
   | 'loading'
   | 'offline'
-  | 'long';
+  | 'long'
+  | 'stale-list';
 
 export function fixtureProjectsScenario(search: string): FixtureProjectsScenario {
   const value = new URLSearchParams(search).get('projects');
@@ -83,11 +84,18 @@ export function fixtureProjectsScenario(search: string): FixtureProjectsScenario
     value === 'error' ||
     value === 'loading' ||
     value === 'offline' ||
-    value === 'long'
+    value === 'long' ||
+    value === 'stale-list'
   ) {
     return value;
   }
   return 'canonical';
+}
+
+interface HeldList {
+  /** The list as it stood when the read started. */
+  snapshot: Project[];
+  resolve: (payload: unknown) => void;
 }
 
 interface ProjectHarnessState {
@@ -98,6 +106,8 @@ interface ProjectHarnessState {
   updates: Record<string, unknown>[];
   deletes: Record<string, unknown>[];
   next: number;
+  /** `stale-list` reads, oldest first, settled only by the browser test. */
+  heldLists: HeldList[];
 }
 
 function answerList(state: ProjectHarnessState): unknown {
@@ -183,6 +193,18 @@ function fixtureProjectSurface(state: ProjectHarnessState): PluginSurface {
             state.lists += 1;
             return new Promise<T>(() => {});
           }
+          if (state.scenario === 'stale-list') {
+            state.lists += 1;
+            // Capture the answer now and settle it in the order the browser
+            // test chooses: a later mutation's refresh must win over this
+            // older read even when it arrives first (#3387 SC-02).
+            return new Promise<T>((resolve) => {
+              state.heldLists.push({
+                snapshot: state.projects,
+                resolve: resolve as (payload: unknown) => void,
+              });
+            });
+          }
           return Promise.resolve(answerList(state)) as Promise<T>;
         case 'server.project.get':
           return Promise.resolve(answerGet(state, payload)) as Promise<T>;
@@ -218,6 +240,14 @@ export interface FixtureProjectControls {
   createRequests: () => Record<string, unknown>[];
   updateRequests: () => Record<string, unknown>[];
   deleteRequests: () => Record<string, unknown>[];
+  /** Start the same Project list refresh a caller/mutation would. */
+  refresh: () => void;
+  /** `stale-list`: reads still waiting for the test to settle them. */
+  pendingLists: () => number;
+  /** Resolve the newest held read with the answer it captured. */
+  releaseLatestList: () => boolean;
+  /** Resolve the oldest held read with the answer it captured. */
+  releaseOldestList: () => boolean;
 }
 
 export function createFixtureProjectHarness(search: string): {
@@ -239,6 +269,7 @@ export function createFixtureProjectHarness(search: string): {
     updates: [],
     deletes: [],
     next: 0,
+    heldLists: [],
   };
   return {
     surface: fixtureProjectSurface(state),
@@ -248,6 +279,18 @@ export function createFixtureProjectHarness(search: string): {
       createRequests: () => state.creates,
       updateRequests: () => state.updates,
       deleteRequests: () => state.deletes,
+      refresh: () => {},
+      pendingLists: () => state.heldLists.length,
+      releaseLatestList: () => {
+        const held = state.heldLists.pop();
+        held?.resolve({ projects: held.snapshot });
+        return Boolean(held);
+      },
+      releaseOldestList: () => {
+        const held = state.heldLists.shift();
+        held?.resolve({ projects: held.snapshot });
+        return Boolean(held);
+      },
     },
   };
 }
@@ -257,7 +300,7 @@ type FixtureProjectsWindow = Window & {
 };
 
 /** Bind the Project stub for a fixture route's lifetime. */
-export function useFixtureProjects(search: string): void {
+export function useFixtureProjects(search: string): ReturnType<typeof createFixtureProjectHarness> {
   const harness = useMemo(() => createFixtureProjectHarness(search), [search]);
   useEffect(() => {
     const release = projectsApi.install(harness.surface);
@@ -270,6 +313,7 @@ export function useFixtureProjects(search: string): void {
       }
     };
   }, [harness]);
+  return harness;
 }
 
 /**
@@ -280,8 +324,19 @@ export function useFixtureProjects(search: string): void {
  * dialogs as the shipped shell.
  */
 export function useFixtureProjectShell(search: string) {
-  useFixtureProjects(search);
+  const harness = useFixtureProjects(search);
   const projects = useProjects();
+  const refreshProjects = projects.refresh;
+  useEffect(() => {
+    // The browser Case needs to start an older read before a mutation, then
+    // settle the mutation's newer refresh first (#3387 SC-02).
+    harness.controls.refresh = () => {
+      void refreshProjects();
+    };
+    return () => {
+      harness.controls.refresh = () => {};
+    };
+  }, [harness, refreshProjects]);
   const dialogs = useProjectDialogs();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
