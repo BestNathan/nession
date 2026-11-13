@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 3445,
+  "run_id": 43473173148,
+  "run_attempt": 2,
+  "target_sha": "ad38ccb317743e2fad31c0c58d5a56f9822519e1",
+  "plan_digest": "f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1",
+  "artifact_digest": "sha256:bdcbbfb9490f7796d2a6db6e8c488333f7fb81c5a1364eddb894a3efe71d3971",
+  "ingest_run_id": 43474666173,
+  "ingest_attempt": 1,
+  "declaration_digest": "3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab",
+  "before_body_sha256": "fc0bec3d4b0471d9db6da64a6b7d978a50fe2465ca5b3656c88673aa65ab4614",
+  "body_sha256": "1a2ecffbcbc789d0cbc7417678e9e724ddc5989ce3904eb35fc207c53f234419",
+  "readback_body": "## Requirements: Align UI-contract and visual E2E with the consolidated Sandbox sections\n\n### Problem and verified baseline\n\n#3408 retires the standalone Session-free Images capability entry and moves the five policy entries under the capability-local **Policies** section. The production UI is delivered by #3432/#3408 follow-up work, but several long-lived regression specs still click the removed entries directly:\n\n- `ui-contract-web.spec.ts`, `ui-contract-assertions.spec.ts` and `ui-contract-matrix.spec.ts` clicked `sandbox-tab-*` from the Overview section, where the policy tabs are no longer mounted;\n- the canonical #1455 capability-row contract still expected a separate `images` capability entry;\n- `fixture-visual.spec.ts` opened the Filesystem tab the same way and its canonical Linux baselines capture the retired capability row and the new Filesystem editor.\n\nLeft unchanged, the canonical browser design gate and the fixture-visual gate fail on staging even though the product change is correct.\n\n### Scope\n\n- Update only the affected navigation steps and the canonical production-capability expectation; do not add a second capability registry or a parallel visual runner.\n- Regenerate the canonical `fixture-visual` Linux baselines with a `--update-snapshots=all` workflow run and move the `migration-parity.json` blob pins with the changed bytes.\n- No production behavior change.\n\n### Success Criteria\n\n- [x] SC-01 The canonical browser design gate passes with the consolidated capability set: the #1455 contract expects no separate `images` tool, and the affected UI-contract specs reach each policy editor through the capability-local Policies section.\n- [x] SC-02 The canonical fixture-visual suite passes against regenerated Linux baselines whose `migration-parity.json` blob pins match the committed PNG bytes, including `web-sandbox-outside` capturing the five-section Filesystem editor.\n\n**SC → scenario:** SC-01 → SCN-01 (source-aligned exact-head browser design evidence in the PR's E2E/design check). SC-02 → SCN-03 (canonical fixture-visual execution with committed baseline bytes).\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | run 43470606161; ref 067d8481042960034d7ee6b49a0ae135f2374724; source agent-qwen; agent-findings: Three exploration agents returned consistent findings supporting Pass verdict at target ref 067d84810; summary: Criterion passes based on repository state exploration |\n| SC-02 | Pass | run 43470606161; ref 067d8481042960034d7ee6b49a0ae135f2374724; source agent-qwen; agent-findings: Three exploration agents returned consistent findings supporting Pass verdict at target ref 067d84810; summary: Criterion passes based on repository state exploration |\n\n## E2E Verification\n\n### New\n- none: this Requirement repairs existing canonical specs and baselines; it adds no product browser behavior\n\n### Regression\n- fixture-visual\n- ui-contract-assertions\n- ui-contract-matrix\n- ui-contract-web\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| fixture-visual | Regression | Pass | run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 14/14 (https://github.com/BestNathan/nession/actions/runs/43473173148) |\n| ui-contract-assertions | Regression | Pass | run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 30/30 (https://github.com/BestNathan/nession/actions/runs/43473173148) |\n| ui-contract-matrix | Regression | Pass | run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 104/104 (https://github.com/BestNathan/nession/actions/runs/43473173148) |\n| ui-contract-web | Regression | Pass | run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 65/65 (https://github.com/BestNathan/nession/actions/runs/43473173148) |\n\n## Product alignment\n\n- [ ] Sandbox remains discovered only inside a Session; no separate Images Workspace entry returns.\n- [ ] The canonical design gate and visual baselines stay the single approved proof.\n- [ ] No Gate threshold is weakened; only the changed navigation and approved baseline bytes move.\n\nRelated: #3408, #3432, #1455, #3194, #3138.\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-11-13T17:38:24Z",
+  "readback_updated_at": "2026-11-13T17:38:24Z",
+  "rows": [
+    {
+      "id": "fixture-visual",
+      "result": "Pass",
+      "evidence": "run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 14/14 (https://github.com/BestNathan/nession/actions/runs/43473173148)"
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "evidence": "run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 30/30 (https://github.com/BestNathan/nession/actions/runs/43473173148)"
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "evidence": "run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 104/104 (https://github.com/BestNathan/nession/actions/runs/43473173148)"
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "evidence": "run 43473173148/2, SHA ad38ccb317743e2fad31c0c58d5a56f9822519e1, contract 3b0c4e6a853a7793688be7e551833eb5492002b51a8b0cf433b0ce05f50cdfab, plan f1e3c4711c53a1e6e97be360bdb5f8324b4ebb54be15742b2e373b23818a25c1, tests 65/65 (https://github.com/BestNathan/nession/actions/runs/43473173148)"
+    }
+  ]
+}
