@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverCases, CASE_PLATFORMS } from '../e2e/acceptance/contract/cases.mjs';
 import { buildAcceptanceContext } from './acceptance-executor.mjs';
-import { acceptancePlan, acceptancePlanSection } from './acceptance-plan.mjs';
+import { acceptancePlan, acceptancePlanSection, canonicalAcceptanceStage } from './acceptance-plan.mjs';
 import { validateCaseSelection } from './acceptance-case-selection-contract.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
@@ -25,7 +25,7 @@ export function selectTrustedCases({
   );
   const selected = manifests
     .filter((item) => issueNumbers.includes(Number(item.issue)))
-    .filter((item) => item.stage === stage)
+    .filter((item) => canonicalAcceptanceStage(item.stage) === canonicalAcceptanceStage(stage))
     .filter((item) => !requested || item.criterion === requested)
     .filter((item) => !runtime || item.runtime === runtime)
     .filter((item) => !platform || item.platform === platform || item.platform === 'both')

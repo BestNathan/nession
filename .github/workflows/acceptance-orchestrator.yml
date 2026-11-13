@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
-  prepare-pre-merge:
+  prepare-pr:
     if: github.event_name == 'pull_request_target' && github.event.action != 'closed' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -66,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-pre-merge)"
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-pr)"
           echo "issue_numbers=${issue_numbers}" >> "${GITHUB_OUTPUT}"
           if [[ "$(jq 'length' <<<"${issue_numbers}")" -gt 0 ]]; then
             echo "has_requirements=true" >> "${GITHUB_OUTPUT}"
@@ -74,19 +74,19 @@ jobs:
             echo "has_requirements=false" >> "${GITHUB_OUTPUT}"
           fi
 
-  pre-merge-acceptance:
-    needs: prepare-pre-merge
-    if: needs.prepare-pre-merge.outputs.has_requirements == 'true'
+  pr-acceptance:
+    needs: prepare-pr
+    if: needs.prepare-pr.outputs.has_requirements == 'true'
     strategy:
       fail-fast: false
       matrix:
-        issue_number: ${{ fromJSON(needs.prepare-pre-merge.outputs.issue_numbers) }}
+        issue_number: ${{ fromJSON(needs.prepare-pr.outputs.issue_numbers) }}
     uses: ./.github/workflows/agent-sc-acceptance.yml
     with:
       issue_number: ${{ matrix.issue_number }}
-      stage: pre-merge
+      stage: pr
       provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
-      target_ref: ${{ needs.prepare-pre-merge.outputs.head_sha }}
+      target_ref: ${{ needs.prepare-pr.outputs.head_sha }}
       deployment: ''
     secrets: inherit
 
