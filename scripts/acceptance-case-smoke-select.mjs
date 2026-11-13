@@ -26,7 +26,7 @@ export function selectRepresentativeCases(cases) {
   return [protocolOnly, browserProtocol].map(({ manifest }) => ({
     issue: manifest.issue,
     criterion: manifest.criterion,
-    stage: manifest.stage,
+    stage: manifest.stage === 'pre-merge' ? 'pr' : manifest.stage, // legacy manifest read
     runtime: manifest.runtime,
     needs_browser: manifest.verifiers.some((v) => v.type === 'browser'),
   }));
@@ -43,6 +43,7 @@ function selfTest() {
   const result = selectRepresentativeCases([c, b, a]);
   assert.deepEqual(result.map((x) => x.issue + '/' + x.criterion), ['7/SC-02','2/SC-03']);
   assert.deepEqual(result.map((x) => x.needs_browser), [false, true]);
+  assert.deepEqual(result.map((x) => x.stage), ['pr','staging'], 'new smoke records never emit the legacy PR alias');
   assert.throws(() => selectRepresentativeCases([a]), /protocol-only and browser\+protocol/);
   assert.throws(() => selectRepresentativeCases([b]), /protocol-only and browser\+protocol/);
   assert.deepEqual(selectRepresentativeCases([b, a]), result);

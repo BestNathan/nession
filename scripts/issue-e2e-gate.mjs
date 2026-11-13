@@ -26,10 +26,10 @@ export function verifyIssueE2EGate(issue,targetSha) {
 // The E2E contract remains independently verified; PR SC acceptance does not
 // subscribe to E2E completion or make Issue E2E an Agent execution prerequisite.
 export function assertPrAcceptanceIndependentOfE2E(workflow) {
-  const prep = workflow.split('  prepare-pre-merge:')[1]
-    ?.split('  pre-merge-acceptance:')[0] ?? '';
-  if (!prep.includes('discover-pre-merge') ||
-      !workflow.includes('  pre-merge-acceptance:') ||
+  const prep = workflow.split('  prepare-pr:')[1]
+    ?.split('  pr-acceptance:')[0] ?? '';
+  if (!prep.includes('discover-pr') ||
+      !workflow.includes('  pr-acceptance:') ||
       !workflow.includes('  background:')) throw Error('missing independent PR acceptance route');
   if (/workflow_run:|nession-issue-e2e-projected|reconcile-issue-e2e:|reconcile-completed-quality-e2e:|defer-pre-merge:|pre-merge-gate:|acceptance-pr-gate:/.test(workflow) ||
       /acceptance-dependency-state|acceptance-source-applicability|issue-e2e-gate|admission|source barrier/.test(prep))
@@ -53,8 +53,8 @@ function selfTest(){
   const trustedWorkflow=fs.readFileSync('.github/workflows/acceptance-orchestrator.yml','utf8');
   assert.doesNotThrow(()=>assertPrAcceptanceIndependentOfE2E(trustedWorkflow));
   assert.throws(()=>assertPrAcceptanceIndependentOfE2E(
-    trustedWorkflow.replace('  pre-merge-acceptance:',
-      '  defer-pre-merge:\n  pre-merge-acceptance:')),
+    trustedWorkflow.replace('  pr-acceptance:',
+      '  defer-pre-merge:\n  pr-acceptance:')),
     /must not depend/);
   assert.equal(verifyIssueE2EGate({body:none},sha).reason,'explicit-none');
   assert.equal(verifyIssueE2EGate({body:none},sha).required,0);

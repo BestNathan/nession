@@ -54,7 +54,7 @@ async function main() {
     : null;
 
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('--sha must be an exact 40-character SHA');
-  if (!['pre-merge', 'staging', 'post-merge'].includes(stage)) throw new Error('unsupported --stage');
+  if (!['pr', 'pre-merge', 'staging', 'post-merge'].includes(stage)) throw new Error('unsupported --stage');
   const targetSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
   if (sha !== targetSha) throw new Error('requested SHA does not match checked-out source SHA');
 
