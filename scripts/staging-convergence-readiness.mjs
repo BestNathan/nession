@@ -524,8 +524,10 @@ function selfTest(){
   assert.equal(evaluatePromotion({firstParentCommits:[a],
     associations:[[native]],issues:[],authenticatedNative:[b],
     deployRuns:[deployed],laneSha:b}).reason,'INVALID_NATIVE_PROMOTION_PROOF');
+  // #3422 is a real, historical source witness: the bot-owned native
+  // convergence PR accumulated the informational backlink Refs #3399.
   const nativeLinked=evaluatePromotion({firstParentCommits:[a],
-    associations:[[{...native,body:native.body+'\nRefs #123'}]],issues:[],
+    associations:[[{...native,body:native.body+'\nRefs #3399'}]],issues:[],
     authenticatedNative:[a],deployRuns:[deployed],laneSha:b});
   assert.equal(nativeLinked.ready,true,
     'informational native source references do not create Issue obligations');
