@@ -651,6 +651,36 @@ export function send(surface: { send(type: string, payload: unknown): void }) {
 TS
 expect_pass "rule 6 — internal camelCase object stays valid"
 
+# Also check the two forms that otherwise get lost behind literal-only parsing.
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-agent/src/server"
+cat > "$WORK/tree/crates/nession-agent/src/server/websocket.rs" <<'RS'
+fn notify(mut out_payload: serde_json::Value) {
+  out_payload["requestId"] = serde_json::Value::String("one".into());
+}
+RS
+expect_fail "rule 6 — dynamically indexed payload field" 'requestId'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-mcp/src/tools"
+cat > "$WORK/tree/crates/nession-mcp/src/tools/nession_test.rs" <<'RS'
+#[derive(serde::Deserialize)]
+pub(crate) struct Arguments {
+  #[serde(rename = "agentId")]
+  agent_id: String,
+}
+RS
+expect_fail "rule 6 — private MCP tool field attribute" 'agentId'
+
+reset_fixture
+mkdir -p "$WORK/tree/web/src/product/terminal"
+cat > "$WORK/tree/web/src/product/terminal/agent.ts" <<'TS'
+export function send(surface: { request(t: string, p: unknown): void }) {
+  surface.request('alpha.one', { payload: { requestId: 'old' } });
+}
+TS
+expect_fail "rule 6 — nested Web transport field" 'requestId'
+
 # ── 3. The transitional alias path ──────────────────────────────────────────
 # Rust refuses a use of the missing module, so the interesting case is the
 # module coming back — which the compiler would accept.
