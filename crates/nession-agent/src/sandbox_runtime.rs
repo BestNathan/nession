@@ -153,6 +153,37 @@ impl SandboxRuntime {
             // see them even when no filesystem policy was requested.
             settings.private_directories.push(agent_dir);
         }
+        // One shared EROFS mount manager per Agent identity/mount namespace
+        // (#3449). Its authorized root is exactly the verified image root; a
+        // missing root leaves the manager absent, so composition fails closed.
+        #[cfg(target_os = "linux")]
+        let mount_manager = settings.erofs_image_root.as_ref().and_then(|image_root| {
+            let config = nession_erofs::mount_manager::MountManagerConfig {
+                root: settings.state_dir.join("erofs-mounts"),
+                settings: nession_erofs::mount::MountSettings::new(
+                    settings.erofsfuse_path.clone(),
+                    settings.fusermount_path.clone(),
+                ),
+                authorized_roots: vec![image_root.clone()],
+                pinner: erofs_cache.clone().map(|cache| {
+                    Arc::new(crate::erofs_cache::CachePinner::new(cache))
+                        as Arc<dyn nession_erofs::mount_manager::BlobPinner>
+                }),
+            };
+            match nession_erofs::mount_manager::MountManager::open(config) {
+                Ok(manager) => Some(manager),
+                Err(error) => {
+                    tracing::warn!(
+                        "could not open the shared EROFS mount manager; compositions fail closed: {error:#}"
+                    );
+                    None
+                }
+            }
+        });
+        #[cfg(target_os = "linux")]
+        {
+            settings.mount_manager = mount_manager;
+        }
         let runtime = Self::new(settings);
         // `new` returns an `Arc`, so expose the cache through a one-shot
         // setter rather than rebuilding the runtime.

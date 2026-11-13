@@ -30,6 +30,8 @@ pub mod cache;
 
 #[cfg(all(feature = "mount", target_os = "linux"))]
 pub mod mount;
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub mod mount_manager;
 
 #[cfg(feature = "build")]
 pub use build::{BuiltImage, ErofsBuilder, MkfsRunner, Packaging, ProcessMkfsRunner};
@@ -42,5 +44,10 @@ pub use digest::{
 pub use git::{GitCommandRunner, GitSnapshot, GitTarget, ProcessGitRunner};
 #[cfg(all(feature = "mount", target_os = "linux"))]
 pub use mount::ErofsMount;
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub use mount_manager::{
+    BlobPinGuard, BlobPinner, ConsumerRef, MountLease, MountManager, MountManagerConfig,
+    MountRecoveryReport, MountState, MountStatus, VerifiedImage,
+};
 #[cfg(feature = "store")]
 pub use store::{BlobDigest, BlobStore, StoreUsage};
