@@ -68,7 +68,7 @@
   function hint(term,description){
     if(!description)return "";
     var name=String(term||"Info").replace(/<[^>]*>/g,"").trim();
-    var content=String(description);
+    var content=String(description)+"::"+name;
     var hash=0;
     for(var i=0;i<content.length;i++)hash=((hash<<5)-hash+content.charCodeAt(i))|0;
     var id="help-"+Math.abs(hash).toString(36);
@@ -461,7 +461,7 @@
   });
   view.addEventListener("click",function(e){
     var b=e.target.closest("[data-action]");
-    if(!b||b.disabled)return;
+    if(!b||b.disabled){if(s.tip){s.tip=null;render();}return;}
     doAction(b.getAttribute("data-action"));
     render();
   });
