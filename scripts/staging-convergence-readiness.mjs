@@ -3,7 +3,7 @@
 // The model is never allowed to issue or certify this verdict.
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {parsePreMergeIssueNumbers,validateRequirementBody,isAcceptanceIssue}
+import {parsePreMergeIssueNumbers,parseClosingIssueNumbers,validateRequirementBody,isAcceptanceIssue}
   from './requirement-acceptance.mjs';
 import {isNativeConvergencePr,verifiedConvergenceBatch,convergenceApproval,
   convergenceBatchDigest,latestConvergenceFull,attestConvergenceFull}
@@ -129,8 +129,14 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     // re-attested in the trusted Main promoter; never trust this marker alone.
     if(isNativeConvergencePr(pr)){
       if(!native.has(item))return fail('UNATTESTED_NATIVE_STAGING_SYNC:'+item);
-      if(parsePreMergeIssueNumbers(pr.body,'BestNathan','nession',pr.title).length)
-        return fail('NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+item);
+      // Native batch authorization comes exclusively from the independently
+      // attested Git/Full/merge identity above, not text links in its PR.
+      // Informational Refs #... are not duplicate Requirement obligations:
+      // their ordinary source PRs still undergo per-Issue Acceptance below.
+      // Explicit closing references remain prohibited for native syncs.
+      if(parseClosingIssueNumbers(pr.body,'BestNathan','nession').length||
+         parseClosingIssueNumbers(pr.title,'BestNathan','nession').length)
+        return fail('NATIVE_STAGING_SYNC_HAS_CLOSING_ISSUE_ASSOCIATION:'+item);
       continue;
     }
     // Ordinary feature/legacy sync Issues still require their exact source
@@ -518,10 +524,25 @@ function selfTest(){
   assert.equal(evaluatePromotion({firstParentCommits:[a],
     associations:[[native]],issues:[],authenticatedNative:[b],
     deployRuns:[deployed],laneSha:b}).reason,'INVALID_NATIVE_PROMOTION_PROOF');
+  // #3422 is a real, historical source witness: the bot-owned native
+  // convergence PR accumulated the informational backlink Refs #3399.
+  const nativeLinked=evaluatePromotion({firstParentCommits:[a],
+    associations:[[{...native,body:native.body+'\nRefs #3399'}]],issues:[],
+    authenticatedNative:[a],deployRuns:[deployed],laneSha:b});
+  assert.equal(nativeLinked.ready,true,
+    'informational native source references do not create Issue obligations');
+  assert.deepEqual(nativeLinked.issueNumbers,[]);
+  for(const closing of ['Closes #123','Fixes #123','Resolves #123']) {
+    assert.equal(evaluatePromotion({firstParentCommits:[a],
+      associations:[[{...native,body:native.body+'\n'+closing}]],issues:[],
+      authenticatedNative:[a],deployRuns:[deployed],laneSha:b}).reason,
+      'NATIVE_STAGING_SYNC_HAS_CLOSING_ISSUE_ASSOCIATION:'+a,
+      'native PR cannot close an Issue as a substitute for source Acceptance');
+  }
   assert.equal(evaluatePromotion({firstParentCommits:[a],
-    associations:[[{...native,body:native.body+'\nRefs #123'}]],issues:[],
+    associations:[[{...native,title:'Fixes #123'}]],issues:[],
     authenticatedNative:[a],deployRuns:[deployed],laneSha:b}).reason,
-    'NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+a);
+    'NATIVE_STAGING_SYNC_HAS_CLOSING_ISSUE_ASSOCIATION:'+a);
   // #3248: a missing historic native source must identify the offending
   // original PR/SHA, not look like today's #3208 promotion Quality failure.
   const nativeMissing=nativeSourceCheckDenial({number:77},a,b,

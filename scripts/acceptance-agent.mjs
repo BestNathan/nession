@@ -311,6 +311,9 @@ async function selfTest() {
   assert.match(prompt, /Do not add, remove, rename, rewrite, weaken, substitute, reinterpret, or re-stage/);
   assert.match(prompt, /untrusted inputs/);
   assert.match(prompt, /"ci_evidence"/);
+  assert.match(prompt, /related_issue_acceptance_receipts/);
+  assert.match(prompt, /NOT required to equal the present observer target_ref/);
+  assert.match(prompt, /If an SC explicitly demands new execution at the current SHA/);
   assert.match(prompt, /"id": 42/);
   assert.match(prompt, /In EVERY stage/);
   assert.match(prompt, /Never require a producer to set that flag true/);

@@ -138,6 +138,69 @@ describe('TerminalController clipboard wiring (#2598)', () => {
     expect(transport.send).not.toHaveBeenCalled();
   });
 
+  it('withholds offered MIME metadata after the controller loses clipboard authority (#3395)', async () => {
+    const { controller, transport, host } = harness();
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      // A live, authorized terminal negotiates paste-event mode and the user
+      // pastes an image, creating the one-time offer.
+      transport.onOutput!(bytes('\x1b[?5522h'), undefined, { streamEpoch: 1, streamSeq: 1 });
+      await flush();
+      const file = {
+        type: 'image/png',
+        arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
+      };
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: () => '',
+          items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+        },
+      });
+      host.dispatchEvent(event);
+      await flush();
+      expect(transport.send).toHaveBeenCalledTimes(1);
+      transport.send.mockClear();
+
+      const listing = `\x1b]5522;type=read;${encodeBase64Text('.')}\x1b\\`;
+
+      // Background tab: the controller is no longer authorized to effect the
+      // clipboard, so the remote process must not learn the offer's MIME types.
+      visibility = 'hidden';
+      transport.onOutput!(bytes(listing), undefined, { streamEpoch: 1, streamSeq: 2 });
+      await flush();
+      const unauthorized = transport.send.mock.calls.map(([data]) => data);
+      expect(unauthorized).toHaveLength(1);
+      expect(unauthorized[0]).toContain('type=read:status=EPERM');
+      expect(unauthorized[0]).not.toContain('status=DATA');
+      expect(unauthorized[0]).not.toContain(encodeBase64Text('image/png'));
+
+      // A passive observer transition emits nothing at all into the pane.
+      visibility = 'visible';
+      controller.setObserverReadOnly(true);
+      transport.send.mockClear();
+      transport.onOutput!(bytes(listing), undefined, { streamEpoch: 1, streamSeq: 3 });
+      await flush();
+      expect(transport.send).not.toHaveBeenCalled();
+
+      // The authorized controller's ordinary listing still works.
+      controller.setObserverReadOnly(false);
+      transport.onOutput!(bytes(listing), undefined, { streamEpoch: 1, streamSeq: 4 });
+      await flush();
+      const authorized = transport.send.mock.calls.map(([data]) => data);
+      expect(authorized).toHaveLength(3);
+      expect(authorized[0]).toContain('type=read:status=OK');
+      expect(authorized[1]).toContain(`status=DATA:mime=${encodeBase64Text('image/png')}`);
+      expect(authorized[2]).toContain('type=read:status=DONE');
+    } finally {
+      delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState;
+    }
+  });
+
   it('announces an image-only paste once the TUI negotiated mode 5522', async () => {
     const { transport, effects, host } = harness();
     transport.onOutput!(bytes('\x1b[?5522h'), undefined, { streamEpoch: 1, streamSeq: 1 });
