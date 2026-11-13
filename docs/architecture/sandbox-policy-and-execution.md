@@ -60,6 +60,14 @@ Absence of a dimension adds no user-requested constraint in that dimension.
 Backend safety prerequisites still apply (next section). `version` is `1`;
 any other version is `UnsupportedPolicy`, never interpreted as v1.
 
+The client-safe Filesystem declaration direction for the next contract
+(`filesystem.rootfs`, `filesystem.mounts`, `filesystem.workspace`, with
+`filesystem.access.read/write` unchanged) is recorded in
+[Sandbox filesystem declaration model](sandbox-filesystem-policy.md). That
+document is the declaration source of truth, not a shipped schema: V1 still
+accepts only `access` or the Agent-prepared `composition`, and the two remain
+mutually exclusive.
+
 ## Backend baseline (all executions)
 
 These are safety/executability prerequisites, not additional policy:
@@ -504,6 +512,9 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
   capability, policy editor and existing-Session Enter.
 - [#3161](https://github.com/BestNathan/nession/issues/3161) — per-policy
   implementation support discovery and Agent-gated configuration.
+- [#3405](https://github.com/BestNathan/nession/issues/3405) — Filesystem
+  RootFS/mount/Workspace declaration and IA decision; see
+  [Sandbox filesystem declaration model](sandbox-filesystem-policy.md).
 - [#2469](session-tmux-sdk-ownership.md) — Session/tmux ownership.
 - [#2514](agent-process-discovery.md) — read-only process discovery.
 - [#170](session-env-binding.md) — independent Session Environment Binding.
