@@ -100,13 +100,13 @@ function selfTest(){
     'Refs #3399',
     '<!-- nession-convergence-pr:v1 branch=staging main='+base+
       ' lane='+head+' head='+head+' digest='+'d'.repeat(64)+' -->',
-  ].join('\\n');
+  ].join('\n');
   assert.deepEqual(referencedIssuesForMergedPr({title:'chore(release): integrate main into staging',
     body:nativeBody}),[],'native PR links must not fetch Requirement contracts');
   assert.deepEqual(referencedIssuesForMergedPr({title:'fix: normal linked issue',
     body:'Refs #3399'}),[3399],'ordinary linked Issues still require contracts');
   assert.deepEqual(referencedIssuesForMergedPr({title:'fix: forged marker',
-    body:'Refs #3399\\n<!-- nession-convergence-pr:v1 branch=staging -->'}),
+    body:'Refs #3399\n<!-- nession-convergence-pr:v1 branch=staging -->'}),
     [3399],'marker without trusted proposal shape cannot skip Issue contracts');
   const squash={sha,parents:[base]};
   assert.equal(mergeIdentity(event,squash,[pr]).pr.number,1,
