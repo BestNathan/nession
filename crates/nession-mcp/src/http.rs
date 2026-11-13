@@ -241,22 +241,36 @@ impl From<io::Error> for HttpError {
 }
 
 /// Read one request head, bounded by [`MAX_HEADER_BYTES`].
+///
+/// The budget is enforced while each buffered chunk is consumed, not after a
+/// whole line has been read: a line is refused as soon as its next chunk would
+/// push the head past the limit, so an unterminated line is never retained in
+/// full. `sniff`'s fixed-capacity `BufReader` also bounds look-ahead.
 async fn read_head<R: AsyncBufRead + Unpin>(reader: &mut R) -> Result<Vec<u8>, HttpError> {
     let mut head = Vec::new();
+    let mut line_start = 0;
     loop {
-        let mut line = Vec::new();
-        let read = reader.read_until(b'\n', &mut line).await?;
-        if read == 0 {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
             return Err(HttpError::BadRequest(
                 "connection closed inside the request head",
             ));
         }
-        head.extend_from_slice(&line);
-        if head.len() > MAX_HEADER_BYTES {
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.map_or(available.len(), |index| index.saturating_add(1));
+        if take > MAX_HEADER_BYTES.saturating_sub(head.len()) {
             return Err(HttpError::HeaderTooLarge);
         }
-        if line == b"\r\n" || line == b"\n" {
-            return Ok(head);
+        if let Some(chunk) = available.get(..take) {
+            head.extend_from_slice(chunk);
+        }
+        reader.consume(take);
+        if newline.is_some() {
+            let line = head.get(line_start..).unwrap_or(&[]);
+            if line == b"\n" || line == b"\r\n" {
+                return Ok(head);
+            }
+            line_start = head.len();
         }
     }
 }
