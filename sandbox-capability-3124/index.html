@@ -476,6 +476,71 @@
 .nession-ui .cand-map code{font:11px/1.5 ui-monospace,Menlo,monospace;overflow-wrap:anywhere;min-width:0}
 .nession-ui .cand-map span{font-size:10px;color:var(--nession-muted-foreground);text-align:right}
 .nession-ui .cand-json{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.6 ui-monospace,Consolas,monospace;max-height:280px;background:var(--nession-surface);padding:12px;border-radius:9px}
+
+/* #3405: five-part Filesystem authoring; policy fields, not explanatory cards. */
+.nession-ui .fs-editor{max-width:880px;min-width:0}
+.nession-ui .fs-editor>.cand-section-head{margin-bottom:17px}
+.nession-ui .fs-block{border:1px solid var(--nession-border);border-radius:12px;background:var(--nession-background);margin:0 0 14px;min-width:0;overflow:visible}
+.nession-ui .fs-block-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--nession-border);padding:13px 17px}
+.nession-ui .fs-block-heading h3{font-size:14px;font-weight:670;letter-spacing:-.015em;margin:0}
+.nession-ui .fs-section-note{font-size:10px;color:var(--nession-muted-foreground);text-align:right}
+.nession-ui .fs-block-body{padding:16px 17px 15px;min-width:0}
+.nession-ui .fs-fixed-mount{display:flex;align-items:center;gap:12px;font-size:11px;color:var(--nession-muted-foreground);margin-bottom:15px}
+.nession-ui .fs-fixed-mount code{display:inline-flex;border:1px solid var(--nession-border);background:var(--nession-surface);border-radius:6px;padding:5px 11px;font:12px/1.3 ui-monospace,Menlo,Consolas,monospace;color:var(--nession-foreground);font-weight:600}
+.nession-ui .fs-cwd{margin-left:auto;color:var(--nession-muted-foreground);font-size:10px;text-align:right}
+.nession-ui .fs-choice{display:flex;flex-wrap:wrap;gap:3px;background:var(--nession-surface);border:1px solid var(--nession-border);border-radius:9px;padding:3px;width:fit-content;max-width:100%;margin:0 0 15px}
+.nession-ui .fs-choice button{border:0;background:transparent;border-radius:7px;padding:8px 12px;min-height:35px;font-size:11px;font-weight:580}
+.nession-ui .fs-choice button[aria-pressed="true"]{background:var(--nession-background);box-shadow:0 1px 3px #00000014}
+.nession-ui .fs-choice button:disabled{opacity:.4}
+.nession-ui .fs-form-row{display:flex;flex-direction:column;gap:7px;margin:4px 0 0;min-width:0}
+.nession-ui .fs-form-row label,.nession-ui .fs-subheading{font-size:11px;font-weight:600;color:var(--nession-foreground)}
+.nession-ui .fs-form-row input,.nession-ui .fs-form-row select,.nession-ui .fs-add-mount select,
+.nession-ui .fs-mount-target input,.nession-ui .fs-path-row input{border:1px solid var(--nession-border);background:var(--nession-background);border-radius:8px;padding:9px 11px;min-width:0;max-width:100%;min-height:38px;width:100%;color:var(--nession-foreground);font:12px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.nession-ui .fs-form-row select,.nession-ui .fs-add-mount select{font-family:inherit}
+.nession-ui .fs-form-row small,.nession-ui .fs-digest{font:10px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--nession-muted-foreground);overflow-wrap:anywhere}
+.nession-ui .fs-form-row input[readonly]{background:var(--nession-surface);color:var(--nession-muted-foreground)}
+.nession-ui .fs-mode-result{font-size:12px;font-weight:590;color:var(--nession-muted-foreground);padding:5px 0}
+.nession-ui .fs-mount-head,.nession-ui .fs-mount-row{display:grid;grid-template-columns:minmax(135px,1.4fr) minmax(125px,1fr) 47px 36px;gap:10px;align-items:center}
+.nession-ui .fs-mount-head{font-size:10px;color:var(--nession-muted-foreground);padding:0 0 7px}
+.nession-ui .fs-mount-row{padding:9px 0;border-top:1px solid var(--nession-border)}
+.nession-ui .fs-mount-source{min-width:0}
+.nession-ui .fs-mount-source strong{display:block;font-size:11px;font-weight:630;overflow-wrap:anywhere}
+.nession-ui .fs-mount-source small{display:block;font-size:10px;color:var(--nession-muted-foreground);overflow-wrap:anywhere}
+.nession-ui .fs-mode-pill{display:inline-flex;width:fit-content;align-items:center;justify-content:center;min-height:24px;font-size:10px;font-weight:600;border-radius:6px;padding:3px 6px;background:var(--nession-surface);border:1px solid var(--nession-border);white-space:nowrap}
+.nession-ui .fs-add-mount{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.nession-ui .fs-add-mount select{flex:1;min-width:150px;width:auto}
+.nession-ui .fs-editor .cand-btn{min-height:36px}
+.nession-ui .fs-editor .cand-btn.compact{padding:3px 8px;font-size:15px;min-height:30px;min-width:30px}
+.nession-ui .fs-actions{display:flex;align-items:center;gap:8px;margin-top:12px}
+.nession-ui .fs-empty{padding:13px 12px;border:1px dashed var(--nession-border);background:var(--nession-surface);border-radius:8px;font-size:11px;color:var(--nession-muted-foreground)}
+.nession-ui .fs-path-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.nession-ui .fs-path-group{min-width:0}
+.nession-ui .fs-subheading{margin-bottom:10px}
+.nession-ui .fs-path-list{display:flex;flex-direction:column;gap:7px}
+.nession-ui .fs-path-row{display:flex;gap:7px;align-items:center;min-width:0}
+.nession-ui .fs-path-row input{flex:1}
+.nession-ui .fs-preview-header,.nession-ui .fs-preview-row{display:grid;grid-template-columns:minmax(100px,1.1fr) minmax(110px,1.4fr) 55px;gap:10px;align-items:start}
+.nession-ui .fs-preview-header{padding:0 0 10px;font-size:10px;color:var(--nession-muted-foreground)}
+.nession-ui .fs-preview-row{border-top:1px solid var(--nession-border);padding:10px 0;font-size:11px;overflow-wrap:anywhere}
+.nession-ui .fs-preview-row code{font:11px/1.6 ui-monospace,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.nession-ui .fs-preview-row .fs-mode-pill{justify-self:start}
+@media(max-width:670px){
+  .nession-ui .fs-block{margin-bottom:10px}
+  .nession-ui .fs-block-heading{padding:11px 12px}
+  .nession-ui .fs-block-body{padding:13px 12px}
+  .nession-ui .fs-cwd{max-width:110px}
+  .nession-ui .fs-choice{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .nession-ui .fs-choice button{min-width:0;padding:8px 5px}
+  .nession-ui .fs-mount-head,.nession-ui .fs-mount-row{grid-template-columns:minmax(85px,1.1fr) minmax(78px,1fr) 31px 27px;gap:5px}
+  .nession-ui .fs-mount-target input{padding:8px 5px;font-size:10px}
+  .nession-ui .fs-mount-row .cand-btn.compact{min-height:28px;min-width:25px;padding:2px 4px}
+  .nession-ui .fs-mount-source small{font-size:9px}
+  .nession-ui .fs-path-columns{grid-template-columns:1fr;gap:16px}
+  .nession-ui .fs-preview-header,.nession-ui .fs-preview-row{grid-template-columns:minmax(72px,1fr) minmax(90px,1.3fr) 42px;gap:6px}
+  .nession-ui .fs-preview-row{font-size:10px}
+  .nession-ui .fs-preview-row code{font-size:10px}
+}
+
 @media(max-width:670px){
   .nession-ui .cand-cap-header{padding:12px 13px 0;display:block}
   .nession-ui .cand-cap-title{display:none}
