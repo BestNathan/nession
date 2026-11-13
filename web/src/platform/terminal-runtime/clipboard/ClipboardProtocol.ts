@@ -15,8 +15,10 @@
  *
  * - Only live stream output may request an effect. Bootstrap/replay writes and
  *   observer clients are refused (no write, no read, no paste announcement).
- * - A read is served only from the one-time offer created by an explicit user
- *   paste whose unguessable `pw` the application echoes back. There is no
+ * - A payload read is served only from the one-time offer created by an
+ *   explicit user paste whose unguessable `pw` the application echoes back.
+ *   A MIME listing reveals only the offer's type names, and even that is
+ *   visible only to the currently authorized Controller. There is no
  *   spontaneous read path.
  * - OSC 52 reads (`?`) stay disabled; no local clipboard bytes can be exposed
  *   by remote output.
@@ -331,6 +333,12 @@ export class TerminalClipboardProtocol {
       return;
     }
     if (requested.length === 1 && requested[0] === '.') {
+      // A listing reveals the pending offer's MIME types, so it shares the
+      // read authorization boundary even though it carries no password.
+      if (!this.options.isAuthorized()) {
+        this.replyRead(id, 'EPERM');
+        return;
+      }
       this.replyReadListing(id);
       return;
     }
