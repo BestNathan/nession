@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "596f0868d45f33c312290c98b6067ce045e1bd80795ac70f81c7ab604b2dc080",
+  "run_id": 43433181454,
+  "run_attempt": 1,
+  "issue": 3395,
+  "criterion": "SC-02",
+  "criterion_text": "The active/observer transition in the existing terminal controller/protocol integration route cannot emit offered MIME listing DATA from a read-only observer; the authorized controller's ordinary paste/read flow remains intact.",
+  "stage": "staging",
+  "target_sha": "960d6919a36c4245a1439b86e9b03cdad7589abe",
+  "contract_sha256": "f42d4bcfd3e0874c00eb1d1c28838f15a9071b65cfeeb0d4b65c11637c0c0477",
+  "case_revision": "960d6919a36c4245a1439b86e9b03cdad7589abe",
+  "case_tree_sha": "141f067584952857060a9a2ec47e26b3758c7891",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-13T13:27:21.596Z",
+  "finished_at": "2026-11-13T13:27:31.704Z",
+  "duration_ms": 10108,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The controller/protocol route withholds offered MIME listing data from unauthorized transitions and keeps the authorized paste/read flow intact",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 960d6919a36c4245a1439b86e9b03cdad7589abe: an authorized live controller announced its one-time image offer; with document.visibilityState=hidden the remote listing received only EPERM and no status=DATA or image/png metadata; a read-only observer transition emitted no PTY bytes; after restoring authority the ordinary listing returned OK/DATA/DONE"
+        }
+      ],
+      "duration_ms": 3742,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43433181454,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "db9be6fa5125217073e63391ca3348090804ac13",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "960d6919a36c4245a1439b86e9b03cdad7589abe",
+        "stage": "staging",
+        "issue": 3395,
+        "criterion": "SC-02",
+        "job_id": 131911544596,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43433181454",
+    "record_path": "runs/2026-11-13/43433181454-1/3395/SC-02.json",
+    "source_result_sha256": "456f5c9fa46000e424f868f564575a6af0ca5b73b2ac17c509287b792b2a755b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43433181454-1",
+    "sha256": "456f5c9fa46000e424f868f564575a6af0ca5b73b2ac17c509287b792b2a755b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43433181454",
+    "durability": "time-limited; object archival not configured"
+  }
+}
