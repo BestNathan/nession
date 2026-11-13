@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f992b52de07362d05d78b521bed079b454ad7bd1642b1cfcdcb465e6fd8e62cf",
+  "run_id": 43422720405,
+  "run_attempt": 1,
+  "issue": 3399,
+  "criterion": "SC-01",
+  "criterion_text": "Given two successful consecutive Agent tmux enumerations with the same Session name and unchanged status/window/client/size/foreground command but different nonempty instance IDs A→B, the incremental watcher emits an update carrying B; an unchanged B→B poll emits no redundant update. Existing enumeration-error and publication-failure retry behavior remains intact.",
+  "stage": "staging",
+  "target_sha": "a432c32e5dad9c099b54fd8eabb523ce60dd9c06",
+  "contract_sha256": "093177763b768ae6e62cbd47b851090fa17daa691e26528d055f5aabdb633b4e",
+  "case_revision": "a432c32e5dad9c099b54fd8eabb523ce60dd9c06",
+  "case_tree_sha": "d2595b80b3929be9e1e59fd44cc6ff556d446e6d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-13T12:11:08.820Z",
+  "finished_at": "2026-11-13T12:11:53.335Z",
+  "duration_ms": 44516,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A same-name tmux incarnation replacement is published as a lifecycle transition, with silent unchanged polls and intact retry behavior",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a432c32e5dad9c099b54fd8eabb523ce60dd9c06: with the same Session name, windows, clients, size, working directory and foreground command, the incremental watcher published the replacement carrying instance-b; an unchanged instance-b poll published nothing; a legacy missing identity was not manufactured into a replacement; the enumeration-failure and publication-failure retry tests also passed"
+        }
+      ],
+      "duration_ms": 38618,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43422720405,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a432c32e5dad9c099b54fd8eabb523ce60dd9c06",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43422720405",
+    "record_path": "runs/2026-11-13/43422720405-1/3399/SC-01.json",
+    "source_result_sha256": "c1e32bc9065f961cf826f0a6a7fc6afcc1a20d4fcf048aa0d811a3782c4a5724"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43422720405-1",
+    "sha256": "c1e32bc9065f961cf826f0a6a7fc6afcc1a20d4fcf048aa0d811a3782c4a5724",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43422720405",
+    "durability": "time-limited; object archival not configured"
+  }
+}

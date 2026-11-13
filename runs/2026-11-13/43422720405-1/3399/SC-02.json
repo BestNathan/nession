@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8150f99a6b763bc19d979eec0bf6dea267946e0ad9bc22f4b055d5d87f26adc4",
+  "run_id": 43422720405,
+  "run_attempt": 1,
+  "issue": 3399,
+  "criterion": "SC-02",
+  "criterion_text": "In an isolated Agent→Server Session lifecycle Case, replacement A→B between polls without a reconnect causes Server `agent:dev` to expose B (and not A) within the next successful poll; incarnation-bound Project membership is not attributed to A after B is reported.",
+  "stage": "staging",
+  "target_sha": "a432c32e5dad9c099b54fd8eabb523ce60dd9c06",
+  "contract_sha256": "093177763b768ae6e62cbd47b851090fa17daa691e26528d055f5aabdb633b4e",
+  "case_revision": "a432c32e5dad9c099b54fd8eabb523ce60dd9c06",
+  "case_tree_sha": "c8e5d88e9c45743fdcd75441dcdf6c4308e2e65d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-13T12:11:53.336Z",
+  "finished_at": "2026-11-13T12:12:31.513Z",
+  "duration_ms": 38177,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The replacement identity crosses the Agent→Server seam and the Server exposes B without inheriting the previous Project membership",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a432c32e5dad9c099b54fd8eabb523ce60dd9c06: the watcher published the replacement on the \"instance_id\" payload field; the Server registry adopted instance-b for \"agent:dev\" and dropped the previous incarnation's Project membership instead of attributing it to the new Session"
+        }
+      ],
+      "duration_ms": 32316,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43422720405,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a432c32e5dad9c099b54fd8eabb523ce60dd9c06",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43422720405",
+    "record_path": "runs/2026-11-13/43422720405-1/3399/SC-02.json",
+    "source_result_sha256": "2908dc550377f833f122dad8911e0db2967636d7ec320a25a1a75c7e215ed4d4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43422720405-1",
+    "sha256": "2908dc550377f833f122dad8911e0db2967636d7ec320a25a1a75c7e215ed4d4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43422720405",
+    "durability": "time-limited; object archival not configured"
+  }
+}
