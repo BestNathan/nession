@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "7118ff05f67934082c0b02dca2dd5c669d0d72d0",
+  "run_id": 43468839201,
+  "run_attempt": 1,
+  "plan_digest": "f89e24f6394ed101825369a4c873745a25b43199c9c0f6d14a9a01ce4515c485",
+  "artifact_digest": "sha256:81ff1d862c57bfb83b84a3b6e7dc534c2ddc769e5f0d8917063bb9759dd6ba6b",
+  "results": [
+    {
+      "id": "fixture-visual",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "images-workspace-capability",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
