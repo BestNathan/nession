@@ -399,9 +399,9 @@ function selfTest() {
     '      - run: node trusted/scripts/run-store-integrity.mjs staged agent-store "$store"');
   assert.deepEqual(auditWorkflows(trustedPath, catalog).errors, []);
   assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
-  assert.deepEqual(upstreamWorkflowNames('on:\\n  workflow_run:\\n    workflows:\\n      - Model\\n      - Task\\n').names, ['Model', 'Task']);
+  assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
   const commentCaseUpstream =
-    'on:\\n  workflow_run:\\n    workflows: ["Acceptance / Cases", "Comment Case #*"]\\n    types: [completed]\\n';
+    'on:\n  workflow_run:\n    workflows: ["Acceptance / Cases", "Comment Case #*"]\n    types: [completed]\n';
   const parsedCaseUpstream = upstreamWorkflowNames(commentCaseUpstream);
   assert.deepEqual(parsedCaseUpstream.names, ['Acceptance / Cases', 'Comment Case #*']);
   assert.equal(approvedCommentCaseRunSource('acceptance-case-ingest.yml',
