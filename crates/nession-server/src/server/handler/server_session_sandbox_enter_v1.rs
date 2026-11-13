@@ -83,7 +83,17 @@ impl ConnectionHandler {
             }
         };
 
-        if !payload.images.is_empty()
+        let images = match super::server_session_sandbox_images::derive_sandbox_image_selections(
+            &payload.policy,
+            payload.images.clone(),
+        ) {
+            Ok(images) => images,
+            Err(error) => {
+                return Ok(refuse(SandboxActionErrorKind::Invalid, &error));
+            }
+        };
+
+        if !images.is_empty()
             && payload
                 .policy
                 .filesystem
@@ -97,15 +107,15 @@ impl ConnectionHandler {
                 "filesystem.composition replaces filesystem.access; clear the access lists before selecting images",
             ));
         }
-        if let Err(errors) = validate_image_selections(&payload.images) {
+        if let Err(errors) = validate_image_selections(&images) {
             return Ok(refuse_with_fields(
                 SandboxActionErrorKind::Invalid,
                 "the Sandbox image selection is not a valid composition",
                 errors,
             ));
         }
-        let mut grants = Vec::with_capacity(payload.images.len());
-        for selection in &payload.images {
+        let mut grants = Vec::with_capacity(images.len());
+        for selection in &images {
             let grant = match self
                 .image_manager
                 .grant_sandbox_access(&payload.session_id, &selection.digest)
