@@ -514,18 +514,22 @@ describe('useTerminalOrchestration', () => {
     // number them 1 and 2 — positions the agent, holding cursor 10, refuses as
     // a gap, which is the whole reason the attach states a position.
     //
-    // No acknowledgement arrives: it is the second keystroke's flush that
-    // re-offers the first chunk, because a chunk the agent has not applied
-    // stays in the queue until it says otherwise. The agent refuses the repeat
-    // by position, so what matters here is only that each chunk carries the
-    // position it was numbered with.
+    // No acknowledgement arrives: the window flush re-offers the first chunk
+    // together with the second — as one frame covering both positions, since a
+    // chunk the agent has not applied stays in the run until it says otherwise
+    // (#3397). The agent refuses the repeat by position, so what matters here
+    // is only that the frame carries the positions the chunks were numbered
+    // with.
     controller.send('a');
     controller.send('b');
+    // The second chunk joined the pending run; the explicit flush stands in for
+    // the 16 ms window boundary a live client would reach on its own.
+    controller.flushAllOutbound();
     expect(agent.wire.slice(0, 1)).toEqual([
       { sessionName: 's1', data: 'a', sequence: { inputEpoch: 7, seqStart: 11, seqEnd: 11 } },
     ]);
     expect(agent.wire.slice(-1)).toEqual([
-      { sessionName: 's1', data: 'b', sequence: { inputEpoch: 7, seqStart: 12, seqEnd: 12 } },
+      { sessionName: 's1', data: 'ab', sequence: { inputEpoch: 7, seqStart: 11, seqEnd: 12 } },
     ]);
     agent.wire.length = 0;
 
