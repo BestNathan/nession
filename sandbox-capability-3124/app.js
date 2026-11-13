@@ -1,830 +1,462 @@
-/* Sandbox Workspace prototype #3124. Deterministic, no network or backend mutations. */
-(function(){
+/* Session-scoped Sandbox candidate for #3408 / #3407 / #3405.
+ * All actions and assets are synthetic browser-only fixtures. No API or host I/O.
+ * Replaces prior six peer policy tabs IN THE SAME #3124 prototype directory.
+ */
+(function () {
   "use strict";
   var root=document.querySelector("[data-np-root]");
   var device=document.querySelector("[data-np-device]");
-  var mock=document.getElementById("sandbox-product");
-  var output=document.getElementById("sandbox-inspector");
-  if(!root||!device||!mock)return;
-  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",denyEgress:"",pid:true,ipc:true,user:true,uts:false,cgroup:false,resourceRows:[],syscallRows:[]};
-  function cloneDraft(d){return Object.assign({},d,{
-      resourceRows:(d.resourceRows||[]).map(function(r){return Object.assign({},r)}),
-      syscallRows:(d.syscallRows||[]).map(function(r){return Object.assign({},r)}),
-      pathItems:{readOnly:(d.pathItems?.readOnly||String(d.readOnly||"").split(",").filter(Boolean)).slice(),
-        write:(d.pathItems?.write||String(d.write||"").split(",").filter(Boolean)).slice()},
-      networkRules:{allow:(d.networkRules?.allow||String(d.egress||"").split(",").filter(Boolean)).slice(),
-        deny:(d.networkRules?.deny||String(d.denyEgress||"").split(",").filter(Boolean)).slice()}
-    });}
-  var activeEffective=cloneDraft(Object.assign({},defaultDraft,{resourceRows:[{id:101,key:"memory.max",value:"2147483648"}],syscallRows:[{id:102,key:"seccomp.profile",value:"nession-interactive-v1"}]}));
-  // Effective-only prepared filesystem readback fixture: safe mount targets,
-  // not editable EROFS image sources, host paths or digests.
-  var preparedEffective=cloneDraft(Object.assign({},activeEffective,{
-    readOnly:"",write:"",
-    preparedMounts:[
-      {target:"/",source:"Base Runtime EROFS",mode:"ro"},
-      {target:"/workspace",source:"Project source + writable workspace",mode:"mixed"},
-      {target:"/opt/rust",source:"Rust toolchain EROFS",mode:"ro"}
-    ]
-  }));
-  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,nativeFixture:"native",draft:cloneDraft(defaultDraft),nextRowId:1,tab:"overview",tabNeedsReveal:false,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
-  var lastRenderedTab="overview",lastRenderedMode="web",tabScrollPositions={};
-  var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
-  var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
-  var execution="sbx-70df40f4";
-  var digest="sha256:9d8437a6e3c1…a26f";
-  function settings(){
-    var s=state.fixture;
-    var offline=s==="offline",unsupported=s==="unsupported",stale=s==="recreated";
-    var inside=!offline&&!unsupported&&!stale&&(s==="active"||s==="prepared"||state.entered&&state.pane==="sandbox");
-    return {scenario:s,online:!offline,supported:!unsupported&&!offline&&!stale,verified:inside,inside:inside,native:!inside&&!offline&&!unsupported&&!stale,offline:offline,unsupported:unsupported,recreated:stale,macos:s==="macos",preflightFail:s==="preflight-fail",enterFail:s==="enter-fail"};
+  var view=document.getElementById("sandbox-product");
+  var inspector=document.getElementById("sandbox-inspector");
+  if(!root||!device||!view)return;
+  function image(id,name,kind,letter){return {id:id,name:name,kind:kind,digest:"sha256:"+letter.repeat(64),status:"ready"};}
+  var initialImages=[
+    image("base","minimal-glibc-runtime","Base Runtime","a"),
+    image("rust","rust-toolchain","Toolchain","b"),
+    image("node","node-toolchain","Toolchain","c"),
+    image("source","nession-source","Project Source","d")
+  ];
+  function initialWorkspaces(){return [
+    {id:"project:nession",name:"Nession · Existing Location",kind:"project_location",project:"Nession",path:"/home/dev/projects/nession",status:"available"},
+    {id:"ws:prior",name:"investigate-build",kind:"managed",project:"—",path:"Agent managed · ws:prior",status:"available"}
+  ];}
+  function defaults(){
+    return {mode:"web",width:1180,surface:"workspace",session:"sandbox-review",fixture:"linux",area:"overview",
+      sub:{images:"library",workspaces:"list",policies:"filesystem"},depth:"root",
+      images:initialImages.map(function(x){return Object.assign({},x)}),
+      builds:[{id:"build-120",name:"nession-source",status:"completed",detail:"Digest verified and registered"}],
+      cache:{base:"verified",rust:"absent",node:"absent",source:"verified"},
+      workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
+      rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",readPaths:"",writePaths:"",
+      home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
+      cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
+      step:0};
   }
-  function escapeHtml(x){return String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
-  function actualPolicy(){return state.effective||activeEffective;}
-  function line(title,value,sub){
-    return '<div class="fact"><small>'+title+'</small><b>'+value+'</b>'+(sub?'<div class="subtxt">'+sub+'</div>':'')+'</div>';
-  }
-  function zone(){
-    var btn='<button type="button" class="round" data-action="terminal" aria-label="Return to Terminal" title="Return to Terminal">↩</button>';
-    var list=['files','git','session','agent','env','sandbox'];
-    if(state.fixture==="unsupported")list=list.filter(function(v){return v!=="sandbox";});
-    var items=list.map(function(id){return '<button type="button" class="cap-item" data-action="cap:'+id+'" aria-label="'+titles[id]+'"'+(state.cap===id?' aria-current="page"':'')+'><span aria-hidden="true">'+icons[id]+'</span><span>'+titles[id]+'</span></button>';}).join("");
-    return '<div class="bottom-zone">'+(state.mode==="web"?btn:"")+'<nav aria-label="Workspace capabilities" class="capsule workspace-cap" data-testid="workspace-capability-capsule"><div class="capsule-row">'+items+'</div></nav></div>';
-  }
-  function terminalOutput(){
-    return '<span class="prompt">➜</span>  /workspace/nession  git status --short\n'+
-      ' M crates/nession-agent/src/sandbox_runtime.rs\n'+
-      ' M web/src/app/workspace/capabilities.ts\n\n'+
-      '<span class="prompt">➜</span>  /workspace/nession  cargo test -p nession-sandbox\n'+
-      'running 14 tests\n'+
-      'test result: ok. 14 passed; 0 failed\n\n'+
-      '<span class="prompt">➜</span>  /workspace/nession  ▌';
-  }
-  function terminal(){
-    var s=settings();
-    var peek=state.peek?'<div class="peek" role="region" aria-label="Sandbox Peek"><div class="peekhead"><b>Sandbox · 当前 Pane</b><button class="close" data-action="toggle-peek" aria-label="Close Sandbox Peek">✕</button></div><p>'+(s.inside?'当前 Pane 在已验证 Sandbox 中；可查看实际生效配置。':s.native?'当前 Pane 在 Native 中；可配置策略并进入隔离 Pane。':'当前环境暂不可确认或 Sandbox 无法使用。')+'</p><button class="action" data-action="open-from-peek">打开 Sandbox Workspace →</button></div>':"";
-
-    if(state.mode==="app"){
-      return '<div class="app"><header class="app-header"><button class="action-small" data-action="sessions" aria-label="Open Sessions">☰ Sessions</button><span class="app-title">'+state.session+'</span><button class="action-small" data-action="workspace" aria-label="Open Workspace">Workspace ›</button></header><main class="terminal"><pre class="term-output">'+terminalOutput()+'</pre></main>'+peek+'<div class="bottom-zone"><div class="capsule compose"><button class="plus" data-action="toggle-peek" aria-label="Peek at Sandbox">+</button><span class="hint">Send to Terminal…</span><button class="send" disabled title="Terminal input is not simulated in this prototype" aria-label="Terminal input unavailable in mock">↑</button></div></div></div>';
+  var s=defaults();
+  var sections=[["overview","Overview"],["images","Images"],["workspaces","Workspaces"],["policies","Policies"]];
+  var subs={
+    images:[["library","Image Library"],["builds","Builds"],["distribution","Distribution"]],
+    workspaces:[["list","All Workspaces"],["details","Workspace Detail"]],
+    policies:[["filesystem","Filesystem"],["network","Network"],["linux_namespace","Linux Namespace"],["cgroup_v2","Cgroup v2"],["seccomp","Seccomp"]]
+  };
+  function h(x){return String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+  function short(x){return x?"sha256:"+x.slice(7,17)+"…"+x.slice(-6):"—";}
+  function online(){return s.fixture!=="offline"&&s.fixture!=="no-session";}
+  function hasSession(){return s.fixture!=="no-session";}
+  function macos(){return s.fixture==="macos";}
+  function isEditable(){return online()&&!s.inside;}
+  function imageBy(id){return s.images.find(function(x){return x.id===id;});}
+  function currentWorkspace(){return s.workspaces.find(function(w){return w.id===s.selectedWorkspace;});}
+  function nativeStatus(key){
+    if(!online())return {state:"unknown",reason:"Agent offline; capability not measured"};
+    if(key==="filesystem.composition")return macos()?{state:"unavailable",reason:"EROFS mount backend not available on macOS"}:{state:"available",reason:"erofsfuse, FUSE and overlay probes"};
+    if(key==="filesystem.access")return macos()?{state:"unavailable",reason:"Host path isolation not measured for macOS Seatbelt"}:{state:"available",reason:"Linux bwrap path isolation"};
+    if(key==="linux_namespace"||key==="cgroup_v2"||key==="seccomp"){
+      if(macos())return {state:"unavailable",reason:"Linux native capability is not supported by macOS"};
+      if(s.fixture==="no-cgroup"&&key==="cgroup_v2")return {state:"unavailable",reason:"controller_not_delegated"};
+      if(s.fixture==="no-seccomp"&&key==="seccomp")return {state:"unavailable",reason:"profile_unavailable"};
     }
-    return '<div class="terminal"><div class="terminal-head"><div><b>'+state.session+'</b><span class="subtxt"> · nession-dev</span></div><span class="minor">Terminal</span></div><pre class="term-output">'+terminalOutput()+'</pre></div>'+peek+'<div class="bottom-zone"><div class="capsule compose"><button class="plus" data-action="toggle-peek" aria-label="Peek at Sandbox">+</button><span class="hint">Send to Terminal…</span><button class="send" disabled title="Terminal input is not simulated in this prototype" aria-label="Terminal input unavailable in mock">↑</button></div><button class="round" data-action="workspace" aria-label="Open Workspace" title="Open Workspace">▦</button></div>';
+    return {state:"available",reason:s.fixture==="limited"&&key==="cgroup_v2"?"Only memory.* and pids.* controller fields available":"Agent-measured capability"};
   }
-
-  function headline(){
-    var s=settings();
-    return s.inside?"Inside Sandbox":s.offline?"Agent Offline":s.unsupported?"Sandbox Unavailable":s.recreated?"Execution Unknown":"Outside Sandbox";
+  function statusChip(value){return '<span class="cand-status '+h(value)+'">'+h(value)+'</span>';}
+  function action(label,act,variant,disabled){
+    return '<button type="button" class="cand-btn '+(variant||"")+'" data-action="'+h(act)+'"'+(disabled?' disabled aria-disabled="true"':'')+'>'+label+'</button>';
   }
-  function summary(){
-    var s=settings(),badges='<span class="pill strong">'+(s.inside?'Current Pane · Sandbox':s.native?'Current Pane · Native':s.offline?'Disconnected':s.unsupported?'Unsupported':'Unknown')+'</span>';
-    if(s.inside)badges+='<span class="pill">Verified · '+(s.macos?'macOS Seatbelt':'Linux bwrap')+'</span>';
-    if(s.native)badges+='<span class="pill">Enter available'+(s.macos?' · Seatbelt':'')+'</span>';
-    return badges;
+  function meta(label,value,desc){return '<div class="cand-fact"><span>'+h(label)+'</span><strong>'+h(value)+'</strong>'+(desc?'<small>'+h(desc)+'</small>':"")+'</div>';}
+  function card(title,desc,content){
+    return '<section class="cand-card"><div class="cand-card-head"><h3>'+title+'</h3>'+(desc?'<p>'+desc+'</p>':"")+'</div>'+(content||"")+'</section>';
   }
-  function message(){
-    var s=settings();
-    if(s.inside)return '<strong>当前生效：</strong>这个 Pane 由 Agent 已验证的 SandboxExecution 管理。只覆盖该 Pane 的进程树；原 Native Pane、共享 tmux server 和未来新建的 Pane/Window 不自动受此策略约束。';
-    if(s.offline)return '<strong>无法感知：</strong>Agent 已离线，旧执行记录不作为当前隔离证明。可以保留配置草稿，但不能执行 Enter。';
-    if(s.unsupported)return '<strong>能力不可用：</strong>宿主未提供可验证的 Sandbox backend；不能进入，也不会自动退回 Native。';
-    if(s.recreated)return '<strong>证据已过期：</strong>Session instance 与历史执行记录不匹配。必须重新感知当前 Pane；不能继承旧的「Inside」状态。';
-    return '<strong>当前不在 Sandbox：</strong>Agent'+(s.macos?' 提供受限的 Seatbelt 能力':' 可提供原生隔离机制')+'。配置 → 预检 → 确认 Enter 后才会新建隔离 Pane；目前的 Native shell 保持不变。';
+  function alert(text,kind){return '<p class="cand-alert '+(kind||"info")+'" role="'+(kind==="danger"?"alert":"status")+'">'+h(text)+'</p>';}
+  function sectionHead(title,sub,right){return '<div class="cand-section-head"><div><h2>'+title+'</h2><p>'+sub+'</p></div>'+(right||"")+'</div>';}
+  function explainSupport(key){var x=nativeStatus(key);return '<div class="cand-support">'+statusChip(x.state)+' <code>'+h(key)+'</code><small>'+h(x.reason)+'</small></div>';}
+  function defaultWorkspaceHint(){
+    if(s.session==="sandbox-review")return "Project Nession 在当前 Agent 的既有目录可默认使用。";
+    return "无当前 Agent 的 Project Location；首次 Enter 时会按 Session 名自动分配 Managed Workspace。";
   }
-  function configInput(id,label,value,type,attr){
-    var disabled=!!(attr&&attr.indexOf('unavailable')>=0);
-    return '<div class="field '+(attr||'')+'"><label for="sandbox-'+id+'">'+label+'</label>'+
-      (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"'+(disabled?' disabled':'')+'><option value="allow"'+(value==="allow"?' selected':'')+(optionSupport("network","allow").status!=="available"?' disabled':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+(optionSupport("network","deny").status!=="available"?' disabled':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+(optionSupport("network","restricted").status!=="available"?' disabled':'')+'>restricted · 白名单</option></select>':
-      '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false"'+(disabled?' disabled title="Unavailable for this policy/backend"':'')+'>')+'</div>';
+  function resolveDefault(){
+    if(s.selectedWorkspace!=="auto")return currentWorkspace();
+    var name=s.session;
+    var existing=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===name;});
+    return existing||{id:"pending",name:name,kind:"managed",status:"pending"};
   }
-
-  // Synthetic Agent responses for the design prototype. Production must fetch this
-  // typed catalog from the authenticated Agent, never from frontend literals.
-  // Synthetic VNext contract: real policy implementation support is reported
-  // by Agent/Location and verified by nession-sandbox. This is NOT shipped V1.
-  function agentFieldCatalog(){
-    var s=settings(),scoped="mock-agent:nession-dev:"+state.fixture;
-    var unknown=!s.online||s.recreated,unavailableHost=s.unsupported;
-    var mac=s.macos, noCgroup=state.fixture==="no-cgroup", noSeccomp=state.fixture==="no-seccomp";
-    var status=unknown?"unknown":unavailableHost?"unavailable":"available";
-    var pstatus=function(available,code,reason){
-      return unknown?{status:"unknown",reason_code:"unprobed",
-          reason:"Agent 离线或 Session 身份无法验证；不是不支持"}:
-        unavailableHost?{status:"unavailable",reason_code:"backend_missing",
-          reason:"Agent 已探测到无可用 Sandbox backend"}:
-        available?{status:"available"}:{status:"unavailable",reason_code:code,reason:reason};
-    };
-    var platformReason="当前 macOS Seatbelt backend 不提供该 Linux 原生机制";
-    var entries=[
-      {path:"filesystem.access",...pstatus(!mac,"platform_unsupported","此 Seatbelt backend 的路径访问白名单无法验证，不能使用")},
-      {path:"network",...pstatus(true,"backend_missing","未找到网络隔离 backend"),
-        options:["allow","deny","restricted"].map(function(mode){
-          return {id:mode,...pstatus(!mac||mode!=="restricted","backend_missing","此 Seatbelt backend 无法验证 restricted 代理")};
-        })},
-      {path:"process.linux_namespaces",...pstatus(!mac,"platform_unsupported",platformReason),
-        options:["pid","ipc","user","uts","cgroup"].map(function(id){return {id:id,...pstatus(!mac,"platform_unsupported",platformReason)};})},
-      {path:"resource.cgroup_v2",...pstatus(!mac&&!noCgroup,
-        noCgroup?"controller_not_delegated":"platform_unsupported",
-        noCgroup?"当前 Agent 未取得可用的子 cgroup v2 控制器委派":platformReason)},
-      {path:"syscall.seccomp",...pstatus(!mac&&!noSeccomp,
-        noSeccomp?"profile_unavailable":"platform_unsupported",
-        noSeccomp?"当前 Agent 无法加载注册的 seccomp profile":platformReason)}
-    ];
-    // Parent unavailability is conclusive only for a completed probe;
-    // unknown can never be derived from empty field/profile arrays.
-    if(unknown||unavailableHost)entries.forEach(function(x){
-      x.status=status;x.reason_code=unknown?"unprobed":"backend_missing";
-      x.reason=unknown?"Agent 或 Session 观测不可用":"当前 Agent 已确认无可用 Sandbox backend";
-    });
-    // Native cgroup file names are examples of a child-cgroup discovery
-    // fixture, not an application whitelist or unit conversion.
-    var controllers=(state.fixture==="limited"?["memory","pids"]:["cpu","memory","pids","io"]);
-    var files=[
-      {key:"memory.max",controller:"memory",format:"Linux native text",example:"2147483648"},
-      {key:"memory.high",controller:"memory",format:"Linux native text",example:"1073741824"},
-      {key:"memory.low",controller:"memory",format:"Linux native text",example:"1048576"},
-      {key:"memory.oom.group",controller:"memory",format:"Linux native text",example:"1"},
-      {key:"cpu.max",controller:"cpu",format:"Linux native text",example:"200000 100000"},
-      {key:"cpu.weight",controller:"cpu",format:"Linux native text",example:"100"},
-      {key:"pids.max",controller:"pids",format:"Linux native text",example:"256"},
-      {key:"io.max",controller:"io",format:"Linux native text",example:"8:0 rbps=10485760"}
-    ];
-    var enabledResource=entries.find(function(x){return x.path==="resource.cgroup_v2"}).status==="available";
-    var enabledSyscall=entries.find(function(x){return x.path==="syscall.seccomp"}).status==="available";
-    var resource=enabledResource?files.filter(function(file){return controllers.includes(file.controller)}):[];
-    var syscall=enabledSyscall?[{key:"seccomp.profile",format:"registered profile",
-      example:"nession-interactive-v1",values:["nession-interactive-v1"]}]:[];
-    entries.find(function(x){return x.path==="resource.cgroup_v2"}).fields=resource.map(function(x){
-      return {key:x.key,controller:x.controller,status:"available",value_format:x.format,example:x.example};
-    });
-    entries.find(function(x){return x.path==="syscall.seccomp"}).options=syscall.flatMap(function(x){
-      return x.values.map(function(v){return {id:v,status:"available"};});
-    });
-    return {catalog_version:2,status:status,platform:unknown?"unknown":unavailableHost?"unsupported":mac?"macos":"linux",
-      backend:unknown||unavailableHost?null:mac?"macos-seatbelt":"linux-bwrap",
-      source:scoped,generation:unknown?"unavailable":"mock-"+state.fixture+"-generation",
-      implementations:entries,resource:resource,syscall:syscall,
-      reason:unknown?"Agent/Session 观测不可用":unavailableHost?"已确认无可用 Sandbox backend":mac?"macOS Seatbelt · 仅实测能力可选":
-        "Agent 已按实现路径探测；cgroup 文件仍需另行发现"};
+  function workspaceName(){var w=resolveDefault();return w?w.name:"none";}
+  function effectiveDraft(){
+    var w=resolveDefault(), mounted=s.tools.map(function(id){var im=imageBy(id);return {source:im?im.digest:"missing",target:id==="rust"?s.toolTarget:"/opt/node",read_only:true};});
+    return {filesystem:{rootfs:{source:s.rootMode==="host"?{kind:"host"}:{kind:"image",digest:imageBy(s.rootImage).digest},implicit_target:"/"},
+      mounts:mounted,workspace:{source:w?{kind:w.kind,id:w.id,name:w.name}:null,implicit_target:"/workspace"},
+      access:{read:s.readPaths.split("\n").filter(Boolean),write:s.writePaths.split("\n").filter(Boolean)},
+      home:{kind:s.home}},network:{mode:s.network},
+      linux_namespace:Object.assign({},s.namespace),cgroup_v2:s.cgroup?{"memory.max":s.cgroup}:{},seccomp:s.seccomp?{profile:"nession-interactive-v1"}:null};
   }
-  function implementation(path){
-    var c=agentFieldCatalog();
-    return c.implementations.find(function(x){return x.path===path})||
-      {path:path,status:"unknown",reason_code:"not_registered",reason:"协议未注册此策略实现"};
-  }
-  function optionSupport(path,id){
-    var parent=implementation(path);
-    return (parent.options||[]).find(function(x){return x.id===id})||
-      {status:"unknown",reason_code:"not_registered",reason:"此选项未在 Agent 注册"};
-  }
-  function supportStateLabel(status){return status==="available"?"支持":status==="unavailable"?"不支持":"状态未知";}
-  function implementationPanel(path,title,intro,contents){
-    var item=implementation(path),enabled=item.status==="available",code=item.reason_code||"";
-    return '<section class="policy-implementation '+(enabled?'is-available':'is-disabled')+
-      '" data-policy-implementation="'+escapeHtml(path)+'" data-policy-status="'+item.status+'">'+
-      '<div class="policy-impl-header"><div><h4>'+title+'</h4><p class="subline">'+intro+'</p>'+
-      '<code class="policy-native-path">'+escapeHtml(path)+'</code></div>'+
-      '<span class="policy-impl-status '+item.status+'">'+supportStateLabel(item.status)+'</span></div>'+
-      (enabled?contents:'<div class="policy-support-reason"><strong>'+supportStateLabel(item.status)+
-        ' · '+escapeHtml(code||"unprobed")+'</strong><p>'+escapeHtml(item.reason||"不可确认支持状态")+
-        '</p><p>此策略不可编辑/添加；已保存的草稿不会被自动删除，预检仍须逐项拒绝不支持的请求。</p></div>')+
-      '</section>';
-  }
-  // Render *registered* native policy implementations for this domain.
-  // An Agent advertising a new policy path alone does not make an older
-  // client understand its versioned schema or own an editor for it.
-  function domainImplementationPanels(domain,renderers){
-    var entries=agentFieldCatalog().implementations.filter(function(x){return x.path.startsWith(domain+".")});
-    if(!entries.length)return '<p class="module-empty">当前协议/Agent 未注册此类策略实现；没有可配置项。</p>';
-    return entries.map(function(entry){
-      if(Object.prototype.hasOwnProperty.call(renderers,entry.path))return renderers[entry.path];
-      return '<section class="policy-implementation is-disabled" data-policy-implementation="'+
-        escapeHtml(entry.path)+'" data-policy-status="client-unsupported"><div class="policy-impl-header">'+
-        '<div><h4>'+escapeHtml(entry.path)+'</h4><p class="subline">Agent 报告了此策略，但当前前端没有对应的版本化配置组件。</p></div>'+
-        '<span class="policy-impl-status unknown">客户端未支持</span></div>'+
-        '<div class="policy-support-reason">必须同时发布 Policy Schema、Agent 实现与前端配置组件；不能将未知策略作为任意 JSON 编辑器或默认为可用。</div></section>';
-    }).join("");
-  }
-  function kvRows(kind,unavailable){
-    var rows=state.draft[kind+"Rows"],resource=kind==="resource";
-    var suggestionId=resource?"resource-key-suggestions":"syscall-key-suggestions";
-    var catalog=agentFieldCatalog(),suggestions=resource?catalog.resource:catalog.syscall;
-    var note=resource?"原生 cgroup v2 控制文件由 Agent 枚举；Value 原样传给 Linux 内核，不做字段级格式转换。":"Agent 注册的 seccomp profile，不提供任意 syscall/BPF 编辑。";
-    var out='<div class="kv-editor" data-kv-editor="'+kind+'"><p class="hint2">'+note+'</p>'+'<p class="hint2"><strong>Agent 发现 · '+(catalog.status==="available"?"已探测":"无法查询")+'</strong> · '+suggestions.length+' 个候选 · '+escapeHtml(catalog.reason)+'</p>'+
-      '<datalist id="'+suggestionId+'">'+suggestions.map(function(field){return '<option value="'+escapeHtml(field.key)+'" label="'+escapeHtml(field.format)+'"></option>';}).join('')+'</datalist>';
-    if(!rows.length)out+='<p class="kv-empty">'+(resource?"未添加额外的 Resource 限制。":"未添加额外的 Syscall profile；后端基础防护仍生效。")+'</p>';
-    rows.forEach(function(row){
-      var label=resource?"cgroup v2":"seccomp";
-      out+='<div class="kv-row" data-kv-row="'+kind+':'+row.id+'">'+
-        '<div class="field"><label for="kv-'+kind+'-'+row.id+'-key">Key</label><input id="kv-'+kind+'-'+row.id+'-key" list="'+suggestionId+'" aria-label="'+label+' Key" data-kv-kind="'+kind+'" data-kv-id="'+row.id+'" data-kv-field="key" value="'+escapeHtml(row.key)+'" placeholder="'+(resource?"e.g. cpu.max":"seccomp.profile")+'"'+(unavailable?' disabled':'')+'></div>'+
-        '<div class="field"><label for="kv-'+kind+'-'+row.id+'-value">Value</label><input id="kv-'+kind+'-'+row.id+'-value" aria-label="'+label+' Value" data-kv-kind="'+kind+'" data-kv-id="'+row.id+'" data-kv-field="value" value="'+escapeHtml(row.value)+'" placeholder="'+(resource?"native value":"nession-interactive-v1")+'"'+(unavailable?' disabled':'')+'></div>'+
-        '<button type="button" class="action kv-remove" aria-label="Remove '+label+' entry" data-action="remove-kv:'+kind+':'+row.id+'"'+(unavailable?' disabled':'')+'>移除</button></div>';
-    });
-    out+='<div class="actionline"><button type="button" class="action" data-action="add-kv:'+kind+'"'+(unavailable?' disabled title="Backend does not support this dimension"':'')+'>＋ 添加条目</button></div></div>';
-    return out;
-  }
-  function validateRows(rows,kind){
-    var seen=new Set();
-    var catalog=agentFieldCatalog(),fields=kind==="resource"?catalog.resource:catalog.syscall;
-    var keys=fields.map(function(field){return field.key});
-    for(var i=0;i<rows.length;i++){
-      var key=rows[i].key.trim(),value=rows[i].value.trim();
-      if(!key||!value)return (kind==="resource"?"Resource":"Syscall")+" 第 "+(i+1)+" 行的 Key 和 Value 都不能为空";
-      if(!keys.includes(key))return "不支持的 "+(kind==="resource"?"cgroup v2":"Syscall")+" Key: "+key;
-      if(seen.has(key))return "重复的 "+(kind==="resource"?"Resource":"Syscall")+" Key: "+key;
-      seen.add(key);
-      if(kind==="syscall"){
-        var profile=fields.find(function(field){return field.key===key});
-        if(key!=="seccomp.profile"||!profile||!profile.values.includes(value))return "seccomp.profile 只支持 Agent 注册的 nession-interactive-v1";
-        continue;
-      }
-      // No app-specific parsing of native Resource values. Linux performs the
-      // authoritative validation when writing inside the new owned cgroup.
-      if(kind==="resource"&&(!/^[a-zA-Z0-9_.-]+$/.test(key)||key.startsWith("cgroup.")||key.includes("..")))
-        return "Resource Key 必须是受管 cgroup 下的单个 controller 控制文件";
-
-    }
+  function check(){
+    if(!hasSession())return "A current Session is required to access Sandbox.";
+    if(!online())return "Agent offline: capabilities and mounts cannot be verified.";
+    if(s.fixture==="preflight-fail")return "Agent reported a failed preflight (mock).";
+    if(s.rootMode==="image"&&nativeStatus("filesystem.composition").state!=="available")return "filesystem.composition unavailable on this Agent.";
+    if(s.rootMode==="host"&&nativeStatus("filesystem.access").state!=="available")return "filesystem.access unavailable on this Agent.";
+    if(s.rootMode==="image"&&(s.readPaths.trim()||s.writePaths.trim()))return "Current V1: EROFS root and access.read/write are mutually exclusive.";
+    if(s.tools.length&&s.rootMode!=="image")return "Current V1: tool EROFS mounts require the prepared EROFS root.";
+    if(s.tools.includes("rust")&&s.toolTarget!=="/opt/rust")return "V1 tool target must remain /opt/<name>; this Rust image is constrained to /opt/rust.";
+    if(s.tools.some(function(t){return !imageBy(t)||imageBy(t).status!=="ready";}))return "Selected tool image is not Server Ready.";
+    if(s.rootMode==="image"&&(!imageBy(s.rootImage)||imageBy(s.rootImage).status!=="ready"))return "Base Runtime image is not Server Ready.";
+    var paths=[s.readPaths,s.writePaths].join("\n").split("\n").filter(Boolean);
+    if(paths.some(function(p){return !p.startsWith("/")||p.indexOf("..")>=0}))return "access paths must be absolute normalized host paths.";
+    if(s.network==="restricted"&&macos())return "This macOS backend does not support restricted network mode.";
+    if(s.seccomp&&nativeStatus("seccomp").state!=="available")return "seccomp unavailable on current Agent.";
+    if(s.cgroup&&nativeStatus("cgroup_v2").state!=="available")return "cgroup_v2 unavailable on current Agent.";
+    if(Object.keys(s.namespace).some(function(k){return s.namespace[k]})&&nativeStatus("linux_namespace").state!=="available")return "linux_namespace unavailable on current Agent.";
+    if(s.selectedWorkspace!=="auto"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
+    if(s.selectedWorkspace!=="auto"&&currentWorkspace().status!=="available")return "Selected Workspace is not currently available.";
     return "";
   }
-  function policyProjection(d){
-    var policy={version:1,enabled:true,enforcement:"required"};
-    var reads=(d.readOnly||"").split(",").map(function(x){return x.trim()}).filter(Boolean);
-    var writes=(d.write||"").split(",").map(function(x){return x.trim()}).filter(Boolean);
-    // Optional groups absent in the draft are *omitted*, never silently
-    // converted into claims about an installed OS-level restriction.
-    if(reads.length||writes.length)policy.filesystem={access:{read:reads,write:writes}};
-    if(d.network){
-      policy.network={mode:d.network,ingress:"deny"};
-      if(d.network==="restricted")policy.network.egress={
-        allow:(d.egress||"").split(",").map(function(x){return x.trim()}).filter(Boolean),
-        deny:(d.denyEgress||"").split(",").map(function(x){return x.trim()}).filter(Boolean),private_network:"deny"};
-    }
-    var namespaces={};
-    ["pid","ipc","user","uts","cgroup"].forEach(function(k){if(d[k])namespaces[k]=true});
-    if(Object.keys(namespaces).length)policy.process={linux_namespaces:namespaces};
-    if(d.resourceRows&&d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value] }))};
-    if(d.syscallRows&&d.syscallRows.length)policy.syscall={seccomp:{profile:d.syscallRows[0].value.trim()}};
-    return policy;
+  function ensureAutoWorkspace(){
+    if(s.selectedWorkspace!=="auto")return;
+    var old=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
+    if(old){s.selectedWorkspace=old.id;return;}
+    var id="ws:"+String(Date.now())+":"+s.workspaces.length;
+    var name=s.session;
+    s.workspaces.push({id:id,name:name,kind:"managed",project:"—",path:"Agent-managed / "+id,status:"available"});
+    s.selectedWorkspace=id;
+    s.notice="Managed Workspace “"+name+"” allocated and preserved for reuse (simulation).";
   }
-  function toggler(id,label,checked,disabled){
-    return '<label><input type="checkbox" data-draft="'+id+'" '+(checked?'checked':'')+' '+(disabled?'disabled':'')+'>'+label+'</label>';
+  function nav(){
+    return '<nav class="cand-primary" aria-label="Sandbox sections">'+sections.map(function(x){
+      return '<button type="button" data-action="area:'+x[0]+'"'+(s.area===x[0]?' aria-current="page"':'')+'>'+x[1]+'</button>';
+    }).join("")+'</nav>';
   }
-
-  var compositionClusters=[
-    {label:"执行环境",subtitle:"进程看到的文件与工作目录",groups:["filesystem"]},
-    {label:"隔离边界",subtitle:"网络可达性与命名空间",groups:["network","process"]},
-    {label:"执行约束",subtitle:"原生控制文件与安全过滤",groups:["resource","syscall"]}
-  ];
-  var dimensionNames={filesystem:"Filesystem",network:"Network",process:"Process",resource:"Resource",syscall:"Syscall"};
-  function compositionState(d,id,observed){
-    var s=settings(),pathByTab={filesystem:"filesystem.access",network:"network",process:"process.linux_namespaces",resource:"resource.cgroup_v2",syscall:"syscall.seccomp"};
-    var support=implementation(pathByTab[id]),unavailable=support.status==="unavailable";
-    var entries=[],active=false,description="";
-    if(id==="filesystem"&&d.preparedMounts&&observed){
-      active=true;
-      description="Agent 预制 EROFS root · "+d.preparedMounts.length+" 个挂载目标（只读执行输入）";
-    }else if(id==="filesystem"){
-      var reads=(d.readOnly||"").split(",").filter(function(x){return !!x.trim()});
-      var writes=(d.write||"").split(",").filter(function(x){return !!x.trim()});
-      active=reads.length+writes.length>0;
-      description=active?reads.length+" 只读路径 · "+writes.length+" 可写路径":"无额外路径白名单；仅后端基础挂载";
-      if(s.macos)description="该 backend 的路径隔离能力需按 Agent 实测";
-    }else if(id==="network"){
-      active=true;
-      description=(d.network||"allow")+" · "+(d.network==="restricted"?(d.egress||"").split(",").filter(Boolean).length+" 个允许目标":"无自定义 egress 列表");
-    }else if(id==="process"){
-      entries=["pid","ipc","user","uts","cgroup"].filter(function(k){return !!d[k]});
-      active=entries.length>0;
-      description=active?"Namespaces: "+entries.map(function(x){return x.toUpperCase()}).join(" / "):"没有额外申请 Linux namespace";
-    }else{
-      entries=d[id+"Rows"]||[];active=entries.length>0;
-      description=active?entries.length+" 条 · "+entries.map(function(x){return x.key||"未填写 Key"}).slice(0,2).join("、")+(entries.length>2?" 等":""):"未添加额外控制";
-    }
-    var kind=observed?(active?"observed":"not-requested"):
-      support.status==="unknown"?"unknown":unavailable?"unavailable":(active?"requested":"not-requested");
-    return {key:id,name:dimensionNames[id],kind:kind,summary:description,count:entries.length};
+  function subNav(area){
+    var keys=subs[area]||[];
+    return '<nav class="cand-sub" aria-label="'+h(area)+" sections"+'">'+
+      '<span class="cand-sub-label">'+h(area)+'</span>'+keys.map(function(x){
+        return '<button type="button" data-action="sub:'+area+":"+x[0]+'"'+(s.sub[area]===x[0]?' aria-current="page"':'')+'>'+h(x[1])+'</button>';
+      }).join("")+'</nav>';
   }
-
-  var moduleCopy={
-    filesystem:"可见路径、读写权限和预制根文件系统",
-    network:"网络模式及出站目标规则",
-    process:"PID / IPC / USER / UTS / CGROUP 命名空间",
-    resource:"Agent 发现的原生 cgroup v2 文件和写入值",
-    syscall:"Agent 注册的 seccomp Profile"
-  };
-
-  var sandboxTabs=["overview","filesystem","network","process","resource","syscall"];
-  function tabLabel(id){return id==="overview"?"Overview":dimensionNames[id]}
-  function tabNav(){
-    var observed=settings().inside,d=observed?actualPolicy():state.draft;
-    return '<nav role="tablist" aria-label="Sandbox policy sections" aria-orientation="'+(state.mode==="web"?"vertical":"horizontal")+
-      '" data-testid="sandbox-tab-nav" class="sandbox-tab-nav">'+
-      sandboxTabs.map(function(id){
-        var active=state.tab===id,info=id==="overview"?null:compositionState(d,id,observed);
-        var status=info?({unavailable:"不可用",unknown:"未知",observed:"已观测",requested:"已配置","not-requested":"未配置"})[info.kind]:"";
-        return '<button type="button" role="tab" id="sandbox-tab-'+id+'" data-action="select-tab:'+id+
-          '" data-sandbox-tab="'+id+'" data-testid="sandbox-tab-'+id+
-          '" aria-controls="sandbox-tab-panel" aria-selected="'+active+'" tabindex="'+(active?"0":"-1")+
-          '" class="sandbox-tab'+(active?" selected":"")+'"><span>'+tabLabel(id)+'</span>'+
-          (status?'<small>'+status+'</small>':'')+'</button>';
-      }).join('')+'</nav>';
+  function layout(area,panel){
+    return '<div class="cand-split">'+subNav(area)+'<div class="cand-main">'+panel+'</div></div>';
   }
-  function compositionOverview(d,observed){
-    var labels=["filesystem","network","process","resource","syscall"];
-    return '<section class="config-index" data-testid="sandbox-config-index" aria-label="Sandbox policy summary">'+
-      '<div class="composition-header"><div><h3>策略摘要</h3><p class="subline">'+(observed?
-        '当前 Pane 的生效配置概况；逐项使用策略 Tab 查看实际证据。':
-        '所有策略在左侧或顶部 Tab 直接切换；配置共同组成一份 Policy 草稿。')+
-      '</p></div><span class="pill">'+(observed?'Inside · observed':'Outside · draft')+'</span></div>'+
-      '<div class="config-summary">'+labels.map(function(id){
-        var p=compositionState(d,id,observed),
-          status=({unavailable:"不可用",unknown:"状态未知",observed:"已观测",requested:"已配置","not-requested":"未配置"})[p.kind];
-        return '<div class="config-summary-row" data-summary-dimension="'+id+'"><span><strong>'+dimensionNames[id]+
-          '</strong><small>'+escapeHtml(p.summary)+'</small></span><span class="config-destination-state '+p.kind+'">'+status+'</span></div>';
-      }).join('')+'</div></section>';
+  function overview(){
+    var status=s.inside?"Verified Sandbox Pane":online()?"Native Pane":"Unverified · Agent offline";
+    var w=resolveDefault();
+    var lead=sectionHead("Overview","当前 Session 的隔离执行、资源和能力状态",statusChip(s.inside?"applied":online()?"available":"unknown"));
+    var cards='<div class="cand-grid">'+
+      '<button class="cand-tile" type="button" data-action="area:images"><strong>Images</strong><span>'+s.images.length+' Server registry entries</span><small>Library · Builds · Distribution</small></button>'+
+      '<button class="cand-tile" type="button" data-action="area:workspaces"><strong>Workspaces</strong><span>'+s.workspaces.length+' resources on current Agent</span><small>'+h(w?w.name:"Auto allocation")+'</small></button>'+
+      '<button class="cand-tile" type="button" data-action="area:policies"><strong>Policies</strong><span>5 capabilities</span><small>Filesystem · Network · Native isolation</small></button></div>';
+    var facts='<div class="cand-facts">'+meta("Selected Session",s.session)+meta("Agent / Location","nession-dev",online()?(macos()?"macOS · Seatbelt":"Linux · Bubblewrap"):"Offline")+
+      meta("Pane",status,s.inside?"Effective policy (read-only)":"Draft may be configured")+meta("Workspace",w?w.name:"Auto allocation",w?w.kind:"Not selected")+'</div>';
+    var buttons=s.inside?'<div class="cand-actions">'+action("Return to Native Pane","return-native","primary")+
+      action("Execution evidence","detail","","")+'</div>':
+      '<div class="cand-actions">'+action("Validate policy","validate","",!online())+
+      action("Enter Sandbox","enter","primary",s.preflight!=="passed"||!online())+'</div>';
+    return lead+cards+card("Current execution","Scope: current Session / active tmux Pane; Sandbox is not global.",
+      facts+(s.preflight==="passed"?alert("Mock preflight passed; Enter rechecks backend and policy at launch.","success"):"")+
+      (s.preflight==="failed"?alert(s.error,"danger"):"")+(s.notice?alert(s.notice):"")+buttons);
   }
-  function policyJson(d,title,always){
-    var view=always||state.showPolicyJson;
-    return '<section class="policy-json-section">'+
-      (always?'<div class="policy-json-heading"><h3>'+title+'</h3><span class="subtxt">只读 · 合成协议视图</span></div>':
-        '<button type="button" class="action policy-json-trigger" data-action="toggle-policy-json" aria-expanded="'+state.showPolicyJson+'">'+(view?"收起组合 Policy JSON":"查看组合 Policy JSON")+'</button>')+
-      (view?(d.preparedMounts?'<div data-testid="sandbox-prepared-policy-notice" class="notice warning">Agent-prepared EROFS 的底层镜像 source/digest 不由这个客户端草稿编辑器暴露。此处只展示 Agent 返回的安全挂载目标，不伪造完整原生执行 JSON。</div>':
-        '<pre data-testid="sandbox-composed-json" class="policy-json" aria-label="'+title+'">'+escapeHtml(JSON.stringify(policyProjection(d),null,2))+'</pre>'):'')+
-      '</section>';
+  function imageLibrary(){
+    var x=imageBy(s.selectedImage)||s.images[0];
+    var left=s.images.map(function(im){return '<button class="cand-item '+(im.id===s.selectedImage?"selected":"")+'" data-action="image:'+im.id+'"><span><strong>'+h(im.name)+'</strong><small>'+h(im.kind)+' · '+short(im.digest)+'</small></span>'+statusChip(im.status)+'</button>';}).join("");
+    var details=x?card("Image detail","Server-owned immutable image; selected Session is navigation context.",
+      '<div class="cand-facts">'+meta("Name",x.name)+meta("Digest",short(x.digest))+meta("Server status",x.status)+meta("Agent cache",online()?(s.cache[x.id]||"absent"):"unknown")+'</div>'+
+      '<div class="cand-actions">'+action("Use as RootFS","image-root:"+x.id,"",x.kind!=="Base Runtime"||!isEditable())+
+      action("Mount in Filesystem","image-tool:"+x.id,"",x.kind!=="Toolchain"||!isEditable())+'</div>'):"";
+    return sectionHead("Image Library","全局 Server 镜像列表；不随 Session 切换而复制")+
+      '<div class="cand-list">'+left+'</div>'+details;
   }
-
-  function listEditor(field,kind){
-    var isPath=kind==="path",items=isPath?state.draft.pathItems[field]:state.draft.networkRules[field];
-    var title=isPath?(field==="readOnly"?"Read-only paths":"Writable paths"):(field==="allow"?"Allowed destinations":"Denied destinations");
-    var shortName=isPath?"路径":"目标";
-    var disabled=!settings().supported||(isPath&&settings().macos);
-    return '<section class="module-list" data-list-kind="'+kind+'" data-list-name="'+field+'">'+
-      '<div class="module-list-head"><div><h4>'+title+'</h4><p class="subline">'+items.length+' 项 · 单独增删和编辑</p></div>'+
-      '<button class="action" data-action="add-'+kind+':'+field+'"'+(disabled?' disabled':'')+'>＋ 添加'+shortName+'</button></div>'+
-      (items.length?'<div class="module-items">'+items.map(function(value,index){
-        return '<div class="module-item"><label for="module-'+kind+'-'+field+'-'+index+'">'+shortName+' '+(index+1)+'</label>'+
-          '<div class="module-item-edit"><input id="module-'+kind+'-'+field+'-'+index+'" data-collection="'+kind+'" data-list-name="'+field+'" data-list-index="'+index+'" value="'+escapeHtml(value)+'" aria-label="'+title+' '+(index+1)+'" placeholder="'+(isPath?"/absolute/path":"example.com:443")+'"'+(disabled?' disabled':'')+'>'+
-          '<button class="action" data-action="remove-'+kind+':'+field+':'+index+'" aria-label="Remove '+title+' '+(index+1)+'"'+(disabled?' disabled':'')+'>移除</button></div></div>';
-      }).join('')+'</div>':'<p class="module-empty">尚未添加'+title+'；不会生成额外规则。</p>')+
-      '</section>';
+  function imageBuilds(){
+    return sectionHead("Builds","Server 构建任务、进度与失败诊断（均为模拟数据）",
+      action("+ New build","build-start","primary"))+
+      '<div class="cand-list">'+s.builds.map(function(b){return '<div class="cand-row"><div><strong>'+h(b.name)+'</strong><small>'+h(b.id)+' · '+h(b.detail)+'</small></div>'+statusChip(b.status)+
+      (b.status==="building"?action("Complete","build-complete:"+b.id):"")+'</div>';}).join("")+'</div>';
   }
-  function filesystemEditor(){
-    var contents='<div class="module-domain"><p class="subline">受管 mount view 的 read/write 授权；Agent-prepared EROFS 是不同的服务器输入，不在此编辑镜像源。</p>'+
-      '<div class="module-start-dir">'+configInput("workingDir","Shell working directory",state.draft.workingDir,"input","full")+'</div>'+
-      listEditor("readOnly","path")+listEditor("write","path")+
-      '<div class="module-hint">所有路径和权限由 Agent 预检及执行阶段验证。</div></div>';
-    return implementationPanel("filesystem.access","Access · 路径权限","通用语义不代表所有 backend 都可以安装",contents);
+  function distribution(){
+    return sectionHead("Distribution","按当前 Agent 观察缓存；Server Ready 不代表 Agent 已准备完成")+
+      card("Server → Agent","按需授权、校验并缓存；不隐含自动广播到所有 Agent。",
+      '<div class="cand-list">'+s.images.map(function(im){
+        var cs=online()?(s.cache[im.id]||"absent"):"unknown";
+        return '<div class="cand-row"><div><strong>'+h(im.name)+'</strong><small>Server: '+h(im.status)+' · '+short(im.digest)+'</small></div>'+statusChip(cs)+
+          (online()&&cs!=="verified"?action("Prepare cache","cache:"+im.id,"",false):"")+'</div>';
+      }).join("")+'</div>');
   }
-  function networkEditor(){
-    var d=state.draft;
-    var modeItems=["allow","deny","restricted"].map(function(mode){
-      var item=optionSupport("network",mode);
-      return '<div class="policy-option-state" data-policy-option="network.'+mode+'" data-option-status="'+item.status+'">'+
-        '<code>'+mode+'</code><span>'+supportStateLabel(item.status)+'</span>'+
-        (item.reason?'<small>'+escapeHtml(item.reason)+'</small>':'')+'</div>';
-    }).join('');
-    var contents='<div class="module-domain"><div class="module-mode"><h4>网络模式</h4><p class="subline">每个模式单独探测；仅支持的模式可以选择。</p>'+
-      '<div class="policy-option-list">'+modeItems+'</div>'+
-      configInput("network","Mode",d.network,"select","")+'</div>'+
-      (d.network==="restricted"?listEditor("allow","network")+listEditor("deny","network"):
-        '<div class="module-hint">当前模式 '+escapeHtml(d.network)+' 不使用自定义 egress 列表。</div>')+
-      '<p class="module-hint">V1 ingress: deny；restricted 需要被 Agent 验证的代理。</p></div>';
-    return implementationPanel("network","Network · 目标访问策略","allow / deny / restricted 分别按 backend 检测",contents);
+  function imagesPanel(){return layout("images",s.sub.images==="builds"?imageBuilds():s.sub.images==="distribution"?distribution():imageLibrary());}
+  function workspaceList(){
+    var rows=s.workspaces.map(function(w){
+      var selected=s.selectedWorkspace===w.id;
+      return '<div class="cand-row"><div class="cand-wsrow"><strong>'+h(w.name)+'</strong><small>'+h(w.kind)+
+        (w.kind==="project_location"?" · "+h(w.path):" · Agent-managed persistent")+'</small>'+
+        '<small>'+h(w.project||"—")+' · nession-dev'+(selected?" · Selected for /workspace":"")+'</small></div>'+
+        statusChip(online()?w.status:"unknown")+
+        action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside)+
+        (w.kind==="managed"?action("Delete","ws-delete:"+w.id,"danger",selected||!online()||s.inside):"")+'</div>';
+    }).join("");
+    var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
+    return sectionHead("Agent Workspaces","可命名、可发现、可复用。Workspace 资源数据由当前 Agent 管理。")+
+      card("Selection precedence","Explicit reference → matching Project Location → get_or_create(session.name).",
+        '<p class="cand-help">'+h(defaultWorkspaceHint())+'</p>'+
+        '<div class="cand-actions">'+action(auto?"Reuse “"+h(s.session)+"”":"Allocate “"+h(s.session)+"”","ws-auto","",!online()||s.inside)+
+        action("Configure Filesystem","area:policies")+'</div>')+
+      card("Create named Workspace","Name is a lookup alias; physical storage is keyed by an opaque Workspace ID.",
+        '<div class="cand-inline"><input aria-label="Managed Workspace name" data-field="newWorkspaceName" placeholder="e.g. experiment-02" value="'+h(s.newWorkspaceName)+'"'+(!isEditable()?' disabled':'')+'>'+
+        action("Create / Reuse","ws-create","primary",!online()||s.inside)+'</div>')+
+      '<div class="cand-list">'+rows+'</div>'+
+      (s.deletePending?alert("Delete managed Workspace “"+(s.workspaces.find(function(w){return w.id===s.deletePending;})||{}).name+"”? Data removal is explicit and irreversible in real product.","danger")+
+        '<div class="cand-actions">'+action("Cancel","ws-delete-cancel")+action("Confirm simulated delete","ws-delete-confirm","danger")+'</div>':"");
   }
-  function processEditor(){
-    var d=state.draft,desc={pid:"隔离 PID 可见范围",ipc:"隔离 IPC 对象",user:"独立用户命名空间",uts:"独立 UTS 主机名空间",cgroup:"隔离 cgroup 命名空间；需要 USER"};
-    var contents='<div class="module-domain"><p class="subline">每个 Namespace 以原生 Linux 语义独立探测，不可从 Resource controller 推断。</p>'+
-      '<div class="namespace-items">'+["pid","ipc","user","uts","cgroup"].map(function(key){
-        var option=optionSupport("process.linux_namespaces",key);
-        return '<label class="namespace-item" data-policy-option="process.linux_namespaces.'+key+
-          '" data-option-status="'+option.status+'"><span><strong>'+key.toUpperCase()+'</strong>'+
-          '<small>'+desc[key]+' · '+supportStateLabel(option.status)+'</small></span>'+
-          '<input type="checkbox" data-draft="'+key+'"'+(d[key]?' checked':'')+
-          (option.status!=="available"?' disabled':'')+' aria-label="'+key.toUpperCase()+' namespace"></label>';
-      }).join('')+'</div><p class="module-hint">真实是否安装必须以 Agent 的执行验证报告为准。</p></div>';
-    return implementationPanel("process.linux_namespaces","Linux Namespaces · 进程隔离","PID、IPC、USER、UTS、CGROUP 各自可用性",contents);
+  function workspaceDetail(){
+    var w=currentWorkspace();
+    return sectionHead("Workspace Detail","Workspace 管理和 Filesystem 消费不重复登记资源")+
+      card(w?h(w.name):"Auto-allocated Workspace","Current Agent is the authority for directory and mount state.",
+      '<div class="cand-facts">'+meta("Kind",w?w.kind:"pending")+meta("Name",w?w.name:s.session)+meta("Agent","nession-dev")+
+      meta("Physical source",w?w.path:"Allocated by Agent on first Enter")+meta("Mapping","Implicit /workspace")+
+      meta("Lifecycle",w&&w.kind==="project_location"?"User-owned; never delete":"Managed: retained after Session ends")+'</div>'+
+      '<div class="cand-actions">'+action("Configure in Filesystem","policy:filesystem","primary")+
+      action("Back to list","sub:workspaces:list")+'</div>');
   }
-  function resourceEditor(){
-    var catalog=agentFieldCatalog(),groups={};
-    catalog.resource.forEach(function(item){(groups[item.controller]??=[]).push(item)});
-    var selectors=Object.keys(groups).map(function(controller){
-      return '<div class="resource-controller"><strong>'+escapeHtml(controller)+'</strong>'+
-        '<div class="resource-available">'+groups[controller].map(function(item){
-          var selected=state.draft.resourceRows.some(function(row){return row.key===item.key});
-          return '<button type="button" class="resource-available-file" data-action="resource-add:'+escapeHtml(item.key)+'"'+
-            (selected?' disabled':'')+'>'+escapeHtml(item.key)+(selected?' · 已配置':' ＋')+'</button>';
-        }).join('')+'</div></div>';
-    }).join('');
-    var contents='<div class="module-domain" data-resource-manager><h4>Agent 检测到的子 cgroup v2 控制文件</h4>'+
-      '<p class="subline">实现级可用后，再检查当前受管子 cgroup 的 delegated controller 和原生控制文件。Value 不做业务层单位换算。</p>'+
-      (selectors||'<p class="module-empty">暂无可写的 Resource 控制文件。</p>')+
-      '<div class="module-list"><div class="module-list-head"><h4>待写入的 cgroup v2 配置</h4>'+
-      '<span class="subtxt">'+state.draft.resourceRows.length+' 条原生 KV</span></div>'+
-      kvRows("resource",false)+'</div></div>';
-    return domainImplementationPanels("resource",{"resource.cgroup_v2":implementationPanel("resource.cgroup_v2","cgroup v2 · 原生资源控制",
-      "只有 Agent 实测 Linux cgroup v2 和当前受管子控制器可用时才启用",contents)});
+  function workspacesPanel(){return layout("workspaces",s.sub.workspaces==="details"?workspaceDetail():workspaceList());}
+  function field(label,control,help){return '<label class="cand-field"><span>'+label+'</span>'+control+(help?'<small>'+help+'</small>':"")+'</label>';}
+  function selectField(key,options,disabled){
+    return '<select data-field="'+key+'" aria-label="'+key+'"'+(disabled?' disabled':'')+'>'+options.map(function(o){
+      return '<option value="'+h(o[0])+'"'+(String(s[key])===String(o[0])?' selected':'')+'>'+h(o[1])+'</option>';
+    }).join("")+'</select>';
   }
-  function syscallEditor(){
-    var values=agentFieldCatalog().syscall.find(function(x){return x.key==="seccomp.profile"});
-    var picked=state.draft.syscallRows[0]?.value||"";
-    var contents='<div class="module-domain" data-syscall-profiles><h4>Seccomp Profile</h4>'+
-      '<p class="subline">只允许选择 Agent 已注册且检测过的 Profile；不是任意 syscall 或 BPF 编辑器。</p>'+
-      (values?'<div class="profile-choice"><label for="sandbox-profile">Profile</label><select id="sandbox-profile" data-sandbox-profile>'+
-        '<option value="">不添加额外 Profile</option>'+
-        values.values.map(function(v){return '<option value="'+escapeHtml(v)+'"'+(picked===v?' selected':'')+'>'+escapeHtml(v)+'</option>'}).join('')+
-        '</select><p class="module-hint">运行时加载必须通过最终执行验证。</p></div>':
-        '<div class="module-empty">Agent 未注册可用 Profile。</div>')+
-      (picked?'<div class="module-detail-note"><strong>已选 Profile</strong><code>'+escapeHtml(picked)+
-        '</code><p>Profile 来源为 Agent Registry，不接受任意上传过滤程序。</p></div>':'')+'</div>';
-    return domainImplementationPanels("syscall",{"syscall.seccomp":implementationPanel("syscall.seccomp","seccomp · 系统调用过滤",
-      "依赖实际加载能力和当前 Agent 注册的 Profile",contents)});
+  function fsPanel(){
+    var locked=!isEditable(),w=resolveDefault(),accessConflict=s.rootMode==="image"&&(s.readPaths.trim()||s.writePaths.trim());
+    var root=card("Root filesystem · implicit /","One source owns the root; images are mounted, never repackaged together.",
+      explainSupport(s.rootMode==="image"?"filesystem.composition":"filesystem.access")+
+      field("Root source",selectField("rootMode",[["image","EROFS · Base Runtime"],["host","Host root / access policy"]],locked),
+        "rootfs source → / (fixed target; no editable target field)")+
+      (s.rootMode==="image"?'<div class="cand-row"><div><strong>minimal-glibc-runtime</strong><small>'+short(imageBy("base").digest)+'</small></div>'+statusChip("read-only")+'</div>':alert("Host root mode uses the existing filesystem.access policy.","info")));
+    var mounts=card("Additional mounts · explicit source → target","Only registered EROFS tool images, mounted read-only at approved /opt/<name>.",
+      field("Toolchain image",'<div class="cand-check">'+["rust","node"].map(function(id){
+        var im=imageBy(id);return '<label><input data-tool="'+id+'" type="checkbox"'+(s.tools.includes(id)?" checked":"")+(locked?" disabled":"")+'> '+h(im.name)+' <small>('+short(im.digest)+')</small></label>';
+      }).join("")+'</div>')+
+      (s.tools.includes("rust")?field("Rust mount target",'<input data-field="toolTarget" value="'+h(s.toolTarget)+'"'+(locked?' disabled':'')+' aria-label="Rust mount target">',"Explicit target: /opt/rust. Unsupported targets fail preflight."):"")+
+      '<div class="cand-map">'+s.tools.map(function(id){return '<div><code>'+h(imageBy(id).name)+'</code><span>→ '+h(id==="rust"?s.toolTarget:"/opt/node")+' · ro</span></div>';}).join("")+'</div>');
+    var wOpts=[["auto","Auto: "+s.session+" (find or allocate)"]].concat(s.workspaces.map(function(x){return [x.id,x.name+" · "+x.kind];}));
+    var wsSelected=s.selectedWorkspace==="auto"?"auto":s.selectedWorkspace;
+    var wsSelect='<select data-field="selectedWorkspace" aria-label="Select workspace"'+(locked?' disabled':'')+'>'+wOpts.map(function(o){
+      return '<option value="'+h(o[0])+'"'+(wsSelected===o[0]?' selected':'')+'>'+h(o[1])+'</option>';
+    }).join("")+'</select>';
+    var workspace=card("Writable Workspace · implicit /workspace","Managed volumes can be reused after Sandbox and Session exit; Project Location is user-owned.",
+      field("Workspace source",wsSelect,"Explicit choice > Project's current Agent location > named managed get-or-create")+
+      '<div class="cand-facts">'+meta("Resolved source",w?w.name:"—")+meta("Map target","/workspace (implicit)")+meta("Owner",w&&w.kind==="project_location"?"External / Project Location":"Agent Workspace Manager")+'</div>'+
+      '<div class="cand-actions">'+action("Manage Workspaces","area:workspaces")+'</div>');
+    var access=card("Host path access · identity mapping","Read/write preserve existing semantics: an Agent path P maps to the same P in Sandbox.",
+      '<div class="cand-pair">'+field("Read paths",'<textarea rows="2" data-field="readPaths" placeholder="/usr/share"'+(locked?' disabled':'')+'>'+h(s.readPaths)+'</textarea>',"P → P · read-only")+
+      field("Write paths",'<textarea rows="2" data-field="writePaths" placeholder="/home/dev/project"'+(locked?' disabled':'')+'>'+h(s.writePaths)+'</textarea>',"P → P · read/write")+'</div>'+
+      (accessConflict?alert("Current V1: filesystem.access and EROFS root composition cannot be combined. Clear paths or select Host.","danger"):"")+
+      '<div class="cand-map">'+s.readPaths.split("\n").filter(Boolean).map(function(p){return '<div><code>'+h(p)+'</code><span>→ '+h(p)+' · ro</span></div>';}).join("")+
+      s.writePaths.split("\n").filter(Boolean).map(function(p){return '<div><code>'+h(p)+'</code><span>→ '+h(p)+' · rw</span></div>';}).join("")+'</div>');
+    var home=card("Home / temporary directories","Home is separate from Workspace. Current implementation creates an ephemeral /home tmpfs.",
+      field("Home lifecycle (design candidate)",selectField("home",[["ephemeral","Ephemeral (current)"],["session","Session persistent (proposed)"]],locked),
+        "Separate from /workspace; actual persistent Home requires future runtime implementation.")) ;
+    return sectionHead("Filesystem","RootFS, mount sources and targets, reusable writable Workspace, identity path permissions",statusChip(s.inside?"applied":"draft"))+
+      (s.inside?alert("Inside Sandbox · effective configuration is read-only. This mock shows the latest successful prepared map."): "")+
+      root+mounts+workspace+access+home+
+      card("Resulting mount view","Observed only after verified Enter; before then this is a draft composition preview.",
+        '<div class="cand-map"><div><code>/</code><span>← '+(s.rootMode==="image"?"Base Runtime EROFS · ro":"Host root view")+'</span></div>'+
+        s.tools.map(function(id){return '<div><code>'+h(id==="rust"?s.toolTarget:"/opt/node")+'</code><span>← '+h(imageBy(id).name)+' · ro</span></div>';}).join("")+
+        '<div><code>/workspace</code><span>← '+h(workspaceName())+' · rw</span></div><div><code>/home</code><span>← '+h(s.home==="ephemeral"?"tmpfs":"proposed Session directory")+'</span></div></div>');
   }
-  function editor(){
-    var id=state.openGroup;
-    return '<section class="module-editor" data-testid="sandbox-policy-editor" aria-label="'+dimensionNames[id]+' management">'+
-      ({filesystem:filesystemEditor,network:networkEditor,process:processEditor,resource:resourceEditor,syscall:syscallEditor}[id])()+
-      '</section>';
+  function networkPanel(){
+    var locked=!isEditable();
+    return sectionHead("Network","Stable cross-platform contract. Backends expose only measured modes.")+
+      card("Network isolation","On macOS this mock supports allow/deny, not restricted.",
+        explainSupport("network")+
+        field("Network mode",selectField("network",[["allow","Allow"],["deny","Deny"],["restricted","Restricted (proxy rules)"]],locked),
+          "Ingress remains denied in this V1 design.")+
+        (s.network==="restricted"&&macos()?alert("restricted is unavailable on the macOS Seatbelt fixture.","danger"):""));
   }
-  function policyDescription(d){
-    return '<div class="dimlist">'+
-      '<div class="dimension"><div class="dimlabel">Filesystem</div><div class="dimval">'+(d.preparedMounts?
-        d.preparedMounts.map(function(m){return '<div class="mono">'+escapeHtml(m.target)+' · '+escapeHtml(m.source)+' · '+escapeHtml(m.mode)+'</div>';}).join(''):
-        escapeHtml(d.readOnly||'no explicit read')+' · read-only<span class="dimmer">'+escapeHtml(d.write||'none')+' · writable</span>')+'</div></div>'+
-      '<div class="dimension"><div class="dimlabel">Network</div><div class="dimval">'+escapeHtml(d.network)+'<span class="dimmer">'+(d.network==='restricted'?'Allowed: '+escapeHtml(d.egress):'Ingress denied by V1 policy')+'</span></div></div>'+
-      '<div class="dimension"><div class="dimlabel">Process</div><div class="dimval">'+(['pid','ipc','user','uts','cgroup'].filter(function(k){return d[k]}).join(' / ')||'no explicitly requested Linux namespaces')+'<span class="dimmer">当前执行上下文的实际机制，不是整个 Session</span></div></div>'+
-      '<div class="dimension"><div class="dimlabel">Resource</div><div class="dimval">'+(d.resourceRows.length?d.resourceRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 cgroup v2 限制')+'</div></div>'+
-      '<div class="dimension"><div class="dimlabel">Syscall</div><div class="dimval">'+(d.syscallRows.length?d.syscallRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 seccomp profile；后端基础安全机制仍生效')+'</div></div></div>';
+  function nativePanel(key){
+    var support=nativeStatus(key),locked=!isEditable()||support.state!=="available";
+    var title=key==="linux_namespace"?"Linux Namespace":key==="cgroup_v2"?"Cgroup v2":"Seccomp";
+    var content=explainSupport(key);
+    if(key==="linux_namespace")content+='<div class="cand-check">'+Object.keys(s.namespace).map(function(k){
+      return '<label><input type="checkbox" data-ns="'+k+'"'+(s.namespace[k]?" checked":"")+(locked?" disabled":"")+'> '+k.toUpperCase()+' namespace</label>';
+    }).join("")+'</div>';
+    if(key==="cgroup_v2")content+=field("memory.max · native cgroup value",'<input data-field="cgroup" value="'+h(s.cgroup)+'" placeholder="2147483648"'+(locked?' disabled':'')+'>',
+      "Raw Linux controller value; partially delegated hosts may lack other fields.");
+    if(key==="seccomp")content+='<label class="cand-check"><input type="checkbox" data-seccomp'+(s.seccomp?" checked":"")+(locked?" disabled":"")+'> Enable registered nession-interactive-v1 profile</label>';
+    if(locked)content+=alert("Unsupported or unknown implementations stay visible but cannot be edited. No implicit fallback.");
+    return sectionHead(title,"Native capability key, not Process/Resource/Syscall group")+
+      card(title+" policy","Current Agent controls support and allowed values.",content);
   }
-  function diagnostics(){
-    return '<section class="info-section"><h3>执行时验证</h3><div class="info-grid">'+
-       line('Backend',settings().macos?'macos-seatbelt':'linux-bwrap')+
-       line('Active Pane','<span class="mono">%8 · sandbox interactive</span>')+
-       line('Execution ID','<span class="mono">'+execution+'</span>')+
-       line('Policy digest','<span class="mono">'+digest+'</span>')+
-       line('Session instance','<span class="mono">instance-15f4</span>')+
-       line('Enforcement','required · verified before shell execution')+
-       '</div></section>';
-  }
-  function insideView(){
-    return '<h3>Inside Sandbox</h3><div class="statusline">'+summary()+'</div><div class="notice warning">'+message()+'</div>'+
-       compositionOverview(actualPolicy(),true)+
-       '<div class="actionline"><button class="action" data-action="return-native">← 返回 Native Pane</button><button class="action primary" data-action="detail">执行验证信息 →</button></div>'+
-       '<p class="extra-dim">各配置项打开独立的生效详情页（只读）；范围只包含当前 Pane。Return to Native 不会终止 Sandbox Pane。</p>';
-  }
-  function preflight(){
-    var d=state.draft,s=settings();
-    if(!s.online)return 'Agent 离线，无法预检或进入';
-    if(s.unsupported)return 'Agent 无可用 Sandbox backend';
-    if(s.recreated)return '当前 Session 实例未通过身份确认';
-    var required=[
-      {path:"filesystem.access",on:Boolean(d.readOnly||d.write)},
-      {path:"network",on:Boolean(d.network)},
-      {path:"process.linux_namespaces",on:["pid","ipc","user","uts","cgroup"].some(function(k){return d[k]})},
-      {path:"resource.cgroup_v2",on:d.resourceRows.length>0},
-      {path:"syscall.seccomp",on:d.syscallRows.length>0}
-    ];
-    for(var req of required)if(req.on&&implementation(req.path).status!=="available")
-      return req.path+" 不可用："+(implementation(req.path).reason||"Agent 尚未确认");
-    if(d.network&&optionSupport("network",d.network).status!=="available")
-      return "network."+d.network+" 不可用："+(optionSupport("network",d.network).reason||"当前 backend 不支持");
-    for(var key of ["pid","ipc","user","uts","cgroup"])if(d[key]&&optionSupport("process.linux_namespaces",key).status!=="available")
-      return "process.linux_namespaces."+key+" 不可用";
-    if(!d.workingDir.startsWith('/')||d.workingDir.indexOf('..')>=0)return '工作目录需要是规范化的绝对路径';
-    if(s.macos){
-      if(d.network==='restricted')return 'macOS Seatbelt 不支持 restricted egress 代理';
-      if(d.resourceRows.length||d.syscallRows.length)return 'macOS 不支持 Linux cgroup v2 或 seccomp 条目';
-    }else{
-      var paths=(d.readOnly+','+d.write).split(',').filter(Boolean);
-      if(paths.some(function(p){return !p.trim().startsWith('/')||p.includes('..')}))return 'Filesystem 路径必须是绝对、规范化路径';
-      var resourceError=validateRows(d.resourceRows,'resource');if(resourceError)return resourceError;
-      var syscallError=validateRows(d.syscallRows,'syscall');if(syscallError)return syscallError;
-    }
-    if(d.network==='restricted'&&!d.egress.trim())return 'restricted 模式必须提供至少一个允许目标';
-    if(d.cgroup&&!d.user)return 'CGROUP Namespace 需要同时启用 USER Namespace';
-    var badPath=["readOnly","write"].some(function(name){return state.draft.pathItems[name].some(function(p){return !p.trim()||!p.startsWith("/")||p.includes("..")})});
-    if(badPath)return 'Filesystem 列表不能包含空路径，且必须使用规范化绝对路径';
-    var badRule=["allow","deny"].some(function(name){return state.draft.networkRules[name].some(function(x){return !x.trim()})});
-    if(d.network==='restricted'&&badRule)return 'Network 规则目标不能为空';
-    if(s.preflightFail)return '当前 Agent cgroup v2 controllers 未委派；拒绝创建 Sandbox';
-    return '';
-  }
-  function draftView(){
-    var s=settings();
-    var view='<h3>'+headline()+'</h3><div class="statusline">'+summary()+'</div><div class="notice '+(!s.online||s.unsupported||s.recreated?'danger':'')+'">'+message()+'</div>'+
-      '<div class="info-grid">'+line('Agent / Location',s.offline?'nession-dev · offline':'nession-dev · '+(s.macos?'macOS':'Linux'))+
-      line('当前 Pane','Native · %1')+'</div>'+
-      compositionOverview(state.draft,false)+
-      '<section class="home-operations"><h3>Sandbox 执行</h3><p class="subline">分别管理配置，最后在这里一次性预检并进入 Sandbox。没有为每类配置创建额外的持久化实体。</p>'+
-      policyJson(state.draft,"Composed Policy JSON",false)+'</section>';
-    if(state.preflight==='passed')view+='<div data-preflight-status class="notice success validated"><strong>预检通过</strong> · 已验证当前草稿结构与 Agent 能力（仅模拟），进入时将重新验证。</div>';
-    if(state.preflight==='failed')view+='<div data-preflight-status class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
-    if(state.error)view+='<div class="notice danger validated" role="alert"><strong>Enter 失败</strong> · '+escapeHtml(state.error)+'。仍在 Native Pane，草稿保持不变。</div>';
-    view+='<div class="actionline"><button class="action" data-action="validate" '+(!s.supported?'disabled title="Agent unavailable"':'')+'>校验配置</button>'+
-      '<button class="action primary" data-action="enter" '+(state.preflight!=='passed'||!s.supported?'disabled title="先完成预检"':'')+'>Enter Sandbox →</button>'+
-      (state.entered?'<button class="action" data-action="switch-sandbox">切回已有 Sandbox Pane →</button>':'')+'</div>';
-    return view;
+  function policiesPanel(){
+    var selected=s.sub.policies;
+    var panel=selected==="filesystem"?fsPanel():selected==="network"?networkPanel():nativePanel(selected);
+    var actions=s.inside?'<div class="cand-actions">'+action("Return Native","return-native","primary")+'</div>':
+      '<div class="cand-actions">'+action("Validate policy","validate","",!online())+
+      action("Enter Sandbox","enter","primary",s.preflight!=="passed"||!online())+'</div>';
+    return layout("policies",panel+(s.preflight==="failed"?alert(s.error,"danger"):s.preflight==="passed"?alert("Mock preflight passed. Backend rechecks during Enter.","success"):"")+
+      card("Policy actions","Policy edits invalidate prior preflight; only the selected Agent determines native support.",actions));
   }
   function confirmation(){
-    return '<div class="statusline"><span class="pill strong">Ready to Enter · explicit confirmation</span></div>'+
-       '<div class="notice warning"><strong>确认进入隔离执行环境：</strong>将在当前 tmux Session 中新建 Sandbox Pane；Agent 必须在启动 shell 前验证请求的全部机制。原 Native Pane 保留。失败不会向原 Pane 发送命令，也不会声称已受保护。</div>'+
-       '<section class="info-section"><h3>配置汇总 · 最终预检范围</h3>'+
-       policyDescription(state.draft)+policyJson(state.draft,"确认提交 · 完整 Policy JSON",true)+
-       '<p class="subline">Target: nession-dev · Native Pane %1 → 新隔离 Pane · policy revision v1 · Mock Agent generation '+escapeHtml(agentFieldCatalog().generation)+'</p></section>'+
-       '<div class="actionline"><button class="action" data-action="cancel-enter">返回修改</button><button class="action primary" data-action="confirm-enter">确认 Enter Sandbox</button></div>';
+    return sectionHead("Confirm Enter","One new isolated Pane in the current Session. Native Pane remains intact.")+
+      alert("This is a mock operation. No real image is transferred, no host mount is performed, and no process is started.")+
+      card("Prepared mapping summary","The Agent will resolve authorized sources to native paths; the Web never provides them.",
+        '<pre class="cand-json">'+h(JSON.stringify(effectiveDraft(),null,2))+'</pre>'+
+        '<div class="cand-actions">'+action("Cancel","cancel-enter")+action("Confirm simulated Enter","confirm-enter","primary")+'</div>');
   }
-
-  function observedModule(){
-    var id=state.openGroup,d=actualPolicy(),mode=id==="filesystem"?"Filesystem":dimensionNames[id];
-    var html='<section data-testid="sandbox-module-effective" class="module-observed">'+
-      '<div class="module-hint">Agent-observed · effective · 当前 Pane 的执行记录 (Mock)</div>';
-    if(id==="filesystem"){
-      if(d.preparedMounts){
-        html+='<h3>已准备的文件系统根</h3><p class="subline">EROFS Base Runtime / Workspace / Toolchains，由 Agent 准备。仅展示 mount target，不暴露底层镜像源。</p>'+
-          '<div class="module-readonly-list">'+d.preparedMounts.map(function(m){return '<div class="module-readonly-item"><span class="mono">'+escapeHtml(m.target)+'</span><span>'+escapeHtml(m.source)+'</span><small>'+escapeHtml(m.mode)+'</small></div>';}).join('')+'</div>';
-      }else{
-        html+='<h3>实际路径访问</h3>'+
-          ['readOnly','write'].map(function(field){
-            var paths=d.pathItems?.[field]||String(d[field]||"").split(",").filter(Boolean);
-            return '<div class="module-list"><h4>'+(field==="readOnly"?"Read-only paths":"Writable paths")+' · '+paths.length+'</h4>'+
-              (paths.length?paths.map(function(x){return '<div class="module-readonly-item mono">'+escapeHtml(x)+'</div>';}).join(''):'<p class="module-empty">没有显式请求；后端基础可见性仍以执行记录为准。</p>')+'</div>';
-          }).join('');
-      }
-    }else if(id==="network"){
-      html+='<h3>网络边界</h3><div class="module-readonly-item"><strong>Mode</strong><code>'+escapeHtml(d.network||"not-requested")+'</code></div>'+
-        (d.network==="restricted"?
-          '<div class="module-list"><h4>Allowed destinations</h4>'+(d.networkRules?.allow||[]).map(function(x){return '<div class="module-readonly-item mono">'+escapeHtml(x)+'</div>'}).join('')+
-          '<h4>Denied destinations</h4>'+(d.networkRules?.deny||[]).map(function(x){return '<div class="module-readonly-item mono">'+escapeHtml(x)+'</div>'}).join('')+'</div>':
-          '<p class="module-hint">没有单独应用 restricted egress 条目。</p>');
-    }else if(id==="process"){
-      html+='<h3>Namespace 安装状态</h3><div class="namespace-items">'+["pid","ipc","user","uts","cgroup"].map(function(x){
-        return '<div class="namespace-item"><span><strong>'+x.toUpperCase()+'</strong><small>Agent execution evidence</small></span>'+
-        '<span class="composition-state">'+(d[x]?"已安装（模拟）":"未申请")+'</span></div>';
-      }).join('')+'</div>';
-    }else if(id==="resource"){
-      html+='<h3>受管 cgroup v2 生效文件</h3><p class="subline">Agent 需要返回执行 cgroup 的只读文件 read-back；仅展示要求配置的原生 KV，不推断其他 controller 值。</p>'+
-        (d.resourceRows.length?'<div class="module-readonly-list">'+d.resourceRows.map(function(x){
-          return '<div class="module-readonly-item"><code>'+escapeHtml(x.key)+'</code><code>'+escapeHtml(x.value)+'</code><small>示例已读回</small></div>';
-        }).join('')+'</div>':'<p class="module-empty">无显式 Resource 配置。</p>');
-    }else if(id==="syscall"){
-      html+='<h3>Seccomp 运行态</h3>'+(d.syscallRows.length?
-        '<div class="module-detail-note"><strong>Agent 已安装的 Profile（Mock）</strong><code>'+escapeHtml(d.syscallRows[0].value)+'</code><p>不是 cgroup controller 文件；需要 seccomp filter 安装证据。</p></div>':
-        '<p class="module-empty">未额外请求 seccomp Profile；后端基础安全行为独立存在。</p>');
-    }
-    return html+'</section>';
+  function evidence(){
+    return sectionHead("Execution evidence","Read-only observed Pane scope, not the entire tmux Session.")+
+      card("Verified execution (simulation)","Mock is not a security audit.",'<div class="cand-facts">'+meta("Pane","%8 · isolated")+
+      meta("Execution","sandbox-demo-001")+meta("Backend",macos()?"Seatbelt":"Linux Bubblewrap")+
+      meta("Verification","synthetic fixture only")+'</div>'+
+      '<div class="cand-actions">'+action("Back to Overview","cancel-detail","primary")+'</div>');
   }
-  function moduleView(){
-    var observed=settings().inside,id=state.tab;
-    var label=observed?"Observed / effective":settings().supported?"Draft / editable":"Agent unknown";
-    var head='<div class="module-head"><div><h3>'+dimensionNames[id]+'</h3><p class="subline">'+moduleCopy[id]+
-      '</p></div><span class="pill">'+label+'</span></div>'+
-      '<div class="module-scope">当前 Session '+escapeHtml(state.session)+' · '+
-      (observed?"Sandbox Pane %8":settings().supported?"Native Pane %1":"当前 Pane 状态未知")+
-      ' · nession-dev · '+(observed?"生效只读":settings().supported?"草稿配置":"Agent 未验证")+'</div>';
-    var availability=!settings().supported?'<div class="notice warning">当前 Agent/Session 状态无法确认；此处仅供查看草稿，不能预检或 Enter。</div>':"";
-    state.openGroup=id;
-    return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+head+availability+
-      (observed?observedModule():editor())+'</section>';
-  }
-  function detail(){
-    if(!settings().inside)return '<div class="notice danger">当前 Pane 没有可验证的 SandboxExecution。</div>';
-    return '<div class="notice warning">验证信息仅覆盖当前 Pane；不影响 Native Pane、共享 tmux server 或未来 Pane。</div>'+
-      diagnostics()+policyJson(actualPolicy(),"Agent 观测 Policy JSON",false)+
-      '<div class="actionline"><button class="action" data-action="detail-back">← 返回 Sandbox 首页</button></div>';
+  function terminal(){
+    return '<div class="terminal"><div class="terminal-head"><b>'+h(s.session)+'</b><span class="subtxt">Terminal · mock</span></div>'+
+      '<pre class="term-output"><span class="prompt">➜</span> /workspace  git status --short\n M crates/nession-sandbox/src/policy.rs\n\n<span class="prompt">➜</span> /workspace  cargo test\nrunning... pass\n\n<span class="prompt">➜</span> /workspace ▌</pre>'+
+      '<div class="cand-actions">'+action("Open Sandbox Workspace","open-sandbox","primary")+'</div></div>';
   }
   function sandbox(){
-    var s=settings(),detailMode=state.depth==="detail",confirmMode=state.depth==="confirm";
-    var title=detailMode?"Execution details":confirmMode?"Confirm Enter":"Sandbox";
-    var intro=detailMode?"当前 Pane 的实际执行证据。":confirmMode?"确认进入新的隔离 Pane。":
-      "五类独立配置面板，通过策略 Tab 直接切换；不增加子页面或返回层级。";
-    var root=!(detailMode||confirmMode);
-    var first='<section class="workspace'+(root?' sandbox-tab-workspace':'')+
-      '" data-testid="sandbox-view"><div class="workspace-inner'+(root?' sandbox-tab-inner':'')+'">'+
-      (state.mode==="web"?'<div class="crumb">Workspace / '+state.session+' / '+title+'</div>':'')+
-      '<div class="titlebar"><div><h2>'+title+'</h2><p class="subline">'+intro+'</p></div></div>';
-    if(!root)return first+(detailMode?detail():confirmation())+'</div></section>';
-    var panel=state.tab==="overview"?(s.inside?insideView():draftView()):moduleView();
-    return first+'<div class="sandbox-tab-layout">'+tabNav()+
-      '<div role="tabpanel" id="sandbox-tab-panel" aria-labelledby="sandbox-tab-'+state.tab+
-      '" data-testid="sandbox-tab-panel" class="sandbox-tab-main">'+panel+'</div></div></div></section>';
+    if(!hasSession())return '<section class="workspace"><div class="workspace-inner">'+sectionHead("No selected Session","Sandbox is a Session-scoped capability. Images data remains Server-owned but has no global navigation here.")+'</div></section>';
+    var pane=s.depth==="confirm"?confirmation():s.depth==="detail"?evidence():s.area==="overview"?overview():s.area==="images"?imagesPanel():s.area==="workspaces"?workspacesPanel():policiesPanel();
+    var heading='<header class="cand-cap-header"><div class="cand-cap-title"><h2>Sandbox</h2><p>Session '+h(s.session)+' · Agent nession-dev'+(s.inside?" · Inside":" · Native")+'</p></div>'+nav()+'</header>';
+    return '<section class="workspace cand-workspace"><div class="workspace-inner cand-wide">'+heading+
+      (s.depth==="root"?pane:'<div class="cand-main">'+pane+'</div>')+'</div></section>';
   }
-  function otherCapability(){
-    var t=titles[state.cap]||"Workspace";
-    return '<section class="workspace"><div class="workspace-inner"><div class="crumb">'+(state.mode==="web"?'Workspace / '+state.session+' / ':'')+t+'</div><h2>'+t+'</h2><p class="subline">此画面仅为 Workspace 能力切换上下文占位，不模拟 '+t+' 的全部功能。切回 Sandbox 可保留 Session/Location 上下文。</p><div class="actionline"><button class="action" data-action="cap:sandbox" '+(state.fixture==="unsupported"?'disabled title="Sandbox unavailable"':'')+'>返回 Sandbox</button></div></div></section>';
+  function capsule(){
+    return '<div class="bottom-zone">'+(s.mode==="web"?'<button class="round" type="button" data-action="to-terminal" aria-label="Return Terminal">↩</button>':"")+
+      '<nav class="capsule workspace-cap" aria-label="Workspace capabilities"><div class="capsule-row">'+
+      '<button class="cap-item" data-action="open-sandbox" aria-current="page">⬡ Sandbox</button>'+
+      '<button class="cap-item" data-action="to-terminal">▣ Terminal</button></div></nav></div>';
   }
-  function workspace(){
-    var current=(state.cap==="sandbox"?sandbox():otherCapability());
-    if(state.mode==="app"){
-      var title=state.depth==="detail"?"Execution details":state.depth==="confirm"?"Confirm Enter":titles[state.cap];
-      return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="'+(state.depth==="detail"?'detail-back':state.depth==="confirm"?'cancel-enter':'terminal')+'" aria-label="Back">←</button><span class="app-title">'+title+'</span><span style="width:40px"></span></header><main class="app-body">'+current+'</main>'+zone()+'</div>';
-    }
-    return '<div class="main-content">'+current+'</div>'+zone();
-  }
-  function side(){
-    return '<aside class="sidebar"><div class="sidebar-head"><span class="wordmark">nession</span><span aria-hidden="true">☷</span></div>'+
+  function sidebar(){
+    return '<aside class="sidebar"><div class="sidebar-head"><span class="wordmark">nession</span><span class="minor">⌘</span></div>'+
       '<div class="side-label">Sessions</div>'+
-      '<button class="navrow '+(state.session==="sandbox-review"?'selected':'')+'" data-action="session:sandbox-review"><span>▣</span><span class="navtext">sandbox-review<br><span class="subtxt">shell · nession-dev</span></span></button>'+
-      '<button class="navrow '+(state.session==="native-debug"?'selected':'')+'" data-action="session:native-debug"><span>▣</span><span class="navtext">native-debug<br><span class="subtxt">shell · nession-dev</span></span></button>'+
-      '<div class="side-label">Projects</div><div class="navrow"><span>◫</span><span class="navtext">Nession</span></div>'+
-      '<div class="side-label">Agents</div><div class="navrow"><span>◉</span><span class="navtext">nession-dev<br><span class="subtxt">'+(settings().offline?'Offline':'Online')+'</span></span></div></aside>';
-  }
-  function sessions(){
-    return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="terminal" aria-label="Back to Terminal">←</button><span class="app-title">Sessions</span><span style="width:40px"></span></header><main class="app-body"><h2>Sessions</h2><p class="subline">Today</p><div class="info-section"><button class="navrow" data-action="session:sandbox-review"><span>▣</span><span>sandbox-review · nession-dev</span></button><button class="navrow" data-action="session:native-debug"><span>▣</span><span>native-debug · nession-dev</span></button></div></main></div>';
+      '<button class="navrow '+(s.session==="sandbox-review"?"selected":"")+'" data-action="session:sandbox-review"><span>▣</span><span class="navtext">sandbox-review<br><small>Nession project · nession-dev</small></span></button>'+
+      '<button class="navrow '+(s.session==="fix-terminal"?"selected":"")+'" data-action="session:fix-terminal"><span>▣</span><span class="navtext">fix-terminal<br><small>No project · nession-dev</small></span></button>'+
+      '<div class="side-label">Projects</div><div class="navrow">◫ Nession</div>'+
+      '<div class="side-label">Agents</div><div class="navrow">◉ nession-dev · '+(online()?"online":"offline")+'</div></aside>';
   }
   function render(){
-    // Full-rebuild mock: retain each strategy Tab's vertical scroll position
-    // and the App horizontal strip's scroll offset across value edits.
-    var prevScroller=mock.querySelector('.sandbox-tab-main')||mock.querySelector('.app-body');
-    if(prevScroller)tabScrollPositions[lastRenderedTab]=prevScroller.scrollTop;
-    var oldNav=mock.querySelector('.sandbox-tab-nav'),navLeft=oldNav?oldNav.scrollLeft:0;
-    var content=state.surface==="workspace"?workspace():state.surface==="sessions"?sessions():terminal();
-    mock.setAttribute("data-mode",state.mode);
-    mock.innerHTML=state.mode==="web"?'<div class="shell">'+side()+'<main class="main">'+content+'</main></div>':content;
-    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),selected_policy_group:state.tab,tab_navigation_depth:"root; no history push",show_policy_json:state.showPolicyJson,composition:compositionClusters.map(function(cluster){return {cluster:cluster.label,dimensions:cluster.groups.map(function(key){return compositionState(settings().inside?actualPolicy():state.draft,key,settings().inside)})}}),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
-    var nextScroller=mock.querySelector('.sandbox-tab-main')||mock.querySelector('.app-body');
-    if(nextScroller)nextScroller.scrollTop=tabScrollPositions[state.tab]||0;
-    var nextNav=mock.querySelector('.sandbox-tab-nav');
-    if(nextNav)nextNav.scrollLeft=navLeft;
-    if(state.tabNeedsReveal&&nextNav){
-      var active=nextNav.querySelector('.sandbox-tab[aria-selected="true"]');
-      active?.scrollIntoView?.({block:"nearest",inline:"nearest"});
+    var prev=view.querySelector(".cand-main");
+    var y=prev?prev.scrollTop:0;
+    var main=s.surface==="terminal"?terminal():sandbox();
+    view.setAttribute("data-mode",s.mode);
+    view.innerHTML=s.mode==="web"?
+      '<div class="shell">'+sidebar()+'<main class="main"><div class="main-content">'+main+'</div>'+capsule()+'</main></div>':
+      '<div class="app"><header class="app-header"><button class="arrow" type="button" data-action="'+(s.depth!=="root"?"cancel-detail":s.surface==="workspace"?"to-terminal":"to-sessions")+'" aria-label="Back">←</button>'+
+      '<span class="app-title">'+(s.surface==="terminal"?h(s.session):"Sandbox")+'</span><span class="minor">nession-dev</span></header>'+
+      '<main class="app-body">'+main+'</main>'+(s.surface==="workspace"?capsule():"")+'</div>';
+    if(inspector)inspector.textContent=JSON.stringify({mode:s.mode,selected_session:s.session,area:s.area,sub:s.sub,fixture:s.fixture,inside:s.inside,
+      selected_workspace:s.selectedWorkspace,workspace_inventory:s.workspaces,images_registry:s.images.map(function(x){return {name:x.name,digest:x.digest,status:x.status};}),
+      mock_preflight:s.preflight,filesystem:effectiveDraft().filesystem},null,2);
+    if(s.mode==="web"){
+      var current=view.querySelector(".cand-main");
+      if(current)current.scrollTop=y;
     }
-    state.tabNeedsReveal=false;
-    lastRenderedTab=state.tab;lastRenderedMode=state.mode;
-    var target=mock.querySelector('.cap-item[aria-current="page"]');
-    if(target&&typeof target.scrollIntoView==="function")target.scrollIntoView({inline:"nearest",block:"nearest"});
   }
-
-  function setFixture(value){
-    state.fixture=value;
-    state.nativeFixture=value;
-    state.peek=false;
-    state.depth="root";
-    state.preflight="none";
-    state.preflightError="";
-    state.error="";
-    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.tab="overview";state.tabNeedsReveal=true;tabScrollPositions={};state.openGroup="filesystem";state.showPolicyJson=false;
-    state.entered=false;
-    state.pane=(value==="active"||value==="prepared")?"sandbox":"native";
-    state.effective=value==="prepared"?cloneDraft(preparedEffective):value==="active"?cloneDraft(activeEffective):null;
-    if(value==="macos"){state.draft.network="deny";state.draft.readOnly="";state.draft.write="";state.draft.pathItems={readOnly:[],write:[]};state.draft.pid=false;state.draft.ipc=false;state.draft.user=false;state.draft.uts=false;state.draft.cgroup=false;state.draft.resourceRows=[];state.draft.syscallRows=[];}
-    document.querySelectorAll("[data-fixture]").forEach(function(button){button.setAttribute("aria-pressed",String(button.getAttribute("data-fixture")===value));});
-    render();
-  }
-  function updateModuleControl(t){
-    if(!t||!t.hasAttribute)return false;
-    var kind=t.getAttribute("data-kv-kind");
-    if(kind==="resource"||kind==="syscall"){
-      var row=state.draft[kind+"Rows"].find(function(r){return String(r.id)===t.getAttribute("data-kv-id")});
-      var prop=t.getAttribute("data-kv-field");
-      if(!row||(prop!=="key"&&prop!=="value"))return false;
-      row[prop]=t.value;return true;
-    }
-    var list=t.getAttribute("data-collection");
-    if(list==="path"||list==="network"){
-      var field=t.getAttribute("data-list-name"),idx=Number(t.getAttribute("data-list-index"));
-      var rows=list==="path"?state.draft.pathItems:state.draft.networkRules;
-      if(!rows[field]||idx<0||idx>=rows[field].length)return false;
-      rows[field][idx]=t.value;
-      if(list==="path")state.draft[field]=rows[field].join(",");
-      else state.draft[field==="allow"?"egress":"denyEgress"]=rows[field].join(",");
+  function dirty(){s.preflight="none";s.error="";s.notice="";}
+  function handleField(t){
+    var fieldName=t.getAttribute("data-field");
+    if(fieldName){
+      var val=t.value;
+      if(fieldName==="newWorkspaceName")s.newWorkspaceName=val;
+      else if(fieldName==="selectedWorkspace"){s.selectedWorkspace=val;dirty();}
+      else if(["rootMode","rootImage","toolTarget","readPaths","writePaths","home","network","cgroup"].includes(fieldName)){
+        s[fieldName]=val;dirty();
+      }
       return true;
     }
-    if(t.hasAttribute("data-sandbox-profile")){
-      state.draft.syscallRows=t.value?[{id:state.nextRowId++,key:"seccomp.profile",value:t.value}]:[];
-      return true;
-    }
-    var field=t.getAttribute("data-draft");
-    if(Object.prototype.hasOwnProperty.call(state.draft,field)){
-      state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;return true;
-    }
+    if(t.hasAttribute("data-tool")){var id=t.getAttribute("data-tool");s.tools=t.checked?Array.from(new Set(s.tools.concat(id))):s.tools.filter(function(x){return x!==id;});dirty();return true;}
+    if(t.hasAttribute("data-ns")){s.namespace[t.getAttribute("data-ns")]=t.checked;dirty();return true;}
+    if(t.hasAttribute("data-seccomp")){s.seccomp=t.checked;dirty();return true;}
     return false;
   }
-  mock.addEventListener("input",function(e){
-    if(!updateModuleControl(e.target))return;
-    state.preflight="none";state.preflightError="";state.error="";
-    var proof=mock.querySelector('[data-preflight-status]');if(proof)proof.hidden=true;
-    var enter=mock.querySelector('[data-action="enter"]');if(enter)enter.disabled=true;
-  });
-  mock.addEventListener("change",function(e){
-    if(!updateModuleControl(e.target))return;
-    state.preflight="none";state.preflightError="";state.error="";
-    render();
-  });
-  mock.addEventListener("click",function(e){
-    var button=e.target.closest("[data-action]");
-    if(!button||button.disabled)return;
-    var action=button.getAttribute("data-action");
-    if(action==="workspace"||action==="open-from-peek"){state.surface="workspace";state.cap="sandbox";state.depth="root";state.peek=false;}
-    else if(action==="terminal"){state.surface="terminal";state.depth="root";state.peek=false;}
-    else if(action==="sessions"){state.surface="sessions";state.peek=false;}
-    else if(action==="toggle-peek"){state.peek=!state.peek;}
-    else if(action==="detail"){state.depth="detail";}
-    else if(action==="detail-back"){state.depth="root";}
-    else if(action.indexOf("select-tab:")===0){
-      var group=action.slice("select-tab:".length);
-      if(sandboxTabs.includes(group)){state.tab=group;state.tabNeedsReveal=true;if(group!=="overview")state.openGroup=group;}
+  function doAction(a){
+    if(a.indexOf("area:")===0){s.area=a.slice(5);s.depth="root";return;}
+    if(a.indexOf("sub:")===0){var p=a.split(":");if(subs[p[1]]&&subs[p[1]].some(function(x){return x[0]===p[2];})){s.area=p[1];s.sub[p[1]]=p[2];}return;}
+    if(a.indexOf("policy:")===0){s.area="policies";s.sub.policies=a.slice(7);return;}
+    if(a==="open-sandbox"){s.surface="workspace";s.depth="root";return;}
+    if(a==="to-terminal"){s.surface="terminal";s.depth="root";return;}
+    if(a==="to-sessions"){s.surface="terminal";return;}
+    if(a.indexOf("session:")===0){
+      s.session=a.slice(8);s.selectedWorkspace=s.session==="sandbox-review"?"project:nession":"auto";
+      s.surface="workspace";s.area="overview";s.depth="root";s.inside=false;dirty();return;
     }
-    else if(action.indexOf("add-path:")===0){
-      var key=action.slice(9);
-      if((key==="readOnly"||key==="write")&&implementation("filesystem.access").status==="available"){
-        state.draft.pathItems[key].push("");
-        state.preflight="none";state.preflightError="";state.error="";
+    if(a.indexOf("image:")===0){s.selectedImage=a.slice(6);return;}
+    if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
+    if(a.indexOf("image-tool:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Toolchain"&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.area="policies";s.sub.policies="filesystem";dirty();}return;}
+    if(a==="build-start"){
+      var id="build-"+(121+s.builds.length);
+      s.builds.unshift({id:id,name:"prototype-build-"+(s.builds.length+1),status:"building",detail:"Synthetic worker assembling EROFS"});
+      s.sub.images="builds";return;
+    }
+    if(a.indexOf("build-complete:")===0){
+      var b=s.builds.find(function(x){return x.id===a.slice(15);});
+      if(b){b.status="completed";b.detail="Digest published in Server registry (mock)";s.images.push(image("built"+s.builds.length,b.name,"Toolchain","e"));}
+      return;
+    }
+    if(a.indexOf("cache:")===0){if(online()){s.cache[a.slice(6)]="verified";s.notice="Simulated cache verified on current Agent";}return;}
+    if(a.indexOf("ws-use:")===0){if(isEditable()&&s.workspaces.some(function(w){return w.id===a.slice(7);})){s.selectedWorkspace=a.slice(7);dirty();}return;}
+    if(a==="ws-auto"){
+      if(!isEditable())return;
+      s.selectedWorkspace="auto";ensureAutoWorkspace();s.sub.workspaces="details";dirty();return;
+    }
+    if(a==="ws-create"){
+      if(!isEditable())return;
+      var name=s.newWorkspaceName.trim();
+      if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)){s.notice="Enter a valid workspace name: letters, digits, dot, underscore or hyphen.";return;}
+      var old=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===name;});
+      if(old){s.selectedWorkspace=old.id;s.notice="Reused existing named Managed Workspace “"+name+"”.";}
+      else{
+        var id="ws:manual:"+String(s.workspaces.length+1);
+        s.workspaces.push({id:id,name:name,kind:"managed",project:"—",path:"Agent-managed / "+id,status:"available"});
+        s.selectedWorkspace=id;s.notice="Created named Managed Workspace “"+name+"” (mock).";
       }
+      s.newWorkspaceName="";dirty();return;
     }
-    else if(action.indexOf("remove-path:")===0){
-      var parts=action.split(":"),key=parts[1],at=Number(parts[2]);
-      if((key==="readOnly"||key==="write")&&implementation("filesystem.access").status==="available"){
-        state.draft.pathItems[key].splice(at,1);
-        state.draft[key]=state.draft.pathItems[key].join(",");
-        state.preflight="none";state.preflightError="";state.error="";
-      }
+    if(a.indexOf("ws-delete:")===0){if(isEditable())s.deletePending=a.slice(10);return;}
+    if(a==="ws-delete-cancel"){s.deletePending=null;return;}
+    if(a==="ws-delete-confirm"){
+      var w=s.workspaces.find(function(x){return x.id===s.deletePending;});
+      if(w&&w.kind==="managed"&&s.selectedWorkspace!==w.id){s.workspaces=s.workspaces.filter(function(x){return x.id!==w.id;});s.notice="Simulated Workspace resource deleted";}
+      s.deletePending=null;return;
     }
-    else if(action.indexOf("add-network:")===0){
-      var key=action.slice(12);
-      if((key==="allow"||key==="deny")&&implementation("network").status==="available"&&optionSupport("network","restricted").status==="available"){
-        state.draft.networkRules[key].push("");
-        state.preflight="none";state.preflightError="";state.error="";
-      }
+    if(a==="validate"){var error=check();s.preflight=error?"failed":"passed";s.error=error;return;}
+    if(a==="enter"){if(s.preflight==="passed"&&!s.inside)s.depth="confirm";return;}
+    if(a==="cancel-enter"||a==="cancel-detail"){s.depth="root";return;}
+    if(a==="confirm-enter"){
+      var error=check();
+      if(error){s.preflight="failed";s.error=error;s.depth="root";return;}
+      if(s.fixture==="enter-fail"){s.preflight="failed";s.error="Mock mount preparation failed; Native Pane remains selected.";s.depth="root";return;}
+      ensureAutoWorkspace();s.effective=effectiveDraft();s.inside=true;s.depth="root";s.area="overview";s.preflight="none";
+      s.notice="Simulated sandbox verified; current Pane entered, Native Pane retained.";return;
     }
-    else if(action.indexOf("remove-network:")===0){
-      var parts=action.split(":"),key=parts[1],at=Number(parts[2]);
-      if((key==="allow"||key==="deny")&&implementation("network").status==="available"&&optionSupport("network","restricted").status==="available"){
-        state.draft.networkRules[key].splice(at,1);
-        state.draft[key==="allow"?"egress":"denyEgress"]=state.draft.networkRules[key].join(",");
-        state.preflight="none";state.preflightError="";state.error="";
-      }
-    }
-    else if(action.indexOf("resource-add:")===0){
-      var key=action.slice("resource-add:".length);
-      if(implementation("resource.cgroup_v2").status==="available"&&agentFieldCatalog().resource.some(function(x){return x.key===key})&&!state.draft.resourceRows.some(function(x){return x.key===key})){
-        state.draft.resourceRows.push({id:state.nextRowId++,key:key,value:""});
-        state.preflight="none";state.preflightError="";state.error="";
-      }
-    }
-    else if(action==="toggle-policy-json"){state.showPolicyJson=!state.showPolicyJson;}
-    else if(action.indexOf("add-kv:")===0){
-      var kind=action.slice(7);
-      if((kind==="resource"||kind==="syscall")&&settings().supported&&!settings().macos){
-        state.draft[kind+"Rows"].push({id:state.nextRowId++,key:"",value:""});state.openGroup=kind;
-        state.preflight="none";state.preflightError="";state.error="";
-      }
-    }
-    else if(action.indexOf("remove-kv:")===0){
-      var args=action.split(":");var kind=args[1];
-      if((kind==="resource"||kind==="syscall")&&settings().supported&&!settings().macos){
-        state.draft[kind+"Rows"]=state.draft[kind+"Rows"].filter(function(row){return String(row.id)!==args[2]});
-        state.preflight="none";state.preflightError="";state.error="";
-      }
-    }
-    else if(action==="validate"){
-      var err=preflight();state.preflight=err?"failed":"passed";state.preflightError=err;state.error="";
-    }
-    else if(action==="enter"){
-      if(state.preflight==="passed"&&settings().supported)state.depth="confirm";
-    }
-    else if(action==="cancel-enter"){state.depth="root";}
-    else if(action==="confirm-enter"){
-      var validationError=preflight();
-      if(state.preflight!=="passed"||validationError){state.preflight="failed";state.preflightError=validationError||"预检状态已过期";state.depth="root";}
-      else if(settings().enterFail){state.error="Agent 启动屏障验证失败（模拟）。未切换 Pane";state.depth="root";}
-      else if(state.fixture==="kernel-reject"&&state.draft.resourceRows.length){
-        state.error="Linux kernel write cpu.weight: EINVAL (Invalid argument)（模拟）。受管子 cgroup 已回滚，原 Native Pane 未修改";
-        state.depth="root";
-      }
-      else{state.effective=cloneDraft(state.draft);state.entered=true;state.pane="sandbox";state.depth="root";state.preflight="none";state.error="";}
-    }
-    else if(action==="return-native"){state.pane="native";state.fixture=state.nativeFixture||"native";state.depth="root";state.preflight="none";state.error="";}
-    else if(action==="switch-sandbox"){if(state.entered){state.pane="sandbox";state.depth="root";}}
-    else if(action.indexOf("cap:")===0){state.cap=action.slice(4);state.depth="root";}
-    else if(action.indexOf("session:")===0){
-      var name=action.slice(8);state.session=name;state.surface="terminal";state.depth="root";state.peek=false;
-      setFixture(name==="native-debug"?"native":"active");return;
-    }
-    render();
-  });
-  // Accessible tab keyboard behavior: arrows move across peers, Home/End jump.
-  // No browser-history change and no App depth pushed by a Tab selection.
-  mock.addEventListener("keydown",function(e){
-    var target=e.target?.closest?.("[data-sandbox-tab]");
-    if(!target)return;
-    var index=sandboxTabs.indexOf(target.getAttribute("data-sandbox-tab"));
-    if(index<0)return;
-    var next=e.key==="Home"?0:e.key==="End"?sandboxTabs.length-1:
-      (e.key==="ArrowRight"||e.key==="ArrowDown")?(index+1)%sandboxTabs.length:
-      (e.key==="ArrowLeft"||e.key==="ArrowUp")?(index-1+sandboxTabs.length)%sandboxTabs.length:-1;
-    if(next<0)return;
-    e.preventDefault?.();
-    state.tab=sandboxTabs[next];state.tabNeedsReveal=true;
-    if(state.tab!=="overview")state.openGroup=state.tab;
-    render();
-    mock.querySelector('[data-sandbox-tab="'+state.tab+'"]')?.focus?.();
-  });
-  root.querySelectorAll("[data-fixture]").forEach(function(button){
-    button.addEventListener("click",function(){setFixture(button.getAttribute("data-fixture"));});
-  });
-  function resize(width){
-    state.mode=width>=600?"web":"app";
-    if(state.mode!==lastRenderedMode)state.tabNeedsReveal=true;
-    device.style.setProperty("--np-device-height",state.mode==="web"?"760px":"844px");
-    if(state.mode==="app"&&state.surface==="sessions")state.surface="terminal";
-    render();
+    if(a==="return-native"){s.inside=false;s.preflight="none";s.depth="root";s.area="overview";return;}
+    if(a==="detail"){s.depth="detail";return;}
   }
-  root.addEventListener("np:resize",function(e){resize(e.detail.width);});
-  resize(1180);
+  view.addEventListener("click",function(e){
+    var b=e.target.closest("[data-action]");
+    if(!b||b.disabled)return;
+    doAction(b.getAttribute("data-action"));
+    render();
+  });
+  view.addEventListener("input",function(e){if(!handleField(e.target))return;
+    var err=view.querySelector(".cand-alert.success");if(err)err.hidden=true;
+    var enter=view.querySelector('[data-action="enter"]');if(enter)enter.disabled=true;
+  });
+  view.addEventListener("change",function(e){if(handleField(e.target))render();});
+  root.querySelectorAll("[data-fixture]").forEach(function(b){
+    b.addEventListener("click",function(){
+      var newFixture=b.getAttribute("data-fixture");
+      var previous=s;
+      s=defaults();s.width=previous.width;s.mode=previous.mode;
+      s.fixture=newFixture;
+      if(newFixture==="inside"){s.inside=true;s.effective=effectiveDraft();}
+      if(newFixture==="macos"){s.namespace={pid:false,ipc:false,user:false,uts:false,cgroup:false};s.network="deny";}
+      if(newFixture==="no-session"){s.surface="terminal";}
+      root.querySelectorAll("[data-fixture]").forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});
+      render();
+    });
+  });
+  root.addEventListener("np:resize",function(e){
+    s.width=Number(e.detail.width);s.mode=s.width>=600?"web":"app";
+    device.style.setProperty("--np-device-height",s.mode==="web"?"760px":"844px");
+    render();
+  });
+  // Frame initializes after this script, dispatching initial resize.
+  window.__sandboxPrototype={getState:function(){return s;},reset:function(){s=defaults();render();},validate:check};
+  render();
 })();
