@@ -18,7 +18,8 @@
   ];
   function initialWorkspaces(){return [
     {id:"project:nession",name:"Nession · Existing Location",kind:"project_location",project:"Nession",path:"/home/dev/projects/nession",status:"available"},
-    {id:"ws:prior",name:"investigate-build",kind:"managed",project:"—",path:"Agent managed · ws:prior",status:"available"}
+    {id:"ws:prior",name:"investigate-build",kind:"managed",project:"—",path:"Agent managed · ws:prior",status:"available"},
+    {id:"ws:busy",name:"shared-build",kind:"managed",project:"—",path:"Agent managed · ws:busy",status:"in_use"}
   ];}
   function defaults(){
     return {mode:"web",width:1180,surface:"workspace",session:"sandbox-review",fixture:"linux",area:"overview",
@@ -27,7 +28,7 @@
       builds:[{id:"build-120",name:"nession-source",status:"completed",detail:"Digest verified and registered"}],
       cache:{base:"verified",rust:"absent",node:"absent",source:"verified"},
       workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
-      rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",readPaths:"",writePaths:"",
+      rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",workspaceLower:false,readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
       step:0};
@@ -83,7 +84,7 @@
   function effectiveDraft(){
     var w=resolveDefault(), mounted=s.tools.map(function(id){var im=imageBy(id);return {source:im?im.digest:"missing",target:id==="rust"?s.toolTarget:"/opt/node",read_only:true};});
     return {filesystem:{rootfs:{source:s.rootMode==="host"?{kind:"host"}:{kind:"image",digest:imageBy(s.rootImage).digest},implicit_target:"/"},
-      mounts:mounted,workspace:{source:w?{kind:w.kind,id:w.id,name:w.name}:null,implicit_target:"/workspace"},
+      mounts:mounted,workspace:{source:w?{kind:w.kind,id:w.id,name:w.name}:null,implicit_target:"/workspace",mount_mode:s.workspaceLower?"overlay":"bind",lower_image:s.workspaceLower?imageBy("source").digest:null},
       access:{read:s.readPaths.split("\n").filter(Boolean),write:s.writePaths.split("\n").filter(Boolean)},
       home:{kind:s.home}},network:{mode:s.network},
       linux_namespace:Object.assign({},s.namespace),cgroup_v2:s.cgroup?{"memory.max":s.cgroup}:{},seccomp:s.seccomp?{profile:"nession-interactive-v1"}:null};
@@ -105,6 +106,9 @@
     if(s.seccomp&&nativeStatus("seccomp").state!=="available")return "seccomp unavailable on current Agent.";
     if(s.cgroup&&nativeStatus("cgroup_v2").state!=="available")return "cgroup_v2 unavailable on current Agent.";
     if(Object.keys(s.namespace).some(function(k){return s.namespace[k]})&&nativeStatus("linux_namespace").state!=="available")return "linux_namespace unavailable on current Agent.";
+    if(s.workspaceLower&&s.rootMode!=="image")return "Workspace EROFS lower requires an EROFS RootFS in current V1.";
+    if(s.workspaceLower&&resolveDefault().kind!=="managed")return "EROFS Overlay Lower requires an Agent-managed writable Workspace; Project Location is bound directly.";
+    if(s.workspaceLower&&macos())return "Workspace Overlay mounting is not supported by this macOS Agent.";
     if(s.selectedWorkspace!=="auto"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
     if(s.selectedWorkspace!=="auto"&&currentWorkspace().status!=="available")return "Selected Workspace is not currently available.";
     return "";
@@ -185,8 +189,8 @@
         (w.kind==="project_location"?" · "+h(w.path):" · Agent-managed persistent")+'</small>'+
         '<small>'+h(w.project||"—")+' · nession-dev'+(selected?" · Selected for /workspace":"")+'</small></div>'+
         statusChip(online()?w.status:"unknown")+
-        action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside)+
-        (w.kind==="managed"?action("Delete","ws-delete:"+w.id,"danger",selected||!online()||s.inside):"")+'</div>';
+        action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside||w.status!=="available")+
+        (w.kind==="managed"?action("Delete","ws-delete:"+w.id,"danger",selected||w.status!=="available"||!online()||s.inside):"")+'</div>';
     }).join("");
     var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
     return (s.notice?alert(s.notice):"")+sectionHead("Agent Workspaces","可命名、可发现、可复用。Workspace 资源数据由当前 Agent 管理。")+
@@ -238,6 +242,8 @@
     }).join("")+'</select>';
     var workspace=card("Writable Workspace · implicit /workspace","Managed volumes can be reused after Sandbox and Session exit; Project Location is user-owned.",
       field("Workspace source",wsSelect,"Explicit choice > Project's current Agent location > named managed get-or-create")+
+      '<label class="cand-check"><input type="checkbox" data-workspace-lower'+(s.workspaceLower?" checked":"")+(locked||!w||w.kind!=="managed"?" disabled":"")+'> Use Project Source EROFS as read-only lower + durable writable Overlay upper</label>'+
+      (s.workspaceLower?'<p class="cand-help">Lower: nession-source ('+short(imageBy("source").digest)+') · Upper/Work: Managed Workspace (Agent-owned, persistent)</p>':"")+
       '<div class="cand-facts">'+meta("Resolved source",w?w.name:"—")+meta("Map target","/workspace (implicit)")+meta("Owner",w&&w.kind==="project_location"?"External / Project Location":"Agent Workspace Manager")+'</div>'+
       '<div class="cand-actions">'+action("Manage Workspaces","area:workspaces")+'</div>');
     var access=card("Host path access · identity mapping","Read/write preserve existing semantics: an Agent path P maps to the same P in Sandbox.",
@@ -255,7 +261,7 @@
       card("Resulting mount view","Observed only after verified Enter; before then this is a draft composition preview.",
         '<div class="cand-map"><div><code>/</code><span>← '+(s.rootMode==="image"?"Base Runtime EROFS · ro":"Host root view")+'</span></div>'+
         s.tools.map(function(id){return '<div><code>'+h(id==="rust"?s.toolTarget:"/opt/node")+'</code><span>← '+h(imageBy(id).name)+' · ro</span></div>';}).join("")+
-        '<div><code>/workspace</code><span>← '+h(workspaceName())+' · rw</span></div><div><code>/home</code><span>← '+h(s.home==="ephemeral"?"tmpfs":"proposed Session directory")+'</span></div></div>');
+        '<div><code>/workspace</code><span>← '+h(workspaceName())+(s.workspaceLower?" · EROFS lower + persistent Overlay":" · rw bind")+'</span></div><div><code>/home</code><span>← '+h(s.home==="ephemeral"?"tmpfs":"proposed Session directory")+'</span></div></div>');
   }
   function networkPanel(){
     var locked=!isEditable();
@@ -363,6 +369,7 @@
     if(t.hasAttribute("data-tool")){var id=t.getAttribute("data-tool");s.tools=t.checked?Array.from(new Set(s.tools.concat(id))):s.tools.filter(function(x){return x!==id;});dirty();return true;}
     if(t.hasAttribute("data-ns")){s.namespace[t.getAttribute("data-ns")]=t.checked;dirty();return true;}
     if(t.hasAttribute("data-seccomp")){s.seccomp=t.checked;dirty();return true;}
+    if(t.hasAttribute("data-workspace-lower")){s.workspaceLower=t.checked;dirty();return true;}
     return false;
   }
   function doAction(a){
