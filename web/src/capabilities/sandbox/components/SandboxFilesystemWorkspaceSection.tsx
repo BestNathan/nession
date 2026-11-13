@@ -26,11 +26,13 @@ function ManagedWorkspacePicker({
   inventory,
   managed,
   disabledReason,
+  nameDisabledReason,
   onChange,
 }: {
   inventory: AgentWorkspacesState;
   managed: Extract<SandboxFilesystemWorkspace, { kind: 'managed' }> | null;
   disabledReason: string | null;
+  nameDisabledReason: string | null;
   onChange: (workspace: SandboxFilesystemWorkspace | undefined) => void;
 }) {
   const [nameDraft, setNameDraft] = useState(managed?.name ?? '');
@@ -74,7 +76,7 @@ function ManagedWorkspacePicker({
           aria-label="New Workspace name"
           data-testid="sandbox-workspace-name"
           autoComplete="off"
-          disabled={disabledReason !== null}
+          disabled={nameDisabledReason !== null}
           onChange={(event) => setNameDraft(event.target.value)}
         />
         <Button
@@ -82,7 +84,7 @@ function ManagedWorkspacePicker({
           size="sm"
           variant="outline"
           data-testid="sandbox-workspace-use-name"
-          disabled={disabledReason !== null || nameDraft.trim().length === 0}
+          disabled={nameDisabledReason !== null || nameDraft.trim().length === 0}
           onClick={() => onChange({ kind: 'managed', name: nameDraft.trim() })}
         >
           Use name
@@ -166,11 +168,11 @@ export function SandboxFilesystemWorkspaceSection({
 }: SandboxFilesystemWorkspaceProps) {
   const inventory = useAgentWorkspaces(sessionId);
   const managed = workspace?.kind === 'managed' ? workspace : null;
-  const disabledReason = !rootfsIsImage
+  const rootfsReason = !rootfsIsImage
     ? 'A Workspace selection requires an image RootFS; choose a Base Runtime image in RootFS first.'
-    : inventory.error
-      ? inventory.error
-      : null;
+    : null;
+  const pickerReason = rootfsReason ?? inventory.error;
+  const disabledReason = rootfsReason ?? inventory.error;
 
   return (
     <FormSection
@@ -197,7 +199,7 @@ export function SandboxFilesystemWorkspaceSection({
           variant={workspace?.kind === 'auto' ? 'secondary' : 'outline'}
           className="justify-start"
           data-testid="sandbox-workspace-auto"
-          disabled={disabledReason !== null}
+          disabled={rootfsReason !== null}
           onClick={() => onChange({ kind: 'auto' })}
         >
           Auto by Session name
@@ -220,7 +222,8 @@ export function SandboxFilesystemWorkspaceSection({
           <ManagedWorkspacePicker
             inventory={inventory}
             managed={managed}
-            disabledReason={disabledReason}
+            disabledReason={pickerReason}
+            nameDisabledReason={rootfsReason}
             onChange={onChange}
           />
         )}
