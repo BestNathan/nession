@@ -414,6 +414,35 @@ describe('terminal clipboard protocol (#2598)', () => {
     expect(decodeSent(sent[sent.length - 1]).metadata).toBe('type=read:status=EPERM');
   });
 
+  it('refuses a MIME listing after the client loses authorization (#3395)', () => {
+    const { protocol, sent, setAuthorized } = harness();
+    protocol.setPasteEventMode(true);
+    protocol.userPasted({ text: 'hi', images: [{ mime: 'image/png', bytes: Uint8Array.from([9]) }] });
+    sent.length = 0;
+    setAuthorized(false);
+
+    protocol.handleOsc5522(`type=read;${encodeBase64Text('.')}`, LIVE);
+
+    // A stale offer must not disclose its MIME types to a client that is no
+    // longer the authorized Controller: no OK, no DATA, no DONE.
+    expect(sent.map((frame) => decodeSent(frame).metadata)).toEqual(['type=read:status=EPERM']);
+  });
+
+  it('refuses an offered payload after the client loses authorization (#3395)', () => {
+    const { protocol, sent, setAuthorized } = harness({ password: 'pw' });
+    protocol.setPasteEventMode(true);
+    protocol.userPasted({ text: 'hi' });
+    sent.length = 0;
+    setAuthorized(false);
+
+    protocol.handleOsc5522(bare(formatOsc5522([
+      ['type', 'read'],
+      ['pw', encodeBase64Text('pw')],
+    ], encodeBase64Text('text/plain'))), LIVE);
+
+    expect(sent.map((frame) => decodeSent(frame).metadata)).toEqual(['type=read:status=EPERM']);
+  });
+
   it('states an unsupported image paste and sends nothing when the mode is off', () => {
     const { protocol, effects, sent } = harness();
     protocol.userPasted({ images: [{ mime: 'image/png', bytes: Uint8Array.from([1]) }] });
