@@ -170,8 +170,17 @@ export function validateCaseRecord(raw) {
 // A digest of user-controlled fields alone is not an attestation.
 export function sourceRunIdentity(event, repository) {
   const run = event?.workflow_run;
-  if (!run || run.name !== 'Acceptance / Cases') {
+  // GitHub's completed workflow_run event reports the dynamic run-name in
+  // workflow_run.name, not the source workflow's static declaration name.
+  // Issue-comment requests intentionally have a comment-bound run title; do
+  // not lose their ingestion, but accept only the exact authenticated family.
+  const commentRun = /^Comment Case #([1-9][0-9]*) (SC-[0-9]{2,}) comment:([1-9][0-9]*)$/
+    .exec(run?.name ?? '');
+  if (!run || (run.name !== 'Acceptance / Cases' && !commentRun)) {
     throw new Error('expected a completed Acceptance / Cases workflow_run event');
+  }
+  if (commentRun && (run.event !== 'workflow_dispatch' || run.head_branch !== 'main')) {
+    throw new Error('comment-named Case source requires trusted main workflow_dispatch');
   }
   if (run.status !== 'completed' || !['success', 'failure'].includes(run.conclusion)) {
     throw new Error('source Acceptance / Cases run has no terminal supported conclusion');
@@ -206,6 +215,10 @@ export function sourceRunIdentity(event, repository) {
     head_sha: sourceSha,
     head_branch: branch,
     workflow_id: positiveInt(run.workflow_id, 'workflow_run.workflow_id'),
+    ...(commentRun ? { comment_case: {
+      issue: Number(commentRun[1]), criterion: commentRun[2],
+      comment_id: Number(commentRun[3]),
+    } } : {}),
   };
 }
 
@@ -269,6 +282,10 @@ function assertRunIdentity(record, source) {
   const item = validateCaseRecord(record);
   if (item.run_id !== source.run_id || item.run_attempt !== source.run_attempt) {
     throw new Error('Case record run identity disagrees with triggering workflow_run');
+  }
+  if (source.comment_case && (item.issue !== source.comment_case.issue ||
+      item.criterion !== source.comment_case.criterion)) {
+    throw new Error('Case record Issue/SC differs from GitHub-authenticated comment Run name');
   }
   return item;
 }
@@ -877,6 +894,43 @@ async function selfTest() {
     path: '.github/workflows/acceptance-cases.yml',
     id: 100, run_attempt: 1, workflow_id: 9,
   }};
+  // Dynamic comment run names are GitHub-owned dispatch metadata, never an
+  // alternative source Workflow/path/branch identity. Test both good and
+  // hostile completed workflow_run payloads with the original Case record.
+  const commentEvent = { workflow_run: {
+    ...fixtureEvent.workflow_run,
+    name: 'Comment Case #1474 SC-14 comment:999',
+    head_branch: 'main', event: 'workflow_dispatch',
+  } };
+  const commentSource = sourceRunIdentity(commentEvent, 'BestNathan/nession');
+  assert.deepEqual(commentSource.comment_case, {
+    issue: 1474, criterion: 'SC-14', comment_id: 999,
+  });
+  assert.equal(assertSourceBoundRecord({ ...valid, stage: 'post-merge' }, commentSource).issue, 1474);
+  assert.throws(() => assertSourceBoundRecord({ ...valid, stage: 'post-merge',
+    criterion: 'SC-15' }, commentSource), /GitHub-authenticated comment Run name/);
+  assert.throws(() => assertSourceBoundRecord({ ...valid, stage: 'post-merge',
+    issue: 1700 }, commentSource), /GitHub-authenticated comment Run name/);
+  for (const name of [
+    'Comment Case #1474 SC-14 comment:999 extra',
+    'Comment Case #1474 SC-14 comment:0',
+    'Comment Case #bad SC-14 comment:999',
+    'Comment Case #1474 SC-14 comment:999\\ninjected',
+    'Unrelated Workflow',
+  ]) {
+    assert.throws(() => sourceRunIdentity({
+      workflow_run: { ...commentEvent.workflow_run, name },
+    }, 'BestNathan/nession'), /expected a completed Acceptance/);
+  }
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, event: 'push',
+  } }, 'BestNathan/nession'), /trusted main workflow_dispatch/);
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, head_branch: 'staging',
+  } }, 'BestNathan/nession'), /trusted main workflow_dispatch/);
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, path: '.github/workflows/untrusted.yml',
+  } }, 'BestNathan/nession'), /unexpected source workflow definition path/);
   // Exercise the actual attest path without credentials: a fetched source commit
   // must contain the exact Case tree claimed by the immutable record.
   const sourceTree = 'f'.repeat(40);
