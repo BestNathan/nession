@@ -171,6 +171,17 @@ impl WorkspaceManager {
         self.root.join("workspaces").join(workspace_id)
     }
 
+    /// The durable directory for one validated managed Workspace identity.
+    ///
+    /// The caller must still acquire a lease; this accessor only maps the
+    /// stable identity to its owned path.
+    pub fn workspace_directory(&self, workspace_id: &str) -> Result<PathBuf> {
+        if !is_valid_workspace_id(workspace_id) {
+            anyhow::bail!("workspace id is not a valid managed workspace identity");
+        }
+        Ok(self.workspace_dir(workspace_id))
+    }
+
     fn read_registry(&self) -> Result<RegistryFile> {
         let path = self.registry_path();
         let bytes = match std::fs::read(&path) {

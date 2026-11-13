@@ -15,9 +15,9 @@ use anyhow::{Context as _, Result};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCatalogStatus,
     SandboxContextStatus, SandboxCurrentContext, SandboxExecutionView, SandboxFieldError,
-    SandboxImageSelection, SandboxImplementationSupport, SandboxNativePane, SandboxPaneRef,
-    SandboxPaneScope, SandboxPolicyDraft, SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS,
-    SANDBOX_CATALOG_VERSION,
+    SandboxFilesystemWorkspace, SandboxImageSelection, SandboxImplementationSupport,
+    SandboxNativePane, SandboxPaneRef, SandboxPaneScope, SandboxPolicyDraft,
+    SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS, SANDBOX_CATALOG_VERSION,
 };
 use nession_protocol::contracts::session::v1::ManagedImageGrant;
 use nession_sandbox::{
@@ -465,6 +465,93 @@ impl SessionManager {
                 None,
             );
         };
+        let workspace_override = match draft
+            .filesystem
+            .as_ref()
+            .and_then(|filesystem| filesystem.workspace.as_ref())
+        {
+            None => None,
+            Some(SandboxFilesystemWorkspace::ProjectLocation) => {
+                return refusal(
+                    SandboxActionErrorKind::Invalid,
+                    "Project Location Workspace selection is not available yet; choose a managed Workspace"
+                        .to_string(),
+                    Some(vec![SandboxFieldError {
+                        field: "filesystem.workspace".to_string(),
+                        code: "unsupported".to_string(),
+                        message: "Project Location resolution is pending".to_string(),
+                    }]),
+                )
+            }
+            Some(SandboxFilesystemWorkspace::Managed {
+                workspace_id,
+                name,
+            }) => {
+                let Some(manager) = self.workspaces() else {
+                    return refusal(
+                        SandboxActionErrorKind::Unavailable,
+                        "this Agent has no Workspace registry configured".to_string(),
+                        None,
+                    );
+                };
+                match resolve_managed_workspace(
+                    manager,
+                    workspace_id.as_deref(),
+                    name.as_deref(),
+                    session_name,
+                )
+                .await
+                {
+                    Ok(workspace) => Some(workspace),
+                    Err(error) => {
+                        return refusal(
+                            SandboxActionErrorKind::Unavailable,
+                            format!("cannot resolve the selected Workspace: {error:#}"),
+                            Some(vec![SandboxFieldError {
+                                field: "filesystem.workspace".to_string(),
+                                code: "unavailable".to_string(),
+                                message: format!("{error:#}"),
+                            }]),
+                        )
+                    }
+                }
+            }
+            Some(SandboxFilesystemWorkspace::Auto) => {
+                let Some(manager) = self.workspaces() else {
+                    return refusal(
+                        SandboxActionErrorKind::Unavailable,
+                        "this Agent has no Workspace registry configured".to_string(),
+                        None,
+                    );
+                };
+                match resolve_managed_workspace(manager, None, None, session_name).await {
+                    Ok(workspace) => Some(workspace),
+                    Err(error) => {
+                        return refusal(
+                            SandboxActionErrorKind::Unavailable,
+                            format!("cannot resolve the automatic Workspace: {error:#}"),
+                            Some(vec![SandboxFieldError {
+                                field: "filesystem.workspace".to_string(),
+                                code: "unavailable".to_string(),
+                                message: format!("{error:#}"),
+                            }]),
+                        )
+                    }
+                }
+            }
+        };
+        if images.is_empty() && workspace_override.is_some() {
+            return refusal(
+                SandboxActionErrorKind::Invalid,
+                "a Workspace selection requires an image RootFS".to_string(),
+                Some(vec![SandboxFieldError {
+                    field: "filesystem.workspace".to_string(),
+                    code: "unsupported".to_string(),
+                    message: "select a Base Runtime image for a Workspace-backed Sandbox"
+                        .to_string(),
+                }]),
+            );
+        }
         let mut prepared_images = if images.is_empty() {
             None
         } else {
@@ -481,6 +568,7 @@ impl SessionManager {
                 images,
                 server_url,
                 &runtime.settings().state_dir,
+                workspace_override,
             )
             .await
             {
@@ -618,12 +706,16 @@ impl SessionManager {
         };
         let verify_runtime = runtime.clone();
         let verify_session = session_name.to_string();
+        let workspace_lease = prepared_images
+            .as_mut()
+            .and_then(|prepared_images| prepared_images.workspace_lease.take());
         let verified = tokio::task::spawn_blocking(move || {
             crate::sandbox_runtime::launch_and_verify(
                 &verify_runtime,
                 prepared,
                 target,
                 &verify_session,
+                workspace_lease,
             )
         })
         .await;
@@ -892,6 +984,40 @@ impl SessionManager {
 
 /// The Session's active Pane: the one row tmux marks as both the current
 /// Window and that Window's active Pane.
+/// Resolve one managed Workspace and acquire its RW lease.
+///
+/// An explicit stable id is leased directly; an explicit name is reused or
+/// created in the default namespace; `auto` uses the Session name. The caller
+/// holds the lease until the execution is cleaned up.
+async fn resolve_managed_workspace(
+    manager: &std::sync::Arc<crate::workspace_manager::WorkspaceManager>,
+    workspace_id: Option<&str>,
+    name: Option<&str>,
+    session_name: &str,
+) -> Result<(std::path::PathBuf, crate::workspace_manager::WorkspaceLease)> {
+    let workspace_id = match (workspace_id, name) {
+        (Some(workspace_id), None) => workspace_id.to_string(),
+        (None, Some(name)) => {
+            manager
+                .get_or_create(Some("default"), name, false)
+                .await?
+                .workspace_id
+        }
+        (None, None) => {
+            manager
+                .get_or_create(Some("default"), session_name, true)
+                .await?
+                .workspace_id
+        }
+        (Some(_), Some(_)) => {
+            anyhow::bail!("a managed Workspace needs exactly one of workspace_id or name")
+        }
+    };
+    let path = manager.workspace_directory(&workspace_id)?;
+    let lease = manager.lease(&workspace_id).await?;
+    Ok((path, lease))
+}
+
 fn active_pane_of(panes: &[PaneSummary], session_name: &str) -> Option<PaneSummary> {
     panes
         .iter()

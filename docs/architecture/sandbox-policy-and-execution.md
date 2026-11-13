@@ -137,12 +137,14 @@ Project Existing Location remains a Project-owned reference and is never
 stored or deleted by that manager. See
 [Agent-owned managed Workspaces](agent-workspaces.md).
 
-The current composition still allocates a per-execution writable directory
+The current managed-session and existing-Session paths still allocate a
+per-execution writable directory
 (`<sandbox state>/managed/<uuid>/workspace` or
-`<sandbox state>/sandbox-workspaces/workspace-<uuid>`). Attaching a selected
-managed Workspace at `/workspace`, including the optional EROFS lower/Overlay,
-belongs to the follow-up #3405 implementation; this document does not claim
-that integration yet.
+`<sandbox state>/sandbox-workspaces/workspace-<uuid>`). A Filesystem
+declaration that selects a managed Workspace now binds that Agent-owned
+directory at `/workspace` and holds its RW lease until execution cleanup; the
+directory is not deleted. A managed Workspace with a Project EROFS lower
+(Overlay upper/work) and Project Location resolution are not implemented yet.
 
 ## Managed EROFS Session creation (#3062)
 
