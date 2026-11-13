@@ -3,33 +3,36 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
-export const SANDBOX_TABS = [
-  { id: 'overview', label: 'Overview' },
+/**
+ * The five native/portable policy entries (#3408, superseding #3143's six
+ * peer tabs). Overview is now a Sandbox section, not a policy entry.
+ */
+export const SANDBOX_POLICY_TABS = [
   { id: 'filesystem', label: 'Filesystem' },
   { id: 'network', label: 'Network' },
-  { id: 'process', label: 'Process' },
-  { id: 'resource', label: 'Resource' },
-  { id: 'syscall', label: 'Syscall' },
+  { id: 'process', label: 'Linux Namespace' },
+  { id: 'resource', label: 'Cgroup v2' },
+  { id: 'syscall', label: 'Seccomp' },
 ] as const;
 
-export type SandboxTabId = (typeof SANDBOX_TABS)[number]['id'];
+export type SandboxPolicyId = (typeof SANDBOX_POLICY_TABS)[number]['id'];
 
 export interface SandboxPolicyTabsProps {
   experience: 'web' | 'app';
-  value: SandboxTabId;
-  onValueChange: (value: SandboxTabId) => void;
-  /** The selected tab's panel. Inactive panels are not rendered. */
-  renderPanel: (tab: SandboxTabId) => ReactNode;
+  value: SandboxPolicyId;
+  onValueChange: (value: SandboxPolicyId) => void;
+  /** The selected policy's panel. Inactive panels are not rendered. */
+  renderPanel: (policy: SandboxPolicyId) => ReactNode;
 }
 
 /**
- * The six peer policy tabs (#3143).
+ * Local policy navigation inside the Sandbox's Policies section.
  *
- * The tabs are local navigation: they never push route/history depth and only
- * change which domain surface is visible. The draft and the authenticated
- * context live above this component, so switching preserves both. Web uses a
- * vertical left list beside one independently scrolling panel; App uses a
- * horizontal, touch-sized strip above the App's existing vertical scroller.
+ * The tabs never push route/history depth and only change which policy surface
+ * is visible. The draft and the authenticated context live above this
+ * component, so switching preserves both. Web uses a vertical left list beside
+ * one independently scrolling panel; App uses a horizontal, touch-sized strip
+ * above the App's existing vertical scroller.
  */
 export function SandboxPolicyTabs({
   experience,
@@ -41,7 +44,7 @@ export function SandboxPolicyTabs({
   return (
     <Tabs
       value={value}
-      onValueChange={(next) => onValueChange(next as SandboxTabId)}
+      onValueChange={(next) => onValueChange(next as SandboxPolicyId)}
       orientation={vertical ? 'vertical' : 'horizontal'}
       className={cn(
         'flex min-w-0',
@@ -75,7 +78,7 @@ export function SandboxPolicyTabs({
               : 'flex h-auto! w-full flex-nowrap items-stretch justify-start gap-1 overflow-x-auto',
           )}
         >
-          {SANDBOX_TABS.map((tab) => (
+          {SANDBOX_POLICY_TABS.map((tab) => (
             <TabsTrigger
               key={tab.id}
               value={tab.id}
@@ -100,7 +103,7 @@ export function SandboxPolicyTabs({
             : 'min-w-0'
         }
       >
-        {SANDBOX_TABS.map((tab) => (
+        {SANDBOX_POLICY_TABS.map((tab) => (
           <TabsContent
             key={tab.id}
             value={tab.id}

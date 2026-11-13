@@ -8,8 +8,8 @@ import { expect, test, type Page } from '@playwright/test';
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 /**
- * Issues #3124 and #3143: the Sandbox capability is a Session-context surface
- * with six peer policy tabs.
+ * Issues #3124, #3143 and #3408: the Sandbox capability is a Session-context
+ * surface with four sections and five policy entries.
  *
  * The fixture routes name what the Agent answered (`?sandbox=…`), never a
  * rendering. These assertions cover the explicit outside draft, the empty-first
@@ -33,7 +33,16 @@ async function openAppSandbox(page: Page, query = ''): Promise<void> {
   await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
 }
 
+async function openSection(page: Page, section: string): Promise<void> {
+  await page.getByTestId(`sandbox-section-${section}`).click();
+}
+
 async function selectTab(page: Page, tab: string): Promise<void> {
+  if (tab === 'overview') {
+    await openSection(page, 'overview');
+    return;
+  }
+  await openSection(page, 'policies');
   await page.getByTestId(`sandbox-tab-${tab}`).click();
   await expect(page.getByTestId(`sandbox-tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
 }
@@ -41,24 +50,27 @@ async function selectTab(page: Page, tab: string): Promise<void> {
 test.describe('Web 1180', () => {
   test.use({ viewport: { width: 1180, height: 900 } });
 
-  test('six peer tabs switch directly without history depth (#3143 SC-01, SC-07)', async ({
+  test('four sections and five policy entries switch directly without history depth (#3408 SC-01, SC-03)', async ({
     page,
   }) => {
     await openWebSandbox(page);
     const historyLength = await page.evaluate(() => window.history.length);
 
+    for (const section of ['overview', 'images', 'workspaces', 'policies']) {
+      await expect(page.getByTestId(`sandbox-section-${section}`)).toBeVisible();
+    }
+    // Overview owns the summary, preview and Enter actions.
+    await expect(page.getByTestId('sandbox-policy-preview')).toBeVisible();
+    await openSection(page, 'policies');
     await expect(page.getByTestId('sandbox-tabs')).toBeVisible();
-    for (const tab of ['overview', 'filesystem', 'network', 'process', 'resource', 'syscall']) {
+    for (const tab of ['filesystem', 'network', 'process', 'resource', 'syscall']) {
       await expect(page.getByTestId(`sandbox-tab-${tab}`)).toBeVisible();
     }
-    // Only the selected peer panel is materialized; there is no Home page or
-    // five-forms-at-once layout.
-    await expect(page.getByTestId('sandbox-policy-preview')).toBeVisible();
+    // Only the selected policy panel is materialized.
     await expect(page.getByTestId('sandbox-resource-add')).toHaveCount(0);
     await expect(page.getByTestId('sandbox-syscall-profile')).toHaveCount(0);
 
     const content: Record<string, string> = {
-      overview: 'sandbox-policy-preview',
       filesystem: 'sandbox-fs-read',
       network: 'sandbox-network-mode',
       process: 'sandbox-namespace-pid',
@@ -78,17 +90,17 @@ test.describe('Web 1180', () => {
 
     // Keyboard tab semantics: arrows move within the vertical list, Home/End
     // jump to its ends, and selection never creates history.
-    await selectTab(page, 'overview');
-    await page.getByTestId('sandbox-tab-overview').focus();
+    await selectTab(page, 'filesystem');
+    await page.getByTestId('sandbox-tab-filesystem').focus();
     await page.keyboard.press('ArrowDown');
-    await expect(page.getByTestId('sandbox-tab-filesystem')).toHaveAttribute(
+    await expect(page.getByTestId('sandbox-tab-network')).toHaveAttribute(
       'aria-selected',
       'true',
     );
     await page.keyboard.press('End');
     await expect(page.getByTestId('sandbox-tab-syscall')).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Home');
-    await expect(page.getByTestId('sandbox-tab-overview')).toHaveAttribute(
+    await expect(page.getByTestId('sandbox-tab-filesystem')).toHaveAttribute(
       'aria-selected',
       'true',
     );
@@ -365,6 +377,7 @@ test.describe('Web 1180', () => {
     await expect(page.getByTestId('sandbox-scope-note')).toContainText(
       'future Panes or Windows are not inside this Sandbox',
     );
+    await openSection(page, 'policies');
     await expect(page.getByTestId('sandbox-tabs')).toBeVisible();
 
     await selectTab(page, 'filesystem');
@@ -454,14 +467,14 @@ test.describe('App 390', () => {
     await expect(page.getByTestId('app-page-back')).toHaveCount(1);
     await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to terminal');
 
+    await openSection(page, 'policies');
     const tablist = page.getByTestId('sandbox-tabs');
     await expect(tablist).toHaveAttribute('data-orientation', 'horizontal');
-    const overview = await page.getByTestId('sandbox-tab-overview').boundingBox();
-    expect(overview).not.toBeNull();
-    expect(overview!.height).toBeGreaterThanOrEqual(44);
+    const filesystem = await page.getByTestId('sandbox-tab-filesystem').boundingBox();
+    expect(filesystem).not.toBeNull();
+    expect(filesystem!.height).toBeGreaterThanOrEqual(44);
 
     const content: Record<string, string> = {
-      overview: 'sandbox-policy-preview',
       filesystem: 'sandbox-fs-read',
       network: 'sandbox-network-mode',
       process: 'sandbox-namespace-pid',
@@ -476,10 +489,10 @@ test.describe('App 390', () => {
     }
 
     // Keyboard arrows move along the horizontal strip.
-    await selectTab(page, 'overview');
-    await page.getByTestId('sandbox-tab-overview').focus();
+    await selectTab(page, 'filesystem');
+    await page.getByTestId('sandbox-tab-filesystem').focus();
     await page.keyboard.press('ArrowRight');
-    await expect(page.getByTestId('sandbox-tab-filesystem')).toHaveAttribute(
+    await expect(page.getByTestId('sandbox-tab-network')).toHaveAttribute(
       'aria-selected',
       'true',
     );
@@ -495,9 +508,9 @@ test.describe('App 390', () => {
     await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Sandbox');
     await page.getByTestId('app-page-back').click();
     await expect(page.getByTestId('sandbox-composer')).toBeVisible();
-    await expect(page.getByTestId('sandbox-tab-overview')).toHaveAttribute(
-      'aria-selected',
-      'true',
+    await expect(page.getByTestId('sandbox-section-overview')).toHaveAttribute(
+      'aria-current',
+      'page',
     );
   });
 

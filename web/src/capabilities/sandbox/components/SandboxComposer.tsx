@@ -17,7 +17,6 @@ import {
   type SandboxActionError,
 } from '../model';
 import { SandboxComposerActions } from './SandboxComposerActions';
-import { SandboxConfirmView } from './SandboxConfirmView';
 import { SandboxExistingPanes } from './SandboxExistingPanes';
 import { SandboxSyscallProfile } from './SandboxSyscallProfile';
 import { SandboxFilesystemFields } from './SandboxFilesystemFields';
@@ -32,7 +31,7 @@ import {
 } from './SandboxPolicySummary';
 import {
   SandboxPolicyTabs,
-  type SandboxTabId,
+  type SandboxPolicyId,
 } from './SandboxPolicyTabs';
 
 export type { SandboxActionError } from '../model';
@@ -50,23 +49,20 @@ export interface SandboxComposerProps {
   onPreflight: () => void;
   onRequestEnter: () => void;
   onFocusPane: (paneId: string) => void;
-  confirming: boolean;
-  onConfirm: () => void;
-  onCancelConfirm: () => void;
   experience: 'web' | 'app';
-  activeTab: SandboxTabId;
-  onTabChange: (tab: SandboxTabId) => void;
+  activePolicy: SandboxPolicyId;
+  onPolicyChange: (policy: SandboxPolicyId) => void;
 }
 
-function ComposerOverview({
-  props,
-  signature,
-  preflightValid,
-}: {
-  props: SandboxComposerProps;
-  signature: string;
-  preflightValid: boolean;
-}) {
+/** The Sandbox Overview's policy summary, preview, actions and panes. */
+export function SandboxOverview(props: SandboxComposerProps) {
+  const signature = sandboxDraftSignature(props.draft.draft, props.images.selections);
+  const preflightValid = preflightIsValid(
+    props.preflight,
+    signature,
+    props.context.generation,
+    props.context.catalog.probe_generation,
+  );
   const {
     context,
     draft,
@@ -77,10 +73,10 @@ function ComposerOverview({
     onPreflight,
     onRequestEnter,
     onFocusPane,
-    onTabChange,
+    onPolicyChange,
   } = props;
   return (
-    <DetailSurface>
+    <DetailSurface data-testid="sandbox-composer">
       <DetailHeader
         level="h2"
         title="Outside Sandbox"
@@ -102,7 +98,7 @@ function ComposerOverview({
         }
       />
 
-      <SandboxPolicySummary policy={draft.draft} onSelectTab={onTabChange} />
+      <SandboxPolicySummary policy={draft.draft} onSelectTab={onPolicyChange} />
       <SandboxPolicyPreview policy={draft.draft} />
 
       <SandboxComposerActions
@@ -156,56 +152,29 @@ function KvPanel({
 }
 
 /**
- * The outside composer (#3124, #3143).
+ * The five policy entries (#3408, superseding #3143's six peer tabs).
  *
- * The draft is explicit and shared across the six peer tabs. Tab switching is
- * local UI navigation: it preserves the draft and a fresh preflight, while any
- * actual edit invalidates the preflight. Enter is only reachable from the
- * Overview through a validation of the exact assembled payload.
+ * The draft is shared across the entries. Switching is local UI navigation:
+ * it preserves the draft and a fresh preflight, while any actual edit
+ * invalidates the preflight.
  */
-export function SandboxComposer(props: SandboxComposerProps) {
+export function SandboxPolicyPanels(props: SandboxComposerProps) {
   const {
     context,
     draft,
     preflight,
     workingDir,
     onWorkingDirChange,
-    confirming,
-    onConfirm,
-    onCancelConfirm,
     experience,
-    activeTab,
-    onTabChange,
+    activePolicy,
+    onPolicyChange,
   } = props;
-  const signature = sandboxDraftSignature(draft.draft, props.images.selections);
-  const preflightValid = preflightIsValid(
-    preflight,
-    signature,
-    context.generation,
-    context.catalog.probe_generation,
-  );
   const fieldErrors = {
     ...fieldErrorsByField(preflight?.result.errors),
     ...(props.actionError?.fieldErrors ?? {}),
   };
 
-  if (confirming) {
-    return (
-      <SandboxConfirmView
-        draft={draft.draft}
-        busy={props.busy}
-        preflightValid={preflightValid}
-        actionError={props.actionError}
-        onConfirm={onConfirm}
-        onCancel={onCancelConfirm}
-      />
-    );
-  }
-
-  const panels: Record<SandboxTabId, ReactNode> = {
-    overview: (
-      <ComposerOverview props={props} signature={signature} preflightValid={preflightValid} />
-    ),
+  const panels: Record<SandboxPolicyId, ReactNode> = {
     filesystem: (
       <FormSurface>
         <SandboxFilesystemFields
@@ -233,7 +202,7 @@ export function SandboxComposer(props: SandboxComposerProps) {
         <KvPanel
           props={props}
           group="resource"
-          title="Resource controls"
+          title="Cgroup v2 controls"
           description="Optional cgroup v2 control files, in their native kernel format. Empty omits the Resource group."
           implementationPath={IMPLEMENTATION_PATHS.cgroupV2}
           fieldErrors={fieldErrors}
@@ -257,9 +226,9 @@ export function SandboxComposer(props: SandboxComposerProps) {
     >
       <SandboxPolicyTabs
         experience={experience}
-        value={activeTab}
-        onValueChange={onTabChange}
-        renderPanel={(tab) => panels[tab]}
+        value={activePolicy}
+        onValueChange={onPolicyChange}
+        renderPanel={(policy) => panels[policy]}
       />
     </div>
   );

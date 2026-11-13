@@ -5,8 +5,22 @@ export {
   resolveSandboxCapabilityState,
 } from './model';
 export { SandboxWorkspace, SandboxWebLayout } from './components/SandboxWorkspace';
-export { SandboxComposer, type SandboxActionError } from './components/SandboxComposer';
-export { SandboxInsideView } from './components/SandboxInsideView';
+export {
+  SandboxOverview,
+  SandboxPolicyPanels,
+  type SandboxActionError,
+  type SandboxComposerProps,
+} from './components/SandboxComposer';
+export {
+  SandboxInsideOverview,
+  SandboxInsidePolicyPanels,
+  type SandboxInsideViewProps,
+} from './components/SandboxInsideView';
+export {
+  SANDBOX_SECTIONS,
+  SandboxSectionNav,
+  type SandboxSectionId,
+} from './components/SandboxSectionNav';
 export { SandboxKvEditor } from './components/SandboxKvEditor';
 export { useSandboxContext, type SandboxContextState } from './hooks/useSandboxContext';
 export { useSandboxDraft, type SandboxDraftState } from './hooks/useSandboxDraft';

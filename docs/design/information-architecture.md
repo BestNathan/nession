@@ -94,6 +94,19 @@ Deeper capability surfaces are explicitly opened. They should not automatically 
 
 Claude Code is the first reference integration for this pattern, not a special IA branch.
 
+## Sandbox capability
+
+Sandbox is discovered only inside a selected Session. Its capability-local
+sections are Overview, Images, Workspaces and Policies. The Server Images
+registry remains global and is rendered inside this Session context rather than
+as a separate Workspace capability; Agent-owned Workspaces are a resource
+section, not the logical Nession Workspace; Policies owns the five
+native/portable entries (Filesystem, Network, Linux Namespace, Cgroup v2,
+Seccomp). Web uses capability-local first-level navigation with a local
+sidebar for Images and Policies; App keeps one host-owned header/Back and
+compact local navigation. These are contextual surfaces, not global
+application chrome.
+
 ## Agent and Workspace Location progressive disclosure
 
 Agent/location information can appear at several depths without becoming the primary navigation model:

@@ -22,6 +22,9 @@ export {
   ImagesWebLayout,
   ImagesAppLayout,
   ImagesDetail,
+  ImagesPanel,
+  ImagesLibraryPanel,
+  ImagesBuildsPanel,
 } from './components/ImagesWorkspace';
 export {
   IMAGE_PAGE_SIZE,

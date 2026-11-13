@@ -3,7 +3,7 @@ import { DetailSection } from '@/components/ui/resource-detail';
 import type { SandboxPolicyDraft } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
-import type { SandboxTabId } from './SandboxPolicyTabs';
+import type { SandboxPolicyId } from './SandboxPolicyTabs';
 
 function namespacesLabel(policy: SandboxPolicyDraft): string {
   const namespaces = policy.process?.linux_namespaces;
@@ -16,7 +16,7 @@ function namespacesLabel(policy: SandboxPolicyDraft): string {
   return enabled.length === 0 ? 'Baseline only' : enabled.join(', ');
 }
 
-function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: string; value: string }[] {
+function summaryRows(policy: SandboxPolicyDraft): { id: SandboxPolicyId; label: string; value: string }[] {
   const read = policy.filesystem?.access.read.length ?? 0;
   const write = policy.filesystem?.access.write.length ?? 0;
   const network = policy.network;
@@ -37,10 +37,10 @@ function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: str
         ? `${network?.mode ?? 'allow'} · ${egress.allow.length} allow · ${egress.deny.length} deny`
         : (network?.mode ?? 'allow'),
     },
-    { id: 'process', label: 'Process', value: namespacesLabel(policy) },
+    { id: 'process', label: 'Linux Namespace', value: namespacesLabel(policy) },
     {
       id: 'resource',
-      label: 'Resource',
+      label: 'Cgroup v2',
       value:
         policy.resource.length === 0
           ? 'No native controls'
@@ -48,7 +48,7 @@ function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: str
     },
     {
       id: 'syscall',
-      label: 'Syscall',
+      label: 'Seccomp',
       value: policy.syscall[0]?.value || 'No profile',
     },
   ];
@@ -56,7 +56,7 @@ function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: str
 
 export interface SandboxPolicySummaryProps {
   policy: SandboxPolicyDraft;
-  onSelectTab: (tab: SandboxTabId) => void;
+  onSelectTab: (tab: SandboxPolicyId) => void;
 }
 
 /**

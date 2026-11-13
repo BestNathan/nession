@@ -13,15 +13,20 @@ async function openProjectSettings(page: Page): Promise<void> {
   await expect(page.getByTestId('project-settings-dialog')).toBeVisible();
 }
 
-test.describe('Server-owned Images capability (#3181)', () => {
-  test('Workspace exposes the complete paged registry without a Session', async ({ page }) => {
-    await page.goto('/#/fixture/workspace?capability=images&session=none');
-    await expect(page.getByTestId('images-workspace')).toBeVisible();
+test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', () => {
+  test('Sandbox exposes the complete paged registry in its Images section', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=sandbox');
+    await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-section-images').click();
+    await expect(page.getByTestId('sandbox-images')).toBeVisible();
 
-    // A Session is not present, but the Server-owned Images capability is.
-    await expect(page.getByTestId('session-empty-state')).toHaveCount(0);
+    // The Server registry is global; the Session-scoped Sandbox presents it.
     await expect(page.getByTestId('image-row')).toHaveCount(50);
     await expect(page.getByTestId('images-page-label')).toHaveText('1–50 of 235');
+    // The Library is a single list: detail expands inline under its row.
+    await expect(page.getByTestId('images-detail')).toHaveCount(0);
+    await page.getByTestId('image-row').first().click();
+    await expect(page.getByTestId('image-detail-row')).toBeVisible();
     await expect(page.getByTestId('images-detail')).toContainText('Server-owned immutable image');
     await expect(page.getByTestId('images-detail')).toContainText('Server Ready');
 
