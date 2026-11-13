@@ -1177,14 +1177,16 @@ and it is why the credential does not need to be signed.
 
 | | Question | Where |
 |---|---|---|
-| Upgrade | Is there a credential, and is it this agent's? | `accept_hdr_async`'s callback |
+| Upgrade | Is there a credential, and is it this agent's? | the Axum WebSocket upgrade handler, before `on_upgrade` |
 | Per frame | Does *this* credential cover *this* wire? | `Frame::route`, before any lane |
 
-The handshake is `accept_hdr_async` rather than `accept_async` because its
-callback can **refuse**: returning `Err` rejects the upgrade, so a peer with no
-credential never has a WebSocket and there is no connection to leave in a
-half-authenticated state. That is structural rather than a promise every later
-handler has to keep.
+Axum owns the HTTP grammar and the Upgrade response (`#3439`). The credential
+check runs in the upgrade handler **before** `WebSocketUpgrade::on_upgrade`, so
+a refused peer receives a 401 response and never has a WebSocket at all: there
+is no connection to leave in a half-authenticated state. That is structural
+rather than a promise every later handler has to keep. The handler still derives
+the connection authority from the same query credential the handshake always
+used; the per-frame scope gate below is unchanged.
 
 The per-frame gate is a **scope column on every arm** of the agent's
 `p2p_routes!` invocation, beside the execution policy and derived from the same
@@ -1208,13 +1210,16 @@ credential callback at all.
 
 The listener therefore owns a *third*, separate boundary:
 [`P2pHandshakePolicy`](../../crates/nession-agent/src/server/websocket.rs)
-bounds how many accepted sockets may be mid-handshake at once and how long one
-handshake may take. The accept loop takes a slot **before** spawning anything and
-closes the socket immediately when the budget is exhausted; `complete_handshake`
-runs TLS and the HTTP upgrade (including the credential callback) under one
-finite deadline. A slot is released when the peer authenticates, is refused, times
-out, disconnects, or the listener shuts down — authenticated Sessions never hold
-one, however long they live.
+bounds how many accepted sockets may be mid-request at once and how long one
+may take. The accept loop takes a slot **before** spawning anything and closes
+the socket immediately when the budget is exhausted; the connection task runs
+TLS and the Axum HTTP request under one finite deadline
+([`nession_runtime::ingress`](../../crates/nession-runtime/src/ingress.rs)).
+A slot is released when the request reaches the router — the upgrade decision or
+the optional MCP route — times out, disconnects, or the listener shuts down.
+Authenticated Sessions never hold one, however long they live. Since `#3439`
+the Server runs the same bounded ingress and keeps the same property; the two
+policies differ only in their configured numbers.
 
 This is deliberately not the `#961` execution-lane bound and does not replace it.
 `#961` bounds the Protocol Units an **authenticated** connection may run in

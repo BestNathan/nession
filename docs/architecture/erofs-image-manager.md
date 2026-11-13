@@ -279,8 +279,8 @@ Server build failure. See [Agent EROFS cache](agent-erofs-cache.md#per-digest-pr
 
 ## Authorized blob HTTP
 
-The existing Server listener sniffs one HTTP request head and routes
-`/images/blobs/<digest>` to the image service before WebSocket/MCP handling.
+The Server's Axum router maps `/images/blobs/<digest>` to the image service
+(`#3439`; the route is registered beside `/ws` and the optional MCP endpoint).
 The service accepts `GET`/`HEAD` and requires:
 
 ```http

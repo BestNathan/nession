@@ -51,25 +51,25 @@ use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
+use axum::extract::{FromRequestParts, State, WebSocketUpgrade};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::any;
+use axum::Router;
 use futures_util::StreamExt;
-use nession_mcp::http::{PrefixedStream, Sniffed};
 use nession_mcp::McpService;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
+use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
-use tokio_tungstenite::tungstenite::handshake::server::{
-    Request as UpgradeRequest, Response as UpgradeResponse,
-};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::WebSocketStream;
 use tracing::{debug, error, info, warn};
 
 // The socket itself belongs to `crate::server::outbound`'s writer, and every
@@ -201,59 +201,6 @@ fn spawn_output_forwarder(
         }
         info!("terminal output for session {session_name} ended");
     });
-}
-
-/// Agent-wide map of attached P2P sessions, keyed by session name.
-#[allow(clippy::large_enum_variant)]
-enum TcpOrTls {
-    Plain(tokio::net::TcpStream),
-    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
-}
-
-impl tokio::io::AsyncRead for TcpOrTls {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            TcpOrTls::Plain(s) => Pin::new(s).poll_read(cx, buf),
-            TcpOrTls::Tls(s) => Pin::new(s).poll_read(cx, buf),
-        }
-    }
-}
-
-impl tokio::io::AsyncWrite for TcpOrTls {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        match self.get_mut() {
-            TcpOrTls::Plain(s) => Pin::new(s).poll_write(cx, buf),
-            TcpOrTls::Tls(s) => Pin::new(s).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            TcpOrTls::Plain(s) => Pin::new(s).poll_flush(cx),
-            TcpOrTls::Tls(s) => Pin::new(s).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            TcpOrTls::Plain(s) => Pin::new(s).poll_shutdown(cx),
-            TcpOrTls::Tls(s) => Pin::new(s).poll_shutdown(cx),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -914,6 +861,11 @@ pub const DEFAULT_P2P_MAX_PENDING_HANDSHAKES: usize = 64;
 /// admission budget indefinitely.
 pub const DEFAULT_P2P_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The frame limits the listener has always enforced. Stated explicitly rather
+/// than left to a default: `#3439` moved the transport, not the bounds.
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
 /// The Agent's pre-authentication admission policy for its P2P listener
 /// (#2653).
 ///
@@ -1036,9 +988,9 @@ pub struct AgentServer {
     /// reason.
     credentials: Arc<P2pCredentials>,
     /// How unauthenticated connections are admitted and how long one may take
-    /// to complete its handshake (#2653). Enforced by [`Self::start`]'s accept
-    /// loop and [`Self::complete_handshake`]; the same policy is never
-    /// re-derived per connection.
+    /// to complete its request (#2653). Enforced by [`Self::start`]'s accept
+    /// loop and the shared [`nession_runtime::ingress::serve`] deadline; the
+    /// same policy is never re-derived per connection.
     handshake_policy: P2pHandshakePolicy,
     /// The MCP endpoint (`#565`) mounted on this listener, when enabled.
     mcp: Option<Arc<McpService>>,
@@ -1187,6 +1139,144 @@ impl ServerHandle {
     }
 }
 
+/// The Agent services one authenticated P2P connection runs on.
+///
+/// Grouped so the ingress closure and the message loop carry one value rather
+/// than thirteen positional parameters. Every field is an `Arc` clone or a
+/// plain value the runtime built once; a second construction site would be a
+/// second owner of the same tmux server, Session map or mutation lane.
+#[derive(Clone)]
+struct AgentIngress {
+    tmux: Arc<SessionManager>,
+    service: Arc<SessionService>,
+    sessions: Arc<SessionRegistry>,
+    file_ops: Arc<FileOps>,
+    session_metadata: Arc<SessionMetadataStore>,
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    default_working_dir: String,
+    terminal_cols: u16,
+    listen_address: String,
+    agent_id: String,
+    attach_mode: AttachMode,
+    resize: ResizeReporter,
+}
+
+/// Router state for one accepted P2P connection.
+#[derive(Clone)]
+struct P2pHttpState {
+    /// This connection's pre-authentication claim (#2653).
+    slot: AdmissionSlot,
+    addr: SocketAddr,
+    ingress: AgentIngress,
+    /// What this Agent will honour at the upgrade (#1013).
+    credentials: Arc<P2pCredentials>,
+    /// The optional MCP endpoint mounted on the same listener (`#565`).
+    mcp: Option<Arc<McpService>>,
+    /// The pre-authentication deadline for this connection (#2653).
+    deadline: Duration,
+}
+
+/// Build the explicit route table for one accepted P2P socket.
+///
+/// Axum owns the HTTP grammar and the WebSocket Upgrade. The Agent keeps its
+/// one listener: the optional MCP endpoint is a route on it, and every other
+/// path is the P2P upgrade — which the Agent has always accepted at the
+/// authority root as well as at `/ws`, because a configured `connect_url` may
+/// carry any path.
+fn p2p_router(state: P2pHttpState) -> Router {
+    let mcp_path = state.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    let slot = state.slot.clone();
+    let mut router = Router::new();
+    if let Some(path) = mcp_path.as_deref() {
+        router = router.route(path, any(mcp_http));
+    }
+    router
+        .fallback(p2p_upgrade_or_not_found)
+        .layer(axum::middleware::from_fn_with_state(
+            slot,
+            ingress::release_after_response,
+        ))
+        .with_state(state)
+}
+
+/// The P2P upgrade route, for any path the MCP endpoint did not claim.
+///
+/// A request that is not an upgrade is an ordinary unmatched request (404);
+/// one that is upgrade-shaped but malformed gets Axum's own rejection. The
+/// credential check happens here, before `on_upgrade`, so a caller with no
+/// credential never has a WebSocket or a connection (#1013).
+async fn p2p_upgrade_or_not_found(
+    State(state): State<P2pHttpState>,
+    request: axum::extract::Request,
+) -> Response {
+    if !ingress::looks_like_websocket_upgrade(request.method(), request.headers()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (mut parts, _body) = request.into_parts();
+    let uri = parts.uri.clone();
+    let ws = match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+        Ok(ws) => ws,
+        Err(rejection) => return rejection.into_response(),
+    };
+
+    let presented = uri
+        .query()
+        .and_then(nession_protocol::contracts::p2p::credential_from_query);
+    let authority = match presented
+        .as_deref()
+        .map(|token| state.credentials.authorize(token))
+    {
+        Some(Ok(found)) => found,
+        refusal => {
+            // The slot is returned as soon as the peer is refused, not at the
+            // deadline. See `refusal_response` for why the reasons collapse.
+            state.slot.release();
+            warn!(
+                addr = %state.addr,
+                reason = ?refusal,
+                "refusing a peer-to-peer connection: no valid credential"
+            );
+            return refusal_response();
+        }
+    };
+
+    // The peer is authenticated: this connection no longer occupies the
+    // pre-auth budget, however long its Session lives.
+    state.slot.release();
+    info!(
+        "WebSocket connection from {} (credential {}, session {})",
+        state.addr, authority.credential_id, authority.session_id
+    );
+    let addr = state.addr;
+    let ingress_context = state.ingress;
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .on_upgrade(move |socket| async move {
+            if let Err(e) = AgentServer::serve_connection(
+                AxumWebSocket::new(socket),
+                authority,
+                addr,
+                ingress_context,
+            )
+            .await
+            {
+                info!("connection error from {}: {:#}", addr, e);
+            }
+        })
+}
+
+/// The optional MCP endpoint on the P2P listener.
+async fn mcp_http(State(state): State<P2pHttpState>, request: axum::extract::Request) -> Response {
+    // MCP is not a P2P peer: it has its own bearer check and its own request
+    // deadline, and it must not hold the pre-authentication budget for a tool
+    // call.
+    state.slot.release();
+    match state.mcp.as_ref() {
+        Some(mcp) => mcp.handle(request).await.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 /// Everything one peer-to-peer request needs in order to be answered.
 ///
 /// The arms of the P2P dispatch used to close over thirteen locals of
@@ -1292,15 +1382,13 @@ struct Connection {
 /// distinguished them would tell a caller which of its guesses was closest. The
 /// wording says nothing about credentials at all; a peer that reached the agent
 /// port by accident gets no vocabulary from this to aim at.
-fn unauthorized_upgrade() -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
-    use tokio_tungstenite::tungstenite::http::{header, Response, StatusCode};
-    let mut refusal = Response::new(Some("connection not authorized".to_string()));
-    *refusal.status_mut() = StatusCode::UNAUTHORIZED;
-    refusal.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("text/plain"),
-    );
-    refusal
+fn refusal_response() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CONTENT_TYPE, "text/plain")],
+        "connection not authorized",
+    )
+        .into_response()
 }
 
 /// One text frame, parsed as far as routing needs, and the connection it came
@@ -3116,19 +3204,6 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 }
 
-/// What a completed pre-authentication phase produced.
-///
-/// Either an authenticated WebSocket peer — the pre-`#565` outcome — or an MCP
-/// request that was answered on the same listener. MCP never owns the P2P
-/// credential store: its bearer check runs inside the service.
-enum Handshake {
-    WebSocket(
-        Box<WebSocketStream<PrefixedStream<TcpOrTls>>>,
-        ConnectionAuthority,
-    ),
-    Mcp(Arc<McpService>, Box<PrefixedStream<TcpOrTls>>),
-}
-
 impl AgentServer {
     /// Create a new agent server.
     ///
@@ -3253,30 +3328,37 @@ impl AgentServer {
             handshake_slots: Arc::clone(&handshake_slots),
         };
 
-        let tmux_manager = Arc::clone(&self.tmux_manager);
-        let service = Arc::clone(&self.service);
-        let sessions = Arc::clone(&self.sessions);
-        let file_ops = Arc::clone(&self.file_ops);
-        let session_metadata = Arc::clone(&self.session_metadata);
-        let mutations = Arc::clone(&self.mutations);
+        let ingress_context = AgentIngress {
+            tmux: Arc::clone(&self.tmux_manager),
+            service: Arc::clone(&self.service),
+            sessions: Arc::clone(&self.sessions),
+            file_ops: Arc::clone(&self.file_ops),
+            session_metadata: Arc::clone(&self.session_metadata),
+            mutations: Arc::clone(&self.mutations),
+            default_working_dir: self.default_working_dir.clone(),
+            terminal_cols: self.terminal_cols,
+            listen_address: self.listen_address.clone(),
+            agent_id: self.agent_id.clone(),
+            attach_mode: self.attach_mode.clone(),
+            resize: self.resize.clone(),
+        };
         let tls_acceptor = self.tls_acceptor;
-        let default_working_dir = self.default_working_dir.clone();
-        let terminal_cols = self.terminal_cols;
-        let listen_address = self.listen_address.clone();
-        let agent_id = self.agent_id.clone();
-        let attach_mode = self.attach_mode.clone();
-        let resize = self.resize.clone();
         let credentials = Arc::clone(&self.credentials);
         let mcp = self.mcp.clone();
+        let handshake_policy = self.handshake_policy;
+        // Used by the accept loop itself: the log line and the shutdown path's
+        // backend close.
+        let listen_address = self.listen_address.clone();
+        let sessions = Arc::clone(&self.sessions);
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
-            // Only the *pre-authentication* phase is tracked here. A handshake
-            // task ends as soon as the upgrade has authorized the peer (then a
-            // separate task runs the Session's message loop), so aborting this
-            // set at shutdown drops exactly the connections that never became
-            // peers — and it already finished ones, whose slots are back.
-            let mut handshakes = JoinSet::new();
+            // Only the *pre-authentication* phase is tracked here. A connection
+            // task ends as soon as the upgrade has been answered (Axum then
+            // runs the authenticated message loop in its own task), so aborting
+            // this set at shutdown drops exactly the connections that never
+            // became peers — and it already finished ones, whose slots are back.
+            let mut connections = JoinSet::new();
             info!("Agent WebSocket server listening on {}", listen_address);
 
             loop {
@@ -3312,60 +3394,22 @@ impl AgentServer {
                                     drop(stream);
                                     continue;
                                 };
-                                let tmux = Arc::clone(&tmux_manager);
-                                let svc = Arc::clone(&service);
-                                let shared_sessions = Arc::clone(&sessions);
-                                let fops = Arc::clone(&file_ops);
-                                let meta = Arc::clone(&session_metadata);
-                                let lanes = Arc::clone(&mutations);
+                                let state = P2pHttpState {
+                                    slot: AdmissionSlot::new(slot),
+                                    addr,
+                                    ingress: ingress_context.clone(),
+                                    credentials: Arc::clone(&credentials),
+                                    mcp: mcp.clone(),
+                                    deadline: handshake_policy.timeout,
+                                };
                                 let tls = tls_acceptor.clone();
-                                let wd = default_working_dir.clone();
-                                let la = listen_address.clone();
-                                let aid = agent_id.clone();
-                                let am = attach_mode.clone();
-                                let rtx = resize.clone();
-                                let creds = Arc::clone(&credentials);
-                                let endpoint_mcp = mcp.clone();
-                                let deadline = handshake_policy.timeout;
-                                handshakes.spawn(async move {
-                                    match Self::complete_handshake(
-                                        stream, addr, tls, creds, deadline, endpoint_mcp,
-                                    )
-                                    .await
-                                    {
-                                        Ok(Handshake::WebSocket(ws, authority)) => {
-                                            // The peer is authenticated: this
-                                            // connection no longer occupies the
-                                            // pre-auth budget, however long its
-                                            // Session lives.
-                                            drop(slot);
-                                            tokio::spawn(Self::serve_connection(
-                                                *ws, authority, addr, tmux, svc,
-                                                shared_sessions, fops, meta, lanes, wd,
-                                                terminal_cols, la, aid, am, rtx,
-                                            ));
-                                        }
-                                        Ok(Handshake::Mcp(service, stream)) => {
-                                            // MCP is not a P2P peer: it had its
-                                            // own bearer check, and it must not
-                                            // hold the pre-authentication budget
-                                            // for a tool call. `serve` owns its
-                                            // own request timeout and failure
-                                            // handling.
-                                            drop(slot);
-                                            if let Err(e) = service.serve(*stream).await {
-                                                info!("MCP connection from {} ended: {e:#}", addr);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            // Downgraded from warn: random non-WebSocket clients
-                                            // (health checks, scanners) hitting the P2P port are
-                                            // expected noise, not actionable alerts.
-                                            info!("connection error from {}: {:#}", addr, e);
-                                            // `slot` drops here, so a timeout, a refused
-                                            // credential and a transport failure all return
-                                            // the budget without waiting for anything else.
-                                        }
+                                connections.spawn(async move {
+                                    if let Err(e) = Self::serve_http(stream, tls, state).await {
+                                        // Downgraded from warn: random
+                                        // non-WebSocket clients (health checks,
+                                        // scanners) hitting the P2P port are
+                                        // expected noise, not actionable alerts.
+                                        info!("connection error from {}: {:#}", addr, e);
                                     }
                                 });
                             }
@@ -3374,33 +3418,34 @@ impl AgentServer {
                             }
                         }
                     }
-                    // Reap finished handshake tasks so a long-lived listener
+                    // Reap finished connection tasks so a long-lived listener
                     // does not accumulate one completed entry per connection.
-                    Some(result) = handshakes.join_next(), if !handshakes.is_empty() => {
+                    Some(result) = connections.join_next(), if !connections.is_empty() => {
                         if let Err(e) = result {
-                            error!("P2P handshake task failed: {}", e);
+                            error!("P2P connection task failed: {}", e);
                         }
                     }
                     _ = shutdown_future => {
                         info!("Agent WebSocket server shutting down");
-                        // Abort in-flight handshakes and wait for them to be
-                        // dropped so their admission slots are back before
-                        // shutdown proceeds. These peers are unauthenticated,
-                        // so there is no connection of theirs to preserve; a
-                        // client that was mid-handshake simply reconnects.
-                        handshakes.abort_all();
-                        // Bounded like every other lane shutdown: an abort
-                        // takes effect at the task's next poll, and a task
-                        // parked in synchronous work (the credential store's
-                        // lock, a blocked log write) must not hold shutdown
-                        // here indefinitely.
+                        // Abort in-flight connections that have not completed an
+                        // upgrade and wait for them to be dropped so their
+                        // admission slots are back before shutdown proceeds.
+                        // These peers are unauthenticated, so there is no
+                        // connection of theirs to preserve; a client that was
+                        // mid-handshake simply reconnects.
+                        connections.abort_all();
+                        // Bounded like every other lane shutdown: an abort takes
+                        // effect at the task's next poll, and a task parked in
+                        // synchronous work (the credential store's lock, a
+                        // blocked log write) must not hold shutdown here
+                        // indefinitely.
                         let drained = tokio::time::timeout(SHUTDOWN_GRACE, async {
-                            while handshakes.join_next().await.is_some() {}
+                            while connections.join_next().await.is_some() {}
                         })
                         .await;
                         if drained.is_err() {
                             warn!(
-                                "P2P handshakes did not stop within {:?}; abandoning them",
+                                "P2P connections did not stop within {:?}; abandoning them",
                                 SHUTDOWN_GRACE
                             );
                         }
@@ -3420,159 +3465,35 @@ impl AgentServer {
         Ok((handle, local_addr))
     }
 
-    /// Complete the pre-authentication phase of one accepted P2P socket.
-    ///
-    /// Performs the optional TLS handshake and then reads one HTTP request
-    /// head. Without MCP this is byte-for-byte the old WebSocket upgrade.
-    /// With MCP, a non-upgrade request is handed back as
-    /// [`Handshake::Mcp`] and served by the host after this function returns,
-    /// so a tool call is not constrained by the WebSocket handshake deadline.
-    /// Everything else — including the #1013 credential check — is unchanged.
-    async fn complete_handshake(
+    /// Serve one accepted socket through the Agent's Axum router.
+    async fn serve_http(
         stream: tokio::net::TcpStream,
-        addr: SocketAddr,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
-        credentials: Arc<P2pCredentials>,
-        deadline: Duration,
-        mcp: Option<Arc<McpService>>,
-    ) -> Result<Handshake> {
-        let authority: Arc<OnceLock<ConnectionAuthority>> = Arc::new(OnceLock::new());
-        let captured = Arc::clone(&authority);
-        let store = Arc::clone(&credentials);
-
-        let upgrade = async move {
-            // Box the underlying stream so that TLS and plain connections
-            // share a single WebSocket stream type.
-            let io: TcpOrTls = if let Some(acceptor) = tls_acceptor {
-                let tls_stream = acceptor
-                    .accept(stream)
-                    .await
-                    .context("TLS handshake failed")?;
-                info!("TLS connection established from {}", addr);
-                TcpOrTls::Tls(tls_stream)
-            } else {
-                TcpOrTls::Plain(stream)
-            };
-
-            let io = match mcp {
-                Some(service) => {
-                    match nession_mcp::http::sniff(io, nession_mcp::http::DEFAULT_IO_TIMEOUT)
-                        .await
-                        .context("HTTP request head read failed")?
-                    {
-                        // Replay the consumed bytes: tungstenite parses the exact
-                        // upgrade request it expects, and the credential callback
-                        // below is untouched.
-                        Sniffed::WebSocket { stream } => stream,
-                        Sniffed::Http { stream, .. } => {
-                            return Ok(Handshake::Mcp(service, Box::new(stream)))
-                        }
-                    }
-                }
-                // No MCP configured: keep the pre-existing path with an empty
-                // replay prefix, so the stream type is one type either way.
-                None => PrefixedStream::new(Vec::new(), io),
-            };
-
-            // The half of #1013 that asks *is there a credential, and is it this
-            // agent's*, decided at the upgrade rather than after it.
-            //
-            // `accept_hdr_async` because its callback can **refuse**: returning
-            // `Err` rejects the upgrade, so a caller with no credential never has a
-            // WebSocket, never has a connection, and cannot leave one in a
-            // half-authenticated state — the property is structural rather than
-            // something every later handler has to keep honouring.
-            //
-            // The callback is **synchronous** (verified in the vendored
-            // tungstenite: `Callback::on_request` is an `FnOnce`, not an async fn),
-            // which is why the credential store is a `std::sync::RwLock` and why the
-            // authority has to come back out through a cell the closure wrote to.
-            // `OnceLock` rather than a `Mutex`: it is written once, on the path that
-            // returns `Ok`, and read once below.
-            let ws = tokio_tungstenite::accept_hdr_async(
-                io,
-                move |request: &UpgradeRequest, response: UpgradeResponse| {
-                    let presented = request
-                        .uri()
-                        .query()
-                        .and_then(nession_protocol::contracts::p2p::credential_from_query);
-
-                    match presented.as_deref().map(|token| store.authorize(token)) {
-                        Some(Ok(found)) => {
-                            let _ = captured.set(found);
-                            Ok(response)
-                        }
-                        refusal => {
-                            // One line, one shape, whatever the reason. `refusal` is
-                            // `None` for "nothing presented" and `Some(Err(_))` for
-                            // unknown, expired and wrong-agent alike, and they are
-                            // deliberately indistinguishable to the peer: a message
-                            // that said "expired" would tell a caller which of its
-                            // guesses was closest. The reason is logged and not sent.
-                            warn!(
-                                %addr,
-                                reason = ?refusal,
-                                "refusing a peer-to-peer connection: no valid credential"
-                            );
-                            Err(unauthorized_upgrade())
-                        }
-                    }
-                },
-            )
-            .await
-            .context("WebSocket upgrade failed")?;
-
-            // The callback sets this on every path that returns `Ok`. A `None` here
-            // would mean a connection that passed the upgrade with no record of what
-            // it may do, so it ends rather than running on an assumed scope — there
-            // is no safe default, and "assume it is allowed" is exactly the
-            // anonymous fallback this design forbids.
-            let Some(authority) = authority.get().cloned() else {
-                anyhow::bail!("upgrade completed without a credential authority");
-            };
-
-            info!(
-                "WebSocket connection from {} (credential {}, session {})",
-                addr, authority.credential_id, authority.session_id
-            );
-            Ok::<Handshake, anyhow::Error>(Handshake::WebSocket(Box::new(ws), authority))
-        };
-
-        // One deadline for both phases, because they are one unauthenticated
-        // window: a peer that sends nothing, a partial TLS record, or half of a
-        // request line is exactly the peer this bound exists for. It starts
-        // after `accept` (the admission slot is acquired before this future
-        // runs) and ends when the upgrade callback has authorized a credential
-        // — or when an MCP head has been read.
-        tokio::time::timeout(deadline, upgrade).await.map_err(|_| {
-            anyhow::anyhow!(
-                "P2P handshake did not complete within {deadline:?}; closing the connection"
-            )
-        })?
+        state: P2pHttpState,
+    ) -> Result<()> {
+        let deadline = state.deadline;
+        let slot = state.slot.clone();
+        let router = p2p_router(state);
+        ingress::serve(
+            move || ingress::TcpOrTls::accept(stream, tls_acceptor),
+            router,
+            slot,
+            deadline,
+        )
+        .await?;
+        Ok(())
     }
 
     /// Run one authenticated P2P connection's message loop.
     ///
-    /// Reached only after [`Self::complete_handshake`] has authorized a
-    /// credential. The connection holds no pre-authentication admission slot
+    /// Reached only after the upgrade handler has authorized a credential
+    /// (#1013). The connection holds no pre-authentication admission slot
     /// here: that budget is for becoming a peer, not for being one.
-    #[allow(clippy::too_many_arguments)]
     async fn serve_connection(
-        ws: WebSocketStream<PrefixedStream<TcpOrTls>>,
+        ws: AxumWebSocket,
         authority: ConnectionAuthority,
         addr: SocketAddr,
-        tmux_manager: Arc<SessionManager>,
-        service: Arc<SessionService>,
-        sessions: Arc<SessionRegistry>,
-        file_ops: Arc<FileOps>,
-        session_metadata: Arc<SessionMetadataStore>,
-        mutations: Arc<KeyedLane<ResourceKey>>,
-        default_working_dir: String,
-        terminal_cols: u16,
-        listen_address: String,
-        agent_id: String,
-        attach_mode: AttachMode,
-        resize: ResizeReporter,
+        context: AgentIngress,
     ) -> Result<()> {
         let (ws_sink, ws_stream) = ws.split();
 
@@ -3588,11 +3509,26 @@ impl AgentServer {
         // Per-connection client ID (set during CLIENT_AUTH handshake)
         let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
+        let AgentIngress {
+            tmux,
+            service,
+            sessions,
+            file_ops,
+            session_metadata,
+            mutations,
+            default_working_dir,
+            terminal_cols,
+            listen_address,
+            agent_id,
+            attach_mode,
+            resize,
+        } = context;
+
         // Everything a frame of this connection needs, owned once and shared by
         // reference: one `Arc` clone per frame rather than a copy of the ten
         // things a handler reads.
         let connection = Arc::new(Connection {
-            tmux: tmux_manager,
+            tmux,
             service,
             sessions,
             client_id,
@@ -3669,7 +3605,7 @@ impl AgentServer {
     ///   transition ahead of the operations that depend on it;
     /// * WebSocket's own ping, which belongs to the transport.
     async fn run_message_loop(
-        mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<PrefixedStream<TcpOrTls>>>,
+        mut ws_stream: futures_util::stream::SplitStream<AxumWebSocket>,
         connection: Arc<Connection>,
         mutations: Arc<KeyedLane<ResourceKey>>,
     ) -> Result<()> {
@@ -5270,8 +5206,8 @@ mod tests {
     ///
     /// The store is asked first, so a dial presenting something it never minted
     /// fails here with that sentence rather than as the opaque refused upgrade
-    /// this socket gives a peer — `HandshakeIncomplete`, with nothing in it
-    /// about which end said no.
+    /// this socket gives a peer — one 401 with nothing in it about which end
+    /// said no.
     async fn dial_presenting(
         credentials: &P2pCredentials,
         addr: SocketAddr,

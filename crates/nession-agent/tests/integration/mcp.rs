@@ -143,9 +143,20 @@ async fn send(
     session: Option<&str>,
     body: &str,
 ) -> Option<HttpResponse> {
+    send_path(addr, method, "/mcp", token, session, body).await
+}
+
+async fn send_path(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    session: Option<&str>,
+    body: &str,
+) -> Option<HttpResponse> {
     let mut stream = TcpStream::connect(addr).await.ok()?;
     let mut head = format!(
-        "{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
          text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
          Connection: close\r\n",
         body.len()
@@ -321,5 +332,33 @@ async fn agent_mcp_refuses_an_anonymous_request() {
         .await
         .expect("HTTP answer");
     assert_eq!(response.status, 401);
+    let _ = handle.shutdown().await;
+}
+
+/// `#3439` SC-02: the Agent's single listener is one explicit route table.
+///
+/// MCP owns its configured path; everything else is the P2P upgrade route.
+/// A plain HTTP request to an unmatched path is a 404, and a request that
+/// claims to be an upgrade but is malformed is refused by Axum's extractor
+/// rather than quietly becoming a WebSocket or a closed connection.
+#[tokio::test]
+async fn agent_http_surface_is_explicit() {
+    let (addr, handle) = start_agent_with_mcp().await;
+
+    let unmatched = send_path(addr, "GET", "/not-a-route", None, None, "")
+        .await
+        .expect("HTTP answer");
+    assert_eq!(unmatched.status, 404);
+
+    let not_an_upgrade = send_path(addr, "GET", "/ws", None, None, "")
+        .await
+        .expect("HTTP answer");
+    assert_eq!(not_an_upgrade.status, 404);
+
+    let wrong_method = send_path(addr, "POST", "/ws", None, None, "")
+        .await
+        .expect("HTTP answer");
+    assert_eq!(wrong_method.status, 404, "the P2P fallback is upgrade-only");
+
     let _ = handle.shutdown().await;
 }
