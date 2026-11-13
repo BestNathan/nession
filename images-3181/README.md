@@ -1,5 +1,9 @@
 # Prototype · Server-owned Images (#3181)
 
+> **HISTORICAL / NAVIGATION SUPERSEDED (2026-11-13):** The old independent Session-less Images Workspace entry depicted below is **not** the current Sandbox+Images product decision. [#3408](https://github.com/BestNathan/nession/issues/3408) moves Images **management presentation** under the selected Session's Sandbox → Images, while the Server still owns the same global registry, build, bytes and grants. [#3407](https://github.com/BestNathan/nession/issues/3407) defines Agent Workspaces; [#3405](https://github.com/BestNathan/nession/issues/3405) owns Filesystem use of EROFS. The revised interactive mock is [sandbox-capability-3124/index.html](../sandbox-capability-3124/index.html) on the same shared branch. The older Chromium receipts and product states below pertain **only to this historical design**; do not claim them for the revised layout.
+
+
+
 Linked Requirement: [#3181](https://github.com/BestNathan/nession/issues/3181) — Server-owned Images capability discoverable in Workspace and consumable by Project/Sandbox/Agent.
 
 Status: **Draft revision for product sign-off**, not production UI and not Acceptance evidence.
