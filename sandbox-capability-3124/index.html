@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">
-<title>Nession · Sandbox capability · #3124</title>
+<title>Nession · Sandbox unified capability · #3408 / #3407 / #3405</title>
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 <style>
 /* Isolated product-surface approximation. Values below are a scoped snapshot of staging design/generated/web.css (2026-11-09). */
@@ -369,31 +369,187 @@
 .nession-ui .policy-implementation>.module-domain,.nession-ui .policy-implementation>.policy-support-reason{padding:0 0 8px}
 .nession-ui .policy-implementation.is-disabled{background:transparent}
 </style>
+
+<style>
+/* Candidate Sandbox IA #3408/#3407/#3405; product-local only. Product values inherit the frozen Nession token snapshot above. */
+.nession-ui .cand-workspace{padding:0 0 115px;overflow-y:auto;min-height:0;height:100%}
+.nession-ui .cand-wide{max-width:none;margin:0}
+.nession-ui .cand-cap-header{padding:24px clamp(18px,3vw,32px) 0;display:flex;align-items:end;justify-content:space-between;gap:12px;border-bottom:1px solid var(--nession-border);background:var(--nession-background)}
+.nession-ui .cand-cap-title{padding-bottom:14px;min-width:0}
+.nession-ui .cand-cap-title h2{font-size:23px;letter-spacing:-.045em}
+.nession-ui .cand-cap-title p{font-size:11px;color:var(--nession-muted-foreground);margin-top:4px}
+.nession-ui .cand-primary{display:flex;gap:3px;flex-wrap:nowrap;align-items:end;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+.nession-ui .cand-primary button{background:transparent;border:0;padding:10px 12px 12px;white-space:nowrap;font-size:12px;font-weight:600;border-bottom:2px solid transparent;min-height:42px}
+.nession-ui .cand-primary button[aria-current="page"]{border-bottom-color:var(--nession-foreground)}
+.nession-ui .cand-primary button:hover{background:var(--nession-surface)}
+.nession-ui .cand-split{display:grid;grid-template-columns:168px minmax(0,1fr);gap:0;min-height:350px}
+.nession-ui .cand-sub{position:sticky;top:0;align-self:start;display:flex;flex-direction:column;gap:3px;padding:20px 12px 18px;background:var(--nession-surface);min-height:calc(100vh - 230px);border-right:1px solid var(--nession-border)}
+.nession-ui .cand-sub-label{color:var(--nession-muted-foreground);text-transform:uppercase;letter-spacing:.10em;font-size:10px;font-weight:650;margin:0 8px 10px}
+.nession-ui .cand-sub button{border:0;background:transparent;text-align:left;padding:10px 11px;border-radius:8px;font-size:12px;line-height:1.35}
+.nession-ui .cand-sub button[aria-current="page"]{background:var(--nession-muted);font-weight:660}
+.nession-ui .cand-sub button:hover{background:var(--nession-muted)}
+.nession-ui .cand-main{min-width:0;padding:25px clamp(16px,3vw,34px) 38px;max-width:1040px}
+.nession-ui .cand-section-head{display:flex;flex-wrap:wrap;align-items:start;justify-content:space-between;gap:12px;margin:3px 0 20px}
+.nession-ui .cand-section-head h2{font-size:21px;font-weight:670;letter-spacing:-.04em}
+.nession-ui .cand-section-head p{margin-top:5px;font-size:12px;line-height:1.5;color:var(--nession-muted-foreground)}
+.nession-ui .cand-cap-header+.cand-section-head{padding:24px 30px 0}
+.nession-ui .cand-card{border:1px solid var(--nession-border);background:var(--nession-background);border-radius:11px;padding:16px 18px;margin:0 0 15px;min-width:0}
+.nession-ui .cand-card-head{margin-bottom:12px}
+.nession-ui .cand-card-head h3{font-size:14px;font-weight:640;letter-spacing:-.015em;margin:0}
+.nession-ui .cand-card-head p{font-size:11px;line-height:1.5;color:var(--nession-muted-foreground);margin-top:5px}
+.nession-ui .cand-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 24px 14px}
+.nession-ui .cand-tile{display:flex;flex-direction:column;align-items:start;text-align:left;min-width:0;gap:8px;background:var(--nession-surface);border:1px solid var(--nession-border);border-radius:12px;padding:15px 16px}
+.nession-ui .cand-tile strong{font-size:14px}
+.nession-ui .cand-tile span{font-size:12px;overflow-wrap:anywhere}
+.nession-ui .cand-tile small{color:var(--nession-muted-foreground);font-size:10px}
+.nession-ui .cand-tile:hover{border-color:var(--nession-muted-foreground)}
+.nession-ui .cand-wide>.cand-section-head,.nession-ui .cand-wide>.cand-card{margin-left:24px;margin-right:24px}
+.nession-ui .cand-status{display:inline-flex;align-items:center;flex:none;border:1px solid var(--nession-border);border-radius:40px;background:var(--nession-surface);padding:3px 8px;font-size:10px;white-space:nowrap;line-height:1.4;font-weight:600}
+.nession-ui .cand-status.available,.nession-ui .cand-status.verified,.nession-ui .cand-status.applied,.nession-ui .cand-status.completed{background:#f0f6f1;color:#3d684b;border-color:#d3e1d5}
+.nession-ui .cand-status.unknown,.nession-ui .cand-status.absent,.nession-ui .cand-status.unavailable{color:#886f47;background:#fbf7f0;border-color:#e9dac0}
+.nession-ui .cand-status.failed,.nession-ui .cand-status.error{color:#a04747;background:#fff4f4;border-color:#e9d1d1}
+.nession-ui .cand-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;margin:9px 0}
+.nession-ui .cand-fact{border-bottom:1px solid var(--nession-border);padding:7px 0;min-width:0;overflow-wrap:anywhere}
+.nession-ui .cand-fact>span{display:block;color:var(--nession-muted-foreground);font-size:10px;margin-bottom:4px}
+.nession-ui .cand-fact strong{font-size:12px;font-weight:610}
+.nession-ui .cand-fact small{display:block;color:var(--nession-muted-foreground);font-size:10px;margin-top:4px}
+.nession-ui .cand-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.nession-ui .cand-btn{background:var(--nession-background);border:1px solid var(--nession-border);border-radius:9px;padding:8px 12px;min-height:35px;font-size:11px;font-weight:590;white-space:normal;text-align:center}
+.nession-ui .cand-btn.primary{background:var(--nession-foreground);color:var(--nession-background)}
+.nession-ui .cand-btn.danger{color:var(--nession-destructive);border-color:#e3c7c7}
+.nession-ui .cand-btn.muted{background:var(--nession-muted)}
+.nession-ui .cand-btn:hover:not(:disabled){background:var(--nession-muted)}
+.nession-ui .cand-btn.primary:hover:not(:disabled){background:#47505d;color:#fff}
+.nession-ui .cand-btn:disabled{opacity:.42;cursor:not-allowed}
+.nession-ui .cand-alert{background:var(--nession-surface);border:1px solid var(--nession-border);border-radius:9px;font-size:11px;padding:11px 13px;margin:12px 0;line-height:1.55;overflow-wrap:anywhere}
+.nession-ui .cand-alert.danger{background:#fff8f8;border-color:#edc9c9;color:#914646}
+.nession-ui .cand-alert.success{background:#f2f8f3;border-color:#d6e8db;color:#36644b}
+.nession-ui .cand-help{font-size:11px;color:var(--nession-muted-foreground);line-height:1.6}
+.nession-ui .cand-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-width:100%}
+.nession-ui .cand-row{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:11px 12px;background:var(--nession-surface);border:1px solid var(--nession-border);border-radius:9px;min-width:0;margin:4px 0}
+.nession-ui .cand-row>div:first-child{flex:1;min-width:0}
+.nession-ui .cand-row strong,.nession-ui .cand-item strong{font-size:12px;font-weight:620}
+.nession-ui .cand-row small,.nession-ui .cand-item small{display:block;font-size:10px;color:var(--nession-muted-foreground);overflow-wrap:anywhere;line-height:1.5}
+.nession-ui .cand-item{display:flex;align-items:center;gap:12px;justify-content:space-between;border:1px solid var(--nession-border);border-radius:9px;padding:11px 14px;background:var(--nession-background);text-align:left;min-width:0}
+.nession-ui .cand-item>span:first-child{min-width:0}
+.nession-ui .cand-item.selected{background:var(--nession-surface);border-color:#bfc7cb}
+.nession-ui .cand-inline{display:flex;gap:8px;min-width:0;flex-wrap:wrap}
+.nession-ui .cand-inline input{flex:1;min-width:155px}
+.nession-ui .cand-field{display:flex;flex-direction:column;gap:6px;margin:0 0 14px;min-width:0}
+.nession-ui .cand-field>span{font-size:12px;font-weight:590}
+.nession-ui .cand-field>small{color:var(--nession-muted-foreground);font-size:10px;line-height:1.45}
+.nession-ui .cand-field input,.nession-ui .cand-field select,.nession-ui .cand-field textarea,.nession-ui .cand-inline input{width:100%;border:1px solid var(--nession-border);background:var(--nession-background);border-radius:9px;padding:9px 11px;min-width:0;font:12px/1.5 Inter,-apple-system,sans-serif;color:var(--nession-foreground);min-height:39px}
+.nession-ui .cand-field textarea{font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical}
+.nession-ui .cand-field input:disabled,.nession-ui .cand-field select:disabled,.nession-ui .cand-field textarea:disabled{opacity:.6}
+.nession-ui .cand-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.nession-ui .cand-check{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;line-height:2.4}
+.nession-ui .cand-check label{display:inline-flex;align-items:center;gap:6px}
+.nession-ui .cand-check input{accent-color:#5f6b74}
+.nession-ui .cand-support{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:0 0 16px;font-size:11px}
+.nession-ui .cand-support code{font:11px/1.4 ui-monospace,Menlo,Consolas,monospace}
+.nession-ui .cand-support small{flex:1;min-width:140px;color:var(--nession-muted-foreground)}
+.nession-ui .cand-map{border:1px solid var(--nession-border);border-radius:9px;margin:13px 0 2px;overflow:hidden}
+.nession-ui .cand-map:empty{display:none}
+.nession-ui .cand-map>div{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:8px 11px;border-bottom:1px solid var(--nession-border)}
+.nession-ui .cand-map>div:last-child{border-bottom:0}
+.nession-ui .cand-map code{font:11px/1.5 ui-monospace,Menlo,monospace;overflow-wrap:anywhere;min-width:0}
+.nession-ui .cand-map span{font-size:10px;color:var(--nession-muted-foreground);text-align:right}
+.nession-ui .cand-json{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.6 ui-monospace,Consolas,monospace;max-height:280px;background:var(--nession-surface);padding:12px;border-radius:9px}
+@media(max-width:670px){
+  .nession-ui .cand-cap-header{padding:12px 13px 0;display:block}
+  .nession-ui .cand-cap-title{display:none}
+  .nession-ui .cand-primary{justify-content:space-between;gap:0}
+  .nession-ui .cand-primary button{padding:9px 7px 11px;font-size:11px;flex:1}
+  .nession-ui .cand-split{display:block}
+  .nession-ui .cand-sub{position:static;display:flex;flex-direction:row;overflow-x:auto;white-space:nowrap;min-height:0;border:0;border-bottom:1px solid var(--nession-border);padding:7px 9px;scrollbar-width:thin}
+  .nession-ui .cand-sub-label{display:none}
+  .nession-ui .cand-sub button{flex:none;padding:9px 10px;min-height:38px}
+  .nession-ui .cand-main{padding:17px 14px 28px}
+  .nession-ui .cand-section-head h2{font-size:18px}
+  .nession-ui .cand-grid{grid-template-columns:1fr;padding:0 14px 12px;gap:8px}
+  .nession-ui .cand-tile{padding:12px 14px;gap:3px}
+  .nession-ui .cand-wide>.cand-section-head,.nession-ui .cand-wide>.cand-card{margin-left:14px;margin-right:14px}
+  .nession-ui .cand-facts,.nession-ui .cand-pair{grid-template-columns:1fr}
+  .nession-ui .cand-card{padding:13px 14px}
+  .nession-ui .cand-row{gap:7px}
+  .nession-ui .cand-btn{min-height:42px}
+  .nession-ui .app-body{padding:0 0 95px}
+  .nession-ui .app .cand-workspace{height:auto;overflow:visible;padding:0}
+  .nession-ui .app .bottom-zone{position:absolute;bottom:14px}
+  .nession-ui .app .cand-section-head{margin-top:0}
+}
+</style>
 </head>
-<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
 <header class="np-overview">
-<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox Capability</span></nav>
-<span class="np-eyebrow">WORKSPACE · AGENT / LOCATION CAPABILITY · SESSION EXECUTION</span>
+<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox · revised</span></nav>
+<span class="np-eyebrow">SESSION WORKSPACE · SANDBOX · WEB / APP · DESIGN CANDIDATE</span>
 <div class="np-header-main">
-<div><h1 class="np-title">Sandbox · 策略 Tab / 独立配置 / 生效检查</h1><p class="np-subtitle">五类策略保留完整配置面板；Web 左侧固定 Tab、App 顶部横向滑动 Tab。每个面板内再按 Agent 探测到的原生策略实现展示独立条目：例如 resource.cgroup_v2 与 syscall.seccomp，可用则配置，不支持/未知则禁用并说明原因。Overview 统一预检和 Enter。</p></div>
-<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3143">Composition #3143</a><a href="https://github.com/BestNathan/nession/issues/3161">Policy Support #3161</a><a href="https://github.com/BestNathan/nession/issues/3141">Native Resource #3141</a><a href="https://github.com/BestNathan/nession/issues/3124">Workspace #3124</a><a href="https://github.com/BestNathan/nession/issues/2681">Sandbox V1 #2681</a><a href="https://github.com/BestNathan/nession/issues/3062">Managed #3062</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
-</div>
-<div class="np-meta"><span>Product: <strong>Terminal → Workspace → Sandbox → Enter</strong></span><span>Widths: <strong>Web 1180/1024 · App 390/375</strong></span><span>Execution: <strong>Interactive mock · no real OS writes</strong></span></div>
+<div><h1 class="np-title">Sandbox · Images · Workspaces · Policies</h1>
+<p class="np-subtitle">Session 依然是 Sandbox 的入口；Images 复用 Server 全局 Registry，Workspaces 是 Agent 可命名的可复用资源，Policies 直接展示 Filesystem / Network / 原生隔离能力。Web 顶部右侧一级导航，进入管理区再使用局部 Sidebar；App 保留唯一的主页面 Header 与 Back。</p></div>
+<div class="np-links">
+<a href="https://github.com/BestNathan/nession/issues/3408">Integration #3408</a>
+<a href="https://github.com/BestNathan/nession/issues/3407">Workspaces #3407</a>
+<a href="https://github.com/BestNathan/nession/issues/3405">Filesystem #3405</a>
+<a href="https://github.com/BestNathan/nession/issues/3143">Previous IA #3143</a>
+<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+</div></div>
+<div class="np-meta"><span>Entry: <strong>Session → Workspace → Sandbox</strong></span><span>Viewport: <strong>Web 1180/1024 · App 390/375</strong></span><span>Fidelity: <strong>Interactive synthetic mock; not production</strong></span></div>
 </header>
 <main>
-<section class="np-preview"><div class="np-section-heading"><div><h2>交互预览 · 真实 CSS 像素</h2><p>先在 Native 上编辑策略 → 预检 → 确认 Enter → 查看当前 Pane 的生效配置 → Return to Native。外部场景可模拟运行时失败和不可用。</p></div>
-<div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button><button type="button" data-np-size="1024">Web 1024</button><button type="button" data-np-size="390">App 390</button><button type="button" data-np-size="375">App 375</button><button type="button" data-np-reset>Reset</button></div></div>
-<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px"><div id="sandbox-product" class="nession-ui" data-mode="web"></div></div></div>
+<section class="np-preview">
+<div class="np-section-heading"><div><h2>Interactive product preview</h2><p>通过 Overview → Images → Workspaces → Policies 走完整路径；选择 Agent Workspace，在 Filesystem 预览 RootFS、Mount、Access 映射，然后 Mock Preflight / Enter。</p></div>
+<div class="np-preview-toolbar">
+<button data-np-size="1180" aria-pressed="true">Web 1180</button>
+<button data-np-size="1024">Web 1024</button>
+<button data-np-size="390">App 390</button>
+<button data-np-size="375">App 375</button>
+<button data-np-reset>Reset</button>
+</div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px">
+<div class="nession-ui" id="sandbox-product" data-mode="web"></div>
+</div></div>
 <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
-<div class="fixtures" aria-label="外部模拟观测条件"><b>模拟当前执行环境：</b><button type="button" data-fixture="native" aria-pressed="true">Native / 可进入</button><button type="button" data-fixture="active">已在 Sandbox</button><button type="button" data-fixture="prepared">EROFS 已组合</button><button type="button" data-fixture="limited">仅 Memory/PIDs 委派</button><button type="button" data-fixture="no-cgroup">cgroup v2 不可用</button><button type="button" data-fixture="no-seccomp">seccomp 不可用</button><button type="button" data-fixture="preflight-fail">预检失败</button><button type="button" data-fixture="enter-fail">启动失败</button><button type="button" data-fixture="kernel-reject">内核写入失败</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="macos">macOS Seatbelt</button><button type="button" data-fixture="recreated">旧实例记录</button></div>
-</section>
-<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede"><strong>#3137 presentation revision:</strong> this mock now consumes the shared Sandbox Outside/Inside resource-detail and configuration-form grammar: one title role, quiet named sections, read-only label/value facts with no input chrome, Web 32px / App 44px control bands, and one secondary→primary action line. Production React remains authoritative. Agent、Session、tmux Pane、Policy、执行结果都为合成 Mock 数据；构建配置、预检与 Enter 操作绝不调用真实主机或修改实际进程。</p>
-<div class="np-detail-grid">
-<article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox。六个同级 Tab 直接切换；进入 Resource 查看 cgroup_v2 条目的实测支持状态，支持才开放 controller 与 Key/Value；进入 Syscall 查看 seccomp 状态和 Agent 注册 Profile。切到「cgroup v2 不可用」「seccomp 不可用」「macOS Seatbelt」「Agent 离线」验证禁用原因。Overview 统一预检、查看 JSON 与 Enter。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>切换「仅 Memory/PIDs 委派」测试 Agent 返回的候选 Key 不包含 cpu.max；测试预检失败、启动失败、macOS、不支持和 Agent 离线，失败保留 Native/草稿。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
-<article class="np-detail"><h3>核心对象和状态</h3><p>宿主能支持 Sandbox ≠ 当前 Pane 位于 Sandbox。状态由 Agent 对 <strong>active Pane + Session instance + execution id</strong> 的观测决定，外部启动的非托管 Sandbox 不能推测为 Nession 已验证。</p><p><strong>Policy Draft</strong> 在提交前可编辑；<strong>Effective Policy</strong> 是成功执行后、Agent 验证并持续可查询的只读配置。预检与 Enter 是两个不同动作。</p></article>
-<article class="np-detail"><h3>运行时设计约束</h3><p>现有 #2681 仅在创建 Session 时提供启动屏障。新的 Enter 需要 Agent 创建 <strong>同一个逻辑 Session 的隔离 Pane</strong>，验证 Linux Bubblewrap / macOS Seatbelt 后切换焦点。原 Native Pane 保留，失败时不影响原 shell，不向已有 Pane 注入文本。</p><p>Return to Native 只是切换焦点，不代表 Sandbox 的进程已经终止。完整的结束/清理与重连需在后端代码及独立 Case 中实现、验收。</p></article>
-<article class="np-detail"><h3>信息架构和证据边界</h3><p>Web：WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox 能力本地视图。App：AppLayers → WorkspacePanel 唯一 AppPageHeader/Back → WorkspaceShell → Sandbox 配置/确认/详情。没有新的永久 Sandbox 页面。</p><p>字体、终端渲染和样式为 Nession token 快照基础上的近似，非真实 React / xterm 画面。静态校验与合成 DOM 测试不等于 Chromium 或真实原生隔离验证。</p><details class="np-inspector"><summary>当前模拟状态</summary><pre id="sandbox-inspector">fixture=native; surface=terminal</pre></details></article>
-</div></section></main><footer class="np-footer">Nession · Requirement #3124 · Prototype source is not proof of production security or Acceptance</footer>
+<div class="fixtures" aria-label="Mock Agent and Session scenarios">
+<b>模拟条件（仅外部测试控件）：</b>
+<button data-fixture="linux" aria-pressed="true">Linux · Available</button>
+<button data-fixture="inside" aria-pressed="false">Inside · Effective</button>
+<button data-fixture="limited" aria-pressed="false">Partial cgroup</button>
+<button data-fixture="no-cgroup" aria-pressed="false">No cgroup</button>
+<button data-fixture="no-seccomp" aria-pressed="false">No seccomp</button>
+<button data-fixture="macos" aria-pressed="false">macOS Seatbelt</button>
+<button data-fixture="offline" aria-pressed="false">Agent Offline</button>
+<button data-fixture="preflight-fail" aria-pressed="false">Preflight Reject</button>
+<button data-fixture="enter-fail" aria-pressed="false">Enter Failure</button>
+<button data-fixture="no-session" aria-pressed="false">No Session</button>
 </div>
-<script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script>
+</section>
+<section class="np-details"><h2>Design contract &amp; verification</h2>
+<p class="np-details-lede">本原型复用 <code>sandbox-capability-3124/</code> 目录，修订原六个同级策略 Tab 的信息架构。所有 Image、Build、Agent Cache、Workspace 目录、Capability Probe 和 Sandbox Enter 均为本地确定性模拟，不发送网络请求，不修改宿主目录，也不代表生产能力已经交付。</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>01 · Sandbox + Images (#3408)</h3><ol class="np-steps">
+<li>从当前 Session 进入 Sandbox，查看 Overview。切换 Images → Image Library / Builds / Distribution。Server Ready 与当前 Agent Cache 必须分开表示。</li>
+<li>在 Library 选择 Runtime 或 Toolchain 可跳转 Filesystem。切换同 Server 的另一个 Session，不会生成第二份 Images Registry。</li>
+<li>Web 一级导航位于 Sandbox Header 右侧、二级导航在选中管理区的局部 Sidebar；App 内使用紧凑横向导航但不新增第二个 App Back。</li>
+</ol></article>
+<article class="np-detail"><h3>02 · Agent Workspaces (#3407)</h3><ol class="np-steps">
+<li>Session <code>sandbox-review</code> 有 Project Existing Location，默认使用 Agent 上的该目录。切换 Session <code>fix-terminal</code> 后无 Project Location，使用按 Session 名自动分配。</li>
+<li>在 Workspaces 里模拟创建命名资源、同名复用、查看列表及删除确认；Project Location 只引用不删除，Managed Resource 在 Sandbox 退出后仍可列出。</li>
+<li>Filesystem 引用 Workspace，Agent 解析实际目录；映射目标隐含为 <code>/workspace</code>。</li>
+</ol></article>
+<article class="np-detail"><h3>03 · Filesystem Policy (#3405)</h3>
+<p><strong>Access：</strong>同名目录只读/读写映射（P→P），没有目标输入。<strong>Mounts：</strong>授权的 EROFS Digest 显式映射到受限目标（Source→Target）。<strong>RootFS：</strong>独占根挂载，目标隐含 <code>/</code>。Workspace 目标隐含 <code>/workspace</code>。Home 独立于 Workspace。</p>
+<p>当前 V1 的 EROFS Root 和任意 <code>filesystem.access</code> 互斥；示意可展示冲突但不能通过预检。工具 Mount 先只允许 <code>/opt/&lt;name&gt;</code>。</p></article>
+<article class="np-detail"><h3>Fidelity &amp; negative states</h3>
+<p>模拟 Agent 离线、macOS、不支持 cgroup/seccomp、Image Cache absent、没有 Session、预检失败、启动失败、Inside 只读等场景。Shell 结构依据 main 现有 WebLayout / Sidebar + ShellMain → WorkspaceShell 与 AppLayers → one AppPageHeader，候选变化仅在 Sandbox 内部。</p>
+<p>Web/App 1:1 尺寸是展示目标，**未声明与生产 UI 的像素完全一致**。Mock 静态自测、真实 Chromium 交互、Pages 发布 SHA 和生产 Acceptance 需独立记录；本页面的模拟按钮不是原生 Kernel/EROFS 验证。</p>
+<details class="np-inspector"><summary>Inspect synthetic mock state</summary><pre id="sandbox-inspector">initializing…</pre></details>
+</article>
+</div>
+</section></main>
+<footer class="np-footer">Nession · #3408 / #3407 / #3405 · Prototype is a decision artifact, not production acceptance evidence.</footer>
+</div>
+<script src="./app.js"></script>
+<script src="../prototype-frame-2758/frame.js"></script>
 </body></html>
