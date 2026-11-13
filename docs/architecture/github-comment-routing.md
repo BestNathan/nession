@@ -13,6 +13,7 @@ admission, Gate results, provenance, and independent Acceptance projection.
 | `/audit` | open native Issue | current Issue → Agent / Issue Audit (single) | OWNER/MEMBER/COLLABORATOR |
 | `/audit tree` | open native Issue | current Issue → Agent / Issue Audit (tree) | same |
 | `/accept` | open native Issue | current Issue → Acceptance / Manual Request | same; recovery request only |
+| `/case SC-NN` | open native Requirement/Bug Issue | trusted associated merged SHA → Acceptance / Cases | OWNER/MEMBER/COLLABORATOR; Case-method SC only |
 | `/e2e full` | open same-repository PR | exact current PR HEAD SHA + branch → E2E / Full Regression | repo owner or collaborator with write+ |
 
 Other slash strings are not commands. In particular, `/e2e` is **not** an
@@ -46,6 +47,32 @@ re-reads `issues/comments/{id}` and `issues/{number}` using GitHub REST,
 materializes a synthetic original `issue_comment` event, then invokes the
 **existing** audit parser or lifecycle reconciler. That preserves human
 author/association checks despite the new bot dispatch actor.
+
+For `/case SC-NN`, the router reads the Issue's `Acceptance Plan` and selects
+only an explicit `when: merged, branch: staging|main, method: case` SC.
+It searches a **bounded** GitHub merged-PR inventory for an Issue-associated
+merge commit on that branch, verifies the commit is still the exact branch
+head or its GitHub-authenticated ancestor, and loads the Case manifest
+from the **exact merge commit**. The manifest controls the existing fixed
+runtime and OS platform (Linux by default; macOS-only selects macOS).
+Comment text cannot supply SHA, ref, stage, runtime, platform or environment.
+Absent Case, unavailable merged provenance, missing GitHub API access,
+unsupported PR/deployed stage or truncated inventory are errors—not Case Pass.
+For `platform: both`, one request exercises the Linux half only; the
+existing dual-native Case combiner withholds unpaired success. A separate
+native platform execution must supply the paired evidence.
+
+The routed `Acceptance / Cases` workflow carries `source_comment_id` and
+uses a comment-bound Run name. On the chosen platform **before target checkout**,
+trusted Main independently reads the original GitHub human comment/Issue,
+rejects edits, untrusted actors, unsupported or stale targets, and recomputes
+the bound merge SHA/Case manifest. Ordinary direct Actions/UI/manual and
+automatic push Case triggers remain supported with no comment ID.
+This preserves the separate authenticated GitHub Run/Attempt/Job/Step binding
+for manual Staging (#3316), existing Case selection, immutable Case ingest,
+Run Store and Issue projector. A successful command receipt **is not** proof
+of any SC: only ingested evidence for an eligible open Issue may project Pass.
+A completed/closed Issue is not silently reopened just to replay a Case.
 
 The Audit Run remains **Agent / Issue Audit**; it is not replaced by a
 reusable workflow with a different Source Run identity. Acceptance remains
