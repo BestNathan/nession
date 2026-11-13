@@ -320,6 +320,12 @@ async function selfTest() {
   const stagingSha = 'b'.repeat(40);
   assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody }, [mainPr]), [],
     'main-only PR cannot authorize staging without GitHub ancestry');
+  assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody }, [],
+    { verifiedStagingSha: stagingSha }), [],
+  'a staging SHA without an associated implementation must not authorize dispatch');
+  assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody },
+    [{ ...mainPr, merged_at: null }], { verifiedStagingSha: stagingSha }), [],
+  'unmerged main PR must not authorize staging replay');
   assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody }, [mainPr],
     { verifiedStagingSha: stagingSha }), [{ stage: 'staging', target_ref: stagingSha }]);
   const validCompare = { status: 'ahead', ahead_by: 2, behind_by: 0,
