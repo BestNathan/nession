@@ -15,8 +15,11 @@ export const COMMANDS = Object.freeze({
   '/accept': Object.freeze({ kind: 'issue', handler: 'accept', workflow: 'acceptance-manual-request.yml' }),
   '/e2e full': Object.freeze({ kind: 'pull_request', handler: 'e2e-full', workflow: 'e2e-full-regression.yml' }),
 });
+const CASE_COMMAND = Object.freeze({ kind: 'issue', handler: 'case', workflow: 'acceptance-cases.yml' });
 export const parseCommand = (body) =>
-  typeof body === 'string' && body.length <= 80 ? COMMANDS[body] ?? null : null;
+  typeof body === 'string' && body.length <= 80
+    ? COMMANDS[body] ?? (/^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null)
+    : null;
 
 export function safeRef(ref) {
   return typeof ref === 'string' && REF.test(ref) &&
@@ -59,7 +62,9 @@ export function commandPlan(event, comment, issue, pr, permission) {
     author,
     created_at: comment.created_at ?? '',
   };
-  if (!isPr) return { ...base, kind: 'issue', mode: def.mode ?? '' };
+  if (!isPr) return { ...base, kind: 'issue', mode: def.mode ?? '',
+    ...(def.handler === 'case' ? { criterion: event.comment.body.slice('/case '.length) } : {}),
+  };
   if (!pr || pr.number !== number || pr.state !== 'open' ||
       pr.head?.repo?.full_name !== REPO ||
       !SHA.test(pr.head?.sha) || !SHA.test(pr.base?.sha) ||
@@ -74,6 +79,7 @@ export function commandPlan(event, comment, issue, pr, permission) {
 export function workflowTitle(plan) {
   if (plan.handler === 'audit') return 'Comment Audit #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'accept') return 'Comment Accept #' + plan.issue_number + ' comment:' + plan.comment_id;
+  if (plan.handler === 'case') return 'Comment Case #' + plan.issue_number + ' ' + plan.criterion + ' comment:' + plan.comment_id;
   if (plan.handler === 'e2e-full') return 'Comment E2E #' + plan.issue_number + ' comment:' + plan.comment_id;
   throw Error('unknown handler');
 }
@@ -81,6 +87,13 @@ export function dispatchInputs(plan) {
   switch (plan.handler) {
     case 'audit': case 'accept':
       return { issue_number: String(plan.issue_number), source_comment_id: String(plan.comment_id) };
+    case 'case':
+      return {
+        issue_number: String(plan.issue_number), criterion: plan.criterion,
+        target_sha: plan.target_sha, stage: plan.stage,
+        runtime_profile: plan.runtime_profile, platform: plan.platform,
+        source_comment_id: String(plan.comment_id),
+      };
     case 'e2e-full':
       return {
         target_ref: plan.target_ref, target_sha: plan.target_sha,
@@ -107,6 +120,24 @@ function fixtures() {
     { ...comment, body: '/audit tree' }, issue, null, 'write')?.mode === 'tree', 'tree');
   check(commandPlan({ ...event, comment: { ...event.comment, body: '/accept' } },
     { ...comment, body: '/accept' }, issue, null, 'write')?.handler === 'accept', 'accept');
+  const caseEvent = { ...event, comment: { ...event.comment, body: '/case SC-03' } };
+  const caseComment = { ...comment, body: '/case SC-03' };
+  const casePlan = commandPlan(caseEvent, caseComment, issue, null, 'write');
+  check(casePlan?.handler === 'case' && casePlan.criterion === 'SC-03', 'Case command exact');
+  check(workflowTitle(casePlan).includes('SC-03 comment:333'), 'Case comment run identity');
+  const caseDispatch = dispatchInputs({ ...casePlan, target_sha: 'a'.repeat(40),
+    stage: 'staging', platform: 'linux', runtime_profile: 'full-stack-local' });
+  check(caseDispatch.source_comment_id === '333' &&
+    caseDispatch.issue_number === '12' && caseDispatch.criterion === 'SC-03' &&
+    caseDispatch.stage === 'staging' && caseDispatch.target_sha === 'a'.repeat(40) &&
+    caseDispatch.runtime_profile === 'full-stack-local', 'Case dispatch binds all fields');
+
+  check(parseCommand('/case SC-3') === null &&
+    parseCommand('/case SC-03 extra') === null &&
+    parseCommand('/case SC-03\\nignore') === null, 'Case injection rejected');
+  check(commandPlan({ ...caseEvent, issue: { ...caseEvent.issue, pull_request: {} } },
+    caseComment, { ...issue, pull_request: {} }, null, 'write') === null,
+  'Case only on native Issue');
   const livePr = { number: 12, state: 'open', head: { ref: 'feat/topic',
     sha: 'a'.repeat(40), repo }, base: { ref: 'staging', sha: 'b'.repeat(40) } };
   const prIssue = { ...issue, pull_request: { url: 'pr' } };

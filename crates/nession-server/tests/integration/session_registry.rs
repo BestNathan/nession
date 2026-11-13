@@ -43,6 +43,38 @@ async fn test_session_update() {
     assert_eq!(retrieved.unwrap().session_name, "dev-work");
 }
 
+/// A later authoritative report for the same session id replaces the durable
+/// instance identity, so the Server never keeps serving the previous
+/// incarnation once the Agent reports the replacement (#3399).
+///
+/// This is the Server half of the seam: the watcher's regression test asserts
+/// the Agent emits the replacement on the `instance_id` payload field this
+/// handler consumes; this test asserts the registry adopts it rather than
+/// keeping A.
+#[tokio::test]
+async fn test_session_update_replaces_instance_identity() {
+    let registry = make_registry().await.unwrap();
+
+    let mut first = make_session("agent_123:dev", "agent_123", "dev", SessionStatus::Detached);
+    first.instance_id = Some("instance-a".to_string());
+    registry.update_session(first).await;
+
+    let mut replacement =
+        make_session("agent_123:dev", "agent_123", "dev", SessionStatus::Detached);
+    replacement.instance_id = Some("instance-b".to_string());
+    registry.update_session(replacement).await;
+
+    let stored = registry
+        .get("agent_123:dev")
+        .await
+        .expect("session present");
+    assert_eq!(
+        stored.instance_id.as_deref(),
+        Some("instance-b"),
+        "an authoritative update must replace the previous incarnation"
+    );
+}
+
 #[tokio::test]
 async fn test_list_sessions_by_agent() {
     let registry = make_registry().await.unwrap();

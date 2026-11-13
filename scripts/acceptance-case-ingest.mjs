@@ -15,7 +15,7 @@ import { makeRunIndex } from './run-record-index-contract.mjs';
 import { enrichReceipt, validateStoredRecord } from './deployment-attestation-ingest.mjs';
 
 const RESULTS = new Set(['Pass', 'Fail', 'Pending', 'Error']);
-const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+const STAGES = new Set(['pr', 'pre-merge', 'staging', 'post-merge']); // legacy record reads only
 const DEPLOYMENT_ROLES = Object.freeze(['agent', 'server', 'ui']);
 const DEPLOYMENT_ENVIRONMENT = /^[a-z][a-z0-9-]{0,62}$/;
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -620,8 +620,8 @@ export async function applyCaseRecord(record, { repository, token, request = git
   const [owner, name] = String(repository ?? '').split('/');
   if (!owner || !name) throw new Error('repository must be owner/name');
 
-  if (item.stage === 'pre-merge') {
-    return { projected: false, reason: 'pre-merge Case records are evidence-only; PR Acceptance owns pre-merge projection' };
+  if (item.stage === 'pr' || item.stage === 'pre-merge') {
+    return { projected: false, reason: 'PR Case Smoke records are evidence-only; Agent owns PR Acceptance projection' };
   }
 
   if (item.deployment) {

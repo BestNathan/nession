@@ -65,6 +65,26 @@ export const INPUT_QUEUE_BOUNDS: InputQueueBounds = {
 };
 
 /**
+ * How long a pending input run may wait for more chunks before it is handed to
+ * the transport as one frame (#3397).
+ *
+ * The queue's bounds above were measured for typing and paste; mouse reporting
+ * is a high-rate source that reaches the same `send()` path (a TUI that enables
+ * DECSET 1003 reports every pointer move). The relay already bounds a burst
+ * with its 16 ms `INPUT_THROTTLE` and merges the bytes server-side (#966,
+ * #1307 SC-05); the direct P2P path has no such merge, so without a client-side
+ * bound every event becomes its own WebSocket frame and each new event re-offers
+ * the whole unacknowledged run (`K(K+1)/2` frames for `K` chunks).
+ *
+ * The window is a **coalescing** bound, not a debounce: a chunk offered to an
+ * empty queue still leaves in the same call, so typing and paste latency are
+ * unchanged. Only a run that is already waiting is folded into one frame with
+ * its `seq_start..seq_end` range. Every byte survives and the Agent applies a
+ * frame whole, so the PTY sees the same stream either way.
+ */
+export const INPUT_COALESCE_WINDOW_MS = 16;
+
+/**
  * Deadline for the periodic keepalive ping.
  *
  * Nothing is decided on the outcome, so this only bounds how long a pending
@@ -108,6 +128,16 @@ export class ConnectionManager implements TerminalTransport {
    * one mean nothing to it.
    */
   private pendingInput = new PendingInputQueue(INPUT_QUEUE_BOUNDS);
+  /**
+   * The armed trailing coalescing flush for the pending run (#3397).
+   *
+   * At most one exists: `scheduleInputFlush` is idempotent, and any immediate
+   * flush (`send` on an empty queue, attach, explicit caller) clears it because
+   * it already handed the run over. The timer is generation- and
+   * attached-gated when it fires, so a transport swap or detach cannot make a
+   * stale window write into a successor's queue.
+   */
+  private inputFlushTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Resize pending while state !== 'attached'. Coalesced — only the latest
    * {cols, rows} survives; intermediate sizes during the connect/reconnect
@@ -265,16 +295,57 @@ export class ConnectionManager implements TerminalTransport {
     if (this.agentApi?.getControlState(this.sessionName).role === 'observer') { return; }
     // Refused at a bound: the input never reaches the transport, so there is
     // nothing to hand over and nothing to question the link about. The drop is
-    // recorded on the queue for whoever reports it.
+    // recorded on the queue for whoever reports it. Expire first so `wasEmpty`
+    // describes the queue this event actually joins, not one whose oldest
+    // chunk is about to take the whole run with it (#3397).
+    this.pendingInput.expire();
+    const wasEmpty = this.pendingInput.size === 0;
     if (!this.pendingInput.accept(data)) { return; }
     // Queued rather than sent: the probe asks whether the link is there, and
     // input that was never offered to the link cannot answer that (#1264).
     if (!this.isAttached()) { return; }
-    this.flushInputBuffer();
-    // Reported for both transports, and even when a send inside the flush
-    // threw: a refused send is exactly the case worth questioning, and the
-    // owner decides for itself whether a check is warranted right now (#1264).
-    this.onInputSent();
+    if (wasEmpty || !this.pendingInput.isBound) {
+      // Leading edge: nothing was waiting, so this chunk gains no window delay.
+      // An unbound queue cannot state a range either, so its existing
+      // unsequenced drain stays immediate (#3397).
+      if (this.flushInputBuffer()) {
+        // Reported for both transports, and even when a send inside the flush
+        // threw: a refused send is exactly the case worth questioning, and the
+        // owner decides for itself whether a check is warranted right now
+        // (#1264).
+        this.onInputSent();
+      }
+      return;
+    }
+    // A run is already pending. Fold this chunk into the next window instead of
+    // re-offering the whole run per event; the timer's flush reports the send
+    // once it actually leaves (#3397).
+    this.scheduleInputFlush();
+  }
+
+  /**
+   * Arm the trailing coalescing flush for a run that is already pending.
+   *
+   * One timer for the whole run: an event that arrives while the window is
+   * open only extends the bytes the next flush carries, and the flush reads the
+   * queue at fire time rather than at schedule time. A flush that happens for
+   * another reason clears the timer, because it already handed the run over.
+   */
+  private scheduleInputFlush(): void {
+    if (this.inputFlushTimer !== null) { return; }
+    this.inputFlushTimer = setTimeout(() => {
+      this.inputFlushTimer = null;
+      if (this.disposed || !this.isCurrentGeneration() || !this.isAttached()) { return; }
+      if (this.flushInputBuffer()) {
+        this.onInputSent();
+      }
+    }, INPUT_COALESCE_WINDOW_MS);
+  }
+
+  private clearInputFlushTimer(): void {
+    if (this.inputFlushTimer === null) { return; }
+    clearTimeout(this.inputFlushTimer);
+    this.inputFlushTimer = null;
   }
 
   /**
@@ -286,15 +357,33 @@ export class ConnectionManager implements TerminalTransport {
    * this sends exactly the chunk just accepted, and after a reconnect it sends
    * the run that was typed while the transport was away.
    *
+   * **The whole contiguous run leaves as one frame** (#3397). The chunks are
+   * numbered from the acknowledged cursor by construction, so their
+   * concatenated bytes are exactly what `seq_start..seq_end` describes; the
+   * Agent writes a frame whole and advances to `seq_end`. Sending one frame for
+   * the run is what keeps a mouse-report burst and a retry from becoming one
+   * frame per event. A queue without an epoch still drains unsequenced, one
+   * chunk at a time, because there is no range to state.
+   *
+   * Any armed trailing window is cleared first: this flush has already handed
+   * the run over, so the timer has nothing left to do.
+   *
+   * Returns whether anything was handed to the transport. The liveness probe
+   * hangs off that fact rather than off an accepted event, so a chunk that only
+   * joined a scheduled window does not question a link it has not used yet.
+   *
    * Reconcile runs **before** this, in the orchestration effect, and that order
    * is load-bearing: a flush that preceded the attach reply would re-send
    * chunks the agent had already applied and, worse, would do it with numbers
    * derived from a stale cursor.
    */
-  flushInputBuffer(): void {
-    if (this.disposed || !this.isCurrentGeneration() || this.pendingInput.size === 0) { return; }
-    const outbound = this.pendingInput.outbound();
-    if (outbound === null) {
+  flushInputBuffer(): boolean {
+    this.clearInputFlushTimer();
+    if (this.disposed || !this.isCurrentGeneration() || this.pendingInput.size === 0) {
+      return false;
+    }
+    const frame = this.pendingInput.outboundFrame();
+    if (frame === null) {
       // No epoch yet — an agent built before this contract, or a transport that
       // has not stated a cursor. Send unsequenced and do not retain: there is
       // nothing a later retry could be checked against, and holding the bytes
@@ -310,16 +399,10 @@ export class ConnectionManager implements TerminalTransport {
       for (const data of this.pendingInput.drain()) {
         this.sendRawInput(data);
       }
-      return;
+      return true;
     }
-    // One frame per chunk. A chunk that coalesced several events would carry a
-    // range, which the agent understands, but nothing produces one yet: xterm
-    // delivers a paste as a single `onData`, so the batching the requirement
-    // asks for is already the shape of the event rather than something this
-    // layer has to do (#1307 SC-14).
-    for (const chunk of outbound) {
-      this.sendSequencedInput(chunk.data, chunk.seq);
-    }
+    this.sendSequencedInput(frame.data, frame.seqStart, frame.seqEnd);
+    return true;
   }
 
   /** Send input with no position — a transport or peer that cannot carry one. */
@@ -339,34 +422,38 @@ export class ConnectionManager implements TerminalTransport {
   }
 
   /**
-   * Send input at a position the agent can acknowledge.
+   * Send one frame covering a contiguous run of chunks.
    *
-   * One chunk is one position: `seqStart === seqEnd`. The range exists in the
-   * contract because a frame may cover several chunks, and nothing here
-   * produces one yet — see {@link flushInputBuffer}.
+   * `seqStart` and `seqEnd` are the first and last chunk positions the frame
+   * carries; a single chunk states the same number twice, which is the form
+   * every caller used before coalescing (#3397). The range exists in the
+   * contract precisely so a frame can cover several chunks: the Agent writes
+   * the concatenated bytes whole and advances its cursor to `seqEnd`.
    *
    * Both transports carry the position. A relay frame states it the same way a
    * direct one does, and the Server's merge is what keeps it true across a
    * burst: the merged frame states the first frame's `seq_start` through the
    * last frame's `seq_end`, so the position a client sent is the position the
-   * agent reads (#1307 SC-05).
+   * agent reads (#1307 SC-05). With client-side coalescing the Server usually
+   * has one frame to fold, not a burst — the merge remains the backstop for a
+   * client that predates the window.
    */
-  private sendSequencedInput(data: string, seq: number): void {
+  private sendSequencedInput(data: string, seqStart: number, seqEnd: number): void {
     const epoch = this.pendingInput.boundTo?.inputEpoch;
     if (epoch === undefined) { return; }
     if (this.mode === 'p2p' && this.agentApi) {
       try {
         this.agentApi.sendInput(this.sessionName, data, {
           inputEpoch: epoch,
-          seqStart: seq,
-          seqEnd: seq,
+          seqStart,
+          seqEnd,
         });
       } catch { /* transport reconnecting — the chunk stays pending */ }
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
       this.serverConnection.sendRelayInput(this.sessionName, data, {
         inputEpoch: epoch,
-        seqStart: seq,
-        seqEnd: seq,
+        seqStart,
+        seqEnd,
       });
     }
   }
@@ -504,9 +591,22 @@ export class ConnectionManager implements TerminalTransport {
    * cursor, which covers every byte of every frame it folds together.
    */
   private applyInputAck(ack: TerminalInputAck): void {
+    const appliedBefore = this.pendingInput.appliedThrough;
     this.pendingInput.acknowledge(ack.inputEpoch, ack.appliedThrough);
     if (ack.controlGeneration !== undefined) {
       this.noteControlGeneration(ack.controlGeneration);
+    }
+    // A coalesced frame that straddled an already-applied prefix is refused
+    // whole and restates the cursor; the chunks above the restated cursor are
+    // still unapplied. The acknowledgement is what moved the cursor, so it is
+    // also the moment to offer the rest — otherwise those bytes wait for an
+    // event that may never come and the TTL discards them (#3397).
+    if (this.pendingInput.appliedThrough > appliedBefore
+      && this.pendingInput.size > 0
+      && !this.disposed
+      && this.isCurrentGeneration()
+      && this.isAttached()) {
+      this.scheduleInputFlush();
     }
   }
 
@@ -528,6 +628,7 @@ export class ConnectionManager implements TerminalTransport {
 
   dispose(): void {
     this.disposed = true;
+    this.clearInputFlushTimer();
     this.reconciler.dispose();
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.p2pUnsubOutput?.();
