@@ -227,6 +227,30 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             erofs_cache.clone(),
         );
         mgr = mgr.with_sandbox(Arc::clone(&sandbox));
+        // Agent-owned reusable Workspaces (#3407). The registry lives under
+        // the Agent's durable data directory; if that directory is
+        // unavailable, the API reports unavailable rather than falling back
+        // to an ephemeral location.
+        match nession_common::paths::agent_dir() {
+            Ok(agent_dir) => {
+                match crate::workspace_manager::WorkspaceManager::open(agent_dir.join("workspaces"))
+                {
+                    Ok(manager) => {
+                        mgr = mgr.with_workspaces(Arc::new(manager));
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "Agent Workspace registry unavailable; the inventory API is disabled: {error:#}"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "Agent Workspace registry path is unresolved; the inventory API is disabled: {error:#}"
+                );
+            }
+        }
         Arc::new(mgr)
     };
 

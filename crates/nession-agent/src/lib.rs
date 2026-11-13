@@ -30,6 +30,7 @@ pub mod server;
 pub mod session;
 pub mod sync;
 pub mod tmux;
+pub mod workspace_manager;
 
 #[cfg(test)]
 mod test_support;
