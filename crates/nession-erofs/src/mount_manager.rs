@@ -625,6 +625,15 @@ impl MountManager {
             if protected_digests.contains(&identity.digest) {
                 continue;
             }
+            if !is_valid_digest(&identity.digest) {
+                // A corrupt or tampered sidecar must never derive a path that
+                // could point outside the manager root.
+                report.reclaim_failed.push((
+                    identity_path.display().to_string(),
+                    format!("invalid digest in mount identity: {}", identity.digest),
+                ));
+                continue;
+            }
             let entry = self.entry_or_create(&identity.digest);
             if identity.mountpoint != entry.mountpoint {
                 // A sidecar that does not name this digest's canonical
@@ -1144,6 +1153,34 @@ mod tests {
         let status = manager.lookup(&digest).unwrap();
         assert!(!status.mounted);
         assert_eq!(status.consumers, 0);
+    }
+
+    #[test]
+    fn a_sidecar_with_an_invalid_digest_cannot_derive_an_unmount_target() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = manager(root.path(), "#!/bin/sh\nexit 0\n", Vec::new());
+        let hex = "d".repeat(64);
+        let digest = format!("{DIGEST_PREFIX}{hex}");
+        let entry = manager.entry_or_create(&digest);
+        write_identity(
+            &entry.identity_path,
+            &MountIdentity {
+                digest: "../../../escape".to_string(),
+                mountpoint: entry.mountpoint.clone(),
+                generation: "generation-1".to_string(),
+                source: root.path().join("image"),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        let report = manager.reclaim_orphans(&HashSet::new());
+        assert!(report.reclaimed.is_empty());
+        assert_eq!(report.reclaim_failed.len(), 1);
+        assert!(report.reclaim_failed[0].1.contains("invalid digest"));
+        assert!(
+            entry.identity_path.exists(),
+            "the identity is left for an operator"
+        );
     }
 
     #[test]
