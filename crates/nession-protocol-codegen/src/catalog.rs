@@ -204,6 +204,15 @@ fn sandbox_capability_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
     ]
 }
 
+fn workspace_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
+    use nession_protocol::contracts::workspace::v1 as workspace;
+    vec![
+        decl_of::<workspace::AgentWorkspaceKind>(cfg),
+        decl_of::<workspace::AgentWorkspaceStatus>(cfg),
+        decl_of::<workspace::AgentWorkspaceDescriptor>(cfg),
+    ]
+}
+
 /// Every contract this workspace serves, and the types each one carries.
 pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
     vec![
@@ -3066,6 +3075,123 @@ wires: &["agent.file.cwd"],
                 "ServerSessionSandboxReturnCall",
                 nession_protocol::contracts::session::v1::ServerSessionSandboxReturnPayload::inline,
                 schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxReturnPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.workspace.list",
+            version: 1,
+            wires: &["server.workspace.list"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::workspace::v1::ClientWorkspaceListPayload>(cfg),
+                    decl_of::<nession_protocol::contracts::workspace::v1::WorkspaceListResponse>(cfg),
+                ];
+                decls.extend(workspace_decls(cfg));
+                decls
+            },
+            request: Some((
+                "WorkspaceListCall",
+                nession_protocol::contracts::workspace::v1::ClientWorkspaceListPayload::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::ClientWorkspaceListPayload>,
+            )),
+            response: Some((
+                "WorkspaceListReply",
+                nession_protocol::contracts::workspace::v1::WorkspaceListResponse::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::WorkspaceListResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.workspace.create",
+            version: 1,
+            wires: &["server.workspace.create"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::workspace::v1::ClientWorkspaceCreatePayload>(cfg),
+                    decl_of::<nession_protocol::contracts::workspace::v1::WorkspaceCreateResponse>(cfg),
+                ];
+                decls.extend(workspace_decls(cfg));
+                decls
+            },
+            request: Some((
+                "WorkspaceCreateCall",
+                nession_protocol::contracts::workspace::v1::ClientWorkspaceCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::ClientWorkspaceCreatePayload>,
+            )),
+            response: Some((
+                "WorkspaceCreateReply",
+                nession_protocol::contracts::workspace::v1::WorkspaceCreateResponse::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::WorkspaceCreateResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.workspace.delete",
+            version: 1,
+            wires: &["server.workspace.delete"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::workspace::v1::ClientWorkspaceDeletePayload>(cfg),
+                decl_of::<nession_protocol::contracts::workspace::v1::WorkspaceDeleteResponse>(cfg),
+            ],
+            request: Some((
+                "WorkspaceDeleteCall",
+                nession_protocol::contracts::workspace::v1::ClientWorkspaceDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::ClientWorkspaceDeletePayload>,
+            )),
+            response: Some((
+                "WorkspaceDeleteReply",
+                nession_protocol::contracts::workspace::v1::WorkspaceDeleteResponse::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::WorkspaceDeleteResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.workspace.list",
+            version: 1,
+            wires: &["agent.workspace.list"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::workspace::v1::ServerWorkspaceListPayload>(cfg),
+                ];
+                decls.extend(workspace_decls(cfg));
+                decls
+            },
+            request: Some((
+                "AgentWorkspaceListCall",
+                nession_protocol::contracts::workspace::v1::ServerWorkspaceListPayload::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::ServerWorkspaceListPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.workspace.create",
+            version: 1,
+            wires: &["agent.workspace.create"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::workspace::v1::ServerWorkspaceCreatePayload>(cfg),
+            ],
+            request: Some((
+                "AgentWorkspaceCreateCall",
+                nession_protocol::contracts::workspace::v1::ServerWorkspaceCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::ServerWorkspaceCreatePayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.workspace.delete",
+            version: 1,
+            wires: &["agent.workspace.delete"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::workspace::v1::ServerWorkspaceDeletePayload>(cfg),
+            ],
+            request: Some((
+                "AgentWorkspaceDeleteCall",
+                nession_protocol::contracts::workspace::v1::ServerWorkspaceDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::workspace::v1::ServerWorkspaceDeletePayload>,
             )),
             response: None,
         },
