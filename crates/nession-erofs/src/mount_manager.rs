@@ -987,7 +987,9 @@ fn read_identity(path: &Path) -> Result<MountIdentity> {
 fn write_identity(path: &Path, identity: &MountIdentity) -> Result<()> {
     let bytes =
         serde_json::to_vec_pretty(identity).context("serialize the durable mount identity")?;
-    let temporary = path.with_extension(format!("json.tmp.{}", std::process::id()));
+    // A stale temporary from a crashed process must not block every later
+    // mount of this digest, so the name is unique rather than pid-based.
+    let temporary = path.with_extension(format!("json.tmp.{}", uuid::Uuid::new_v4()));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
