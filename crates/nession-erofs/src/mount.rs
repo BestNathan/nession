@@ -128,9 +128,16 @@ impl ErofsMount {
     }
 
     /// Unmount eagerly (rather than leaving it to `Drop`).
+    ///
+    /// A read-only EROFS mount is a shared-resource candidate, so reclamation
+    /// is strict and bounded: a failed unmount keeps the handle (and its
+    /// mountpoint) so the caller or `Drop` can retry. Never use the lazy
+    /// `fusermount -uz` escape hatch here.
     pub fn unmount(&mut self) -> Result<()> {
-        let result = unmount_one(&self.fusermount, &self.mountpoint);
-        self.mountpoint = PathBuf::new();
+        let result = unmount_shared(&self.fusermount, &self.mountpoint);
+        if result.is_ok() {
+            self.mountpoint = PathBuf::new();
+        }
         result
     }
 }
@@ -138,7 +145,7 @@ impl ErofsMount {
 impl Drop for ErofsMount {
     fn drop(&mut self) {
         if !self.mountpoint.as_os_str().is_empty() {
-            let _ = unmount_one(&self.fusermount, &self.mountpoint);
+            let _ = unmount_shared(&self.fusermount, &self.mountpoint);
         }
     }
 }
