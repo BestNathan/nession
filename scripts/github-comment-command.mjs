@@ -125,6 +125,13 @@ function fixtures() {
   const casePlan = commandPlan(caseEvent, caseComment, issue, null, 'write');
   check(casePlan?.handler === 'case' && casePlan.criterion === 'SC-03', 'Case command exact');
   check(workflowTitle(casePlan).includes('SC-03 comment:333'), 'Case comment run identity');
+  const caseDispatch = dispatchInputs({ ...casePlan, target_sha: 'a'.repeat(40),
+    stage: 'staging', platform: 'linux', runtime_profile: 'full-stack-local' });
+  check(caseDispatch.source_comment_id === '333' &&
+    caseDispatch.issue_number === '12' && caseDispatch.criterion === 'SC-03' &&
+    caseDispatch.stage === 'staging' && caseDispatch.target_sha === 'a'.repeat(40) &&
+    caseDispatch.runtime_profile === 'full-stack-local', 'Case dispatch binds all fields');
+
   check(parseCommand('/case SC-3') === null &&
     parseCommand('/case SC-03 extra') === null &&
     parseCommand('/case SC-03\\nignore') === null, 'Case injection rejected');
