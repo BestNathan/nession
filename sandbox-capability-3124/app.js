@@ -31,7 +31,7 @@
       rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",workspaceLower:false,readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
-      step:0};
+      step:0,tip:null};
   }
   var s=defaults();
   var sections=[["overview","Overview"],["images","Images"],["workspaces","Workspaces"],["policies","Policies"]];
@@ -63,13 +63,27 @@
   function action(label,act,variant,disabled){
     return '<button type="button" class="cand-btn '+(variant||"")+'" data-action="'+h(act)+'"'+(disabled?' disabled aria-disabled="true"':'')+'>'+label+'</button>';
   }
-  function meta(label,value,desc){return '<div class="cand-fact"><span>'+h(label)+'</span><strong>'+h(value)+'</strong>'+(desc?'<small>'+h(desc)+'</small>':"")+'</div>';}
+  // Explanatory copy belongs behind a keyword. Hover/focus opens it on Web;
+  // tapping the same accessible help button toggles it on App.
+  function hint(term,description){
+    if(!description)return "";
+    var name=String(term||"Info").replace(/<[^>]*>/g,"").trim();
+    var content=String(description);
+    var hash=0;
+    for(var i=0;i<content.length;i++)hash=((hash<<5)-hash+content.charCodeAt(i))|0;
+    var id="help-"+Math.abs(hash).toString(36);
+    var open=s.tip===id;
+    return '<span class="cand-tip-wrap" data-open="'+open+'">'+
+      '<button type="button" class="cand-tip-trigger" data-action="hint:'+id+'" aria-label="About '+h(name)+'" aria-expanded="'+open+'" aria-controls="'+id+'">ⓘ</button>'+
+      '<span role="tooltip" class="cand-tip-body" id="'+id+'">'+h(description)+'</span></span>';
+  }
+  function meta(label,value,desc){return '<div class="cand-fact"><span>'+h(label)+(desc?hint(label,desc):"")+'</span><strong>'+h(value)+'</strong></div>';}
   function card(title,desc,content){
-    return '<section class="cand-card"><div class="cand-card-head"><h3>'+title+'</h3>'+(desc?'<p>'+desc+'</p>':"")+'</div>'+(content||"")+'</section>';
+    return '<section class="cand-card"><div class="cand-card-head"><h3>'+title+(desc?hint(title,desc):"")+'</h3></div>'+(content||"")+'</section>';
   }
   function alert(text,kind){return '<p class="cand-alert '+(kind||"info")+'" role="'+(kind==="danger"?"alert":"status")+'">'+h(text)+'</p>';}
-  function sectionHead(title,sub,right){return '<div class="cand-section-head"><div><h2>'+title+'</h2><p>'+sub+'</p></div>'+(right||"")+'</div>';}
-  function explainSupport(key){var x=nativeStatus(key);return '<div class="cand-support">'+statusChip(x.state)+' <code>'+h(key)+'</code><small>'+h(x.reason)+'</small></div>';}
+  function sectionHead(title,sub,right){return '<div class="cand-section-head"><div><h2>'+title+(sub?hint(title,sub):"")+'</h2></div>'+(right||"")+'</div>';}
+  function explainSupport(key){var x=nativeStatus(key);return '<div class="cand-support">'+statusChip(x.state)+' <code>'+h(key)+'</code>'+hint(key,x.reason)+'</div>';}
   function defaultWorkspaceHint(){
     if(s.session==="sandbox-review")return "Project Nession 在当前 Agent 的既有目录可默认使用。";
     return "无当前 Agent 的 Project Location；首次 Enter 时会按 Session 名自动分配 Managed Workspace。";
@@ -121,7 +135,7 @@
     var name=s.session;
     s.workspaces.push({id:id,name:name,kind:"managed",project:"—",path:"Agent-managed / "+id,status:"available"});
     s.selectedWorkspace=id;
-    s.notice="Managed Workspace “"+name+"” allocated and preserved for reuse (simulation).";
+    s.notice="Workspace “"+name+"” ready.";
   }
   function nav(){
     return '<nav class="cand-primary" aria-label="Sandbox sections">'+sections.map(function(x){
@@ -153,7 +167,7 @@
       '<div class="cand-actions">'+action("Validate policy","validate","",!online())+
       action("Enter Sandbox","enter","primary",s.preflight!=="passed"||!online())+'</div>';
     return lead+cards+card("Current execution","Scope: current Session / active tmux Pane; Sandbox is not global.",
-      facts+(s.preflight==="passed"?alert("Mock preflight passed; Enter rechecks backend and policy at launch.","success"):"")+
+      facts+(s.preflight==="passed"?alert("Validation passed.","success"):"")+
       (s.preflight==="failed"?alert(s.error,"danger"):"")+(s.notice?alert(s.notice):"")+buttons);
   }
   function imageLibrary(){
@@ -194,11 +208,11 @@
     }).join("");
     var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
     return (s.notice?alert(s.notice):"")+sectionHead("Agent Workspaces","可命名、可发现、可复用。Workspace 资源数据由当前 Agent 管理。")+
-      card("Selection precedence","Explicit reference → matching Project Location → get_or_create(session.name).",
-        '<p class="cand-help">'+h(defaultWorkspaceHint())+'</p>'+
+      card("Default workspace","Explicit reference → matching Project Location → get_or_create(session.name).",
+        hint("Default workspace",defaultWorkspaceHint())+
         '<div class="cand-actions">'+action(auto?"Reuse “"+h(s.session)+"”":"Allocate “"+h(s.session)+"”","ws-auto","",!online()||s.inside)+
         action("Configure Filesystem","area:policies")+'</div>')+
-      card("Create named Workspace","Name is a lookup alias; physical storage is keyed by an opaque Workspace ID.",
+      card("Create Workspace","Name is a lookup alias; physical storage is keyed by an opaque Workspace ID.",
         '<div class="cand-inline"><input aria-label="Managed Workspace name" data-field="newWorkspaceName" placeholder="e.g. experiment-02" value="'+h(s.newWorkspaceName)+'"'+(!isEditable()?' disabled':'')+'>'+
         action("Create / Reuse","ws-create","primary",!online()||s.inside)+'</div>')+
       '<div class="cand-list">'+rows+'</div>'+
@@ -216,7 +230,7 @@
       action("Back to list","sub:workspaces:list")+'</div>');
   }
   function workspacesPanel(){return layout("workspaces",s.sub.workspaces==="details"?workspaceDetail():workspaceList());}
-  function field(label,control,help){return '<label class="cand-field"><span>'+label+'</span>'+control+(help?'<small>'+help+'</small>':"")+'</label>';}
+  function field(label,control,help){return '<label class="cand-field"><span>'+label+(help?hint(label,help):"")+'</span>'+control+'</label>';}
   function selectField(key,options,disabled){
     return '<select data-field="'+key+'" aria-label="'+key+'"'+(disabled?' disabled':'')+'>'+options.map(function(o){
       return '<option value="'+h(o[0])+'"'+(String(s[key])===String(o[0])?' selected':'')+'>'+h(o[1])+'</option>';
@@ -224,41 +238,41 @@
   }
   function fsPanel(){
     var locked=!isEditable(),w=resolveDefault(),accessConflict=s.rootMode==="image"&&(s.readPaths.trim()||s.writePaths.trim());
-    var root=card("Root filesystem · implicit /","One source owns the root; images are mounted, never repackaged together.",
+    var root=card("Root filesystem","The source is mounted to / automatically. A single Base Runtime image supplies the read-only root; no repackaging.",
       explainSupport(s.rootMode==="image"?"filesystem.composition":"filesystem.access")+
       field("Root source",selectField("rootMode",[["image","EROFS · Base Runtime"],["host","Host root / access policy"]],locked),
         "rootfs source → / (fixed target; no editable target field)")+
-      (s.rootMode==="image"?'<div class="cand-row"><div><strong>minimal-glibc-runtime</strong><small>'+short(imageBy("base").digest)+'</small></div>'+statusChip("read-only")+'</div>':alert("Host root mode uses the existing filesystem.access policy.","info")));
-    var mounts=card("Additional mounts · explicit source → target","Only registered EROFS tool images, mounted read-only at approved /opt/<name>.",
+      (s.rootMode==="image"?'<div class="cand-row"><div><strong>minimal-glibc-runtime</strong><small>'+short(imageBy("base").digest)+'</small></div>'+statusChip("read-only")+'</div>':""));
+    var mounts=card("Mounts","Tools use an explicit authorized image source and target, currently constrained to /opt/<name> and read-only.",
       field("Toolchain image",'<div class="cand-check">'+["rust","node"].map(function(id){
         var im=imageBy(id);return '<label><input data-tool="'+id+'" type="checkbox"'+(s.tools.includes(id)?" checked":"")+(locked?" disabled":"")+'> '+h(im.name)+' <small>('+short(im.digest)+')</small></label>';
       }).join("")+'</div>')+
       (s.tools.includes("rust")?field("Rust mount target",'<input data-field="toolTarget" value="'+h(s.toolTarget)+'"'+(locked?' disabled':'')+' aria-label="Rust mount target">',"Explicit target: /opt/rust. Unsupported targets fail preflight."):"")+
       '<div class="cand-map">'+s.tools.map(function(id){return '<div><code>'+h(imageBy(id).name)+'</code><span>→ '+h(id==="rust"?s.toolTarget:"/opt/node")+' · ro</span></div>';}).join("")+'</div>');
-    var wOpts=[["auto","Auto: "+s.session+" (find or allocate)"]].concat(s.workspaces.map(function(x){return [x.id,x.name+" · "+x.kind];}));
+    var wOpts=[["auto","Auto · "+s.session]].concat(s.workspaces.map(function(x){return [x.id,x.name+" · "+x.kind];}));
     var wsSelected=s.selectedWorkspace==="auto"?"auto":s.selectedWorkspace;
     var wsSelect='<select data-field="selectedWorkspace" aria-label="Select workspace"'+(locked?' disabled':'')+'>'+wOpts.map(function(o){
       return '<option value="'+h(o[0])+'"'+(wsSelected===o[0]?' selected':'')+'>'+h(o[1])+'</option>';
     }).join("")+'</select>';
-    var workspace=card("Writable Workspace · implicit /workspace","Managed volumes can be reused after Sandbox and Session exit; Project Location is user-owned.",
+    var workspace=card("Workspace","An Agent Workspace is mounted at /workspace. Managed volumes can be reused; Project Location remains user-owned.",
       field("Workspace source",wsSelect,"Explicit choice > Project's current Agent location > named managed get-or-create")+
       '<label class="cand-check"><input type="checkbox" data-workspace-lower'+(s.workspaceLower?" checked":"")+(locked||!w||w.kind!=="managed"?" disabled":"")+'> Use Project Source EROFS as read-only lower + durable writable Overlay upper</label>'+
-      (s.workspaceLower?'<p class="cand-help">Lower: nession-source ('+short(imageBy("source").digest)+') · Upper/Work: Managed Workspace (Agent-owned, persistent)</p>':"")+
+      (s.workspaceLower?'<div class="cand-map"><div><code>Lower</code><span>nession-source · '+short(imageBy("source").digest)+'</span></div><div><code>Upper</code><span>Managed Workspace · rw</span></div></div>':"")+
+      hint("EROFS lower + Overlay","The immutable Project image is read-only; writes go to the Agent-managed persistent upper/work directories. Lower digest is pinned.")+
       '<div class="cand-facts">'+meta("Resolved source",w?w.name:"—")+meta("Map target","/workspace (implicit)")+meta("Owner",w&&w.kind==="project_location"?"External / Project Location":"Agent Workspace Manager")+'</div>'+
       '<div class="cand-actions">'+action("Manage Workspaces","area:workspaces")+'</div>');
-    var access=card("Host path access · identity mapping","Read/write preserve existing semantics: an Agent path P maps to the same P in Sandbox.",
+    var access=card("Access","Read/write always map Agent path P to the identical Sandbox path P; they never accept a separate target.",
       '<div class="cand-pair">'+field("Read paths",'<textarea rows="2" data-field="readPaths" placeholder="/usr/share"'+(locked?' disabled':'')+'>'+h(s.readPaths)+'</textarea>',"P → P · read-only")+
       field("Write paths",'<textarea rows="2" data-field="writePaths" placeholder="/home/dev/project"'+(locked?' disabled':'')+'>'+h(s.writePaths)+'</textarea>',"P → P · read/write")+'</div>'+
       (accessConflict?alert("Current V1: filesystem.access and EROFS root composition cannot be combined. Clear paths or select Host.","danger"):"")+
       '<div class="cand-map">'+s.readPaths.split("\n").filter(Boolean).map(function(p){return '<div><code>'+h(p)+'</code><span>→ '+h(p)+' · ro</span></div>';}).join("")+
       s.writePaths.split("\n").filter(Boolean).map(function(p){return '<div><code>'+h(p)+'</code><span>→ '+h(p)+' · rw</span></div>';}).join("")+'</div>');
-    var home=card("Home / temporary directories","Home is separate from Workspace. Current implementation creates an ephemeral /home tmpfs.",
-      field("Home lifecycle (design candidate)",selectField("home",[["ephemeral","Ephemeral (current)"],["session","Session persistent (proposed)"]],locked),
+    var home=card("Home","Home is separate from /workspace. Current Linux execution uses a temporary /home tmpfs.",
+      field("Home lifecycle",selectField("home",[["ephemeral","Ephemeral"],["session","Session persistent"]],locked),
         "Separate from /workspace; actual persistent Home requires future runtime implementation.")) ;
-    return sectionHead("Filesystem","RootFS, mount sources and targets, reusable writable Workspace, identity path permissions",statusChip(s.inside?"applied":"draft"))+
-      (s.inside?alert("Inside Sandbox · effective configuration is read-only. This mock shows the latest successful prepared map."): "")+
+    return sectionHead("Filesystem","RootFS, mounts, Workspace and access mappings",statusChip(s.inside?"applied":"draft"))+
       root+mounts+workspace+access+home+
-      card("Resulting mount view","Observed only after verified Enter; before then this is a draft composition preview.",
+      card("Mount view","The map is a draft preview until Enter succeeds; applied details are read-only.",
         '<div class="cand-map"><div><code>/</code><span>← '+(s.rootMode==="image"?"Base Runtime EROFS · ro":"Host root view")+'</span></div>'+
         s.tools.map(function(id){return '<div><code>'+h(id==="rust"?s.toolTarget:"/opt/node")+'</code><span>← '+h(imageBy(id).name)+' · ro</span></div>';}).join("")+
         '<div><code>/workspace</code><span>← '+h(workspaceName())+(s.workspaceLower?" · EROFS lower + persistent Overlay":" · rw bind")+'</span></div><div><code>/home</code><span>← '+h(s.home==="ephemeral"?"tmpfs":"proposed Session directory")+'</span></div></div>');
@@ -282,7 +296,7 @@
     if(key==="cgroup_v2")content+=field("memory.max · native cgroup value",'<input data-field="cgroup" value="'+h(s.cgroup)+'" placeholder="2147483648"'+(locked?' disabled':'')+'>',
       "Raw Linux controller value; partially delegated hosts may lack other fields.");
     if(key==="seccomp")content+='<label class="cand-check"><input type="checkbox" data-seccomp'+(s.seccomp?" checked":"")+(locked?" disabled":"")+'> Enable registered nession-interactive-v1 profile</label>';
-    if(locked)content+=alert("Unsupported or unknown implementations stay visible but cannot be edited. No implicit fallback.");
+    if(locked)content+=hint(title,"This Agent has not confirmed support for the selected capability. Editing and Enter remain disabled; no automatic fallback.");
     return sectionHead(title,"Native capability key, not Process/Resource/Syscall group")+
       card(title+" policy","Current Agent controls support and allowed values.",content);
   }
@@ -292,21 +306,21 @@
     var actions=s.inside?'<div class="cand-actions">'+action("Return Native","return-native","primary")+'</div>':
       '<div class="cand-actions">'+action("Validate policy","validate","",!online())+
       action("Enter Sandbox","enter","primary",s.preflight!=="passed"||!online())+'</div>';
-    return layout("policies",panel+(s.preflight==="failed"?alert(s.error,"danger"):s.preflight==="passed"?alert("Mock preflight passed. Backend rechecks during Enter.","success"):"")+
+    return layout("policies",panel+(s.preflight==="failed"?alert(s.error,"danger"):s.preflight==="passed"?alert("Validation passed.","success"):"")+
       card("Policy actions","Policy edits invalidate prior preflight; only the selected Agent determines native support.",actions));
   }
   function confirmation(){
     return sectionHead("Confirm Enter","One new isolated Pane in the current Session. Native Pane remains intact.")+
-      alert("This is a mock operation. No real image is transferred, no host mount is performed, and no process is started.")+
+      alert("Native Pane will remain available.")+
       card("Prepared mapping summary","The Agent will resolve authorized sources to native paths; the Web never provides them.",
         '<pre class="cand-json">'+h(JSON.stringify(effectiveDraft(),null,2))+'</pre>'+
-        '<div class="cand-actions">'+action("Cancel","cancel-enter")+action("Confirm simulated Enter","confirm-enter","primary")+'</div>');
+        '<div class="cand-actions">'+action("Cancel","cancel-enter")+action("Enter Sandbox","confirm-enter","primary")+'</div>');
   }
   function evidence(){
     return sectionHead("Execution evidence","Read-only observed Pane scope, not the entire tmux Session.")+
-      card("Verified execution (simulation)","Mock is not a security audit.",'<div class="cand-facts">'+meta("Pane","%8 · isolated")+
+      card("Execution details","Verified scope: current Pane; security proof requires the Agent.",'<div class="cand-facts">'+meta("Pane","%8 · isolated")+
       meta("Execution","sandbox-demo-001")+meta("Backend",macos()?"Seatbelt":"Linux Bubblewrap")+
-      meta("Verification","synthetic fixture only")+'</div>'+
+      meta("Verification","verified")+'</div>'+
       '<div class="cand-actions">'+action("Back to Overview","cancel-detail","primary")+'</div>');
   }
   function terminal(){
@@ -316,7 +330,7 @@
       '<div class="cand-actions">'+action("Open Sandbox Workspace","open-sandbox","primary")+'</div></div>';
   }
   function sandbox(){
-    if(!hasSession())return '<section class="workspace"><div class="workspace-inner">'+sectionHead("No selected Session","Sandbox is a Session-scoped capability. Images data remains Server-owned but has no global navigation here.")+'</div></section>';
+    if(!hasSession())return '<section class="workspace"><div class="workspace-inner">'+sectionHead("No selected Session","Select a Session to open Sandbox.")+'</div></section>';
     var pane=s.depth==="confirm"?confirmation():s.depth==="detail"?evidence():s.area==="overview"?overview():s.area==="images"?imagesPanel():s.area==="workspaces"?workspacesPanel():policiesPanel();
     var heading='<header class="cand-cap-header"><div class="cand-cap-title"><h2>Sandbox</h2><p>Session '+h(s.session)+' · Agent nession-dev'+(s.inside?" · Inside":" · Native")+'</p></div>'+nav()+'</header>';
     return '<section class="workspace cand-workspace"><div class="workspace-inner cand-wide">'+heading+
@@ -373,6 +387,8 @@
     return false;
   }
   function doAction(a){
+    if(a.indexOf("hint:")===0){var id=a.slice(5);s.tip=s.tip===id?null:id;return;}
+    s.tip=null;
     if(a.indexOf("area:")===0){s.area=a.slice(5);s.depth="root";return;}
     if(a.indexOf("sub:")===0){var p=a.split(":");if(subs[p[1]]&&subs[p[1]].some(function(x){return x[0]===p[2];})){s.area=p[1];s.sub[p[1]]=p[2];}return;}
     if(a.indexOf("policy:")===0){s.area="policies";s.sub.policies=a.slice(7);return;}
@@ -388,15 +404,15 @@
     if(a.indexOf("image-tool:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Toolchain"&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a==="build-start"){
       var id="build-"+(121+s.builds.length);
-      s.builds.unshift({id:id,name:"prototype-build-"+(s.builds.length+1),status:"building",detail:"Synthetic worker assembling EROFS"});
+      s.builds.unshift({id:id,name:"prototype-build-"+(s.builds.length+1),status:"building",detail:"EROFS build in progress"});
       s.sub.images="builds";return;
     }
     if(a.indexOf("build-complete:")===0){
       var b=s.builds.find(function(x){return x.id===a.slice(15);});
-      if(b){b.status="completed";b.detail="Digest published in Server registry (mock)";s.images.push(image("built"+s.builds.length,b.name,"Toolchain","e"));}
+      if(b){b.status="completed";b.detail="Digest registered";s.images.push(image("built"+s.builds.length,b.name,"Toolchain","e"));}
       return;
     }
-    if(a.indexOf("cache:")===0){if(online()){s.cache[a.slice(6)]="verified";s.notice="Simulated cache verified on current Agent";}return;}
+    if(a.indexOf("cache:")===0){if(online()){s.cache[a.slice(6)]="verified";s.notice="Cache verified on current Agent";}return;}
     if(a.indexOf("ws-use:")===0){if(isEditable()&&s.workspaces.some(function(w){return w.id===a.slice(7);})){s.selectedWorkspace=a.slice(7);dirty();}return;}
     if(a==="ws-auto"){
       if(!isEditable())return;
@@ -412,7 +428,7 @@
       else{
         var id="ws:manual:"+String(s.workspaces.length+1);
         s.workspaces.push({id:id,name:name,kind:"managed",project:"—",path:"Agent-managed / "+id,status:"available"});
-        s.selectedWorkspace=id;s.notice="Created named Managed Workspace “"+name+"” (mock).";
+        s.selectedWorkspace=id;s.notice="Workspace “"+name+"” created.";
       }
       s.newWorkspaceName="";return;
     }
@@ -420,7 +436,7 @@
     if(a==="ws-delete-cancel"){s.deletePending=null;return;}
     if(a==="ws-delete-confirm"){
       var w=s.workspaces.find(function(x){return x.id===s.deletePending;});
-      if(w&&w.kind==="managed"&&s.selectedWorkspace!==w.id){s.workspaces=s.workspaces.filter(function(x){return x.id!==w.id;});s.notice="Simulated Workspace resource deleted";}
+      if(w&&w.kind==="managed"&&s.selectedWorkspace!==w.id){s.workspaces=s.workspaces.filter(function(x){return x.id!==w.id;});s.notice="Workspace deleted";}
       s.deletePending=null;return;
     }
     if(a==="validate"){var error=check();s.preflight=error?"failed":"passed";s.error=error;return;}
@@ -431,11 +447,14 @@
       if(error){s.preflight="failed";s.error=error;s.depth="root";return;}
       if(s.fixture==="enter-fail"){s.preflight="failed";s.error="Mock mount preparation failed; Native Pane remains selected.";s.depth="root";return;}
       ensureAutoWorkspace();s.effective=effectiveDraft();s.inside=true;s.depth="root";s.area="overview";s.preflight="none";
-      s.notice="Simulated sandbox verified; current Pane entered, Native Pane retained.";return;
+      s.notice="Sandbox entered · Native Pane retained.";return;
     }
     if(a==="return-native"){s.inside=false;s.preflight="none";s.depth="root";s.area="overview";return;}
     if(a==="detail"){s.depth="detail";return;}
   }
+  view.addEventListener("keydown",function(e){
+    if(e.key==="Escape"&&s.tip){s.tip=null;render();}
+  });
   view.addEventListener("click",function(e){
     var b=e.target.closest("[data-action]");
     if(!b||b.disabled)return;
