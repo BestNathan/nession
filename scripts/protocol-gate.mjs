@@ -900,11 +900,15 @@ const CONTRACT_DIRS = [
   'crates/nession-git/src/protocol',
   'crates/nession-github/src/protocol',
   'crates/nession-claude-code/src/protocol',
+  'crates/nession-mcp/src/tools',
+  'crates/nession-agent/src/protocol',
 ];
 const HAND_WRITTEN_TRANSPORT_DIRS = [
   'crates/nession-mcp/src',
   'crates/nession-protocol/src/kernel',
   'crates/nession-server/src/server',
+  'crates/nession-server/src/image',
+  'crates/nession-agent/src/server',
   'crates/nession-agent/src/connection',
   'crates/nession-client/src',
 ];
@@ -916,10 +920,13 @@ const HAND_WRITTEN_TRANSPORT_DIRS = [
  * cgroup resource path) is data, not a field declaration; the external
  * standard set covers the keys an external protocol requires.
  */
-function fieldNameProblem(key) {
+function fieldNameProblem(key, parent = null) {
   if (SNAKE_FIELD.test(key)) return null;
   if (EXTERNAL_STANDARD_FIELDS.has(key)) return null;
-  if (key.includes('.') || key.startsWith('_')) return null;
+  // A protocol-id or cgroup key is opaque only within its owning map.
+  // Spelling alone never exempts an arbitrary transmitted object field.
+  if (parent === 'protocols' && grammarError(key) === null) return null;
+  if (parent === 'cgroup_v2' && /^[a-z][a-z0-9_.]*$/.test(key)) return null;
   return key;
 }
 
@@ -984,14 +991,14 @@ for (const dir of CONTRACT_DIRS) {
       if (m[1]) {
         // `rename_all` on an enum renames variant *values*, which this rule
         // deliberately does not govern.
-        if (!/^(?:pub\s+)?struct\b/.test(declaration)) continue;
+        if (!/^(?:pub(?:\([^)]*\))?\s+)?struct\b/.test(declaration)) continue;
         if (m[2] === 'snake_case') continue;
         report(rel, line, '`rename_all = "' + m[2] + '"` is not snake_case on a struct (rule 6)', '',
           'Nession-owned transport field names are snake_case; remove the attribute or use `snake_case`');
         continue;
       }
       // A field declaration has a `:`; an enum variant has none.
-      if (!/^(?:pub\s+)?[A-Za-z_]\w*\s*:/.test(declaration)) continue;
+      if (!/^(?:pub(?:\([^)]*\))?\s+)?[A-Za-z_]\w*\s*:/.test(declaration)) continue;
       const problem = fieldNameProblem(m[2]);
       if (!problem) continue;
       report(rel, line, '`' + problem + '` is not a snake_case transport field (rule 6)', '',
@@ -1000,7 +1007,45 @@ for (const dir of CONTRACT_DIRS) {
   }
 }
 
-/** The `json!({…})` object keys in one hand-written producer. */
+/**
+ * Return the immediate owner of a literal object key. We need the container,
+ * not a key spelling heuristic, to distinguish a resource-map entry from a
+ * Nession-owned field. Comments are masked by the caller.
+ */
+function objectParent(block, keyOffset) {
+  const owners = [];
+  let quote = null;
+  for (let i = 0; i < keyOffset; i++) {
+    const ch = block[i];
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch.charCodeAt(0) === 96) { quote = ch; continue; }
+    if (ch === '{') {
+      const match = /(?:"([^"\\]+)"|'([^'\\]+)'|([A-Za-z_$][\w$]*))\s*:\s*$/.exec(block.slice(0, i));
+      owners.push(match ? (match[1] ?? match[2] ?? match[3]) : null);
+    } else if (ch === '}') owners.pop();
+  }
+  return owners.at(-1) ?? null;
+}
+
+function literalObjectKeys(block, typescript = false) {
+  const keys = [];
+  const pattern = typescript
+    ? /(?:^|[{,]\s*)(?:"([^"\\]+)"|'([^'\\]+)'|([A-Za-z_$][\w$]*))\s*\??\s*:/g
+    : /(?:^|[{,]\s*)"([^"\\]+)"\s*:/g;
+  for (const m of block.matchAll(pattern)) {
+    const key = m[1] ?? m[2] ?? m[3];
+    const marker = m[1] !== undefined ? '"' + key + '"' : m[2] !== undefined ? "'" + key + "'" : key;
+    const offset = m.index + m[0].lastIndexOf(marker);
+    keys.push({ key, parent: objectParent(block, offset), offset });
+  }
+  return keys;
+}
+
+/** The json!() object keys in hand-written Nession transport producers. */
 function handWrittenJsonKeys(masked) {
   const found = [];
   for (const m of masked.matchAll(/json!\s*\(/g)) {
@@ -1008,8 +1053,8 @@ function handWrittenJsonKeys(masked) {
     const close = closeParen(masked, open);
     if (close < 0) continue;
     const block = masked.slice(open, close + 1);
-    for (const key of block.matchAll(/(?:^|[{,]\s*)"([^"\\]+)"\s*:/g)) {
-      found.push({ key: key[1], line: masked.slice(0, open + key.index).split('\n').length });
+    for (const { key, parent, offset } of literalObjectKeys(block)) {
+      found.push({ key, parent, line: masked.slice(0, open + offset).split('\n').length });
     }
   }
   return found;
@@ -1022,12 +1067,50 @@ for (const dir of HAND_WRITTEN_TRANSPORT_DIRS) {
     if (!file.endsWith('.rs')) continue;
     const rel = relative(ROOT, file);
     if (/(^|\/)(tests?|__tests__)(\/|\.|$)/.test(rel) || /\/tests?\.rs$/.test(rel)) continue;
-    const masked = maskComments(readFileSync(file, 'utf8'), 'rs');
-    for (const { key, line } of handWrittenJsonKeys(masked)) {
+    // Inline #[cfg(test)] may contain deliberately malformed transport fixtures.
+    const masked = maskComments(readFileSync(file, 'utf8'), 'rs').split(/#\[\s*cfg\(test\)\s*\]/)[0];
+    for (const { key, parent, line } of handWrittenJsonKeys(masked)) {
+      const problem = fieldNameProblem(key, parent);
+      if (problem) report(rel, line, '\x60' + problem + '\x60 is not a snake_case transport field (rule 6)', '',
+        'rename the transmitted key; opaque map entries are exempt only inside their owning map');
+    }
+    // Explicit mutations of the payload object bypass json!() literal checks.
+    for (const m of masked.matchAll(/\b(?:payload|out_payload|request_payload|reply_payload)\s*(?:\.insert\s*\(\s*"([^"\\]+)"|\[\s*"([^"\\]+)"\s*\]\s*=)/g)) {
+      const key = m[1] ?? m[2];
       const problem = fieldNameProblem(key);
-      if (!problem) continue;
-      report(rel, line, '`' + problem + '` is not a snake_case transport field (rule 6)', '',
-        'Nession-owned transport keys are snake_case; external-standard keys and opaque maps are exempt');
+      if (problem) report(rel, masked.slice(0, m.index).split('\n').length,
+        '\x60' + problem + '\x60 is not a snake_case transport field (rule 6)', '',
+        'rename the dynamically inserted transmitted payload field');
+    }
+  }
+}
+
+// Only object literals sent to a transport call are wire fields; arbitrary
+// TypeScript view-model properties remain free to use idiomatic camelCase.
+const WEB_TRANSPORT_DIRS = ['web/src/platform', 'web/src/product', 'web/src/capabilities'];
+for (const dir of WEB_TRANSPORT_DIRS) {
+  const absolute = join(ROOT, dir);
+  if (!existsSync(absolute)) continue;
+  for (const file of sourceFiles(absolute)) {
+    if (!/\.tsx?$/.test(file)) continue;
+    const rel = relative(ROOT, file);
+    if (/(^|\/)(__tests__|tests)(\/|$)/.test(rel) || /\.test\.[jt]sx?$/.test(rel)) continue;
+    const masked = maskComments(readFileSync(file, 'utf8'), 'ts');
+    for (const m of masked.matchAll(/\.(?:send|sendTracked|request)\s*(?:<[^<>()]*>)?\s*\(/g)) {
+      const open = m.index + m[0].length - 1;
+      if (isDeclaration(masked, open)) continue;
+      const args = splitArgs(masked.slice(open + 1));
+      if (args.length < 2 || !args[1].trimStart().startsWith('{')) continue;
+      const wire = args[0].trim();
+      if (!/^(?:['"][a-z][\w-]*\.[^'"]+['"]|[A-Za-z_][\w.]*WIRE|[A-Za-z_][\w.]*_WIRE)$/.test(wire)) continue;
+      const start = masked.indexOf(args[1], open + 1);
+      if (start < 0) continue;
+      for (const { key, parent, offset } of literalObjectKeys(args[1], true)) {
+        const problem = fieldNameProblem(key, parent);
+        if (problem) report(rel, masked.slice(0, start + offset).split('\n').length,
+          '\x60' + problem + '\x60 is not a snake_case transport field (rule 6)', '',
+          'normalize the literal WebSocket request/send payload');
+      }
     }
   }
 }

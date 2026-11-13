@@ -567,6 +567,120 @@ pub fn payload() -> serde_json::Value {
 RS
 expect_pass "rule 6 — external-standard keys and opaque maps are not fields"
 
+# ── 6b. Coverage regression tests for #3371 review ───────────────────────
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-agent/src/server"
+cat > "$WORK/tree/crates/nession-agent/src/server/websocket.rs" <<'RS'
+fn notify() -> serde_json::Value { serde_json::json!({ "clientId": "one" }) }
+RS
+expect_fail "rule 6 — Agent WebSocket producer" 'clientId'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-server/src/image"
+cat > "$WORK/tree/crates/nession-server/src/image/http.rs" <<'RS'
+fn response() -> serde_json::Value { serde_json::json!({ "imageId": "one" }) }
+RS
+expect_fail "rule 6 — Server HTTP producer" 'imageId'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-mcp/src/tools"
+cat > "$WORK/tree/crates/nession-mcp/src/tools/nession_test.rs" <<'RS'
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Arguments { agent_id: String }
+RS
+expect_fail "rule 6 — MCP tool argument DTO" 'rename_all = "camelCase"'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-agent/src/server"
+cat > "$WORK/tree/crates/nession-agent/src/server/websocket.rs" <<'RS'
+fn notify(mut payload: serde_json::Map<String, serde_json::Value>) {
+  payload.insert("clientId".to_string(), serde_json::Value::Null);
+}
+RS
+expect_fail "rule 6 — dynamic payload insertion" 'clientId'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-server/src/server"
+cat > "$WORK/tree/crates/nession-server/src/server/handwritten.rs" <<'RS'
+fn response() -> serde_json::Value {
+  serde_json::json!({ "metadata": { "wrong.Field": 1, "_badField": true } })
+}
+RS
+expect_fail "rule 6 — dotted object field is not a map key" 'wrong.Field'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-server/src/server"
+cat > "$WORK/tree/crates/nession-server/src/server/handwritten.rs" <<'RS'
+fn response() -> serde_json::Value {
+  serde_json::json!({ "metadata": { "_badField": true } })
+}
+RS
+expect_fail "rule 6 — underscore prefix is not an exemption" '_badField'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-server/src/server"
+cat > "$WORK/tree/crates/nession-server/src/server/handwritten.rs" <<'RS'
+fn response() -> serde_json::Value {
+  serde_json::json!({
+    "protocols": { "git.status": { "versions": [1] } },
+    "resource": { "cgroup_v2": { "memory.max": "1024" } },
+    "_meta": {}
+  })
+}
+RS
+expect_pass "rule 6 — context-owned opaque maps remain valid"
+
+reset_fixture
+mkdir -p "$WORK/tree/web/src/product/terminal"
+cat > "$WORK/tree/web/src/product/terminal/agent.ts" <<'TS'
+export function send(surface: { send(type: string, payload: unknown): void }) {
+  const model = { localCamelCase: 'ok' };
+  surface.send('alpha.one', { sessionId: model.localCamelCase });
+}
+TS
+expect_fail "rule 6 — direct WebSocket payload" 'sessionId'
+
+reset_fixture
+mkdir -p "$WORK/tree/web/src/product/terminal"
+cat > "$WORK/tree/web/src/product/terminal/agent.ts" <<'TS'
+export function send(surface: { send(type: string, payload: unknown): void }) {
+  const model = { localCamelCase: 'ok' };
+  surface.send('alpha.one', { session_id: model.localCamelCase });
+}
+TS
+expect_pass "rule 6 — internal camelCase object stays valid"
+
+# Also check the two forms that otherwise get lost behind literal-only parsing.
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-agent/src/server"
+cat > "$WORK/tree/crates/nession-agent/src/server/websocket.rs" <<'RS'
+fn notify(mut out_payload: serde_json::Value) {
+  out_payload["requestId"] = serde_json::Value::String("one".into());
+}
+RS
+expect_fail "rule 6 — dynamically indexed payload field" 'requestId'
+
+reset_fixture
+mkdir -p "$WORK/tree/crates/nession-mcp/src/tools"
+cat > "$WORK/tree/crates/nession-mcp/src/tools/nession_test.rs" <<'RS'
+#[derive(serde::Deserialize)]
+pub(crate) struct Arguments {
+  #[serde(rename = "agentId")]
+  agent_id: String,
+}
+RS
+expect_fail "rule 6 — private MCP tool field attribute" 'agentId'
+
+reset_fixture
+mkdir -p "$WORK/tree/web/src/product/terminal"
+cat > "$WORK/tree/web/src/product/terminal/agent.ts" <<'TS'
+export function send(surface: { request(t: string, p: unknown): void }) {
+  surface.request('alpha.one', { payload: { requestId: 'old' } });
+}
+TS
+expect_fail "rule 6 — nested Web transport field" 'requestId'
+
 # ── 3. The transitional alias path ──────────────────────────────────────────
 # Rust refuses a use of the missing module, so the interesting case is the
 # module coming back — which the compiler would accept.
