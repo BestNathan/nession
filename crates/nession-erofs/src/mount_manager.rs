@@ -1003,9 +1003,17 @@ fn write_identity(path: &Path, identity: &MountIdentity) -> Result<()> {
     use std::io::Write as _;
     file.write_all(&bytes)
         .with_context(|| format!("write mount identity {}", temporary.display()))?;
-    file.sync_all().ok();
+    file.sync_all()
+        .with_context(|| format!("sync mount identity {}", temporary.display()))?;
     std::fs::rename(&temporary, path)
         .with_context(|| format!("publish mount identity {}", path.display()))?;
+    // Persist the rename itself; a sidecar that vanishes after a crash would
+    // turn a reconstructible consumer into an unexplained orphan.
+    if let Some(parent) = path.parent() {
+        if let Ok(directory) = std::fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+    }
     Ok(())
 }
 
