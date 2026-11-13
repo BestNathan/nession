@@ -20,6 +20,16 @@ The prototype stays in the **original \`sandbox-capability-3124/\` directory** r
 - Current-vs-candidate delta: old prototype's Overview+five peer tabs / independent Images Workspace is superseded by **4 capability sections** and **5 native/portable policy entries** without Process/Resource/Syscall grouping. This is **not** yet implemented on main.
 - Visual approximation: local static CSS derived from the prior Nession token-snapshot mock; full Web/App screenshot/component-pixel parity has not been independently proven. Shared outer review frame is \`../prototype-frame-2758/{frame.css,frame.js}\` and is separate from product chrome.
 
+## Prototype copy and contextual help rule (2026-11-13)
+
+**The end-user product viewport is not a design document.** It should show names, statuses, actionable form controls, path/digest values, validation errors and irreversible-action confirmations, but **not** inline architecture justifications, implementation caveats, mock/test disclaimers or explanatory paragraphs.
+
+- The term itself is the affordance: **Root filesystem**, **Mounts**, **Workspace**, **Access**, **Home**, **Agent Support**, and relevant fields use a dotted-underline keyword and optional ⓘ cue. The explanation appears in an accessible `role="tooltip"` on hover (Web pointer), keyboard focus, or an explicit tap/click (App); Escape dismisses. Tap toggles in the mock and the focus target survives a rerender. This is contextual disclosure, not a second navigation level.
+- Explanations of how `P→P`, `Source→Target`, implicit `/` and implicit `/workspace` work, as well as V1 restrictions, are primarily available through term help and **the review-page `np-details` below the preview**, not as on-screen blocks in the production-shaped viewport.
+- **Safety and operational exceptions:** rejection reasons, unsupported state, offline state, the exact delete target, and Enter's Native Pane preservation remain explicitly visible because the user must be able to act safely without having to discover hidden help.
+- **Accessibility:** help terms are actual keyboard-operable buttons with descriptive names, `aria-expanded`, `aria-controls`, and focus indication. Field help is not nested inside a `label` wrapping another interactive control; form controls have independent accessible names. App tooltip must not rely on CSS hover.
+- **Fidelity:** the help CSS and events approximate the intended behavior in standalone HTML. No claim of production-grade popover positioning, exact component parity or tested screen-reader compatibility without separate browser/accessibility verification.
+
 ## Interaction paths (fully local mock)
 
 1. Open a selected Session's **Sandbox**; Overview shows Agent/Pane, Server image count, Agent workspaces and quick navigation.
