@@ -21,7 +21,7 @@ on:
         description: Acceptance stage
         required: true
         type: choice
-        options: [pre-merge, staging, post-merge, deployed]
+        options: [staging, post-merge, deployed]
       environment:
         description: 'Deployed environment id (required for stage=deployed)'
         required: false
