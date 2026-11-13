@@ -304,6 +304,7 @@
       '<div class="cand-actions">'+action("Back to Overview","cancel-detail","primary")+'</div>');
   }
   function terminal(){
+    if(!hasSession())return '<div class="terminal"><div class="terminal-head"><b>No selected Session</b></div><p class="cand-help">Sandbox requires an active Session. Choose a Session to discover this capability.</p></div>';
     return '<div class="terminal"><div class="terminal-head"><b>'+h(s.session)+'</b><span class="subtxt">Terminal · mock</span></div>'+
       '<pre class="term-output"><span class="prompt">➜</span> /workspace  git status --short\n M crates/nession-sandbox/src/policy.rs\n\n<span class="prompt">➜</span> /workspace  cargo test\nrunning... pass\n\n<span class="prompt">➜</span> /workspace ▌</pre>'+
       '<div class="cand-actions">'+action("Open Sandbox Workspace","open-sandbox","primary")+'</div></div>';
