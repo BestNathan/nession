@@ -633,6 +633,7 @@ fn sandbox_context_and_action_replies_round_trip() {
         error: Some("Agent 'a' is offline".to_string()),
         context: None,
         cache_statuses: Vec::new(),
+        cache_observations: Vec::new(),
     };
     let value = serde_json::to_value(&context).unwrap();
     assert_eq!(value["success"], false);

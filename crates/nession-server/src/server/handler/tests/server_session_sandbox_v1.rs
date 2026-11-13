@@ -462,6 +462,15 @@ async fn context_relays_per_digest_cache_statuses() {
                     "digest": base_digest(),
                     "state": "verified",
                 }],
+                "cache_observations": [{
+                    "contract_version": 1,
+                    "digest": base_digest(),
+                    "phase": "verified",
+                    "downloaded_bytes": 4096,
+                    "total_bytes": 4096,
+                    "active": false,
+                    "updated_at": 1_760_000_000_u64,
+                }],
             }),
         )
         .await
@@ -470,4 +479,75 @@ async fn context_relays_per_digest_cache_statuses() {
     let reply = parse_reply(action.unwrap());
     assert_eq!(sent["payload"]["cache_digests"][0], base_digest());
     assert_eq!(reply["payload"]["cache_statuses"][0]["state"], "verified");
+    assert_eq!(
+        reply["payload"]["cache_observations"][0]["phase"],
+        "verified"
+    );
+    assert_eq!(
+        reply["payload"]["cache_observations"][0]["downloaded_bytes"],
+        4096
+    );
+    assert_eq!(reply["payload"]["cache_observations"][0]["active"], false);
+}
+
+#[tokio::test]
+async fn context_refuses_an_inconsistent_cache_observation() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.context",
+        json!({ "session_id": "a1:s1", "cache_digests": [base_digest()] }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.context",
+            json!({
+                "success": true,
+                "context": context_payload(),
+                "cache_observations": [{
+                    "contract_version": 1,
+                    "digest": base_digest(),
+                    "phase": "downloading",
+                    "downloaded_bytes": 10,
+                    "total_bytes": 5,
+                    "active": true,
+                    "updated_at": 1_760_000_000_u64,
+                }],
+            }),
+        )
+        .await
+    };
+    let (action, _sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], false);
+    assert_eq!(
+        reply["payload"]["error"],
+        "Agent returned an invalid cache observation"
+    );
+}
+
+#[tokio::test]
+async fn context_refuses_an_invalid_cache_digest_before_routing() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    let reply = parse_reply(
+        h.handle_message(proto_msg(
+            "server.session.sandbox.context",
+            json!({
+                "session_id": "a1:s1",
+                "cache_digests": ["sha256:not-a-digest"],
+            }),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("invalid cache digest"));
 }

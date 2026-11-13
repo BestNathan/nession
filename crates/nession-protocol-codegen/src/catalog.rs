@@ -184,6 +184,8 @@ fn sandbox_capability_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
         decl_of::<sandbox::SandboxImageSelection>(cfg),
         decl_of::<nession_protocol::contracts::image::v1::ImageCacheState>(cfg),
         decl_of::<nession_protocol::contracts::image::v1::ImageCacheStatus>(cfg),
+        decl_of::<nession_protocol::contracts::image::v1::ImageCachePhase>(cfg),
+        decl_of::<nession_protocol::contracts::image::v1::ImageCacheObservation>(cfg),
         decl_of::<sandbox::SandboxKvEntry>(cfg),
         decl_of::<sandbox::SandboxEnforcement>(cfg),
         decl_of::<sandbox::SandboxFilesystemPolicy>(cfg),
