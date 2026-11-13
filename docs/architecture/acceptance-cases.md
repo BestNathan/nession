@@ -98,6 +98,22 @@ The repository-owned `Acceptance / Cases` workflow uses the same runner for both
 
 Manual `workflow_dispatch` accepts one Issue/SC/SHA/stage/runtime tuple and follows the same runner.
 
+An authorized human may request a merged-branch Case from an **open native
+Requirement/Bug Issue** with the exact comment `/case SC-NN`. The trusted
+`Automation / Comment Router` derives the stage from the Issue Plan
+(`method: case`) and the exact target from an Issue-associated merged PR
+on `staging` or `main` whose commit is still in that branch's history
+and contains the matching Case manifest. It supplies a source comment ID
+to the normal manual `Acceptance / Cases` workflow; the workflow
+independently verifies the original comment, Issue and immutable target
+**before checking out the Case code**. It then produces the same source-bound
+record and trusted ingester receipt as other manual Cases, with no alternate
+Acceptance authority. A comment acknowledgment is not a Case verdict.
+Non-merged stages, arbitrary SHA, closed Issues and missing manifest/merge
+identity are ineligible for this shortcut; use the existing owner-controlled
+explicit Actions path for other supported manual cases.
+
+
 For a **manual Staging Case dispatched from trusted `main`**, GitHub's
 `workflow_run.head_sha` identifies the **workflow code** and intentionally
 does not equal the explicitly selected Staging `target_sha`. The source
