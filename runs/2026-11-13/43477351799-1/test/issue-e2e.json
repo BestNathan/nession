@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "30eea1b161e6ac4dfb2a48744ea5eff81f9808d2",
+  "run_id": 43477351799,
+  "run_attempt": 1,
+  "plan_digest": "c4539ad2e9596143375f6895d3ef8bc875278cee53b5f622cf05b58dc802979e",
+  "artifact_digest": "sha256:ac3ba9a666fff7fea1344ea98745b94be5345f73d788e1deda4d2f6751b45460",
+  "results": [
+    {
+      "id": "fixture-visual",
+      "result": "Pass",
+      "discovered": 14,
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 91
+    },
+    {
+      "id": "images-workspace-capability",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 48
+    },
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 262
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 30,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 141
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 104,
+      "passed": 104,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 836
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "discovered": 65,
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 730
+    }
+  ]
+}
