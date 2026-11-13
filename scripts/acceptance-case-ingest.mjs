@@ -1018,6 +1018,64 @@ async function selfTest() {
     token: 'self-test', request: manualRequest,
   });
   assert.equal(manualAttested.source.dispatch_binding.issue, 1474);
+  // A historical Main merge Case also has a distinct product SHA. The source
+  // is only permitted after its *own* GitHub-owned post-merge dispatch step,
+  // not by relabeling an authenticated Staging step or trusting the artifact.
+  const historicalMain = { ...valid, stage: 'post-merge' };
+  const mainStep = { ...manualStep,
+    name: 'Authenticate manual Post-Merge Case 1474 SC-14 ' + valid.target_sha };
+  const mainJob = { ...manualJob, steps: [
+    { number: 2, name: 'Checkout trusted discovery tooling' }, mainStep,
+    { number: 4, name: 'Resolve target identity' },
+    { number: 5, name: 'Checkout exact target SHA' },
+  ] };
+  const mainJobs = { jobs: [mainJob] };
+  const historicalBound = await attestManualStagingSource(historicalMain, manualSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async () => mainJobs,
+  });
+  assert.equal(historicalBound.dispatch_binding.stage, 'post-merge');
+  assert.equal(assertSourceBoundRecord(historicalMain, historicalBound).issue, 1474);
+  assert.throws(() => assertSourceBoundRecord(historicalMain, manualSource), /not bound/);
+  const commentManualEvent = { workflow_run: {
+    ...manualEvent.workflow_run,
+    name: 'Comment Case #1474 SC-14 comment:999',
+  } };
+  const mainAttested = await attestCaseRecord(historicalMain, {
+    event: commentManualEvent, repository: 'BestNathan/nession',
+    token: 'self-test',
+    request: async p => p === manualJobPath ? mainJobs : attestationRequest(p),
+  });
+  assert.equal(mainAttested.source.dispatch_binding.stage, 'post-merge');
+  assert.equal(caseIndexRecord(enrichCaseRecord(historicalMain, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(historicalMain), source: mainAttested.source,
+  })).stage, 'post-merge');
+  assert.equal((await attestManualStagingSource(historicalMain, {
+    ...manualSource, head_sha: historicalMain.target_sha,
+  }, { repository: 'BestNathan/nession', request: async () => {
+    throw Error('historical/main-head equality must not fetch input binding');
+  } })).dispatch_binding, undefined);
+  for (const tampered of [
+    { jobs: [{ ...mainJob, steps: mainJob.steps.filter(x => x !== mainStep) }] },
+    { jobs: [{ ...mainJob, steps: [mainStep, { number: 5,
+      name: 'Checkout exact target SHA' }, mainStep] }] },
+    { jobs: [{ ...mainJob, steps: [{ ...mainStep, conclusion: 'failure' },
+      { number: 5, name: 'Checkout exact target SHA' }] }] },
+    { jobs: [{ ...mainJob, head_sha: 'f'.repeat(40) }] },
+    { jobs: [{ ...mainJob, run_attempt: 999 }] },
+  ]) {
+    await assert.rejects(() => attestManualStagingSource(historicalMain, manualSource, {
+      repository: 'BestNathan/nession', token: 'self-test',
+      request: async () => tampered,
+    }), /manual Case|missing or ambiguous/);
+  }
+  const stagingStepOnly = await assert.rejects(() => attestManualStagingSource(
+    historicalMain, manualSource, {
+      repository: 'BestNathan/nession', token: 'self-test',
+      request: async () => manualJobs,
+    }), /missing or ambiguous/);
+  void stagingStepOnly;
   assert.equal(caseIndexRecord(enrichCaseRecord(valid, {
     workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
     recordPath: recordPath(valid), source: manualAttested.source,
