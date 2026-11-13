@@ -91,6 +91,7 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
   }) => {
     await page.goto('/#/fixture/workspace?capability=sandbox');
     await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
     await expect(page.getByTestId('sandbox-image-composition')).toBeVisible();
 
@@ -159,6 +160,7 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
     await page.goto(
       '/#/fixture/workspace?capability=sandbox&sandbox=agent-cache-failed',
     );
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
     await page.getByTestId('sandbox-image-add-open').click();
     await page.getByTestId('sandbox-image-row').first().click();
