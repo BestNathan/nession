@@ -191,7 +191,7 @@
     var left=s.images.map(function(im){return '<button class="cand-item '+(im.id===s.selectedImage?"selected":"")+'" data-action="image:'+im.id+'"><span><strong>'+h(im.name)+'</strong><small>'+h(im.kind)+' · '+short(im.digest)+'</small></span>'+statusChip(im.status)+'</button>';}).join("");
     var details=x?card("Image detail","Server-owned immutable image; selected Session is navigation context.",
       '<div class="cand-facts">'+meta("Name",x.name)+meta("Digest",short(x.digest))+meta("Server status",x.status)+meta("Agent cache",online()?(s.cache[x.id]||"absent"):"unknown")+'</div>'+
-      '<div class="cand-actions">'+action("Use as RootFS","image-root:"+x.id,"",x.kind!=="Base Runtime"||!isEditable())+
+      '<div class="cand-actions">'+action("Use as RootFS","image-root:"+x.id,"",x.kind!=="Base Runtime"||s.cache[x.id]!=="verified"||!isEditable())+
       action("Mount in Filesystem","image-tool:"+x.id,"",x.kind==="Base Runtime"||!isEditable())+'</div>'):"";
     return sectionHead("Image Library","全局 Server 镜像列表；不随 Session 切换而复制")+
       '<div class="cand-list">'+left+'</div>'+details;
@@ -219,7 +219,7 @@
         (w.kind==="project_location"?" · "+h(w.path):" · Agent-managed persistent")+'</small>'+
         '<small>'+h(w.project||"—")+' · nession-dev'+(selected?" · Selected for /workspace":"")+'</small></div>'+
         statusChip(online()?w.status:"unknown")+
-        action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside||w.status!=="available")+
+        action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside||w.status!=="available"||(w.kind==="project_location"&&s.session!=="sandbox-review"))+
         (w.kind==="managed"?action("Delete","ws-delete:"+w.id,"danger",selected||w.status!=="available"||!online()||s.inside):"")+'</div>';
     }).join("");
     var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
@@ -507,7 +507,7 @@
       s.surface="workspace";s.area="overview";s.depth="root";s.inside=false;dirty();return;
     }
     if(a.indexOf("image:")===0){s.selectedImage=a.slice(6);return;}
-    if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
+    if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&s.cache[id]==="verified"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a.indexOf("image-tool:")===0){var id=a.slice(11),im=imageBy(id);if(im&&im.kind!=="Base Runtime"&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a==="build-start"){
       var id="build-"+(121+s.builds.length);
@@ -520,7 +520,7 @@
       return;
     }
     if(a.indexOf("cache:")===0){if(online()){s.cache[a.slice(6)]="verified";s.notice="Cache verified on current Agent";}return;}
-    if(a.indexOf("ws-use:")===0){if(isEditable()&&s.workspaces.some(function(w){return w.id===a.slice(7);})){s.selectedWorkspace=a.slice(7);dirty();}return;}
+    if(a.indexOf("ws-use:")===0){var selected=s.workspaces.find(function(w){return w.id===a.slice(7)});if(isEditable()&&selected&&selected.status==="available"&&(selected.kind!=="project_location"||s.session==="sandbox-review")){s.selectedWorkspace=selected.id;dirty();}return;}
     if(a==="ws-auto"){
       if(!isEditable())return;
       dirty();s.selectedWorkspace="auto";ensureAutoWorkspace();s.sub.workspaces="details";return;
