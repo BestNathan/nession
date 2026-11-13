@@ -337,12 +337,39 @@ impl SessionWatcher {
 }
 
 /// Check if a session has changed between polls by comparing key fields.
+///
+/// The instance identity is part of the comparison (#3399): a same-name tmux
+/// Session can be killed and recreated between polls with every visible counter
+/// unchanged, and the name then addresses another incarnation. Without the
+/// identity, the incremental path never publishes the replacement and the
+/// Server keeps serving the previous snapshot until an unrelated field moves or
+/// a full reconnect resync happens.
+///
+/// `created_at` stays out on purpose: tmux can report a different creation
+/// timestamp for an observation that is not a lifecycle change, and the
+/// durable `instance_id` is the identity the Server binds Project membership
+/// to (`#3082`).
 fn session_changed(prev: &SessionInfo, current: &SessionInfo) -> bool {
     prev.window_count != current.window_count
         || prev.attached_clients != current.attached_clients
         || prev.width != current.width
         || prev.height != current.height
         || prev.foreground_command != current.foreground_command
+        || instance_replaced(prev.instance_id.as_deref(), current.instance_id.as_deref())
+}
+
+/// Whether two observations prove the name now names another incarnation.
+///
+/// Only **two nonempty, different** identities do. A missing id is "not
+/// stated", never "a different instance": a legacy Session, a provider that has
+/// not been asked yet, or a partial enumeration must not be published as a
+/// replacement (`#3399`). An id that appears or disappears is a change in what
+/// the Agent can state, not proof that the tmux Session was recreated.
+fn instance_replaced(prev: Option<&str>, current: Option<&str>) -> bool {
+    match (prev, current) {
+        (Some(prev), Some(current)) => prev != current,
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +435,45 @@ mod tests {
         let mut back_to_shell = current.clone();
         back_to_shell.foreground_command = Some("bash".to_string());
         assert!(session_changed(&current, &back_to_shell));
+    }
+
+    #[test]
+    fn test_session_changed_detects_instance_replacement() {
+        // The defect (#3399): every visible counter can match while the name
+        // now addresses a different tmux incarnation. The identity is the only
+        // field that proves it.
+        let mut prev = make_session("test", 1, 2);
+        prev.instance_id = Some("instance-a".to_string());
+        let current = {
+            let mut s = prev.clone();
+            s.instance_id = Some("instance-b".to_string());
+            s
+        };
+
+        assert!(session_changed(&prev, &current));
+    }
+
+    #[test]
+    fn test_session_changed_ignores_the_same_instance() {
+        let mut prev = make_session("test", 1, 2);
+        prev.instance_id = Some("instance-a".to_string());
+        let current = prev.clone();
+
+        assert!(!session_changed(&prev, &current));
+    }
+
+    #[test]
+    fn test_session_changed_does_not_manufacture_identity_changes() {
+        // A legacy Session has no identity, and an id that appears or
+        // disappears is not proof of a replacement. Publishing one would
+        // turn "the Agent cannot state it" into a fabricated lifecycle event.
+        let legacy = make_session("test", 1, 2);
+        let mut with_id = legacy.clone();
+        with_id.instance_id = Some("instance-a".to_string());
+
+        assert!(!session_changed(&legacy, &with_id));
+        assert!(!session_changed(&with_id, &legacy));
+        assert!(!session_changed(&legacy, &legacy));
     }
 
     #[test]
@@ -486,8 +552,32 @@ mod enumeration_failure {
         FakeTmux::new(dir, &script);
     }
 
+    /// Install a fake tmux whose successful answer lists one Session with a
+    /// nonempty durable instance identity (#3399).
+    pub(super) fn listing_with_instance(dir: &Path, name: &str, instance_id: &str) {
+        FakeTmux::new(
+            dir,
+            &format!("printf '%s\\n' '{name}|{instance_id}|1000|1|0|80|24|/tmp|bash'\n"),
+        );
+    }
+
     /// Drain every pending frame as `(session_name, status)`.
     pub(super) fn updates(frames: &mut OutboxFrames) -> Vec<(String, String)> {
+        updates_with_instance(frames)
+            .into_iter()
+            .map(|(name, status, _)| (name, status))
+            .collect()
+    }
+
+    /// Drain every pending frame as `(session_name, status, instance_id)`.
+    ///
+    /// The identity is read from the same `instance_id` payload field the
+    /// Server's `server.agent.session-update` handler consumes, so a watcher
+    /// test can assert the Agent→Server seam itself rather than only that
+    /// *some* update was published (#3399).
+    pub(super) fn updates_with_instance(
+        frames: &mut OutboxFrames,
+    ) -> Vec<(String, String, Option<String>)> {
         let mut updates = Vec::new();
         while let Some(frame) = frames.try_next() {
             let WsMessage::Text(text) = frame else {
@@ -509,7 +599,11 @@ mod enumeration_failure {
             let Some(status) = payload.get("status").and_then(serde_json::Value::as_str) else {
                 panic!("a session update states its status: {parsed}");
             };
-            updates.push((name.to_string(), status.to_string()));
+            let instance_id = payload
+                .get("instance_id")
+                .and_then(serde_json::Value::as_str)
+                .map(std::string::ToString::to_string);
+            updates.push((name.to_string(), status.to_string(), instance_id));
         }
         updates
     }
@@ -648,6 +742,86 @@ mod enumeration_failure {
         assert!(
             watcher.tracked_sessions().contains_key("api"),
             "the unaffected Session stays tracked and visible"
+        );
+    }
+}
+
+/// Incarnation-replacement coverage (#3399).
+///
+/// These drive the real [`SessionWatcher`] over a fake tmux whose enumeration
+/// changes only the durable instance identity between polls. The frames are
+/// read from the outbox the watcher publishes into, so the assertion is the
+/// Agent→Server seam: a replacement must reach the payload field the Server's
+/// update handler consumes.
+#[cfg(all(test, unix))]
+mod incarnation_replacement {
+    use super::enumeration_failure::{
+        listing, listing_with_instance, updates_with_instance, watcher_at,
+    };
+
+    #[tokio::test]
+    async fn a_same_name_replacement_with_an_unchanged_shape_is_published() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing_with_instance(dir.path(), "dev", "instance-a");
+        let (mut watcher, _handle, mut frames) = watcher_at(dir.path());
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(
+            updates_with_instance(&mut frames),
+            vec![(
+                "dev".to_string(),
+                "detached".to_string(),
+                Some("instance-a".to_string())
+            )],
+            "the first poll states the identity it observed"
+        );
+
+        // Same windows, clients, size, working directory and foreground
+        // command; only the incarnation changed. Before #3399 the predicate
+        // ignored this field and the Server kept serving A indefinitely.
+        listing_with_instance(dir.path(), "dev", "instance-b");
+        watcher.poll_and_sync().await.expect("replacement poll");
+        let replaced = updates_with_instance(&mut frames);
+        assert_eq!(
+            replaced.len(),
+            1,
+            "the replacement must be published exactly once: {replaced:?}"
+        );
+        assert_eq!(replaced[0].0, "dev");
+        assert_eq!(replaced[0].1, "detached");
+        assert_eq!(
+            replaced[0].2.as_deref(),
+            Some("instance-b"),
+            "the frame must carry the current authoritative identity"
+        );
+
+        // B is the new baseline: an unchanged poll is silent.
+        watcher.poll_and_sync().await.expect("idle poll");
+        assert!(
+            updates_with_instance(&mut frames).is_empty(),
+            "an unchanged incarnation must not be re-published"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_legacy_missing_instance_is_not_a_replacement() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev"]); // no @nession_instance_id
+        let (mut watcher, _handle, mut frames) = watcher_at(dir.path());
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        let first = updates_with_instance(&mut frames);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].2, None);
+
+        // Unknown → known is a change in what the Agent can state, not proof
+        // that the tmux Session was recreated. It must not be manufactured into
+        // an incarnation transition.
+        listing_with_instance(dir.path(), "dev", "instance-b");
+        watcher.poll_and_sync().await.expect("identity appears");
+        assert!(
+            updates_with_instance(&mut frames).is_empty(),
+            "a legacy missing identity must not be published as a replacement"
         );
     }
 }
