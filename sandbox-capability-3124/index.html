@@ -456,6 +456,43 @@
 .nession-ui .cand-item.selected{background:var(--nession-surface);border-color:#bfc7cb}
 
 /* Image Library: one collapsible detail per list row, no detached detail panel. */
+
+/* Build lifecycle: phase + measured counters, never a fabricated mkfs percentage. */
+.nession-ui .cand-job-list{display:flex;flex-direction:column;gap:10px;min-width:0;margin:0 0 20px}
+.nession-ui .cand-job{border:1px solid var(--nession-border);background:var(--nession-background);border-radius:11px;padding:14px 16px;min-width:0}
+.nession-ui .cand-job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.nession-ui .cand-job-head>div{min-width:0;flex:1}
+.nession-ui .cand-job-head strong{font-size:12px;font-weight:650;overflow-wrap:anywhere;display:block}
+.nession-ui .cand-job-head small{display:block;font-size:10px;color:var(--nession-muted-foreground);overflow-wrap:anywhere;margin-top:3px}
+.nession-ui .cand-job-stage{display:flex;justify-content:space-between;flex-wrap:wrap;gap:9px;margin-top:12px;font-size:11px;font-weight:580}
+.nession-ui .cand-job-stage span:last-child{font-size:10px;color:var(--nession-muted-foreground)}
+.nession-ui .cand-job-measure{font:11px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--nession-muted-foreground);margin-top:7px;overflow-wrap:anywhere}
+.nession-ui .cand-job-diagnostic{margin-top:8px;color:var(--nession-muted-foreground);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.nession-ui .cand-job-diagnostic.error{color:var(--nession-destructive)}
+.nession-ui .cand-job .cand-actions{margin-top:10px}
+.nession-ui .cand-progress-track{height:6px;margin:10px 0 0;border-radius:999px;overflow:hidden;background:var(--nession-surface);position:relative}
+.nession-ui .cand-progress-track>span{position:absolute;top:0;bottom:0;width:32%;left:0;border-radius:999px;background:var(--nession-muted-foreground)}
+@media(prefers-reduced-motion:no-preference){
+  .nession-ui .cand-progress-track.indeterminate>span{animation:cand-progress-sweep 2s ease-in-out infinite}
+}
+@keyframes cand-progress-sweep{0%{transform:translateX(-110%)}100%{transform:translateX(345%)}}
+.nession-ui .cand-transfer-measure{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:10px;font:11px/1.5 ui-monospace,Menlo,monospace}
+.nession-ui .cand-transfer-measure strong{font-size:11px}
+.nession-ui .cand-transfer-progress{display:block;appearance:none;-webkit-appearance:none;border:none;border-radius:999px;height:7px;width:100%;margin-top:7px;background:var(--nession-surface);overflow:hidden}
+.nession-ui .cand-transfer-progress::-webkit-progress-bar{background:var(--nession-surface)}
+.nession-ui .cand-transfer-progress::-webkit-progress-value{background:var(--nession-muted-foreground);border-radius:999px}
+.nession-ui .cand-transfer-progress::-moz-progress-bar{background:var(--nession-muted-foreground);border-radius:999px}
+.nession-ui .cand-distribution-context{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 0 14px;font-size:11px}
+.nession-ui .cand-distribution-context span{color:var(--nession-muted-foreground)}
+.nession-ui .cand-distribution-context strong{font-size:11px;font-weight:650}
+.nession-ui .cand-status.downloading,.nession-ui .cand-status.resumable,.nession-ui .cand-status.verifying,.nession-ui .cand-status.running,.nession-ui .cand-status.queued{background:var(--nession-surface);color:var(--nession-foreground)}
+.nession-ui .cand-status.not-cached,.nession-ui .cand-status.failed{color:var(--nession-muted-foreground)}
+@media(max-width:670px){
+  .nession-ui .cand-job{padding:12px}
+  .nession-ui .cand-job-stage{gap:5px}
+  .nession-ui .cand-job .cand-btn{min-height:38px}
+}
+
 .nession-ui .cand-image-list{display:flex;flex-direction:column;gap:8px;margin:0 0 16px;min-width:0}
 .nession-ui .cand-image-entry{border:1px solid var(--nession-border);border-radius:10px;overflow:hidden;background:var(--nession-background);min-width:0}
 .nession-ui .cand-image-entry.expanded{border-color:#bfc7cb}
@@ -636,6 +673,11 @@
 <button data-fixture="preflight-fail" aria-pressed="false">Preflight Reject</button>
 <button data-fixture="enter-fail" aria-pressed="false">Enter Failure</button>
 <button data-fixture="no-session" aria-pressed="false">No Session</button>
+</div>
+<div class="fixtures" aria-label="Synthetic build and transfer updates">
+<b>进度状态演示（仅原型外控件）：</b>
+<button data-demo-progress="build-next">推进构建阶段</button>
+<button data-demo-progress="transfer-next">推进下载 / 校验</button>
 </div>
 </section>
 <section class="np-details"><h2>Design contract &amp; verification</h2>
