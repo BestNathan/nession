@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {parsePreMergeIssueNumbers,parseClosingIssueNumbers,validateRequirementBody,isAcceptanceIssue}
   from './requirement-acceptance.mjs';
-import {isNativeConvergencePr,verifiedConvergenceBatch,convergenceApproval,
+import {isNativeConvergencePr,isNativePromotionPr,verifiedConvergenceBatch,convergenceApproval,
   convergenceBatchDigest,latestConvergenceFull,attestConvergenceFull}
   from './staging-convergence-pr.mjs';
 
@@ -208,7 +208,8 @@ function nativeSourceCheckDenial(pr,mergeSha,headSha,source,sourceRuns){
 }
 
 export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
-  branch='staging',sourceRuns=[],fullReceipt=null}){
+  branch='staging',sourceRuns=[],fullReceipt=null,
+  promotionHead=null,promotionFull=null}){
   if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
      pr.merge_commit_sha!==mergeSha||pr.base?.ref!==branch||
      pr.base?.repo?.full_name!==REPO)
@@ -235,7 +236,27 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
     return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);
   }
   const approval=convergenceApproval(batch,fullReceipt);
-  if(!approval.approved)return fail('NATIVE_'+approval.reason+':'+batch.integration_head);
+  // #3431: an independently completed Full on the exact final promotion
+  // candidate can supersede *regression* evidence from a merged native batch.
+  // It never supersedes a bad Git source, removed E2E, unknown risk, or the
+  // original exact-head PR checks. This path is promotion-only.
+  let superseded=false;
+  if(!approval.approved &&
+     approval.reason==='AWAITING_EXACT_HEAD_FULL_E2E' &&
+     SHA.test(promotionHead??'') &&
+     promotionFull?.verified===true &&
+     promotionFull.source_head_sha===promotionHead &&
+     Number.isSafeInteger(promotionFull.run_id) &&
+     Date.parse(promotionFull.executed_at??'')>Date.parse(pr.merged_at)) {
+    try {
+      execFileSync('git',['merge-base','--is-ancestor',
+        batch.integration_head,promotionHead],{cwd:repoRoot,
+        stdio:'ignore'});
+      superseded=true;
+    } catch { /* No ancestry proof means the historic Full remains required. */ }
+  }
+  if(!approval.approved&&!superseded)
+    return fail('NATIVE_'+approval.reason+':'+batch.integration_head);
   const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns,pr);
   if(!source.ready){
     const denial=nativeSourceCheckDenial(pr,mergeSha,batch.integration_head,
@@ -245,7 +266,8 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
     return fail(denial.reason);
   }
   return okay({integrationHead:batch.integration_head,
-    sourceBatchDigest:convergenceBatchDigest(batch)});
+    sourceBatchDigest:convergenceBatchDigest(batch),
+    ...(superseded?{superseding_full_run_id:promotionFull.run_id}: {})});
 }
 
 // Independently re-attest the complete Full E2E source before Main
@@ -266,6 +288,89 @@ function nativeFullReceipt(batch,pr){
   if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
     throw Error('unbounded native Full job inventory during promotion');
   return attestConvergenceFull(batch,run,jobs.jobs);
+}
+
+
+// A later Full is an alternative regression proof, not a historical source
+// Full Pass. The trusted comment router checks the original OWNER comment,
+// exact PR HEAD/ref, and workflow_dispatch inputs. Independently verify its
+// job/attempt and mandatory execution steps before using its result.
+export function attestPromotionCandidateFull({pr,laneSha,run,jobs=[],comment}){
+  const title='Comment E2E #'+pr?.number+' comment:'+comment?.id;
+  if(!isNativePromotionPr(pr)||pr.state!=='open'||
+     pr.head.sha!==laneSha||!SHA.test(laneSha??'')||
+     !Number.isSafeInteger(comment?.id)||comment.id<=0||
+     comment.body?.trim()!=='/e2e full'||
+     comment.user?.login!=='BestNathan'||comment.user?.type!=='User'||
+     comment.author_association!=='OWNER'||
+     comment.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+pr.number||
+     !comment.created_at||comment.updated_at!==comment.created_at||
+     run?.path?.split('@')[0]!=='.github/workflows/e2e-full-regression.yml'||
+     run.display_title!==title||
+     ![title,'E2E / Full Regression'].includes(run.name)||
+     run.event!=='workflow_dispatch'||run.head_branch!=='main'||
+     run.actor?.login!=='github-actions[bot]'||
+     run.repository?.full_name!==REPO||
+     run.head_repository?.full_name!==REPO||
+     !SHA.test(run.head_sha??'')||
+     run.status!=='completed'||run.conclusion!=='success'||
+     !Number.isSafeInteger(run.id)||run.id<=0||
+     !Number.isSafeInteger(run.run_attempt)||run.run_attempt<=0||
+     !Number.isFinite(Date.parse(run.created_at??''))||
+     Date.parse(run.created_at)<Date.parse(comment.created_at)||
+     !Array.isArray(jobs)||jobs.length>100)return null;
+  const full=jobs.filter(job=>job.name==='full'&&job.run_id===run.id&&
+    (job.run_attempt==null||job.run_attempt===run.run_attempt));
+  if(full.length!==1||full[0].status!=='completed'||
+     full[0].conclusion!=='success')return null;
+  const passed=new Set((full[0].steps??[])
+    .filter(step=>step.status==='completed'&&step.conclusion==='success')
+    .map(step=>step.name));
+  for(const step of ['Verify original PR comment and exact HEAD for routed Full',
+      'Resolve immutable branch/SHA target',
+      'Run full canonical Playwright suite at pinned SHA',
+      'Verify complete per-ID assertions']){
+    if(!passed.has(step))return null;
+  }
+  return {verified:true,source_head_sha:laneSha,executed_at:run.created_at,
+    run_id:run.id,run_attempt:run.run_attempt};
+}
+
+// The newest matching Full run wins. A newer failed/in-progress attempt
+// cannot be masked by an older successful browser execution.
+export function latestPromotionCandidateFull(pr,runs=[]){
+  if(!Array.isArray(runs)||runs.length>=100)
+    throw Error('unbounded promotion candidate Full inventory');
+  const prefix='Comment E2E #'+pr?.number+' comment:';
+  return runs.filter(r=>r.display_title?.startsWith(prefix)&&
+    /^Comment E2E #[1-9][0-9]* comment:[1-9][0-9]*$/.test(r.display_title)&&
+    r.path?.split('@')[0]==='.github/workflows/e2e-full-regression.yml'&&
+    r.event==='workflow_dispatch'&&r.head_branch==='main'&&
+    r.repository?.full_name===REPO&&r.head_repository?.full_name===REPO)
+    .sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
+      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0]??null;
+}
+
+function promotionCandidateFullReceipt(pr,laneSha){
+  if(!isNativePromotionPr(pr)||pr.head.sha!==laneSha)return null;
+  const since=String(pr.created_at??'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(since))
+    throw Error('promotion PR missing trustworthy creation fence');
+  const inventory=read('actions/workflows/e2e-full-regression.yml/runs?'+
+    'event=workflow_dispatch&created=>='+since+'&per_page=100');
+  if(!Array.isArray(inventory.workflow_runs)||
+     inventory.workflow_runs.length>=100)
+    throw Error('unbounded promotion Full inventory');
+  const run=latestPromotionCandidateFull(pr,inventory.workflow_runs);
+  if(!run||run.status!=='completed'||run.conclusion!=='success')return null;
+  const commentId=Number(run.display_title.split(' comment:')[1]);
+  if(!Number.isSafeInteger(commentId)||commentId<=0)return null;
+  const jobs=read('actions/runs/'+run.id+'/attempts/'+
+    run.run_attempt+'/jobs?per_page=100');
+  if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
+    throw Error('unbounded promotion Full job inventory');
+  const comment=read('issues/comments/'+commentId);
+  return attestPromotionCandidateFull({pr,laneSha,run,jobs:jobs.jobs,comment});
 }
 
 export function qualify({action,prNumber,mainSha,laneSha,branch,
@@ -344,6 +449,7 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
   }
   const issues=[...numberSet].map(n=>read('issues/'+n));
   const authenticatedNative=[];
+  let promotionFullLoaded=false,promotionFull=null;
   for(let i=0;i<commits.length;i++){
     const matches=associations[i].filter(pr=>pr.merge_commit_sha===commits[i]&&
       pr.merged_at&&pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
@@ -362,8 +468,14 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
       parents[1],commits[i],{requireCheckout:false});}
     catch(error){return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);}
     fullReceipt=nativeFullReceipt(batch,nativePr);
+    if(convergenceApproval(batch,fullReceipt).reason==='AWAITING_EXACT_HEAD_FULL_E2E' &&
+       !promotionFullLoaded){
+      promotionFull=promotionCandidateFullReceipt(pr,laneSha);
+      promotionFullLoaded=true;
+    }
     const proof=certifyNativeMerge({pr:nativePr,mergeSha:commits[i],
-      branch,sourceRuns:runs,fullReceipt});
+      branch,sourceRuns:runs,fullReceipt,promotionHead:laneSha,
+      promotionFull});
     if(!proof.ready)return proof;
     authenticatedNative.push(commits[i]);
   }
@@ -568,6 +680,60 @@ function selfTest(){
     /invalid bounded workflow run route/);
   assert.throws(()=>workflowRunsRoute('actions/workflows/../runs?head_sha='+b),
     /invalid bounded workflow run route/);
+
+  // #3431: only an authenticated exact final-candidate Full can replace
+  // historical regression evidence, not source identity or source checks.
+  const candidatePr={number:3341,state:'open',
+    title:'release: promote staging to main',
+    user:{login:'nession-publisher[bot]'},
+    base:{ref:'main',sha:a,repo:{full_name:REPO}},
+    head:{ref:'staging',sha:b,repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).\n'+
+      '- Direction: staging -> main\n'+
+      '- Planned main SHA: '+a+'\n- Planned lane SHA: '+b};
+  const sourceComment={id:123,body:'/e2e full',
+    created_at:'2026-11-13T15:04:52Z',updated_at:'2026-11-13T15:04:52Z',
+    user:{login:'BestNathan',type:'User'},author_association:'OWNER',
+    issue_url:'https://api.github.com/repos/'+REPO+'/issues/3341'};
+  const fullName='Comment E2E #3341 comment:123';
+  const candidateRun={id:456,run_attempt:1,run_number:10,
+    path:'.github/workflows/e2e-full-regression.yml@refs/heads/main',
+    display_title:fullName,name:fullName,event:'workflow_dispatch',
+    head_branch:'main',head_sha:a,actor:{login:'github-actions[bot]'},
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    status:'completed',conclusion:'success',
+    created_at:'2026-11-13T15:05:23Z'};
+  const candidateJob={name:'full',run_id:456,run_attempt:1,
+    status:'completed',conclusion:'success',steps:[
+      'Verify original PR comment and exact HEAD for routed Full',
+      'Resolve immutable branch/SHA target',
+      'Run full canonical Playwright suite at pinned SHA',
+      'Verify complete per-ID assertions'].map(name=>({
+        name,status:'completed',conclusion:'success'}))};
+  const candidate={pr:candidatePr,laneSha:b,run:candidateRun,
+    jobs:[candidateJob],comment:sourceComment};
+  assert.equal(attestPromotionCandidateFull(candidate).source_head_sha,b);
+  assert.equal(attestPromotionCandidateFull({...candidate,laneSha:a}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,pr:{
+    ...candidatePr,user:{login:'untrusted'}}}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,comment:{
+    ...sourceComment,body:'other'}}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,comment:{
+    ...sourceComment,updated_at:'2026-11-13T15:05:00Z'}}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,run:{
+    ...candidateRun,event:'push'}}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,run:{
+    ...candidateRun,conclusion:'failure'}}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,jobs:[{
+    ...candidateJob,steps:candidateJob.steps.slice(1)}]}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,jobs:[{
+    ...candidateJob,run_attempt:2}]}),null);
+  assert.equal(latestPromotionCandidateFull(candidatePr,[candidateRun,
+    {...candidateRun,id:457,run_number:11,conclusion:'failure'}]).id,457,
+    'newer failed Full must not inherit previous success');
+  assert.equal(requiredSourceRuns(3176,syncHead,
+    orphanRuns.map(r=>({...r,conclusion:'failure'})),nativePrFixture).ready,false,
+    'final candidate Full never waives historical native source PR checks');
   console.log('staging convergence readiness self-test: PASS');
 }
 if(process.argv[1]?.endsWith('/staging-convergence-readiness.mjs')){
