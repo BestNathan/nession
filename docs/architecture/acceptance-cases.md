@@ -114,6 +114,16 @@ identity are ineligible for this shortcut; use the existing owner-controlled
 explicit Actions path for other supported manual cases.
 
 
+Manual `post-merge` Cases selected from an older authenticated Main merge
+commit have the same dual-SHA distinction: the source workflow runs trusted
+Main code, while `target_sha` names the exact historical product merge.
+The original GitHub `Authenticate manual Post-Merge Case` step is evaluated
+before checkout and independently verified during ingestion. This is not
+permission to ingest an arbitrary SHA: the existing open Issue/SC, merged
+branch ancestry, manifest tree, and immutable Store/Issue projection rules
+still apply. A manual post-merge Case targeting the current source head retains
+the ordinary equal-SHA rule without needing the historical-input exception.
+
 For a **manual Staging Case dispatched from trusted `main`**, GitHub's
 `workflow_run.head_sha` identifies the **workflow code** and intentionally
 does not equal the explicitly selected Staging `target_sha`. The source
