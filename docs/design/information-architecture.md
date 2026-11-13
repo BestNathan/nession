@@ -99,13 +99,15 @@ Claude Code is the first reference integration for this pattern, not a special I
 Sandbox is discovered only inside a selected Session. Its capability-local
 sections are Overview, Images, Workspaces and Policies. The Server Images
 registry remains global and is rendered inside this Session context rather than
-as a separate Workspace capability; Agent-owned Workspaces are a resource
-section, not the logical Nession Workspace; Policies owns the five
-native/portable entries (Filesystem, Network, Linux Namespace, Cgroup v2,
-Seccomp). Web uses capability-local first-level navigation with a local
-sidebar for Images and Policies; App keeps one host-owned header/Back and
-compact local navigation. These are contextual surfaces, not global
-application chrome.
+as a separate Workspace capability; Images exposes Library, Builds and the
+current Agent's Distribution observations. Agent-owned Workspaces are a
+resource section with list/create/delete, not the logical Nession Workspace;
+Policies owns the five native/portable entries (Filesystem, Network, Linux
+Namespace, Cgroup v2, Seccomp), and the Filesystem editor always presents
+RootFS, Mounts, Workspace, Access and the derived Preview. Web uses
+capability-local first-level navigation with a local sidebar for Images and
+Policies; App keeps one host-owned header/Back and compact local navigation.
+These are contextual surfaces, not global application chrome.
 
 ## Agent and Workspace Location progressive disclosure
 

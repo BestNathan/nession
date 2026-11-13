@@ -18,13 +18,11 @@ import {
   sourceLabel,
   type ImageDescriptor,
 } from '@/capabilities/images';
-import type { SandboxImageMode } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
-import type { SandboxImagesState } from '../hooks/useSandboxImages';
-import { sandboxImageChoice } from '../model';
+import { mountTargetError } from '../model';
 
-function SandboxImageRegistryPager({
+function RegistryPager({
   offset,
   shown,
   total,
@@ -45,7 +43,13 @@ function SandboxImageRegistryPager({
         {total === 0 ? '0 images' : `${offset + 1}–${offset + shown} of ${total}`}
       </span>
       <span className="flex gap-1">
-        <Button type="button" size="sm" variant="outline" disabled={offset === 0 || loading} onClick={onPrevious}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={offset === 0 || loading}
+          onClick={onPrevious}
+        >
           Previous
         </Button>
         <Button
@@ -62,11 +66,12 @@ function SandboxImageRegistryPager({
   );
 }
 
-function SandboxImageRegistryRows({
+function RegistryRows({
   images,
   loading,
   error,
   query,
+  selectedId,
   onSelect,
   onRetry,
 }: {
@@ -74,6 +79,7 @@ function SandboxImageRegistryRows({
   loading: boolean;
   error: string | null;
   query: string;
+  selectedId: string | null;
   onSelect: (image: ImageDescriptor) => void;
   onRetry: () => void;
 }) {
@@ -86,7 +92,11 @@ function SandboxImageRegistryRows({
     );
   }
   if (loading) {
-    return <p className="text-muted-foreground" data-testid="sandbox-image-loading">Reading the Server registry…</p>;
+    return (
+      <p className="text-muted-foreground" data-testid="sandbox-image-loading">
+        Reading the Server registry…
+      </p>
+    );
   }
   if (images.length === 0) {
     return (
@@ -99,21 +109,30 @@ function SandboxImageRegistryRows({
     <div className="flex max-h-64 flex-col overflow-auto" data-testid="sandbox-image-list">
       {images.map((image) => {
         const aliases = imageAliases(image);
+        const selected = image.image_id === selectedId;
         return (
           <button
             key={image.image_id}
             type="button"
             data-testid="sandbox-image-row"
+            data-selected={selected ? 'true' : undefined}
             disabled={image.status !== 'ready'}
             onClick={() => onSelect(image)}
-            className="flex min-w-0 flex-col gap-1 border-b border-border px-2 py-2 text-left last:border-b-0 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className={cn(
+              'flex min-w-0 flex-col gap-1 border-b border-border px-2 py-2 text-left last:border-b-0 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50',
+              selected && 'bg-muted',
+            )}
           >
             <span className="flex items-center justify-between gap-2">
               <span className={cn('truncate', chromeSansRole('primary'))}>
                 {aliases[0] ?? image.image_id}
               </span>
               <Badge variant={image.status === 'ready' ? 'secondary' : 'outline'}>
-                {image.status === 'ready' ? 'Server Ready' : image.status === 'failed' ? 'Failed' : 'Building'}
+                {image.status === 'ready'
+                  ? 'Server Ready'
+                  : image.status === 'failed'
+                    ? 'Failed'
+                    : 'Building'}
               </Badge>
             </span>
             <span className="truncate text-muted-foreground">{sourceLabel(image)}</span>
@@ -127,11 +146,13 @@ function SandboxImageRegistryRows({
   );
 }
 
-function SandboxImageRegistry({
+function Registry({
   open,
+  selectedId,
   onSelect,
 }: {
   open: boolean;
+  selectedId: string | null;
   onSelect: (image: ImageDescriptor) => void;
 }) {
   const [images, setImages] = useState<ImageDescriptor[]>([]);
@@ -182,15 +203,16 @@ function SandboxImageRegistry({
           load(0, next);
         }}
       />
-      <SandboxImageRegistryRows
+      <RegistryRows
         images={images}
         loading={loading}
         error={error}
         query={query}
+        selectedId={selectedId}
         onSelect={onSelect}
         onRetry={() => setRevision((n) => n + 1)}
       />
-      <SandboxImageRegistryPager
+      <RegistryPager
         offset={offset}
         shown={images.length}
         total={total}
@@ -210,83 +232,37 @@ function SandboxImageRegistry({
   );
 }
 
-function SandboxImageChoiceForm({
-  selected,
-  target,
-  mode,
-  error,
-  onTargetChange,
-  onModeChange,
-}: {
-  selected: ImageDescriptor;
-  target: string;
-  mode: SandboxImageMode;
-  error: string | null;
-  onTargetChange: (value: string) => void;
-  onModeChange: (mode: SandboxImageMode) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded-[var(--nession-radius-surface)] border border-border p-3">
-      <p className={chromeSansRole('primary')}>
-        {imageAliases(selected)[0] ?? selected.image_id} · pinned {shortDigest(selected.digest)}
-      </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <FormField
-          id="sandbox-image-target"
-          label="Target"
-          description="/ for Base Runtime, /workspace for the writable workspace, /opt/<name> for a toolchain."
-          error={error ?? undefined}
-        >
-          <Input
-            id="sandbox-image-target"
-            data-testid="sandbox-image-target"
-            value={target}
-            onChange={(event) => onTargetChange(event.target.value)}
-          />
-        </FormField>
-        <FormField
-          id="sandbox-image-mode"
-          label="Mode"
-          description="The workspace merges the image with an Agent-owned writable overlay; other images are read-only."
-        >
-          <select
-            id="sandbox-image-mode"
-            data-testid="sandbox-image-mode"
-            className={cn(
-              'h-[length:var(--nession-control-md)] rounded-[var(--nession-radius-control)] border border-input bg-transparent px-3',
-              chromeSansRole('primary'),
-            )}
-            value={mode}
-            onChange={(event) => onModeChange(event.target.value as SandboxImageMode)}
-          >
-            <option value="read_only">Read-only</option>
-            <option value="overlay">Overlay</option>
-          </select>
-        </FormField>
-      </div>
-    </div>
-  );
+export interface SandboxImageSelectDialogProps {
+  open: boolean;
+  title: string;
+  /** Mount targets are editable; a RootFS selection is fixed at `/`. */
+  requireTarget: boolean;
+  submitLabel: string;
+  onSelect: (image: ImageDescriptor, target: string | null) => void;
+  onClose: () => void;
 }
 
-/** The Sandbox-specific image selector. Project has its own separate flow. */
-export function SandboxImagePicker({
+/**
+ * Select one Server Ready image for the Filesystem declaration (#3405, #3408).
+ *
+ * The dialog only chooses a digest and, for a mount, its validated target. It
+ * is not a composition editor and never exposes Agent paths or grants.
+ */
+export function SandboxImageSelectDialog({
   open,
-  images,
+  title,
+  requireTarget,
+  submitLabel,
+  onSelect,
   onClose,
-}: {
-  open: boolean;
-  images: SandboxImagesState;
-  onClose: () => void;
-}) {
+}: SandboxImageSelectDialogProps) {
   const [selected, setSelected] = useState<ImageDescriptor | null>(null);
-  const [target, setTarget] = useState('/');
-  const [mode, setMode] = useState<SandboxImageMode>('read_only');
+  const [target, setTarget] = useState('/opt/');
   const [formError, setFormError] = useState<string | null>(null);
 
   const reset = () => {
     setSelected(null);
-    setTarget(images.selections.some((selection) => selection.role === 'base') ? '/opt/' : '/');
-    setMode('read_only');
+    setTarget('/opt/');
     setFormError(null);
   };
 
@@ -295,60 +271,64 @@ export function SandboxImagePicker({
     onClose();
   };
 
-  const begin = (image: ImageDescriptor) => {
-    setSelected(image);
-    setTarget(images.selections.some((selection) => selection.role === 'base') ? '/opt/' : '/');
-    setMode('read_only');
-    setFormError(null);
-  };
+  const targetError = requireTarget ? mountTargetError(target) : null;
 
-  const add = () => {
+  const submit = () => {
     if (!selected) {
       return;
     }
-    const result = sandboxImageChoice({ digest: selected.digest ?? '', target, mode });
-    if ('error' in result) {
-      setFormError(result.error);
-      return;
-    }
-    const duplicate = images.add(result.choice, selected.status);
-    if (duplicate) {
-      setFormError(duplicate);
-      return;
+    if (requireTarget) {
+      const error = mountTargetError(target);
+      if (error) {
+        setFormError(error);
+        return;
+      }
+      onSelect(selected, target.trim());
+    } else {
+      onSelect(selected, null);
     }
     close();
   };
 
-  const changeTarget = (value: string) => {
-    setTarget(value);
-    if (value.trim() === '/workspace') {
-      setMode('overlay');
-    } else if (value.trim() === '/' || value.trim().startsWith('/opt/')) {
-      setMode('read_only');
-    }
-    setFormError(null);
-  };
-
   return (
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
-      <DialogContent data-testid="sandbox-image-picker" className="max-w-3xl">
+      <DialogContent data-testid="sandbox-image-select-dialog" className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add image to Sandbox</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
-          Sandbox-specific composition. The image is pinned to this resolved digest; the
-          target and mode are owned by this Sandbox and do not change the Project reference.
+          Only a Server Ready image can be declared. The Agent verifies its own cache and
+          refuses an image it has not materialized.
         </p>
-        <SandboxImageRegistry open={open} onSelect={begin} />
+        <Registry open={open} selectedId={selected?.image_id ?? null} onSelect={setSelected} />
         {selected ? (
-          <SandboxImageChoiceForm
-            selected={selected}
-            target={target}
-            mode={mode}
-            error={formError}
-            onTargetChange={changeTarget}
-            onModeChange={setMode}
-          />
+          <div className="flex flex-col gap-2 rounded-[var(--nession-radius-surface)] border border-border p-3">
+            <p className={chromeSansRole('primary')}>
+              {imageAliases(selected)[0] ?? selected.image_id} · pinned{' '}
+              {shortDigest(selected.digest)}
+            </p>
+            {requireTarget ? (
+              <FormField
+                id="sandbox-mount-target"
+                label="Mount target"
+                description="Read-only image mount at /opt/<lowercase-name>."
+                error={formError ?? undefined}
+                errorTestId="sandbox-mount-target-error"
+              >
+                <Input
+                  id="sandbox-mount-target"
+                  data-testid="sandbox-mount-target"
+                  value={target}
+                  placeholder="/opt/<name>"
+                  autoComplete="off"
+                  onChange={(event) => {
+                    setTarget(event.target.value);
+                    setFormError(null);
+                  }}
+                />
+              </FormField>
+            ) : null}
+          </div>
         ) : null}
         <DialogFooter className="items-center justify-between gap-2 sm:justify-between">
           <span />
@@ -359,11 +339,11 @@ export function SandboxImagePicker({
             <Button
               type="button"
               size="sm"
-              data-testid="sandbox-image-add"
-              disabled={!selected || selected.status !== 'ready'}
-              onClick={add}
+              data-testid="sandbox-image-select-submit"
+              disabled={!selected || selected.status !== 'ready' || targetError !== null}
+              onClick={submit}
             >
-              Add to composition
+              {submitLabel}
             </Button>
           </span>
         </DialogFooter>

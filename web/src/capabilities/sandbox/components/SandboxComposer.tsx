@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import type {
+  ImageCacheObservation,
   SandboxCurrentContext,
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
@@ -8,7 +9,6 @@ import { FormSurface } from '@/components/ui/configuration-form';
 import { DetailHeader, DetailSurface } from '@/components/ui/resource-detail';
 import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
-import type { SandboxImagesState } from '../hooks/useSandboxImages';
 import {
   sandboxDraftSignature,
   fieldErrorsByField,
@@ -45,7 +45,8 @@ export interface SandboxComposerProps {
   actionError: SandboxActionError | null;
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
-  images: SandboxImagesState;
+  sessionId: string | null;
+  observations: Map<string, ImageCacheObservation>;
   onPreflight: () => void;
   onRequestEnter: () => void;
   onFocusPane: (paneId: string) => void;
@@ -56,7 +57,7 @@ export interface SandboxComposerProps {
 
 /** The Sandbox Overview's policy summary, preview, actions and panes. */
 export function SandboxOverview(props: SandboxComposerProps) {
-  const signature = sandboxDraftSignature(props.draft.draft, props.images.selections);
+  const signature = sandboxDraftSignature(props.draft.draft);
   const preflightValid = preflightIsValid(
     props.preflight,
     signature,
@@ -165,6 +166,8 @@ export function SandboxPolicyPanels(props: SandboxComposerProps) {
     preflight,
     workingDir,
     onWorkingDirChange,
+    sessionId,
+    observations,
     experience,
     activePolicy,
     onPolicyChange,
@@ -179,11 +182,12 @@ export function SandboxPolicyPanels(props: SandboxComposerProps) {
       <FormSurface>
         <SandboxFilesystemFields
           context={context}
+          sessionId={sessionId}
           draft={draft}
           workingDir={workingDir}
           workingDirError={fieldErrors['working_dir']}
           onWorkingDirChange={onWorkingDirChange}
-          images={props.images}
+          observations={observations}
         />
       </FormSurface>
     ),

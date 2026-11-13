@@ -16,19 +16,29 @@ function namespacesLabel(policy: SandboxPolicyDraft): string {
   return enabled.length === 0 ? 'Baseline only' : enabled.join(', ');
 }
 
+function filesystemValue(policy: SandboxPolicyDraft): string {
+  const filesystem = policy.filesystem;
+  const imageRoot = filesystem?.rootfs?.kind === 'image';
+  const mounts = filesystem?.mounts?.length ?? 0;
+  if (imageRoot || mounts > 0) {
+    const workspace = filesystem?.workspace ? ' · Workspace' : '';
+    return `${imageRoot ? 'Image root' : 'Local root'} · ${mounts} mount${mounts === 1 ? '' : 's'}${workspace}`;
+  }
+  const read = filesystem?.access.read.length ?? 0;
+  const write = filesystem?.access.write.length ?? 0;
+  return read === 0 && write === 0
+    ? 'No explicit paths'
+    : `${read} read · ${write} write paths`;
+}
+
 function summaryRows(policy: SandboxPolicyDraft): { id: SandboxPolicyId; label: string; value: string }[] {
-  const read = policy.filesystem?.access.read.length ?? 0;
-  const write = policy.filesystem?.access.write.length ?? 0;
   const network = policy.network;
   const egress = network?.egress;
   return [
     {
       id: 'filesystem',
       label: 'Filesystem',
-      value:
-        read === 0 && write === 0
-          ? 'No explicit paths'
-          : `${read} read · ${write} write paths`,
+      value: filesystemValue(policy),
     },
     {
       id: 'network',

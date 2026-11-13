@@ -505,12 +505,23 @@ export function ImagesLibraryPanel({
  *
  * The Image Library is a single list: activating a row expands its details
  * immediately underneath that row, and one row is expanded at a time. Builds
- * is the durable #3334 build surface. Distribution is a later integration.
+ * is the durable #3334 build surface. The owning Session's Sandbox supplies
+ * the Agent-scoped Distribution view; this capability owns no Agent cache
+ * observation itself.
  */
-export function ImagesPanel({ experience }: { experience: 'web' | 'app' }) {
+export function ImagesPanel({
+  experience,
+  distribution,
+}: {
+  experience: 'web' | 'app';
+  distribution?: React.ReactNode;
+}) {
   const page = useImagesPage(IMAGE_PAGE_SIZE);
   const builds = useImageBuilds(IMAGE_PAGE_SIZE);
-  const [section, setSection] = useState<'library' | 'builds'>('library');
+  const sections = distribution
+    ? (['library', 'builds', 'distribution'] as const)
+    : (['library', 'builds'] as const);
+  const [section, setSection] = useState<(typeof sections)[number]>('library');
   const [expandedImageId, setExpandedImageId] = useState<string | null>(null);
   return (
     <div
@@ -519,7 +530,7 @@ export function ImagesPanel({ experience }: { experience: 'web' | 'app' }) {
       className="flex min-w-0 flex-col gap-3"
     >
       <div className="flex min-w-0 items-center gap-1">
-        {(['library', 'builds'] as const).map((id) => (
+        {sections.map((id) => (
           <Button
             key={id}
             type="button"
@@ -529,7 +540,7 @@ export function ImagesPanel({ experience }: { experience: 'web' | 'app' }) {
             aria-pressed={section === id}
             onClick={() => setSection(id)}
           >
-            {id === 'library' ? 'Library' : 'Builds'}
+            {id === 'library' ? 'Library' : id === 'builds' ? 'Builds' : 'Distribution'}
           </Button>
         ))}
       </div>
@@ -539,8 +550,10 @@ export function ImagesPanel({ experience }: { experience: 'web' | 'app' }) {
           expandedImageId={expandedImageId}
           onExpand={setExpandedImageId}
         />
-      ) : (
+      ) : section === 'builds' ? (
         <ImagesBuildsPanel builds={builds} />
+      ) : (
+        distribution
       )}
     </div>
   );

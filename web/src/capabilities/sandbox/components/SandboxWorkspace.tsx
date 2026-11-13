@@ -6,11 +6,12 @@ import type {
   WorkspaceDepthControl,
   WorkspaceViewProps,
 } from '@/app/workspace/workspaceContext';
+import type { ImageCacheObservation } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import { useSandboxContext, type SandboxContextState } from '../hooks/useSandboxContext';
 import { useSandboxDraft, type SandboxDraftState } from '../hooks/useSandboxDraft';
-import { useSandboxImages, type SandboxImagesState } from '../hooks/useSandboxImages';
+import { useImageCacheObservations } from '../hooks/useImageCacheObservations';
 import {
   useSandboxPreflight,
   type SandboxPreflightState,
@@ -20,6 +21,7 @@ import {
   type SandboxTransitionsState,
 } from '../hooks/useSandboxTransitions';
 import {
+  declaredDigests,
   preflightIsValid,
   sandboxDraftSignature,
   type SandboxActionError,
@@ -67,7 +69,8 @@ interface SandboxContentProps {
   actionError: SandboxActionError | null;
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
-  images: SandboxImagesState;
+  sessionId: string | null;
+  observations: Map<string, ImageCacheObservation>;
   activeSection: SandboxSectionId;
   activePolicy: SandboxPolicyId;
   onPolicyChange: (policy: SandboxPolicyId) => void;
@@ -120,14 +123,15 @@ function SandboxContent({
   actionError,
   workingDir,
   onWorkingDirChange,
-  images,
+  sessionId,
+  observations,
   activeSection,
   activePolicy,
   onPolicyChange,
   onRetry,
 }: SandboxContentProps) {
   const context = sandbox.context;
-  const signature = sandboxDraftSignature(draft.draft, images.selections);
+  const signature = sandboxDraftSignature(draft.draft);
   const preflightValid = preflightIsValid(
     preflightState.preflight,
     signature,
@@ -161,10 +165,10 @@ function SandboxContent({
     );
   }
   if (activeSection === 'images') {
-    return <SandboxImagesPanel experience={ctx.experience} />;
+    return <SandboxImagesPanel experience={ctx.experience} sessionId={sessionId} />;
   }
   if (activeSection === 'workspaces') {
-    return <SandboxWorkspacesPanel />;
+    return <SandboxWorkspacesPanel sessionId={sessionId} />;
   }
   if (context.status === 'inside') {
     if (activeSection === 'policies') {
@@ -203,7 +207,8 @@ function SandboxContent({
     actionError,
     workingDir,
     onWorkingDirChange,
-    images,
+    sessionId,
+    observations,
     onPreflight: () => preflightState.runPreflight(draft.draft),
     onRequestEnter: transitions.requestEnter,
     onFocusPane: transitions.focusPane,
@@ -238,17 +243,15 @@ export function SandboxWorkspace({
   const [activePolicy, setActivePolicy] = useState<SandboxPolicyId>('filesystem');
   const sandbox = useSandboxContext(sessionId);
   const draft = useSandboxDraft(sandbox.context);
-  const images = useSandboxImages(sessionId);
+  const observations = useImageCacheObservations(sessionId, declaredDigests(draft.draft));
   const [workingDir, setWorkingDir] = useState('');
   const preflightState = useSandboxPreflight({
     sessionId,
     context: sandbox.context,
-    images: images.selections,
     workingDir,
   });
   const transitions = useSandboxTransitions({
     sessionId,
-    images: images.selections,
     workingDir,
     applyContext: sandbox.applyContext,
   });
@@ -324,7 +327,8 @@ export function SandboxWorkspace({
           actionError={actionError}
           workingDir={workingDir}
           onWorkingDirChange={setWorkingDir}
-          images={images}
+          sessionId={sessionId}
+          observations={observations.observations}
           activeSection={activeSection}
           activePolicy={activePolicy}
           onPolicyChange={selectPolicy}

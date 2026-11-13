@@ -86,31 +86,32 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
     await expect(page.getByTestId('project-image-digest-field')).toHaveText(before);
   });
 
-  test('Sandbox owns its image composition and pins Agent cache observations', async ({
+  test('Sandbox owns Filesystem image declarations and pins Agent cache observations', async ({
     page,
   }) => {
     await page.goto('/#/fixture/workspace?capability=sandbox');
     await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
-    await expect(page.getByTestId('sandbox-image-composition')).toBeVisible();
+    await expect(page.getByTestId('sandbox-filesystem-preview')).toBeVisible();
 
-    await page.getByTestId('sandbox-image-add-open').click();
-    await expect(page.getByTestId('sandbox-image-picker')).toContainText(
-      'Sandbox-specific',
-    );
+    await page.getByTestId('sandbox-rootfs-image').click();
     await page.getByTestId('sandbox-image-row').first().click();
-    await expect(page.getByTestId('sandbox-image-target')).toHaveValue('/');
-    await page.getByTestId('sandbox-image-add').click();
-    await expect(page.getByTestId('sandbox-image-selection')).toHaveCount(1);
-    await expect(page.getByTestId('sandbox-image-cache')).toHaveText('Agent verified');
+    await page.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-rootfs-selected')).toBeVisible();
+    await expect(page.getByTestId('sandbox-rootfs-cache')).toContainText('Verified');
 
-    await page.getByTestId('sandbox-image-add-open').click();
-    await page.getByTestId('sandbox-image-row').nth(1).click();
-    await page.getByTestId('sandbox-image-target').fill('/opt/tool');
-    await page.getByTestId('sandbox-image-add').click();
-    await expect(page.getByTestId('sandbox-image-selection')).toHaveCount(2);
+    await page.getByTestId('sandbox-mount-add').click();
+    const dialog = page.getByTestId('sandbox-image-select-dialog');
+    await dialog.getByTestId('sandbox-image-row').nth(1).click();
+    await dialog.getByTestId('sandbox-mount-target').fill('/opt/tool');
+    await dialog.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-mount-row')).toHaveCount(1);
+    await expect(page.getByTestId('sandbox-filesystem-preview-mount-0')).toContainText(
+      '/opt/tool',
+    );
 
-    await page.getByTestId('sandbox-tab-overview').click();
+    await page.getByTestId('sandbox-section-overview').click();
     await page.getByTestId('sandbox-preflight').click();
     await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
   });
@@ -159,13 +160,16 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
     await page.goto(
       '/#/fixture/workspace?capability=sandbox&sandbox=agent-cache-failed',
     );
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
-    await page.getByTestId('sandbox-image-add-open').click();
+    await page.getByTestId('sandbox-rootfs-image').click();
     await page.getByTestId('sandbox-image-row').first().click();
-    await page.getByTestId('sandbox-image-add').click();
-    await expect(page.getByTestId('sandbox-image-cache')).toHaveText('Agent cache failed');
-    await expect(page.getByTestId('sandbox-image-cache')).not.toContainText(
-      'Agent verified',
+    await page.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-rootfs-cache')).toHaveText(
+      'Cache failed · 256 KiB',
+    );
+    await expect(page.getByTestId('sandbox-rootfs-cache')).not.toContainText(
+      'Verified',
     );
   });
 });

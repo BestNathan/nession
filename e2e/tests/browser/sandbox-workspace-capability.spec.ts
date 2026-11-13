@@ -236,6 +236,101 @@ test.describe('Web 1180', () => {
     await expect(page.getByTestId('sandbox-syscall-profile')).toBeEnabled();
   });
 
+  test('Filesystem declares RootFS, mounts and a Workspace with a live Preview (#3405, #3408 SC-02)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page);
+    await selectTab(page, 'filesystem');
+    await expect(page.getByTestId('sandbox-filesystem-preview')).toBeVisible();
+    await expect(page.getByTestId('sandbox-filesystem-preview-rootfs')).toContainText(
+      'Local host root',
+    );
+
+    await page.getByTestId('sandbox-rootfs-image').click();
+    await page.getByTestId('sandbox-image-row').first().click();
+    await page.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-rootfs-selected')).toBeVisible();
+    await expect(page.getByTestId('sandbox-rootfs-cache')).toContainText('Verified');
+
+    await page.getByTestId('sandbox-mount-add').click();
+    const dialog = page.getByTestId('sandbox-image-select-dialog');
+    await dialog.getByTestId('sandbox-image-row').first().click();
+    await dialog.getByTestId('sandbox-mount-target').fill('/opt/rust');
+    await dialog.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-mount-row')).toHaveCount(1);
+    await expect(page.getByTestId('sandbox-mount-target-0')).toHaveValue('/opt/rust');
+    await expect(page.getByTestId('sandbox-filesystem-preview-mount-0')).toContainText(
+      '/opt/rust',
+    );
+    await expect(page.getByTestId('sandbox-filesystem-preview-mount-0')).toContainText(
+      'read-only',
+    );
+
+    await page.getByTestId('sandbox-workspace-auto').click();
+    await expect(page.getByTestId('sandbox-filesystem-preview-workspace')).toContainText(
+      'Auto by Session name',
+    );
+
+    await page.getByTestId('sandbox-preflight').click();
+    await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
+    await expect(page.getByTestId('sandbox-enter')).toBeEnabled();
+  });
+
+  test('Workspaces lists, creates and refuses to delete a leased Workspace (#3407, #3408 SC-02)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page);
+    await openSection(page, 'workspaces');
+    await expect(page.getByTestId('sandbox-workspaces')).toBeVisible();
+    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+
+    await page.getByTestId('sandbox-workspaces-create-name').fill('demo');
+    await page.getByTestId('sandbox-workspaces-create').click();
+    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
+
+    const leased = page
+      .getByTestId('sandbox-workspace-row')
+      .filter({ hasText: 'fixture-session-auto' });
+    await leased.getByTestId('sandbox-workspace-delete').click();
+    await page.getByTestId('sandbox-workspace-delete-confirm').click();
+    await expect(page.getByTestId('sandbox-workspaces-action-error')).toContainText('leased');
+    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
+  });
+
+  test('Distribution separates an active transfer from verified bytes (#3412, #3408 SC-02)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page, '&sandbox=agent-cache-downloading');
+    await openSection(page, 'images');
+    await page.getByTestId('images-section-distribution').click();
+    await expect(page.getByTestId('sandbox-distribution')).toBeVisible();
+
+    const first = page.getByTestId('sandbox-distribution-row').first();
+    await expect(first.getByTestId('sandbox-distribution-phase')).toHaveText('Downloading');
+    await expect(first.getByTestId('sandbox-distribution-transfer')).toHaveText(
+      '1.0 MiB / 4.0 MiB',
+    );
+    await expect(first.getByTestId('sandbox-distribution-active')).toBeVisible();
+
+    const second = page.getByTestId('sandbox-distribution-row').nth(1);
+    await expect(second.getByTestId('sandbox-distribution-phase')).toHaveText('Verified');
+    await expect(second.getByTestId('sandbox-distribution-active')).toHaveCount(0);
+  });
+
+  test('Distribution never calls a resumable partial active or mount-ready (#3412)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page, '&sandbox=agent-cache-resumable');
+    await openSection(page, 'images');
+    await page.getByTestId('images-section-distribution').click();
+    const first = page.getByTestId('sandbox-distribution-row').first();
+    await expect(first.getByTestId('sandbox-distribution-phase')).toHaveText(
+      'Resumable partial',
+    );
+    await expect(first.getByTestId('sandbox-distribution-active')).toHaveCount(0);
+    await expect(first.getByTestId('sandbox-distribution-detail')).toContainText('partial');
+  });
+
   test('macOS disables Linux-native implementations per tab (#3161 SC-04)', async ({ page }) => {
     await openWebSandbox(page, '&sandbox=macos');
 
