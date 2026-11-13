@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cdcd29420feedad0c333de7a014620f888eb58cab181bde1d776261a6ac795ad",
+  "run_id": 43432234584,
+  "run_attempt": 1,
+  "issue": 3395,
+  "criterion": "SC-01",
+  "criterion_text": "A pending paste offer followed by `isAuthorized=false` cannot disclose MIME listing metadata through OSC 5522 `type=read` with `.`; authorized listing continues to work, and passwordless payload reads still fail. Cover the negative transition with a deterministic test.",
+  "stage": "staging",
+  "target_sha": "960d6919a36c4245a1439b86e9b03cdad7589abe",
+  "contract_sha256": "f42d4bcfd3e0874c00eb1d1c28838f15a9071b65cfeeb0d4b65c11637c0c0477",
+  "case_revision": "960d6919a36c4245a1439b86e9b03cdad7589abe",
+  "case_tree_sha": "d24cda72bc2f9a69905dff16cb60b5f401bbcbc6",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-13T13:20:39.640Z",
+  "finished_at": "2026-11-13T13:20:57.837Z",
+  "duration_ms": 18196,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "MIME listing requires current controller authorization while the authorized listing and password-gated payload read semantics are unchanged",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 960d6919a36c4245a1439b86e9b03cdad7589abe: an authorized passwordless listing returned the offered text/plain and image/png names; after isAuthorized=false the listing returned only EPERM with no OK/DATA/DONE; a passwordless read still failed; a password read after authorization loss returned EPERM"
+        }
+      ],
+      "duration_ms": 12248,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43432234584,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "db9be6fa5125217073e63391ca3348090804ac13",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "960d6919a36c4245a1439b86e9b03cdad7589abe",
+        "stage": "staging",
+        "issue": 3395,
+        "criterion": "SC-01",
+        "job_id": 131908323973,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43432234584",
+    "record_path": "runs/2026-11-13/43432234584-1/3395/SC-01.json",
+    "source_result_sha256": "42ed179c9068f09870bfa6b918d39b6a7843c1572a7c38357f368cb440505906"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43432234584-1",
+    "sha256": "42ed179c9068f09870bfa6b918d39b6a7843c1572a7c38357f368cb440505906",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43432234584",
+    "durability": "time-limited; object archival not configured"
+  }
+}
