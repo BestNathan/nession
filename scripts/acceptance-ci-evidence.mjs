@@ -1997,13 +1997,18 @@ async function collectCommand(workspace, outFile) {
         }
       }
     }
+    // A staging SC may depend on another Issue's already-completed staging
+    // Acceptance. Its historical run/attempt, immutable artifact digest,
+    // required collector/Agent/updater steps and staging-SHA ancestry are
+    // authenticated by the canonical cross-Issue receipt verifier.
+    if(['staging','post-merge'].includes(process.env.ACCEPTANCE_STAGE))
+      relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
+        sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
     if(process.env.ACCEPTANCE_STAGE==='post-merge') {
       implementationPulls=await collectImplementationGateEvidence(
         repo,Number(issueNumber),currentIssue,sha);
       historicalReporterE2eRerun=await collectHistoricalReporterE2eRerun(
         repo,currentIssue,sha);
-      relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
-        sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
       if(Number(issueNumber)===1818)
         relatedBugCompletion=await collectRelatedBugCompletion(repo,currentIssue,sha,githubGet);
     }
