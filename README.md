@@ -15,7 +15,7 @@
 
 ## Catalog
 
-| Server-owned Images: Workspace discovery without a Session, independent Project reference / Git build bind, independent Sandbox multi-image composition, Agent cache vs Server Ready; Web/App | [#3181](https://github.com/BestNathan/nession/issues/3181) | [Interactive HTML](images-3181/index.html) · [Scenario & fidelity](images-3181/README.md) |
+| Historical Server Images entry (global ownership remains; independent Session-less Workspace navigation superseded by #3408) | [#3181](https://github.com/BestNathan/nession/issues/3181) · [#3408](https://github.com/BestNathan/nession/issues/3408) | [Historical interactive HTML](images-3181/index.html) · [Supersession note](images-3181/README.md) |
 
 | AI · Current Session Agent Skills/MCP, no Agent selector; project discovery stays in client extensions | [#3251](https://github.com/BestNathan/nession/issues/3251) | [Interactive HTML](ai-global-resources-3251/index.html) · [Scenario & fidelity](ai-global-resources-3251/README.md) |
 
@@ -26,7 +26,7 @@
 
 | Unified Overlay & Operation Surfaces (including #3298 Dialog Header/Body/Footer scroll-ownership comparison) | [#3142](https://github.com/BestNathan/nession/issues/3142) | [Interactive HTML](overlay-system-3142/index.html) · [Scenario & fidelity](overlay-system-3142/README.md) |
 
-| Sandbox strategy tabs: Web sticky left nav + wide scrolling panel / App horizontal tabs + vertical content; five independent policy editors, Overview Enter, Inside effective inspection; revised in place for the shared ResourceDetail / ConfigurationForm / OperationSurface grammar (#3137) | [#3143](https://github.com/BestNathan/nession/issues/3143), [#3141](https://github.com/BestNathan/nession/issues/3141), [#3124](https://github.com/BestNathan/nession/issues/3124) | [Interactive HTML](sandbox-capability-3124/index.html) · [Scenario & fidelity](sandbox-capability-3124/README.md) |
+| Unified Session Sandbox (revise existing #3124 prototype): Web header-right Overview/Images/Workspaces/Policies + local feature sidebar; App one Back; Server Images registry / Agent named Workspaces / Filesystem RootFS/Mount/Access mapping; native policy support | [#3408](https://github.com/BestNathan/nession/issues/3408), [#3407](https://github.com/BestNathan/nession/issues/3407), [#3405](https://github.com/BestNathan/nession/issues/3405) · historical [#3143](https://github.com/BestNathan/nession/issues/3143) | [Interactive HTML](sandbox-capability-3124/index.html) · [Scenario & fidelity](sandbox-capability-3124/README.md) |
 
 
 | Web/App Attach and Session operations — responsive Web Dialog, App operation depths; Project Location Select now content-height and wrap-safe; Project operation form now uses named #3137 ConfigurationForm sections (#3089 reopened) | [#3089](https://github.com/BestNathan/nession/issues/3089) | [Interactive HTML](session-operation-surfaces-3089/index.html) · [Scenario & fidelity](session-operation-surfaces-3089/README.md) |
