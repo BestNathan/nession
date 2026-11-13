@@ -9,7 +9,7 @@
   var view=document.getElementById("sandbox-product");
   var inspector=document.getElementById("sandbox-inspector");
   if(!root||!device||!view)return;
-  function image(id,name,kind,letter,mount){return {id:id,name:name,kind:kind,digest:"sha256:"+letter.repeat(64),status:"ready",default_mount:mount||null};}
+  function image(id,name,kind,letter,mount){var sizes={base:24000000,base2:21000000,rust:104000000,node:48000000,source:58000000};return {id:id,name:name,kind:kind,digest:"sha256:"+letter.repeat(64),status:"ready",default_mount:mount||null,size_bytes:sizes[id]||35000000};}
   var initialImages=[
     image("base","minimal-glibc-runtime","Base Runtime","a"),
     image("base2","alpine-runtime","Base Runtime","f"),
@@ -26,8 +26,13 @@
     return {mode:"web",width:1180,surface:"workspace",session:"sandbox-review",fixture:"linux",area:"overview",
       sub:{images:"library",workspaces:"list",policies:"filesystem"},depth:"root",
       images:initialImages.map(function(x){return Object.assign({},x)}),
-      builds:[{id:"build-120",name:"nession-source",status:"completed",detail:"Digest verified and registered"}],
-      cache:{base:"verified",base2:"absent",rust:"verified",node:"absent",source:"verified"},
+      builds:[
+        {id:"build-120",name:"nession-source",status:"running",stage:"packaging",elapsed_ms:68000,files:2317,bytes:58240000,attempt:1,diagnostic:"mkfs.erofs"},
+        {id:"build-119",name:"rust-toolchain",status:"succeeded",stage:"publishing",elapsed_ms:93000,files:15290,bytes:104000000,attempt:1,diagnostic:"Digest published"},
+        {id:"build-118",name:"node-toolchain",status:"failed",stage:"snapshotting",elapsed_ms:12000,files:null,bytes:null,attempt:1,diagnostic:"Snapshot failed: source unavailable"}
+      ],
+      cache:{base:"verified",base2:"absent",rust:"verified",node:"preparing",source:"verified"},
+      transfers:{node:{state:"resumable",received:12000000,total:48000000},base2:{state:"absent",received:0,total:21000000}},
       workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
       rootMode:"image",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,workspaceManualName:"",readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
@@ -216,20 +221,87 @@
     return sectionHead("Image Library","")+
       '<div class="cand-image-list">'+(items||'<div class="fs-empty">No images</div>')+'</div>';
   }
+  function sizeLabel(bytes){
+    if(bytes==null)return "—";
+    if(bytes>=1000000000)return (bytes/1000000000).toFixed(2)+" GB";
+    if(bytes>=1000000)return (bytes/1000000).toFixed(1)+" MB";
+    if(bytes>=1000)return (bytes/1000).toFixed(1)+" KB";
+    return bytes+" B";
+  }
+  function buildStageLabel(stage){return ({fetching:"Fetching source",snapshotting:"Snapshotting",validating:"Validating",packaging:"Packaging EROFS",publishing:"Publishing image"})[stage]||"Queued";}
+  function transferFor(im){
+    return s.transfers[im.id]||{state:s.cache[im.id]==="verified"?"verified":"absent",
+      received:s.cache[im.id]==="verified"?im.size_bytes:0,total:im.size_bytes};
+  }
   function imageBuilds(){
-    return sectionHead("Builds","Server 构建任务、进度与失败诊断（均为模拟数据）",
-      action("+ New build","build-start","primary"))+
-      '<div class="cand-list">'+s.builds.map(function(b){return '<div class="cand-row"><div><strong>'+h(b.name)+'</strong><small>'+h(b.id)+' · '+h(b.detail)+'</small></div>'+statusChip(b.status)+
-      (b.status==="building"?action("Complete","build-complete:"+b.id):"")+'</div>';}).join("")+'</div>';
+    var rows=s.builds.map(function(b){
+      var active=b.status==="running"||b.status==="queued",terminal=!active;
+      var counts=(b.files!=null?b.files.toLocaleString()+" files":"Files pending")+
+        " · "+(b.bytes!=null?sizeLabel(b.bytes):"Bytes pending");
+      return '<section class="cand-job" data-build-id="'+h(b.id)+'">'+
+        '<div class="cand-job-head"><div><strong>'+h(b.name)+'</strong><small>'+h(b.id)+' · Attempt '+h(b.attempt||1)+'</small></div>'+statusChip(b.status)+'</div>'+
+        '<div class="cand-job-stage"><span>'+h(active?buildStageLabel(b.stage):b.status==="succeeded"?"Published":b.status==="failed"?"Failed":b.status==="canceled"?"Canceled":b.status)+'</span>'+
+        '<span>'+Math.round((b.elapsed_ms||0)/1000)+'s elapsed</span></div>'+
+        (active?'<div class="cand-progress-track indeterminate" aria-label="Running build stage; no reliable percentage"><span></span></div>':"")+
+        '<div class="cand-job-measure">'+h(counts)+'</div>'+
+        (b.diagnostic?'<div class="cand-job-diagnostic '+(b.status==="failed"?"error":"")+'">'+h(b.diagnostic)+'</div>':"")+
+        '<div class="cand-actions">'+(active?action("Cancel","build-cancel:"+b.id,"",!online()):"")+
+          (b.status==="failed"||b.status==="canceled"?action("Retry","build-retry:"+b.id,"",!online()):"")+'</div></section>';
+    }).join("");
+    return sectionHead("Builds","",action("+ New build","build-start","primary",!online()))+
+      '<div class="cand-job-list">'+rows+'</div>';
   }
   function distribution(){
-    return sectionHead("Distribution","按当前 Agent 观察缓存；Server Ready 不代表 Agent 已准备完成")+
-      card("Server → Agent","按需授权、校验并缓存；不隐含自动广播到所有 Agent。",
-      '<div class="cand-list">'+s.images.map(function(im){
-        var cs=online()?(s.cache[im.id]||"absent"):"unknown";
-        return '<div class="cand-row"><div><strong>'+h(im.name)+'</strong><small>Server: '+h(im.status)+' · '+short(im.digest)+'</small></div>'+statusChip(cs)+
-          (online()&&cs!=="verified"?action("Prepare cache","cache:"+im.id,"",false):"")+'</div>';
-      }).join("")+'</div>');
+    var rows=s.images.map(function(im){
+      var cacheStatus=online()?(s.cache[im.id]||"absent"):"unknown";
+      var transfer=transferFor(im),ready=cacheStatus==="verified";
+      var label=!online()?"Unknown":ready?"Verified":transfer.state==="downloading"?"Downloading":
+        transfer.state==="verifying"?"Verifying":transfer.state==="resumable"?"Resumable":
+        transfer.state==="failed"?"Failed":"Not cached";
+      var received=ready?im.size_bytes:Math.min(transfer.received||0,im.size_bytes);
+      var total=im.size_bytes;
+      var measurable=!ready&&online()&&(transfer.state==="downloading"||transfer.state==="resumable"||transfer.state==="verifying");
+      var pct=measurable&&total>0?Math.round(received/total*100):null;
+      var measure=measurable?'<div class="cand-transfer-measure"><span>'+h(sizeLabel(received))+' / '+h(sizeLabel(total))+'</span><strong>'+pct+'%</strong></div>'+
+        '<progress class="cand-transfer-progress" aria-label="'+h(im.name)+' transfer bytes" value="'+received+'" max="'+total+'"></progress>':"";
+      var verified=ready?'<div class="cand-job-measure">Verified · '+h(sizeLabel(total))+' · SHA-256 matched</div>':"";
+      return '<section class="cand-job" data-transfer-image="'+h(im.id)+'">'+
+        '<div class="cand-job-head"><div><strong>'+h(im.name)+'</strong><small>'+short(im.digest)+'</small></div>'+statusChip(label.toLowerCase().replaceAll(" ","-"))+'</div>'+
+        '<div class="cand-job-stage"><span>'+label+'</span><span>Agent · nession-dev</span></div>'+
+        measure+verified+
+        (transfer.state==="verifying"?'<div class="cand-job-measure">Checking SHA-256 · not mount-ready</div>':"")+
+        (transfer.state==="resumable"?'<div class="cand-job-measure">Partial file preserved · transfer not active</div>':"")+
+        (!ready&&online()&&transfer.state!=="downloading"&&transfer.state!=="verifying"?
+          '<div class="cand-actions">'+action(transfer.state==="resumable"?"Resume":"Prepare","cache:"+im.id,"",false)+'</div>':"")+
+        '</section>';
+    }).join("");
+    return sectionHead("Distribution","",statusChip(online()?"available":"unknown"))+
+      '<div class="cand-distribution-context"><span>Current Agent</span><strong>nession-dev</strong><span>Server source: ready registry</span></div>'+
+      '<div class="cand-job-list">'+rows+'</div>';
+  }
+  function demoBuildStep(){
+    var b=s.builds.find(function(item){return item.status==="queued"||item.status==="running"});
+    if(!b)return;
+    var stages=["fetching","snapshotting","validating","packaging","publishing"];
+    var index=stages.indexOf(b.stage);
+    if(b.status==="queued"){b.status="running";b.stage="fetching";}
+    else if(index===stages.length-1){
+      b.status="succeeded";b.elapsed_ms+=8000;b.diagnostic="Verified Digest published";
+      var id="built"+b.id.replace("build-","");
+      s.images.push(image(id,b.name,"Toolchain","e","/opt/"+b.name.slice(0,24)));
+    }else {
+      b.stage=stages[index+1]||"fetching";b.elapsed_ms+=8000;
+      if(b.stage==="validating"){b.files=2317;b.bytes=58240000;}
+      b.diagnostic=b.stage==="packaging"?"mkfs.erofs (no native percent)":buildStageLabel(b.stage);
+    }
+  }
+  function demoTransferStep(){
+    var im=s.images.find(function(item){return (s.transfers[item.id]||{}).state==="downloading"||(s.transfers[item.id]||{}).state==="verifying"});
+    if(!im)return;
+    var t=s.transfers[im.id];
+    if(t.state==="verifying"){t.state="verified";s.cache[im.id]="verified";return;}
+    t.received=Math.min(t.total,(t.received||0)+Math.ceil(t.total*0.30));
+    if(t.received>=t.total)t.state="verifying";
   }
   function imagesPanel(){return layout("images",s.sub.images==="builds"?imageBuilds():s.sub.images==="distribution"?distribution():imageLibrary());}
   function workspaceList(){
@@ -530,16 +602,20 @@
     if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&s.cache[id]==="verified"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a.indexOf("image-tool:")===0){var id=a.slice(11),im=imageBy(id);if(im&&im.kind!=="Base Runtime"&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a==="build-start"){
+      if(!online())return;
       var id="build-"+(121+s.builds.length);
-      s.builds.unshift({id:id,name:"prototype-build-"+(s.builds.length+1),status:"building",detail:"EROFS build in progress"});
+      s.builds.unshift({id:id,name:"new-source-"+(s.builds.length+1),status:"queued",stage:null,elapsed_ms:0,files:null,bytes:null,attempt:1,diagnostic:"Awaiting worker"});
       s.sub.images="builds";return;
     }
-    if(a.indexOf("build-complete:")===0){
-      var b=s.builds.find(function(x){return x.id===a.slice(15);});
-      if(b){b.status="completed";b.detail="Digest registered";s.images.push(image("built"+s.builds.length,b.name,"Toolchain","e"));}
-      return;
+    if(a.indexOf("build-cancel:")===0){var b=s.builds.find(function(x){return x.id===a.slice(13)});if(b&&(b.status==="running"||b.status==="queued")){b.status="canceled";b.diagnostic="Canceled by user";}return;}
+    if(a.indexOf("build-retry:")===0){var b=s.builds.find(function(x){return x.id===a.slice(12)});if(b&&(b.status==="failed"||b.status==="canceled")){b.status="queued";b.stage=null;b.attempt++;b.elapsed_ms=0;b.diagnostic="Awaiting worker";}return;}
+    if(a.indexOf("cache:")===0){
+      if(!online())return;
+      var id=a.slice(6),im=imageBy(id);if(!im||s.cache[id]==="verified")return;
+      var previous=transferFor(im);
+      s.transfers[id]={state:"downloading",received:previous.received||0,total:im.size_bytes};
+      s.cache[id]="preparing";return;
     }
-    if(a.indexOf("cache:")===0){if(online()){s.cache[a.slice(6)]="verified";s.notice="Cache verified on current Agent";}return;}
     if(a.indexOf("ws-use:")===0){var selected=s.workspaces.find(function(w){return w.id===a.slice(7)});if(isEditable()&&selected&&selected.status==="available"&&(selected.kind!=="project_location"||s.session==="sandbox-review")){s.selectedWorkspace=selected.id;dirty();}return;}
     if(a==="ws-auto"){
       if(!isEditable())return;
@@ -611,6 +687,14 @@
       if(newFixture==="macos"){s.namespace={pid:false,ipc:false,user:false,uts:false,cgroup:false};s.network="deny";}
       if(newFixture==="no-session"){s.surface="terminal";}
       root.querySelectorAll("[data-fixture]").forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});
+      render();
+    });
+  });
+  root.querySelectorAll("[data-demo-progress]").forEach(function(button){
+    button.addEventListener("click",function(){
+      var command=button.getAttribute("data-demo-progress");
+      if(command==="build-next")demoBuildStep();
+      if(command==="transfer-next")demoTransferStep();
       render();
     });
   });
