@@ -63,7 +63,13 @@ existing dual-native Case combiner withholds unpaired success. A separate
 native platform execution must supply the paired evidence.
 
 The routed `Acceptance / Cases` workflow carries `source_comment_id` and
-uses a comment-bound Run name. On the chosen platform **before target checkout**,
+uses a comment-bound Run name. GitHub's completed `workflow_run.name`
+reports that dynamic title, not the workflow's static `name`; therefore
+the existing `Acceptance / Case Ingest` subscriber covers the bounded
+`Comment Case #*` name family as well as `Acceptance / Cases`, while
+the trusted ingester **still requires the exact canonical workflow path,
+source branch/event, Run/Attempt and matching Issue/SC**. An arbitrary
+workflow named similarly cannot forge the canonical source path. On the chosen platform **before target checkout**,
 trusted Main independently reads the original GitHub human comment/Issue,
 rejects edits, untrusted actors, unsupported or stale targets, and recomputes
 the bound merge SHA/Case manifest. Ordinary direct Actions/UI/manual and
