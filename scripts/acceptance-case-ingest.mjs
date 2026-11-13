@@ -931,6 +931,9 @@ async function selfTest() {
   assert.throws(() => sourceRunIdentity({ workflow_run: {
     ...commentEvent.workflow_run, path: '.github/workflows/untrusted.yml',
   } }, 'BestNathan/nession'), /unexpected source workflow definition path/);
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, repository: { full_name: 'other/nession' },
+  } }, 'BestNathan/nession'), /repository mismatch/);
   // Exercise the actual attest path without credentials: a fetched source commit
   // must contain the exact Case tree claimed by the immutable record.
   const sourceTree = 'f'.repeat(40);
