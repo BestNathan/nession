@@ -125,7 +125,7 @@ const stripComment = (line) => {
         quote = '';
       }
     } else if (ch === "'" || ch === '"') quote = ch;
-    else if (ch === '#' && (i === 0 || /\\s/.test(line[i - 1]))) return line.slice(0, i);
+    else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
   }
   return line;
 };
