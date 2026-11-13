@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 43342836958,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "43342836958-1-issue-3388-pr"
+  },
+  "task": {
+    "id": "issue-3388-pr",
+    "type": "acceptance",
+    "issue": 3388,
+    "stage": "pr",
+    "target_ref": "5a54f11f530c1c075fcefb86c36d8b760d79e655",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "8e8cf5f8-4baf-4415-b940-d3476ce66f08",
+    "request_id": null,
+    "status": "error",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v4",
+      "sha256": "9f254feb8d6c393b69c2d30e476754d2e12b24548230ca3e2848c2c8becaf88f"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 6,
+    "output": 52,
+    "cache_read": 98679,
+    "cache_write": 6027,
+    "reasoning": null,
+    "total": 104764
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-13T01:11:13.498Z",
+    "finished_at": "2026-11-13T01:13:40.332Z",
+    "agent_duration_ms": 4017,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "agent-error",
+    "pass": 0,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
