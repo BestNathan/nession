@@ -295,7 +295,7 @@ function nativeFullReceipt(batch,pr){
 // Full Pass. The trusted comment router checks the original OWNER comment,
 // exact PR HEAD/ref, and workflow_dispatch inputs. Independently verify its
 // job/attempt and mandatory execution steps before using its result.
-export function attestPromotionCandidateFull({pr,laneSha,run,jobs=[],comment}){
+export function attestPromotionCandidateFull({pr,laneSha,run,jobs=[],comment,botReceipt}){
   const title='Comment E2E #'+pr?.number+' comment:'+comment?.id;
   if(!isNativePromotionPr(pr)||pr.state!=='open'||
      pr.head.sha!==laneSha||!SHA.test(laneSha??'')||
@@ -305,6 +305,21 @@ export function attestPromotionCandidateFull({pr,laneSha,run,jobs=[],comment}){
      comment.author_association!=='OWNER'||
      comment.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+pr.number||
      !comment.created_at||comment.updated_at!==comment.created_at||
+     // GitHub's run.head_sha is the dispatcher's main SHA, NOT the
+     // workflow's requested target_sha. The trusted router's immutable
+     // source-bound receipt carries the actual requested target.
+     botReceipt?.user?.login!=='github-actions[bot]'||
+     botReceipt?.user?.id!==41898282||
+     botReceipt?.user?.type!=='Bot'||
+     botReceipt.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+pr.number||
+     !botReceipt.created_at||
+     botReceipt.updated_at!==botReceipt.created_at||
+     botReceipt.body!==(
+       'Comment command `/e2e full` accepted for PR #'+pr.number+
+       ' at '+laneSha+'. [Actions run](https://github.com/'+REPO+
+       '/actions/runs/'+run?.id+'). This request is not an Acceptance Pass.\n\n'+
+       '<!-- nession-command-comment:'+comment.id+' -->')||
+     Date.parse(botReceipt.created_at)<Date.parse(run?.created_at??'')||
      run?.path?.split('@')[0]!=='.github/workflows/e2e-full-regression.yml'||
      run.display_title!==title||
      ![title,'E2E / Full Regression'].includes(run.name)||
@@ -370,7 +385,15 @@ function promotionCandidateFullReceipt(pr,laneSha){
   if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
     throw Error('unbounded promotion Full job inventory');
   const comment=read('issues/comments/'+commentId);
-  return attestPromotionCandidateFull({pr,laneSha,run,jobs:jobs.jobs,comment});
+  const comments=read('issues/'+pr.number+'/comments?per_page=100');
+  if(!Array.isArray(comments)||comments.length>=100)
+    throw Error('unbounded promotion source comment inventory');
+  const matching=comments.filter(c=>c.user?.id===41898282&&
+    c.body?.includes('<!-- nession-command-comment:'+commentId+' -->')&&
+    c.body?.includes('/actions/runs/'+run.id+')'));
+  if(matching.length!==1)return null;
+  return attestPromotionCandidateFull({pr,laneSha,run,jobs:jobs.jobs,
+    comment,botReceipt:matching[0]});
 }
 
 export function qualify({action,prNumber,mainSha,laneSha,branch,
@@ -710,10 +733,29 @@ function selfTest(){
       'Run full canonical Playwright suite at pinned SHA',
       'Verify complete per-ID assertions'].map(name=>({
         name,status:'completed',conclusion:'success'}))};
+  const botReceipt={id:124,
+    user:{login:'github-actions[bot]',id:41898282,type:'Bot'},
+    issue_url:'https://api.github.com/repos/'+REPO+'/issues/3341',
+    created_at:'2026-11-13T15:05:32Z',
+    updated_at:'2026-11-13T15:05:32Z',
+    body:'Comment command `/e2e full` accepted for PR #3341 at '+b+
+      '. [Actions run](https://github.com/'+REPO+
+      '/actions/runs/456). This request is not an Acceptance Pass.\n\n'+
+      '<!-- nession-command-comment:123 -->'};
   const candidate={pr:candidatePr,laneSha:b,run:candidateRun,
-    jobs:[candidateJob],comment:sourceComment};
+    jobs:[candidateJob],comment:sourceComment,botReceipt};
   assert.equal(attestPromotionCandidateFull(candidate).source_head_sha,b);
-  assert.equal(attestPromotionCandidateFull({...candidate,laneSha:a}),null);
+  assert.equal(attestPromotionCandidateFull({...candidate,laneSha:a}),null,
+    'old successful Full with different target SHA cannot be reused');
+  assert.equal(attestPromotionCandidateFull({...candidate,botReceipt:{
+    ...botReceipt,body:botReceipt.body.replace(b,a)}}),null,
+    'bot receipt must pin exactly the current candidate SHA');
+  assert.equal(attestPromotionCandidateFull({...candidate,botReceipt:{
+    ...botReceipt,user:{login:'BestNathan',type:'User',id:26139217}}}),null,
+    'an owner comment cannot masquerade as trusted router receipt');
+  assert.equal(attestPromotionCandidateFull({...candidate,botReceipt:{
+    ...botReceipt,body:botReceipt.body.replace('456','999')}}),null,
+    'router run id must match the exact Full run');
   assert.equal(attestPromotionCandidateFull({...candidate,pr:{
     ...candidatePr,user:{login:'untrusted'}}}),null);
   assert.equal(attestPromotionCandidateFull({...candidate,comment:{
