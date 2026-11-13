@@ -5,6 +5,7 @@ use super::{
     info, json, reply_json, warn, ClientSessionSandboxContextPayload, ConnectionHandler, Duration,
     HandlerAction, ProtocolMessage, SandboxContextResponse, SandboxCurrentContext,
 };
+use nession_protocol::contracts::image::v1::ImageCacheObservation;
 
 /// The Agent has to resolve the active Pane, read the Session's instance
 /// identity and (on a cold catalog) measure the host before it can answer.
@@ -32,6 +33,7 @@ impl ConnectionHandler {
                     error: Some(message.to_string()),
                     context: None,
                     cache_statuses: Vec::new(),
+                    cache_observations: Vec::new(),
                 })
                 .unwrap_or_else(|_| json!({ "success": false, "error": "refused" })),
             )
@@ -46,6 +48,13 @@ impl ConnectionHandler {
         };
         if payload.session_id.is_empty() {
             return Ok(refusal("session_id is required"));
+        }
+        if let Some(digest) = payload
+            .cache_digests
+            .iter()
+            .find(|digest| !nession_protocol::contracts::image::v1::is_valid_image_digest(digest))
+        {
+            return Ok(refusal(&format!("invalid cache digest: {digest}")));
         }
         let (agent_id, session_name) = match self.sandbox_session_target(&payload.session_id).await
         {
@@ -78,6 +87,26 @@ impl ConnectionHandler {
                     .get("context")
                     .cloned()
                     .and_then(|value| serde_json::from_value::<SandboxCurrentContext>(value).ok());
+                let cache_observations = match response.get("cache_observations") {
+                    Some(value) => {
+                        match serde_json::from_value::<Vec<ImageCacheObservation>>(value.clone()) {
+                            Ok(observations) => observations,
+                            Err(error) => {
+                                warn!("Agent returned an unreadable cache observation: {error}");
+                                return Ok(refusal(
+                                    "Agent returned an unreadable cache observation",
+                                ));
+                            }
+                        }
+                    }
+                    None => Vec::new(),
+                };
+                for observation in &cache_observations {
+                    if let Err(error) = observation.validate() {
+                        warn!("Agent returned an invalid cache observation: {error}");
+                        return Ok(refusal("Agent returned an invalid cache observation"));
+                    }
+                }
                 match context {
                     Some(context) => Ok(reply_json(
                         &id,
@@ -91,6 +120,7 @@ impl ConnectionHandler {
                                 .cloned()
                                 .and_then(|value| serde_json::from_value(value).ok())
                                 .unwrap_or_default(),
+                            cache_observations,
                         })
                         .unwrap_or_else(|_| json!({ "success": false, "error": "refused" })),
                     )),

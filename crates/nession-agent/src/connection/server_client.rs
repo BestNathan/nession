@@ -53,6 +53,10 @@ use nession_protocol::contracts::session::v1::{
     ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
     SessionMetadataUpdatePayload,
 };
+use nession_protocol::contracts::workspace::v1::{
+    AgentWorkspaceDescriptor, AgentWorkspaceKind, AgentWorkspaceStatus,
+    ServerWorkspaceCreatePayload, ServerWorkspaceDeletePayload, ServerWorkspaceListPayload,
+};
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -3868,6 +3872,42 @@ fn sandbox_session_by_name(payload: &serde_json::Value) -> ResourceKey {
     ResourceKey::Session(str_field(payload, "session_name"))
 }
 
+/// The managed Workspace a create/delete payload names, as a lane key.
+fn workspace_by_name(payload: &serde_json::Value) -> ResourceKey {
+    let namespace = payload
+        .get("namespace")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("default");
+    ResourceKey::Workspace(format!("{namespace}:{}", str_field(payload, "name")))
+}
+
+fn workspace_by_id(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Workspace(str_field(payload, "workspace_id"))
+}
+
+/// Project the manager's observed record into the versioned contract.
+fn workspace_descriptor(
+    workspace: crate::workspace_manager::AgentWorkspace,
+) -> AgentWorkspaceDescriptor {
+    AgentWorkspaceDescriptor {
+        workspace_id: workspace.workspace_id,
+        name: workspace.name,
+        namespace: workspace.namespace,
+        kind: AgentWorkspaceKind::Managed,
+        status: match workspace.status {
+            crate::workspace_manager::WorkspaceStatus::Available => AgentWorkspaceStatus::Available,
+            crate::workspace_manager::WorkspaceStatus::InUse => AgentWorkspaceStatus::InUse,
+            crate::workspace_manager::WorkspaceStatus::Missing => AgentWorkspaceStatus::Missing,
+            crate::workspace_manager::WorkspaceStatus::Error => AgentWorkspaceStatus::Error,
+        },
+        auto_created: workspace.auto_created,
+        created_at: workspace.created_at,
+        last_used_at: workspace.last_used_at,
+        path: None,
+        detail: workspace.detail,
+    }
+}
+
 fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
     ResourceKey::Env(str_field(payload, "name"))
 }
@@ -4578,31 +4618,47 @@ core_routes!(agent, msg, responses;
                                 (false, None, Some(format!("{e:#}")))
                             }
                         };
-                    let cache_statuses = if payload.cache_digests.is_empty() {
-                        Vec::new()
-                    } else if let Some(cache) = agent
-                        .tmux
-                        .sandbox_runtime()
-                        .and_then(|runtime| runtime.erofs_cache())
-                    {
-                        let mut statuses = Vec::with_capacity(payload.cache_digests.len());
-                        for digest in &payload.cache_digests {
-                            statuses.push(crate::erofs_cache::status(&cache, digest).await);
-                        }
-                        statuses
-                    } else {
-                        payload
-                            .cache_digests
-                            .iter()
-                            .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
-                                digest: digest.clone(),
-                                state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
-                                detail: Some(
-                                    "this Agent has no EROFS cache configured".to_string(),
-                                ),
-                            })
-                            .collect()
-                    };
+                    let (cache_statuses, cache_observations) =
+                        if payload.cache_digests.is_empty() {
+                            (Vec::new(), Vec::new())
+                        } else if let Some(cache) = agent
+                            .tmux
+                            .sandbox_runtime()
+                            .and_then(|runtime| runtime.erofs_cache())
+                        {
+                            let mut statuses = Vec::with_capacity(payload.cache_digests.len());
+                            let mut observations =
+                                Vec::with_capacity(payload.cache_digests.len());
+                            for digest in &payload.cache_digests {
+                                let observation =
+                                    crate::erofs_cache::observation(&cache, digest).await;
+                                statuses.push(
+                                    nession_protocol::contracts::image::v1::ImageCacheStatus::from_observation(
+                                        &observation,
+                                    ),
+                                );
+                                observations.push(observation);
+                            }
+                            (statuses, observations)
+                        } else {
+                            let statuses = payload
+                                .cache_digests
+                                .iter()
+                                .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
+                                    digest: digest.clone(),
+                                    state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
+                                    detail: Some(
+                                        "this Agent has no EROFS cache configured".to_string(),
+                                    ),
+                                })
+                                .collect();
+                            let observations = payload
+                                .cache_digests
+                                .iter()
+                                .map(|digest| crate::erofs_cache::unavailable_observation(digest))
+                                .collect();
+                            (statuses, observations)
+                        };
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
@@ -4614,6 +4670,161 @@ core_routes!(agent, msg, responses;
                             "context": context,
                             "error": error,
                             "cache_statuses": cache_statuses,
+                            "cache_observations": cache_observations,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.workspace.list" => "agent.workspace.list" => 1 => Query => {
+                    let payload: ServerWorkspaceListPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.workspace.list payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": "",
+                                        "command": "workspace.list",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                        "workspaces": [],
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, workspaces, error) = match agent.tmux.workspaces() {
+                        Some(manager) => match manager.list(payload.namespace.as_deref()).await {
+                            Ok(workspaces) => (
+                                true,
+                                workspaces
+                                    .into_iter()
+                                    .map(workspace_descriptor)
+                                    .collect::<Vec<_>>(),
+                                None,
+                            ),
+                            Err(error) => (false, Vec::new(), Some(format!("{error:#}"))),
+                        },
+                        None => (
+                            false,
+                            Vec::new(),
+                            Some("this Agent has no Workspace registry configured".to_string()),
+                        ),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "workspace.list",
+                            "success": success,
+                            "error": error,
+                            "workspaces": workspaces,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.workspace.create" => "agent.workspace.create" => 1 => Key(workspace_by_name(&msg.payload)) => {
+                    let payload: ServerWorkspaceCreatePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.workspace.create payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": "",
+                                        "command": "workspace.create",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, workspace, error) = match agent.tmux.workspaces() {
+                        Some(manager) => match manager
+                            .get_or_create(
+                                payload.namespace.as_deref(),
+                                &payload.name,
+                                payload.auto_created,
+                            )
+                            .await
+                        {
+                            Ok(workspace) => (true, Some(workspace_descriptor(workspace)), None),
+                            Err(error) => (false, None, Some(format!("{error:#}"))),
+                        },
+                        None => (
+                            false,
+                            None,
+                            Some("this Agent has no Workspace registry configured".to_string()),
+                        ),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "workspace.create",
+                            "success": success,
+                            "error": error,
+                            "workspace": workspace,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.workspace.delete" => "agent.workspace.delete" => 1 => Key(workspace_by_id(&msg.payload)) => {
+                    let payload: ServerWorkspaceDeletePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.workspace.delete payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": "",
+                                        "command": "workspace.delete",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, error) = match agent.tmux.workspaces() {
+                        Some(manager) => match manager.delete(&payload.workspace_id).await {
+                            Ok(()) => (true, None),
+                            Err(error) => (false, Some(format!("{error:#}"))),
+                        },
+                        None => (
+                            false,
+                            Some("this Agent has no Workspace registry configured".to_string()),
+                        ),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "workspace.delete",
+                            "success": success,
+                            "error": error,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

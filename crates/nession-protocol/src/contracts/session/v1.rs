@@ -1898,6 +1898,11 @@ pub struct SandboxContextResponse {
     /// Per-digest Agent cache observations for `cache_digests`.
     #[serde(default)]
     pub cache_statuses: Vec<crate::contracts::image::v1::ImageCacheStatus>,
+    /// Per-digest authoritative transfer/verification observations (#3412).
+    /// Additive to `cache_statuses`; consumers that need bytes/activity read
+    /// this list.
+    #[serde(default)]
+    pub cache_observations: Vec<crate::contracts::image::v1::ImageCacheObservation>,
 }
 
 /// `agent.session.sandbox.context` — the Server asks the Session's Agent.

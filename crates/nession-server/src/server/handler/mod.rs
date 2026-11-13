@@ -1436,8 +1436,12 @@ mod server_session_relay_begin_v1;
 mod server_session_sandbox_context_v1;
 mod server_session_sandbox_enter_v1;
 mod server_session_sandbox_focus_v1;
+mod server_session_sandbox_images;
 mod server_session_sandbox_preflight_v1;
 mod server_session_sandbox_return_to_native_v1;
+mod server_workspace_create_v1;
+mod server_workspace_delete_v1;
+mod server_workspace_list_v1;
 #[cfg(test)]
 mod tests;
 
