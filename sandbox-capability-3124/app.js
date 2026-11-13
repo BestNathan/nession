@@ -199,7 +199,7 @@
             '<div><span>Digest</span><code>'+h(im.digest)+'</code></div>'+
             '<div><span>Type</span><strong>'+h(im.kind)+'</strong></div>'+
             '<div><span>Agent cache</span>'+statusChip(cache)+'</div>'+
-            '<div><span>Default mount</span><code>'+h(im.default_mount||"—")+'</code></div>'+
+            '<div><span>'+(im.kind==="Base Runtime"?"RootFS target":"Default mount")+'</span><code>'+h(im.kind==="Base Runtime"?"/":im.default_mount||"—")+'</code></div>'+
           '</div>'+
           '<div class="cand-actions">'+
             (im.kind==="Base Runtime"
@@ -208,7 +208,7 @@
           '</div>'+
         '</div>':"";
       return '<div class="cand-image-entry'+(expanded?' expanded':'')+'">'+
-        '<button type="button" class="cand-image-trigger" data-action="image:'+h(im.id)+'" aria-expanded="'+expanded+'" aria-controls="'+detailId+'">'+
+        '<button type="button" class="cand-image-trigger" data-action="image:'+h(im.id)+'" aria-expanded="'+expanded+'"'+(expanded?' aria-controls="'+detailId+'"':"")+'>'+
           '<span class="cand-image-summary"><strong>'+h(im.name)+'</strong><small>'+h(im.kind)+' · '+short(im.digest)+'</small></span>'+
           statusChip(im.status)+'<span class="cand-image-chevron" aria-hidden="true">'+(expanded?'⌃':'⌄')+'</span>'+
         '</button>'+details+'</div>';
