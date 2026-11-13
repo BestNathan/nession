@@ -939,6 +939,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
 
       // Grow the policy past the viewport: the shared WorkspaceScrollRegion is
       // the one owner, and the App page header/Back does not multiply.
+      await page.getByTestId('sandbox-section-policies').click();
       await page.getByTestId('sandbox-tab-resource').click();
       await growUntilWorkspaceScrolls(page, 'sandbox-resource-add');
       await expectFormFieldAlignment(

@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,12 +16,8 @@ import {
   DetailSurface,
 } from '@/components/ui/resource-detail';
 import { Input } from '@/components/ui/input';
-import type {
-  WorkspaceDepthControl,
-  WorkspaceViewProps,
-} from '@/app/workspace/workspaceContext';
+import type { WorkspaceViewProps } from '@/app/workspace/workspaceContext';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { cn } from '@/shared/lib/utils';
 import { imagesApi, type ImageBuildDescriptor, type ImageDescriptor } from '../ImagesPlugin';
 import {
@@ -45,12 +46,12 @@ function ImageStatusBadge({ image }: { image: ImageDescriptor }) {
 
 function ImageRow({
   image,
-  selected,
-  onSelect,
+  expanded,
+  onToggle,
 }: {
   image: ImageDescriptor;
-  selected: boolean;
-  onSelect: () => void;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const aliases = imageAliases(image);
   return (
@@ -58,26 +59,34 @@ function ImageRow({
       type="button"
       data-testid="image-row"
       data-image-digest={image.digest ?? ''}
-      aria-pressed={selected}
-      onClick={onSelect}
+      aria-expanded={expanded}
+      aria-controls={`image-detail-${image.image_id}`}
+      onClick={onToggle}
       className={cn(
-        'flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-control)] border border-transparent px-3 py-2 text-left transition-colors',
+        'flex min-w-0 items-center gap-2 rounded-[var(--nession-radius-control)] border border-transparent px-3 py-2 text-left transition-colors',
         'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selected && 'bg-muted',
+        expanded && 'bg-muted',
       )}
     >
-      <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
-          {aliases.length > 0 ? aliases[0] : image.image_id}
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex min-w-0 items-center justify-between gap-2">
+          <span className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
+            {aliases.length > 0 ? aliases[0] : image.image_id}
+          </span>
+          <ImageStatusBadge image={image} />
         </span>
-        <ImageStatusBadge image={image} />
+        <span className="min-w-0 truncate text-muted-foreground">
+          {sourceLabel(image)}
+        </span>
+        <span className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}>
+          {shortDigest(image.digest)}
+        </span>
       </span>
-      <span className="min-w-0 truncate text-muted-foreground">
-        {sourceLabel(image)}
-      </span>
-      <span className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}>
-        {shortDigest(image.digest)}
-      </span>
+      {expanded ? (
+        <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      )}
     </button>
   );
 }
@@ -325,7 +334,7 @@ function BuildSubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
   );
 }
 
-function ImageBuildActivity({ builds }: { builds: ImageBuildsState }) {
+export function ImagesBuildsPanel({ builds }: { builds: ImageBuildsState }) {
   return (
     <div
       className="flex min-w-0 flex-col gap-2 border-b border-border p-3"
@@ -372,26 +381,24 @@ function ImageBuildActivity({ builds }: { builds: ImageBuildsState }) {
   );
 }
 
-function ImagesListPane({
+export function ImagesLibraryPanel({
   page,
-  builds,
-  selectedDigest,
-  onSelect,
+  expandedImageId,
+  onExpand,
 }: {
   page: ImagesPageState;
-  builds: ImageBuildsState;
-  selectedDigest: string | null;
-  onSelect: (digest: string | null) => void;
+  expandedImageId: string | null;
+  onExpand: (imageId: string | null) => void;
 }) {
   return (
     <section
       data-testid="images-list"
       aria-label="Server image inventory"
-      className="flex min-w-0 flex-col rounded-[var(--nession-radius-surface)] border border-border"
+      className="flex min-w-0 flex-col"
     >
       <div className="flex min-w-0 flex-col gap-2 border-b border-border p-3">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <h2 className={cn('min-w-0', chromeSansRole('title'))}>Images</h2>
+          <h2 className={cn('min-w-0', chromeSansRole('title'))}>Image Library</h2>
           <Button
             type="button"
             size="icon"
@@ -404,8 +411,8 @@ function ImagesListPane({
           </Button>
         </div>
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
-          Server-owned immutable images. Available without a Session; Projects and Sandboxes
-          consume the same registry through their own flows.
+          Server-owned immutable images. Agent cache readiness is observed separately for the
+          current Session&apos;s Agent.
         </p>
         <Input
           type="search"
@@ -416,7 +423,6 @@ function ImagesListPane({
           onChange={(event) => page.setQuery(event.target.value)}
         />
       </div>
-      <ImageBuildActivity builds={builds} />
       {page.error ? (
         <div className="flex flex-col items-start gap-2 p-4">
           <p className={cn('text-destructive', chromeSansRole('secondary'))} data-testid="images-error">
@@ -438,14 +444,27 @@ function ImagesListPane({
         </DetailEmpty>
       ) : (
         <div className="flex min-w-0 flex-col p-1">
-          {page.images.map((image) => (
-            <ImageRow
-              key={image.image_id}
-              image={image}
-              selected={image.digest === selectedDigest}
-              onSelect={() => onSelect(image.digest ?? null)}
-            />
-          ))}
+          {page.images.map((image) => {
+            const expanded = image.image_id === expandedImageId;
+            return (
+              <div key={image.image_id} className="min-w-0">
+                <ImageRow
+                  image={image}
+                  expanded={expanded}
+                  onToggle={() => onExpand(expanded ? null : image.image_id)}
+                />
+                {expanded ? (
+                  <div
+                    id={`image-detail-${image.image_id}`}
+                    data-testid="image-detail-row"
+                    className="min-w-0 pb-2 pt-1"
+                  >
+                    <ImagesDetail image={image} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
       <div className="flex items-center justify-between gap-2 border-t border-border p-2">
@@ -482,72 +501,71 @@ function ImagesListPane({
 }
 
 /**
- * The Images capability's Workspace surface (#3181).
+ * The reusable Server Images management panel (#3181, #3408).
  *
- * The Server registry has one list/detail surface here. Project and Sandbox
- * each own a separate selection flow; this view has no Project reference and
- * no Sandbox composition controls. The App registers one pushed detail depth
- * through the shell, while Web keeps list and detail side by side.
+ * The Image Library is a single list: activating a row expands its details
+ * immediately underneath that row, and one row is expanded at a time. Builds
+ * is the durable #3334 build surface. The owning Session's Sandbox supplies
+ * the Agent-scoped Distribution view; this capability owns no Agent cache
+ * observation itself.
  */
-export function ImagesWorkspace({
-  ctx,
-  depth,
+export function ImagesPanel({
+  experience,
+  distribution,
 }: {
-  ctx: WorkspaceViewProps['ctx'];
-  depth?: WorkspaceDepthControl;
+  experience: 'web' | 'app';
+  distribution?: React.ReactNode;
 }) {
   const page = useImagesPage(IMAGE_PAGE_SIZE);
   const builds = useImageBuilds(IMAGE_PAGE_SIZE);
-  const [selectedDigest, setSelectedDigest] = useState<string | null>(null);
-  const selected = useMemo(
-    () => page.images.find((image) => image.digest === selectedDigest) ?? null,
-    [page.images, selectedDigest],
-  );
-
-  useEffect(() => {
-    if (ctx.experience === 'web' && !selected && page.images.length > 0) {
-      setSelectedDigest(page.images[0].digest ?? null);
-    }
-  }, [ctx.experience, page.images, selected]);
-
-  useEffect(() => {
-    if (!depth) {
-      return;
-    }
-    if (selected) {
-      depth.setPush({
-        title: imageAliases(selected)[0] ?? selected.image_id,
-        onLeave: () => setSelectedDigest(null),
-      });
-    } else {
-      depth.setPush(null);
-    }
-    return () => depth.setPush(null);
-  }, [depth, selected]);
-
-  const showDetailOnly = ctx.experience === 'app' && selected !== null;
-  if (showDetailOnly) {
-    return (
-      <div
-        data-testid="images-workspace"
-        className="flex min-h-0 min-w-0 flex-col gap-3 p-3"
-      >
-        <div className="flex min-h-0 flex-col gap-3 overflow-auto">
+  const sections = distribution
+    ? (['library', 'builds', 'distribution'] as const)
+    : (['library', 'builds'] as const);
+  const [section, setSection] = useState<(typeof sections)[number]>('library');
+  const [expandedImageId, setExpandedImageId] = useState<string | null>(null);
+  return (
+    <div
+      data-testid="images-panel"
+      data-experience={experience}
+      className="flex min-w-0 flex-col gap-3"
+    >
+      <div className="flex min-w-0 items-center gap-1">
+        {sections.map((id) => (
           <Button
+            key={id}
             type="button"
-            variant="ghost"
             size="sm"
-            className="self-start"
-            onClick={() => setSelectedDigest(null)}
+            variant={section === id ? 'secondary' : 'ghost'}
+            data-testid={`images-section-${id}`}
+            aria-pressed={section === id}
+            onClick={() => setSection(id)}
           >
-            <ChevronLeft aria-hidden="true" /> All images
+            {id === 'library' ? 'Library' : id === 'builds' ? 'Builds' : 'Distribution'}
           </Button>
-          {selected ? <ImagesDetail image={selected} /> : null}
-        </div>
+        ))}
       </div>
-    );
-  }
+      {section === 'library' ? (
+        <ImagesLibraryPanel
+          page={page}
+          expandedImageId={expandedImageId}
+          onExpand={setExpandedImageId}
+        />
+      ) : section === 'builds' ? (
+        <ImagesBuildsPanel builds={builds} />
+      ) : (
+        distribution
+      )}
+    </div>
+  );
+}
 
+/** The Images capability's Workspace surface; the Sandbox embeds the panel. */
+export function ImagesWorkspace({
+  ctx,
+}: {
+  ctx: WorkspaceViewProps['ctx'];
+  depth?: unknown;
+}) {
   return (
     <div
       data-testid="images-workspace"
@@ -556,32 +574,7 @@ export function ImagesWorkspace({
         ctx.experience === 'app' ? 'p-3' : 'h-full min-h-0 p-4',
       )}
     >
-      <div
-        className={cn(
-          'grid min-h-0 gap-4',
-          ctx.experience === 'web'
-            ? 'flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden'
-            : 'grid-cols-1',
-        )}
-      >
-        <div className={`min-h-0 overflow-auto ${workspaceScrollClearanceClass}`}>
-          <ImagesListPane
-            page={page}
-            builds={builds}
-            selectedDigest={selectedDigest}
-            onSelect={setSelectedDigest}
-          />
-        </div>
-        {ctx.experience === 'web' ? (
-          <div className={`min-h-0 overflow-auto ${workspaceScrollClearanceClass}`}>
-            {selected ? (
-              <ImagesDetail image={selected} />
-            ) : (
-              <DetailEmpty>Select an image to inspect its digest and build state.</DetailEmpty>
-            )}
-          </div>
-        ) : null}
-      </div>
+      <ImagesPanel experience={ctx.experience} />
     </div>
   );
 }
@@ -591,7 +584,7 @@ export function ImagesWebLayout({ ctx }: WorkspaceViewProps) {
   return <ImagesWorkspace ctx={ctx} />;
 }
 
-/** App layout entry: the one page header is the shell's; the view pushes detail. */
-export function ImagesAppLayout({ ctx, depth }: WorkspaceViewProps & { depth: WorkspaceDepthControl }) {
-  return <ImagesWorkspace ctx={ctx} depth={depth} />;
+/** App layout entry: the one page header is the shell's. */
+export function ImagesAppLayout({ ctx }: WorkspaceViewProps) {
+  return <ImagesWorkspace ctx={ctx} />;
 }
