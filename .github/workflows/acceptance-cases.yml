@@ -1,10 +1,16 @@
 name: Acceptance / Cases
+run-name: >-
+  ${{ inputs.source_comment_id != '' && format('Comment Case #{0} {1} comment:{2}', inputs.issue_number, inputs.criterion, inputs.source_comment_id) || github.workflow }}
 
 on:
   push:
     branches: [staging, main]
   workflow_dispatch:
     inputs:
+      source_comment_id:
+        description: Original authenticated /case GitHub Issue comment ID (router only)
+        required: false
+        type: string
       issue_number:
         description: Requirement Issue number
         required: true
@@ -67,6 +73,28 @@ jobs:
           ref: main
           path: trusted
           persist-credentials: false
+
+      # The authenticated original human comment is independently read back
+      # before any target code checkout. Plain manual/UI and push runs remain
+      # supported with an empty source_comment_id.
+      - name: Verify original human Case comment and source-bound target
+        if: github.event_name == 'workflow_dispatch' && inputs.source_comment_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CASE_ISSUE: ${{ inputs.issue_number }}
+          CASE_CRITERION: ${{ inputs.criterion }}
+          CASE_TARGET: ${{ inputs.target_sha }}
+          CASE_STAGE: ${{ inputs.stage }}
+          CASE_RUNTIME: ${{ inputs.runtime_profile }}
+          CASE_PLATFORM: ${{ inputs.platform }}
+          CASE_COMMENT: ${{ inputs.source_comment_id }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Case comment routing only runs trusted main" >&2; exit 1; }
+          node trusted/scripts/github-comment-case-request.mjs verify \
+            "$CASE_ISSUE" "$CASE_CRITERION" "$CASE_TARGET" \
+            "$CASE_STAGE" "$CASE_RUNTIME" "$CASE_PLATFORM" "$CASE_COMMENT"
 
       # GitHub evaluates step.name from workflow_dispatch inputs before target
       # code executes. Ingest reads this GitHub-owned job/step metadata rather
@@ -532,6 +560,28 @@ jobs:
           ref: main
           path: trusted
           persist-credentials: false
+
+      # The authenticated original human comment is independently read back
+      # before any target code checkout. Plain manual/UI and push runs remain
+      # supported with an empty source_comment_id.
+      - name: Verify original human Case comment and source-bound target
+        if: github.event_name == 'workflow_dispatch' && inputs.source_comment_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CASE_ISSUE: ${{ inputs.issue_number }}
+          CASE_CRITERION: ${{ inputs.criterion }}
+          CASE_TARGET: ${{ inputs.target_sha }}
+          CASE_STAGE: ${{ inputs.stage }}
+          CASE_RUNTIME: ${{ inputs.runtime_profile }}
+          CASE_PLATFORM: ${{ inputs.platform }}
+          CASE_COMMENT: ${{ inputs.source_comment_id }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Case comment routing only runs trusted main" >&2; exit 1; }
+          node trusted/scripts/github-comment-case-request.mjs verify \
+            "$CASE_ISSUE" "$CASE_CRITERION" "$CASE_TARGET" \
+            "$CASE_STAGE" "$CASE_RUNTIME" "$CASE_PLATFORM" "$CASE_COMMENT"
 
       # GitHub evaluates step.name from workflow_dispatch inputs before target
       # code executes. Ingest reads this GitHub-owned job/step metadata rather
