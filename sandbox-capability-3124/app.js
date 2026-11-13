@@ -462,8 +462,14 @@
   view.addEventListener("click",function(e){
     var b=e.target.closest("[data-action]");
     if(!b||b.disabled){if(s.tip){s.tip=null;render();}return;}
-    doAction(b.getAttribute("data-action"));
+    var selectedAction=b.getAttribute("data-action");
+    doAction(selectedAction);
     render();
+    // Re-render must not drop the keyboard-help focus target.
+    if(selectedAction.indexOf("hint:")===0){
+      var tip=view.querySelector('[data-action="'+selectedAction+'"]');
+      if(tip&&typeof tip.focus==="function")tip.focus({preventScroll:true});
+    }
   });
   view.addEventListener("input",function(e){if(!handleField(e.target))return;
     var err=view.querySelector(".cand-alert.success");if(err)err.hidden=true;
