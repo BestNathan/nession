@@ -80,17 +80,17 @@ jobs:
             echo '[]' > "${RUNNER_TEMP}/representative-cases.json"
           fi
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            issue_numbers="$(node trusted/scripts/requirement-acceptance.mjs discover-pre-merge)"
+            issue_numbers="$(node trusted/scripts/requirement-acceptance.mjs discover-pr)"
             jq -r '.[]' <<< "${issue_numbers}" | while read -r issue; do
               gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" \
                 > "${RUNNER_TEMP}/acceptance-smoke-contracts/${issue}.json"
             done
-            ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="pre-merge" \
+            ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="pr" \
               TARGET_SHA="${target_sha}" \
               node trusted/scripts/select-acceptance-cases.mjs select \
               e2e/acceptance/cases "${RUNNER_TEMP}/acceptance-smoke-contracts" \
               "${RUNNER_TEMP}/selected-pr-cases.json" "${RUNNER_TEMP}/pr-case-coverage.json"
-            jq 'map(. + {stage:"pre-merge"})' "${RUNNER_TEMP}/selected-pr-cases.json" \
+            jq 'map(. + {stage:"pr"})' "${RUNNER_TEMP}/selected-pr-cases.json" \
               > "${RUNNER_TEMP}/linked-cases.json"
           fi
 
@@ -183,7 +183,7 @@ jobs:
           set +e
           ./e2e/run acceptance-batch \
             --sha "${target_sha}" \
-            --stage pre-merge \
+            --stage pr \
             --selection "${RUNNER_TEMP}/acceptance-smoke-plan.json" \
             --contracts-dir "${contracts}" \
             --results-dir "${results}" \
