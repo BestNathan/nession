@@ -119,7 +119,10 @@ for binary in mkfs.erofs erofsfuse; do
     fi
 done
 
-mkfs_version="$(mkfs.erofs --version 2>&1 | head -n 1 || true)"
+# Both tools print their version line to stdout. `erofsfuse --version` also
+# exits through usage() on stderr in the FUSE3 build, so capture stdout only
+# and assert the printed identity rather than the helper's exit status.
+mkfs_version="$(mkfs.erofs --version 2>/dev/null | head -n 1 || true)"
 case "${mkfs_version}" in
     *"${EROFS_UTILS_VERSION}"*)
         ;;
@@ -128,7 +131,7 @@ case "${mkfs_version}" in
         exit 6
         ;;
 esac
-erofsfuse_version="$(erofsfuse --version 2>&1 | head -n 1 || true)"
+erofsfuse_version="$(erofsfuse --version 2>/dev/null | head -n 1 || true)"
 case "${erofsfuse_version}" in
     *"${EROFS_UTILS_VERSION}"*)
         ;;
