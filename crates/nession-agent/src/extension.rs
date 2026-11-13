@@ -1071,9 +1071,12 @@ mod tests {
         // Up by five for #3124: the Sandbox context capability adds context,
         // preflight, enter and the two focus transitions. The Agent owns the
         // active-Pane observation and the one Enter mutation.
+        // Up by three for #3407: the managed Workspace inventory, idempotent
+        // create and explicit delete are Agent-owned resources the Server asks
+        // this Agent about; the registry remains the Agent's authority.
         assert_eq!(
             manifest.protocols.len(),
-            39,
+            42,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );
