@@ -82,8 +82,12 @@ properties:
 The canonical spelling is enforced by rule 6 of `scripts/protocol-gate.mjs`
 (the `protocol-integrity` Gate). It inspects the generated protocol bindings
 (the Web's actual projection, nested shapes included), `serde` field renames
-in the protocol contracts, and the hand-written Nession payload producers in
-the server/agent/client/MCP paths.
+in protocol contracts and MCP Tool argument DTOs, hand-written JSON payloads
+in Server/Agent/client/MCP paths, and literal Web transport send/request
+payloads. Opaque keys are exempt only inside their owning maps, not merely
+because their names contain a dot or start with an underscore. Computed
+payloads still require typed contracts or explicit boundary adapters; the
+static Gate does not infer arbitrary JSON value or TypeScript object flow.
 
 #### Pre-release in-place normalization (#3371)
 
