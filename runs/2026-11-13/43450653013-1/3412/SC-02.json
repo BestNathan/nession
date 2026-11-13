@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "118c777f6da67eb617431b3cb9ee63ab6cef812f4e308422dd9af21d7174116b",
+  "run_id": 43450653013,
+  "run_attempt": 1,
+  "issue": 3412,
+  "criterion": "SC-02",
+  "criterion_text": "In an isolated real HTTP Range transfer fixture, an absent Digest becomes Downloading with observed bytes, interrupted download becomes Resumable with nonzero persistent bytes, a resumed transfer continues from the actual partial offset, and a `200` restart resets stale byte counts; simultaneous consumers do not report separate multiplied progress.",
+  "stage": "staging",
+  "target_sha": "6c71a442dad5e6f7fbcbb8b4f60e0f82b49c8cd1",
+  "contract_sha256": "1c747cb9cbd0bc5a5e5a217492c6b2c7c65ebdb47125917ab2d67cb569638b8e",
+  "case_revision": "6c71a442dad5e6f7fbcbb8b4f60e0f82b49c8cd1",
+  "case_tree_sha": "cd8ae16d91c01b11365f867cf92040a4c80fe96d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-13T15:18:19.490Z",
+  "finished_at": "2026-11-13T15:18:44.722Z",
+  "duration_ms": 25232,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Measured transfer progress, durable resume, 200 restart accounting and shared in-flight transfer are proven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 6c71a442dad5e6f7fbcbb8b4f60e0f82b49c8cd1: an isolated HTTP fixture exposed Downloading with measured bytes; an interrupted transfer became Resumable with nonzero durable bytes; a validated 206 resumed from the durable offset; a 200 restart reset the count; two concurrent consumers shared one transfer and did not multiply progress"
+        }
+      ],
+      "duration_ms": 19308,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43450653013,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6c71a442dad5e6f7fbcbb8b4f60e0f82b49c8cd1",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43450653013",
+    "record_path": "runs/2026-11-13/43450653013-1/3412/SC-02.json",
+    "source_result_sha256": "3f0b887b4ad331eacb506a5e7cb0193160c41e6dfd08e8c5d568e18ad7d6ea10"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43450653013-1",
+    "sha256": "3f0b887b4ad331eacb506a5e7cb0193160c41e6dfd08e8c5d568e18ad7d6ea10",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43450653013",
+    "durability": "time-limited; object archival not configured"
+  }
+}
