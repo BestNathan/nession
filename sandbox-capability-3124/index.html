@@ -688,6 +688,11 @@
 <li>在 Library 选择 Runtime 或 Toolchain 可跳转 Filesystem。切换同 Server 的另一个 Session，不会生成第二份 Images Registry。</li>
 <li>Web 一级导航位于 Sandbox Header 右侧、二级导航在选中管理区的局部 Sidebar；App 内使用紧凑横向导航但不新增第二个 App Back。</li>
 </ol></article>
+<article class="np-detail"><h3>Build / Distribution · 进度来源</h3>
+<p><strong>Builds（Server）：</strong><code>staging</code> 已有 #3334 持久任务和 <code>submit/get/list/cancel/retry</code>、状态事件。展示阶段、实际文件/字节计数、耗时、诊断；<code>mkfs.erofs</code> 未提供可验证的百分比，因此使用不确定进度状态，不生成假百分比。<code>main</code> 目前仍是旧同步接口。</p>
+<p><strong>Distribution（当前 Agent）：</strong>现有 Cache 支持 Range、部分文件与 SHA-256 校验，但现有 Agent 状态没有按 Digest 的下载字节进度。候选方案是用当前 Agent 的缓存分片大小、下载实时字节数以及 Server Image 总大小生成 <code>received/total</code>，独立区分 Resumable、Downloading、Verifying、Verified。<strong>下载 100% 不代表镜像已验证可用。</strong></p>
+<p>原型外面的「推进构建阶段」「推进下载 / 校验」仅驱动模拟状态，不是产品控件，更不是实际后端接口或真实传输。</p>
+</article>
 <article class="np-detail"><h3>02 · Agent Workspaces (#3407)</h3><ol class="np-steps">
 <li>Session <code>sandbox-review</code> 有 Project Existing Location，默认使用 Agent 上的该目录。切换 Session <code>fix-terminal</code> 后无 Project Location，使用按 Session 名自动分配。</li>
 <li>在 Workspaces 里模拟创建命名资源、同名复用、查看列表及删除确认；Project Location 只引用不删除，Managed Resource 在 Sandbox 退出后仍可列出。</li>
