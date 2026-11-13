@@ -22,6 +22,7 @@ const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 // GitHub evaluates this step name from the original workflow_dispatch inputs;
 // target-controlled Case code cannot mutate the GitHub Jobs/Steps API metadata.
 const MANUAL_STAGING_STEP = /^Authenticate manual Staging Case ([1-9][0-9]*) (SC-[0-9]{2,}) ([0-9a-f]{40})$/;
+const MANUAL_POST_MERGE_STEP = /^Authenticate manual Post-Merge Case ([1-9][0-9]*) (SC-[0-9]{2,}) ([0-9a-f]{40})$/;
 
 function positiveInt(value, label) {
   const n = Number(value);
@@ -253,10 +254,12 @@ export function assertSourceBoundRecord(record, source) {
   // The binding is NOT taken from the Case artifact: attestCaseRecord first
   // reads its GitHub-owned pre-target step identity at this exact Run/Attempt.
   const manual = source.event === 'workflow_dispatch' &&
-    source.head_branch === 'main' && item.stage === 'staging' && !item.deployment;
+    source.head_branch === 'main' && !item.deployment &&
+    (item.stage === 'staging' ||
+      (item.stage === 'post-merge' && item.target_sha !== source.head_sha));
   if (manual) {
     const binding = source.dispatch_binding;
-    if (!binding || binding.stage !== 'staging' ||
+    if (!binding || binding.stage !== item.stage ||
         binding.target_sha !== item.target_sha ||
         binding.issue !== item.issue || binding.criterion !== item.criterion ||
         !Number.isSafeInteger(binding.job_id) || binding.job_id < 1 ||
@@ -336,7 +339,9 @@ export function assertDeployedSourceRecord(record, source, deploymentRecords) {
 }
 
 /**
- * Derive the manual Staging target independently of an untrusted Case JSON.
+ * Derive manual merged-branch targets independently of untrusted Case JSON.
+ * Staging and historical Main use two separately pinned SHAs; Main-head runs
+ * preserve the old strict equality rule without requiring a new binding.
  * Unlike logs or uploaded artifacts, Jobs/Steps names are evaluated by GitHub
  * from original workflow_dispatch inputs in the trusted-main workflow. The
  * step must succeed BEFORE the exact-target checkout / untrusted execution.
@@ -346,7 +351,11 @@ export async function attestManualStagingSource(record, source, {
 } = {}) {
   const item = validateCaseRecord(record);
   if (source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
-      item.stage !== 'staging' || item.deployment) return source;
+      item.deployment || (item.stage !== 'staging' &&
+        !(item.stage === 'post-merge' && item.target_sha !== source.head_sha))) return source;
+  const manualPrefix = item.stage === 'staging'
+    ? 'Authenticate manual Staging Case ' : 'Authenticate manual Post-Merge Case ';
+  const manualPattern = item.stage === 'staging' ? MANUAL_STAGING_STEP : MANUAL_POST_MERGE_STEP;
   if (source.repository !== repository) throw new Error('manual Case repository mismatch');
   const jobs = await request('/repos/' + repository +
     '/actions/runs/' + source.run_id + '/attempts/' + source.run_attempt +
@@ -366,20 +375,21 @@ export async function attestManualStagingSource(record, source, {
     }
     const checkoutIndex = job.steps.findIndex(step => step.name === 'Checkout exact target SHA');
     for (const [index, step] of job.steps.entries()) {
-      if (!String(step.name ?? '').startsWith('Authenticate manual Staging Case ')) continue;
-      const fields = MANUAL_STAGING_STEP.exec(step.name);
+      if (!String(step.name ?? '').startsWith(manualPrefix)) continue;
+      const fields = manualPattern.exec(step.name);
       if (!fields || index >= checkoutIndex ||
           step.status !== 'completed' || step.conclusion !== 'success' ||
           !Number.isSafeInteger(step.number) || step.number < 1) {
         throw new Error('manual Case target dispatch step is invalid or executed after target checkout');
       }
       matches.push({
-        target_sha: fields[3], stage: 'staging', issue: Number(fields[1]),
+        target_sha: fields[3], stage: item.stage, issue: Number(fields[1]),
         criterion: fields[2], job_id: job.id, step_number: step.number,
       });
     }
   }
-  if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual Staging target step');
+  if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual ' +
+    item.stage + ' target step');
   return { ...source, dispatch_binding: matches[0] };
 }
 
