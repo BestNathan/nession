@@ -32,6 +32,8 @@ nession-erofs = { path = "../nession-erofs", default-features = false, features 
 # reuses the Server client for the cluster backend.
 nession-mcp = { path = "../nession-mcp", features = ["remote"] }
 tokio.workspace = true
+# The HTTP ingress and WebSocket Upgrade owner (#3439).
+axum.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true

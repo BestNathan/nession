@@ -2578,30 +2578,59 @@ mod tests {
         target: &str,
         headers: Vec<(&str, &str)>,
     ) -> String {
-        use tokio::io::AsyncReadExt;
-        let (mut client, server) = tokio::io::duplex(64 * 1024);
-        let head = nession_mcp::http::RequestHead {
-            method: method.to_string(),
-            target: target.to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: headers
-                .into_iter()
-                .map(|(name, value)| (name.to_ascii_lowercase(), value.to_string()))
-                .collect(),
-        };
+        use axum::http::{HeaderMap, HeaderName, HeaderValue, Method};
+        let method = Method::from_bytes(method.as_bytes()).expect("valid test method");
+        let digest = target
+            .strip_prefix(IMAGE_BLOB_PATH_PREFIX)
+            .unwrap_or(target);
+        let mut request_headers = HeaderMap::new();
+        for (name, value) in headers {
+            request_headers.insert(
+                HeaderName::from_bytes(name.to_ascii_lowercase().as_bytes())
+                    .expect("valid test header name"),
+                HeaderValue::from_str(value).expect("valid test header value"),
+            );
+        }
         let service = crate::image::http::ImageHttpService::new(Arc::clone(manager));
-        let task = tokio::spawn(async move {
-            service
-                .serve(
-                    head,
-                    nession_mcp::http::PrefixedStream::new(Vec::new(), server),
-                )
-                .await
-        });
-        let mut response = Vec::new();
-        client.read_to_end(&mut response).await.unwrap();
-        task.await.unwrap().unwrap();
-        String::from_utf8_lossy(&response).into_owned()
+        let response = service.respond(&method, digest, &request_headers).await;
+        let status = response.status();
+        let response_headers = response.headers().clone();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("collect response body");
+        let mut text = format!(
+            "HTTP/1.1 {} {}\r\n",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("")
+        );
+        for (name, value) in &response_headers {
+            // Axum's `HeaderName` is lower-case; these tests read the wire
+            // spelling the old hand-written writer produced.
+            let canonical = match name.as_str() {
+                "etag" => "ETag".to_string(),
+                other => other
+                    .split('-')
+                    .map(|part| {
+                        let mut chars = part.chars();
+                        match chars.next() {
+                            Some(first) => {
+                                format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+                            }
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("-"),
+            };
+            text.push_str(&format!(
+                "{}: {}\r\n",
+                canonical,
+                value.to_str().unwrap_or("")
+            ));
+        }
+        text.push_str("\r\n");
+        text.push_str(&String::from_utf8_lossy(&body));
+        text
     }
 
     fn split_response(response: &str) -> (String, Vec<u8>) {

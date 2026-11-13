@@ -2,9 +2,15 @@ use anyhow::Context;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
-use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
+
+use axum::extract::{FromRequestParts, Path, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get};
+use axum::Router;
+use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 
 use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
@@ -21,11 +27,9 @@ use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
-use nession_mcp::http::Sniffed;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
 use nession_runtime::lane::KeyedLane;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -358,39 +362,79 @@ impl WebSocketServer {
         // reachability, letting clients skip dead endpoints.
         crate::probe::spawn_probe_task(Arc::clone(&self.agent_registry));
 
+        // The pre-authentication admission budget (#3439). One slot per
+        // accepted socket that has not yet completed an HTTP request; an
+        // accepted socket beyond the bound is closed before any task is
+        // spawned for it. This is the Server's answer to the Agent's #2653
+        // bound, and it exists for the same reason: a peer that sends nothing
+        // must not cost a task and a socket indefinitely.
+        let handshake_slots = Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_PENDING_HANDSHAKES));
+        let mut connections = tokio::task::JoinSet::new();
+
         loop {
-            let (tcp_stream, addr) = listener.accept().await?;
-            info!("New connection from: {}", addr);
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let (tcp_stream, addr) = accepted?;
+                    info!("New connection from: {}", addr);
 
-            let ctx = ServerContext {
-                agent_registry: Arc::clone(&self.agent_registry),
-                session_registry: Arc::clone(&self.session_registry),
-                command_broker: Arc::clone(&self.command_broker),
-                client_registry: Arc::clone(&self.client_registry),
-                web_client_registry: Arc::clone(&self.web_client_registry),
-                env_service: Arc::clone(&self.env_service),
-                db: Arc::clone(&self.db),
-                mutations: Arc::clone(&self.mutations),
-                p2p_broker: Arc::clone(&self.p2p_broker),
-                mcp: self.mcp.clone(),
-                image_manager: Arc::clone(&self.image_manager),
-                image_http: Arc::clone(&self.image_http),
-                auth_token: self.config.auth_token.clone(),
-                heartbeat_interval_secs,
-                terminal_cols: self.config.terminal_cols,
-                terminal_web_font_size: self.config.terminal_web_font_size,
-                terminal_stall_grace: std::time::Duration::from_secs(
-                    self.config.terminal_stall_grace_secs,
-                ),
-                query_concurrency: self.config.query_concurrency_per_connection,
-            };
-            let tls_acceptor = tls_acceptor.clone();
+                    let Ok(slot) = Arc::clone(&handshake_slots).try_acquire_owned() else {
+                        // Debug, not warn: this fires once per offered socket,
+                        // and under the flood the bound exists for the log
+                        // backend would become the next bottleneck.
+                        debug!(
+                            %addr,
+                            pending = DEFAULT_MAX_PENDING_HANDSHAKES,
+                            "refusing a connection: every handshake slot is occupied"
+                        );
+                        drop(tcp_stream);
+                        continue;
+                    };
 
-            tokio::spawn(async move {
-                if let Err(e) = handle_connection(tcp_stream, tls_acceptor, ctx).await {
-                    error!("Connection error: {}", e);
+                    let ctx = ServerContext {
+                        agent_registry: Arc::clone(&self.agent_registry),
+                        session_registry: Arc::clone(&self.session_registry),
+                        command_broker: Arc::clone(&self.command_broker),
+                        client_registry: Arc::clone(&self.client_registry),
+                        web_client_registry: Arc::clone(&self.web_client_registry),
+                        env_service: Arc::clone(&self.env_service),
+                        db: Arc::clone(&self.db),
+                        mutations: Arc::clone(&self.mutations),
+                        p2p_broker: Arc::clone(&self.p2p_broker),
+                        mcp: self.mcp.clone(),
+                        image_manager: Arc::clone(&self.image_manager),
+                        image_http: Arc::clone(&self.image_http),
+                        auth_token: self.config.auth_token.clone(),
+                        heartbeat_interval_secs,
+                        terminal_cols: self.config.terminal_cols,
+                        terminal_web_font_size: self.config.terminal_web_font_size,
+                        terminal_stall_grace: std::time::Duration::from_secs(
+                            self.config.terminal_stall_grace_secs,
+                        ),
+                        query_concurrency: self.config.query_concurrency_per_connection,
+                    };
+                    let tls_acceptor = tls_acceptor.clone();
+
+                    connections.spawn(async move {
+                        if let Err(e) = handle_connection(
+                            tcp_stream,
+                            tls_acceptor,
+                            ctx,
+                            AdmissionSlot::new(slot),
+                        )
+                        .await
+                        {
+                            error!("Connection error: {}", e);
+                        }
+                    });
                 }
-            });
+                // Reap finished connections so a long-lived Server does not
+                // accumulate one completed entry per socket.
+                Some(result) = connections.join_next(), if !connections.is_empty() => {
+                    if let Err(e) = result {
+                        error!("Connection task failed: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -461,66 +505,149 @@ struct ServerContext {
     query_concurrency: usize,
 }
 
+/// How many accepted Server connections may be mid-HTTP-request at once
+/// (#3439).
+///
+/// The Server's equivalent of the Agent's #2653 budget. One slot per accepted
+/// socket that has not yet completed an HTTP request; an accepted socket
+/// beyond the bound is dropped before any task is spawned for it. This bounds
+/// pending work, not Sessions or attached clients.
+pub const DEFAULT_MAX_PENDING_HANDSHAKES: usize = 64;
+
+/// How long one Server connection may take to complete an HTTP request
+/// (#3439).
+///
+/// Covers the optional TLS handshake and the request head. It ends when the
+/// request reaches the router and releases its admission slot, so a
+/// long-lived WebSocket or MCP stream is never cut short by this bound.
+pub const DEFAULT_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The frame limits the listener has always enforced. Stated explicitly rather
+/// than left to a default: `#3439` moved the transport, not the bounds.
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+/// Router state for one accepted connection.
+#[derive(Clone)]
+struct HttpState {
+    ctx: ServerContext,
+    /// This connection's pre-authentication claim (#3439).
+    slot: AdmissionSlot,
+}
+
+/// Serve one accepted socket through the Server's Axum router.
 async fn handle_connection(
     tcp_stream: tokio::net::TcpStream,
     tls_acceptor: Option<TlsAcceptor>,
     ctx: ServerContext,
+    slot: AdmissionSlot,
 ) -> anyhow::Result<()> {
-    if let Some(acceptor) = tls_acceptor {
-        let tls_stream = acceptor.accept(tcp_stream).await?;
-        route_connection(tls_stream, ctx).await
-    } else {
-        route_connection(tcp_stream, ctx).await
-    }
+    let router = http_router(ctx, slot.clone());
+    ingress::serve(
+        move || ingress::TcpOrTls::accept(tcp_stream, tls_acceptor),
+        router,
+        slot,
+        DEFAULT_HANDSHAKE_TIMEOUT,
+    )
+    .await?;
+    Ok(())
 }
 
-/// Dispatch one accepted connection to MCP or the WebSocket handler.
+/// Build the explicit route table for one accepted connection.
 ///
-/// Without MCP this is exactly the old path. With MCP the request head is read
-/// once: a WebSocket upgrade replays those bytes into tungstenite, and an HTTP
-/// request is answered by the MCP service on the same listener. There is no
-/// second port, and `/ws` keeps its existing handshake and authentication.
-async fn route_connection<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
-        Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
-        Ok(Sniffed::Http { head, stream }) => {
-            let is_image = head
-                .path()
-                .starts_with(nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX);
-            if is_image {
-                return ctx
-                    .image_http
-                    .serve(head, stream)
-                    .await
-                    .map_err(|error| anyhow::anyhow!("image blob response failed: {error}"));
-            }
-            if let Some(mcp) = ctx.mcp.clone() {
-                mcp.serve(stream)
-                    .await
-                    .map_err(|error| anyhow::anyhow!("MCP response failed: {error}"))
-            } else {
-                // No service owns this route. The connection closes without a
-                // body; the client sees the closed connection, not a hang.
-                Ok(())
-            }
-        }
-        Err(error) => {
-            // A non-WebSocket, non-HTTP peer (a scanner or a health check that
-            // sent garbage). The stream is gone with the parser, so this is a
-            // log and a close rather than a status code.
-            warn!(%error, "refusing a connection that is neither WebSocket nor HTTP");
-            Ok(())
-        }
+/// Axum owns the HTTP grammar and the Upgrade; the routes name the existing
+/// owners: `/ws` for the protocol WebSocket, the Image Manager's authorized
+/// blob route, and the MCP endpoint when `[mcp] enabled = true`. There is no
+/// protocol sniff and no hand-written HTTP response on this listener.
+///
+/// The fallback keeps two pre-existing behaviors: the Server has always
+/// accepted a WebSocket upgrade at the authority root (`ws://host:port`) as
+/// well as at `/ws`, and anything that is not an upgrade gets a plain 404.
+fn http_router(ctx: ServerContext, slot: AdmissionSlot) -> Router {
+    let mcp_path = ctx.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    let state = HttpState {
+        ctx,
+        slot: slot.clone(),
+    };
+    let mut router = Router::new()
+        .route("/ws", get(ws_upgrade))
+        .route(&crate::image::http::blob_route(), get(image_blob));
+    if let Some(path) = mcp_path.as_deref() {
+        router = router.route(path, any(mcp_http));
+    }
+    router
+        .fallback(websocket_or_not_found)
+        .layer(axum::middleware::from_fn_with_state(
+            slot,
+            ingress::release_after_response,
+        ))
+        .with_state(state)
+}
+
+/// The `/ws` route: a valid upgrade is accepted, anything else is the
+/// extractor's own rejection (405 for a non-GET, 400 for a malformed upgrade).
+async fn ws_upgrade(State(state): State<HttpState>, ws: WebSocketUpgrade) -> Response {
+    finish_ws_upgrade(state, ws)
+}
+
+/// Accept a WebSocket upgrade on an otherwise unmatched path.
+///
+/// The registry advertises `/ws`, but the Server has always also accepted
+/// `ws://host:port` and a configured `connect_url` with any path. The fallback
+/// keeps that contract while still answering every non-upgrade request with
+/// 404 rather than an implicit upgrade.
+async fn websocket_or_not_found(
+    State(state): State<HttpState>,
+    request: axum::extract::Request,
+) -> Response {
+    if !ingress::looks_like_websocket_upgrade(request.method(), request.headers()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (mut parts, _body) = request.into_parts();
+    match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+        Ok(ws) => finish_ws_upgrade(state, ws),
+        Err(rejection) => rejection.into_response(),
     }
 }
 
-async fn handle_ws_stream<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()>
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
-{
+fn finish_ws_upgrade(state: HttpState, ws: WebSocketUpgrade) -> Response {
+    // The upgrade request is the end of the unauthenticated admission window.
+    state.slot.release();
+    let ctx = state.ctx;
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .on_upgrade(move |socket| async move {
+            if let Err(error) = handle_ws_stream(AxumWebSocket::new(socket), ctx).await {
+                error!("Connection error: {error:#}");
+            }
+        })
+}
+
+/// The Image Manager's authorized blob route.
+async fn image_blob(
+    State(state): State<HttpState>,
+    Path(digest): Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    state.slot.release();
+    state
+        .ctx
+        .image_http
+        .respond(&method, &digest, &headers)
+        .await
+}
+
+/// The MCP endpoint, mounted only when configured.
+async fn mcp_http(State(state): State<HttpState>, request: axum::extract::Request) -> Response {
+    state.slot.release();
+    match state.ctx.mcp.as_ref() {
+        Some(mcp) => mcp.handle(request).await.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyhow::Result<()> {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
 
@@ -545,7 +672,6 @@ where
         image_http: _,
     } = ctx;
 
-    let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
 
     // Create the outgoing-message queue BEFORE the handler so the handler can

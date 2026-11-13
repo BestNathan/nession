@@ -68,7 +68,7 @@ crates/nession-mcp/src/
 ├── backend.rs             # semantic backend seams
 ├── error.rs
 ├── protocol.rs            # claimed versions and endpoint defaults
-├── http.rs                # shared-listener request sniffing
+├── http.rs                # standalone HTTP host request classification
 └── tools/
     ├── mod.rs             # module declarations + explicit registration ONLY
     ├── nession_server_list_agents.rs
@@ -157,9 +157,15 @@ The wire grammar — version negotiation, standard-header mirroring and
 validation, `server/discover`, legacy sessions and SSE — comes from the official
 Rust [`rmcp`](https://github.com/modelcontextprotocol/rust-sdk) SDK. Nession
 keeps its own flat ToolHandler/ToolRegistry and does not adopt SDK macros or
-the SDK's tool registry. The SDK's Streamable HTTP service is driven through
-hyper on the host's already-accepted connection, so an embedded host keeps its
-single `/ws` listener and TLS setup.
+the SDK's tool registry.
+
+Embedded hosts mount the SDK's Streamable HTTP service as an explicit route on
+their Axum router (`#3439`): the Agent's `/mcp` path sits beside its P2P upgrade
+on the same listener, and the Server's beside `/ws` and the authorized blob
+route. The listener's HTTP grammar, routing and WebSocket Upgrade belong to
+Axum; the MCP endpoint keeps its own path check, Bearer authentication, Origin
+and Host policy. The standalone `nession-mcp` binary owns its own listener and
+still drives the shared service through hyper.
 
 ## Hosting modes
 

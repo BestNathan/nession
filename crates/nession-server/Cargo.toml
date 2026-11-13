@@ -20,6 +20,10 @@ nession-erofs = { path = "../nession-erofs" }
 # catalog, protocol lifecycle, auth and transport live in this crate.
 nession-mcp = { path = "../nession-mcp", default-features = false }
 tokio.workspace = true
+# The HTTP ingress and WebSocket Upgrade owner (#3439).
+axum.workspace = true
+# Streaming the blob body from a file into an Axum response.
+tokio-util = { version = "0.7", features = ["io"] }
 tokio-tungstenite.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
