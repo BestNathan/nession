@@ -189,7 +189,7 @@
         (w.kind==="managed"?action("Delete","ws-delete:"+w.id,"danger",selected||!online()||s.inside):"")+'</div>';
     }).join("");
     var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
-    return sectionHead("Agent Workspaces","可命名、可发现、可复用。Workspace 资源数据由当前 Agent 管理。")+
+    return (s.notice?alert(s.notice):"")+sectionHead("Agent Workspaces","可命名、可发现、可复用。Workspace 资源数据由当前 Agent 管理。")+
       card("Selection precedence","Explicit reference → matching Project Location → get_or_create(session.name).",
         '<p class="cand-help">'+h(defaultWorkspaceHint())+'</p>'+
         '<div class="cand-actions">'+action(auto?"Reuse “"+h(s.session)+"”":"Allocate “"+h(s.session)+"”","ws-auto","",!online()||s.inside)+
@@ -392,20 +392,21 @@
     if(a.indexOf("ws-use:")===0){if(isEditable()&&s.workspaces.some(function(w){return w.id===a.slice(7);})){s.selectedWorkspace=a.slice(7);dirty();}return;}
     if(a==="ws-auto"){
       if(!isEditable())return;
-      s.selectedWorkspace="auto";ensureAutoWorkspace();s.sub.workspaces="details";dirty();return;
+      dirty();s.selectedWorkspace="auto";ensureAutoWorkspace();s.sub.workspaces="details";return;
     }
     if(a==="ws-create"){
       if(!isEditable())return;
       var name=s.newWorkspaceName.trim();
       if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)){s.notice="Enter a valid workspace name: letters, digits, dot, underscore or hyphen.";return;}
       var old=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===name;});
+      dirty();
       if(old){s.selectedWorkspace=old.id;s.notice="Reused existing named Managed Workspace “"+name+"”.";}
       else{
         var id="ws:manual:"+String(s.workspaces.length+1);
         s.workspaces.push({id:id,name:name,kind:"managed",project:"—",path:"Agent-managed / "+id,status:"available"});
         s.selectedWorkspace=id;s.notice="Created named Managed Workspace “"+name+"” (mock).";
       }
-      s.newWorkspaceName="";dirty();return;
+      s.newWorkspaceName="";return;
     }
     if(a.indexOf("ws-delete:")===0){if(isEditable())s.deletePending=a.slice(10);return;}
     if(a==="ws-delete-cancel"){s.deletePending=null;return;}
