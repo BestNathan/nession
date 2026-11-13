@@ -87,6 +87,9 @@ pub fn materialize_with_composition(
     }
     policy.filesystem = Some(SandboxFilesystemPolicy {
         access: SandboxFilesystemAccess::default(),
+        rootfs: None,
+        mounts: Vec::new(),
+        workspace: None,
         composition: Some(composition),
     });
     Ok(policy)

@@ -10,10 +10,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use nession_protocol::contracts::sandbox::v1::{
-    SandboxCgroupV2Policy, SandboxEnforcement, SandboxFilesystemComposition, SandboxImageRef,
-    SandboxLinuxNamespaces, SandboxNetworkMode, SandboxPolicy, SandboxToolchainImage,
-    SandboxWorkspace, SANDBOX_POLICY_VERSION,
+    SandboxCgroupV2Policy, SandboxEnforcement, SandboxFilesystemComposition,
+    SandboxFilesystemPolicy, SandboxFilesystemRoot, SandboxFilesystemWorkspace, SandboxImageRef,
+    SandboxLinuxNamespaces, SandboxMountSource, SandboxNetworkMode, SandboxPolicy,
+    SandboxToolchainImage, SandboxWorkspace, SANDBOX_POLICY_VERSION,
 };
+use nession_protocol::contracts::workspace::v1::{is_valid_workspace_id, validate_workspace_name};
 use sha2::{Digest, Sha256};
 
 use crate::error::{Result, SandboxError};
@@ -251,13 +253,7 @@ pub fn compile(policy: &SandboxPolicy) -> Result<CompiledSandboxPolicy> {
     let filesystem = policy
         .filesystem
         .as_ref()
-        .map(|filesystem| {
-            compile_filesystem(
-                &filesystem.access.read,
-                &filesystem.access.write,
-                filesystem.composition.as_ref(),
-            )
-        })
+        .map(compile_filesystem)
         .transpose()?;
     if let (Some(filesystem), Some(normalized_filesystem)) =
         (&filesystem, normalized.filesystem.as_mut())
@@ -275,6 +271,9 @@ pub fn compile(policy: &SandboxPolicy) -> Result<CompiledSandboxPolicy> {
         if let Some(composition) = &filesystem.composition {
             normalized_filesystem.composition = Some(normalize_composition(composition));
         }
+        normalized_filesystem
+            .mounts
+            .sort_by(|left, right| left.target.cmp(&right.target));
     }
 
     let network = match &policy.network {
@@ -385,11 +384,11 @@ pub fn requested_mechanisms(policy: &CompiledSandboxPolicy) -> Vec<String> {
     mechanisms
 }
 
-fn compile_filesystem(
-    read: &[String],
-    write: &[String],
-    composition: Option<&SandboxFilesystemComposition>,
-) -> Result<CompiledFilesystem> {
+fn compile_filesystem(filesystem: &SandboxFilesystemPolicy) -> Result<CompiledFilesystem> {
+    validate_filesystem_declaration(filesystem)?;
+    let read = &filesystem.access.read;
+    let write = &filesystem.access.write;
+    let composition = filesystem.composition.as_ref();
     let mut read_paths: Vec<PathBuf> = read
         .iter()
         .map(|path| validate_path(path))
@@ -431,6 +430,143 @@ fn compile_filesystem(
         write: write_paths,
         composition: composition.map(compile_composition).transpose()?,
     })
+}
+
+/// Validate the client-safe declaration against the prepared composition.
+///
+/// The declaration is authoritative for what the client requested; the
+/// composition is the Agent's trusted, verified materialization. A declaration
+/// that has not been materialized is refused rather than silently ignored, and
+/// a materialization that disagrees with the declaration is refused rather than
+/// guessing which side is right.
+fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Result<()> {
+    let composition = filesystem.composition.as_ref();
+    let has_declaration = filesystem.rootfs.is_some()
+        || !filesystem.mounts.is_empty()
+        || filesystem.workspace.is_some();
+    if !has_declaration {
+        return Ok(());
+    }
+    match &filesystem.rootfs {
+        Some(SandboxFilesystemRoot::Local) => {
+            if composition.is_some()
+                || !filesystem.mounts.is_empty()
+                || filesystem.workspace.is_some()
+            {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.rootfs Local cannot carry an image composition, mounts or a workspace"
+                        .to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        Some(SandboxFilesystemRoot::Image { digest }) => {
+            validate_image_digest(digest)?;
+            let Some(composition) = composition else {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.rootfs image was not prepared; the Agent must materialize the declaration"
+                        .to_string(),
+                ));
+            };
+            if composition.base.digest != *digest {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.rootfs digest `{digest}` does not match the prepared Base Runtime `{}`",
+                    composition.base.digest
+                )));
+            }
+        }
+        None => {
+            if composition.is_none() {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem mounts/workspace require an image RootFS prepared by the Agent"
+                        .to_string(),
+                ));
+            }
+        }
+    }
+
+    if !filesystem.mounts.is_empty() {
+        let Some(composition) = composition else {
+            return Err(SandboxError::InvalidPolicy(
+                "filesystem.mounts was not prepared; the Agent must materialize the declaration"
+                    .to_string(),
+            ));
+        };
+        let mut targets = BTreeSet::new();
+        for mount in &filesystem.mounts {
+            if !mount.read_only {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.mounts is read-only in the first implementation".to_string(),
+                ));
+            }
+            let target = validate_toolchain_target(&mount.target)?;
+            if !targets.insert(target) {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.mounts target `{}` is duplicated",
+                    mount.target
+                )));
+            }
+            let SandboxMountSource::Image { digest } = &mount.source;
+            validate_image_digest(digest)?;
+            let Some(toolchain) = composition
+                .toolchains
+                .iter()
+                .find(|toolchain| toolchain.target == mount.target)
+            else {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.mounts target `{}` was not prepared",
+                    mount.target
+                )));
+            };
+            if toolchain.digest != *digest {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.mounts digest for `{}` does not match the prepared image",
+                    mount.target
+                )));
+            }
+        }
+        if composition.toolchains.len() != filesystem.mounts.len() {
+            return Err(SandboxError::InvalidPolicy(
+                "filesystem.mounts does not match the prepared toolchain set".to_string(),
+            ));
+        }
+    }
+
+    if let Some(workspace) = &filesystem.workspace {
+        let Some(composition) = composition else {
+            return Err(SandboxError::InvalidPolicy(
+                "filesystem.workspace was not prepared; the Agent must resolve the selected resource"
+                    .to_string(),
+            ));
+        };
+        if composition.workspace.is_none() {
+            return Err(SandboxError::InvalidPolicy(
+                "filesystem.workspace requires a prepared writable workspace".to_string(),
+            ));
+        }
+        match workspace {
+            SandboxFilesystemWorkspace::Auto | SandboxFilesystemWorkspace::ProjectLocation => {}
+            SandboxFilesystemWorkspace::Managed { workspace_id, name } => {
+                if workspace_id.is_some() == name.is_some() {
+                    return Err(SandboxError::InvalidPolicy(
+                        "filesystem.workspace managed requires exactly one of workspace_id or name"
+                            .to_string(),
+                    ));
+                }
+                if let Some(workspace_id) = workspace_id {
+                    if !is_valid_workspace_id(workspace_id) {
+                        return Err(SandboxError::InvalidPolicy(format!(
+                            "filesystem.workspace workspace_id `{workspace_id}` is not a valid ws_<uuid> identity"
+                        )));
+                    }
+                }
+                if let Some(name) = name {
+                    validate_workspace_name(name).map_err(SandboxError::InvalidPolicy)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<CompiledComposition> {
@@ -887,6 +1023,132 @@ mod tests {
         value["filesystem"]["access"]["read"] = serde_json::json!(["/usr"]);
         let error = compile(&policy(value)).expect_err("two filesystem owners");
         assert!(matches!(error, SandboxError::InvalidPolicy(_)));
+    }
+
+    fn declaration_policy() -> serde_json::Value {
+        let mut value = composition_policy();
+        value["filesystem"]["rootfs"] = serde_json::json!({
+            "kind": "image",
+            "digest": format!("sha256:{}", "a".repeat(64)),
+        });
+        value["filesystem"]["mounts"] = serde_json::json!([
+            {
+                "source": { "kind": "image", "digest": format!("sha256:{}", "d".repeat(64)) },
+                "target": "/opt/rust",
+                "read_only": true,
+            },
+            {
+                "source": { "kind": "image", "digest": format!("sha256:{}", "c".repeat(64)) },
+                "target": "/opt/node",
+                "read_only": true,
+            },
+        ]);
+        value["filesystem"]["workspace"] = serde_json::json!({
+            "kind": "managed",
+            "workspace_id": "ws_123e4567-e89b-42d3-a456-426614174000",
+        });
+        value
+    }
+
+    #[test]
+    fn a_materialized_declaration_matches_its_prepared_composition() {
+        let compiled = compile(&policy(declaration_policy())).expect("valid declaration");
+        let normalized = compiled.normalized.filesystem.expect("filesystem");
+        let mounts = normalized.mounts;
+        assert_eq!(
+            mounts
+                .iter()
+                .map(|mount| mount.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/opt/node", "/opt/rust"]
+        );
+        assert!(normalized.workspace.is_some());
+    }
+
+    #[test]
+    fn a_declaration_without_a_prepared_composition_is_refused() {
+        let mut value = declaration_policy();
+        value["filesystem"]
+            .as_object_mut()
+            .unwrap()
+            .remove("composition");
+        let error = compile(&policy(value)).expect_err("the Agent must materialize first");
+        assert!(
+            format!("{error}").contains("prepared"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn declaration_mounts_must_be_read_only_opt_targets_with_matching_digests() {
+        let mut wrong_target = declaration_policy();
+        wrong_target["filesystem"]["mounts"][0]["target"] = serde_json::json!("/workspace");
+        assert!(compile(&policy(wrong_target)).is_err());
+
+        let mut writable = declaration_policy();
+        writable["filesystem"]["mounts"][0]["read_only"] = serde_json::json!(false);
+        assert!(compile(&policy(writable)).is_err());
+
+        let mut mismatched = declaration_policy();
+        mismatched["filesystem"]["mounts"][0]["source"]["digest"] =
+            serde_json::json!(format!("sha256:{}", "e".repeat(64)));
+        assert!(compile(&policy(mismatched)).is_err());
+
+        let mut extra = declaration_policy();
+        extra["filesystem"]["mounts"].as_array_mut().unwrap().pop();
+        assert!(compile(&policy(extra)).is_err());
+    }
+
+    #[test]
+    fn declaration_rootfs_must_match_the_prepared_base() {
+        let mut value = declaration_policy();
+        value["filesystem"]["rootfs"]["digest"] =
+            serde_json::json!(format!("sha256:{}", "e".repeat(64)));
+        let error = compile(&policy(value)).expect_err("root digest mismatch");
+        assert!(format!("{error}").contains("does not match"));
+    }
+
+    #[test]
+    fn local_root_cannot_carry_a_composition_or_a_mount() {
+        let mut with_composition = declaration_policy();
+        with_composition["filesystem"]["rootfs"] = serde_json::json!({ "kind": "local" });
+        assert!(compile(&policy(with_composition)).is_err());
+
+        let mut local_only = serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": ["/usr"], "write": [] },
+                "rootfs": { "kind": "local" },
+            }
+        });
+        assert!(compile(&policy(local_only.clone())).is_ok());
+        local_only["filesystem"]["mounts"] = serde_json::json!([{
+            "source": { "kind": "image", "digest": format!("sha256:{}", "a".repeat(64)) },
+            "target": "/opt/rust",
+            "read_only": true,
+        }]);
+        assert!(compile(&policy(local_only)).is_err());
+    }
+
+    #[test]
+    fn managed_workspace_requires_exactly_one_valid_reference() {
+        let mut none = declaration_policy();
+        none["filesystem"]["workspace"] = serde_json::json!({ "kind": "managed" });
+        assert!(compile(&policy(none)).is_err());
+
+        let mut both = declaration_policy();
+        both["filesystem"]["workspace"]["name"] = serde_json::json!("fix-terminal");
+        assert!(compile(&policy(both)).is_err());
+
+        let mut invalid = declaration_policy();
+        invalid["filesystem"]["workspace"]["workspace_id"] = serde_json::json!("ws_not-a-uuid");
+        assert!(compile(&policy(invalid)).is_err());
+
+        for kind in ["auto", "project_location"] {
+            let mut value = declaration_policy();
+            value["filesystem"]["workspace"] = serde_json::json!({ "kind": kind });
+            assert!(compile(&policy(value)).is_ok(), "{kind}");
+        }
     }
 
     #[test]

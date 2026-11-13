@@ -1,10 +1,10 @@
 # Agent-owned managed Workspaces
 
-Status: **P1-A resource registry and API (#3407).** The Agent owns the
-registry, names, stable identities and durable bytes. Filesystem Policy
-attachment at `/workspace` and the optional EROFS lower/Overlay are the
-follow-up implementation (#3405); the Web/App inventory is P3. This document
-does not claim that a Sandbox currently mounts a managed Workspace.
+Status: **Registry/API (#3407) plus managed `/workspace` attachment without a
+Project EROFS lower (#3405).** The Agent owns the registry, names, stable
+identities, durable bytes and RW leases. Project Location selection, the
+optional EROFS lower/Overlay and the Web/App inventory remain follow-up work;
+this document does not claim those.
 
 ## Ownership
 
@@ -23,8 +23,10 @@ resource it may use.
 
 ## Durable layout
 
-The production root is the Agent data directory's `workspaces/` child
-(`$NESSION_HOME/workspaces` in the deployment, on the Agent's durable volume):
+The production root is the Agent sandbox state directory's `agent-workspaces/`
+child (`<sandbox state>/agent-workspaces`). The sandbox state directory is the
+configured durable location; the sandbox mount validation already confines
+`filesystem.composition.workspace.write` to it:
 
 ```text
 <root>/registry.json                 versioned metadata, atomically replaced
@@ -76,6 +78,26 @@ managed `get_or_create(name = session.name)`. This registry implements the
 managed branch and the stable identity it relies on; it does not silently fall
 back when an explicit selection is invalid, missing or offline.
 
+## Sandbox `/workspace` attachment
+
+`filesystem.workspace` is resolved on Enter:
+
+1. an explicit stable `workspace_id` is leased directly;
+2. an explicit `name` is reused/created in the default namespace, then leased;
+3. `auto` uses the Session name in the default namespace (Project Location
+   resolution is not implemented yet).
+
+The selected directory becomes the composition's writable `/workspace` bind.
+The execution holds the RW lease; cleanup releases it without deleting any
+durable bytes. The per-execution scratch directory is removed. A managed
+Workspace combined with a Project EROFS lower is refused in this
+implementation: the lower would require an Overlay whose upper/work lives in
+the managed directory, and that contract is not implemented yet.
+
+Leases are in-memory. An Agent restart drops them; the durable execution
+record remains the attachment authority, and reconstructing leases from it is
+part of the follow-up.
+
 ## Lifetime and deletion
 
 - Managed bytes persist after Sandbox Enter/Return Native, Pane termination,
@@ -112,8 +134,8 @@ Server-cached claim.
 
 ## Limits / when to revisit
 
-- Project Location discovery/selection and the Filesystem `/workspace`
-  attachment are not implemented by this registry.
+- Project Location discovery/selection is not implemented; a managed
+  Workspace with a Project EROFS lower is refused.
 - A managed Workspace is exclusive for RW attachment in the first
   implementation; concurrent sharing needs a separate decision.
 - The Agent data directory must be a durable mount. A container writable layer

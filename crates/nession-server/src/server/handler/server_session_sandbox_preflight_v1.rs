@@ -78,7 +78,15 @@ impl ConnectionHandler {
             Err(error) => return Ok(refuse(&error, &payload.generation)),
         };
 
-        if !payload.images.is_empty()
+        let images = match super::server_session_sandbox_images::derive_sandbox_image_selections(
+            &payload.policy,
+            payload.images.clone(),
+        ) {
+            Ok(images) => images,
+            Err(error) => return Ok(refuse(&error, &payload.generation)),
+        };
+
+        if !images.is_empty()
             && payload
                 .policy
                 .filesystem
@@ -97,14 +105,14 @@ impl ConnectionHandler {
                 }],
             ));
         }
-        if let Err(errors) = validate_image_selections(&payload.images) {
+        if let Err(errors) = validate_image_selections(&images) {
             return Ok(refuse_with_errors(
                 "the Sandbox image selection is not a valid composition",
                 &payload.generation,
                 errors,
             ));
         }
-        for (index, selection) in payload.images.iter().enumerate() {
+        for (index, selection) in images.iter().enumerate() {
             match self.image_manager.get(Some(&selection.digest), None).await {
                 Ok(image) if image.status == ImageStatus::Ready => {}
                 Ok(_) => {
@@ -137,7 +145,7 @@ impl ConnectionHandler {
             agent_id,
             session_name,
             payload.generation,
-            payload.images.len()
+            images.len()
         );
         match self
             .agent_command_with_timeout(
@@ -148,7 +156,7 @@ impl ConnectionHandler {
                     "generation": payload.generation,
                     "probe_generation": payload.probe_generation,
                     "policy": payload.policy,
-                    "images": payload.images,
+                    "images": images,
                     "working_dir": payload.working_dir,
                 }),
                 SANDBOX_PREFLIGHT_TIMEOUT,

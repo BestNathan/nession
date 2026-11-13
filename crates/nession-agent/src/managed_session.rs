@@ -190,6 +190,9 @@ pub async fn prepare(
         enabled: true,
         filesystem: Some(SandboxFilesystemPolicy {
             access: SandboxFilesystemAccess::default(),
+            rootfs: None,
+            mounts: Vec::new(),
+            workspace: None,
             composition: Some(SandboxFilesystemComposition {
                 base: base_ref,
                 workspace: Some(SandboxWorkspace {

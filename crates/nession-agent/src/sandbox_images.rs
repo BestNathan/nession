@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use crate::erofs_cache::{DownloadGrant, ErofsCache};
 use crate::managed_session::blob_origin;
+use crate::workspace_manager::WorkspaceLease;
 
 /// One prepared Sandbox image set, before a Pane exists.
 pub struct PreparedSandboxImages {
@@ -33,6 +34,9 @@ pub struct PreparedSandboxImages {
     pub workspace_guard: WorkspaceGuard,
     /// `(role, digest, resolved cache path)` for diagnostics and tests.
     pub images: Vec<(ManagedImageRole, String, PathBuf)>,
+    /// The RW attachment to a selected managed Workspace, when one was used.
+    /// The execution owner must hold it until cleanup.
+    pub workspace_lease: Option<WorkspaceLease>,
 }
 
 /// Removes one Agent-owned Sandbox workspace unless disarmed.
@@ -78,6 +82,7 @@ pub async fn prepare(
     grants: &[ManagedImageGrant],
     server_url: &str,
     state_dir: &Path,
+    workspace_override: Option<(PathBuf, WorkspaceLease)>,
 ) -> Result<PreparedSandboxImages> {
     let origin = blob_origin(server_url)?;
     let mut base: Option<&ManagedImageGrant> = None;
@@ -188,7 +193,7 @@ pub async fn prepare(
         });
     }
 
-    let composition = SandboxFilesystemComposition {
+    let mut composition = SandboxFilesystemComposition {
         base: base_ref,
         workspace: Some(SandboxWorkspace {
             image: workspace_ref,
@@ -196,10 +201,31 @@ pub async fn prepare(
         }),
         toolchains: toolchain_refs,
     };
+    let mut workspace_lease = None;
+    if let Some((path, lease)) = workspace_override {
+        if composition
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.image.as_ref())
+            .is_some()
+        {
+            anyhow::bail!("a managed Workspace cannot be combined with a Project EROFS lower yet");
+        }
+        // The selected managed directory is the durable workspace. Remove the
+        // per-execution placeholder; the manager owns the bytes.
+        guard.disarm();
+        remove_owned_workspace(&guard.root, &guard.path);
+        composition.workspace = Some(SandboxWorkspace {
+            image: None,
+            write: path.display().to_string(),
+        });
+        workspace_lease = Some(lease);
+    }
     Ok(PreparedSandboxImages {
         composition,
         workspace_guard: guard,
         images,
+        workspace_lease,
     })
 }
 
@@ -361,6 +387,7 @@ mod tests {
             ],
             &ws_url(&server),
             state_dir.path(),
+            None,
         )
         .await
         .unwrap();
@@ -470,5 +497,150 @@ mod tests {
         std::fs::create_dir(&foreign).unwrap();
         remove_owned_workspace(&owned_root, &foreign);
         assert!(foreign.exists());
+    }
+}
+
+#[cfg(test)]
+mod workspace_override_tests {
+    use super::*;
+    use crate::erofs_cache::StorageProbe;
+    use httptest::http::Response;
+    use httptest::{matchers::*, Expectation, Server};
+    use nession_protocol::contracts::session::v1::ManagedImageRole;
+    use sha2::{Digest, Sha256};
+    use std::sync::Arc;
+
+    struct DurableProbe;
+    impl StorageProbe for DurableProbe {
+        fn mount_type(&self, _path: &Path) -> anyhow::Result<String> {
+            Ok("nfs".to_string())
+        }
+    }
+
+    fn digest_for(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("sha256:{:x}", hasher.finalize())
+    }
+
+    async fn cache(root: &Path) -> ErofsCache {
+        ErofsCache::open_with_probe(root, "workspace-override-test", true, &DurableProbe)
+            .await
+            .unwrap()
+    }
+
+    fn grant(role: ManagedImageRole, digest: &str, target: Option<&str>) -> ManagedImageGrant {
+        ManagedImageGrant {
+            role,
+            digest: digest.to_string(),
+            path: format!("/images/blobs/{digest}"),
+            token: "scoped-token".to_string(),
+            target: target.map(str::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_selected_managed_workspace_replaces_the_execution_scratch_dir() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let base = digest_for(&base_bytes);
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/images/blobs/{base}")))
+                .respond_with(Response::builder().status(200).body(base_bytes).unwrap()),
+        );
+        let manager = Arc::new(
+            crate::workspace_manager::WorkspaceManager::open(
+                state_dir.path().join("agent-workspaces"),
+            )
+            .unwrap(),
+        );
+        let workspace = manager
+            .get_or_create(None, "fix-terminal", true)
+            .await
+            .unwrap();
+        let lease = manager.lease(&workspace.workspace_id).await.unwrap();
+        let path = manager
+            .workspace_directory(&workspace.workspace_id)
+            .unwrap();
+        let prepared = prepare(
+            &cache,
+            &[grant(ManagedImageRole::Base, &base, None)],
+            &server.url("/").to_string().replacen("http://", "ws://", 1),
+            state_dir.path(),
+            Some((path.clone(), lease)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            prepared.composition.workspace.as_ref().unwrap().write,
+            path.display().to_string()
+        );
+        assert!(prepared
+            .composition
+            .workspace
+            .as_ref()
+            .unwrap()
+            .image
+            .is_none());
+        assert!(prepared.workspace_lease.is_some());
+        let scratch = state_dir.path().join("sandbox-workspaces");
+        let leftovers = std::fs::read_dir(&scratch)
+            .map(std::iter::Iterator::count)
+            .unwrap_or(0);
+        assert_eq!(leftovers, 0);
+    }
+
+    #[tokio::test]
+    async fn a_managed_workspace_with_a_project_lower_is_refused() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let workspace_bytes = b"project image".to_vec();
+        let base = digest_for(&base_bytes);
+        let workspace_digest = digest_for(&workspace_bytes);
+        let server = Server::run();
+        for (digest, bytes) in [(&base, base_bytes), (&workspace_digest, workspace_bytes)] {
+            server.expect(
+                Expectation::matching(request::method_path(
+                    "GET",
+                    format!("/images/blobs/{digest}"),
+                ))
+                .respond_with(Response::builder().status(200).body(bytes).unwrap()),
+            );
+        }
+        let manager = Arc::new(
+            crate::workspace_manager::WorkspaceManager::open(
+                state_dir.path().join("agent-workspaces"),
+            )
+            .unwrap(),
+        );
+        let workspace = manager
+            .get_or_create(None, "with-lower", true)
+            .await
+            .unwrap();
+        let lease = manager.lease(&workspace.workspace_id).await.unwrap();
+        let path = manager
+            .workspace_directory(&workspace.workspace_id)
+            .unwrap();
+        let result = prepare(
+            &cache,
+            &[
+                grant(ManagedImageRole::Base, &base, None),
+                grant(ManagedImageRole::Workspace, &workspace_digest, None),
+            ],
+            &server.url("/").to_string().replacen("http://", "ws://", 1),
+            state_dir.path(),
+            Some((path, lease)),
+        )
+        .await;
+        let error = match result {
+            Ok(_) => panic!("a managed Workspace with a Project lower must be refused"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("Project EROFS lower"));
     }
 }
