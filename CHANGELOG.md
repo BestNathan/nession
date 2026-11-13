@@ -724,3 +724,10 @@
 - Categories: acceptance, ci, e2e, release
 - Reason: Document #3068 exact-SHA bounded orphan evidence, trusted Agent-only staging, legacy GitOps cutoff, and separate Case/public-readback proof authority
 - Source: https://github.com/BestNathan/nession/issues/3068
+
+## 2026-11-13T01:18:59Z | update | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Replace the duplicate PR timing identity and distinguish Agent acceptance from PR Case Smoke evidence, preserving immutable legacy reads after Issue #3388
+- Source: https://github.com/BestNathan/nession/issues/3388
