@@ -20,6 +20,14 @@ The prototype stays in the **original \`sandbox-capability-3124/\` directory** r
 - Current-vs-candidate delta: old prototype's Overview+five peer tabs / independent Images Workspace is superseded by **4 capability sections** and **5 native/portable policy entries** without Process/Resource/Syscall grouping. This is **not** yet implemented on main.
 - Visual approximation: local static CSS derived from the prior Nession token-snapshot mock; full Web/App screenshot/component-pixel parity has not been independently proven. Shared outer review frame is \`../prototype-frame-2758/{frame.css,frame.js}\` and is separate from product chrome.
 
+## Image Library list interaction — #3408 (2026-11-13)
+
+- The Library is a list, not a master-detail page. Keep each collapsed row compact: image name, type, shortened digest, Server status and expansion chevron.
+- Activating a row expands an inline detail region **immediately below that row**, pushing later rows down. Activating it again collapses; activating another row collapses the former and opens the new one.
+- Expanded content: full Digest, image type, current Agent cache observation, default mount (or RootFS target), and only the applicable action. No separate detail panel below the full list and no explanatory paragraphs occupying item layout.
+- A row is a native keyboard-focusable button with `aria-expanded`; expanded content is a labelled region. App uses the same tap-to-expand flow and a single-column details layout.
+- Image Registry/build/distribution ownership remains unchanged. No real image or Agent operations are performed by the mock.
+
 ## Filesystem IA — current owner decision (2026-11-13)
 
 Under **Policies → Filesystem**, render **five always-visible sections in order**, corresponding to what a user actually configures. There is no outer Host Access vs Image Composition switch that hides unrelated inputs, and no extra Home policy editor.
@@ -37,7 +45,7 @@ Under **Policies → Filesystem**, render **five always-visible sections in orde
 ## Interaction paths (fully local mock)
 
 1. Open a selected Session's **Sandbox**; Overview shows Agent/Pane, Server image count, Agent workspaces and quick navigation.
-2. **Images → Library / Builds / Distribution**. Choose a Base Runtime or Toolchain and continue to Filesystem. Start/finish a **simulated** build; compare Server Ready with per-Agent \`verified/absent/unknown\` cache. Agent offline does **not** remove Server Images list.
+2. **Images → Library / Builds / Distribution**. Library is a **plain image list**. A row click expands its detail **directly under that row** (one row expanded at a time; click the same row to collapse); the former detached detail card below the list is removed. The expanded section shows full digest, image type, Agent cache, target/default mount and its relevant action (Use as RootFS / Mount in Filesystem). All detail actions continue to the Filesystem editor. Start/finish a **simulated** build; compare Server Ready with per-Agent `verified/absent/unknown` cache. Agent offline does **not** remove Server Images list.
 3. **Workspaces → All Workspaces / Detail**. \`sandbox-review\` has Project's Existing Location \`/home/dev/projects/nession\` on current Agent, defaulting \`/workspace\` to that directory. Change Session to \`fix-terminal\` (no Project Location), use **Allocate \`fix-terminal\`** or **Create / Reuse** a named Managed Workspace. Managed resources remain in the mock list after return to Native.
 4. **Policies → Filesystem**. RootFS (`/`) selects Local or only current-Agent-cached Base Runtime EROFS; Mounts starts empty and adds any non-Base EROFS with image default target (editable); Workspace selects read-only Project Location or named managed reference, always mounted at `/workspace` and used as cwd; Access adds independent identity RO/RW paths; Preview continuously lists the resolved mount/source/mode rows. Runtime V1 unsupported combinations fail preflight.
 5. **Policies → Network / Linux Namespace / Cgroup v2 / Seccomp**. Each native policy has its own entry and Agent support status, not generic Process/Resource/Syscall groups. macOS/partial/no-cgroup/no-seccomp fixtures show unavailable without editing or fallback. A draft remains stable when navigating across sections.
