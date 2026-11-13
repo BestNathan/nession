@@ -30,6 +30,13 @@ export function mergeIdentity(event,commit,prs) {
   if(matching.length>1)throw Error('ambiguous exact merge PR identity');
   return {targetSha:commit.sha,baseSha:commit.parents[0],pr:matching[0]??null};
 }
+// A PR-native staging sync owns an immutable Git/E2E batch, not a disposable
+// Requirement Issue. Its optional "Refs #..." links are informational only.
+// Source authenticity is still proven by convergenceE2ESelection below.
+export function referencedIssuesForMergedPr(pr) {
+  if(isNativeConvergencePr(pr))return [];
+  return parsePreMergeIssueNumbers(pr.body,'BestNathan','nession',pr.title);
+}
 export function mergedSelection(event,commit,prs,issues,repoRoot) {
   const target=mergeIdentity(event,commit,prs);
   if(git(repoRoot,'rev-parse','HEAD')!==target.targetSha)
@@ -85,6 +92,26 @@ function selfTest(){
   const pr={number:1,merged_at:'2026-10-21T02:00:00Z',merge_commit_sha:sha,
     base:{ref:'main',repo:{full_name:REPO}},head:{sha:head,repo:{full_name:REPO}}};
   assert.equal(mergeIdentity(event,commit,[pr]).pr.number,1);
+  // Native staging syncs may link a real Issue for context. That link must
+  // not become a fetched Issue obligation: the independent Git/SHA-bound
+  // convergence planner verifies the source and selects the actual E2E IDs.
+  const nativeBody=[
+    'Staging Convergence automated proposal (source: Release / Staging Convergence).',
+    'Refs #3399',
+    '<!-- nession-convergence-pr:v1 branch=staging main='+base+
+      ' lane='+head+' head='+head+' digest='+'d'.repeat(64)+' -->',
+  ].join('\n');
+  assert.deepEqual(referencedIssuesForMergedPr({title:'chore(release): integrate main into staging',
+    body:nativeBody}),[],'native PR links must not fetch Requirement contracts');
+  assert.deepEqual(referencedIssuesForMergedPr({title:'fix: normal linked issue',
+    body:'Refs #3399'}),[3399],'ordinary linked Issues still require contracts');
+  assert.deepEqual(referencedIssuesForMergedPr({title:'fix: forged marker',
+    body:'Refs #3399\n<!-- nession-convergence-pr:v1 branch=staging -->'}),
+    [3399],'marker without trusted proposal shape cannot skip Issue contracts');
+  assert.deepEqual(referencedIssuesForMergedPr({
+    title:'chore(release): integrate main into staging',
+    body:nativeBody.replace('nession-convergence-pr:v1','invalid-convergence-pr:v1'),
+  }),[3399],'a proposal without the canonical convergence marker cannot skip contracts');
   const squash={sha,parents:[base]};
   assert.equal(mergeIdentity(event,squash,[pr]).pr.number,1,
     'GitHub-attested squash merge PR must not be mistaken for an unassociated push');
@@ -158,7 +185,7 @@ function main(){
   const identity=mergeIdentity(event,commit,prs);
   let issues=[];
   if(identity.pr){
-    const refs=parsePreMergeIssueNumbers(identity.pr.body,'BestNathan','nession',identity.pr.title);
+    const refs=referencedIssuesForMergedPr(identity.pr);
     if(refs.length>30)throw Error('too many associated Issues');
     issues=refs.map(number=>gh('repos/'+REPO+'/issues/'+number));
   }
