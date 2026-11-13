@@ -108,6 +108,10 @@ function selfTest(){
   assert.deepEqual(referencedIssuesForMergedPr({title:'fix: forged marker',
     body:'Refs #3399\n<!-- nession-convergence-pr:v1 branch=staging -->'}),
     [3399],'marker without trusted proposal shape cannot skip Issue contracts');
+  assert.deepEqual(referencedIssuesForMergedPr({
+    title:'chore(release): integrate main into staging',
+    body:nativeBody.replace('nession-convergence-pr:v1','invalid-convergence-pr:v1'),
+  }),[3399],'a proposal without the canonical convergence marker cannot skip contracts');
   const squash={sha,parents:[base]};
   assert.equal(mergeIdentity(event,squash,[pr]).pr.number,1,
     'GitHub-attested squash merge PR must not be mistaken for an unassociated push');
