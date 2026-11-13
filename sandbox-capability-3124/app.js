@@ -308,7 +308,7 @@
       :'<div class="fs-mode-result">Local filesystem</div>')+
       (nativeStatus(isImage?"filesystem.composition":"filesystem.access").state!=="available"?
          alert(nativeStatus(isImage?"filesystem.composition":"filesystem.access").reason,"danger"):""),
-      statusChip(isImage?(selectedBase?"available":"unavailable"):"local"));
+      statusChip(isImage?(selectedBase&&nativeStatus("filesystem.composition").state==="available"?"available":"unavailable"):"local"));
     var rows=s.tools.map(function(id){
       var im=imageBy(id);if(!im)return "";
       var loaded=online()&&s.cache[id]==="verified";
