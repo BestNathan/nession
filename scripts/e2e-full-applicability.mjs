@@ -38,6 +38,12 @@ function basename(file) {
 function isE2ERunner(file) {
   // The executor, selection/report contract, browser tests, test support and
   // suite membership are implementation, not data.
+  //
+  // `e2e/run` is the canonical CLI entrypoint: it selects the Issue-owned
+  // Cases and provisions the suite. Leaving it in `unknown` fails the whole
+  // convergence batch closed for a runner file that cannot affect product
+  // runtime by itself (measured on the main->staging integration batch).
+  if (file === 'e2e/run') return true;
   if (file.startsWith('e2e/runner/')) return true;
   if (file.startsWith('e2e/tests/')) return true;
   if (file.startsWith('e2e/acceptance/evaluator/') ||
@@ -201,6 +207,7 @@ function selfTest() {
     assert.equal(categorizeChangedPath(file), 'tooling', file + ' must be tooling');
   }
   const runner = [
+    'e2e/run',
     'e2e/tests/browser/login.spec.ts',
     'e2e/runner/test-catalog.cjs',
     'e2e/runner/runtime/full-stack.cjs',
@@ -222,6 +229,11 @@ function selfTest() {
   for (const file of runner) {
     assert.equal(categorizeChangedPath(file), 'e2e-runner', file + ' must be E2E runner');
   }
+  // The canonical CLI wrapper is the runner entrypoint, not an unrecognized
+  // path: without this classification a main->staging integration batch that
+  // carries only runner/tooling changes is rejected as `unknown`.
+  assert.equal(categorizeChangedPath('e2e/run'), 'e2e-runner',
+    'e2e/run is the canonical E2E runner entrypoint');
   const fixtureCatalog = [
     'e2e/fixtures/server.js',
     'e2e/fixtures/browser/state.json',
