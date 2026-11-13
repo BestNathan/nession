@@ -32,11 +32,11 @@ Requirement Success Criteria
 
 Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
-For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` does not execute as part of an ordinary main push: it runs only through an explicit deployed Case run that presents an authenticated deployment record for its environment. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
+For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. New `when: pr` criteria use `method: agent` over independently executed exact-head CI receipts; PR Case Smoke does not project a separate SC verdict. `when: deployed` does not execute as part of an ordinary main push: it runs only through an explicit deployed Case run that presents an authenticated deployment record for its environment. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
 
 Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
-- `pre-merge`
+- `pr` (exact PR head SHA)
 - `staging`
 - `post-merge`
 
@@ -63,7 +63,7 @@ Model-backed **Agent / SC Acceptance** evaluation is routed through `.github/wor
 Manual execution uses **Actions -> Agent / SC Acceptance -> Run workflow** (`workflow_dispatch`) with:
 
 - `issue_number`;
-- explicit `stage` (`pre-merge`, `staging`, or `post-merge`);
+- explicit `stage` (`pr`, `staging`, or `post-merge`);
 - exact `target_ref`;
 - optional `deployment`;
 - optional deterministic result or model provider.
