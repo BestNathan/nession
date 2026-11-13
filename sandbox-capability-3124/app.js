@@ -28,7 +28,7 @@
       builds:[{id:"build-120",name:"nession-source",status:"completed",detail:"Digest verified and registered"}],
       cache:{base:"verified",rust:"absent",node:"absent",source:"verified"},
       workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
-      rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",workspaceLower:false,readPaths:"",writePaths:"",
+      rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node"},mountToAdd:"node",workspaceLower:false,readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
       step:0,tip:null};
@@ -97,11 +97,19 @@
   }
   function workspaceName(){var w=resolveDefault();return w?w.name:"none";}
   function effectiveDraft(){
-    var w=resolveDefault(), mounted=s.tools.map(function(id){var im=imageBy(id);return {source:im?im.digest:"missing",target:id==="rust"?s.toolTarget:"/opt/node",read_only:true};});
-    return {filesystem:{rootfs:{source:s.rootMode==="host"?{kind:"host"}:{kind:"image",digest:imageBy(s.rootImage).digest},implicit_target:"/"},
-      mounts:mounted,workspace:{source:w?{kind:w.kind,id:w.id,name:w.name}:null,implicit_target:"/workspace",mount_mode:s.workspaceLower?"overlay":"bind",lower_image:s.workspaceLower?imageBy("source").digest:null},
-      access:{read:s.readPaths.split("\n").filter(Boolean),write:s.writePaths.split("\n").filter(Boolean)},
-      home:{kind:s.home}},network:{mode:s.network},
+    var paths={read:s.readPaths.split("\n").map(function(p){return p.trim()}).filter(Boolean),write:s.writePaths.split("\n").map(function(p){return p.trim()}).filter(Boolean)};
+    var filesystem;
+    if(s.rootMode==="host"){
+      filesystem={access:paths};
+    }else{
+      var w=resolveDefault();
+      filesystem={
+        rootfs:{source:{kind:"image",digest:imageBy(s.rootImage)?.digest||""},implicit_target:"/"},
+        mounts:s.tools.map(function(id){var im=imageBy(id);return {source:{kind:"image",digest:im?im.digest:""},target:s.mountTargets[id],read_only:true};}),
+        workspace:{source:w?{kind:w.kind,id:w.id,name:w.name}:null,implicit_target:"/workspace",mount_mode:s.workspaceLower?"overlay":"bind",lower_image:s.workspaceLower?imageBy("source").digest:null}
+      };
+    }
+    return {filesystem:filesystem,network:{mode:s.network},
       linux_namespace:Object.assign({},s.namespace),cgroup_v2:s.cgroup?{"memory.max":s.cgroup}:{},seccomp:s.seccomp?{profile:"nession-interactive-v1"}:null};
   }
   function check(){
@@ -110,22 +118,26 @@
     if(s.fixture==="preflight-fail")return "Agent reported a failed preflight (mock).";
     if(s.rootMode==="image"&&nativeStatus("filesystem.composition").state!=="available")return "filesystem.composition unavailable on this Agent.";
     if(s.rootMode==="host"&&nativeStatus("filesystem.access").state!=="available")return "filesystem.access unavailable on this Agent.";
-    if(s.rootMode==="image"&&(s.readPaths.trim()||s.writePaths.trim()))return "Current V1: EROFS root and access.read/write are mutually exclusive.";
-    if(s.tools.length&&s.rootMode!=="image")return "Current V1: tool EROFS mounts require the prepared EROFS root.";
-    if(s.tools.includes("rust")&&s.toolTarget!=="/opt/rust")return "V1 tool target must remain /opt/<name>; this Rust image is constrained to /opt/rust.";
-    if(s.tools.some(function(t){return !imageBy(t)||imageBy(t).status!=="ready";}))return "Selected tool image is not Server Ready.";
+
+
+    if(s.rootMode==="image"){
+      var targets=s.tools.map(function(id){return s.mountTargets[id]});
+      if(targets.some(function(t){return !/^\/opt\/[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(t||"")}))return "Mount targets must use an approved /opt/<name> path.";
+      if(new Set(targets).size!==targets.length)return "Duplicate mount targets are not allowed.";
+    }
+    if(s.rootMode==="image"&&s.tools.some(function(t){return !imageBy(t)||imageBy(t).status!=="ready";}))return "Selected tool image is not Server Ready.";
     if(s.rootMode==="image"&&(!imageBy(s.rootImage)||imageBy(s.rootImage).status!=="ready"))return "Base Runtime image is not Server Ready.";
     var paths=[s.readPaths,s.writePaths].join("\n").split("\n").filter(Boolean);
-    if(paths.some(function(p){return !p.startsWith("/")||p.indexOf("..")>=0}))return "access paths must be absolute normalized host paths.";
+    if(s.rootMode==="host"&&paths.some(function(p){return !p.startsWith("/")||p.indexOf("..")>=0}))return "Access paths must be absolute normalized host paths.";
     if(s.network==="restricted"&&macos())return "This macOS backend does not support restricted network mode.";
     if(s.seccomp&&nativeStatus("seccomp").state!=="available")return "seccomp unavailable on current Agent.";
     if(s.cgroup&&nativeStatus("cgroup_v2").state!=="available")return "cgroup_v2 unavailable on current Agent.";
     if(Object.keys(s.namespace).some(function(k){return s.namespace[k]})&&nativeStatus("linux_namespace").state!=="available")return "linux_namespace unavailable on current Agent.";
     if(s.workspaceLower&&s.rootMode!=="image")return "Workspace EROFS lower requires an EROFS RootFS in current V1.";
-    if(s.workspaceLower&&resolveDefault().kind!=="managed")return "EROFS Overlay Lower requires an Agent-managed writable Workspace; Project Location is bound directly.";
-    if(s.workspaceLower&&macos())return "Workspace Overlay mounting is not supported by this macOS Agent.";
-    if(s.selectedWorkspace!=="auto"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
-    if(s.selectedWorkspace!=="auto"&&currentWorkspace().status!=="available")return "Selected Workspace is not currently available.";
+    if(s.rootMode==="image"&&s.workspaceLower&&resolveDefault().kind!=="managed")return "EROFS Overlay Lower requires an Agent-managed writable Workspace; Project Location is bound directly.";
+    if(s.rootMode==="image"&&s.workspaceLower&&macos())return "Workspace Overlay mounting is not supported by this macOS Agent.";
+    if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
+    if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&currentWorkspace()&&currentWorkspace().status!=="available")return "Selected Workspace is not currently available.";
     return "";
   }
   function ensureAutoWorkspace(){
