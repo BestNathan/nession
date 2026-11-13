@@ -471,3 +471,107 @@ async fn context_relays_per_digest_cache_statuses() {
     assert_eq!(sent["payload"]["cache_digests"][0], base_digest());
     assert_eq!(reply["payload"]["cache_statuses"][0]["state"], "verified");
 }
+
+#[tokio::test]
+async fn preflight_derives_image_selections_from_the_filesystem_declaration() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    insert_ready_image(&h, "image-tool", &tool_digest()).await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.preflight",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "policy": {
+                "enabled": true,
+                "filesystem": {
+                    "access": { "read": [], "write": [] },
+                    "rootfs": { "kind": "image", "digest": base_digest() },
+                    "mounts": [{
+                        "source": { "kind": "image", "digest": tool_digest() },
+                        "target": "/opt/tool",
+                        "read_only": true,
+                    }],
+                    "workspace": { "kind": "auto" },
+                },
+            },
+            "images": [],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.preflight",
+            json!({
+                "success": true,
+                "result": {
+                    "ok": true,
+                    "generation": "gen-1",
+                    "mechanisms": ["filesystem.erofs"],
+                    "errors": [],
+                    "warnings": [],
+                    "catalog": {
+                        "status": "available",
+                        "platform": "linux",
+                        "backend": "linux-bwrap",
+                        "probe_generation": "probe-1",
+                        "source": "agent-host-probe",
+                        "resource_fields": [],
+                        "syscall_fields": [],
+                    },
+                }
+            }),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    let images = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0]["role"], "base");
+    assert_eq!(images[0]["digest"], base_digest());
+    assert_eq!(images[1]["role"], "toolchain");
+    assert_eq!(images[1]["target"], "/opt/tool");
+    assert_eq!(reply["payload"]["ok"], true);
+}
+
+#[tokio::test]
+async fn preflight_refuses_local_root_with_mounts_before_routing() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    let reply = parse_reply(
+        h.handle_message(proto_msg(
+            "server.session.sandbox.preflight",
+            json!({
+                "session_id": "a1:s1",
+                "generation": "gen-1",
+                "policy": {
+                    "enabled": true,
+                    "filesystem": {
+                        "access": { "read": [], "write": [] },
+                        "rootfs": { "kind": "local" },
+                        "mounts": [{
+                            "source": { "kind": "image", "digest": tool_digest() },
+                            "target": "/opt/tool",
+                            "read_only": true,
+                        }],
+                    },
+                },
+                "images": [],
+            }),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_eq!(reply["payload"]["ok"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Local cannot carry"));
+}
