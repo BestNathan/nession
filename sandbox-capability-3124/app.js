@@ -74,16 +74,17 @@
     var id="help-"+Math.abs(hash).toString(36);
     var open=s.tip===id;
     return '<span class="cand-tip-wrap" data-open="'+open+'">'+
-      '<button type="button" class="cand-tip-trigger" data-action="hint:'+id+'" aria-label="About '+h(name)+'" aria-expanded="'+open+'" aria-controls="'+id+'">ⓘ</button>'+
+      '<button type="button" class="cand-tip-trigger" data-action="hint:'+id+'" aria-label="About '+h(name)+'" aria-expanded="'+open+'" aria-controls="'+id+'">'+
+        '<span class="cand-keyword">'+h(name)+'</span><span class="cand-tip-symbol" aria-hidden="true">ⓘ</span></button>'+
       '<span role="tooltip" class="cand-tip-body" id="'+id+'">'+h(description)+'</span></span>';
   }
-  function meta(label,value,desc){return '<div class="cand-fact"><span>'+h(label)+(desc?hint(label,desc):"")+'</span><strong>'+h(value)+'</strong></div>';}
+  function meta(label,value,desc){return '<div class="cand-fact"><span>'+(desc?hint(label,desc):h(label))+'</span><strong>'+h(value)+'</strong></div>';}
   function card(title,desc,content){
-    return '<section class="cand-card"><div class="cand-card-head"><h3>'+title+(desc?hint(title,desc):"")+'</h3></div>'+(content||"")+'</section>';
+    return '<section class="cand-card"><div class="cand-card-head"><h3>'+(desc?hint(title,desc):title)+'</h3></div>'+(content||"")+'</section>';
   }
   function alert(text,kind){return '<p class="cand-alert '+(kind||"info")+'" role="'+(kind==="danger"?"alert":"status")+'">'+h(text)+'</p>';}
-  function sectionHead(title,sub,right){return '<div class="cand-section-head"><div><h2>'+title+(sub?hint(title,sub):"")+'</h2></div>'+(right||"")+'</div>';}
-  function explainSupport(key){var x=nativeStatus(key);return '<div class="cand-support">'+statusChip(x.state)+' <code>'+h(key)+'</code>'+hint(key,x.reason)+'</div>';}
+  function sectionHead(title,sub,right){return '<div class="cand-section-head"><div><h2>'+(sub?hint(title,sub):title)+'</h2></div>'+(right||"")+'</div>';}
+  function explainSupport(key){var x=nativeStatus(key);return '<div class="cand-support">'+statusChip(x.state)+' '+hint(key,x.reason)+'</div>';}
   function defaultWorkspaceHint(){
     if(s.session==="sandbox-review")return "Project Nession 在当前 Agent 的既有目录可默认使用。";
     return "无当前 Agent 的 Project Location；首次 Enter 时会按 Session 名自动分配 Managed Workspace。";
@@ -208,16 +209,15 @@
     }).join("");
     var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
     return (s.notice?alert(s.notice):"")+sectionHead("Agent Workspaces","可命名、可发现、可复用。Workspace 资源数据由当前 Agent 管理。")+
-      card("Default workspace","Explicit reference → matching Project Location → get_or_create(session.name).",
-        hint("Default workspace",defaultWorkspaceHint())+
+      card("Default workspace","Explicit reference → matching Project Location → get_or_create(session.name). "+defaultWorkspaceHint(),
         '<div class="cand-actions">'+action(auto?"Reuse “"+h(s.session)+"”":"Allocate “"+h(s.session)+"”","ws-auto","",!online()||s.inside)+
         action("Configure Filesystem","area:policies")+'</div>')+
       card("Create Workspace","Name is a lookup alias; physical storage is keyed by an opaque Workspace ID.",
         '<div class="cand-inline"><input aria-label="Managed Workspace name" data-field="newWorkspaceName" placeholder="e.g. experiment-02" value="'+h(s.newWorkspaceName)+'"'+(!isEditable()?' disabled':'')+'>'+
         action("Create / Reuse","ws-create","primary",!online()||s.inside)+'</div>')+
       '<div class="cand-list">'+rows+'</div>'+
-      (s.deletePending?alert("Delete managed Workspace “"+(s.workspaces.find(function(w){return w.id===s.deletePending;})||{}).name+"”? Data removal is explicit and irreversible in real product.","danger")+
-        '<div class="cand-actions">'+action("Cancel","ws-delete-cancel")+action("Confirm simulated delete","ws-delete-confirm","danger")+'</div>':"");
+      (s.deletePending?alert("Delete Workspace “"+(s.workspaces.find(function(w){return w.id===s.deletePending;})||{}).name+"”? This deletes its stored data.","danger")+
+        '<div class="cand-actions">'+action("Cancel","ws-delete-cancel")+action("Delete Workspace","ws-delete-confirm","danger")+'</div>':"");
   }
   function workspaceDetail(){
     var w=currentWorkspace();
@@ -230,7 +230,11 @@
       action("Back to list","sub:workspaces:list")+'</div>');
   }
   function workspacesPanel(){return layout("workspaces",s.sub.workspaces==="details"?workspaceDetail():workspaceList());}
-  function field(label,control,help){return '<label class="cand-field"><span>'+label+(help?hint(label,help):"")+'</span>'+control+'</label>';}
+  function field(label,control,help){
+    // Help buttons must not be nested inside labels wrapping another control.
+    if(!/aria-label=/.test(control))control=control.replace(/^<(input|textarea|select)(\s|>)/,'<$1 aria-label="'+h(label)+'"$2');
+    return '<div class="cand-field"><div class="cand-field-label">'+(help?hint(label,help):h(label))+'</div>'+control+'</div>';
+  }
   function selectField(key,options,disabled){
     return '<select data-field="'+key+'" aria-label="'+key+'"'+(disabled?' disabled':'')+'>'+options.map(function(o){
       return '<option value="'+h(o[0])+'"'+(String(s[key])===String(o[0])?' selected':'')+'>'+h(o[1])+'</option>';
@@ -256,9 +260,9 @@
     }).join("")+'</select>';
     var workspace=card("Workspace","An Agent Workspace is mounted at /workspace. Managed volumes can be reused; Project Location remains user-owned.",
       field("Workspace source",wsSelect,"Explicit choice > Project's current Agent location > named managed get-or-create")+
-      '<label class="cand-check"><input type="checkbox" data-workspace-lower'+(s.workspaceLower?" checked":"")+(locked||!w||w.kind!=="managed"?" disabled":"")+'> Use Project Source EROFS as read-only lower + durable writable Overlay upper</label>'+
+      '<label class="cand-check"><input type="checkbox" data-workspace-lower'+(s.workspaceLower?" checked":"")+(locked||!w||w.kind!=="managed"?" disabled":"")+'> EROFS lower + Overlay</label>'+
       (s.workspaceLower?'<div class="cand-map"><div><code>Lower</code><span>nession-source · '+short(imageBy("source").digest)+'</span></div><div><code>Upper</code><span>Managed Workspace · rw</span></div></div>':"")+
-      hint("EROFS lower + Overlay","The immutable Project image is read-only; writes go to the Agent-managed persistent upper/work directories. Lower digest is pinned.")+
+      '<div class="cand-small-note">'+hint("Overlay details","The Project image is immutable; Agent-managed upper/work directories preserve changes and pin the lower digest.")+'</div>'+
       '<div class="cand-facts">'+meta("Resolved source",w?w.name:"—")+meta("Map target","/workspace (implicit)")+meta("Owner",w&&w.kind==="project_location"?"External / Project Location":"Agent Workspace Manager")+'</div>'+
       '<div class="cand-actions">'+action("Manage Workspaces","area:workspaces")+'</div>');
     var access=card("Access","Read/write always map Agent path P to the identical Sandbox path P; they never accept a separate target.",
@@ -280,7 +284,7 @@
   function networkPanel(){
     var locked=!isEditable();
     return sectionHead("Network","Stable cross-platform contract. Backends expose only measured modes.")+
-      card("Network isolation","On macOS this mock supports allow/deny, not restricted.",
+      card("Network isolation","Current Agent exposes supported modes; macOS Seatbelt does not support restricted.",
         explainSupport("network")+
         field("Network mode",selectField("network",[["allow","Allow"],["deny","Deny"],["restricted","Restricted (proxy rules)"]],locked),
           "Ingress remains denied in this V1 design.")+
@@ -296,7 +300,7 @@
     if(key==="cgroup_v2")content+=field("memory.max · native cgroup value",'<input data-field="cgroup" value="'+h(s.cgroup)+'" placeholder="2147483648"'+(locked?' disabled':'')+'>',
       "Raw Linux controller value; partially delegated hosts may lack other fields.");
     if(key==="seccomp")content+='<label class="cand-check"><input type="checkbox" data-seccomp'+(s.seccomp?" checked":"")+(locked?" disabled":"")+'> Enable registered nession-interactive-v1 profile</label>';
-    if(locked)content+=hint(title,"This Agent has not confirmed support for the selected capability. Editing and Enter remain disabled; no automatic fallback.");
+    if(locked)content+=alert(nativeStatus(key).reason,"danger");
     return sectionHead(title,"Native capability key, not Process/Resource/Syscall group")+
       card(title+" policy","Current Agent controls support and allowed values.",content);
   }
