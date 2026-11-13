@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7c51363c86815e15152b622c4cf03a968f8a5e9515944505998aa7b6a05ec8a8",
+  "run_id": 43339553038,
+  "run_attempt": 1,
+  "issue": 3387,
+  "criterion": "SC-01",
+  "criterion_text": "With controlled deferred list requests A and B, B's newer success remains authoritative when A later succeeds or fails. Latest empty list, latest failure, loading and retry remain truthful. A response from a superseded transport generation cannot commit after reconnect.",
+  "stage": "staging",
+  "target_sha": "94cc40547aa7affa08a93ff677c09a391f97ed00",
+  "contract_sha256": "8e7ccd90f03972a3734c17a7f7bd80129f969a05ddbc4957b5ea27dd01c1ca3e",
+  "case_revision": "94cc40547aa7affa08a93ff677c09a391f97ed00",
+  "case_tree_sha": "4ff85f2d7315d30f9091efbf1b2eebc009fe27e2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-13T00:49:33.931Z",
+  "finished_at": "2026-11-13T00:49:35.556Z",
+  "duration_ms": 1625,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Only the latest Project list read from the current transport generation commits Project list state",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 94cc40547aa7affa08a93ff677c09a391f97ed00: a newer Project list refresh stayed authoritative while an older success and an older failure settled late; newest empty, newest failure, retry and loading stayed truthful; a superseded transport generation and an uninstalled transport could not commit their late replies"
+        }
+      ],
+      "duration_ms": 1558,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43339553038,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "94cc40547aa7affa08a93ff677c09a391f97ed00",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43339553038",
+    "record_path": "runs/2026-11-13/43339553038-1/3387/SC-01.json",
+    "source_result_sha256": "660c0027cf250b89d45b303ccbb18e901005b96074b51d1843afd880e274af1a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43339553038-1",
+    "sha256": "660c0027cf250b89d45b303ccbb18e901005b96074b51d1843afd880e274af1a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43339553038",
+    "durability": "time-limited; object archival not configured"
+  }
+}
