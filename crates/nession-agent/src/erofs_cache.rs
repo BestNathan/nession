@@ -7,11 +7,14 @@
 //! Agent identity.
 
 pub use nession_erofs::cache::{
-    identity_root, CacheDiagnostics, CacheObservation, CachedImage, DownloadGrant, ErofsCache,
-    PinGuard, ProcMountsProbe, StorageProbe, IDENTITY_NAMESPACE_DIR, PARTIAL_RETENTION,
-    TRANSFER_CHUNK_BYTES,
+    identity_root, CacheDiagnostics, CacheObservation, CachePhase, CacheProgress, CachedImage,
+    DownloadGrant, ErofsCache, PinGuard, ProcMountsProbe, StorageProbe, IDENTITY_NAMESPACE_DIR,
+    PARTIAL_RETENTION, TRANSFER_CHUNK_BYTES,
 };
-use nession_protocol::contracts::image::v1::{ImageCacheState, ImageCacheStatus};
+use nession_protocol::contracts::image::v1::{
+    ImageCacheObservation, ImageCachePhase, ImageCacheStatus, IMAGE_CACHE_OBSERVATION_VERSION,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ResolvedErofsStorage;
 
@@ -36,25 +39,58 @@ pub async fn open_resolved(
     .await
 }
 
-/// Project one cached digest into the Web-safe Agent readiness vocabulary.
+/// Project one digest into the authoritative per-digest observation (#3412).
 ///
-/// This is an observation, never a reservation: it does not download, repair
-/// or evict. Server Ready is a different fact and is not inferred here.
-pub async fn status(cache: &ErofsCache, digest: &str) -> ImageCacheStatus {
-    let (state, detail) = match cache.observe(digest).await {
-        CacheObservation::Verified => (ImageCacheState::Verified, None),
-        CacheObservation::Preparing => (
-            ImageCacheState::Preparing,
-            Some("a partial download exists; Enter will resume it".to_string()),
-        ),
-        CacheObservation::Absent => (ImageCacheState::Absent, None),
-        CacheObservation::Failed { detail } => (ImageCacheState::Failed, Some(detail)),
-    };
-    ImageCacheStatus {
+/// This is read-only: it never downloads, repairs or evicts. A surviving
+/// `.part` is `resumable`, not `downloading`; only an in-memory worker is
+/// active. Server Ready is a different fact and is not inferred here.
+pub async fn observation(cache: &ErofsCache, digest: &str) -> ImageCacheObservation {
+    let progress = cache.observe_progress(digest).await;
+    ImageCacheObservation {
+        contract_version: IMAGE_CACHE_OBSERVATION_VERSION,
         digest: digest.to_string(),
-        state,
-        detail,
+        phase: match progress.phase {
+            CachePhase::Absent => ImageCachePhase::Absent,
+            CachePhase::Resumable => ImageCachePhase::Resumable,
+            CachePhase::Downloading => ImageCachePhase::Downloading,
+            CachePhase::Verifying => ImageCachePhase::Verifying,
+            CachePhase::Verified => ImageCachePhase::Verified,
+            CachePhase::Failed => ImageCachePhase::Failed,
+        },
+        downloaded_bytes: progress.downloaded_bytes,
+        total_bytes: progress.total_bytes,
+        active: progress.active,
+        updated_at: unix_seconds(progress.updated_at),
+        detail: progress.detail,
     }
+}
+
+/// The observation for an Agent with no configured EROFS cache.
+pub fn unavailable_observation(digest: &str) -> ImageCacheObservation {
+    ImageCacheObservation {
+        contract_version: IMAGE_CACHE_OBSERVATION_VERSION,
+        digest: digest.to_string(),
+        phase: ImageCachePhase::Unavailable,
+        downloaded_bytes: None,
+        total_bytes: None,
+        active: false,
+        updated_at: unix_seconds(SystemTime::now()),
+        detail: Some("this Agent has no EROFS cache configured".to_string()),
+    }
+}
+
+/// Project one cached digest into the older Web-safe readiness vocabulary.
+///
+/// `preparing` covers resumable, downloading and verifying; only a verified
+/// observation maps to `verified`.
+pub async fn status(cache: &ErofsCache, digest: &str) -> ImageCacheStatus {
+    ImageCacheStatus::from_observation(&observation(cache, digest).await)
+}
+
+fn unix_seconds(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -63,6 +99,7 @@ mod tests {
     use httptest::http::Response;
     use httptest::{matchers::*, Expectation, Server};
     use nession_erofs::digest_of_bytes;
+    use nession_protocol::contracts::image::v1::ImageCacheState;
 
     #[tokio::test]
     async fn status_distinguishes_absent_verified_and_preparing_without_mutating() {
@@ -79,6 +116,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status(&cache, &digest).await.state, ImageCacheState::Absent);
+        let absent = observation(&cache, &digest).await;
+        assert_eq!(absent.contract_version, IMAGE_CACHE_OBSERVATION_VERSION);
+        assert_eq!(absent.phase, ImageCachePhase::Absent);
+        assert!(!absent.active);
         let grant = DownloadGrant {
             url: server.url(&format!("/blobs/{digest}")).to_string(),
             token: "scoped-token".to_string(),
@@ -87,6 +128,13 @@ mod tests {
         let verified = status(&cache, &digest).await;
         assert_eq!(verified.state, ImageCacheState::Verified);
         assert!(verified.detail.is_none());
+        let verified_observation = observation(&cache, &digest).await;
+        assert_eq!(verified_observation.phase, ImageCachePhase::Verified);
+        assert_eq!(
+            verified_observation.downloaded_bytes,
+            Some(bytes.len() as u64)
+        );
+        assert!(!verified_observation.active);
 
         let other = format!("sha256:{}", "a".repeat(64));
         let partial = cache.partial_path(&other).unwrap();
@@ -94,6 +142,10 @@ mod tests {
         let preparing = status(&cache, &other).await;
         assert_eq!(preparing.state, ImageCacheState::Preparing);
         assert!(preparing.detail.as_deref().unwrap().contains("partial"));
+        let resumable = observation(&cache, &other).await;
+        assert_eq!(resumable.phase, ImageCachePhase::Resumable);
+        assert_eq!(resumable.downloaded_bytes, Some(b"partial".len() as u64));
+        assert!(!resumable.active);
         assert_eq!(
             status(&cache, "sha256:not-a-digest").await.state,
             ImageCacheState::Failed

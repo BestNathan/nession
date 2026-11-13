@@ -4618,31 +4618,47 @@ core_routes!(agent, msg, responses;
                                 (false, None, Some(format!("{e:#}")))
                             }
                         };
-                    let cache_statuses = if payload.cache_digests.is_empty() {
-                        Vec::new()
-                    } else if let Some(cache) = agent
-                        .tmux
-                        .sandbox_runtime()
-                        .and_then(|runtime| runtime.erofs_cache())
-                    {
-                        let mut statuses = Vec::with_capacity(payload.cache_digests.len());
-                        for digest in &payload.cache_digests {
-                            statuses.push(crate::erofs_cache::status(&cache, digest).await);
-                        }
-                        statuses
-                    } else {
-                        payload
-                            .cache_digests
-                            .iter()
-                            .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
-                                digest: digest.clone(),
-                                state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
-                                detail: Some(
-                                    "this Agent has no EROFS cache configured".to_string(),
-                                ),
-                            })
-                            .collect()
-                    };
+                    let (cache_statuses, cache_observations) =
+                        if payload.cache_digests.is_empty() {
+                            (Vec::new(), Vec::new())
+                        } else if let Some(cache) = agent
+                            .tmux
+                            .sandbox_runtime()
+                            .and_then(|runtime| runtime.erofs_cache())
+                        {
+                            let mut statuses = Vec::with_capacity(payload.cache_digests.len());
+                            let mut observations =
+                                Vec::with_capacity(payload.cache_digests.len());
+                            for digest in &payload.cache_digests {
+                                let observation =
+                                    crate::erofs_cache::observation(&cache, digest).await;
+                                statuses.push(
+                                    nession_protocol::contracts::image::v1::ImageCacheStatus::from_observation(
+                                        &observation,
+                                    ),
+                                );
+                                observations.push(observation);
+                            }
+                            (statuses, observations)
+                        } else {
+                            let statuses = payload
+                                .cache_digests
+                                .iter()
+                                .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
+                                    digest: digest.clone(),
+                                    state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
+                                    detail: Some(
+                                        "this Agent has no EROFS cache configured".to_string(),
+                                    ),
+                                })
+                                .collect();
+                            let observations = payload
+                                .cache_digests
+                                .iter()
+                                .map(|digest| crate::erofs_cache::unavailable_observation(digest))
+                                .collect();
+                            (statuses, observations)
+                        };
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
@@ -4654,6 +4670,7 @@ core_routes!(agent, msg, responses;
                             "context": context,
                             "error": error,
                             "cache_statuses": cache_statuses,
+                            "cache_observations": cache_observations,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
