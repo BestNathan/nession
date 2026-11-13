@@ -117,7 +117,9 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
   });
 
   test('Workspace observes a durable build stage, cancels and retries it', async ({ page }) => {
-    await page.goto('/#/fixture/workspace?capability=images&images=lifecycle');
+    await page.goto('/#/fixture/workspace?capability=sandbox&images=lifecycle');
+    await page.getByTestId('sandbox-section-images').click();
+    await page.getByTestId('images-section-builds').click();
     await expect(page.getByTestId('images-builds')).toBeVisible();
     await expect(page.getByTestId('image-build-row')).toHaveCount(4);
 
@@ -145,7 +147,9 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
     // record is still canceled and no Project reference was rebound.
     await page.goto('/#/fixture?projects=canonical');
     await expect(page.getByTestId('project-detail')).toHaveCount(0);
-    await page.goto('/#/fixture/workspace?capability=images&images=lifecycle');
+    await page.goto('/#/fixture/workspace?capability=sandbox&images=lifecycle');
+    await page.getByTestId('sandbox-section-images').click();
+    await page.getByTestId('images-section-builds').click();
     await expect(
       page.locator('[data-build-id="build-fixture-running"]').getByTestId('image-build-status'),
     ).toHaveText('Canceled');

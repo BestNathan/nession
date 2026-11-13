@@ -271,6 +271,7 @@ test.describe('Web 1180', () => {
       'Auto by Session name',
     );
 
+    await page.getByTestId('sandbox-section-overview').click();
     await page.getByTestId('sandbox-preflight').click();
     await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
     await expect(page.getByTestId('sandbox-enter')).toBeEnabled();
