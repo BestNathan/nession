@@ -419,7 +419,45 @@ function selfTest() {
       stdio: 'inherit',
     });
   }
+  const live = new Map([
+    ['agent-sc-acceptance.yml', 'options:\\n  - pr\\n  - staging\\n'],
+    ['acceptance-orchestrator.yml', 'stage: pr\\n'],
+    ['acceptance-case-smoke.yml', './e2e/run acceptance-batch --stage pr\\n'],
+    ['acceptance-cases.yml', 'options: [staging, post-merge, deployed]\\n'],
+  ]);
+  assert.deepEqual(auditCanonicalPrWorkflowTiming(live), []);
+  const stale = new Map(live);
+  stale.set('acceptance-case-smoke.yml', 'run with pre-merge');
+  assert.match(auditCanonicalPrWorkflowTiming(stale).join('\\n'), /deprecated PR timing/);
+  assert.match(auditCanonicalPrWorkflowTiming(new Map()).join('\\n'), /workflow missing/);
   console.log('workflow-conventions: standard and dual-orphan positive/negative scenarios passed');
+}
+
+// #3388: never reintroduce the retired PR timing spelling into live workflow
+// dispatch. Historical immutable Run/Issue readers are owned outside YAML.
+export function auditCanonicalPrWorkflowTiming(files) {
+  const required = [
+    'agent-sc-acceptance.yml',
+    'acceptance-orchestrator.yml',
+    'acceptance-case-smoke.yml',
+    'acceptance-cases.yml',
+  ];
+  const errors = [];
+  for (const file of required) {
+    const content = files.get(file);
+    if (content == null) errors.push(file + ': canonical PR Acceptance workflow missing');
+    else if (/pre-merge/i.test(content))
+      errors.push(file + ': deprecated PR timing alias in live workflow; use pr');
+  }
+  if (!/\bstage: pr\b/.test(files.get('acceptance-orchestrator.yml') ?? ''))
+    errors.push('Acceptance Orchestrator must dispatch stage: pr');
+  if (!/--stage pr\b/.test(files.get('acceptance-case-smoke.yml') ?? ''))
+    errors.push('PR Case Smoke must use --stage pr');
+  if (!/- pr\b/.test(files.get('agent-sc-acceptance.yml') ?? ''))
+    errors.push('Agent Acceptance workflow must expose pr stage');
+  if (!/options: \[staging, post-merge, deployed\]/.test(files.get('acceptance-cases.yml') ?? ''))
+    errors.push('Formal Cases must not expose a PR stage selection');
+  return errors;
 }
 
 function check() {
@@ -434,8 +472,9 @@ function check() {
   const audit = auditWorkflows(files, CATALOG, {
     trustedSources: sources, ownerDocs, requireTargetNames: true, documents,
   });
-  if (!audit.ok) {
-    for (const error of audit.errors) console.error('✗ ' + error);
+  const errors = [...audit.errors, ...auditCanonicalPrWorkflowTiming(files)];
+  if (errors.length) {
+    for (const error of errors) console.error('✗ ' + error);
     process.exitCode = 1;
     return;
   }

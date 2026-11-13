@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateAcceptancePlan, isProofEligible, deploymentProofEligible } from './acceptance-plan.mjs';
+import { validateAcceptancePlan, isProofEligible, deploymentProofEligible, canonicalAcceptanceStage } from './acceptance-plan.mjs';
 import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
@@ -20,10 +20,10 @@ import {
   validateRequirementBody,
 } from './requirement-acceptance.mjs';
 
-const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+const STAGES = new Set(['pr', 'staging', 'post-merge']);
 
 function stageOf(value) {
-  const stage = String(value ?? '').trim().toLowerCase();
+  const stage = canonicalAcceptanceStage(String(value ?? '').trim().toLowerCase());
   if (!STAGES.has(stage)) throw new Error('unsupported acceptance stage: ' + (value || '(empty)'));
   return stage;
 }
@@ -41,7 +41,7 @@ function parseContract(body) {
   for (const criterion of success.criteria.values()) {
     const row = report.rows.get(criterion.id);
     if (!row) errors.push(criterion.id + ' has no Acceptance Report row');
-    else if (!STAGES.has(row.stage)) errors.push(criterion.id + ' has unsupported acceptance stage ' + row.stage);
+    else if (!STAGES.has(canonicalAcceptanceStage(row.stage))) errors.push(criterion.id + ' has unsupported acceptance stage ' + row.stage);
   }
   for (const row of report.rows.values()) {
     if (!success.criteria.has(row.id)) errors.push('Acceptance Report contains unknown criterion ' + row.id);
@@ -59,7 +59,11 @@ function contractDigest(contract) {
     .map((criterion) => ({
       id: criterion.id,
       text: criterion.text,
-      stage: contract.rows.get(criterion.id).stage,
+      // Maintain the pre-v3 digest identity for previously authored PR Plans
+      // without emitting the old stage in new acceptance contexts or records.
+      stage: contract.plan?.get(criterion.id)?.when === 'pr' &&
+        contract.rows.get(criterion.id).stage === 'pr'
+        ? 'pre-merge' : contract.rows.get(criterion.id).stage,
       ...(contract.plan ? {
         acceptance_plan: contract.plan.get(criterion.id),
       } : {}),
@@ -90,14 +94,14 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     return isProofEligible(entry, normalizedStage, options.method);
   };
   const criteria = [...contract.criteria.values()]
-    .filter((criterion) => contract.rows.get(criterion.id).stage === normalizedStage)
+    .filter((criterion) => canonicalAcceptanceStage(contract.rows.get(criterion.id).stage) === normalizedStage)
     .filter((criterion) => eligible(contract.plan?.get(criterion.id)))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
         criterion: criterion.id,
         text: criterion.text,
-        stage: row.stage,
+        stage: canonicalAcceptanceStage(row.stage),
         current_result: row.result,
         current_evidence: row.evidence,
       };
@@ -150,7 +154,7 @@ export function normalizeAcceptanceCaseResult(context, record, source = 'case-ru
   const criterion = String(record.criterion ?? '').trim().toUpperCase();
   if (!/^SC-\d{2,}$/.test(criterion)) throw new Error('invalid Case criterion');
   if (Number(record.issue) !== Number(context.issue.number)) throw new Error('Case result Issue does not match Acceptance context');
-  if (String(record.stage) !== String(context.stage)) throw new Error('Case result stage does not match Acceptance context');
+  if (canonicalAcceptanceStage(record.stage) !== context.stage) throw new Error('Case result stage does not match Acceptance context');
   if (String(record.contract_sha256) !== String(context.contract_sha256)) {
     throw new Error('Case result contract digest does not match Acceptance context');
   }
@@ -297,7 +301,7 @@ function originalStagingPrRecovery(body, normalized, criterion, currentEvidence,
     'f7e2d008ed497d85554b2aa88801f4d86177f873 head='+head+' -->';
   const currentRef=/\bref ([0-9a-f]{40});/.exec(String(currentEvidence ?? ''))?.[1];
   return normalized.issue===2984 && criterion==='SC-01' &&
-    normalized.stage==='pre-merge' && normalized.target_ref===head &&
+    ['pr', 'pre-merge'].includes(normalized.stage) && normalized.target_ref===head &&
     normalized.run_id===42461722784 &&
     normalized.source==='agent-qwen' && result?.result==='Pass' &&
     body.includes(marker) && currentRef!=null && currentRef!==head &&
@@ -314,7 +318,7 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   if (!Array.isArray(normalized.criteria)) throw new Error('acceptance result criteria must be an array');
 
   const stageExpected = [...contract.criteria.values()]
-    .filter((criterion) => contract.rows.get(criterion.id).stage === stage)
+    .filter((criterion) => canonicalAcceptanceStage(contract.rows.get(criterion.id).stage) === stage)
     .map((criterion) => criterion.id);
   const expected = Array.isArray(normalized.selected_criteria)
     ? normalized.selected_criteria.map((id) => String(id).trim().toUpperCase())
@@ -347,7 +351,7 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
     if (resultMap.has(result.criterion)) throw new Error('duplicate criterion ' + result.criterion);
     const row = contract.rows.get(result.criterion);
     if (!row) throw new Error('unknown criterion ' + result.criterion);
-    if (row.stage !== stage) throw new Error(result.criterion + ' belongs to ' + row.stage + ', not requested stage ' + stage);
+    if (canonicalAcceptanceStage(row.stage) !== stage) throw new Error(result.criterion + ' belongs to ' + row.stage + ', not requested stage ' + stage);
     if (!expected.includes(result.criterion)) throw new Error('criterion ' + result.criterion + ' was not selected for this partial acceptance result');
     resultMap.set(result.criterion, result);
   }
@@ -403,7 +407,7 @@ function implicitCiEvidenceFile(outFile) {
 // its owner-approved E2E digest, native PR merge and four original check Runs.
 // Do not turn on the full post-merge collector for ordinary PRs.
 function originalStagingPrEvidence(issueNumber, stage, targetRef, outFile, explicitFile) {
-  if (Number(issueNumber) !== 2984 || stage !== 'pre-merge' ||
+  if (Number(issueNumber) !== 2984 || !['pr', 'pre-merge'].includes(stage) ||
       targetRef !== '91af0907d508224d55e469adfa6442f440b70432' ||
       explicitFile !== '-') return null;
   const output=outFile+'.original-staging-pr.json';

@@ -33,6 +33,10 @@ jobs:
       comment_id: ${{ steps.route.outputs.comment_id }}
       target_sha: ${{ steps.route.outputs.target_sha }}
       target_ref: ${{ steps.route.outputs.target_ref }}
+      criterion: ${{ steps.route.outputs.criterion }}
+      stage: ${{ steps.route.outputs.stage }}
+      platform: ${{ steps.route.outputs.platform }}
+      runtime_profile: ${{ steps.route.outputs.runtime_profile }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +50,7 @@ jobs:
           node scripts/github-comment-command.mjs self-test
           node scripts/github-comment-source.mjs self-test
           node scripts/github-comment-router.mjs self-test
+          node scripts/github-comment-case-request.mjs self-test
       - name: Resolve original comment and immutable target
         id: route
         env:
@@ -78,4 +83,8 @@ jobs:
           EXPECTED_COMMENT: ${{ needs.resolve.outputs.comment_id }}
           EXPECTED_SHA: ${{ needs.resolve.outputs.target_sha }}
           EXPECTED_REF: ${{ needs.resolve.outputs.target_ref }}
+          EXPECTED_CRITERION: ${{ needs.resolve.outputs.criterion }}
+          EXPECTED_STAGE: ${{ needs.resolve.outputs.stage }}
+          EXPECTED_PLATFORM: ${{ needs.resolve.outputs.platform }}
+          EXPECTED_RUNTIME_PROFILE: ${{ needs.resolve.outputs.runtime_profile }}
         run: node scripts/github-comment-router.mjs dispatch

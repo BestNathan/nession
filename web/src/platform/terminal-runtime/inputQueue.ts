@@ -297,6 +297,30 @@ export class PendingInputQueue {
   }
 
   /**
+   * The whole pending run as one sequenced frame, or `null` when the queue has
+   * no epoch to number it against.
+   *
+   * The chunks are contiguous by construction — `pending[i]` is chunk
+   * `cursor + 1 + i` — so concatenating their data is exactly the byte run
+   * between `seqStart` and `seqEnd`. The Agent writes a frame whole and
+   * advances its cursor to `seqEnd` (#1307), so one frame replaces N frames
+   * without moving a byte or changing a position (#3397).
+   *
+   * `null` for an empty queue as well: there is nothing to hand over, and a
+   * frame describing a position it does not carry would be worse than none.
+   */
+  outboundFrame(): { data: string; seqStart: number; seqEnd: number } | null {
+    if (!this.identity || this.chunks.length === 0) {
+      return null;
+    }
+    return {
+      data: this.chunks.map((chunk) => chunk.data).join(''),
+      seqStart: this.cursor + 1,
+      seqEnd: this.cursor + this.chunks.length,
+    };
+  }
+
+  /**
    * Take everything and forget it, for a transport that cannot acknowledge.
    *
    * The relay path, until the Server can preserve a sequence through its 16 ms

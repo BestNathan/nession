@@ -84,6 +84,37 @@ describe('PendingInputQueue', () => {
     });
   });
 
+  describe('the coalesced frame projection (#3397)', () => {
+    /**
+     * One frame for the whole run above the cursor: the bytes are exactly the
+     * chunks in order, and the range is exactly the positions they occupy.
+     * Concatenating is lossless by construction — the Agent writes a frame
+     * whole and advances to `seqEnd`.
+     */
+    it('joins the whole pending run into one frame above the cursor', () => {
+      const { queue } = queueWithClock();
+      queue.reconcile(identity());
+      queue.accept('a');
+      queue.accept('\x1b[<35;20;1M');
+      queue.accept('b');
+      queue.acknowledge(7, 1);
+
+      expect(queue.outboundFrame()).toEqual({
+        data: '\x1b[<35;20;1Mb',
+        seqStart: 2,
+        seqEnd: 3,
+      });
+    });
+
+    /** No epoch or no chunks means no position to state, so no frame either. */
+    it('has no frame before an epoch or with an empty run', () => {
+      const { queue } = queueWithClock();
+      expect(queue.outboundFrame()).toBeNull();
+      queue.reconcile(identity());
+      expect(queue.outboundFrame()).toBeNull();
+    });
+  });
+
   describe('acknowledgement', () => {
     it('drops exactly the acknowledged prefix', () => {
       const { queue } = queueWithClock();

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ConnectionManager, INPUT_QUEUE_BOUNDS } from '@/platform/terminal-runtime/ConnectionManager';
+import { ConnectionManager, INPUT_COALESCE_WINDOW_MS, INPUT_QUEUE_BOUNDS } from '@/platform/terminal-runtime/ConnectionManager';
 import type { AgentError, TerminalAgentApi, TerminalInputAck, TerminalResizeFrame } from '@/product/terminal';
 import type { ResumeReply } from '@/platform/terminal-runtime/streamReconciler';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
@@ -1131,16 +1131,101 @@ describe('ConnectionManager', () => {
       expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
 
       cm.send('p'.repeat(500 * 1024));
+      // The paste joins the pending keystroke and leaves at the next window
+      // boundary as one frame covering both positions (#3397).
+      vi.advanceTimersByTime(INPUT_COALESCE_WINDOW_MS);
 
-      // Three frames, not two: the paste was admitted, so the flush offered the
-      // whole unacknowledged run — the keystroke that was already pending, then
-      // the paste at the position after it. What is asserted is that the paste
-      // is *on the wire* at all, which is the half the bound decides.
+      // Two frames: the keystroke that left immediately, then the coalesced
+      // run carrying that keystroke and the paste. What is asserted is that the
+      // paste is *on the wire* at all, which is the half the bound decides.
       const calls = vi.mocked(harness.api.sendInput).mock.calls;
-      expect(calls).toHaveLength(3);
-      const [, pasted] = calls[2];
-      expect(pasted).toHaveLength(500 * 1024);
+      expect(calls).toHaveLength(2);
+      const [, coalesced] = calls[1];
+      expect(coalesced).toHaveLength(1 + 500 * 1024);
+      expect(coalesced.endsWith('p'.repeat(500 * 1024))).toBe(true);
       cm.dispose();
+    });
+
+    describe('coalesced input framing (#3397)', () => {
+      it('sends a pending run as one range frame with every byte', () => {
+        const { harness, cm } = seeded({ appliedThrough: 0 });
+        cm.send('a'); // empty queue: leading edge, no window delay
+        cm.send('b');
+        cm.send('c');
+        expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(INPUT_COALESCE_WINDOW_MS);
+
+        expect(vi.mocked(harness.api.sendInput).mock.calls).toEqual([
+          ['test', 'a', { inputEpoch: 7, seqStart: 1, seqEnd: 1 }],
+          // The whole contiguous run above the cursor, one frame. The bytes are
+          // exactly the chunks in order; the range says which positions they
+          // occupy, and the Agent advances to seqEnd after writing them whole.
+          ['test', 'abc', { inputEpoch: 7, seqStart: 1, seqEnd: 3 }],
+        ]);
+        cm.dispose();
+      });
+
+      it('does not delay a lone chunk behind the window', () => {
+        const { harness, cm } = seeded();
+        cm.send('a');
+        expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(INPUT_COALESCE_WINDOW_MS);
+        expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+        cm.dispose();
+      });
+
+      it('bounds a stalled burst by the window instead of re-offering per event', () => {
+        const { harness, cm } = seeded();
+        const events = 64;
+        const interval = 4;
+        for (let i = 0; i < events; i += 1) {
+          cm.send('x');
+          vi.advanceTimersByTime(interval);
+        }
+        vi.advanceTimersByTime(INPUT_COALESCE_WINDOW_MS);
+
+        const calls = vi.mocked(harness.api.sendInput).mock.calls as unknown as Array<
+          [string, string, { inputEpoch: number; seqStart: number; seqEnd: number }]
+        >;
+        const span = events * interval;
+        // One frame per window plus the leading edge — not `K(K+1)/2`.
+        expect(calls.length).toBeLessThanOrEqual(2 + Math.ceil(span / INPUT_COALESCE_WINDOW_MS));
+        expect(calls.length).toBeLessThan(events);
+
+        // No acknowledgement ever arrived, so the last frame carries the whole
+        // run from the cursor. Every frame's range describes exactly the bytes
+        // it carries, so coalescing cannot lose or invent a position.
+        const [, lastData, lastSequence] = calls[calls.length - 1];
+        expect(lastData).toBe('x'.repeat(events));
+        expect(lastSequence.seqStart).toBe(1);
+        expect(lastSequence.seqEnd).toBe(events);
+        for (const [, data, sequence] of calls) {
+          expect(data).toHaveLength(sequence.seqEnd - sequence.seqStart + 1);
+        }
+        cm.dispose();
+      });
+
+      it('offers the rest after an acknowledgement advances the cursor', () => {
+        const { harness, cm } = seeded();
+        cm.send('a');
+        cm.send('b'); // joins the pending run behind 'a'
+        // The agent applied 'a'; a coalesced retry that straddled it would be
+        // refused whole and restate the cursor, leaving 'b' unapplied. The
+        // acknowledgement is therefore also the moment to offer 'b' again —
+        // waiting for another event would strand it until the TTL.
+        deliverAck(harness, { inputEpoch: 7, appliedThrough: 1 });
+
+        vi.advanceTimersByTime(INPUT_COALESCE_WINDOW_MS);
+
+        expect(harness.api.sendInput).toHaveBeenLastCalledWith('test', 'b', {
+          inputEpoch: 7,
+          seqStart: 2,
+          seqEnd: 2,
+        });
+        cm.dispose();
+      });
     });
   });
 
@@ -1764,8 +1849,23 @@ describe('ConnectionManager', () => {
         ready = true;
         cm.flushInputBuffer();
         expect(send.mock.calls.slice(1)).toEqual([
-          ['test', 'b', { inputEpoch: 7, seqStart: 2, seqEnd: 2 }],
-          ['test', 'c', { inputEpoch: 7, seqStart: 3, seqEnd: 3 }],
+          // One frame for the contiguous run, at the positions it already had
+          // (#3397). The retry is the same bytes; only the framing changed.
+          ['test', 'bc', { inputEpoch: 7, seqStart: 2, seqEnd: 3 }],
+        ]);
+        cm.dispose();
+      });
+
+      it('coalesces a pending relay run into one range frame (#3397)', () => {
+        const { send, cm } = seededRelay({ appliedThrough: 0 });
+        cm.send('a'); // empty queue: leading edge
+        cm.send('b');
+        cm.send('c');
+        vi.advanceTimersByTime(INPUT_COALESCE_WINDOW_MS);
+
+        expect(send.mock.calls).toEqual([
+          ['test', 'a', { inputEpoch: 7, seqStart: 1, seqEnd: 1 }],
+          ['test', 'abc', { inputEpoch: 7, seqStart: 1, seqEnd: 3 }],
         ]);
         cm.dispose();
       });
@@ -1781,20 +1881,21 @@ describe('ConnectionManager', () => {
        *
        * * **Measured, acknowledgements keeping up:** 64 keystrokes produce
        *   **64** frames — one each. That is the bound below.
-       * * **Measured, acknowledgements stalled:** the same 64 keystrokes
-       *   produce **2080** frames, i.e. `K(K+1)/2`. Each keystroke re-offers
-       *   the whole unacknowledged run, so the cost is quadratic in the run
-       *   length rather than linear in the keystrokes. That number is *not*
-       *   pinned — it is the present shape of the retry, and a later change
-       *   that offered only the new chunk would be an improvement this test
-       *   must not fail.
+       * * **Measured before the coalescing window (#3397):** with
+       *   acknowledgements stalled, the same 64 keystrokes produced **2080**
+       *   frames, i.e. `K(K+1)/2`. Each event re-offered the whole
+       *   unacknowledged run, so the cost was quadratic in the run length.
+       *   That shape is no longer the contract: a pending run leaves at most
+       *   once per window as one range frame, bounded by elapsed time rather
+       *   than by the number of events. The stalled bound is pinned by the
+       *   coalescing tests added for #3397.
        *
        * The healthy figure is what SC-11 promises, and it holds only while the
        * acknowledgement is consumed. The mutation is that consumption —
        * dropping the `pendingInput.acknowledge` call in `applyInputAck` (or the
        * `onRelayInputAck` subscription that feeds it) leaves the cursor at 0,
-       * and this test then measures the quadratic case instead: 2080 frames
-       * for 64 keystrokes.
+       * so each window re-offers the whole run and this test's 64-frame
+       * expectation fails.
        */
       it('offers one frame per keystroke while acknowledgements keep up', () => {
         const { send, cm, deliverAck } = seededRelay({ appliedThrough: 0 });
