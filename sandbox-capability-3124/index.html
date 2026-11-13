@@ -612,7 +612,7 @@
 </div>
 </section>
 <section class="np-details"><h2>Design contract &amp; verification</h2>
-<p class="np-details-lede">本原型复用 <code>sandbox-capability-3124/</code> 目录，修订原六个同级策略 Tab 的信息架构。产品预览已收起解释性文字：带点状下划线的关键词可悬停或键盘聚焦查看解释，App 可点击展开；完整设计约束集中放在这里。所有 Image、Build、Workspace 与 Sandbox Enter 仍为确定性 Mock，不调用生产服务。</p>
+<p class="np-details-lede">本原型复用 <code>sandbox-capability-3124/</code> 目录。Filesystem 按五项真实配置对象组织，不再采用全局模式切换遮挡其它字段，也不为所有标题添加帮助提示。产品预览只呈现资源、路径、权限、配置和操作；详细设计约束留在原型外。所有 Image、Build、Workspace 与 Sandbox Enter 均为模拟数据与交互。</p>
 <div class="np-detail-grid">
 <article class="np-detail"><h3>01 · Sandbox + Images (#3408)</h3><ol class="np-steps">
 <li>从当前 Session 进入 Sandbox，查看 Overview。切换 Images → Image Library / Builds / Distribution。Server Ready 与当前 Agent Cache 必须分开表示。</li>
@@ -624,12 +624,17 @@
 <li>在 Workspaces 里模拟创建命名资源、同名复用、查看列表及删除确认；Project Location 只引用不删除，Managed Resource 在 Sandbox 退出后仍可列出。</li>
 <li>Filesystem 引用 Workspace，Agent 解析实际目录；映射目标隐含为 <code>/workspace</code>。</li>
 </ol></article>
-<article class="np-detail"><h3>03 · Filesystem Policy (#3405)</h3>
-<p><strong>Access：</strong>同名目录只读/读写映射（P→P），没有目标输入。<strong>Mounts：</strong>授权的 EROFS Digest 显式映射到受限目标（Source→Target）。<strong>RootFS：</strong>独占根挂载，目标隐含 <code>/</code>。Workspace 目标隐含 <code>/workspace</code>。Home 独立于 Workspace。</p>
-<p>当前 V1 的 EROFS Root 和任意 <code>filesystem.access</code> 互斥；示意可展示冲突但不能通过预检。工具 Mount 先只允许 <code>/opt/&lt;name&gt;</code>。</p></article>
-<article class="np-detail"><h3>04 · 解释性注释的呈现原则</h3>
-<p><strong>产品视图区：</strong>只显示对象、名称、状态、必要的资源来源与路径映射、可操作控件、验证结果和危险操作确认。Hover / focus / tap 才展开概念说明，包括 RootFS 的隐式 <code>/</code>、Mount 的 Source→Target、Access 的 P→P、Workspace 来源与 Home 生命周期。</p>
-<p><strong>外部注释区：</strong>设计理由、协议尚未发布、权限/数据权责、模拟与真实实现的差异，以及原型验收边界，统一在此页说明或 README 中记录。拒绝原因及操作安全确认仍须留在产品界面，不能藏进帮助提示。</p></article>
+<article class="np-detail"><h3>03 · Filesystem IA (#3405)</h3>
+<ol class="np-steps">
+<li><strong>RootFS</strong>：目标固定 <code>/</code>；选 Local（无镜像）或仅限当前 Agent 已验证缓存的 <code>base_runtime</code> EROFS 镜像。</li>
+<li><strong>Mounts</strong>：默认空；从非 <code>base_runtime</code> EROFS 中逐项添加，默认目标来自镜像元数据，允许手动改挂载点。</li>
+<li><strong>Workspace</strong>：固定 <code>/workspace</code>，也是 Enter 后默认工作目录。引用不可修改的 Project Location，或 Agent 管理的 Workspace（自动按 Session 名、已存在、手动新命名）。</li>
+<li><strong>Access</strong>：只读 / 读写各自是独立路径列表，一行一个路径，始终同路径 <code>P→P</code> 映射。</li>
+<li><strong>Preview</strong>：永远显示根、附加挂载、Workspace 和 Access 的最终来源、目标与权限；路径修改时实时同步。</li>
+</ol>
+<p>当前生产 V1 的 <code>filesystem.access</code> 与 EROFS Composition 仍然互斥，额外挂载点仅支持受限 <code>/opt/&lt;name&gt;</code>；本原型展示新声明的配置 IA，不能作为运行时已支持的证明。镜像的 <code>default_mount</code> 元数据尚需协议落地，Home 不再是 Filesystem Policy 编辑区。</p></article>
+<article class="np-detail"><h3>04 · 产品文案边界</h3>
+<p>Policy 编辑区只显示配置项、实际可编辑的值、目标路径及状态。RootFS、Mounts、Workspace、Access、Preview 都是普通标题，不需要每个都有 ⓘ。仅对真正有歧义的术语提供按需解释；详细设计、运行时差异、验收边界集中留在这块原型外说明。安全错误和缓存不可用必须在产品界面直接展示。</p></article>
 <article class="np-detail"><h3>Fidelity &amp; negative states</h3>
 <p>模拟 Agent 离线、macOS、不支持 cgroup/seccomp、Image Cache absent、没有 Session、预检失败、启动失败、Inside 只读等场景。Shell 结构依据 main 现有 WebLayout / Sidebar + ShellMain → WorkspaceShell 与 AppLayers → one AppPageHeader，候选变化仅在 Sandbox 内部。</p>
 <p>Web/App 1:1 尺寸是展示目标，**未声明与生产 UI 的像素完全一致**。Mock 静态自测、真实 Chromium 交互、Pages 发布 SHA 和生产 Acceptance 需独立记录；本页面的模拟按钮不是原生 Kernel/EROFS 验证。</p>
