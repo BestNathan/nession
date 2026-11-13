@@ -56,6 +56,12 @@ Workspace answers questions such as:
 
 See [workspace.md](workspace.md).
 
+A **managed Agent Workspace** is a distinct Agent-local resource: a durable,
+named directory the Agent owns and can reuse across Sessions. It is not the
+logical Workspace above, a Project, an EROFS image or a Sandbox execution. The
+logical Workspace may use one; its inventory and lifecycle are owned by the
+Agent Workspace Manager (#3407, [agent-workspaces.md](../architecture/agent-workspaces.md)).
+
 ### Workspace Location
 
 A Workspace Location is a physical realization of part of a Workspace: for example a directory on a local machine, a remote development host, a sandbox, or another execution environment.

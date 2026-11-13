@@ -49,6 +49,11 @@ pub enum ResourceKey {
     /// `staging.env` are not the same resource, and a string key would merge
     /// them.
     Env(String),
+    /// One managed Workspace registry entry, by stable id or namespace+name.
+    ///
+    /// A distinct namespace from `Session` and `Env`: two workspaces may share
+    /// a name across namespaces, and a workspace id is not a path.
+    Workspace(String),
     /// The file sandbox as **one** resource, rather than a path within it.
     ///
     /// A deliberately coarse key. A path is not the whole of what a file
@@ -80,6 +85,7 @@ impl std::fmt::Display for ResourceKey {
         match self {
             Self::Session(name) => write!(f, "session:{name}"),
             Self::Env(name) => write!(f, "env:{name}"),
+            Self::Workspace(id) => write!(f, "workspace:{id}"),
             Self::Filesystem => write!(f, "filesystem"),
             Self::Authority => write!(f, "authority"),
         }

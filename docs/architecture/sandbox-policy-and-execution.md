@@ -129,6 +129,21 @@ before mounting anything.
   `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
   equivalence is claimed.
 
+## Managed Workspace resources (#3407)
+
+The Agent Workspace Manager owns named, durable, reusable managed Workspace
+directories, their stable `ws_<uuid>` identities, inventory and deletion. A
+Project Existing Location remains a Project-owned reference and is never
+stored or deleted by that manager. See
+[Agent-owned managed Workspaces](agent-workspaces.md).
+
+The current composition still allocates a per-execution writable directory
+(`<sandbox state>/managed/<uuid>/workspace` or
+`<sandbox state>/sandbox-workspaces/workspace-<uuid>`). Attaching a selected
+managed Workspace at `/workspace`, including the optional EROFS lower/Overlay,
+belongs to the follow-up #3405 implementation; this document does not claim
+that integration yet.
+
 ## Managed EROFS Session creation (#3062)
 
 The Managed path turns a Project declaration plus a pinned artifact set into a

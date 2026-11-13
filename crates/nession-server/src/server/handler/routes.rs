@@ -126,6 +126,12 @@ server_routes!(handler, msg, payload;
     "server.session.sandbox.enter" => "server.session.sandbox.enter" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_enter(msg).await,
     "server.session.sandbox.return-to-native" => "server.session.sandbox.return-to-native" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_return(msg).await,
     "server.session.sandbox.focus" => "server.session.sandbox.focus" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_focus(msg).await,
+    // Agent-owned managed Workspace resources (#3407). The Agent owns the
+    // registry and the bytes; the Server authorizes the Session target and
+    // relays. Mutations serialize with the Session's other mutations.
+    "server.workspace.list" => "server.workspace.list" => 1 => Query => handler.handle_client_workspace_list(msg).await,
+    "server.workspace.create" => "server.workspace.create" => 1 => Key(session_by_id(payload)) => handler.handle_client_workspace_create(msg).await,
+    "server.workspace.delete" => "server.workspace.delete" => 1 => Key(session_by_id(payload)) => handler.handle_client_workspace_delete(msg).await,
     "server.session.attach" => "server.session.attach" => 1 => Ordered => handler.handle_client_session_attach(msg).await,
     "server.session.relay.begin" => "server.session.relay.begin" => 1 => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function

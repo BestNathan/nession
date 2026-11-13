@@ -323,6 +323,9 @@ pub struct SessionManager {
     /// The Agent's Sandbox runtime. `None` refuses an explicit policy rather
     /// than silently executing it as Native.
     sandbox: Option<Arc<crate::sandbox_runtime::SandboxRuntime>>,
+    /// The Agent's managed Workspace registry (#3407). `None` reports the
+    /// inventory API unavailable; Native Sessions are unaffected.
+    workspaces: Option<Arc<crate::workspace_manager::WorkspaceManager>>,
     /// The central Server's configured WebSocket URL (#3062). Managed
     /// creation derives its authorized blob HTTP base from this value; the
     /// Server never guesses its own public hostname.
@@ -358,6 +361,7 @@ impl SessionManager {
             create_timeout: TMUX_CREATE_TIMEOUT,
             memory_threshold_percent: None,
             sandbox: None,
+            workspaces: None,
             server_url: String::new(),
         }
     }
@@ -388,6 +392,20 @@ impl SessionManager {
         sandbox.arm_reaper(self.tmux_dep());
         self.sandbox = Some(sandbox);
         self
+    }
+
+    /// Attach the Agent's durable managed Workspace registry (#3407).
+    pub fn with_workspaces(
+        mut self,
+        workspaces: Arc<crate::workspace_manager::WorkspaceManager>,
+    ) -> Self {
+        self.workspaces = Some(workspaces);
+        self
+    }
+
+    /// The managed Workspace registry this manager was composed with, when any.
+    pub fn workspaces(&self) -> Option<&Arc<crate::workspace_manager::WorkspaceManager>> {
+        self.workspaces.as_ref()
     }
 
     /// Record the central Server URL used to derive Managed download URLs.
