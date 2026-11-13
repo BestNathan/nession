@@ -31,7 +31,7 @@
       rootMode:"image",rootImage:"base",tools:["rust"],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node"},mountToAdd:"node",workspaceLower:false,readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
-      step:0,tip:null};
+      step:0,tip:null,fsInspect:false};
   }
   var s=defaults();
   var sections=[["overview","Overview"],["images","Images"],["workspaces","Workspaces"],["policies","Policies"]];
@@ -252,46 +252,93 @@
       return '<option value="'+h(o[0])+'"'+(String(s[key])===String(o[0])?' selected':'')+'>'+h(o[1])+'</option>';
     }).join("")+'</select>';
   }
+  // Filesystem editor is field-first: access (P -> P) OR proposed image
+  // composition (RootFS, Mounts, Workspace). Home is a runtime fact, not a
+  // shipped client filesystem policy key.
+  function fsBlock(key,title,metaText,body,right){
+    return '<section class="fs-block" data-fs-section="'+h(key)+'">'+
+      '<div class="fs-block-heading"><div><h3>'+h(title)+'</h3><code>'+h(metaText)+'</code></div>'+(right||"")+'</div>'+
+      '<div class="fs-block-body">'+body+'</div></section>';
+  }
+  function fsPathList(kind){
+    var prop=kind==="read"?"readPaths":"writePaths";
+    var raw=s[prop],entries=raw===""?[""]:raw.split("\n"),locked=!isEditable();
+    return fsBlock("access."+kind,kind==="read"?"Read paths":"Write paths",
+      kind==="read"?"filesystem.access.read[]":"filesystem.access.write[]",
+      '<div class="fs-path-list">'+entries.map(function(p,i){
+        return '<div class="fs-path-row">'+
+          '<input type="text" data-fs-path="'+kind+'" data-fs-index="'+i+'" aria-label="'+kind+' path '+(i+1)+'" placeholder="/absolute/agent/path" value="'+h(p)+'"'+(locked?' disabled':'')+'>'+
+          '<span class="fs-same">→ same path</span>'+
+          '<span class="fs-mode-pill">'+(kind==="read"?"Read only":"Read/write")+'</span>'+
+          action("×","fs-path-remove:"+kind+":"+i,"compact",locked)+'</div>';
+      }).join("")+'</div>'+
+      '<div class="fs-actions">'+action("+ Add "+(kind==="read"?"read":"write")+" path","fs-path-add:"+kind,"",locked)+'</div>');
+  }
   function fsPanel(){
-    var locked=!isEditable(),w=resolveDefault(),accessConflict=s.rootMode==="image"&&(s.readPaths.trim()||s.writePaths.trim());
-    var root=card("Root filesystem","The source is mounted to / automatically. A single Base Runtime image supplies the read-only root; no repackaging.",
-      explainSupport(s.rootMode==="image"?"filesystem.composition":"filesystem.access")+
-      field("Root source",selectField("rootMode",[["image","EROFS · Base Runtime"],["host","Host root / access policy"]],locked),
-        "rootfs source → / (fixed target; no editable target field)")+
-      (s.rootMode==="image"?'<div class="cand-row"><div><strong>minimal-glibc-runtime</strong><small>'+short(imageBy("base").digest)+'</small></div>'+statusChip("read-only")+'</div>':""));
-    var mounts=card("Mounts","Tools use an explicit authorized image source and target, currently constrained to /opt/<name> and read-only.",
-      field("Toolchain image",'<div class="cand-check">'+["rust","node"].map(function(id){
-        var im=imageBy(id);return '<label><input data-tool="'+id+'" type="checkbox"'+(s.tools.includes(id)?" checked":"")+(locked?" disabled":"")+'> '+h(im.name)+' <small>('+short(im.digest)+')</small></label>';
-      }).join("")+'</div>')+
-      (s.tools.includes("rust")?field("Rust mount target",'<input data-field="toolTarget" value="'+h(s.toolTarget)+'"'+(locked?' disabled':'')+' aria-label="Rust mount target">',"Explicit target: /opt/rust. Unsupported targets fail preflight."):"")+
-      '<div class="cand-map">'+s.tools.map(function(id){return '<div><code>'+h(imageBy(id).name)+'</code><span>→ '+h(id==="rust"?s.toolTarget:"/opt/node")+' · ro</span></div>';}).join("")+'</div>');
-    var wOpts=[["auto","Auto · "+s.session]].concat(s.workspaces.map(function(x){return [x.id,x.name+" · "+x.kind];}));
-    var wsSelected=s.selectedWorkspace==="auto"?"auto":s.selectedWorkspace;
-    var wsSelect='<select data-field="selectedWorkspace" aria-label="Select workspace"'+(locked?' disabled':'')+'>'+wOpts.map(function(o){
-      return '<option value="'+h(o[0])+'"'+(wsSelected===o[0]?' selected':'')+'>'+h(o[1])+'</option>';
-    }).join("")+'</select>';
-    var workspace=card("Workspace","An Agent Workspace is mounted at /workspace. Managed volumes can be reused; Project Location remains user-owned.",
-      field("Workspace source",wsSelect,"Explicit choice > Project's current Agent location > named managed get-or-create")+
-      '<label class="cand-check"><input type="checkbox" data-workspace-lower'+(s.workspaceLower?" checked":"")+(locked||!w||w.kind!=="managed"?" disabled":"")+'> EROFS lower + Overlay</label>'+
-      (s.workspaceLower?'<div class="cand-map"><div><code>Lower</code><span>nession-source · '+short(imageBy("source").digest)+'</span></div><div><code>Upper</code><span>Managed Workspace · rw</span></div></div>':"")+
-      '<div class="cand-small-note">'+hint("Overlay details","The Project image is immutable; Agent-managed upper/work directories preserve changes and pin the lower digest.")+'</div>'+
-      '<div class="cand-facts">'+meta("Resolved source",w?w.name:"—")+meta("Map target","/workspace (implicit)")+meta("Owner",w&&w.kind==="project_location"?"External / Project Location":"Agent Workspace Manager")+'</div>'+
-      '<div class="cand-actions">'+action("Manage Workspaces","area:workspaces")+'</div>');
-    var access=card("Access","Read/write always map Agent path P to the identical Sandbox path P; they never accept a separate target.",
-      '<div class="cand-pair">'+field("Read paths",'<textarea rows="2" data-field="readPaths" placeholder="/usr/share"'+(locked?' disabled':'')+'>'+h(s.readPaths)+'</textarea>',"P → P · read-only")+
-      field("Write paths",'<textarea rows="2" data-field="writePaths" placeholder="/home/dev/project"'+(locked?' disabled':'')+'>'+h(s.writePaths)+'</textarea>',"P → P · read/write")+'</div>'+
-      (accessConflict?alert("Current V1: filesystem.access and EROFS root composition cannot be combined. Clear paths or select Host.","danger"):"")+
-      '<div class="cand-map">'+s.readPaths.split("\n").filter(Boolean).map(function(p){return '<div><code>'+h(p)+'</code><span>→ '+h(p)+' · ro</span></div>';}).join("")+
-      s.writePaths.split("\n").filter(Boolean).map(function(p){return '<div><code>'+h(p)+'</code><span>→ '+h(p)+' · rw</span></div>';}).join("")+'</div>');
-    var home=card("Home","Home is separate from /workspace. Current Linux execution uses a temporary /home tmpfs.",
-      field("Home lifecycle",selectField("home",[["ephemeral","Ephemeral"],["session","Session persistent"]],locked),
-        "Separate from /workspace; actual persistent Home requires future runtime implementation.")) ;
-    return sectionHead("Filesystem","RootFS, mounts, Workspace and access mappings",statusChip(s.inside?"applied":"draft"))+
-      root+mounts+workspace+access+home+
-      card("Mount view","The map is a draft preview until Enter succeeds; applied details are read-only.",
-        '<div class="cand-map"><div><code>/</code><span>← '+(s.rootMode==="image"?"Base Runtime EROFS · ro":"Host root view")+'</span></div>'+
-        s.tools.map(function(id){return '<div><code>'+h(id==="rust"?s.toolTarget:"/opt/node")+'</code><span>← '+h(imageBy(id).name)+' · ro</span></div>';}).join("")+
-        '<div><code>/workspace</code><span>← '+h(workspaceName())+(s.workspaceLower?" · EROFS lower + persistent Overlay":" · rw bind")+'</span></div><div><code>/home</code><span>← '+h(s.home==="ephemeral"?"tmpfs":"proposed Session directory")+'</span></div></div>');
+    var locked=!isEditable(),composed=s.rootMode==="image",support=nativeStatus(composed?"filesystem.composition":"filesystem.access");
+    var head=sectionHead("Filesystem","",statusChip(s.inside?"applied":"draft"));
+    var mode='<div class="fs-mode" role="group" aria-label="Filesystem policy configuration">'+
+      '<button type="button" data-action="fs-mode:host" aria-pressed="'+(!composed)+'"'+(locked?" disabled":"")+'>Host Access</button>'+
+      '<button type="button" data-action="fs-mode:image" aria-pressed="'+composed+'"'+(locked?" disabled":"")+'>Image Composition</button></div>';
+    var status='<div class="fs-policy-status">'+statusChip(support.state)+
+      '<code>'+(composed?"filesystem.composition":"filesystem.access")+'</code></div>'+
+      (support.state!=="available"?alert(support.reason,"danger"):"");
+    var content="";
+    if(!composed){
+      content=fsPathList("read")+fsPathList("write");
+    }else{
+      var baseOptions=s.images.filter(function(im){return im.kind==="Base Runtime"&&im.status==="ready"}).map(function(im){return [im.id,im.name]});
+      var baseSelect=selectField("rootImage",baseOptions,locked);
+      var base=imageBy(s.rootImage);
+      content=fsBlock("rootfs","RootFS","rootfs.source",
+        '<div class="fs-row fs-root-row">'+
+          '<div class="fs-control">'+field("Base Runtime image",baseSelect)+'</div>'+
+          '<span class="fs-target"><span>Target</span><code>/</code></span>'+
+          '<span class="fs-mode-pill">Read only</span></div>'+
+        (base?'<div class="fs-digest">Digest '+short(base.digest)+'</div>':""));
+      var extra=s.images.filter(function(im){return im.kind==="Toolchain"&&!s.tools.includes(im.id)&&im.status==="ready"});
+      var mountRows=s.tools.map(function(id){
+        var im=imageBy(id);
+        if(!im)return "";
+        return '<div class="fs-mount-row" data-fs-mount="'+h(id)+'">'+
+          '<div class="fs-mount-source"><strong>'+h(im.name)+'</strong><small>'+short(im.digest)+'</small></div>'+
+          '<div class="fs-mount-target"><input aria-label="'+h(im.name)+' mount target" data-mount-target="'+h(id)+'" type="text" value="'+h(s.mountTargets[id]||"")+'"'+(locked?" disabled":"")+'></div>'+
+          '<span class="fs-mode-pill">RO</span>'+action("×","mount-remove:"+id,"compact",locked)+'</div>';
+      }).join("");
+      var picker=extra.length?
+        '<div class="fs-add-mount"><select data-field="mountToAdd" aria-label="Available toolchain image"'+(locked?" disabled":"")+'>'
+        +extra.map(function(im){return '<option value="'+h(im.id)+'"'+(s.mountToAdd===im.id?' selected':'')+'>'+h(im.name)+'</option>'}).join("")+'</select>'+
+        action("+ Add mount","mount-add","",locked)+'</div>':"";
+      content+=fsBlock("mounts","Mounts","mounts[]",
+        '<div class="fs-mount-head"><span>Source image</span><span>Target</span><span>Mode</span></div>'+
+        '<div class="fs-mount-list">'+(mountRows||'<div class="fs-empty">No additional mounts</div>')+'</div>'+picker);
+      var w=resolveDefault();
+      var options=[["auto","Auto · "+s.session]].concat(s.workspaces.filter(function(item){return item.status==="available"}).map(function(item){return [item.id,item.name+" · "+(item.kind==="project_location"?"Project":"Managed")];}));
+      var selected='<select data-field="selectedWorkspace" aria-label="Workspace source"'+(locked?" disabled":"")+'>'
+        +options.map(function(opt){return '<option value="'+h(opt[0])+'"'+(s.selectedWorkspace===opt[0]?" selected":"")+'>'+h(opt[1])+'</option>';}).join("")+'</select>';
+      content+=fsBlock("workspace","Workspace","workspace.source",
+        '<div class="fs-workspace-row"><div class="fs-control">'+field("Workspace source",selected)+'</div>'+
+        '<span class="fs-target"><span>Target</span><code>/workspace</code></span>'+
+        '<span class="fs-mode-pill">RW</span></div>'+
+        '<label class="fs-overlay"><input type="checkbox" data-workspace-lower'+(s.workspaceLower?' checked':'')+
+          (locked||!w||w.kind!=="managed"?' disabled':'')+'> Project EROFS lower + writable Overlay</label>'+
+        (s.workspaceLower?'<div class="fs-digest">Lower · '+short(imageBy("source").digest)+' · Upper · '+h(w?w.name:"Agent managed")+'</div>':"")+
+        '<div class="fs-actions">'+action("Manage Workspaces","area:workspaces")+'</div>');
+    }
+    var inspect='<div class="fs-inspector">'+
+      '<button type="button" class="fs-inspect-toggle" data-action="fs-inspect" aria-expanded="'+s.fsInspect+'">'+
+        (s.fsInspect?"▾":"▸")+' '+(s.inside?"Effective filesystem":"Preview mappings")+'</button>'+
+      (s.fsInspect?'<div class="fs-inspect-content">'+
+        (composed?
+          '<div class="fs-map-line"><code>/</code><span>Base Runtime · RO</span></div>'+
+          s.tools.map(function(id){return '<div class="fs-map-line"><code>'+h(s.mountTargets[id])+'</code><span>'+h(imageBy(id)?.name||id)+' · RO</span></div>'}).join("")+
+          '<div class="fs-map-line"><code>/workspace</code><span>'+h(workspaceName())+' · '+(s.workspaceLower?"Overlay":"Bind")+'</span></div>'+
+          '<div class="fs-map-line"><code>/home</code><span>Runtime tmpfs · not a policy setting</span></div>':
+          s.readPaths.split("\n").filter(Boolean).map(function(p){return '<div class="fs-map-line"><code>'+h(p)+'</code><span>same path · RO</span></div>'}).join("")+
+          s.writePaths.split("\n").filter(Boolean).map(function(p){return '<div class="fs-map-line"><code>'+h(p)+'</code><span>same path · RW</span></div>'}).join("")+
+          (!s.readPaths.trim()&&!s.writePaths.trim()?'<div class="fs-empty">No host paths configured</div>':"")
+        )+'</div>':"")+'</div>';
+    return '<div class="fs-editor">'+head+mode+status+content+inspect+'</div>';
   }
   function networkPanel(){
     var locked=!isEditable();
@@ -391,10 +438,22 @@
       var val=t.value;
       if(fieldName==="newWorkspaceName")s.newWorkspaceName=val;
       else if(fieldName==="selectedWorkspace"){s.selectedWorkspace=val;dirty();}
-      else if(["rootMode","rootImage","toolTarget","readPaths","writePaths","home","network","cgroup"].includes(fieldName)){
+      else if(["rootMode","rootImage","toolTarget","mountToAdd","readPaths","writePaths","home","network","cgroup"].includes(fieldName)){
         s[fieldName]=val;dirty();
       }
       return true;
+    }
+    if(t.hasAttribute("data-fs-path")){
+      var key=t.getAttribute("data-fs-path")==="read"?"readPaths":"writePaths";
+      var index=Number(t.getAttribute("data-fs-index"));
+      var parts=s[key]===""?[""]:s[key].split("\n");
+      if(!Number.isInteger(index)||index<0||index>=parts.length)return false;
+      parts[index]=t.value;s[key]=parts.join("\n");dirty();return true;
+    }
+    if(t.hasAttribute("data-mount-target")){
+      var mount=t.getAttribute("data-mount-target");
+      if(!s.tools.includes(mount))return false;
+      s.mountTargets[mount]=t.value;dirty();return true;
     }
     if(t.hasAttribute("data-tool")){var id=t.getAttribute("data-tool");s.tools=t.checked?Array.from(new Set(s.tools.concat(id))):s.tools.filter(function(x){return x!==id;});dirty();return true;}
     if(t.hasAttribute("data-ns")){s.namespace[t.getAttribute("data-ns")]=t.checked;dirty();return true;}
@@ -403,6 +462,26 @@
     return false;
   }
   function doAction(a){
+    if(a==="fs-inspect"){s.fsInspect=!s.fsInspect;return;}
+    if(a.indexOf("fs-mode:")===0){if(isEditable()){s.rootMode=a.slice(8);dirty();}return;}
+    if(a.indexOf("fs-path-add:")===0){
+      if(!isEditable())return;
+      var k=a.slice(12)==="read"?"readPaths":"writePaths";
+      s[k]=s[k]===""?"\n":s[k]+"\n";dirty();return;
+    }
+    if(a.indexOf("fs-path-remove:")===0){
+      if(!isEditable())return;
+      var parts=a.split(":"),k=parts[1]==="read"?"readPaths":"writePaths",index=Number(parts[2]);
+      var vals=s[k]===""?[""]:s[k].split("\n");vals.splice(index,1);s[k]=vals.join("\n");dirty();return;
+    }
+    if(a==="mount-add"){
+      if(!isEditable())return;
+      var available=s.images.filter(function(x){return x.kind==="Toolchain"&&x.status==="ready"&&!s.tools.includes(x.id)});
+      var target=available.find(function(x){return x.id===s.mountToAdd})||available[0];
+      if(target){s.tools.push(target.id);s.mountToAdd=(available.find(function(x){return x.id!==target.id})||{}).id||"";dirty();}
+      return;
+    }
+    if(a.indexOf("mount-remove:")===0){if(isEditable()){s.tools=s.tools.filter(function(x){return x!==a.slice(13)});dirty();}return;}
     if(a.indexOf("hint:")===0){var id=a.slice(5);s.tip=s.tip===id?null:id;return;}
     s.tip=null;
     if(a.indexOf("area:")===0){s.area=a.slice(5);s.depth="root";return;}
