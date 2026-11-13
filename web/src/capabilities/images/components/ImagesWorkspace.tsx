@@ -18,14 +18,19 @@ import type {
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { cn } from '@/shared/lib/utils';
-import type { ImageDescriptor } from '../ImagesPlugin';
+import { imagesApi, type ImageBuildDescriptor, type ImageDescriptor } from '../ImagesPlugin';
 import {
   IMAGE_PAGE_SIZE,
   imageAliases,
+  imageBuildProgressLabel,
+  imageBuildStageLabel,
+  imageBuildStatusLabel,
   imageServerStatusLabel,
+  isTerminalBuild,
   shortDigest,
   sourceLabel,
 } from '../model';
+import { useImageBuilds, type ImageBuildsState } from '../hooks/useImageBuilds';
 import { useImagesPage, type ImagesPageState } from '../hooks/useImagesPage';
 
 function ImageStatusBadge({ image }: { image: ImageDescriptor }) {
@@ -145,12 +150,236 @@ export function ImagesDetail({ image }: { image: ImageDescriptor }) {
   );
 }
 
+
+function BuildStatusBadge({ build }: { build: ImageBuildDescriptor }) {
+  const variant =
+    build.status === 'succeeded'
+      ? 'secondary'
+      : build.status === 'failed'
+        ? 'destructive'
+        : 'outline';
+  return (
+    <Badge variant={variant} data-testid="image-build-status">
+      {imageBuildStatusLabel(build)}
+    </Badge>
+  );
+}
+
+function ImageBuildRow({
+  build,
+  onCancel,
+  onRetry,
+}: {
+  build: ImageBuildDescriptor;
+  onCancel: (buildId: string) => void;
+  onRetry: (buildId: string) => void;
+}) {
+  const terminal = isTerminalBuild(build);
+  return (
+    <div
+      data-testid="image-build-row"
+      data-build-id={build.build_id}
+      className="flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-control)] border border-border px-3 py-2"
+    >
+      <span className="flex min-w-0 items-center justify-between gap-2">
+        <span className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
+          {build.alias ?? build.build_id}
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          <BuildStatusBadge build={build} />
+        </span>
+      </span>
+      <span className="min-w-0 truncate text-muted-foreground" data-testid="image-build-stage">
+        {imageBuildStageLabel(build)}
+      </span>
+      <span
+        className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}
+        data-testid="image-build-progress"
+      >
+        {imageBuildProgressLabel(build)}
+      </span>
+      {build.diagnostic ? (
+        <span
+          className="min-w-0 truncate text-muted-foreground"
+          data-testid="image-build-diagnostic"
+        >
+          {build.diagnostic}
+        </span>
+      ) : null}
+      {build.error ? (
+        <span className="min-w-0 break-all text-destructive" data-testid="image-build-error">
+          {build.error}
+        </span>
+      ) : null}
+      {build.digest ? (
+        <span className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}>
+          {shortDigest(build.digest)}
+        </span>
+      ) : null}
+      <span className="flex items-center gap-1">
+        {!terminal ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="image-build-cancel"
+            onClick={() => onCancel(build.build_id)}
+          >
+            Cancel
+          </Button>
+        ) : null}
+        {build.status === 'failed' || build.status === 'canceled' ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="image-build-retry"
+            onClick={() => onRetry(build.build_id)}
+          >
+            Retry
+          </Button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function BuildSubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
+  const [repository, setRepository] = useState('');
+  const [reference, setReference] = useState('main');
+  const [alias, setAlias] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const url = repository.trim();
+    const ref = reference.trim();
+    if (!url || !ref) {
+      setError('A public GitHub repository URL and a branch or commit are required');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await imagesApi.submitBuild(
+        { kind: 'github', repository_url: url, ref },
+        { alias: alias.trim() || undefined },
+      );
+      setAlias('');
+      onSubmitted();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'The build could not be submitted');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="image-build-form">
+      <div className="flex flex-wrap items-center gap-1">
+        <Input
+          type="url"
+          value={repository}
+          placeholder="https://github.com/<owner>/<repo>"
+          aria-label="Build repository URL"
+          data-testid="image-build-repository"
+          className="min-w-0 flex-1"
+          onChange={(event) => setRepository(event.target.value)}
+        />
+        <Input
+          type="text"
+          value={reference}
+          placeholder="branch or commit"
+          aria-label="Build source ref"
+          data-testid="image-build-ref"
+          className="w-36"
+          onChange={(event) => setReference(event.target.value)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <Input
+          type="text"
+          value={alias}
+          placeholder="optional alias"
+          aria-label="Build alias"
+          data-testid="image-build-alias"
+          className="min-w-0 flex-1"
+          onChange={(event) => setAlias(event.target.value)}
+        />
+        <Button
+          type="button"
+          size="sm"
+          data-testid="image-build-submit"
+          disabled={submitting}
+          onClick={() => void submit()}
+        >
+          {submitting ? 'Submitting…' : 'Build image'}
+        </Button>
+      </div>
+      {error ? (
+        <p className="text-destructive" data-testid="image-build-submit-error">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ImageBuildActivity({ builds }: { builds: ImageBuildsState }) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-2 border-b border-border p-3"
+      data-testid="images-builds"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <h3 className={cn('min-w-0', chromeSansRole('title'))}>Build activity</h3>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          data-testid="images-builds-refresh"
+          onClick={builds.refresh}
+        >
+          Refresh
+        </Button>
+      </div>
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
+        Builds run in the Server&apos;s durable build directory. Stage and measured counts
+        survive navigation and reconnect; no percentage is invented while mkfs.erofs runs.
+      </p>
+      <BuildSubmitForm onSubmitted={builds.refresh} />
+      {builds.error ? (
+        <p className="text-destructive" data-testid="images-builds-error">
+          {builds.error}
+        </p>
+      ) : builds.builds.length === 0 ? (
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))} data-testid="images-builds-empty">
+          {builds.loading ? 'Reading durable builds…' : 'No builds have been submitted.'}
+        </p>
+      ) : (
+        <div className="flex max-h-64 min-w-0 flex-col gap-1 overflow-auto">
+          {builds.builds.map((build) => (
+            <ImageBuildRow
+              key={build.build_id}
+              build={build}
+              onCancel={(buildId) => void builds.cancel(buildId)}
+              onRetry={(buildId) => void builds.retry(buildId)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImagesListPane({
   page,
+  builds,
   selectedDigest,
   onSelect,
 }: {
   page: ImagesPageState;
+  builds: ImageBuildsState;
   selectedDigest: string | null;
   onSelect: (digest: string | null) => void;
 }) {
@@ -187,6 +416,7 @@ function ImagesListPane({
           onChange={(event) => page.setQuery(event.target.value)}
         />
       </div>
+      <ImageBuildActivity builds={builds} />
       {page.error ? (
         <div className="flex flex-col items-start gap-2 p-4">
           <p className={cn('text-destructive', chromeSansRole('secondary'))} data-testid="images-error">
@@ -267,6 +497,7 @@ export function ImagesWorkspace({
   depth?: WorkspaceDepthControl;
 }) {
   const page = useImagesPage(IMAGE_PAGE_SIZE);
+  const builds = useImageBuilds(IMAGE_PAGE_SIZE);
   const [selectedDigest, setSelectedDigest] = useState<string | null>(null);
   const selected = useMemo(
     () => page.images.find((image) => image.digest === selectedDigest) ?? null,
@@ -336,6 +567,7 @@ export function ImagesWorkspace({
         <div className={`min-h-0 overflow-auto ${workspaceScrollClearanceClass}`}>
           <ImagesListPane
             page={page}
+            builds={builds}
             selectedDigest={selectedDigest}
             onSelect={setSelectedDigest}
           />

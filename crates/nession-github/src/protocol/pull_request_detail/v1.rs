@@ -22,7 +22,6 @@ pub struct PullRequestDetailRequestV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubPullRequestDetailV1 {
     pub number: u64,
     pub title: String,
@@ -45,7 +44,6 @@ pub struct GithubPullRequestDetailV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct PullRequestDetailOkV1 {
     pub repository: GithubRepositoryRefV1,
     pub pull_request: GithubPullRequestDetailV1,

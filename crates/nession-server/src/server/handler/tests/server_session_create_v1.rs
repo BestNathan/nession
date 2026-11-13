@@ -519,6 +519,303 @@ async fn concurrent_same_name_creates_keep_the_accepted_binding() {
     }
 }
 
+/// Drop the Agent connection while a create is in flight. The broker clears
+/// its pending commands, so the handler takes its ambiguous `Ok(Err(_))` branch.
+async fn answer_create_with_disconnect(
+    h: &mut ConnectionHandler,
+    name: &str,
+    env_files: serde_json::Value,
+) -> serde_json::Value {
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let broker = Arc::clone(&h.command_broker);
+    let create = h.handle_message(proto_msg(
+        "server.session.create",
+        json!({ "agent_id": "a1", "name": name, "env_files": env_files }),
+    ));
+    let agent = async move {
+        let _request = rx.recv().await.expect("Agent receives session.create");
+        broker.release_agent("a1", generation).await;
+    };
+    let (action, ()) = tokio::join!(create, agent);
+    parse_reply(action.unwrap())
+}
+
+/// Hold the Agent reply until the create deadline elapses under paused Tokio
+/// time. No wall-clock sleep is involved.
+async fn create_then_timeout(
+    h: &mut ConnectionHandler,
+    name: &str,
+    env_files: serde_json::Value,
+) -> serde_json::Value {
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let action = tokio::select! {
+        action = h.handle_message(proto_msg(
+            "server.session.create",
+            json!({ "agent_id": "a1", "name": name, "env_files": env_files }),
+        )) => action.unwrap(),
+        _ = async move {
+            let _request = rx.recv().await.expect("Agent receives session.create");
+            std::future::pending::<()>().await;
+        } => unreachable!("the holding branch never resolves"),
+    };
+    parse_reply(action)
+}
+
+fn assert_live_binding(stored: Option<crate::env::BindingRecord>, profile: &str, revision: u64) {
+    let stored = stored.expect("the live Session's desired binding must survive");
+    assert_eq!(stored.desired_revision, revision);
+    assert_eq!(stored.profiles.len(), 1);
+    assert_eq!(stored.profiles[0].profile.name, profile);
+}
+
+/// #3344 SC-01: a duplicate create whose reply channel closes is ambiguous, but
+/// the target was already a live Session. Its speculative Profile B candidate
+/// must not replace the live Session's Profile A binding or revision.
+#[tokio::test]
+async fn ambiguous_duplicate_disconnect_preserves_the_existing_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("a.env", "A=1", false)
+        .await
+        .unwrap();
+    h.env_service
+        .store
+        .write("b.env", "B=2", false)
+        .await
+        .unwrap();
+    bind_for_test(&h, "a1:dev", &[env_file("a.env")]).await;
+
+    let reply = answer_create_with_disconnect(&mut h, "dev", json!([env_file("b.env")])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("disconnected"));
+    assert_live_binding(
+        h.env_service.bindings.get("a1:dev").await.unwrap(),
+        "a.env",
+        1,
+    );
+    assert!(
+        h.session_registry.get("a1:dev").await.is_some(),
+        "the existing Session instance must survive the ambiguous duplicate"
+    );
+}
+
+/// #3344 SC-01: an empty-profile duplicate has no candidate to write, but it
+/// must not clear the live Session's binding either.
+#[tokio::test]
+async fn ambiguous_duplicate_disconnect_without_profiles_preserves_the_existing_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("a.env", "A=1", false)
+        .await
+        .unwrap();
+    bind_for_test(&h, "a1:dev", &[env_file("a.env")]).await;
+
+    let reply = answer_create_with_disconnect(&mut h, "dev", json!([])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert_live_binding(
+        h.env_service.bindings.get("a1:dev").await.unwrap(),
+        "a.env",
+        1,
+    );
+}
+
+/// #3344 SC-01: the 30s deadline is the other ambiguous outcome. It uses the
+/// same ownership fence and must preserve the live Session's binding.
+#[tokio::test]
+async fn ambiguous_duplicate_timeout_preserves_the_existing_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("a.env", "A=1", false)
+        .await
+        .unwrap();
+    h.env_service
+        .store
+        .write("b.env", "B=2", false)
+        .await
+        .unwrap();
+    bind_for_test(&h, "a1:dev", &[env_file("a.env")]).await;
+
+    let reply = create_then_timeout(&mut h, "dev", json!([env_file("b.env")])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("Timeout"));
+    assert_live_binding(
+        h.env_service.bindings.get("a1:dev").await.unwrap(),
+        "a.env",
+        1,
+    );
+}
+
+/// #3344 SC-01: an empty-profile duplicate timeout must not clear the live
+/// Session's binding.
+#[tokio::test]
+async fn ambiguous_duplicate_timeout_without_profiles_preserves_the_existing_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("a.env", "A=1", false)
+        .await
+        .unwrap();
+    bind_for_test(&h, "a1:dev", &[env_file("a.env")]).await;
+
+    let reply = create_then_timeout(&mut h, "dev", json!([])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert_live_binding(
+        h.env_service.bindings.get("a1:dev").await.unwrap(),
+        "a.env",
+        1,
+    );
+}
+
+/// #3344 SC-02: a genuinely new Session whose create reply is lost is still
+/// reconciled with the staged binding, preserving the pre-existing recovery
+/// semantics for an Agent that may have created it.
+#[tokio::test]
+async fn ambiguous_new_create_disconnect_applies_the_staged_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("b.env", "B=2", false)
+        .await
+        .unwrap();
+
+    let reply = answer_create_with_disconnect(&mut h, "fresh", json!([env_file("b.env")])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert_live_binding(
+        h.env_service.bindings.get("a1:fresh").await.unwrap(),
+        "b.env",
+        1,
+    );
+}
+
+/// #3344 SC-02: the same recovery applies under the create deadline.
+#[tokio::test]
+async fn ambiguous_new_create_timeout_applies_the_staged_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("b.env", "B=2", false)
+        .await
+        .unwrap();
+
+    let reply = create_then_timeout(&mut h, "fresh", json!([env_file("b.env")])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert_live_binding(
+        h.env_service.bindings.get("a1:fresh").await.unwrap(),
+        "b.env",
+        1,
+    );
+}
+
+/// #3344 SC-02: an empty-profile ambiguous new create starts a genuinely new
+/// Session empty, so a stale same-named row is cleared as before.
+#[tokio::test]
+async fn ambiguous_new_create_disconnect_without_profiles_clears_a_stale_row() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("stale.env", "OLD=1", false)
+        .await
+        .unwrap();
+    let stale_profiles =
+        crate::env::binding::materialized_profiles(&[], &[env_file("stale.env")], "create");
+    h.env_service
+        .bindings
+        .put(&crate::env::BindingRecord {
+            session_id: "a1:fresh".to_string(),
+            agent_id: "a1".to_string(),
+            desired_revision: 1,
+            profiles: stale_profiles,
+            updated_at: 0,
+        })
+        .await
+        .unwrap();
+
+    let reply = answer_create_with_disconnect(&mut h, "fresh", json!([])).await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(
+        h.env_service
+            .bindings
+            .get("a1:fresh")
+            .await
+            .unwrap()
+            .is_none(),
+        "an ambiguous new empty create must not inherit a stale row"
+    );
+}
+
+/// #3344 SC-02: after an ambiguous new create reconciled its binding, a later
+/// authoritative duplicate refusal must not replace it.
+#[tokio::test]
+async fn authoritative_refusal_preserves_the_ambiguous_new_create_binding() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("b.env", "B=2", false)
+        .await
+        .unwrap();
+    h.env_service
+        .store
+        .write("c.env", "C=3", false)
+        .await
+        .unwrap();
+    let first = answer_create_with_disconnect(&mut h, "dev", json!([env_file("b.env")])).await;
+    assert_eq!(first["payload"]["success"], false);
+
+    // The Agent has confirmed the Session it created for the ambiguous
+    // attempt; it is now a live Session under the same name.
+    let now = chrono::Utc::now();
+    h.session_registry
+        .insert_session_if_absent(crate::registry::session::SessionInfo {
+            session_id: "a1:dev".to_string(),
+            agent_id: "a1".to_string(),
+            session_name: "dev".to_string(),
+            status: crate::registry::session::SessionStatus::Detached,
+            window_count: 1,
+            attached_clients: 0,
+            foreground_command: None,
+            working_dir: None,
+            instance_id: None,
+            created_at: now,
+            last_activity: now,
+        })
+        .await;
+
+    let second = answer_create(
+        &mut h,
+        "dev",
+        json!([env_file("c.env")]),
+        json!({ "success": false, "error": "session 'dev' already exists" }),
+    )
+    .await;
+
+    assert_eq!(second["payload"]["success"], false);
+    assert_live_binding(
+        h.env_service.bindings.get("a1:dev").await.unwrap(),
+        "b.env",
+        1,
+    );
+}
+
 // ── Project-aware create (#3025) ────────────────────────────────────────
 
 use nession_protocol::contracts::project::v1::{ProjectLocation, ProjectSessionDefaults};

@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
-use crate::image::{ImageHttpService, ImageManager};
+use crate::image::{ImageHttpService, ImageManager, ImageManagerOptions};
 use crate::registry::{AgentRegistry, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
@@ -113,10 +113,35 @@ impl WebSocketServer {
             Arc::clone(&db),
             Arc::new(image_builder),
             blob_store,
-            config.image_max_concurrent_builds,
-            config.image_access_token_expiry_secs,
-        ));
+            ImageManagerOptions {
+                max_concurrent_builds: config.image_max_concurrent_builds,
+                access_token_ttl_secs: config.image_access_token_expiry_secs,
+                build_root: std::path::PathBuf::from(&config.image_build_dir),
+                build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
+                    .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),
+                build_log_max_bytes: config.image_build_log_max_bytes,
+                build_retention_secs: config.image_build_retention_secs,
+            },
+        )?);
         let image_http = Arc::new(ImageHttpService::new(Arc::clone(&image_manager)));
+        // Build transitions are pushed with the authoritative descriptor read
+        // from the durable build directory. A client that missed a push asks
+        // `server.image.build.get|list` after reconnecting.
+        {
+            let registry = Arc::clone(&web_client_registry);
+            image_manager.set_build_notifier(Arc::new(move |build| {
+                registry.broadcast_image_build_changed(build);
+            }));
+        }
+        // The exclusive build-root lock held by the manager proves the previous
+        // owner is gone, so every `running` record is an orphan to reconcile
+        // now. A verified snapshot resumes at packaging; an unpinned Git source
+        // is fetched again; a local source without a trustworthy snapshot fails
+        // explicitly. A recovery scan/storage failure stops the start.
+        image_manager
+            .recover_builds()
+            .await
+            .context("failed to recover durable image builds")?;
 
         // Mount MCP on this listener when configured. Building it here (rather
         // than on first request) means a fail-closed configuration error stops
@@ -205,10 +230,22 @@ impl WebSocketServer {
                             reclaimed_bytes = report.reclaimed_bytes,
                             deferred_by_limit = report.deferred_by_limit,
                             skipped_active_transfers = report.skipped_active_transfers,
+                            skipped_active_builds = report.skipped_active_builds,
                             "bounded image GC sweep completed"
                         ),
                         Err(error) => {
                             warn!("bounded image GC sweep failed and will retry: {error:#}")
+                        }
+                    }
+                    match image_manager.cleanup_builds().await {
+                        Ok(report) => info!(
+                            expired_builds = report.expired_builds,
+                            expired_rejected = report.expired_rejected,
+                            deferred_active = report.deferred_active,
+                            "bounded image build cleanup completed"
+                        ),
+                        Err(error) => {
+                            warn!("bounded image build cleanup failed and will retry: {error:#}")
                         }
                     }
                 }
@@ -599,6 +636,10 @@ where
         super::execution::LANE_LABEL,
     );
 
+    // A bounded, credential-free classification of *why* this connection ends.
+    // It is logged once below and is what makes a browser's close event
+    // correlatable with the Server's own view (#3358 SC-05).
+    let mut close_reason = "peer-closed";
     while let Some(frame) = read.next().await {
         let frame = frame?;
 
@@ -609,6 +650,7 @@ where
         // still in flight is ended with the connection, further down.
         let Message::Text(text) = frame else {
             if let HandlerAction::Close = handler.handle_message(frame).await? {
+                close_reason = "client-close";
                 break;
             }
             claim_agent_channel(&handler, &command_broker, &sender).await;
@@ -682,6 +724,7 @@ where
                 // exit so the cleanup below still runs, instead of returning
                 // through `?` and skipping it.
                 if sender.send_reply(response).await.is_err() {
+                    close_reason = "outbound-closed";
                     break;
                 }
             }
@@ -753,11 +796,21 @@ where
                         // history bootstrap. A client that asked to stop, or one
                         // whose socket already ended, takes `Ended` instead.
                         warn!(
+                            session = %session_name,
+                            close_reason = "relay-agent-ended",
                             "Relay for session '{}' ended: the Agent's terminal stream ended \
                              while the client was still attached; closing the connection so it \
                              re-attaches",
                             session_name
                         );
+                        close_reason = "relay-agent-ended";
+                        // Deliberately no Close frame here. A clean close frame
+                        // lets the browser reconnect before the re-registering
+                        // Agent has republished its Sessions, so the client can
+                        // observe a transiently empty Session list while it is
+                        // rebuilding the relay. Dropping the socket keeps the
+                        // pre-existing reconnect timing; the reason is recorded
+                        // above and in the connection-end log for correlation.
                         break;
                     }
                     Ok(RelayEnd::ClientStalled) => {
@@ -775,20 +828,30 @@ where
                         // the one that never gets written. Breaking here drops
                         // the socket, which is the same fact without the wait.
                         warn!(
+                            session = %session_name,
+                            close_reason = "relay-client-stalled",
                             "Relay for session '{}' ended: the client stopped draining its \
                              terminal; closing the connection",
                             session_name
                         );
+                        // Deliberately no Close frame: the queue this client is
+                        // not draining is exactly where it would wait. The
+                        // browser observes 1006; this log is the Server-side
+                        // reason it correlates with (#3358 SC-05).
+                        close_reason = "relay-client-stalled";
                         break;
                     }
                     Err(e) => return Err(e),
                 }
             }
             HandlerAction::Close => {
+                close_reason = "client-close";
                 break;
             }
         }
     }
+
+    info!(close_reason, "WebSocket connection ended");
 
     // End the work still in flight, before anything below waits on a writer it
     // may be parked in.

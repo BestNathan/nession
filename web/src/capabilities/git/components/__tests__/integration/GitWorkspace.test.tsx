@@ -81,7 +81,7 @@ function statusResponse(overrides: Partial<GitStatusResponse & { state: 'ok' }> 
   return {
     state: 'ok',
     truncated: false,
-    truncatedBytes: 0,
+    truncated_bytes: 0,
     root: '/repo',
     snapshot: { token: 'token-1', head: 'head-1', root: '/repo' },
     status: {
@@ -133,8 +133,8 @@ describe('GitWorkspace', () => {
         host: 'github.com',
         owner: 'acme',
         repo: 'repo',
-        remoteName: 'origin',
-        sourceUrl: 'https://github.com/acme/repo',
+        remote_name: 'origin',
+        source_url: 'https://github.com/acme/repo',
       },
       branch: 'main',
       choices: [],
@@ -249,7 +249,7 @@ describe('GitWorkspace', () => {
             { path: 'src/a.ts', kind: 'modified', staged: false, unstaged: true },
             {
               path: 'src/c.ts',
-              originalPath: 'src/b.ts',
+              original_path: 'src/b.ts',
               kind: 'renamed',
               staged: true,
               unstaged: false,
@@ -597,7 +597,7 @@ describe('GitWorkspace', () => {
 
   it('reports the truncation of the listing itself, not just of a diff', async () => {
     mockedStatus.mockResolvedValue(
-      statusResponse({ truncated: true, truncatedBytes: 2048 }),
+      statusResponse({ truncated: true, truncated_bytes: 2048 }),
     );
 
     render(<GitWorkspace ctx={context()} />);
@@ -770,7 +770,7 @@ describe('GitWorkspace', () => {
         unmerged: [],
       },
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     });
 
     render(<GitWorkspace ctx={context()} />);
@@ -783,7 +783,7 @@ describe('GitWorkspace', () => {
         agent_id: 'agent-1',
         session: 'agent-1:work',
         path: 'src/a.ts',
-        expectedSnapshot: 'token-1',
+        expected_snapshot: 'token-1',
       }),
     );
     // The mutation's answer is adopted as the authoritative listing rather
@@ -826,7 +826,7 @@ describe('GitWorkspace', () => {
         unmerged: [],
       },
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     });
 
     render(<GitWorkspace ctx={context()} />);
@@ -871,7 +871,7 @@ describe('GitWorkspace', () => {
         unmerged: [],
       },
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     });
 
     render(<GitWorkspace ctx={context()} />);
@@ -890,11 +890,11 @@ describe('GitWorkspace', () => {
     expect(request).toMatchObject({
       agent_id: 'agent-1',
       session: 'agent-1:work',
-      expectedSnapshot: 'token-1',
+      expected_snapshot: 'token-1',
       message: 'feat: change a',
     });
-    expect(typeof request.requestId).toBe('string');
-    expect(request.requestId.length).toBeGreaterThan(0);
+    expect(typeof request.request_id).toBe('string');
+    expect(request.request_id.length).toBeGreaterThan(0);
 
     expect(await screen.findByTestId('git-clean')).toBeInTheDocument();
     expect(screen.queryByTestId('git-commit-form')).toBeNull();
@@ -927,7 +927,7 @@ describe('GitWorkspace', () => {
         unmerged: [],
       },
       truncated: false,
-      truncatedBytes: 0,
+      truncated_bytes: 0,
     });
 
     render(<GitWorkspace ctx={context()} />);
@@ -940,7 +940,7 @@ describe('GitWorkspace', () => {
         agent_id: 'agent-1',
         session: 'agent-1:work',
         path: 'src/a.ts',
-        expectedSnapshot: 'token-1',
+        expected_snapshot: 'token-1',
       }),
     );
     await waitFor(() =>

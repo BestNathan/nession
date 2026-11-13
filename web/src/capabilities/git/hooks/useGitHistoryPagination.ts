@@ -15,8 +15,8 @@ export function useGitHistoryPagination(
   useEffect(() => {
     if (history?.state === 'ok') {
       setCommits(history.history.commits);
-      setNextCursor(history.history.nextCursor ?? null);
-      setEndOfHistory(history.history.endOfHistory);
+      setNextCursor(history.history.next_cursor ?? null);
+      setEndOfHistory(history.history.end_of_history);
     }
   }, [history]);
 
@@ -29,8 +29,8 @@ export function useGitHistoryPagination(
       const page = await gitApi.gitLog({ agent_id: agentId, session: sessionId, before: nextCursor });
       if (page.state === 'ok') {
         setCommits((prev) => [...prev, ...page.history.commits]);
-        setNextCursor(page.history.nextCursor ?? null);
-        setEndOfHistory(page.history.endOfHistory);
+        setNextCursor(page.history.next_cursor ?? null);
+        setEndOfHistory(page.history.end_of_history);
       }
     } finally {
       setLoadingMore(false);

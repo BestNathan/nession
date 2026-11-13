@@ -361,20 +361,32 @@ function useFileSave({
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
+  /**
+   * The editor's latest content. A write commits the snapshot it submitted,
+   * but editing stays possible while that request is in flight; dirty must be
+   * reconciled against what the editor holds when the write completes, not
+   * cleared because the older snapshot was persisted (#3322).
+   */
+  const latestContentRef = useRef(content);
+  latestContentRef.current = content;
 
   const save = useCallback(async (overwrite: boolean): Promise<FileSaveOutcome> => {
     setSaving(true);
     setConflict(false);
+    const submittedContent = content;
     try {
       const result = await fileOps.writeFile(
         path,
-        content,
+        submittedContent,
         overwrite || revision === undefined ? {} : { expectedRevision: revision },
       );
       setRevision(result.revision);
-      setOriginalContent(content);
-      setIsDirty(false);
-      onDirtyChange?.(false);
+      setOriginalContent(submittedContent);
+      // The committed baseline is the submitted snapshot; newer edits remain
+      // dirty so a second guarded save can persist them.
+      const stillDirty = latestContentRef.current !== submittedContent;
+      setIsDirty(stillDirty);
+      onDirtyChange?.(stillDirty);
       toast.success(`Saved ${filename}`);
       return 'saved';
     } catch (err) {

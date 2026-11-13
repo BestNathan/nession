@@ -34,9 +34,9 @@ run(async () => {
     const misrouted = await gitAsk(stack, 'git.commit', {
       session,
       contract_version: 1,
-      expectedSnapshot: 'anything',
+      expected_snapshot: 'anything',
       message: 'must not commit',
-      requestId: 'case-845-sc15',
+      request_id: 'case-845-sc15',
     });
     assert.equal(misrouted.state, 'error', 'git.commit must reject a creation-shaped request: ' + JSON.stringify(misrouted));
     assert.equal(revCount(dir), 1, 'git.commit must never create a commit');
@@ -49,7 +49,7 @@ run(async () => {
       'git.commit still answered commit detail and rejected a creation-shaped request; creation remained on its distinct git.create-commit unit.',
       [
         { type: 'protocol', value: 'git.commit v1 oid=' + oid + ' subject=initial' },
-        { type: 'protocol', value: 'git.commit with expectedSnapshot/message/requestId -> state=error' },
+        { type: 'protocol', value: 'git.commit with expected_snapshot/message/request_id -> state=error' },
         { type: 'protocol', value: 'manifest carries git.commit and git.create-commit as two units' },
         { type: 'runtime', value: 'rev count stayed 1 after both calls' },
         { type: 'runtime', value: 'target_sha=' + stack.runtime.target_sha },

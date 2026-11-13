@@ -516,6 +516,18 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::UsizeNonZero,
     },
     FieldSpec {
+        key: "image_build_stage_timeout_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "image_build_log_max_bytes",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "image_build_retention_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
         key: "terminal_stall_grace_secs",
         kind: FieldKind::U64,
     },

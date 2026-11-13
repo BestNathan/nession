@@ -339,12 +339,9 @@ mod tests {
 
     #[test]
     fn a_renamed_file_serialises_in_the_spelling_the_client_reads() {
-        // The wire is camelCase — hand-written `truncatedBytes` beside it says
-        // so — and `original_path` was the one field that was not, because it is
-        // the one multi-word field on this struct. A rename's tooltip read
-        // `undefined -> new-name` and nothing failed: no fixture carried a
-        // rename across the wire, and the client's own tests use its own
-        // spelling, so both sides agreed with themselves.
+        // Nession-owned transport fields are snake_case (#3371). This test
+        // pins the wire spelling: the previous camelCase spelling must not
+        // survive anywhere on the boundary.
         let file = ChangedFile {
             path: "src/new.rs".to_string(),
             original_path: Some("src/old.rs".to_string()),
@@ -354,17 +351,17 @@ mod tests {
         };
 
         let json = serde_json::to_value(&file).unwrap();
-        assert_eq!(json["originalPath"], "src/old.rs");
+        assert_eq!(json["original_path"], "src/old.rs");
         assert!(
-            json.get("original_path").is_none(),
-            "the snake_case key must not be on the wire at all, got: {json}"
+            json.get("originalPath").is_none(),
+            "the retired camelCase key must not be on the wire at all, got: {json}"
         );
     }
 
     #[test]
     fn an_absent_original_path_is_omitted_rather_than_null() {
-        // `skip_serializing_if` and the case rule have to agree; a `null` here
-        // would read as "renamed from nothing".
+        // `skip_serializing_if` and the naming rule have to agree; a `null`
+        // here would read as "renamed from nothing".
         let file = ChangedFile {
             path: "src/a.rs".to_string(),
             original_path: None,
@@ -374,7 +371,6 @@ mod tests {
         };
 
         let json = serde_json::to_value(&file).unwrap();
-        assert!(json.get("originalPath").is_none());
         assert!(json.get("original_path").is_none());
     }
 }

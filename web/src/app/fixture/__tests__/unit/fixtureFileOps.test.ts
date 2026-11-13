@@ -99,6 +99,15 @@ describe('fixtureFileOps', () => {
     fixtureFilesControl().reset();
   });
 
+  it('exposes current content to Cases without going through the read path', async () => {
+    fixtureFilesControl().reset();
+    const target = fixtureFileOps();
+    await target.writeFile('web/src/index.css', 'changed');
+    expect(fixtureFilesControl().contentsOf('web/src/index.css')).toBe('changed');
+    expect(fixtureFilesControl().contentsOf('missing.txt')).toBeNull();
+    fixtureFilesControl().reset();
+  });
+
   it('getCwd answers the fixture root', async () => {
     await expect(ops.getCwd('s')).resolves.toEqual({ path: '' });
   });

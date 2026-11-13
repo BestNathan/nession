@@ -95,6 +95,16 @@ impl TestServer {
             auth_token: SERVER_TOKEN.to_string(),
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
+            image_blob_dir: std::env::temp_dir()
+                .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
+                .join("blobs")
+                .to_string_lossy()
+                .into_owned(),
+            image_build_dir: std::env::temp_dir()
+                .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
+                .join("build")
+                .to_string_lossy()
+                .into_owned(),
             db_path: db_path.to_string_lossy().into_owned(),
             ..Default::default()
         };

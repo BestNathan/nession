@@ -142,7 +142,6 @@ impl GitFailure {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GitSnapshotV1 {
     /// Compare for equality; never parse or construct.
     pub token: String,
@@ -157,7 +156,6 @@ pub struct GitSnapshotV1 {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct MutationStateOkV1 {
     pub snapshot: GitSnapshotV1,
     pub status: RepoStatus,
@@ -188,7 +186,6 @@ pub enum GitMutationResponseV1<T> {
         snapshot: GitSnapshotV1,
         status: RepoStatus,
         truncated: bool,
-        #[serde(rename = "truncatedBytes")]
         truncated_bytes: usize,
     },
     /// The request was rejected before any mutating command ran.

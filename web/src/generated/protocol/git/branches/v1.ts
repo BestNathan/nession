@@ -31,7 +31,7 @@ export type Branches = { branches: Array<Branch>,
 /**
  * The count that was answered for, so the view can offer "more" honestly.
  */
-limit: number, truncatedBytes: number, truncated: boolean, };
+limit: number, truncated_bytes: number, truncated: boolean, };
 export type Branch = { name: string, 
 /**
  * HEAD points here.
@@ -53,7 +53,7 @@ behind: number,
 /**
  * The configured upstream no longer exists — git's `[gone]`.
  */
-upstreamGone: boolean, };
+upstream_gone: boolean, };
 export type SessionTargetV1 = { session: string, };
 
 // ── Operations ──

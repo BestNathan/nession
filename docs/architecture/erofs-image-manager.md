@@ -1,7 +1,9 @@
 # Global EROFS Image Manager
 
-> Owner of immutable EROFS image builds, content-addressed bytes, aliases and
-> authorized blob access ([#3022](https://github.com/BestNathan/nession/issues/3022)).
+> Owner of immutable EROFS image builds, durable asynchronous build execution,
+> content-addressed bytes, aliases and authorized blob access
+> ([#3022](https://github.com/BestNathan/nession/issues/3022),
+> [#3334](https://github.com/BestNathan/nession/issues/3334)).
 > Upstream model: [#3021 Project](project.md), [product-model.md](../design/product-model.md),
 > [agent-process-discovery.md](agent-process-discovery.md) for the Agent/Server
 > trust style this follows.
@@ -13,7 +15,9 @@ EROFS is a **global immutable resource**, not a `ProjectEnvironment`.
 | Thing | Owner |
 |---|---|
 | Portable EROFS mechanics: byte digest/verify, content-addressed atomic store, deterministic builder, optional cache and FUSE mount primitives | `nession-erofs` |
-| Image metadata, digest, bytes, aliases, leases, access grants | Server Image Manager (`crates/nession-server/src/image`) |
+| Image metadata, digest, published bytes, aliases, leases, access grants | Server Image Manager (`crates/nession-server/src/image`) |
+| Durable build execution state (one directory per build) | Server Image Manager; `state.json` is the execution-state authority |
+| Stage mechanics, snapshot checkpoint, bounded subprocess lifecycle | `nession-erofs` (`build`) |
 | `image_digest` reference on a Project | Project declaration (`projects.image_digest`) |
 | Build worker and `mkfs.erofs` | Server Image Manager (consumes the crate's builder) |
 | Sandbox policy | `nession-sandbox`; it never clones Git or manages a registry |
@@ -111,17 +115,130 @@ digest only after the bytes are ready. Moving a tag to a new revision changes
 which digest the tag names; existing Project references and leases keep their
 old digest.
 
-## Server protocol units
+## Durable build directory (#3334)
+
+Every Image build is asynchronous and directory-backed. One build ID is one
+directory under the existing configured build root (`image_build_dir`, default
+`~/.nession/server/images/build`):
+
+```text
+<image_build_dir>/<build-id>/
+  state.json          versioned execution state, atomically replaced
+  snapshot/           private validated source snapshot (while reusable)
+  snapshot.json       source + packaging identity and content manifest
+  image.erofs.part    in-progress mkfs output; never published
+  build.log           bounded operator diagnostics
+```
+
+`state.json` is written to a temporary file, fsynced, renamed and followed by a
+parent-directory fsync, so a reader never observes truncated JSON. It records
+the canonical requested source, the pinned Git commit, packaging identity,
+`queued|running|succeeded|failed|canceled`, the current stage, real measured
+file/byte counts, elapsed time, the last bounded diagnostic, attempt history and
+the result digest. The Build directory is **execution state**, not a new Image
+Registry: a succeeded build publishes an immutable blob and registry row through
+the pre-existing Blob Store and Image Manager.
+
+Stages are `fetching`, `snapshotting`, `validating`, `packaging` and
+`publishing`. After the snapshot manifest is measured, the descriptor carries
+real file and byte counts. `mkfs.erofs` has no native progress report, so the
+packaging stage reports stage and elapsed time and **no invented percentage**.
+
+### Asynchronous protocol units
 
 | Unit | Policy | Meaning |
 |---|---|---|
-| `server.image.build` | Inline | Validate a source, run the bounded worker, return the ready/failed descriptor |
+| `server.image.build.submit` | Inline | Validate input, create the durable directory and `building` row, return the queued record promptly |
+| `server.image.build.get` | Query | Read the authoritative durable record (valid after reconnect/restart) |
+| `server.image.build.list` | Query | Durable build inventory, newest first |
+| `server.image.build.cancel` | Inline | Terminate owned subprocesses, record truthful `canceled`; idempotent on a terminal record |
+| `server.image.build.retry` | Inline | New attempt in the same record, reusing a verified snapshot |
+| `server.image.build` | Inline | **Legacy synchronous compatibility path**: submits the same durable build and waits for the terminal record, then returns the ready/failed `ImageDescriptor` |
+
+The legacy unit is explicit and versioned, not reinterpreted: a client that
+calls it still receives an Image descriptor, never a build/JOB record. New
+clients use the asynchronous family. All units require an authenticated client;
+contract types and validation live in
+`nession-protocol::contracts::image::v1`.
+
+The Server pushes `server.image.build.updated` with the descriptor read from the
+durable state at each transition. A client that misses a push (navigation or
+reconnect) re-reads `server.image.build.get|list`; there is no client-side
+fabrication of progress.
+
+### Stage-level restart recovery
+
+The manager takes an exclusive advisory lock on
+`<image_build_dir>/.owner.lock` for its lifetime and fails closed if another
+process owns the root. That lock is what makes startup recovery truthful: after
+acquiring it, every `running` record is an orphan whose previous owner is gone.
+
+Startup scans the build directories and reconciles non-terminal records:
+
+- a verified snapshot checkpoint (source identity, packaging identity and
+  recomputed content manifest match) resumes at `packaging`;
+- a Git record whose commit was pinned may refetch exactly that commit; a Git
+  branch is pinned once for the lifetime of the build, so later branch movement
+  cannot change the result;
+- a local directory with no trustworthy snapshot fails explicitly instead of
+  re-copying a possibly changed source;
+- a corrupted checkpoint is rejected, never reused; an unreadable `state.json`
+  directory is moved aside as `<build-id>.rejected` and is never resumed,
+  listed or executed;
+- an incomplete `image.erofs.part` is discarded and packaging is rerun from the
+  validated snapshot. No resume happens inside `mkfs.erofs`, Git transfer or an
+  arbitrary partial write.
+
+A `building` registry row with no durable build directory is stale and is marked
+failed on recovery, never offered as ready.
+
+### Cancellation, retry and concurrency
+
+Cancellation sets the build's cancellation control, waits for the worker, and
+the owned Git/`mkfs.erofs` subprocess run loop kills and reaps its child.
+Dropping a Tokio future is not cancellation. A canceled build publishes no
+bytes, fails only its own registry row and never changes a Project reference or
+alias.
+
+Retry creates the next attempt in the same record and preserves the terminal
+attempt's stage/error history. A verified snapshot is reused without the source;
+packaging is rerun; a Git source with no snapshot is refetched (pinned commit
+when one exists); a local source without a snapshot is refused with "submit a
+new build". A succeeded build cannot be retried.
+
+`image_max_concurrent_builds` still bounds simultaneous workers with an
+in-process semaphore. Each build ID has at most one active execution; a
+duplicate client submission with the same `client_request_id` and the same
+source returns the existing record. Different builds write only inside their own
+directories. Publication, digest dedupe and alias application are serialized:
+a stale completion cannot move an alias past a newer submitted intent.
+
+**V1 single-owner assumption:** exactly one active Server build manager may own
+a shared build root. The advisory lock detects a same-host second owner and the
+Server refuses to start with it. This is not a claim that multiple Server Pods
+can safely share a network filesystem; multi-writer build ownership remains
+unsupported until a verified cross-instance mechanism exists.
+
+### Bounded cleanup
+
+Terminal build directories are retained for `image_build_retention_secs`
+(default 7 days) and removed by the same scheduled maintenance tick as image GC.
+Failed/canceled snapshots stay within that window so a retry can reuse them.
+Successful builds release their snapshot and partial image immediately after
+publication. Cleanup never removes an active build, a published blob, an Image
+alias, a Session lease or an Agent cache; Blob GC (#3180) remains a separate
+sweep over registry rows.
+
+## Image registry protocol units
+
+| Unit | Policy | Meaning |
+|---|---|---|
 | `server.image.list` | Query | Complete inventory, newest first, paginated and searchable |
 | `server.image.get` | Query | Exactly one of `digest` or `alias` |
 | `server.image.access` | Inline | Mint a Project- or Session-scoped, expiring bearer grant for one digest |
 
-All four require an authenticated client. The contract types and validation
-live in `nession-protocol::contracts::image::v1`.
+All require an authenticated client. The contract types and validation live in
+`nession-protocol::contracts::image::v1`.
 
 `server.image.list` takes an absolute `offset`, a `limit` (default 200 for an
 older client, maximum 200) and an optional case-sensitive `query` over alias,
@@ -188,14 +305,15 @@ The service holds an in-process transfer guard while streaming.
 ## GC and failure states
 
 A build is persisted before the worker starts as `building`, becomes `ready`
-only after the digest is computed from stored bytes, and becomes `failed` with
-a bounded error if the worker fails. Failed and stale `building` rows are never
-offered as bytes.
+only after the verified digest is published from stored bytes, and becomes
+`failed` with a bounded error if the worker fails or is canceled. Failed and
+stale `building` rows are never offered as bytes.
 
 GC removes:
 
 - failed rows;
-- `building` rows older than the stale threshold;
+- `building` rows older than the stale threshold, **except** a row protected by
+  a live durable build directory (`skipped_active_builds` reports the skip);
 - ready rows (and their blob) only when **no** Project references the digest,
   no alias points at it, no unexpired lease exists, and no in-process transfer
   is active.
@@ -248,25 +366,44 @@ image_max_concurrent_builds = 2
 image_access_token_expiry_secs = 300
 image_gc_interval_secs = 21600   # 0 disables scheduled GC
 image_gc_max_candidates = 64
+image_build_stage_timeout_secs = 1800  # 0 disables the subprocess bound
+image_build_log_max_bytes = 1048576
+image_build_retention_secs = 604800   # terminal build directories
 ```
 
 Bounds: `image_max_concurrent_builds` in `[1, 8]`, grant expiry in
 `[30, 3600]` seconds, `image_gc_interval_secs` either `0` or in `[60, 604800]`,
-and `image_gc_max_candidates` in `[1, 1024]`. The build workspace must be
+`image_gc_max_candidates` in `[1, 1024]`,
+`image_build_stage_timeout_secs` either `0` or in `[30, 86400]`,
+`image_build_log_max_bytes` in `[4096, 16777216]`, and
+`image_build_retention_secs` in `[60, 31536000]`. The build workspace must be
 private to the Server; never point it at a repository or a user directory.
 The byte budget for one sweep is fixed at 512 MiB, in addition to the
 candidate bound.
 
+Missing, uncreatable or unwritable build storage fails the Server start closed.
+There is deliberately no fallback to ephemeral Pod storage when durable storage
+is required.
+
 ## Runtime prerequisites
 
-- `mkfs.erofs` on the build host. Both Server images ship a pinned build of
-  `erofs-utils` (`deploy/build-erofs-utils.sh`) because Debian bookworm's 1.5
-  package cannot run the V1 argv; Ubuntu CI test hosts install `erofs-utils`
-  for the acceptance Case, and the ordinary Rust gates use a deterministic
-  fake. The `runtime-image-tools` guard covers both the from-source and
-  prebuilt image paths (#3178).
+- `mkfs.erofs` on the build host. Both Server and Agent images ship a pinned
+  build of `erofs-utils` (`deploy/build-erofs-utils.sh`) because Debian
+  bookworm's 1.5 package cannot run the V1 argv; Ubuntu CI test hosts install
+  `erofs-utils` for the acceptance Case, and the ordinary Rust gates use a
+  deterministic fake. The image build fetches the pinned source from the
+  official erofs-utils GitHub tag archive — byte-identical to the upstream
+  cgit snapshot and carrying the same SHA-256 — because the image runners
+  cannot reach `git.kernel.org` (#3386). The script verifies the checksum, the
+  top-level directory and the `VERSION` file before building, and reports
+  network, integrity and revision failures as distinct states. The
+  `runtime-image-tools` guard covers both the from-source and prebuilt image
+  paths (#3178) and its self-test exercises those three failure states.
 - Git with normal HTTPS support; no credential is required for a public source.
-- Enough temporary disk for one snapshot plus its image per concurrent build.
+- Enough disk for one snapshot plus its image per concurrent build; the build
+  root is durable execution state, not scratch.
+- Exactly one active Server build manager per build root (V1 single-owner
+  condition, enforced by the advisory lock).
 - Docker Compose (`deploy/docker-compose.yml`) mounts `server-data` at
   `/data` and sets `NESSION_HOME=/data`, so the effective metadata DB
   (`/data/server/server.db`), image blobs (`/data/server/images/blobs`) and

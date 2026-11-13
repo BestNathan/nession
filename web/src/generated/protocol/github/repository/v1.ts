@@ -38,12 +38,12 @@ resolution: RepositoryStateV1, repository?: GithubRepositoryRefV1 | null, branch
  */
 authenticated: boolean, };
 export type RepositoryStateV1 = "resolved" | "no_remote" | "ambiguous" | "host_not_allowed" | "not_a_repository";
-export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remoteName: string, 
+export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remote_name: string, 
 /**
  * The canonical browser source of this repository, never a credential URL.
  */
-sourceUrl: string, };
-export type GithubRemoteChoiceV1 = { remoteName: string, host: string, owner: string, repo: string, };
+source_url: string, };
+export type GithubRemoteChoiceV1 = { remote_name: string, host: string, owner: string, repo: string, };
 export type SessionTargetV1 = { session: string, 
 /**
  * A remote name discovered by the Agent for this Session. The provider
@@ -72,5 +72,5 @@ resolution: RepositoryStateV1, repository?: GithubRepositoryRefV1 | null, branch
  * Whether the Agent has a host-appropriate credential. Discovery is not
  * authentication; this is the fact the UI must show before a read.
  */
-authenticated: boolean, } | { "state": "error", code: GithubErrorCodeV1, message: string, retryAfterSeconds?: number | null, };
+authenticated: boolean, } | { "state": "error", code: GithubErrorCodeV1, message: string, retry_after_seconds?: number | null, };
 

@@ -64,7 +64,7 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   return { action: 'close', reason: 'accepted SCs and merged implementation PRs' };
 }
 
-export function selectManualAgentRuns(issue, prs) {
+export function selectManualAgentRuns(issue, prs, { verifiedStagingSha = null } = {}) {
   const success = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
   const parsed = validateAcceptancePlan(issue.body, success.criteria.keys(), report.rows);
@@ -87,7 +87,17 @@ export function selectManualAgentRuns(issue, prs) {
       String(a.merged_at || a.updated_at || '')));
     const pr = candidates[0];
     const sha = stage === 'pr' ? pr?.head?.sha : pr?.merge_commit_sha;
-    if (!SHA.test(String(sha || ''))) continue;
+    if (!SHA.test(String(sha || ''))) {
+      // A main-only implementation can reach staging through a subsequent
+      // authenticated merge. The caller supplies this SHA only after proving
+      // exact main-merge-commit ancestry on the staging branch.
+      if (stage === 'staging' && SHA.test(String(verifiedStagingSha || '')) &&
+          prs.some(p => p.base?.ref === 'main' && p.merged_at &&
+            SHA.test(String(p.merge_commit_sha || '')))) {
+        planned.set(stage, verifiedStagingSha);
+      }
+      continue;
+    }
     planned.set(stage, sha);
   }
   return [...planned].map(([stage, sha]) => ({ stage, target_ref: sha }));
@@ -136,6 +146,40 @@ async function relatedPulls(repository, issueNumber, token, includePr = null, re
     }
   }
   return prs;
+}
+
+// Compare metadata comes from GitHub REST, not Issue prose, PR descriptions,
+// or a user-supplied SHA. Diverged and incomplete lineage must fail closed.
+export function isMainMergeAncestorOfStaging(mainMergeSha, stagingSha, comparison) {
+  return SHA.test(String(mainMergeSha || '')) &&
+    SHA.test(String(stagingSha || '')) &&
+    comparison?.base_commit?.sha === mainMergeSha &&
+    comparison?.merge_base_commit?.sha === mainMergeSha &&
+    comparison?.behind_by === 0 &&
+    Number.isSafeInteger(comparison?.ahead_by) &&
+    ['ahead', 'identical'].includes(comparison?.status);
+}
+
+async function verifiedStagingTargetForMainPR(repository, prs, token, request) {
+  // Only Issue-associated, actually merged Main PRs may authorize this
+  // fallback. The separate Acceptance executor still independently verifies
+  // the stage, exact target SHA, CI evidence, and SC contract.
+  const mainMerges = prs.filter(pr => pr.base?.ref === 'main' && pr.merged_at &&
+    SHA.test(String(pr.merge_commit_sha || '')));
+  if (mainMerges.length === 0) return null;
+  const { prefix } = repoParts(repository);
+  const branch = await request(prefix + '/branches/staging', { token });
+  const stagingSha = branch?.commit?.sha;
+  if (!SHA.test(String(stagingSha || ''))) {
+    throw Error('authenticated staging branch has no valid commit SHA');
+  }
+  for (const pr of mainMerges) {
+    const source = pr.merge_commit_sha;
+    const comparison = await request(prefix + '/compare/' + source + '...' + stagingSha,
+      { token });
+    if (isMainMergeAncestorOfStaging(source, stagingSha, comparison)) return stagingSha;
+  }
+  return null;
 }
 
 export function hasUnrecoveredHumanReopen(events, comments) {
@@ -211,7 +255,14 @@ async function handleManual(event, repository, actor, token, request = githubReq
     return { action: 'pending', reason: 'explicit blocker prevents manual re-dispatch' };
   }
   const prs = await relatedPulls(repository, command.issueNumber, token, null, request);
-  const runs = selectManualAgentRuns(issue, prs);
+  const directlySelected = selectManualAgentRuns(issue, prs);
+  // Never invent a staging association. When the source PR was correctly
+  // merged to main (e.g. scripts-only), authenticate its actual ancestry in
+  // staging before scheduling the pending merged/staging Agent criterion.
+  const verifiedStagingSha = directlySelected.some(run => run.stage === 'staging')
+    ? null : await verifiedStagingTargetForMainPR(repository, prs, token, request);
+  const runs = verifiedStagingSha
+    ? selectManualAgentRuns(issue, prs, { verifiedStagingSha }) : directlySelected;
   for (const run of runs) {
     await request(prefix + '/actions/workflows/agent-sc-acceptance.yml/dispatches', {
       token, method: 'POST',
@@ -263,6 +314,34 @@ async function selfTest() {
     { ...issue, body: body.replace('| Pass |', '| Pending |') }, [pr]),
     [{ stage: 'pr', target_ref: sha }]);
   assert.deepEqual(selectManualAgentRuns(issue, [pr]), []);
+  const stagedBody = body.replace('when: pr\n',
+    'when: merged\n    branch: staging\n').replace('| Pass |', '| Pending |');
+  const mainPr = { ...pr, base: { ref: 'main' } };
+  const stagingSha = 'b'.repeat(40);
+  assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody }, [mainPr]), [],
+    'main-only PR cannot authorize staging without GitHub ancestry');
+  assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody }, [],
+    { verifiedStagingSha: stagingSha }), [],
+  'a staging SHA without an associated implementation must not authorize dispatch');
+  assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody },
+    [{ ...mainPr, merged_at: null }], { verifiedStagingSha: stagingSha }), [],
+  'unmerged main PR must not authorize staging replay');
+  assert.deepEqual(selectManualAgentRuns({ ...issue, body: stagedBody }, [mainPr],
+    { verifiedStagingSha: stagingSha }), [{ stage: 'staging', target_ref: stagingSha }]);
+  const validCompare = { status: 'ahead', ahead_by: 2, behind_by: 0,
+    base_commit: { sha }, merge_base_commit: { sha } };
+  assert.equal(isMainMergeAncestorOfStaging(sha, stagingSha, validCompare), true);
+  for (const invalid of [
+    { ...validCompare, status: 'diverged' },
+    { ...validCompare, behind_by: 1 },
+    { ...validCompare, merge_base_commit: { sha: stagingSha } },
+    { ...validCompare, base_commit: { sha: stagingSha } },
+    { ...validCompare, ahead_by: null },
+    {},
+  ]) assert.equal(isMainMergeAncestorOfStaging(sha, stagingSha, invalid), false,
+    'unverified or divergent source cannot authorize staging replay');
+  assert.equal(isMainMergeAncestorOfStaging('bad', stagingSha, validCompare), false);
+  assert.equal(isMainMergeAncestorOfStaging(sha, 'bad', validCompare), false);
   const reopened = [{ event: 'reopened', actor: { type: 'User' }, created_at: '2026-11-11T02:00:00Z' }];
   const recovery = [{ body: '/accept', user: { type: 'User' },
     author_association: 'OWNER', created_at: '2026-11-11T02:01:00Z' }];
@@ -295,10 +374,13 @@ async function selfTest() {
     if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
       items: [{ number: 21 }] };
     if (path.endsWith('/pulls/21')) return effectivePr;
+    if (path.endsWith('/branches/staging')) return { commit: { sha: stagingSha } };
+    if (path.includes('/compare/')) return validCompare;
     if (path.endsWith('/issues/19/events?per_page=100')) return [];
     if (path.endsWith('/actions/workflows/agent-sc-acceptance.yml/dispatches')) {
       assert.equal(options.method, 'POST');
-      assert.equal(options.body.inputs.target_ref, sha);
+      assert.equal(options.body.inputs.target_ref,
+        options.body.inputs.stage === 'staging' ? stagingSha : sha);
       dispatches += 1; return null;
     }
     if (path.endsWith('/issues/19')) {
@@ -351,6 +433,24 @@ async function selfTest() {
   assert.equal((await handleManual({ ...e, comment: { ...e.comment, body: '/accept all' } },
     'X/y', 'owner', 'fixture-token', mock)).action, 'skip');
   assert.equal(dispatches, 1, 'untrusted comments cannot dispatch');
+  // End-to-end /accept mock: a main-only implementation reaches the exact
+  // staging SHA by authenticated ancestry, not by editing the SC plan.
+  live = { ...issue, body: stagedBody, updated_at: '2026-11-11T01:01:01Z' };
+  effectivePr = mainPr;
+  const stagingRecovery = await handleManual(e, 'X/y', 'owner', 'fixture-token', mock);
+  assert.equal(stagingRecovery.action, 'dispatched');
+  assert.deepEqual(stagingRecovery.agent_runs,
+    [{ stage: 'staging', target_ref: stagingSha }]);
+  assert.equal(dispatches, 2);
+  const tamperedCompare = async (path, options = {}) =>
+    path.includes('/compare/')
+      ? { ...validCompare, merge_base_commit: { sha: stagingSha } }
+      : mock(path, options);
+  const refused = await handleManual(e, 'X/y', 'owner', 'fixture-token', tamperedCompare);
+  assert.equal(refused.action, 'pending');
+  assert.equal(refused.agent_runs.length, 0);
+  assert.equal(dispatches, 2, 'tampered ancestry must never dispatch');
+  effectivePr = pr;
   live = { ...issue, body, updated_at: '2026-11-11T01:02:00Z' };
   // Distinct timestamps across successive reads force no mutation.
   let reads = 0;

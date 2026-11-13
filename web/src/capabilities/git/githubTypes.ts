@@ -97,6 +97,7 @@ export type GithubErrorResponse = Extract<
 >;
 
 export type GithubErrorCode = GithubErrorResponse['code'];
+/** The Web view model; snake_case wire keys are translated here at the adapter. */
 export type GithubError = { code: GithubErrorCode; message: string; retryAfterSeconds?: number | null };
 
 /** Narrow a response or throw its typed error, for hooks that must distinguish. */
@@ -108,7 +109,7 @@ export function githubErrorOf<T extends { state: string }>(response: T): GithubE
   return {
     code: error.code,
     message: error.message,
-    retryAfterSeconds: error.retryAfterSeconds,
+    retryAfterSeconds: error.retry_after_seconds,
   };
 }
 

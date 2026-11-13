@@ -40,6 +40,7 @@ Examples:
 - Agent offline, Session last-known active, client detached → surface the infrastructure problem; do not label the Session dead.
 - Agent online, Session exited → surface Session lifecycle; no need for a green Agent badge.
 - Agent online, Session active, attachment failed → explain attach failure; do not call it an Agent outage.
+- Server transport reconnecting while the Session and attachment are known → keep the work surface mounted and state the recovery; do not fall back to Login or discard the detached Terminal.
 - Explicit Agent/Location detail → all applicable dimensions may be shown for diagnosis.
 
 ## Canonical states

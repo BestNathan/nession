@@ -47,6 +47,11 @@ const fixtureOps = fixtureFileOps();
  * Canonical Workspace surface (#561 Phase 2B): the real plugin shell with
  * deterministic files data, no network. Phase 6 baseline source.
  */
+/** Routes that expose the Session-switch control while a Git request is in flight. */
+function isGitSessionScenario(scenario: string | null): boolean {
+  return scenario === 'selection-overlap' || scenario === 'mutation-overlap';
+}
+
 export function FixtureWorkspace() {
   // Route parameters express session observations; without them the fixture is
   // exactly the canonical screen the golden screenshots capture.
@@ -93,10 +98,12 @@ export function FixtureWorkspace() {
     subscribeFixtureAgentProcessSession,
     fixtureAgentProcessSessionId,
   );
-  // #2972: the selection-overlap Case moves the Session while a Git read is
-  // still in flight. The control is scoped to that route and removed with it.
+  // #2972 / #3327: these Cases move the Session while a Git read or mutation
+  // is still in flight. The control is scoped to those routes and removed with
+  // them.
+  const gitSessionScenario = isGitSessionScenario(gitScenario);
   useEffect(() => {
-    if (gitScenario !== 'selection-overlap' || typeof window === 'undefined') {
+    if (!gitSessionScenario || typeof window === 'undefined') {
       return;
     }
     const control = window as Window & {
@@ -112,7 +119,7 @@ export function FixtureWorkspace() {
       delete control.fixtureGitSelectSession;
       delete control.fixtureGitSelectedSession;
     };
-  }, [gitScenario]);
+  }, [gitSessionScenario]);
   const sessions = agentProcessScenario ? FIXTURE_AGENT_PROCESS_SESSIONS : FIXTURE_SESSIONS;
   const agents = agentProcessScenario
     ? fixtureAgentProcessesAgents(agentProcessScenario)
@@ -129,7 +136,7 @@ export function FixtureWorkspace() {
   );
   const selectedId = agentProcessScenario
     ? agentProcessSessionId
-    : gitScenario === 'selection-overlap'
+    : gitSessionScenario
       ? gitSessionId
       : metadataControlled
         ? ownershipSessionId

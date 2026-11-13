@@ -686,6 +686,53 @@ mod tests {
         assert_eq!(reg.list().await.len(), 1);
     }
 
+    /// #3399: an authoritative update for the same recyclable Session id
+    /// replaces the durable instance identity, and the new incarnation must not
+    /// inherit the previous Project membership.
+    ///
+    /// The Agent-side watcher regression proves the replacement is published on
+    /// the `instance_id` payload field; this is the Server half of the seam.
+    #[tokio::test]
+    async fn an_authoritative_replacement_updates_the_registry_and_drops_the_old_project_binding() {
+        let reg = new_registry().await;
+        let now = Utc::now().timestamp();
+        reg.db
+            .upsert_session_project_binding(&crate::db::SessionProjectBindingRow {
+                session_id: "a1:dev".to_owned(),
+                agent_id: "a1".to_owned(),
+                project_id: "project-1".to_owned(),
+                incarnation_id: "instance-a".to_owned(),
+                agent_created_at: now,
+                revision: 1,
+                updated_at: now,
+            })
+            .await
+            .expect("seed the previous incarnation's Project binding");
+
+        let mut first = make_session("a1", "dev");
+        first.instance_id = Some("instance-a".to_owned());
+        reg.update_session(first).await;
+
+        let mut replacement = make_session("a1", "dev");
+        replacement.instance_id = Some("instance-b".to_owned());
+        reg.update_session(replacement).await;
+
+        let stored = reg.get("a1:dev").await.expect("session present");
+        assert_eq!(
+            stored.instance_id.as_deref(),
+            Some("instance-b"),
+            "the authoritative report must replace the previous incarnation"
+        );
+        assert!(
+            reg.db
+                .get_session_project_binding("a1:dev")
+                .await
+                .expect("read the binding")
+                .is_none(),
+            "a new incarnation must not inherit the previous Project membership"
+        );
+    }
+
     /// Sorted session IDs — `list()` iterates a HashMap, so order is arbitrary.
     async fn sorted_ids(reg: &SessionRegistry) -> Vec<String> {
         let mut ids: Vec<String> = reg.list().await.into_iter().map(|s| s.session_id).collect();

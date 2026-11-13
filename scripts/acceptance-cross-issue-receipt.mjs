@@ -27,6 +27,16 @@ export function pinnedCrossIssueAcceptance(body) {
         throw Error('historical Acceptance witness integer overflow');
       return {kind:'pre-merge',issue,sc:pre[2],pr,sha:pre[4],run,attempt,e2eRun,e2eAttempt};
     }
+    // A staging witness names the historical source SHA explicitly. A later
+    // staging execution must prove SHA ancestry using GitHub compare metadata;
+    // the mutable Issue field is merely a bounded source locator.
+    const staging = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); Staging SHA ([0-9a-f]{40}); Agent Run ([1-9]\d*) attempt ([1-9]\d*)$/);
+    if (staging) {
+      const [issue,run,attempt] = [staging[1],staging[4],staging[5]].map(Number);
+      if (![issue,run,attempt].every(Number.isSafeInteger))
+        throw Error('historical staging witness integer overflow');
+      return {kind:'staging',issue,sc:staging[2],sha:staging[3],run,attempt};
+    }
     // A post-merge witness names the canonical Agent run that already evaluated
     // this commit, so it needs no source PR or ancestry chain: the run itself
     // must execute at the target SHA, which is a strictly tighter binding.
@@ -135,6 +145,88 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
   };
 }
 
+// A prior staging Issue's accepted Agent verdict is a source observation,
+// not a verdict for the current Issue. Authenticate the actual source result
+// artifact, each required workflow step, and GitHub merge ancestry instead
+// of trusting Issue prose or treating current-SHA generic runs as source proof.
+export function attestStagingCrossIssueAcceptance(pin, sourceRun, jobs, artifact,
+    result, comparison, {repo=REPO,targetSha,subjectIssue}={}) {
+  if (repo!==REPO || !SHA.test(String(targetSha)) ||
+      !Number.isSafeInteger(subjectIssue) || subjectIssue===pin?.issue ||
+      pin?.kind!=='staging' || !SHA.test(pin.sha) ||
+      sourceRun?.id!==pin.run || sourceRun.run_attempt!==pin.attempt ||
+      sourceRun.name!=='Agent / SC Acceptance' ||
+      sourceRun.path!=='.github/workflows/agent-sc-acceptance.yml' ||
+      sourceRun.event!=='workflow_dispatch' ||
+      sourceRun.head_branch!=='main' || !SHA.test(sourceRun.head_sha) ||
+      sourceRun.repository?.full_name!==repo ||
+      sourceRun.head_repository?.full_name!==repo ||
+      sourceRun.status!=='completed' || sourceRun.conclusion!=='success' ||
+      artifact?.name!==('acceptance-result-'+pin.issue+'-staging-'+pin.run+'-'+pin.attempt) ||
+      artifact?.expired!==false || !DIGEST.test(artifact?.digest??'') ||
+      !Number.isSafeInteger(artifact.id) || artifact.id<=0 ||
+      !Number.isSafeInteger(artifact.size_in_bytes) ||
+      artifact.size_in_bytes<=0 || artifact.size_in_bytes>MAX_BYTES ||
+      artifact.workflow_run?.id!==pin.run ||
+      artifact.workflow_run?.head_sha!==sourceRun.head_sha ||
+      artifact.workflow_run?.repository_id!==sourceRun.repository?.id)
+    throw Error('staging historical Acceptance workflow/artifact identity unverified');
+  if (!Array.isArray(jobs?.jobs) || jobs.jobs.length>100)
+    throw Error('unverified staging Acceptance job listing');
+  const job = name => {
+    const found=jobs.jobs.filter(j=>j?.name===name);
+    if(found.length!==1)throw Error('missing or ambiguous staging Acceptance job');
+    const j=found[0];
+    if(!Number.isSafeInteger(j.id)||j.id<=0||j.run_id!==pin.run||
+       j.run_attempt!==pin.attempt||j.head_sha!==sourceRun.head_sha||
+       j.status!=='completed'||j.conclusion!=='success')
+      throw Error('unverified staging Acceptance job/attempt');
+    return j;
+  };
+  const executor=job('Execute acceptance');
+  const updater=job('Deterministic Issue updater');
+  const required=[
+    'Validate invocation',
+    'Collect trusted GitHub Actions evidence',
+    'Prepare stage-specific immutable acceptance context',
+    'Run read-only Acceptance Agent',
+    'Normalize and freeze machine-readable result',
+    'Upload structured Acceptance Result',
+  ];
+  if (!required.every(name=>uniqueSuccessfulStep(executor,name)) ||
+      !uniqueSuccessfulStep(updater,'Apply Acceptance Report and checkbox projection'))
+    throw Error('missing or unsuccessful historical staging Acceptance step');
+  const verdicts=(result?.criteria??[]).filter(item=>item?.criterion===pin.sc);
+  if (result?.schema_version!==1 || result.issue!==pin.issue ||
+      result.stage!=='staging' || result.run_id!==pin.run ||
+      result.target_ref!==pin.sha ||
+      !/^[0-9a-f]{64}$/.test(result.contract_sha256??'') ||
+      !['agent-qwen','agent-cursor','agent-deepseek'].includes(result.source) ||
+      !Array.isArray(result.selected_criteria) ||
+      !result.selected_criteria.includes(pin.sc) ||
+      verdicts.length!==1 || !['Pass','Fail','Pending','N/A'].includes(verdicts[0].result))
+    throw Error('historical staging Acceptance result does not bind requested SC');
+  if (comparison?.base_commit?.sha!==pin.sha ||
+      comparison?.merge_base_commit?.sha!==pin.sha ||
+      !['ahead','identical'].includes(comparison?.status) ||
+      comparison.behind_by!==0 ||
+      !Number.isSafeInteger(comparison.ahead_by))
+    throw Error('unverified staging historical source ancestry');
+  return {
+    kind:'source_issue_staging_acceptance_receipt',
+    subject_issue:subjectIssue,source_issue:pin.issue,source_sc:pin.sc,
+    source_sha:pin.sha,target_sha:targetSha,
+    acceptance_run:pin.run,acceptance_attempt:pin.attempt,
+    acceptance_run_head_sha:sourceRun.head_sha,
+    executor_job:executor.id,updater_job:updater.id,
+    required_executor_steps:required,required_updater_step:'Apply Acceptance Report and checkbox projection',
+    acceptance_artifact_id:artifact.id,acceptance_artifact_digest:artifact.digest,
+    source_sc_result:verdicts[0].result,
+    provenance:'GitHub exact-attempt trusted staging Acceptance Run/Job/Step + digest-verified immutable source result + SHA ancestry',
+    limitation:'Historical source Issue verdict; independently evaluated, not automatic Pass or Issue write authority',
+  };
+}
+
 // Post-merge variant: the canonical Agent Acceptance run must have executed at
 // the evaluated commit itself, so `sourceRun.head_sha===targetSha` replaces the
 // pre-merge path's source-PR + ancestry + E2E-planner attestation. Everything
@@ -240,6 +332,23 @@ export async function collectCrossIssueAcceptance(repo,body,targetSha,subjectIss
     throw Error('historical Acceptance source environment unavailable');
   const results=[];
   for (const pin of pins) {
+    if (pin.kind==='staging') {
+      const [run,jobs,artifacts,comparison]=await Promise.all([
+        request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt),
+        request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt+'/jobs?per_page=100'),
+        request('/repos/'+repo+'/actions/runs/'+pin.run+'/artifacts?per_page=100'),
+        request('/repos/'+repo+'/compare/'+pin.sha+'...'+targetSha),
+      ]);
+      if (!Array.isArray(artifacts?.artifacts)||artifacts.artifacts.length>100)
+        throw Error('unverified historical staging artifact listing');
+      const name='acceptance-result-'+pin.issue+'-staging-'+pin.run+'-'+pin.attempt;
+      const matches=artifacts.artifacts.filter(a=>a?.name===name);
+      if(matches.length!==1)throw Error('missing or ambiguous staging result artifact');
+      const raw=await downloadedResult(repo,matches[0],token);
+      results.push(attestStagingCrossIssueAcceptance(pin,run,jobs,matches[0],
+        raw,comparison,{repo,targetSha,subjectIssue}));
+      continue;
+    }
     if (pin.kind==='post-merge') {
       const [run,jobs,artifacts]=await Promise.all([
         request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt),
@@ -382,6 +491,58 @@ function selfTest(){
     [postRun,postJobs,postArtifact,{...postResult,criteria:[{criterion:'SC-02',result:'Pending'}]},postOptions],
     [postRun,postJobs,postArtifact,postResult,{...postOptions,subjectIssue:1719}],
   ]) assert.throws(()=>invokePost(r,jb,a,re,o),/unverified|not verified|missing|unsuccessful|lacks/);
+  // Staging source recovery: verify exact historical Issue SC verdict, source
+  // target ancestry and source Run/Job/Step/Artifact identity. No Issue prose
+  // or green workflow alone can synthesize a source verdict.
+  const stagingBody='## Historical Acceptance Evidence\n'+
+    'Historical Acceptance witness: Issue #1719 SC-02; Staging SHA '+sha+
+    '; Agent Run '+postId+' attempt 1\n\n## Other';
+  const stagingPin={kind:'staging',issue:1719,sc:'SC-02',sha,run:postId,attempt:1};
+  assert.deepEqual(pinnedCrossIssueAcceptance(stagingBody),[stagingPin]);
+  assert.throws(()=>pinnedCrossIssueAcceptance(stagingBody.replace('attempt 1','attempt forged')),
+    /malformed/);
+  const stagingRun={...postRun,head_sha:head};
+  const stagingJob=(id,name,names)=>({id,name,run_id:postId,
+    run_attempt:1,head_sha:head,status:'completed',conclusion:'success',
+    steps:names.map(n=>({name:n,status:'completed',conclusion:'success'}))});
+  const stagingExec=stagingJob(31,'Execute acceptance',[
+    'Validate invocation','Collect trusted GitHub Actions evidence',
+    'Prepare stage-specific immutable acceptance context',
+    'Run read-only Acceptance Agent',
+    'Normalize and freeze machine-readable result',
+    'Upload structured Acceptance Result']);
+  const stagingUpdate=stagingJob(32,'Deterministic Issue updater',[
+    'Apply Acceptance Report and checkbox projection']);
+  const stagingJobs={jobs:[stagingExec,stagingUpdate]};
+  const stagingArtifact={...postArtifact,
+    name:'acceptance-result-1719-staging-'+postId+'-1',
+    workflow_run:{id:postId,head_sha:head,repository_id:123}};
+  const stagingResult={...postResult,stage:'staging',target_ref:sha,
+    source:'agent-qwen'};
+  const stagingCompare={status:'ahead',ahead_by:2,behind_by:0,
+    base_commit:{sha},merge_base_commit:{sha}};
+  const stagingOptions={repo:REPO,targetSha:target,subjectIssue:1822};
+  const stage=(p=stagingPin,r=stagingRun,j=stagingJobs,a=stagingArtifact,
+      v=stagingResult,co=stagingCompare,o=stagingOptions)=>
+    attestStagingCrossIssueAcceptance(p,r,j,a,v,co,o);
+  assert.equal(stage().source_sc_result,'Pass');
+  assert.equal(stage().executor_job,31);
+  for(const [p,r,j,a,v,co,o] of [
+    [stagingPin,{...stagingRun,event:'push'},stagingJobs,stagingArtifact,stagingResult,stagingCompare,stagingOptions],
+    [stagingPin,stagingRun,{jobs:[{...stagingExec,steps:stagingExec.steps.filter(s=>s.name!=='Collect trusted GitHub Actions evidence')},stagingUpdate]},stagingArtifact,stagingResult,stagingCompare,stagingOptions],
+    [stagingPin,stagingRun,{jobs:[stagingExec,{...stagingUpdate,run_attempt:2}]},stagingArtifact,stagingResult,stagingCompare,stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,{...stagingArtifact,digest:'sha256:invalid'},stagingResult,stagingCompare,stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,stagingArtifact,{...stagingResult,target_ref:head},stagingCompare,stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,stagingArtifact,{...stagingResult,criteria:[{criterion:'SC-02',result:'unknown'}]},stagingCompare,stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,stagingArtifact,stagingResult,{...stagingCompare,status:'diverged'},stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,stagingArtifact,stagingResult,{...stagingCompare,merge_base_commit:{sha:head}},stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,stagingArtifact,stagingResult,{...stagingCompare,behind_by:1},stagingOptions],
+    [stagingPin,stagingRun,stagingJobs,stagingArtifact,stagingResult,stagingCompare,{...stagingOptions,subjectIssue:1719}],
+  ])assert.throws(()=>stage(p,r,j,a,v,co,o),/unverified|missing|unsuccessful|does not bind/);
+  // A historical Fail is a real verified verdict, not an automatic Pass.
+  assert.equal(stage(stagingPin,stagingRun,stagingJobs,stagingArtifact,
+    {...stagingResult,criteria:[{criterion:'SC-02',result:'Fail'}]},
+    stagingCompare,stagingOptions).source_sc_result,'Fail');
   console.log('historical cross-Issue Acceptance proof self-test passed');
 }
 if(process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){

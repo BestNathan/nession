@@ -45,6 +45,8 @@ impl TestServer {
             auth_token: auth_token.to_string(),
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
+            image_blob_dir: format!("{db_path}.images/blobs"),
+            image_build_dir: format!("{db_path}.images/build"),
             db_path: db_path.clone(),
             ..Default::default()
         };

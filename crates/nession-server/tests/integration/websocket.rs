@@ -45,6 +45,8 @@ async fn test_server_accepts_connection() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -67,6 +69,8 @@ async fn test_agent_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -123,6 +127,8 @@ async fn test_invalid_auth_token() {
         auth_token: "correct_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -172,6 +178,8 @@ async fn test_heartbeat_without_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -223,6 +231,8 @@ async fn test_client_agents_list_unauthenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -262,6 +272,8 @@ async fn test_close_frame_triggers_disconnect() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -293,6 +305,8 @@ async fn test_agent_registration_with_connect_url() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -340,6 +354,8 @@ async fn test_server_local_addr() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -362,6 +378,8 @@ async fn test_client_sessions_list_authenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -498,6 +516,8 @@ fn ownership_server_config(db_path: String) -> nession_common::config::ServerCon
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     }
@@ -3305,6 +3325,15 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
         "the unit the Server serves was not dispatched while the relay was on: {}",
         replies[0]
     );
+    // Nession-owned transport fields are snake_case (#3371); this is the
+    // Server's own typed unit, answered on the same connection the relay
+    // borrows, so its multi-word key is asserted where it crosses the wire.
+    anyhow::ensure!(
+        replies[0]["payload"]["stale_agents"].is_array()
+            && replies[0]["payload"].get("staleAgents").is_none(),
+        "the relay-path reply must use the contract's snake_case key: {}",
+        replies[0]
+    );
     no_frame_of_type_within(
         &mut endpoint.frames,
         "server.session.list",
@@ -3330,6 +3359,12 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
     anyhow::ensure!(
         replies[0]["payload"]["sessions"].is_array(),
         "the frame written after the relay ended was not dispatched: {}",
+        replies[0]
+    );
+    anyhow::ensure!(
+        replies[0]["payload"]["stale_agents"].is_array()
+            && replies[0]["payload"].get("staleAgents").is_none(),
+        "the post-relay reply must use the contract's snake_case key: {}",
         replies[0]
     );
     Ok(())

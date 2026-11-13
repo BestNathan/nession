@@ -34,7 +34,6 @@ pub enum RepositoryStateV1 {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct RepositoryOkV1 {
     /// The identity resolution, distinct from the response's `state`.
     pub resolution: RepositoryStateV1,

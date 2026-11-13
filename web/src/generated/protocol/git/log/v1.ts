@@ -43,15 +43,15 @@ limit: number,
 /**
  * Bytes the cap dropped. Non-zero means this is a prefix of the answer.
  */
-truncatedBytes: number, truncated: boolean, 
+truncated_bytes: number, truncated: boolean, 
 /**
  * Pass as `before` on the next page — the oldest commit in this page.
  */
-nextCursor?: string | null, 
+next_cursor?: string | null, 
 /**
  * True when there are no older commits to page to.
  */
-endOfHistory: boolean, };
+end_of_history: boolean, };
 export type Commit = { 
 /**
  * Full object name.
@@ -60,14 +60,14 @@ hash: string,
 /**
  * Abbreviated, as git would print it.
  */
-shortHash: string, author: string, 
+short_hash: string, author: string, 
 /**
  * git's own relative phrasing ("3 days ago"). Not re-derived here: the
  * agent host's clock and the browser's are not the same clock, and a view
  * that computed "3 days ago" from a timestamp would disagree with `git log`
  * run in the Session beside it.
  */
-relativeDate: string, 
+relative_date: string, 
 /**
  * Committer date, ISO-8601 with the author's offset.
  */

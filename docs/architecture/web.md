@@ -456,6 +456,32 @@ No new parallel shell should be introduced; session-first patterns are
 canonical (name-collision policy: legacy copies are deleted, not kept in
 coexistence).
 
+## Session recovery chain (#3358)
+
+Three lifetimes are deliberately distinct: the authenticated **Server WS**, each
+physical **P2P socket**, and the **Session**. A recoverable loss of the first two
+must not shorten the third, and the browser client must not require a reload,
+manual attach or re-login to restore it.
+
+- `useAppConnection` owns the one logical Server connection. Past its fast retry
+  budget it keeps a bounded low-frequency tail and stays `reconnecting` rather
+  than settling at a terminal loss; a first-dial failure is retryable; only an
+  explicit `server.auth` refusal ends the connection.
+- `useVisibilityReconnect` probes the connected Server only while the page is
+  visible, single-flight and generation-fenced, so a half-open socket is
+  detected without a browser lifecycle event.
+- The Server `connected` event is the authenticated-ready signal. It wakes each
+  leased `SessionRuntime`; a runtime waiting on the credential issuer keeps its
+  Session and route (no candidate consumption, no force-Relay) and retries then,
+  with a bounded fallback probe.
+- `SessionRuntime` owns each Session's P2P credential lease: single-flight
+  renewal before a new Agent upgrade, epoch-fenced stale replies, and one
+  bounded reissue retry after an Agent identity rejection. Expiry alone never
+  closes a healthy socket.
+- Transport diagnostics are classified (close code/`wasClean`, handshake failure
+  class, physical generation, attempt, Server close reason) and never carry a
+  URL, auth token or P2P credential.
+
 ## Quality gates
 
 - ESLint: `nession/no-reverse-imports` (layer direction, see mapping above);

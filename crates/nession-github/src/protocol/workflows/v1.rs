@@ -41,7 +41,6 @@ pub enum WorkflowRunStatusV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct WorkflowRunV1 {
     pub id: u64,
     pub status: WorkflowRunStatusV1,
@@ -59,7 +58,6 @@ pub struct WorkflowRunV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubWorkflowV1 {
     pub id: u64,
     pub name: String,
@@ -88,7 +86,6 @@ pub struct WorkflowsRequestV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct WorkflowsOkV1 {
     pub repository: GithubRepositoryRefV1,
     pub scope: RunScopeV1,

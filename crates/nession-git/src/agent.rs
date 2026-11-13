@@ -368,7 +368,7 @@ impl GitAgentExtension {
         }
     }
 
-    /// Create a commit, replaying a repeated `requestId` instead of repeating
+    /// Create a commit, replaying a repeated `request_id` instead of repeating
     /// the commit.
     async fn create_commit_operation(&self, request: CreateCommitRequestV1) -> Value {
         let cmd = match self.cmd_for(&request.target.session).await {

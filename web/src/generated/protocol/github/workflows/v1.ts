@@ -31,17 +31,17 @@ export type WorkflowsOkV1 = { repository: GithubRepositoryRefV1, scope: RunScope
 /**
  * The branch whose runs were asked for; present only for branch scope.
  */
-branch?: string | null, workflows: Array<GithubWorkflowV1>, hasMore: boolean, nextCursor?: string | null, };
-export type GithubWorkflowV1 = { id: number, name: string, path: string, state: WorkflowStateV1, latestRun?: WorkflowRunV1 | null, };
-export type WorkflowRunV1 = { id: number, status: WorkflowRunStatusV1, conclusion?: string | null, branch?: string | null, sha: string, event: string, createdAt: string, updatedAt: string, url: string, };
+branch?: string | null, workflows: Array<GithubWorkflowV1>, has_more: boolean, next_cursor?: string | null, };
+export type GithubWorkflowV1 = { id: number, name: string, path: string, state: WorkflowStateV1, latest_run?: WorkflowRunV1 | null, };
+export type WorkflowRunV1 = { id: number, status: WorkflowRunStatusV1, conclusion?: string | null, branch?: string | null, sha: string, event: string, created_at: string, updated_at: string, url: string, };
 export type WorkflowRunStatusV1 = "queued" | "in_progress" | "completed" | "unknown";
 export type WorkflowStateV1 = "active" | "disabled" | "unknown";
 export type RunScopeV1 = "repository" | "branch";
-export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remoteName: string, 
+export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remote_name: string, 
 /**
  * The canonical browser source of this repository, never a credential URL.
  */
-sourceUrl: string, };
+source_url: string, };
 export type SessionTargetV1 = { session: string, 
 /**
  * A remote name discovered by the Agent for this Session. The provider
@@ -65,5 +65,5 @@ export type WorkflowsResponse = { "state": "ok", repository: GithubRepositoryRef
 /**
  * The branch whose runs were asked for; present only for branch scope.
  */
-branch?: string | null, workflows: Array<GithubWorkflowV1>, hasMore: boolean, nextCursor?: string | null, } | { "state": "error", code: GithubErrorCodeV1, message: string, retryAfterSeconds?: number | null, };
+branch?: string | null, workflows: Array<GithubWorkflowV1>, has_more: boolean, next_cursor?: string | null, } | { "state": "error", code: GithubErrorCodeV1, message: string, retry_after_seconds?: number | null, };
 

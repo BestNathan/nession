@@ -124,8 +124,9 @@ Typed codes: `not_a_repository`, `no_github_remote`, `ambiguous_remote`,
 `malformed_response`.
 
 The UI explains the scoped cause, keeps Local Repository available, and offers
-a user-triggered retry. Rate-limit answers carry `retryAfterSeconds` when GitHub
-provides it. A 3xx redirect is refused rather than followed with credentials.
+a user-triggered retry. Rate-limit answers carry `retry_after_seconds` when
+GitHub provides it. A 3xx redirect is refused rather than followed with
+credentials.
 Empty, missing, unauthenticated, denied and rate-limited are distinct states.
 
 ## Presentation

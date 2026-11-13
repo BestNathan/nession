@@ -96,6 +96,7 @@ impl Database {
         image_id: &str,
         digest: &str,
         size_bytes: u64,
+        source_sha: Option<&str>,
         updated_at: i64,
     ) -> Result<Option<ImageRow>> {
         let Some(existing) = images::Entity::find_by_id(image_id.to_owned())
@@ -108,6 +109,7 @@ impl Database {
         let mut model: images::ActiveModel = existing.into();
         model.digest = Set(Some(digest.to_string()));
         model.size_bytes = Set(i64::try_from(size_bytes).unwrap_or(i64::MAX));
+        model.source_sha = Set(source_sha.map(str::to_string));
         model.status = Set("ready".to_string());
         model.error = Set(None);
         model.updated_at = Set(updated_at);
@@ -137,6 +139,70 @@ impl Database {
             .update(&self.conn)
             .await
             .context("failed to record image failure")?;
+        Ok(())
+    }
+
+    /// Re-open one registry row for a new retry attempt.
+    ///
+    /// The build directory remains the execution authority; this only makes the
+    /// registry row truthful (`building`, no digest) for a retried attempt. A
+    /// failed row that a GC sweep already removed is recreated.
+    pub async fn set_image_building(&self, row: &ImageRow) -> Result<()> {
+        let Some(existing) = images::Entity::find_by_id(row.image_id.clone())
+            .one(&self.conn)
+            .await
+            .context("failed to load image for retry")?
+        else {
+            return self.insert_image(row).await;
+        };
+        let mut model: images::ActiveModel = existing.into();
+        model.digest = Set(None);
+        model.size_bytes = Set(0);
+        model.source_json = Set(row.source_json.clone());
+        model.source_sha = Set(row.source_sha.clone());
+        model.packaging_json = Set(row.packaging_json.clone());
+        model.status = Set("building".to_string());
+        model.error = Set(None);
+        model.updated_at = Set(row.updated_at);
+        model
+            .update(&self.conn)
+            .await
+            .context("failed to reopen image for retry")?;
+        Ok(())
+    }
+
+    /// Every image row in one lifecycle status.
+    pub async fn list_images_by_status(&self, status: &str) -> Result<Vec<ImageRow>> {
+        let rows = images::Entity::find()
+            .filter(images::Column::Status.eq(status))
+            .order_by_asc(images::Column::CreatedAt)
+            .all(&self.conn)
+            .await
+            .with_context(|| format!("failed to list {status} images"))?;
+        Ok(rows.into_iter().map(row_from_model).collect())
+    }
+
+    /// Test seam: make one row look older than the stale threshold so GC
+    /// candidate selection can be exercised without waiting an hour.
+    #[cfg(test)]
+    pub(crate) async fn set_image_updated_at_for_test(
+        &self,
+        image_id: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        let Some(existing) = images::Entity::find_by_id(image_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to load image for test touch")?
+        else {
+            return Ok(());
+        };
+        let mut model: images::ActiveModel = existing.into();
+        model.updated_at = Set(updated_at);
+        model
+            .update(&self.conn)
+            .await
+            .context("failed to touch image for test")?;
         Ok(())
     }
 
@@ -484,6 +550,7 @@ mod tests {
                 "image-b",
                 "sha256:0000000000000000000000000000000000000000000000000000000000000000",
                 7,
+                None,
                 4,
             )
             .await
@@ -519,7 +586,7 @@ mod tests {
             db.insert_image(&row(id, None, "building", 1))
                 .await
                 .unwrap();
-            db.finish_image(id, digest, 3, 2).await.unwrap();
+            db.finish_image(id, digest, 3, None, 2).await.unwrap();
         }
         db.insert_project(&crate::db::ProjectRow {
             project_id: "project-ref".to_string(),
