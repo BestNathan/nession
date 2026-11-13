@@ -119,7 +119,7 @@ for binary in mkfs.erofs erofsfuse; do
     fi
 done
 
-mkfs_version="$(mkfs.erofs --version 2>&1 | head -n 1)"
+mkfs_version="$(mkfs.erofs --version 2>&1 | head -n 1 || true)"
 case "${mkfs_version}" in
     *"${EROFS_UTILS_VERSION}"*)
         ;;
@@ -128,7 +128,7 @@ case "${mkfs_version}" in
         exit 6
         ;;
 esac
-erofsfuse_version="$(erofsfuse --version 2>&1 | head -n 1)"
+erofsfuse_version="$(erofsfuse --version 2>&1 | head -n 1 || true)"
 case "${erofsfuse_version}" in
     *"${EROFS_UTILS_VERSION}"*)
         ;;
