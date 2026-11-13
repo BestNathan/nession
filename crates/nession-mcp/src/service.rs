@@ -230,11 +230,29 @@ impl McpService {
         &self.path
     }
 
+    /// Answer one HTTP request on an embedding host's Axum router (`#3439`).
+    ///
+    /// The host owns the route and the upgrade/routing decision; the service
+    /// still owns its path check, bearer authentication and the rmcp transport
+    /// semantics. A request reaching this method has already been parsed by the
+    /// host's HTTP stack, so no request head is replayed here.
+    pub async fn handle<B>(&self, request: Request<B>) -> Response<RmcpBody>
+    where
+        B: HttpBody + Send + 'static,
+        B::Data: Send + 'static,
+        B::Error: std::fmt::Display,
+    {
+        let mut endpoint = self.endpoint.clone();
+        match endpoint.call(request).await {
+            Ok(response) => response,
+            Err(never) => match never {},
+        }
+    }
+
     /// Serve one replayed HTTP connection.
     ///
-    /// The stream starts with the request head the host already read; the
-    /// embedded hosts therefore keep their single `/ws` listener without a
-    /// second port or a framework change to the WebSocket handshake.
+    /// The standalone MCP host owns its listener and uses this; embedded
+    /// Server/Agent hosts mount [`Self::handle`] on their Axum router instead.
     pub async fn serve<S>(&self, stream: PrefixedStream<S>) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,

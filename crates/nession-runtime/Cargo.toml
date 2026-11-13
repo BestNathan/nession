@@ -16,6 +16,13 @@ edition.workspace = true
 # depending on the agent to schedule its own connections.
 [dependencies]
 tokio.workspace = true
+# The accepted-connection ingress both runtimes serve (#3439). Axum owns the
+# HTTP router and the WebSocket Upgrade; hyper drives the connection.
+axum.workspace = true
+hyper = { version = "1.11", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
+futures-util.workspace = true
+tokio-rustls.workspace = true
 # The frame the queue bounds. This is why the module is a *runtime's* and not
 # `nession-common`'s: only a runtime has a socket.
 tokio-tungstenite.workspace = true

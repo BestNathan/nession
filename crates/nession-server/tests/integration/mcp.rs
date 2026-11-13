@@ -303,13 +303,72 @@ async fn answer_command(
 async fn mcp_disabled_registers_no_http_route() {
     let (addr, _server) = start_server(McpConfig::default()).await;
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }).to_string();
-    let response = send(addr, "POST", "/mcp", Some(TOKEN), None, &body).await;
-    // The listener is a WebSocket listener: without MCP the request reaches
-    // tungstenite, which closes rather than answering JSON.
+    let response = send(addr, "POST", "/mcp", Some(TOKEN), None, &body)
+        .await
+        .expect("the listener answers HTTP now");
+    // The Axum router has no MCP route: an ordinary HTTP client gets an
+    // explicit 404 rather than a connection whose owner is unclear.
+    assert_eq!(response.status, 404);
+}
+
+/// `#3439` SC-01: the Server's HTTP surface is an explicit route table.
+///
+/// `/ws`, the authorized blob route and the optional MCP endpoint are the only
+/// routes. Everything else is a 404, a wrong method is a 405, and an HTTP
+/// request to the WebSocket route without an upgrade is refused by the
+/// Upgrade extractor rather than upgraded or silently closed.
+#[tokio::test]
+async fn http_routes_are_explicit_and_methods_are_bounded() {
+    let (addr, _server) = start_server(enabled_mcp()).await;
+
+    let unmatched = send(addr, "GET", "/not-a-route", None, None, "")
+        .await
+        .expect("answer");
+    assert_eq!(unmatched.status, 404, "unmatched paths are not served");
+
+    let wrong_method = send(addr, "POST", "/ws", None, None, "")
+        .await
+        .expect("answer");
+    assert_eq!(wrong_method.status, 405);
     assert!(
-        response.is_none_or(|response| response.status != 200),
-        "MCP disabled must not serve /mcp"
+        wrong_method
+            .header("allow")
+            .is_some_and(|value| value.contains("GET")),
+        "the 405 says which methods the route takes"
     );
+
+    let not_an_upgrade = send(addr, "GET", "/ws", None, None, "")
+        .await
+        .expect("answer");
+    assert_eq!(
+        not_an_upgrade.status, 400,
+        "an upgrade route rejects a request that did not ask to upgrade"
+    );
+
+    let unknown_digest = format!("sha256:{}", "e".repeat(64));
+    let unknown_blob = send(
+        addr,
+        "GET",
+        &format!("/images/blobs/{unknown_digest}"),
+        None,
+        None,
+        "",
+    )
+    .await
+    .expect("answer");
+    assert_eq!(unknown_blob.status, 404, "the blob route owns this path");
+
+    let blob_wrong_method = send(
+        addr,
+        "PUT",
+        &format!("/images/blobs/{unknown_digest}"),
+        None,
+        None,
+        "",
+    )
+    .await
+    .expect("answer");
+    assert_eq!(blob_wrong_method.status, 405);
 }
 
 #[tokio::test]
