@@ -41,6 +41,104 @@ pub enum CacheObservation {
     Failed { detail: String },
 }
 
+/// One digest's authoritative transfer/verification phase (#3412).
+///
+/// This is still protocol-free: the Agent adapter maps it to
+/// `ImageCachePhase`. `Resumable` is a durable partial with no active worker;
+/// `Downloading` and `Verifying` are the only active phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachePhase {
+    Absent,
+    Resumable,
+    Downloading,
+    Verifying,
+    Verified,
+    Failed,
+}
+
+/// One digest's measured progress snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheProgress {
+    pub phase: CachePhase,
+    /// Durable partial bytes plus bytes written by the current transfer.
+    pub downloaded_bytes: Option<u64>,
+    /// Authoritative total, or `None` when the server did not provide one.
+    pub total_bytes: Option<u64>,
+    pub active: bool,
+    /// Last measured state change: a file mtime for durable states, `now` for
+    /// live/failed states.
+    pub updated_at: SystemTime,
+    /// Bounded diagnostic; never a local image path or grant.
+    pub detail: Option<String>,
+}
+
+/// One in-flight transfer, kept only in memory. A surviving `.part` without
+/// this entry is `Resumable`, never `Downloading`.
+#[derive(Debug, Clone)]
+struct TransferState {
+    phase: CachePhase,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    updated_at: SystemTime,
+    detail: Option<String>,
+}
+
+impl TransferState {
+    fn progress(&self) -> CacheProgress {
+        CacheProgress {
+            phase: self.phase,
+            downloaded_bytes: Some(self.downloaded_bytes),
+            total_bytes: self.total_bytes,
+            active: matches!(self.phase, CachePhase::Downloading | CachePhase::Verifying),
+            updated_at: self.updated_at,
+            detail: self.detail.clone(),
+        }
+    }
+}
+
+/// How often a streaming transfer refreshes its observable byte count.
+const PROGRESS_UPDATE_BYTES: u64 = 256 * 1024;
+/// Bound on a reported transfer error; the cache never emits an unbounded body.
+const TRANSFER_DETAIL_MAX_CHARS: usize = 512;
+
+struct TransferOutcome {
+    transferred: u64,
+    /// Full durable bytes in the `.part` after this transfer.
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+}
+
+/// Clears an in-flight entry when the transfer future is dropped or cancelled.
+/// Durable bytes remain in the `.part`, so the next observation is `Resumable`.
+struct TransferGuard<'a> {
+    cache: &'a ErofsCache,
+    digest: String,
+    armed: bool,
+}
+
+impl<'a> TransferGuard<'a> {
+    fn new(cache: &'a ErofsCache, digest: &str) -> Self {
+        Self {
+            cache,
+            digest: digest.to_string(),
+            armed: true,
+        }
+    }
+
+    /// Keep the state the transfer explicitly recorded (verified/failed).
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TransferGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.cache.clear_transfer(&self.digest);
+        }
+    }
+}
+
 /// One read/write chunk. The cache never buffers a whole image in memory.
 pub const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 /// A partial download older than this is reconciled; a newer one is resumed.
@@ -182,6 +280,8 @@ pub struct ErofsCache {
     locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     /// Digests with an active consumer; eviction refuses to remove them.
     pinned: Mutex<HashMap<String, u32>>,
+    /// Per-digest live transfer observations. Absent means no active worker.
+    transfers: Mutex<HashMap<String, TransferState>>,
     bytes_transferred: AtomicU64,
     fetch_count: AtomicU64,
     evicted_blobs: AtomicU64,
@@ -240,6 +340,7 @@ impl ErofsCache {
             client,
             locks: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashMap::new()),
+            transfers: Mutex::new(HashMap::new()),
             bytes_transferred: AtomicU64::new(0),
             fetch_count: AtomicU64::new(0),
             evicted_blobs: AtomicU64::new(0),
@@ -384,6 +485,181 @@ impl ErofsCache {
         CacheObservation::Absent
     }
 
+    /// Observe one digest's phase, measured bytes and activity without
+    /// downloading or mutating anything.
+    ///
+    /// The in-memory transfer entry is authoritative while a worker runs. With
+    /// no entry, the durable files decide: a verified blob is `Verified`, a
+    /// surviving `.part` is `Resumable` (not active), and neither is `Absent`.
+    /// A restart therefore rebuilds the same truthful state from disk.
+    pub async fn observe_progress(&self, digest: &str) -> CacheProgress {
+        let now = SystemTime::now();
+        let Ok(final_path) = self.blob_path(digest) else {
+            return CacheProgress {
+                phase: CachePhase::Failed,
+                downloaded_bytes: None,
+                total_bytes: None,
+                active: false,
+                updated_at: now,
+                detail: Some("invalid image digest".to_string()),
+            };
+        };
+        if let Some(state) = self.transfer_state(digest) {
+            return state.progress();
+        }
+        if self.verify_file(&final_path, digest).await.unwrap_or(false) {
+            let size = std::fs::metadata(&final_path).ok().map(|meta| meta.len());
+            let updated_at = std::fs::metadata(&final_path)
+                .and_then(|meta| meta.modified())
+                .unwrap_or(now);
+            return CacheProgress {
+                phase: CachePhase::Verified,
+                downloaded_bytes: size,
+                total_bytes: size,
+                active: false,
+                updated_at,
+                detail: None,
+            };
+        }
+        if final_path.exists() {
+            let updated_at = std::fs::metadata(&final_path)
+                .and_then(|meta| meta.modified())
+                .unwrap_or(now);
+            return CacheProgress {
+                phase: CachePhase::Failed,
+                downloaded_bytes: None,
+                total_bytes: None,
+                active: false,
+                updated_at,
+                detail: Some("cached blob failed digest verification".to_string()),
+            };
+        }
+        match self.partial_path(digest).map(|partial| {
+            std::fs::metadata(&partial)
+                .ok()
+                .filter(std::fs::Metadata::is_file)
+                .map(|meta| (meta.len(), meta.modified().unwrap_or(now)))
+        }) {
+            Ok(Some((downloaded_bytes, updated_at))) => CacheProgress {
+                phase: CachePhase::Resumable,
+                downloaded_bytes: Some(downloaded_bytes),
+                total_bytes: None,
+                active: false,
+                updated_at,
+                detail: Some("a partial download exists; it can resume".to_string()),
+            },
+            _ => CacheProgress {
+                phase: CachePhase::Absent,
+                downloaded_bytes: None,
+                total_bytes: None,
+                active: false,
+                updated_at: now,
+                detail: None,
+            },
+        }
+    }
+
+    fn transfer_state(&self, digest: &str) -> Option<TransferState> {
+        self.transfers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(digest)
+            .cloned()
+    }
+
+    fn set_transfer(&self, digest: &str, state: TransferState) {
+        self.transfers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(digest.to_string(), state);
+    }
+
+    fn begin_transfer(&self, digest: &str, downloaded_bytes: u64) {
+        self.set_transfer(
+            digest,
+            TransferState {
+                phase: CachePhase::Downloading,
+                downloaded_bytes,
+                total_bytes: None,
+                updated_at: SystemTime::now(),
+                detail: None,
+            },
+        );
+    }
+
+    fn update_transfer_progress(
+        &self,
+        digest: &str,
+        downloaded_bytes: u64,
+        total_bytes: Option<u64>,
+    ) {
+        let mut transfers = self
+            .transfers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(state) = transfers.get_mut(digest) {
+            state.phase = CachePhase::Downloading;
+            state.downloaded_bytes = downloaded_bytes;
+            state.total_bytes = total_bytes;
+            state.updated_at = SystemTime::now();
+        }
+    }
+
+    fn set_transfer_verifying(
+        &self,
+        digest: &str,
+        downloaded_bytes: u64,
+        total_bytes: Option<u64>,
+    ) {
+        let mut transfers = self
+            .transfers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(state) = transfers.get_mut(digest) {
+            state.phase = CachePhase::Verifying;
+            state.downloaded_bytes = downloaded_bytes;
+            state.total_bytes = total_bytes;
+            state.updated_at = SystemTime::now();
+            state.detail = None;
+        }
+    }
+
+    fn fail_transfer(&self, digest: &str, detail: impl Into<String>) {
+        let detail = bounded_transfer_detail(&detail.into());
+        self.set_transfer(
+            digest,
+            TransferState {
+                phase: CachePhase::Failed,
+                downloaded_bytes: 0,
+                total_bytes: None,
+                updated_at: SystemTime::now(),
+                detail: Some(detail),
+            },
+        );
+    }
+
+    /// A transfer error with durable bytes is resumable; one without is failed.
+    fn transfer_error(&self, digest: &str, detail: &str) {
+        let durable = self
+            .partial_path(digest)
+            .ok()
+            .and_then(|partial| std::fs::metadata(partial).ok())
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+        if durable > 0 {
+            self.clear_transfer(digest);
+        } else {
+            self.fail_transfer(digest, detail);
+        }
+    }
+
+    fn clear_transfer(&self, digest: &str) {
+        self.transfers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(digest);
+    }
+
     /// Return the verified blob, downloading it only when the cache is cold.
     ///
     /// Concurrent callers for one digest share a single fetch. A warm hit
@@ -419,23 +695,48 @@ impl ErofsCache {
         }
         self.fetch_count.fetch_add(1, Ordering::Relaxed);
         let part = self.partial_path(digest)?;
-        let transferred = self.download(digest, grant, &part).await?;
+        let mut transfer = TransferGuard::new(self, digest);
+        let outcome = match self.download(digest, grant, &part).await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                // `download` already recorded the truthful durable state
+                // (resumable when bytes survive, failed otherwise).
+                transfer.disarm();
+                return Err(error);
+            }
+        };
         self.bytes_transferred
-            .fetch_add(transferred, Ordering::Relaxed);
+            .fetch_add(outcome.transferred, Ordering::Relaxed);
+        self.set_transfer_verifying(digest, outcome.downloaded_bytes, outcome.total_bytes);
         if !self.verify_file(&part, digest).await.unwrap_or(false) {
             let _ = std::fs::remove_file(&part);
+            self.fail_transfer(digest, format!("downloaded image does not match {digest}"));
+            transfer.disarm();
             anyhow::bail!("downloaded image does not match {digest}");
         }
         let size_bytes = std::fs::metadata(&part)
             .with_context(|| format!("cannot stat {}", part.display()))?
             .len();
-        std::fs::rename(&part, &final_path).with_context(|| {
-            format!(
-                "cannot publish {} as {}",
-                part.display(),
-                final_path.display()
-            )
-        })?;
+        if let Err(error) = std::fs::rename(&part, &final_path) {
+            self.fail_transfer(
+                digest,
+                format!(
+                    "cannot publish {} as {}: {error}",
+                    part.display(),
+                    final_path.display()
+                ),
+            );
+            transfer.disarm();
+            return Err(error).with_context(|| {
+                format!(
+                    "cannot publish {} as {}",
+                    part.display(),
+                    final_path.display()
+                )
+            });
+        }
+        self.clear_transfer(digest);
+        transfer.disarm();
         Ok(CachedImage {
             digest: digest.to_string(),
             path: final_path,
@@ -506,7 +807,12 @@ impl ErofsCache {
         Ok(actual.as_deref() == Some(digest))
     }
 
-    async fn download(&self, digest: &str, grant: &DownloadGrant, part: &Path) -> Result<u64> {
+    async fn download(
+        &self,
+        digest: &str,
+        grant: &DownloadGrant,
+        part: &Path,
+    ) -> Result<TransferOutcome> {
         if grant.token.is_empty() {
             anyhow::bail!("image download grant has no token");
         }
@@ -517,6 +823,23 @@ impl ErofsCache {
             .await
             .map(|metadata| metadata.len())
             .unwrap_or(0);
+        self.begin_transfer(digest, existing);
+        let result = self.download_stream(digest, grant, part, existing).await;
+        if let Err(error) = &result {
+            // Keep a truthful final state: durable bytes are resumable,
+            // otherwise the attempt is failed with a bounded diagnostic.
+            self.transfer_error(digest, &format!("{error:#}"));
+        }
+        result
+    }
+
+    async fn download_stream(
+        &self,
+        digest: &str,
+        grant: &DownloadGrant,
+        part: &Path,
+        existing: u64,
+    ) -> Result<TransferOutcome> {
         let mut request = self
             .client
             .get(&grant.url)
@@ -527,22 +850,59 @@ impl ErofsCache {
         }
         let response = request.send().await.context("image download failed")?;
         let status = response.status();
-        let (mut file, append) = if status == reqwest::StatusCode::PARTIAL_CONTENT && existing > 0 {
-            (
-                tokio::fs::OpenOptions::new()
-                    .append(true)
-                    .open(part)
-                    .await
-                    .context("cannot resume a partial image download")?,
-                true,
-            )
+        let headers = response.headers().clone();
+        let content_length = header_u64(&headers, reqwest::header::CONTENT_LENGTH);
+        let (mut file, resumed_bytes, total_bytes) = if status
+            == reqwest::StatusCode::PARTIAL_CONTENT
+        {
+            let content_range = headers
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("image server returned 206 without Content-Range")
+                })?;
+            let (start, end, total) = parse_content_range(content_range).ok_or_else(|| {
+                anyhow::anyhow!("image server returned an invalid Content-Range `{content_range}`")
+            })?;
+            if existing == 0 {
+                anyhow::bail!(
+                    "image server returned an unexpected partial response for a cold download"
+                );
+            }
+            if start != existing {
+                anyhow::bail!("image resume range starts at {start}, expected {existing}");
+            }
+            let expected = end - start + 1;
+            if let Some(length) = content_length {
+                if length != expected {
+                    anyhow::bail!(
+                        "image resume length {length} disagrees with Content-Range length {expected}"
+                    );
+                }
+            }
+            if let Some(total) = total {
+                if total < end + 1 {
+                    anyhow::bail!(
+                        "image resume range ends at {} but the declared total is {total}",
+                        end + 1
+                    );
+                }
+            }
+            let file = tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(part)
+                .await
+                .context("cannot resume a partial image download")?;
+            self.update_transfer_progress(digest, existing, total);
+            (file, existing, total)
         } else if status.is_success() {
-            (
-                tokio::fs::File::create(part)
-                    .await
-                    .context("cannot create a partial image download")?,
-                false,
-            )
+            // A 200 response restarts from byte zero even if the request asked
+            // for a Range; `File::create` truncates the stale partial.
+            let file = tokio::fs::File::create(part)
+                .await
+                .context("cannot create a partial image download")?;
+            self.update_transfer_progress(digest, 0, content_length);
+            (file, 0, content_length)
         } else if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
             let _ = tokio::fs::remove_file(part).await;
             anyhow::bail!("image server refused the resume range; retry the download");
@@ -554,23 +914,89 @@ impl ErofsCache {
         };
         let mut stream = response.bytes_stream();
         let mut transferred = 0_u64;
+        let mut last_reported = 0_u64;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("image body stream failed")?;
             file.write_all(&chunk)
                 .await
                 .context("image body write failed")?;
             transferred += chunk.len() as u64;
+            if transferred.saturating_sub(last_reported) >= PROGRESS_UPDATE_BYTES {
+                self.update_transfer_progress(digest, resumed_bytes + transferred, total_bytes);
+                last_reported = transferred;
+            }
         }
         file.flush().await?;
         file.sync_all().await?;
-        if !append {
-            // A 200 response restarted the body from byte zero; the file was
-            // truncated by File::create, so the final hash covers the whole
-            // body, not a concatenation.
-            let _ = append;
+        let downloaded_bytes = resumed_bytes + transferred;
+        if let Some(total) = total_bytes {
+            if downloaded_bytes > total {
+                let _ = tokio::fs::remove_file(part).await;
+                anyhow::bail!(
+                    "image body reached {downloaded_bytes} bytes but the declared total is {total}"
+                );
+            }
         }
-        Ok(transferred)
+        self.update_transfer_progress(digest, downloaded_bytes, total_bytes);
+        Ok(TransferOutcome {
+            transferred,
+            downloaded_bytes,
+            total_bytes,
+        })
     }
+}
+
+fn header_u64(
+    headers: &reqwest::header::HeaderMap,
+    name: reqwest::header::HeaderName,
+) -> Option<u64> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse().ok())
+}
+
+/// Parse one `Content-Range: bytes <start>-<end>/<total|*>` value.
+fn parse_content_range(value: &str) -> Option<(u64, u64, Option<u64>)> {
+    let rest = value.strip_prefix("bytes ")?;
+    let (range, total) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse().ok()?;
+    let end = end.parse().ok()?;
+    if end < start {
+        return None;
+    }
+    let total = if total == "*" {
+        None
+    } else {
+        Some(total.parse().ok()?)
+    };
+    Some((start, end, total))
+}
+
+fn bounded_transfer_detail(detail: &str) -> String {
+    // The observation is client-visible: never disclose an absolute cache or
+    // host path, even when an I/O error or context wrapper included one.
+    let redacted = detail
+        .split_whitespace()
+        .map(|token| {
+            let trimmed = token.trim_matches(|value: char| {
+                matches!(value, '\'' | '"' | '`' | ',' | ';' | '(' | ')')
+            });
+            if trimmed.starts_with('/') && trimmed.len() > 1 {
+                "<path>".to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if redacted.chars().count() <= TRANSFER_DETAIL_MAX_CHARS {
+        return redacted;
+    }
+    let mut bounded: String = redacted.chars().take(TRANSFER_DETAIL_MAX_CHARS).collect();
+    bounded.push('…');
+    bounded
 }
 
 /// A consumer's pin. Dropping it releases the eviction guard.
@@ -826,6 +1252,10 @@ mod tests {
             .respond_with(
                 Response::builder()
                     .status(206)
+                    .header(
+                        "content-range",
+                        format!("bytes {half}-{}/{}", bytes.len() - 1, bytes.len()),
+                    )
                     .body(bytes[half..].to_vec())
                     .unwrap(),
             ),
@@ -1139,5 +1569,493 @@ mod tests {
         assert_eq!(after.temp_artifacts, 0);
         assert_eq!(after.stale_partials, 0);
         assert_eq!(after.reconciled_partials, 1);
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    struct DurableProbe;
+    impl StorageProbe for DurableProbe {
+        fn mount_type(&self, _path: &Path) -> Result<String> {
+            Ok("nfs".to_string())
+        }
+    }
+
+    async fn cache(root: &Path) -> ErofsCache {
+        ErofsCache::open_with_probe(root, "agent-progress", true, &DurableProbe)
+            .await
+            .unwrap()
+    }
+
+    fn digest_for(bytes: &[u8]) -> String {
+        crate::digest::digest_of_bytes(bytes)
+    }
+
+    #[test]
+    fn content_range_parsing_accepts_known_and_unknown_totals() {
+        assert_eq!(
+            parse_content_range("bytes 12-47/48"),
+            Some((12, 47, Some(48)))
+        );
+        assert_eq!(parse_content_range("bytes 0-99/*"), Some((0, 99, None)));
+        assert_eq!(parse_content_range("bytes 47-12/48"), None);
+        assert_eq!(parse_content_range("items 0-1/2"), None);
+    }
+
+    #[tokio::test]
+    async fn progress_distinguishes_absent_resumable_and_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cache(dir.path()).await;
+        let bytes = b"progress body".to_vec();
+        let digest = digest_for(&bytes);
+
+        let absent = cache.observe_progress(&digest).await;
+        assert_eq!(absent.phase, CachePhase::Absent);
+        assert!(!absent.active);
+        assert!(absent.downloaded_bytes.is_none());
+
+        let part = cache.partial_path(&digest).unwrap();
+        std::fs::write(&part, &bytes[..4]).unwrap();
+        let resumable = cache.observe_progress(&digest).await;
+        assert_eq!(resumable.phase, CachePhase::Resumable);
+        assert_eq!(resumable.downloaded_bytes, Some(4));
+        assert!(!resumable.active);
+        assert!(resumable
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("partial")));
+
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path(
+                "GET",
+                format!("/blobs/{digest}"),
+            ))
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(200)
+                    .body(bytes.clone())
+                    .unwrap(),
+            ),
+        );
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "t".to_string(),
+        };
+        cache.get_or_fetch(&digest, &grant).await.unwrap();
+        let verified = cache.observe_progress(&digest).await;
+        assert_eq!(verified.phase, CachePhase::Verified);
+        assert_eq!(verified.downloaded_bytes, Some(bytes.len() as u64));
+        assert_eq!(verified.total_bytes, Some(bytes.len() as u64));
+        assert!(!verified.active);
+    }
+
+    #[tokio::test]
+    async fn restart_rebuilds_resumable_and_verified_progress_from_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"restart progress".to_vec();
+        let digest = digest_for(&bytes);
+        {
+            let cache = cache(dir.path()).await;
+            std::fs::write(cache.partial_path(&digest).unwrap(), &bytes[..5]).unwrap();
+            let verified_bytes = b"already verified".to_vec();
+            let verified_digest = digest_for(&verified_bytes);
+            let server = httptest::Server::run();
+            server.expect(
+                httptest::Expectation::matching(httptest::matchers::request::method_path(
+                    "GET",
+                    format!("/blobs/{verified_digest}"),
+                ))
+                .respond_with(
+                    httptest::http::Response::builder()
+                        .status(200)
+                        .body(verified_bytes.clone())
+                        .unwrap(),
+                ),
+            );
+            let grant = DownloadGrant {
+                url: server.url(&format!("/blobs/{verified_digest}")).to_string(),
+                token: "t".to_string(),
+            };
+            cache.get_or_fetch(&verified_digest, &grant).await.unwrap();
+        }
+        let restarted = cache(dir.path()).await;
+        let resumable = restarted.observe_progress(&digest).await;
+        assert_eq!(resumable.phase, CachePhase::Resumable);
+        assert_eq!(resumable.downloaded_bytes, Some(5));
+        assert!(!resumable.active);
+
+        let verified = restarted
+            .observe_progress(&digest_for(b"already verified"))
+            .await;
+        assert_eq!(verified.phase, CachePhase::Verified);
+        assert!(!verified.active);
+    }
+
+    #[tokio::test]
+    async fn a_slow_transfer_is_downloading_with_measured_bytes_then_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![0_u8; 512 * 1024];
+        let digest = digest_for(&body);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_body = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                server_body.len()
+            )
+            .unwrap();
+            let (first, second) = server_body.split_at(server_body.len() / 2);
+            stream.write_all(first).unwrap();
+            stream.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            stream.write_all(second).unwrap();
+        });
+        let cache = Arc::new(cache(dir.path()).await);
+        let grant = DownloadGrant {
+            url: format!("http://{address}/blobs/{digest}"),
+            token: "t".to_string(),
+        };
+        let fetch = tokio::spawn({
+            let cache = Arc::clone(&cache);
+            let digest = digest.clone();
+            async move { cache.get_or_fetch(&digest, &grant).await }
+        });
+
+        let mut observed = None;
+        for _ in 0..200 {
+            let progress = cache.observe_progress(&digest).await;
+            if progress.phase == CachePhase::Downloading
+                && progress.downloaded_bytes.unwrap_or(0) > 0
+            {
+                observed = Some(progress);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let observed = observed.expect("a slow transfer must be observable while active");
+        assert!(observed.active);
+        assert_eq!(observed.total_bytes, Some(body.len() as u64));
+        assert!(observed.downloaded_bytes.unwrap() < body.len() as u64);
+
+        fetch.await.unwrap().unwrap();
+        server.join().unwrap();
+        let verified = cache.observe_progress(&digest).await;
+        assert_eq!(verified.phase, CachePhase::Verified);
+        assert!(!verified.active);
+    }
+
+    #[tokio::test]
+    async fn a_200_restart_resets_the_reported_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"0123456789abcdef".to_vec();
+        let digest = digest_for(&bytes);
+        let part = cache(dir.path()).await.partial_path(&digest).unwrap();
+        std::fs::write(&part, &bytes[..8]).unwrap();
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path(
+                "GET",
+                format!("/blobs/{digest}"),
+            ))
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(200)
+                    .body(bytes.clone())
+                    .unwrap(),
+            ),
+        );
+        let cache = cache(dir.path()).await;
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "t".to_string(),
+        };
+        let cached = cache.get_or_fetch(&digest, &grant).await.unwrap();
+        assert_eq!(cached.size_bytes, bytes.len() as u64);
+        assert_eq!(cache.bytes_transferred(), bytes.len() as u64);
+        assert_eq!(
+            cache.observe_progress(&digest).await.downloaded_bytes,
+            Some(bytes.len() as u64)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_digest_mismatch_is_failed_not_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let expected = digest_for(b"expected");
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path(
+                "GET",
+                format!("/blobs/{expected}"),
+            ))
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(200)
+                    .body(b"wrong".to_vec())
+                    .unwrap(),
+            ),
+        );
+        let cache = cache(dir.path()).await;
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{expected}")).to_string(),
+            token: "t".to_string(),
+        };
+        assert!(cache.get_or_fetch(&expected, &grant).await.is_err());
+        let failed = cache.observe_progress(&expected).await;
+        assert_eq!(failed.phase, CachePhase::Failed);
+        assert!(!failed.active);
+        assert!(failed
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("does not match")));
+        assert!(!cache.partial_path(&expected).unwrap().exists());
+    }
+}
+
+#[cfg(test)]
+mod progress_negative_tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    struct DurableProbe;
+    impl StorageProbe for DurableProbe {
+        fn mount_type(&self, _path: &Path) -> Result<String> {
+            Ok("nfs".to_string())
+        }
+    }
+
+    async fn cache(root: &Path) -> ErofsCache {
+        ErofsCache::open_with_probe(root, "agent-negative", true, &DurableProbe)
+            .await
+            .unwrap()
+    }
+
+    fn digest_for(bytes: &[u8]) -> String {
+        crate::digest::digest_of_bytes(bytes)
+    }
+
+    #[test]
+    fn transfer_details_redact_absolute_paths_and_bound_length() {
+        let detail = bounded_transfer_detail(
+            "cannot publish /data/erofs/agents/a/tmp/x.part as /data/erofs/agents/a/sha256/x: denied",
+        );
+        assert!(!detail.contains("/data/erofs"), "{detail}");
+        assert!(detail.contains("<path>"), "{detail}");
+        let long = "x".repeat(TRANSFER_DETAIL_MAX_CHARS + 10);
+        assert_eq!(
+            bounded_transfer_detail(&long).chars().count(),
+            TRANSFER_DETAIL_MAX_CHARS + 1
+        );
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_transfer_leaves_nonzero_resumable_bytes_not_active() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![0_u8; 512 * 1024];
+        let digest = digest_for(&body);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_body = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                server_body.len()
+            )
+            .unwrap();
+            stream
+                .write_all(&server_body[..server_body.len() / 2])
+                .unwrap();
+            stream.flush().unwrap();
+            // Dropping the connection before the declared length is an
+            // interrupted transfer, not a successful image.
+        });
+        let cache = cache(dir.path()).await;
+        let grant = DownloadGrant {
+            url: format!("http://{address}/blobs/{digest}"),
+            token: "t".to_string(),
+        };
+        assert!(cache.get_or_fetch(&digest, &grant).await.is_err());
+        server.join().unwrap();
+
+        let progress = cache.observe_progress(&digest).await;
+        assert_eq!(progress.phase, CachePhase::Resumable);
+        assert!(!progress.active);
+        assert!(progress.downloaded_bytes.unwrap() > 0);
+        assert!(progress.downloaded_bytes.unwrap() < body.len() as u64);
+        let part = cache.partial_path(&digest).unwrap();
+        assert_eq!(
+            progress.downloaded_bytes,
+            Some(std::fs::metadata(part).unwrap().len())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_contradictory_resume_range_keeps_the_partial_resumable() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"0123456789abcdef".to_vec();
+        let digest = digest_for(&bytes);
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path(
+                "GET",
+                format!("/blobs/{digest}"),
+            ))
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(206)
+                    .header("content-range", "bytes 4-15/16")
+                    .body(bytes[8..].to_vec())
+                    .unwrap(),
+            ),
+        );
+        let cache = cache(dir.path()).await;
+        let part = cache.partial_path(&digest).unwrap();
+        std::fs::write(&part, &bytes[..8]).unwrap();
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "t".to_string(),
+        };
+        assert!(cache.get_or_fetch(&digest, &grant).await.is_err());
+        let progress = cache.observe_progress(&digest).await;
+        assert_eq!(progress.phase, CachePhase::Resumable);
+        assert_eq!(progress.downloaded_bytes, Some(8));
+        assert!(!progress.active);
+    }
+
+    #[tokio::test]
+    async fn a_refused_grant_is_failed_without_a_partial() {
+        let dir = tempfile::tempdir().unwrap();
+        let digest = digest_for(b"refused image");
+        let server = httptest::Server::run();
+        server.expect(
+            httptest::Expectation::matching(httptest::matchers::request::method_path(
+                "GET",
+                format!("/blobs/{digest}"),
+            ))
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(403)
+                    .body(Vec::new())
+                    .unwrap(),
+            ),
+        );
+        let cache = cache(dir.path()).await;
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "expired".to_string(),
+        };
+        assert!(cache.get_or_fetch(&digest, &grant).await.is_err());
+        let progress = cache.observe_progress(&digest).await;
+        assert_eq!(progress.phase, CachePhase::Failed);
+        assert!(!progress.active);
+        assert!(progress
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("403")));
+        assert!(!cache.partial_path(&digest).unwrap().exists());
+    }
+
+    #[tokio::test]
+    async fn verifying_is_active_but_not_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cache(dir.path()).await;
+        let digest = digest_for(b"verifying image");
+        cache.set_transfer(
+            &digest,
+            TransferState {
+                phase: CachePhase::Verifying,
+                downloaded_bytes: 1024,
+                total_bytes: Some(1024),
+                updated_at: SystemTime::now(),
+                detail: None,
+            },
+        );
+        let progress = cache.observe_progress(&digest).await;
+        assert_eq!(progress.phase, CachePhase::Verifying);
+        assert!(progress.active);
+        assert_eq!(progress.downloaded_bytes, Some(1024));
+        assert_eq!(progress.total_bytes, Some(1024));
+        assert_ne!(progress.phase, CachePhase::Verified);
+        cache.clear_transfer(&digest);
+    }
+
+    #[tokio::test]
+    async fn two_consumers_share_one_active_transfer() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = vec![1_u8; 512 * 1024];
+        let digest = digest_for(&body);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_body = body.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                server_body.len()
+            )
+            .unwrap();
+            let (first, second) = server_body.split_at(server_body.len() / 2);
+            stream.write_all(first).unwrap();
+            stream.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            stream.write_all(second).unwrap();
+        });
+        let cache = Arc::new(cache(dir.path()).await);
+        let grant = DownloadGrant {
+            url: format!("http://{address}/blobs/{digest}"),
+            token: "t".to_string(),
+        };
+        let first = tokio::spawn({
+            let cache = Arc::clone(&cache);
+            let grant = grant.clone();
+            let digest = digest.clone();
+            async move { cache.get_or_fetch(&digest, &grant).await }
+        });
+        let second = tokio::spawn({
+            let cache = Arc::clone(&cache);
+            let grant = grant.clone();
+            let digest = digest.clone();
+            async move { cache.get_or_fetch(&digest, &grant).await }
+        });
+
+        let mut observed = None;
+        for _ in 0..200 {
+            let progress = cache.observe_progress(&digest).await;
+            if progress.phase == CachePhase::Downloading
+                && progress.downloaded_bytes.unwrap_or(0) > 0
+            {
+                observed = Some(progress);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let observed = observed.expect("the shared transfer is observable");
+        assert!(observed.active);
+        assert!(observed.downloaded_bytes.unwrap() < body.len() as u64);
+
+        first.await.unwrap().unwrap();
+        second.await.unwrap().unwrap();
+        server.join().unwrap();
+        assert_eq!(cache.fetch_count(), 1);
+        assert_eq!(
+            cache.observe_progress(&digest).await.phase,
+            CachePhase::Verified
+        );
     }
 }

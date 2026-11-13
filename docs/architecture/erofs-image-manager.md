@@ -270,6 +270,13 @@ must name a digest already resolved by that Session's ready Managed context.
 Unrelated Sessions and guessed digests are refused; a Project-scoped request
 remains compatible.
 
+Per-digest transfer and verification progress is deliberately **not** a Server
+image status. The Agent owns the versioned `ImageCacheObservation` (#3412) and
+reports measured bytes/activity for its own cache through the authenticated
+Session-context query. A Server `ready` image does not imply that any Agent has
+fetched, verified or is downloading it; conversely, an Agent partial is not a
+Server build failure. See [Agent EROFS cache](agent-erofs-cache.md#per-digest-progress-observation-3412).
+
 ## Authorized blob HTTP
 
 The existing Server listener sniffs one HTTP request head and routes
