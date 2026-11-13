@@ -185,7 +185,28 @@ export type ImageCacheState = "verified" | "preparing" | "absent" | "failed" | "
 export type ImageCacheStatus = { digest: string, state: ImageCacheState, detail?: string | null, };
 export type SandboxKvEntry = { key: string, value: string, };
 export type SandboxEnforcement = "required";
-export type SandboxFilesystemPolicy = { access: SandboxFilesystemAccess, };
+export type SandboxFilesystemPolicy = { access: SandboxFilesystemAccess, 
+/**
+ * Optional RootFS source. Absent means the current host-root baseline.
+ */
+rootfs?: SandboxFilesystemRoot | null, 
+/**
+ * Additional read-only image mounts, initially empty.
+ */
+mounts?: Array<SandboxMount>, 
+/**
+ * Optional Workspace selection at the implicit `/workspace` target.
+ */
+workspace?: SandboxFilesystemWorkspace | null, };
+export type SandboxFilesystemRoot = { "kind": "local" } | { "kind": "image", digest: string, };
+export type SandboxMountSource = { "kind": "image", digest: string, };
+export type SandboxMount = { source: SandboxMountSource, 
+/**
+ * Absolute, normalized target. The first executable implementation keeps
+ * the V1 `/opt/<lowercase-name>` restriction.
+ */
+target: string, read_only: boolean, };
+export type SandboxFilesystemWorkspace = { "kind": "auto" } | { "kind": "project_location" } | { "kind": "managed", workspace_id?: string | null, name?: string | null, };
 export type SandboxFilesystemAccess = { 
 /**
  * Paths visible read-only.

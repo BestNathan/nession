@@ -80,6 +80,67 @@ pub enum SandboxEnforcement {
     Required,
 }
 
+/// The client-safe RootFS declaration (#3405).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SandboxFilesystemRoot {
+    /// The backend's host-root baseline ("Local" in the editor).
+    Local,
+    /// One immutable Base Runtime EROFS image mounted read-only at `/`.
+    Image { digest: String },
+}
+
+/// One authorized additional image source (#3405).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SandboxMountSource {
+    /// An immutable Server image digest. The Agent resolves it through its
+    /// verified cache; a raw local path is never a client source.
+    Image { digest: String },
+}
+
+/// One read-only additional image mount with an explicit target (#3405).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxMount {
+    pub source: SandboxMountSource,
+    /// Absolute, normalized target. The first executable implementation keeps
+    /// the V1 `/opt/<lowercase-name>` restriction.
+    pub target: String,
+    #[serde(default = "default_mount_read_only")]
+    pub read_only: bool,
+}
+
+fn default_mount_read_only() -> bool {
+    true
+}
+
+/// The client-safe Workspace selection (#3405, resource model #3407).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SandboxFilesystemWorkspace {
+    /// Resolve the current Project Location first, otherwise the managed
+    /// Workspace named after the Session.
+    Auto,
+    /// The current Project's declared Existing Location on this Agent.
+    ProjectLocation,
+    /// One Agent-managed Workspace by stable id or lookup name.
+    Managed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+}
+
 /// Filesystem access contract.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
@@ -87,6 +148,15 @@ pub enum SandboxEnforcement {
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemPolicy {
     pub access: SandboxFilesystemAccess,
+    /// Optional RootFS source. Absent means the current host-root baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rootfs: Option<SandboxFilesystemRoot>,
+    /// Additional read-only image mounts, initially empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mounts: Vec<SandboxMount>,
+    /// Optional Workspace selection at the implicit `/workspace` target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<SandboxFilesystemWorkspace>,
     /// A prepared EROFS root composition. When present it replaces
     /// `access`: the sandbox root is an empty tmpfs carrying the base image,
     /// with only the declared image mounts and writable workspace visible.
