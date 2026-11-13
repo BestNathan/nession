@@ -184,12 +184,20 @@ pub fn looks_like_websocket_upgrade(
             .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
 }
 
+/// Upper bound on one HTTP request head.
+///
+/// The old listener's sniffed head had the same bound; moving the grammar to
+/// hyper keeps it rather than inheriting a larger default.
+pub const MAX_REQUEST_HEAD_BYTES: usize = 16 * 1024;
+
 /// Serve one accepted socket with `router` until the connection ends.
 ///
 /// `connect` completes the optional TLS handshake. The handshake deadline
-/// covers both that and the first complete HTTP request: once the slot is
-/// released the deadline is disarmed, so a long-lived WebSocket or MCP stream is
-/// never cut short by the pre-authentication bound.
+/// covers both that and the first complete HTTP request. Once the slot is
+/// released the deadline is disarmed, so a long-lived WebSocket or MCP stream
+/// is never cut short by the pre-authentication bound; the deadline is also
+/// the only read deadline here, so it cannot race a second timer over the same
+/// window.
 pub async fn serve<F, Fut>(
     connect: F,
     router: Router,
@@ -203,9 +211,9 @@ where
     let served = async move {
         let io = connect().await?;
         hyper::server::conn::http1::Builder::new()
-            // A header timeout needs an explicit timer in hyper 1.x.
-            .timer(hyper_util::rt::TokioTimer::new())
-            .header_read_timeout(deadline)
+            // The pre-authentication deadline below is the read bound; hyper's
+            // own header buffer stays at the head size the old listener used.
+            .max_buf_size(MAX_REQUEST_HEAD_BYTES)
             .serve_connection(TokioIo::new(io), TowerToHyperService::new(router))
             .with_upgrades()
             .await
@@ -333,11 +341,121 @@ impl Sink<WsMessage> for AxumWebSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::routing::get;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn the_adapter_is_unpin_like_the_transports_around_it() {
         fn assert_unpin<T: Unpin>() {}
         assert_unpin::<AxumWebSocket>();
         assert_unpin::<TcpOrTls>();
+    }
+
+    /// #2653/#3439 SC-03: a peer that never sends a request holds one
+    /// admission slot and is closed at the deadline, and the slot comes back.
+    #[tokio::test]
+    async fn a_silent_peer_is_closed_at_the_deadline_and_returns_its_slot() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a local listener");
+        let addr = listener.local_addr().expect("local address");
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&slots)
+            .try_acquire_owned()
+            .expect("one free slot");
+        let slot = AdmissionSlot::new(permit);
+        let served_slot = slot.clone();
+        let router = Router::new().route("/", get(|| async { "ok" }));
+
+        let client = tokio::spawn(async move { tokio::net::TcpStream::connect(addr).await });
+        let (server, _) = listener.accept().await.expect("accept the client");
+        let client = client.await.expect("client task").expect("connect");
+        // The client sends nothing at all.
+
+        let result = serve(
+            move || async move { Ok(TcpOrTls::Plain(server)) },
+            router,
+            slot,
+            Duration::from_millis(100),
+        )
+        .await;
+        assert_eq!(
+            result.expect_err("a silent peer is bounded").kind(),
+            io::ErrorKind::TimedOut
+        );
+        drop(client);
+        assert!(
+            !served_slot.is_released(),
+            "the slot was never released by a request"
+        );
+        drop(served_slot);
+        assert_eq!(
+            slots.available_permits(),
+            1,
+            "the deadline returns the admission slot"
+        );
+    }
+
+    /// A completed request releases the slot and disarms the deadline, so a
+    /// keep-alive connection is not closed by the pre-authentication bound.
+    #[tokio::test]
+    async fn a_completed_request_releases_the_slot_and_disarms_the_deadline() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a local listener");
+        let addr = listener.local_addr().expect("local address");
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&slots)
+            .try_acquire_owned()
+            .expect("one free slot");
+        let slot = AdmissionSlot::new(permit);
+        let served_slot = slot.clone();
+        let router = Router::new().route("/", get(|| async { "ok" })).layer(
+            axum::middleware::from_fn_with_state(slot.clone(), release_after_response),
+        );
+
+        let client = tokio::spawn(async move {
+            let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+            client
+                .write_all(b"GET / HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+                .await
+                .expect("write request");
+            let mut response = Vec::new();
+            client
+                .read_to_end(&mut response)
+                .await
+                .expect("read response");
+            response
+        });
+        let (server, _) = listener.accept().await.expect("accept the client");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            serve(
+                move || async move { Ok(TcpOrTls::Plain(server)) },
+                router,
+                slot,
+                Duration::from_millis(100),
+            ),
+        )
+        .await
+        .expect("the request completes before the test deadline");
+        result.expect("the served connection ends cleanly");
+
+        let response = client.await.expect("client task");
+        assert!(
+            String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 OK"),
+            "{}",
+            String::from_utf8_lossy(&response)
+        );
+        assert!(
+            served_slot.is_released(),
+            "the routed request ended the pre-authentication window"
+        );
+        assert_eq!(
+            slots.available_permits(),
+            1,
+            "the admission slot is back while the connection is being served"
+        );
     }
 }

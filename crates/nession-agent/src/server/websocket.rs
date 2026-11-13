@@ -988,9 +988,9 @@ pub struct AgentServer {
     /// reason.
     credentials: Arc<P2pCredentials>,
     /// How unauthenticated connections are admitted and how long one may take
-    /// to complete its handshake (#2653). Enforced by [`Self::start`]'s accept
-    /// loop and [`Self::complete_handshake`]; the same policy is never
-    /// re-derived per connection.
+    /// to complete its request (#2653). Enforced by [`Self::start`]'s accept
+    /// loop and the shared [`nession_runtime::ingress::serve`] deadline; the
+    /// same policy is never re-derived per connection.
     handshake_policy: P2pHandshakePolicy,
     /// The MCP endpoint (`#565`) mounted on this listener, when enabled.
     mcp: Option<Arc<McpService>>,
@@ -5206,8 +5206,8 @@ mod tests {
     ///
     /// The store is asked first, so a dial presenting something it never minted
     /// fails here with that sentence rather than as the opaque refused upgrade
-    /// this socket gives a peer — `HandshakeIncomplete`, with nothing in it
-    /// about which end said no.
+    /// this socket gives a peer — one 401 with nothing in it about which end
+    /// said no.
     async fn dial_presenting(
         credentials: &P2pCredentials,
         addr: SocketAddr,

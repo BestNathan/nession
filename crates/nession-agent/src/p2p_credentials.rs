@@ -13,12 +13,12 @@
 //!
 //! ## Why the lock is not `tokio`'s
 //!
-//! [`P2pCredentials::authorize`] runs inside the WebSocket upgrade, in
-//! `accept_hdr_async`'s callback, which is **synchronous** — it cannot await, so
-//! a `tokio::sync::RwLock` is not merely unnecessary but unusable. The
-//! invariant that makes a blocking lock safe on an async runtime is narrow and
-//! worth stating: **the critical section is a `HashMap` lookup or insert and
-//! never awaits, never does I/O and never calls out.** It is a few hundred
+//! [`P2pCredentials::authorize`] runs in the Axum WebSocket upgrade handler,
+//! before `on_upgrade`, and the same store is read and written from ordinary
+//! synchronous paths. A `std::sync::RwLock` is sufficient because the invariant
+//! that makes a blocking lock safe on an async runtime is narrow and worth
+//! stating: **the critical section is a `HashMap` lookup or insert and never
+//! awaits, never does I/O and never calls out.** It is a few hundred
 //! nanoseconds against a map bounded by the credential expiry.
 
 use std::collections::HashMap;

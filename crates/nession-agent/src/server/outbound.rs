@@ -323,9 +323,9 @@ impl P2pOutbound {
 ///
 /// Generic over the sink rather than naming the connection's own type: what this
 /// function implements is a *policy* about a queue, and the socket it drains it
-/// onto is the caller's business. (`websocket.rs` splits a `TcpOrTls` stream and
-/// hands the write half here; that enum does not have to be visible for this to
-/// work, and it is not.)
+/// onto is the caller's business. (`websocket.rs` splits the upgraded
+/// `AxumWebSocket` and hands the write half here; that transport does not have
+/// to be visible for this to work, and it is not.)
 ///
 /// Not shared with the Server's writer, and deliberately: the Server's is a
 /// `select!` against a ping ticker it has to keep writing through a saturated
