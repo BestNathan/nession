@@ -31,7 +31,7 @@
       workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
       rootMode:"image",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,workspaceManualName:"",readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
-      cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
+      cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:null,imageAction:"",
       step:0,tip:null,fsInspect:false};
   }
   var s=defaults();
@@ -187,14 +187,34 @@
       (s.preflight==="failed"?alert(s.error,"danger"):"")+(s.notice?alert(s.notice):"")+buttons);
   }
   function imageLibrary(){
-    var x=imageBy(s.selectedImage)||s.images[0];
-    var left=s.images.map(function(im){return '<button class="cand-item '+(im.id===s.selectedImage?"selected":"")+'" data-action="image:'+im.id+'"><span><strong>'+h(im.name)+'</strong><small>'+h(im.kind)+' · '+short(im.digest)+'</small></span>'+statusChip(im.status)+'</button>';}).join("");
-    var details=x?card("Image detail","Server-owned immutable image; selected Session is navigation context.",
-      '<div class="cand-facts">'+meta("Name",x.name)+meta("Digest",short(x.digest))+meta("Server status",x.status)+meta("Agent cache",online()?(s.cache[x.id]||"absent"):"unknown")+'</div>'+
-      '<div class="cand-actions">'+action("Use as RootFS","image-root:"+x.id,"",x.kind!=="Base Runtime"||s.cache[x.id]!=="verified"||!isEditable())+
-      action("Mount in Filesystem","image-tool:"+x.id,"",x.kind==="Base Runtime"||!isEditable())+'</div>'):"";
-    return sectionHead("Image Library","全局 Server 镜像列表；不随 Session 切换而复制")+
-      '<div class="cand-list">'+left+'</div>'+details;
+    // A single list is the owning surface: detail expands inside its row.
+    // Never render a second detail card below the entire list.
+    var items=s.images.map(function(im,i){
+      var expanded=s.selectedImage===im.id;
+      var detailId="cand-image-detail-"+i;
+      var cache=online()?(s.cache[im.id]||"absent"):"unknown";
+      var details=expanded?
+        '<div class="cand-image-detail" id="'+detailId+'" role="region" aria-label="'+h(im.name)+' details">'+
+          '<div class="cand-image-details-grid">'+
+            '<div><span>Digest</span><code>'+h(im.digest)+'</code></div>'+
+            '<div><span>Type</span><strong>'+h(im.kind)+'</strong></div>'+
+            '<div><span>Agent cache</span>'+statusChip(cache)+'</div>'+
+            '<div><span>Default mount</span><code>'+h(im.default_mount||"—")+'</code></div>'+
+          '</div>'+
+          '<div class="cand-actions">'+
+            (im.kind==="Base Runtime"
+              ? action("Use as RootFS","image-root:"+im.id,"primary",cache!=="verified"||!isEditable())
+              : action("Mount in Filesystem","image-tool:"+im.id,"primary",!isEditable()))+
+          '</div>'+
+        '</div>':"";
+      return '<div class="cand-image-entry'+(expanded?' expanded':'')+'">'+
+        '<button type="button" class="cand-image-trigger" data-action="image:'+h(im.id)+'" aria-expanded="'+expanded+'" aria-controls="'+detailId+'">'+
+          '<span class="cand-image-summary"><strong>'+h(im.name)+'</strong><small>'+h(im.kind)+' · '+short(im.digest)+'</small></span>'+
+          statusChip(im.status)+'<span class="cand-image-chevron" aria-hidden="true">'+(expanded?'⌃':'⌄')+'</span>'+
+        '</button>'+details+'</div>';
+    }).join("");
+    return sectionHead("Image Library","")+
+      '<div class="cand-image-list">'+(items||'<div class="fs-empty">No images</div>')+'</div>';
   }
   function imageBuilds(){
     return sectionHead("Builds","Server 构建任务、进度与失败诊断（均为模拟数据）",
@@ -506,7 +526,7 @@
       s.session=a.slice(8);s.selectedWorkspace=s.session==="sandbox-review"?"project:nession":"auto";
       s.surface="workspace";s.area="overview";s.depth="root";s.inside=false;dirty();return;
     }
-    if(a.indexOf("image:")===0){s.selectedImage=a.slice(6);return;}
+    if(a.indexOf("image:")===0){var id=a.slice(6);s.selectedImage=s.selectedImage===id?null:id;return;}
     if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&s.cache[id]==="verified"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a.indexOf("image-tool:")===0){var id=a.slice(11),im=imageBy(id);if(im&&im.kind!=="Base Runtime"&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a==="build-start"){
