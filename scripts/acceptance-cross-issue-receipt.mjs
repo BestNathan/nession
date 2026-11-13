@@ -39,7 +39,7 @@ export function pinnedCrossIssueAcceptance(body) {
     }
     // Staging receipts are evaluated at a source SHA that must also be an
     // authenticated ancestor of the Issue's current staging target.
-    const staging = line.match(/^Historical Acceptance witness: Issue #([1-9]\\d*) (SC-\\d{2,}); Staging SHA ([0-9a-f]{40}); Agent Run ([1-9]\\d*) attempt ([1-9]\\d*)$/);
+    const staging = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); Staging SHA ([0-9a-f]{40}); Agent Run ([1-9]\d*) attempt ([1-9]\d*)$/);
     if (staging) {
       const [issue,run,attempt] = [staging[1],staging[4],staging[5]].map(Number);
       if (![issue,run,attempt].every(Number.isSafeInteger))
@@ -500,10 +500,10 @@ function selfTest(){
   const stagingWitness='Historical Acceptance witness: Issue #3200 SC-02; Staging SHA '+
     sha+'; Agent Run 43250574562 attempt 1';
   assert.deepEqual(pinnedCrossIssueAcceptance(
-    '## Historical Acceptance Evidence\\n'+stagingWitness+'\\n\\n## Other'),[stagingPin]);
+    '## Historical Acceptance Evidence\n'+stagingWitness+'\n\n## Other'),[stagingPin]);
   assert.throws(()=>pinnedCrossIssueAcceptance(
-    '## Historical Acceptance Evidence\\n'+stagingWitness.replace('attempt 1','attempt bad')+
-      '\\n\\n## Other'),/malformed/);
+    '## Historical Acceptance Evidence\n'+stagingWitness.replace('attempt 1','attempt bad')+
+      '\n\n## Other'),/malformed/);
   const stagingRun={...run,id:stagingPin.run,run_attempt:1,head_sha:head};
   const stagingJobs={jobs:[
     {id:500,run_id:stagingPin.run,run_attempt:1,head_sha:head,
