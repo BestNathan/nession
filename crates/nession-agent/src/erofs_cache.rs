@@ -15,6 +15,39 @@ use nession_protocol::contracts::image::v1::{ImageCacheState, ImageCacheStatus};
 
 use crate::config::ResolvedErofsStorage;
 
+/// Agent adapter that keeps a verified cache blob pinned for the full
+/// lifetime of a shared physical EROFS mount (#3449).
+#[cfg(target_os = "linux")]
+pub struct CachePinner {
+    cache: std::sync::Arc<ErofsCache>,
+}
+
+#[cfg(target_os = "linux")]
+impl CachePinner {
+    pub fn new(cache: std::sync::Arc<ErofsCache>) -> Self {
+        Self { cache }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct CachePinGuard {
+    _guard: PinGuard,
+}
+
+#[cfg(target_os = "linux")]
+impl nession_erofs::mount_manager::BlobPinGuard for CachePinGuard {}
+
+#[cfg(target_os = "linux")]
+impl nession_erofs::mount_manager::BlobPinner for CachePinner {
+    fn pin(
+        &self,
+        digest: &str,
+    ) -> anyhow::Result<Box<dyn nession_erofs::mount_manager::BlobPinGuard>> {
+        let guard = self.cache.pin(digest)?;
+        Ok(Box::new(CachePinGuard { _guard: guard }))
+    }
+}
+
 /// Open the Agent's durable cache from its resolved storage configuration.
 ///
 /// `ResolvedErofsStorage` comes only from
