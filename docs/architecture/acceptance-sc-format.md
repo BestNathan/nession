@@ -84,7 +84,7 @@ source-authenticated Store/Case consumers rather than generic staging.
 | `method` | `agent`, `case` | Read-only source/CI analysis vs executable full-stack source Case |
 | `Result` | `Pending`, `Pass`, `Fail`, `N/A` | Evaluated outcome, not GitHub workflow success/failure |
 
-Existing runner compatibility needs a stage. It is **derived**, never copied into the new Report: `pr → pre-merge`, `merged/staging → staging`, `merged/main → post-merge`, `deployed/environment → post-merge` **for compatibility bookkeeping only**. A deployed SC is not executed on a plain main push. Real rollout must be bound to an independently verified environment/revision/digest before proving it.
+Current runner timing is **derived**, never copied into the new Report: `pr → pr`, `merged/staging → staging`, `merged/main → post-merge`, `deployed/environment → post-merge` **for compatibility bookkeeping only**. Historical four-column Reports and immutable receipts using the old `pre-merge` value are read through the legacy adapter but never emitted under new PR executions. Newly authored PR criteria use `method: agent`; PR Case Smoke is supporting CI evidence, not a formal Case verdict. A deployed SC is not executed on a plain main push. Real rollout must be bound to an independently verified environment/revision/digest before proving it.
 
 
 ## Issue lifecycle states

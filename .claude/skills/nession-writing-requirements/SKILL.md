@@ -182,7 +182,7 @@ acceptance:
 
 Every `SC-xx` has a stable ID, exactly one Plan entry, and exactly one Report row. Define the timing and proof method **once in the Plan**. The Report and SC checkbox are trusted projections, not alternative sources of proof configuration.
 
-The Plan supports `when: pr | merged | deployed` and `method: agent | case`; `merged` requires `branch: staging | main`, while `deployed` requires `environment`. The runner compatibility stage derives from the Plan (`pr → pre-merge`, merged staging → staging, merged main/deployed → post-merge), **but a main merge is never production deployment evidence**.
+The Plan supports `when: pr | merged | deployed` and `method: agent | case`. **For new PR criteria choose `method: agent`** over authenticated exact-head CI/Gate/test evidence; PR Case Smoke is a CI evidence producer, not a distinct PR Acceptance verdict path. Existing historical PR Case contracts remain read-only compatible. `merged` requires `branch: staging | main`, while `deployed` requires `environment`. The runner stage derives from the Plan (`pr → pr`, merged staging → staging, merged main/deployed → post-merge), **but a main merge is never production deployment evidence**.
 
 Historical four-column Reports (`Criterion | Stage | Result | Evidence`) remain readable and must agree with a Plan if one is present. Historical three-column Reports without a Plan continue to mean `staging`; do not infer a new proof method for them. Do not rewrite old evidence merely to normalize Markdown.
 

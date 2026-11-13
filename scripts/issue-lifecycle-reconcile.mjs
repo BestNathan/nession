@@ -80,13 +80,13 @@ export function selectManualAgentRuns(issue, prs) {
     const stage = planStage(entry);
     if (!stage || planned.has(stage)) continue;
     const candidates = prs.filter(pr =>
-      stage === 'pre-merge' ||
+      stage === 'pr' ||
       (stage === 'staging' && pr.base?.ref === 'staging' && pr.merged_at) ||
       (stage === 'post-merge' && pr.base?.ref === 'main' && pr.merged_at));
     candidates.sort((a, b) => String(b.merged_at || b.updated_at || '').localeCompare(
       String(a.merged_at || a.updated_at || '')));
     const pr = candidates[0];
-    const sha = stage === 'pre-merge' ? pr?.head?.sha : pr?.merge_commit_sha;
+    const sha = stage === 'pr' ? pr?.head?.sha : pr?.merge_commit_sha;
     if (!SHA.test(String(sha || ''))) continue;
     planned.set(stage, sha);
   }
@@ -261,7 +261,7 @@ async function selfTest() {
     [pr]).action, 'pending');
   assert.deepEqual(selectManualAgentRuns(
     { ...issue, body: body.replace('| Pass |', '| Pending |') }, [pr]),
-    [{ stage: 'pre-merge', target_ref: sha }]);
+    [{ stage: 'pr', target_ref: sha }]);
   assert.deepEqual(selectManualAgentRuns(issue, [pr]), []);
   const reopened = [{ event: 'reopened', actor: { type: 'User' }, created_at: '2026-11-11T02:00:00Z' }];
   const recovery = [{ body: '/accept', user: { type: 'User' },

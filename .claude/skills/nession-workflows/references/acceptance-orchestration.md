@@ -4,7 +4,7 @@
 
 ## Problem and decision
 
-The current `pre-merge | staging | post-merge` stage vocabulary mixes **timing** and **branch**. Meanwhile, some SCs can be proved by a read-only model Agent inspecting code and existing tests, while others require the full system to be started after a merge, with scripted fault injection, user operations and observable assertions.
+The historical `pre-merge | staging | post-merge` stage vocabulary mixed **timing** and **branch**; new execution and Issue authoring use `pr` for the PR boundary, retaining legacy value translation only when reading old records. Meanwhile, some SCs can be proved by a read-only model Agent inspecting code and existing tests, while others require the full system to be started after a merge, with scripted fault injection, user operations and observable assertions.
 
 **Decision:** an SC is the unit of proof. Its plan has orthogonal `when`, `target`, and `method` coordinates. An orchestration workflow chooses eligible SCs, dispatches their proof mechanism, evaluates evidence under a trusted policy and projects one authoritative result.
 
@@ -49,7 +49,7 @@ This is the **supported constrained Issue grammar**, validated by `scripts/accep
 
 Legacy stage migration guidance (not always one-to-one):
 
-- `pre-merge` normally maps to `when: pr` + PR head SHA.
+- Historical `pre-merge` reads as `when: pr` + original PR head SHA; new PR executions use `pr`.
 - `staging` normally maps to `when: merged`, `branch: staging`, merged staging SHA.
 - `post-merge` normally maps to `when: merged`, `branch: main`, main SHA **only when** the old SC meant main-branch verification. If the old SC actually requires observing production, map to `when: deployed` and explicitly verify deployed identity. No blind bulk conversion.
 - Historical records keep their original stage/target semantics and remain immutable; compatibility readers translate only where justified.
@@ -90,7 +90,7 @@ PR / merged push / verified deployment event / explicit manual request
 
 ## Gate semantics
 
-- Pre-merge PR Gate checks the SCs due before the requested merge boundary, using exact PR head evidence. SCs only provable after merge remain explicitly deferred, not silently Pass.
+- PR Gate checks the SCs due before the requested merge boundary, using exact PR head evidence from a read-only Agent over authenticated CI outputs. SCs only provable after merge remain explicitly deferred, not silently Pass.
 - A merged staging SHA executes eligible merged-stage Case/Agent proofs; main may use the same execution logic against **its own** exact SHA.
 - Issue close Gate requires all applicable SCs to have acceptable, authenticated results. Document when an SC can legitimately be `N/A`.
 - Reuse staging evidence on main only under an explicit validator-approved reuse contract (source/build/runtime/environment equivalence). Never infer it from branch ancestry alone.
