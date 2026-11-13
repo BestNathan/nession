@@ -642,7 +642,7 @@
 <p class="np-details-lede">本原型复用 <code>sandbox-capability-3124/</code> 目录。Filesystem 按五项真实配置对象组织，不再采用全局模式切换遮挡其它字段，也不为所有标题添加帮助提示。产品预览只呈现资源、路径、权限、配置和操作；详细设计约束留在原型外。所有 Image、Build、Workspace 与 Sandbox Enter 均为模拟数据与交互。</p>
 <div class="np-detail-grid">
 <article class="np-detail"><h3>01 · Sandbox + Images (#3408)</h3><ol class="np-steps">
-<li>从当前 Session 进入 Sandbox，查看 Overview。切换 Images → Image Library / Builds / Distribution。Server Ready 与当前 Agent Cache 必须分开表示。</li>
+<li>从当前 Session 进入 Sandbox，查看 Overview。Images → Library 是纯列表：点击镜像行在该行下方展开详情，再次点击收起；同一时间只展开一项，不在列表尾部放独立详情卡片。Builds / Distribution 保持原有入口，Server Ready 与当前 Agent Cache 分别显示。</li>
 <li>在 Library 选择 Runtime 或 Toolchain 可跳转 Filesystem。切换同 Server 的另一个 Session，不会生成第二份 Images Registry。</li>
 <li>Web 一级导航位于 Sandbox Header 右侧、二级导航在选中管理区的局部 Sidebar；App 内使用紧凑横向导航但不新增第二个 App Back。</li>
 </ol></article>
