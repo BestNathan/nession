@@ -29,7 +29,7 @@
       builds:[{id:"build-120",name:"nession-source",status:"completed",detail:"Digest verified and registered"}],
       cache:{base:"verified",base2:"absent",rust:"verified",node:"absent",source:"verified"},
       workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
-      rootMode:"image",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,readPaths:"",writePaths:"",
+      rootMode:"image",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,workspaceManualName:"",readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:"base",imageAction:"",
       step:0,tip:null,fsInspect:false};
@@ -91,10 +91,10 @@
     return "无当前 Agent 的 Project Location；首次 Enter 时会按 Session 名自动分配 Managed Workspace。";
   }
   function resolveDefault(){
-    if(s.selectedWorkspace!=="auto")return currentWorkspace();
-    var name=s.session;
+    if(s.selectedWorkspace!=="auto"&&s.selectedWorkspace!=="manual")return currentWorkspace();
+    var name=s.selectedWorkspace==="manual"?s.workspaceManualName.trim():s.session;
     var existing=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===name;});
-    return existing||{id:"pending",name:name,kind:"managed",status:"pending"};
+    return existing||{id:"pending",name:name||"Custom name",kind:"managed",status:"pending"};
   }
   function workspaceName(){var w=resolveDefault();return w?w.name:"none";}
   // Proposed declaration: RootFS, additional mounts and selected Workspace
@@ -137,16 +137,18 @@
     if(s.workspaceLower&&s.rootMode!=="image")return "Workspace EROFS lower requires an EROFS RootFS in current V1.";
     if(s.rootMode==="image"&&s.workspaceLower&&resolveDefault().kind!=="managed")return "EROFS Overlay Lower requires an Agent-managed writable Workspace; Project Location is bound directly.";
     if(s.rootMode==="image"&&s.workspaceLower&&macos())return "Workspace Overlay mounting is not supported by this macOS Agent.";
-    if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
-    if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&currentWorkspace()&&currentWorkspace().status!=="available")return "Selected Workspace is not currently available.";
+    if(s.selectedWorkspace==="manual"&&!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(s.workspaceManualName.trim()))return "Enter a valid managed Workspace name.";
+    if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&s.selectedWorkspace!=="manual"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
+    if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&s.selectedWorkspace!=="manual"&&currentWorkspace()&&currentWorkspace().status!=="available")return "Selected Workspace is not currently available.";
     return "";
   }
   function ensureAutoWorkspace(){
-    if(s.selectedWorkspace!=="auto")return;
-    var old=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
+    if(s.selectedWorkspace!=="auto"&&s.selectedWorkspace!=="manual")return;
+    var name=s.selectedWorkspace==="manual"?s.workspaceManualName.trim():s.session;
+    if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name))return;
+    var old=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===name;});
     if(old){s.selectedWorkspace=old.id;return;}
     var id="ws:"+String(Date.now())+":"+s.workspaces.length;
-    var name=s.session;
     s.workspaces.push({id:id,name:name,kind:"managed",project:"—",path:"Agent-managed / "+id,status:"available"});
     s.selectedWorkspace=id;
     s.notice="Workspace “"+name+"” ready.";
@@ -272,6 +274,22 @@
         action("×","fs-path-remove:"+(key==="readPaths"?"read":"write")+":"+i,"compact",locked)+'</div>'}).join("")+'</div>'+
       '<div class="fs-actions">'+action("+ Add path","fs-path-add:"+(key==="readPaths"?"read":"write"),"",locked)+'</div></div>';
   }
+  function fsPreviewRows(){
+    var isImage=s.rootMode==="image",isProject=s.selectedWorkspace.startsWith("project:");
+    var selectedBase=s.images.find(function(im){return im.id===s.rootImage&&s.cache[im.id]==="verified"&&online()&&im.kind==="Base Runtime"});
+    var ws=resolveDefault();
+    var projectLocation=s.session==="sandbox-review"?s.workspaces.find(function(w){return w.id==="project:nession"}):null;
+    var rows=[{target:"/",source:isImage?(selectedBase?selectedBase.name:"No cached Base Runtime"):"Local filesystem",mode:isImage?"RO":"Local"}];
+    s.tools.forEach(function(id){var im=imageBy(id);if(im)rows.push({target:s.mountTargets[id]||im.default_mount||"",source:im.name,mode:"RO"});});
+    rows.push({target:"/workspace",source:isProject&&projectLocation?projectLocation.path:ws?ws.name:"Auto · "+s.session,mode:"RW"});
+    s.readPaths.split("\n").map(function(p){return p.trim()}).filter(Boolean).forEach(function(p){rows.push({target:p,source:p,mode:"RO"});});
+    s.writePaths.split("\n").map(function(p){return p.trim()}).filter(Boolean).forEach(function(p){rows.push({target:p,source:p,mode:"RW"});});
+    return rows;
+  }
+  function fsPreviewMarkup(){
+    return fsPreviewRows().map(function(row){return '<div class="fs-preview-row">'+
+      '<code>'+h(row.target)+'</code><span>'+h(row.source)+'</span><span class="fs-mode-pill">'+h(row.mode)+'</span></div>';}).join("");
+  }
   function fsPanel(){
     var locked=!isEditable(),isImage=s.rootMode==="image",ws=resolveDefault();
     var cachedBases=s.images.filter(function(im){return im.kind==="Base Runtime"&&im.status==="ready"&&online()&&s.cache[im.id]==="verified"});
@@ -307,14 +325,15 @@
       '<div class="fs-mount-list">'+(rows||'<div class="fs-empty">No mounts</div>')+'</div>'+selectable,
       "0 or more · source → target");
     var managed=s.workspaces.filter(function(w){return w.kind==="managed"&&w.status==="available"});
-    var managedChoice=s.selectedWorkspace==="auto"?"auto":isProject?"auto":s.selectedWorkspace;
-    var managedOptions=[{id:"auto",name:"Auto · "+s.session}].concat(managed);
+    var managedChoice=isProject?"auto":s.selectedWorkspace;
+    var managedOptions=[{id:"auto",name:"Auto · "+s.session}].concat(managed).concat([{id:"manual",name:"New named Workspace…"}]);
     var projectUI='<div class="fs-form-row"><label>Project Location</label>'+
       '<input aria-label="Project Location" type="text" readonly value="'+h(projectLocation?projectLocation.path:"Not configured for this Agent")+'">'+
       '<small>Read-only · Project configuration</small></div>';
     var managedUI='<div class="fs-form-row"><label>Managed Workspace</label>'+
       '<select data-field="selectedWorkspace" aria-label="Managed Workspace"'+(locked?' disabled':'')+'>'+
       managedOptions.map(function(w){return '<option value="'+h(w.id)+'"'+(managedChoice===w.id?' selected':'')+'>'+h(w.name)+'</option>'}).join("")+'</select></div>'+
+      (managedChoice==="manual"?'<div class="fs-form-row"><label>Workspace name</label><input data-field="workspaceManualName" aria-label="New Workspace name" type="text" value="'+h(s.workspaceManualName)+'" placeholder="e.g. build-experiment"'+(locked?' disabled':'')+'></div>':"")+
       '<div class="fs-actions">'+action("Manage Workspaces","area:workspaces")+'</div>';
     var choices='<div class="fs-choice" role="group" aria-label="Workspace source">'+
       '<button type="button" data-action="fs-ws:project" aria-pressed="'+isProject+'"'+(locked||!projectLocation?' disabled':'')+'>Project Location</button>'+
@@ -325,17 +344,9 @@
     var access=fsBlock("access","4 · Access",
       '<div class="fs-path-columns">'+fsPathGroup("readPaths","Read-only paths")+
       fsPathGroup("writePaths","Read/write paths")+'</div>',"Same-path mapping");
-    var previewRows=[
-      {target:"/",source:isImage?(selectedBase?selectedBase.name:"No cached Base Runtime"):"Local filesystem",mode:isImage?"RO":"Local"},
-    ];
-    s.tools.forEach(function(id){var im=imageBy(id);if(im)previewRows.push({target:s.mountTargets[id]||im.default_mount||"",source:im.name,mode:"RO"});});
-    previewRows.push({target:"/workspace",source:isProject&&projectLocation?projectLocation.path:ws?ws.name:"Auto · "+s.session,mode:"RW"});
-    s.readPaths.split("\n").map(function(p){return p.trim()}).filter(Boolean).forEach(function(p){previewRows.push({target:p,source:p,mode:"RO"});});
-    s.writePaths.split("\n").map(function(p){return p.trim()}).filter(Boolean).forEach(function(p){previewRows.push({target:p,source:p,mode:"RW"});});
     var preview=fsBlock("preview","5 · Preview",
       '<div class="fs-preview-header"><span>Path in Sandbox</span><span>Source</span><span>Mode</span></div>'+
-      '<div class="fs-preview-list">'+previewRows.map(function(row){return '<div class="fs-preview-row">'+
-        '<code>'+h(row.target)+'</code><span>'+h(row.source)+'</span><span class="fs-mode-pill">'+h(row.mode)+'</span></div>';}).join("")+'</div>');
+      '<div class="fs-preview-list">'+fsPreviewMarkup()+'</div>');
     return '<div class="fs-editor">'+sectionHead("Filesystem","",statusChip(s.inside?"applied":"draft"))+
       root+mounts+workspace+access+preview+'</div>';
   }
@@ -437,7 +448,7 @@
       var val=t.value;
       if(fieldName==="newWorkspaceName")s.newWorkspaceName=val;
       else if(fieldName==="selectedWorkspace"){s.selectedWorkspace=val;dirty();}
-      else if(["rootMode","rootImage","toolTarget","mountToAdd","readPaths","writePaths","home","network","cgroup"].includes(fieldName)){
+      else if(["rootMode","rootImage","toolTarget","mountToAdd","workspaceManualName","readPaths","writePaths","home","network","cgroup"].includes(fieldName)){
         s[fieldName]=val;dirty();
       }
       return true;
@@ -564,6 +575,8 @@
     }
   });
   view.addEventListener("input",function(e){if(!handleField(e.target))return;
+    var preview=view.querySelector(".fs-preview-list");
+    if(preview)preview.innerHTML=fsPreviewMarkup();
     var err=view.querySelector(".cand-alert.success");if(err)err.hidden=true;
     var enter=view.querySelector('[data-action="enter"]');if(enter)enter.disabled=true;
   });
