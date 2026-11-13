@@ -168,7 +168,7 @@ jobs:
     # Reuse the existing main-owned read-only evaluator and deterministic Issue updater.
     #
     # The provider follows the same repository-variable policy as the
-    # orchestrator's pre-merge and merged evaluations: `AGENT_DEFAULT_ACCEPTOR`
+    # orchestrator's PR and merged evaluations: `AGENT_DEFAULT_ACCEPTOR`
     # is the trusted acceptor default (the registered identity, e.g.
     # `accept-qwen-01`), the legacy `ACCEPTANCE_PROVIDER` is a compatibility
     # fallback, and `cursor` applies only when neither is configured. Every

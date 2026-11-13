@@ -4,7 +4,13 @@
 // parser. Never evaluate YAML tags/anchors or untrusted source instructions.
 import assert from 'node:assert/strict';
 
-const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+const STAGES = new Set(['pr', 'staging', 'post-merge']);
+
+// Only legacy readers accept the old PR-stage spelling. New plans, contexts,
+// dispatches and result records use "pr"; historical source bytes are unchanged.
+export function canonicalAcceptanceStage(value) {
+  return value === 'pre-merge' ? 'pr' : value;
+}
 const METHODS = new Set(['agent', 'case']);
 const WHENS = new Set(['pr', 'merged', 'deployed']);
 const FIELDS = new Set(['when', 'method', 'branch', 'environment']);
@@ -82,7 +88,7 @@ function parseContractYaml(section, errors) {
 }
 
 export function planStage(entry) {
-  if (entry.when === 'pr') return 'pre-merge';
+  if (entry.when === 'pr') return 'pr';
   if (entry.when === 'merged' && entry.branch === 'staging') return 'staging';
   if (entry.when === 'merged' && entry.branch === 'main') return 'post-merge';
   if (entry.when === 'deployed') return 'post-merge'; // compatibility only, not merged-SHA proof
@@ -119,8 +125,8 @@ export function validateAcceptancePlan(body, criteria, reportRows) {
     // defaulting all of them to staging. Explicit four-column reports remain
     // independently authoritative for legacy contracts and must agree.
     if (legacy?.explicitStage === false && stage) legacy.stage = stage;
-    if (stage && !STAGES.has(legacy?.stage)) errors.push(id + ' missing compatible legacy Acceptance Report stage');
-    else if (stage && legacy?.stage !== stage) {
+    if (stage && !STAGES.has(canonicalAcceptanceStage(legacy?.stage))) errors.push(id + ' missing compatible legacy Acceptance Report stage');
+    else if (stage && canonicalAcceptanceStage(legacy?.stage) !== stage) {
       errors.push(id + ' Acceptance Plan stage ' + stage + ' disagrees with Acceptance Report ' + legacy.stage);
     }
   }
@@ -131,7 +137,7 @@ export function isProofEligible(entry, stage, method) {
   if (!entry) return true; // explicit backward compatibility
   if (entry.method !== method) return false;
   if (entry.when === 'deployed') return false; // real deployment trigger required
-  return planStage(entry) === stage;
+  return planStage(entry) === canonicalAcceptanceStage(stage);
 }
 
 // A deployed criterion is eligible only for its own authenticated environment.
@@ -146,7 +152,7 @@ export function deploymentProofEligible(entry, { environment, attested, method }
 
 function selfTest() {
   const criteria = ['SC-01', 'SC-02', 'SC-03', 'SC-04'];
-  const stages = new Map([['SC-01', {stage:'pre-merge'}], ['SC-02', {stage:'staging'}],
+  const stages = new Map([['SC-01', {stage:'pr'}], ['SC-02', {stage:'staging'}],
     ['SC-03', {stage:'post-merge'}], ['SC-04', {stage:'post-merge'}]]);
   const plan = '## Acceptance Plan\n\n\x60\x60\x60yaml\nacceptance:\n' +
     '  SC-01:\n    when: pr\n    method: agent\n' +
@@ -175,7 +181,7 @@ function selfTest() {
   const implicit = validateAcceptancePlan(plan, criteria, implicitRows);
   assert.deepEqual(implicit.errors, []);
   assert.deepEqual(criteria.map(id => implicitRows.get(id).stage),
-    ['pre-merge', 'staging', 'post-merge', 'post-merge']);
+    ['pr', 'staging', 'post-merge', 'post-merge']);
   assert.equal(implicitRows.get('SC-04').stage, 'post-merge');
   // Historical four-column reports may not silently override a conflicting
   // explicit stage. This is the backwards-compatibility trust boundary.
@@ -185,13 +191,21 @@ function selfTest() {
   assert.match(validateAcceptancePlan(plan, criteria, explicitRows).errors.join('\n'),
     /disagrees with Acceptance Report/);
   assert.equal(explicitRows.get('SC-01').stage, 'staging');
+  const historical = new Map([['SC-01', {
+    stage: 'pre-merge', explicitStage: true, result: 'Pass', evidence: 'historic Run',
+  }], ['SC-02', { stage: 'staging', explicitStage: true }],
+  ['SC-03', { stage: 'post-merge', explicitStage: true }],
+  ['SC-04', { stage: 'post-merge', explicitStage: true }]]);
+  assert.deepEqual(validateAcceptancePlan(plan, criteria, historical).errors, []);
+  assert.equal(historical.get('SC-01').stage, 'pre-merge', 'historical Report is immutable');
   // Without a plan, historic three-column reports keep staging semantics.
   const legacyRows = new Map([['SC-01', { stage: 'staging', explicitStage: false }]]);
   assert.deepEqual(validateAcceptancePlan('## Success Criteria\n- [ ] SC-01', ['SC-01'], legacyRows),
     { plan: null, errors: [] });
   assert.equal(legacyRows.get('SC-01').stage, 'staging');
-  assert.equal(isProofEligible(valid.plan.get('SC-01'), 'pre-merge', 'agent'), true);
-  assert.equal(isProofEligible(valid.plan.get('SC-01'), 'pre-merge', 'case'), false);
+  assert.equal(isProofEligible(valid.plan.get('SC-01'), 'pr', 'agent'), true);
+  assert.equal(isProofEligible(valid.plan.get('SC-01'), 'pre-merge', 'agent'), true, 'legacy read compatibility');
+  assert.equal(isProofEligible(valid.plan.get('SC-01'), 'pr', 'case'), false);
   assert.equal(isProofEligible(valid.plan.get('SC-02'), 'staging', 'case'), true);
   assert.equal(isProofEligible(valid.plan.get('SC-03'), 'post-merge', 'agent'), true);
   assert.equal(isProofEligible(valid.plan.get('SC-04'), 'post-merge', 'case'), false);

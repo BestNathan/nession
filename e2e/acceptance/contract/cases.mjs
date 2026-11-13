@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const CASE_SCHEMA_VERSION = 1;
-export const CASE_STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+export const CASE_STAGES = new Set(['pr', 'pre-merge', 'staging', 'post-merge']); // legacy manifest read
 export const CASE_RUNTIMES = new Set(['full-stack-local']);
 // The OS whose native capability the Case observes. A macOS-only Case must
 // never be executed on the Linux runner (it would report Pending at best);
@@ -227,7 +227,7 @@ export function validateCaseAgainstAcceptanceContext(caseManifest, context) {
   if (caseManifest.issue !== Number(context.issue?.number)) {
     throw new Error('Case issue does not match trusted Acceptance context');
   }
-  if (caseManifest.stage !== String(context.stage)) {
+  if ((caseManifest.stage === 'pre-merge' ? 'pr' : caseManifest.stage) !== (context.stage === 'pre-merge' ? 'pr' : context.stage)) {
     throw new Error(
       caseManifest.criterion + ' Case stage ' + caseManifest.stage +
       ' does not match trusted stage ' + context.stage,

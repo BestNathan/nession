@@ -213,7 +213,7 @@ function acceptance(args) {
   const profile = arg(args, 'profile') || 'full-stack-local';
   if (!Number.isSafeInteger(issue) || issue <= 0 ||
       !/^SC-\d{2,}$/.test(criterion) || !/^[0-9a-f]{40}$/.test(sha) ||
-      !['pre-merge', 'staging', 'post-merge'].includes(stage) || profile !== 'full-stack-local') {
+      !['pr', 'pre-merge', 'staging', 'post-merge'].includes(stage) || profile !== 'full-stack-local') {
     throw new Error('invalid Case selector or runtime profile');
   }
   const targetSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -259,7 +259,7 @@ function acceptanceBatch(args) {
   const contractsDir = required(args, 'contracts-dir');
   const resultsDir = required(args, 'results-dir');
   if (!/^[0-9a-f]{40}$/.test(sha) ||
-      !['pre-merge', 'staging', 'post-merge'].includes(stage)) {
+      !['pr', 'pre-merge', 'staging', 'post-merge'].includes(stage)) {
     throw new Error('invalid batch target SHA or stage');
   }
   const targetSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();

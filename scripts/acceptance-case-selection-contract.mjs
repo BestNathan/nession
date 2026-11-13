@@ -9,7 +9,10 @@ import assert from 'node:assert/strict';
  * callers pass its already-resolved expected keys to this pure validator.
  */
 export function validateCaseSelection({ stage, issueNumbers, expected, selected, requested = '' }) {
-  if (!['pre-merge', 'staging', 'post-merge'].includes(stage)) {
+  // Formal Case verdicts are reserved for merged SHA; PR Case Smoke is CI evidence.
+  // PR selection may run source-aligned smoke, but Case Ingest never projects
+  // either canonical PR or its historical alias as an SC verdict.
+  if (!['pr', 'pre-merge', 'staging', 'post-merge'].includes(stage)) {
     throw new Error('unsupported Acceptance Case stage: ' + stage);
   }
   if (!Array.isArray(issueNumbers) || !Array.isArray(expected) || !Array.isArray(selected)) {
@@ -73,6 +76,8 @@ function selfTest() {
   assert.equal(validateCaseSelection({
     ...base, expected: ['1556/SC-07'], selected: [covered], requested: 'SC-07',
   }).status, 'selected');
+  assert.equal(validateCaseSelection({ ...base, stage: 'pr' }).status, 'not-applicable');
+  assert.equal(validateCaseSelection({ ...base, stage: 'pre-merge' }).status, 'not-applicable');
   assert.throws(() => validateCaseSelection({
     ...base, stage: 'unknown',
   }), /unsupported Acceptance Case stage/);
