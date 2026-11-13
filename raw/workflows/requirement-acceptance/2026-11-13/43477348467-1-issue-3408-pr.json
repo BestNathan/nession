@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 43477348467,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "43477348467-1-issue-3408-pr"
+  },
+  "task": {
+    "id": "issue-3408-pr",
+    "type": "acceptance",
+    "issue": 3408,
+    "stage": "pr",
+    "target_ref": "30eea1b161e6ac4dfb2a48744ea5eff81f9808d2",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "28d58510-2e39-4829-abe4-aefd5ac62eb3",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v4",
+      "sha256": "09498d24b940bca834ccfcb04ce32f6e8f5a77649d848618afc5d744db790d06"
+    }
+  },
+  "execution": {
+    "turns": 14,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 96,
+    "output": 14059,
+    "cache_read": 562409,
+    "cache_write": 69579,
+    "reasoning": null,
+    "total": 646143
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-13T17:57:04.745Z",
+    "finished_at": "2026-11-13T17:59:13.351Z",
+    "agent_duration_ms": 128060,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "agent-error",
+    "pass": 0,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "invalid-result",
+      "error": "Acceptance Sources: SC-04 supplied an undeclared source citation",
+      "started_at": "2026-11-13T17:54:52.215Z",
+      "finished_at": "2026-11-13T17:57:04.744Z",
+      "turns": 25,
+      "tokens": {
+        "input": 66,
+        "output": 6757,
+        "cache_read": 417927,
+        "cache_write": 43689,
+        "reasoning": null,
+        "total": null
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "invalid-result",
+      "error": "Acceptance Sources: SC-04 supplied an undeclared source citation",
+      "started_at": "2026-11-13T17:57:04.744Z",
+      "finished_at": "2026-11-13T17:59:13.351Z",
+      "turns": 14,
+      "tokens": {
+        "input": 30,
+        "output": 7302,
+        "cache_read": 144482,
+        "cache_write": 25890,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
