@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "725205df02aece46329a8804d42cf7df8d68299d",
+  "run_id": 43434667385,
+  "run_attempt": 1,
+  "plan_digest": "ff8f691d309177e354d331dba6f3fbb562f1c877729f59a58a115638eeb3b585",
+  "artifact_digest": "sha256:5b6906c60c2d1267709162b1a0664896b318ec7419e6a76047f7c7d4c399981a",
+  "results": [
+    {
+      "id": "design-renderer-boundary",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 11
+    },
+    {
+      "id": "files-context-create",
+      "result": "Pass",
+      "discovered": 8,
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 160
+    },
+    {
+      "id": "images-workspace-capability",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 47
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 30,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 142
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 104,
+      "passed": 104,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 840
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "discovered": 65,
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 735
+    }
+  ]
+}
