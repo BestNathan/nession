@@ -333,6 +333,125 @@ pub struct ImageCacheStatus {
     pub detail: Option<String>,
 }
 
+// ── Per-digest cache progress (#3412) ───────────────────────────────────
+
+/// The only per-digest cache observation version this build understands.
+pub const IMAGE_CACHE_OBSERVATION_VERSION: u32 = 1;
+
+/// The truthful phase of one digest in the current Agent's cache.
+///
+/// A durable `.part` is `resumable`, not an active download. Byte transfer
+/// completing is `verifying`; only a full SHA-256 match plus atomic
+/// publication is `verified`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageCachePhase {
+    /// No verified blob and no partial download.
+    Absent,
+    /// A durable partial exists; a later fetch can resume it. Not active.
+    Resumable,
+    /// A transfer is receiving bytes now.
+    Downloading,
+    /// Byte transfer finished but full-digest verification/publication has not.
+    /// Not mount-ready.
+    Verifying,
+    /// A verified blob exists in this Agent's identity-namespaced cache.
+    Verified,
+    /// The cached bytes failed verification or a preparation attempt failed.
+    Failed,
+    /// This Agent has no EROFS cache configured.
+    Unavailable,
+}
+
+/// One digest's authoritative cache observation from the current Agent.
+///
+/// The observation is read-only: asking for it never starts a transfer, mints
+/// a grant or exposes a local path. `downloaded_bytes` and `total_bytes` are
+/// measured values, never estimates; `total_bytes` is absent when the
+/// authoritative total is unknown, and consumers must not synthesize a
+/// percentage in that case. `updated_at` is Unix epoch seconds.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageCacheObservation {
+    /// [`IMAGE_CACHE_OBSERVATION_VERSION`]. Other versions are refused.
+    pub contract_version: u32,
+    pub digest: String,
+    pub phase: ImageCachePhase,
+    /// Durable partial bytes plus bytes written by the current transfer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloaded_bytes: Option<u64>,
+    /// Authoritative total from the Server descriptor or validated HTTP
+    /// `Content-Range`/`Content-Length`; absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
+    /// True only for `downloading` and `verifying`; a surviving `.part` is
+    /// not active.
+    #[serde(default)]
+    pub active: bool,
+    /// Unix epoch seconds of the last measured state change.
+    pub updated_at: u64,
+    /// Bounded diagnostic. Never a local path or bearer grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl ImageCacheObservation {
+    /// Validate the version, digest and measured-byte/activity invariants.
+    pub fn validate(&self) -> Result<(), ImageValidationError> {
+        if self.contract_version != IMAGE_CACHE_OBSERVATION_VERSION {
+            return Err(ImageValidationError::UnsupportedCacheObservationVersion {
+                version: self.contract_version,
+            });
+        }
+        if !is_valid_image_digest(&self.digest) {
+            return Err(ImageValidationError::CacheObservationInvalidDigest);
+        }
+        if let (Some(downloaded), Some(total)) = (self.downloaded_bytes, self.total_bytes) {
+            if downloaded > total {
+                return Err(ImageValidationError::CacheObservationBytesInconsistent);
+            }
+        }
+        if self.total_bytes.is_some() && self.downloaded_bytes.is_none() {
+            return Err(ImageValidationError::CacheObservationBytesInconsistent);
+        }
+        let must_be_active = matches!(
+            self.phase,
+            ImageCachePhase::Downloading | ImageCachePhase::Verifying
+        );
+        if self.active != must_be_active {
+            return Err(ImageValidationError::CacheObservationActivityInconsistent);
+        }
+        Ok(())
+    }
+}
+
+impl ImageCacheStatus {
+    /// Project an observation into the older readiness vocabulary.
+    ///
+    /// A resumable/downloading/verifying digest is `preparing`; it is never
+    /// mount-ready until the observation itself says `verified`.
+    pub fn from_observation(observation: &ImageCacheObservation) -> Self {
+        let state = match observation.phase {
+            ImageCachePhase::Verified => ImageCacheState::Verified,
+            ImageCachePhase::Resumable
+            | ImageCachePhase::Downloading
+            | ImageCachePhase::Verifying => ImageCacheState::Preparing,
+            ImageCachePhase::Absent => ImageCacheState::Absent,
+            ImageCachePhase::Failed => ImageCacheState::Failed,
+            ImageCachePhase::Unavailable => ImageCacheState::Unavailable,
+        };
+        Self {
+            digest: observation.digest.clone(),
+            state,
+            detail: observation.detail.clone(),
+        }
+    }
+}
+
 /// `server.image.access`'s request: a scoped read grant for one digest.
 ///
 /// Exactly one consumer context authorizes the grant. A Project grant requires
@@ -423,6 +542,10 @@ pub enum ImageValidationError {
     EmptyClientRequestId,
     ClientRequestIdTooLong { max: usize },
     ClientRequestIdInvalid,
+    UnsupportedCacheObservationVersion { version: u32 },
+    CacheObservationInvalidDigest,
+    CacheObservationBytesInconsistent,
+    CacheObservationActivityInconsistent,
 }
 
 impl ImageValidationError {
@@ -502,6 +625,21 @@ impl ImageValidationError {
             Self::ClientRequestIdInvalid => {
                 "client_request_id must contain only ASCII letters, digits, '.', '_', '-' or ':'"
                     .to_string()
+            }
+            Self::UnsupportedCacheObservationVersion { version } => {
+                format!(
+                    "image cache observation version {version} is not supported; expected {IMAGE_CACHE_OBSERVATION_VERSION}"
+                )
+            }
+            Self::CacheObservationInvalidDigest => {
+                "image cache observation digest must be a sha256:<64 lowercase hex> digest"
+                    .to_string()
+            }
+            Self::CacheObservationBytesInconsistent => {
+                "image cache observation byte counts are inconsistent".to_string()
+            }
+            Self::CacheObservationActivityInconsistent => {
+                "image cache observation activity does not match its phase".to_string()
             }
         }
     }

@@ -633,6 +633,31 @@ function preflight(
   };
 }
 
+function fixtureCacheStatuses(
+  cacheDigests: string[],
+  failed: boolean,
+): SandboxContextResponse['cache_statuses'] {
+  return cacheDigests.map((digest) => ({
+    digest,
+    state: failed ? ('failed' as const) : ('verified' as const),
+    ...(failed ? { detail: 'fixture cache verification failed' } : {}),
+  }));
+}
+
+function fixtureCacheObservations(
+  cacheDigests: string[],
+  failed: boolean,
+): SandboxContextResponse['cache_observations'] {
+  return cacheDigests.map((digest) => ({
+    contract_version: 1,
+    digest,
+    phase: failed ? ('failed' as const) : ('verified' as const),
+    active: false,
+    updated_at: 1_760_000_000,
+    ...(failed ? { detail: 'fixture cache verification failed' } : {}),
+  }));
+}
+
 interface FixtureSandboxState {
   scenario: Scenario;
   revision: number;
@@ -659,13 +684,14 @@ function answerSandbox(
     const response: SandboxContextResponse = {
       success: true,
       context: contextFor(),
-      cache_statuses: cacheDigests.map((digest) => ({
-        digest,
-        state: state.scenario === 'agent-cache-failed' ? 'failed' : 'verified',
-        ...(state.scenario === 'agent-cache-failed'
-          ? { detail: 'fixture cache verification failed' }
-          : {}),
-      })),
+      cache_statuses: fixtureCacheStatuses(
+        cacheDigests,
+        state.scenario === 'agent-cache-failed',
+      ),
+      cache_observations: fixtureCacheObservations(
+        cacheDigests,
+        state.scenario === 'agent-cache-failed',
+      ),
     };
     return Promise.resolve(response);
   }
