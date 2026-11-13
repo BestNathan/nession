@@ -25,14 +25,14 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 </head>
 <body>
 <main>
-<a class="card" href="./images-3181/index.html" aria-label="Open Server-owned Images discovery and consumption prototype">
-<small>Requirement #3181 · Server Images · Workspace / Project / Sandbox / Agent · Web / App</small>
-<h2>Server-owned Images · discover, reference, compose <span aria-hidden="true">↗</span></h2>
-<p>无 Session 的 Workspace 直接发现 Server-owned Images，235 张镜像可搜索/分页；Project 使用自己的单镜像选择流程显式引用，Git 构建成功后才可选择绑定，失败保留旧引用；Sandbox 使用独立的组合流程添加镜像并设置 target/mode，选择时固定 Digest；Project 与 Sandbox 不共用 Picker/引用模型。Server Ready 与 Agent 缓存状态分开展示，支持空、不可用、构建失败、缓存失败与 Alias 移动状态。</p>
-<span class="tag">Interactive HTML · 235-image inventory · Independent Project/Sandbox flows · Digest pinning · Web 1180/1024 · App 390/375 · Mock only</span>
-<span class="ia-status">按 WorkspaceShell / AppPageHeader 职责树建模；静态 smoke 33/33 与 Chromium 交互 24/24 已执行，不代表生产 API、像素一致性或 Acceptance 验收。</span>
+<a class="card" href="./images-3181/index.html" aria-label="Open historical Server-owned Images architecture prototype">
+<small>Historical #3181 · Server Images source/ownership remains valid · navigation superseded by #3408</small>
+<h2>Images · independent Workspace entry (historical) <span aria-hidden="true">↗</span></h2>
+<p>旧原型包含 Server Registry、Project 引用和 Sandbox 消费流程，但其中「Images 无 Session 独立 Workspace 入口」已由 #3408 的 Session-scoped Sandbox → Images 取代。历史交互只作对照；新方案请打开 Sandbox 原型。</p>
+<span class="tag">Historical interactive mock · Server ownership still authoritative · Navigation superseded</span>
+<span class="ia-status">STALE for Sandbox/Images IA as of #3408; prior browser receipts prove only the old revision, not the current unified design.</span>
 </a>
-<a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/images-3181" target="_blank" rel="noopener noreferrer">View Images prototype source (GitHub) ↗</a>
+<a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/images-3181" target="_blank" rel="noopener noreferrer">View historical Images source (GitHub) ↗</a>
 <a class="card" href="./ai-global-resources-3251/index.html" aria-label="Open current Session Agent AI resource prototype">
 <small>Requirement #3251 · AI capability · Web / App</small>
 <h2>AI · Current Session Agent Skills &amp; MCP <span aria-hidden="true">↗</span></h2>
@@ -70,14 +70,14 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <span class="ia-status">基于 #3089 业务体验与 Nession Design System 源码审查；App Shell 为示意近似，IA/视觉一致性需生产 Chromium 对照，原型不代表已交付。</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/overlay-system-3142" target="_blank" rel="noopener noreferrer">View Overlay System source (GitHub) ↗</a>
-<a class="card" href="./sandbox-capability-3124/index.html" aria-label="Open Sandbox Workspace capability prototype">
-<small>Requirements #3143 / #3141 / #3124 · Web/App · Policy Tabs</small>
-<h2>Sandbox · Five managed policy panels, one Tab navigation <span aria-hidden="true">↗</span></h2>
-<p>五个独立策略配置面板保留各自管理方式，但不再是五层子页面：Web 左侧固定 Tab、右侧大面积滚动；App 顶部横向滑动 Tab、内容纵向滚动。Overview 统一预检和 Enter，Inside 可切到每个策略的只读生效详情。</p>
-<span class="tag">Interactive HTML · Web 1180/1024 · App 390/375 · Deterministic mock</span>
-<span class="ia-status">对齐 staging WorkspaceShell / CapabilityCapsule / AppPageHeader 的信息架构；不是底层安全或生产行为证明，Chromium 验证另记。</span>
+<a class="card" href="./sandbox-capability-3124/index.html" aria-label="Open unified Sandbox Images Workspaces and Policies Web App prototype">
+<small>Requirements #3408 / #3407 / #3405 · Session Sandbox · Web / App</small>
+<h2>Sandbox · Overview / Images / Workspaces / Policies <span aria-hidden="true">↗</span></h2>
+<p>在原有 sandbox-capability-3124 目录中修订：Session 作用域入口；Images 使用 Server 全局镜像 Registry、构建与 Agent Cache 观察；Workspaces 是 Agent 可命名、可复用的资源；Policies 保留 filesystem/network 并按 linux_namespace/cgroup_v2/seccomp 直接导航。Filesystem 展示 identity Access、显式 Source→Target Mount、隐式 RootFS / 与 Workspace /workspace 的映射。</p>
+<span class="tag">Interactive HTML · Web 1180/1024 · App 390/375 · Session-scoped · Native support / negative paths · Mock only</span>
+<span class="ia-status">Candidate design on the shared prototype branch; Web/App Chromium and latest Pages publication revision must be independently verified. Previous six-peer policy Tabs are superseded.</span>
 </a>
-<a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/sandbox-capability-3124" target="_blank" rel="noopener noreferrer">View Sandbox capability prototype source (GitHub) ↗</a>
+<a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/sandbox-capability-3124" target="_blank" rel="noopener noreferrer">View revised Sandbox source (GitHub) ↗</a>
 <a class="card" href="./session-operation-surfaces-3089/index.html" aria-label="Open Web and App Session operation surfaces prototype">
 <small>Requirement #3089 · Web / App · Attach / Create Session / Project maintenance</small>
 <h2>Session operation surfaces · Web vs App ↗</h2>
