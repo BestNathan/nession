@@ -36,7 +36,7 @@ export const ACCEPTANCE_BATCH_WORKFLOWS = Object.freeze([
   }),
 ]);
 export const ACCEPTANCE_BATCH_RESULTS = Object.freeze(['Pass', 'Fail', 'Pending', 'N/A', 'Error']);
-export const ACCEPTANCE_BATCH_STAGES = Object.freeze(['pre-merge', 'staging', 'post-merge']);
+export const ACCEPTANCE_BATCH_STAGES = Object.freeze(['pr', 'pre-merge', 'staging', 'post-merge']) // historical receipts use old spelling;
 export const REPO = 'BestNathan/nession';
 const SHA = /^[a-f0-9]{40}$/;
 const CRITERION = /^SC-\d{2,}$/;
@@ -412,6 +412,9 @@ function selfTest() {
     ...env,
     GITHUB_WORKFLOW_REF: REPO + '/.github/workflows/acceptance-case-smoke.yml@refs/heads/feat/x',
   };
+  const prSmoke = makeAcceptanceBatchReceipt({ ...args, env: smokeEnv, stage: 'pr' });
+  assert.equal(prSmoke.stage, 'pr');
+  assert.ok(validateAcceptanceBatchReceipt(prSmoke));
   const smoke = makeAcceptanceBatchReceipt({ ...args, env: smokeEnv, stage: 'pre-merge' });
   assert.equal(smoke.workflow, '.github/workflows/acceptance-case-smoke.yml');
   const smokeRun = {

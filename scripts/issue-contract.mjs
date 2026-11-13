@@ -198,6 +198,9 @@ function validateKnowledgeImpact(issue, sectionMap, errors) {
     errors.push('Knowledge Impact None requires a reason');
 }
 
+// #3388: new Requirements have one PR Acceptance method. Historical plans
+// retain their original method and authenticated result provenance.
+const PR_AGENT_ONLY_REQUIRED_FROM = Date.parse('2026-11-13T00:00:00Z');
 function validateRequirement(issue, errors) {
   if (!/^requirement\s*:/i.test(String(issue.title ?? ''))) errors.push('Requirement title must start with `Requirement:`');
   const map = sections(issue.body);
@@ -213,8 +216,16 @@ function validateRequirement(issue, errors) {
   for (const id of report.rows.keys()) if (!success.ids.includes(id)) errors.push(`Acceptance Report contains unknown criterion ${id}`);
   const plan = validateAcceptancePlan(issue.body, success.ids, report.rows);
   errors.push(...plan.errors);
+  const created = Date.parse(issue.createdAt ?? issue.created_at ?? '');
+  if (Number.isFinite(created) && created >= PR_AGENT_ONLY_REQUIRED_FROM) {
+    for (const [id, entry] of plan.plan ?? []) {
+      if (entry.when === 'pr' && entry.method === 'case') {
+        errors.push(id + ' PR Acceptance requires method: agent; Case Smoke supplies CI evidence, not a second PR SC verdict');
+      }
+    }
+  }
   for (const [id, row] of report.rows) {
-    if (!new Set(['pre-merge', 'staging', 'post-merge']).has(row.stage)) errors.push(`${id} has unsupported Acceptance stage ${row.stage || '(empty)'}`);
+    if (!new Set(['pr', 'pre-merge', 'staging', 'post-merge']).has(row.stage)) errors.push(`${id} has unsupported Acceptance stage ${row.stage || '(empty)'}`);
     if (!new Set(['pending', 'pass', 'fail', 'n/a']).has(row.result)) errors.push(`${id} has unsupported Acceptance result ${row.result || '(empty)'}`);
     if (!row.evidence) errors.push(`${id} has empty Acceptance evidence`);
   }
@@ -318,6 +329,16 @@ function selfTest() {
   assert.ok(auditIssue(recent).errors.some(e=>e.includes('missing Knowledge Impact')));
   const assessed={...recent,body:recent.body+'\n\n### Knowledge Impact\n- Decision: None\n- Related knowledge: none, checked project ledger\n- Reason: existing architectural truth remains unchanged\n- Owner and timing: Issue author at creation\n- Evidence: relevant canonical doc and exact SHA reviewed\n'};
   assert.equal(auditIssue(assessed).ok,true,auditIssue(assessed).errors.join('; '));
+  // #3388: new PR Case plans fail closed while old Issue plans remain readable.
+  const newPrCase = { ...assessed, createdAt: '2026-11-13T00:00:01Z',
+    body: assessed.body.replace('SC-01:\n    when: pr\n    method: agent',
+      'SC-01:\n    when: pr\n    method: case') };
+  assert.ok(auditIssue(newPrCase).errors.some(e =>
+    e.includes('PR Acceptance requires method: agent')));
+  assert.equal(auditIssue({ ...newPrCase, createdAt: '2026-11-12T23:59:59Z' }).ok,
+    true, 'historical PR Case method remains readable');
+  assert.equal(auditIssue({ ...assessed, createdAt: '2026-11-13T00:00:01Z' }).ok,
+    true, 'new PR Agent method is valid');
   // Live #2851: visual Markdown emphasis is not a canonical field key, and
   // the Decision enum must not inherit a trailing prose period.
   assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Decision: None','- **Decision:** None')})

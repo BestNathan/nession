@@ -1,5 +1,10 @@
 export { SandboxPlugin, sandboxApi } from './SandboxPlugin';
 export {
+  WorkspacePlugin,
+  workspaceApi,
+  type AgentWorkspaceDescriptor,
+} from './WorkspacePlugin';
+export {
   SANDBOX_CAPABILITY_ID,
   SANDBOX_TITLE,
   resolveSandboxCapabilityState,

@@ -46,6 +46,7 @@ pub mod sandbox;
 pub mod server;
 pub mod session;
 pub mod terminal;
+pub mod workspace;
 
 /// The build tag of whichever binary is answering.
 ///

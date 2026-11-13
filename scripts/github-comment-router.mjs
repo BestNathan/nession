@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { commandPlan, parseCommand, workflowTitle, dispatchInputs } from './github-comment-command.mjs';
+import { resolveCaseTarget } from './github-comment-case-request.mjs';
 
 const REPO = 'BestNathan/nession';
 const API = 'https://api.github.com';
@@ -48,7 +49,8 @@ export async function resolve(event, read = api) {
       (await read('/repos/' + REPO + '/collaborators/' +
         encodeURIComponent(event.comment.user.login) + '/permission')).permission;
   }
-  return commandPlan(event, comment, issue, pr, permission);
+  const plan = commandPlan(event, comment, issue, pr, permission);
+  return plan?.handler === 'case' ? resolveCaseTarget(plan, issue, read) : plan;
 }
 function outputs(plan) {
   if (!process.env.GITHUB_OUTPUT) throw Error('GITHUB_OUTPUT missing');
@@ -56,6 +58,8 @@ function outputs(plan) {
   for (const [key, value] of Object.entries({
     handler: plan.handler, issue_number: plan.issue_number, comment_id: plan.comment_id,
     target_sha: plan.target_sha ?? '', target_ref: plan.target_ref ?? '',
+    criterion: plan.criterion ?? '', stage: plan.stage ?? '',
+    platform: plan.platform ?? '', runtime_profile: plan.runtime_profile ?? '',
   })) {
     if (!/^[a-z_]+$/.test(key) || /[\r\n]/.test(String(value))) throw Error('invalid output');
     appendFileSync(process.env.GITHUB_OUTPUT, key + '=' + value + '\n');
@@ -66,7 +70,11 @@ function matchesPlan(plan) {
     String(plan.issue_number) === process.env.EXPECTED_ISSUE &&
     String(plan.comment_id) === process.env.EXPECTED_COMMENT &&
     (plan.target_sha ?? '') === (process.env.EXPECTED_SHA ?? '') &&
-    (plan.target_ref ?? '') === (process.env.EXPECTED_REF ?? '');
+    (plan.target_ref ?? '') === (process.env.EXPECTED_REF ?? '') &&
+    (plan.criterion ?? '') === (process.env.EXPECTED_CRITERION ?? '') &&
+    (plan.stage ?? '') === (process.env.EXPECTED_STAGE ?? '') &&
+    (plan.platform ?? '') === (process.env.EXPECTED_PLATFORM ?? '') &&
+    (plan.runtime_profile ?? '') === (process.env.EXPECTED_RUNTIME_PROFILE ?? '');
 }
 function findRun(runs, plan) {
   return runs.find(r => r.display_title === workflowTitle(plan) &&
@@ -83,7 +91,8 @@ function marker(plan) { return '<!-- nession-command-comment:' + plan.comment_id
 async function acknowledge(read, plan, link) {
   const target = plan.kind === 'pull_request'
     ? 'PR #' + plan.issue_number + ' at ' + plan.target_sha
-    : 'Issue #' + plan.issue_number;
+    : 'Issue #' + plan.issue_number +
+      (plan.handler === 'case' ? ' / ' + plan.criterion + ' at ' + plan.target_sha : '');
   const body = 'Comment command ' + String.fromCharCode(96) + plan.command +
     String.fromCharCode(96) + ' accepted for ' + target +
     '. [Actions run](' + link + '). This request is not an Acceptance Pass.\n\n' + marker(plan);

@@ -36,11 +36,11 @@ Discovery is derived from the directory tree and manifest. There is no shared mu
 
 Choose the effective Acceptance runner stage from the trusted Requirement contract: **derive it from `Acceptance Plan.when/branch/environment` for new canonical three-column Reports**, or use the explicit Stage for historical four-column Reports. See [SC authoring format](acceptance-sc-format.md).
 
-- `pre-merge`: evidence required before the feature PR gate.
+- `pr`: PR-head tests provide independently executed CI evidence for Agent Acceptance; no separate PR Case verdict ingestion.
 - `staging`: evidence that needs the merged staging SHA and integration environment.
 - `post-merge`: evidence that can only be established after the main merge. A main merge alone is not evidence that production deployed.
 
-The Case manifest's compatibility `stage` must match the trusted **effective SC stage** (Plan-derived for new Issues, Report-derived for legacy Issues). This source-aligned Case metadata is an execution selector, not a second authority defining SC timing. Automatic `staging` and `main` runs pin `github.sha`; manual replay requires an exact 40-character SHA plus Issue, SC, stage and runtime profile.
+Current Case manifests use `stage: pr` for PR-head smoke and retain exact old stage bytes for historical manifests. The manifest's compatibility `stage` must match the trusted **effective SC stage** (Plan-derived for new Issues, Report-derived for legacy Issues). This source-aligned Case metadata is an execution selector, not a second authority defining SC timing. Automatic `staging` and `main` runs pin `github.sha`; manual replay requires an exact 40-character SHA plus Issue, SC, stage and runtime profile.
 
 **Method-specific Case Coverage:** the trusted `scripts/select-acceptance-cases.mjs` script is the canonical selector shared by the `Acceptance / Cases` workflow; workflow YAML must not independently compute SC eligibility. A Requirement declaring `## Acceptance Plan` requires an executable Case for **every eligible `method: case` SC** at the exact target stage; missing source Case is a blocking error rather than a warning. `method: agent` criteria do not require Cases. Historical Issues without a Plan retain only their already-present source-aligned Cases and are not retroactively required to provide Cases for every legacy Agent-accepted SC. Explicit `when: deployed` criteria are not eligible on a plain `main` push.
 
@@ -97,6 +97,22 @@ The repository-owned `Acceptance / Cases` workflow uses the same runner for both
 - the target checkout is the exact SHA, not a moving branch name.
 
 Manual `workflow_dispatch` accepts one Issue/SC/SHA/stage/runtime tuple and follows the same runner.
+
+An authorized human may request a merged-branch Case from an **open native
+Requirement/Bug Issue** with the exact comment `/case SC-NN`. The trusted
+`Automation / Comment Router` derives the stage from the Issue Plan
+(`method: case`) and the exact target from an Issue-associated merged PR
+on `staging` or `main` whose commit is still in that branch's history
+and contains the matching Case manifest. It supplies a source comment ID
+to the normal manual `Acceptance / Cases` workflow; the workflow
+independently verifies the original comment, Issue and immutable target
+**before checking out the Case code**. It then produces the same source-bound
+record and trusted ingester receipt as other manual Cases, with no alternate
+Acceptance authority. A comment acknowledgment is not a Case verdict.
+Non-merged stages, arbitrary SHA, closed Issues and missing manifest/merge
+identity are ineligible for this shortcut; use the existing owner-controlled
+explicit Actions path for other supported manual cases.
+
 
 For a **manual Staging Case dispatched from trusted `main`**, GitHub's
 `workflow_run.head_sha` identifies the **workflow code** and intentionally
@@ -167,7 +183,7 @@ Remote profile implementation is **deferred until VPN runner and deployment-iden
 
 ## Generic PR Case Smoke and staging merge-proofs
 
-The `Acceptance / Case Smoke` PR Gate is a **real-runtime regression test** over the exact PR head. The selector (`scripts/acceptance-case-smoke-select.mjs`) chooses source-aligned protocol-only and browser+protocol representative Case classes without a fixed Issue number. PR-associated, explicit `method: case` pre-merge SCs are additionally selected via the trusted main-owned canonical Case selector; their missing mandatory source manifests are blocking failures. The verifier runtime never receives Issue-write credentials or GitHub tokens.
+The `Acceptance / Case Smoke` PR Gate is a **real-runtime regression test** over the exact PR head. The selector (`scripts/acceptance-case-smoke-select.mjs`) chooses source-aligned protocol-only and browser+protocol representative Case classes without a fixed Issue number. Historical PR-associated `method: case` Cases may still run as source-aligned CI evidence; newly authored PR SCs require `method: agent`. Do not ingest PR Smoke as a formal Case verdict or silently relabel old Case receipts. The verifier runtime never receives Issue-write credentials or GitHub tokens.
 
 Generic Smoke is an infrastructure check: its successful representative Cases do **not** imply every Requirement's own SC has been accepted. A Requirement's staging/production obligations are evaluated by the separate source-aligned `Acceptance / Cases` push workflow and its trusted Ingest.
 

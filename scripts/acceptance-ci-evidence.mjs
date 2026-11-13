@@ -1997,13 +1997,19 @@ async function collectCommand(workspace, outFile) {
         }
       }
     }
+    // Historic cross-Issue Agent receipts can originate at a verified
+    // ancestor Staging SHA. Do not reinterpret them as current-SHA executions
+    // or let Issue prose supply authority: the canonical collector checks
+    // GitHub source Run/Job/Step, digest-bound artifact, and SHA ancestry.
+    if (['staging','post-merge'].includes(process.env.ACCEPTANCE_STAGE)) {
+      relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
+        sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
+    }
     if(process.env.ACCEPTANCE_STAGE==='post-merge') {
       implementationPulls=await collectImplementationGateEvidence(
         repo,Number(issueNumber),currentIssue,sha);
       historicalReporterE2eRerun=await collectHistoricalReporterE2eRerun(
         repo,currentIssue,sha);
-      relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
-        sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
       if(Number(issueNumber)===1818)
         relatedBugCompletion=await collectRelatedBugCompletion(repo,currentIssue,sha,githubGet);
     }

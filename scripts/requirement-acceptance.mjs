@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 const ACCEPTED_RESULTS = new Set(['pass', 'n/a']);
 const ALL_RESULTS = new Set(['pass', 'pending', 'fail', 'n/a']);
-const ACCEPTANCE_STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+const ACCEPTANCE_STAGES = new Set(['pr', 'pre-merge', 'staging', 'post-merge']); // legacy report read only
 const ACCEPTANCE_ISSUE_LABELS = new Set(['bug', 'requirement']);
 const PLACEHOLDER_EVIDENCE = new Set([
   '', '-', 'none', 'n/a', 'na', 'pending', 'tbd', 'todo', 'implementation pending',
@@ -157,7 +157,7 @@ export function parseAcceptanceReport(section) {
 }
 
 export function validateRequirementBody(body, { mode = 'closure', targetBranch = null } = {}) {
-  if (!new Set(['pre-merge', 'merge', 'closure']).has(mode)) {
+  if (!new Set(['pr', 'pre-merge', 'merge', 'closure']).has(mode)) {
     throw new Error(`unsupported acceptance validation mode: ${mode}`);
   }
 
@@ -186,7 +186,7 @@ export function validateRequirementBody(body, { mode = 'closure', targetBranch =
       continue;
     }
 
-    if (mode === 'pre-merge' && row.stage !== 'pre-merge') {
+    if (['pr', 'pre-merge'].includes(mode) && !['pr', 'pre-merge'].includes(row.stage)) {
       continue;
     }
 
@@ -247,8 +247,8 @@ export function validateRequirementBody(body, { mode = 'closure', targetBranch =
     if (!ACCEPTED_RESULTS.has(normalizedResult)) {
       const expectation = mode === 'merge'
         ? 'expected Pass or N/A before merge unless this is an explicit post-merge Pending criterion'
-        : mode === 'pre-merge'
-          ? 'expected Pass or N/A before the pre-merge gate'
+        : ['pr', 'pre-merge'].includes(mode)
+          ? 'expected Pass or N/A before the PR acceptance gate'
           : 'expected Pass or N/A before closure';
       errors.push(`${criterion.id} result is ${row.result}; ${expectation}`);
     }
@@ -277,8 +277,8 @@ function formatErrors(issueNumber, errors, context = 'acceptance') {
   const label =
     context === 'merge'
       ? 'is not merge-ready'
-      : context === 'pre-merge'
-        ? 'has incomplete pre-merge acceptance'
+      : ['pr', 'pre-merge'].includes(context)
+        ? 'has incomplete PR acceptance'
         : 'acceptance is incomplete';
   return [
     `Requirement #${issueNumber} ${label}:`,
@@ -315,7 +315,7 @@ async function graphql(query, variables, token) {
   return payload.data;
 }
 
-function parseClosingIssueNumbers(body, owner, name) {
+export function parseClosingIssueNumbers(body, owner, name) {
   const text = String(body ?? '').replace(/<!--[^]*?-->/g, '');
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const numbers = new Set();
@@ -512,8 +512,8 @@ async function discoverPreMergeRequirements() {
 // Keeping a PR open permits the author to push a fix and rerun the required check.
 function enforcePrAcceptance({ mode, number, failures }) {
   if (!failures.length) return;
-  const label = mode === 'pre-merge'
-    ? 'Pre-merge requirement acceptance gate failed'
+  const label = ['pr', 'pre-merge'].includes(mode)
+    ? 'PR requirement acceptance gate failed'
     : 'Requirement acceptance gate failed';
   throw new Error(`${label} for PR #${number} (PR remains open; merge blocked):\n\n${failures.join('\n\n')}`);
 }
@@ -525,7 +525,7 @@ async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
   const number = pr?.number ?? event.number;
   if (!owner || !name || !number || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  const requirements = discovery === 'pre-merge'
+  const requirements = ['pr', 'pre-merge'].includes(discovery)
     ? await preMergeRequirementIssues({ owner, name, title: pr.title, body: pr.body, token })
     : await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
@@ -536,16 +536,16 @@ async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
       console.log(`Requirement #${issue.number}: merge-ready with ${result.deferredStagingCount} staging-SHA and ${result.deferredPostMergeCount} post-merge deferred criterion/criteria.`);
     } else {
       console.log(
-        mode === 'pre-merge'
-          ? `Requirement #${issue.number}: pre-merge criteria accepted.`
+        ['pr', 'pre-merge'].includes(mode)
+          ? `Requirement #${issue.number}: PR criteria accepted.`
           : `Requirement #${issue.number}: ${result.criteriaCount} criteria accepted before merge.`,
       );
     }
   }
   enforcePrAcceptance({ mode, number, failures });
   console.log(
-    mode === 'pre-merge'
-      ? `Pre-merge requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`
+    ['pr', 'pre-merge'].includes(mode)
+      ? `PR requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`
       : `Requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`,
   );
 }
@@ -847,7 +847,7 @@ function runSelfTest() {
   assert.doesNotThrow(() => enforcePrAcceptance({ mode: 'pre-merge', number: 99, failures: [] }));
   assert.throws(() => enforcePrAcceptance({ mode: 'pre-merge', number: 99,
     failures: ['SC-01 remains Pending'] }), error =>
-      error.message.includes('Pre-merge requirement acceptance gate failed') &&
+      error.message.includes('PR requirement acceptance gate failed') &&
       error.message.includes('PR remains open; merge blocked') &&
       error.message.includes('SC-01 remains Pending'));
   assert.throws(() => enforcePrAcceptance({ mode: 'merge', number: 99,
@@ -862,12 +862,12 @@ function runSelfTest() {
 async function main() {
   const command = process.argv[2];
   if (command === 'self-test') return runSelfTest();
-  if (command === 'discover-pre-merge') return discoverPreMergeRequirements();
+  if (command === 'discover-pr' || command === 'discover-pre-merge') return discoverPreMergeRequirements();
   if (command === 'discover-ref') return discoverRefRequirements(process.argv[3]);
-  if (command === 'pre-merge-pr-gate') return runPrGate({ mode: 'pre-merge', discovery: 'pre-merge' });
+  if (command === 'pr-acceptance-gate' || command === 'pre-merge-pr-gate') return runPrGate({ mode: 'pr', discovery: 'pr' });
   if (command === 'pr-gate') return runPrGate();
   if (command === 'issue-close-guard') return runIssueCloseGuard();
-  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|discover-pre-merge|discover-ref SHA|pre-merge-pr-gate|pr-gate|issue-close-guard>');
+  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|discover-pr|discover-ref SHA|pr-acceptance-gate|pr-gate|issue-close-guard>');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
