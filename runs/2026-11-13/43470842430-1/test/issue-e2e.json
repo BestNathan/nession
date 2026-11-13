@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "79c4af076d12c3bece4778587043005ab0e9c1fa",
+  "run_id": 43470842430,
+  "run_attempt": 1,
+  "plan_digest": "5f4c452e16317ff19a6af9aabc263c6fab2f38b2fe565522e0ffb9e1b2a42d61",
+  "artifact_digest": "sha256:59a83c27e56bfd33d2e48947ddf53f6e1073391be18d4d6739f9a8a2bcdc501a",
+  "results": [
+    {
+      "id": "images-workspace-capability",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 47
+    },
+    {
+      "id": "login",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 2
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "discovered": 15,
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 592
+    }
+  ]
+}
