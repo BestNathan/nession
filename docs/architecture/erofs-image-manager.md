@@ -387,12 +387,18 @@ is required.
 
 ## Runtime prerequisites
 
-- `mkfs.erofs` on the build host. Both Server images ship a pinned build of
-  `erofs-utils` (`deploy/build-erofs-utils.sh`) because Debian bookworm's 1.5
-  package cannot run the V1 argv; Ubuntu CI test hosts install `erofs-utils`
-  for the acceptance Case, and the ordinary Rust gates use a deterministic
-  fake. The `runtime-image-tools` guard covers both the from-source and
-  prebuilt image paths (#3178).
+- `mkfs.erofs` on the build host. Both Server and Agent images ship a pinned
+  build of `erofs-utils` (`deploy/build-erofs-utils.sh`) because Debian
+  bookworm's 1.5 package cannot run the V1 argv; Ubuntu CI test hosts install
+  `erofs-utils` for the acceptance Case, and the ordinary Rust gates use a
+  deterministic fake. The image build fetches the pinned source from the
+  official erofs-utils GitHub tag archive — byte-identical to the upstream
+  cgit snapshot and carrying the same SHA-256 — because the image runners
+  cannot reach `git.kernel.org` (#3386). The script verifies the checksum, the
+  top-level directory and the `VERSION` file before building, and reports
+  network, integrity and revision failures as distinct states. The
+  `runtime-image-tools` guard covers both the from-source and prebuilt image
+  paths (#3178) and its self-test exercises those three failure states.
 - Git with normal HTTPS support; no credential is required for a public source.
 - Enough disk for one snapshot plus its image per concurrent build; the build
   root is durable execution state, not scratch.

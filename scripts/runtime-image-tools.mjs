@@ -14,9 +14,12 @@
 // (the pre-commit runner exports a tree without `.git`), never at the caller's
 // cwd. A violation exits 1; an unreadable input exits 2 so a broken guard is
 // never a green skip.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -150,16 +153,35 @@ function checkBuildScript(text) {
     if (!pattern.test(text)) errors.push(`${BUILD_SCRIPT}: ${message}`);
   };
   require(/set -euo pipefail/, 'must fail closed (`set -euo pipefail`)');
-  require(/EROFS_UTILS_VERSION=['"]\d+\.\d+(?:\.\d+)?['"]/, 'must pin EROFS_UTILS_VERSION');
   require(
-    /EROFS_UTILS_SHA256=['"][0-9a-f]{64}['"]/,
+    /EROFS_UTILS_VERSION=["']?(?:\$\{EROFS_UTILS_VERSION:-)?\d+\.\d+(?:\.\d+)?/,
+    'must pin EROFS_UTILS_VERSION',
+  );
+  require(
+    /EROFS_UTILS_SHA256=["']?(?:\$\{EROFS_UTILS_SHA256:-)?[0-9a-f]{64}/,
     'must pin the release tarball with a full SHA-256',
   );
   require(
-    /erofs-utils-\$\{EROFS_UTILS_VERSION\}\.tar\.gz/,
-    'must download the tarball named by the pinned version',
+    /github\.com\/erofs\/erofs-utils\/archive\/refs\/tags\/v\$\{EROFS_UTILS_VERSION\}\.tar\.gz/,
+    'must fetch the pinned source from the erofs-utils GitHub tag archive',
   );
-  require(/sha256sum -c/, 'must verify the pinned SHA-256 before building');
+  if (/https:\/\/git\.kernel\.org/.test(text)) {
+    errors.push(
+      `${BUILD_SCRIPT}: must not depend on git.kernel.org (unreachable from image runners)`,
+    );
+  }
+  require(
+    /source download failed \(network\/endpoint\)/,
+    'must report a source download/network failure distinctly',
+  );
+  require(
+    /source integrity check failed/,
+    'must report a source checksum failure distinctly',
+  );
+  require(
+    /source revision check failed/,
+    'must report a source revision failure distinctly',
+  );
   require(/--enable-fuse/, 'must build erofsfuse (`--enable-fuse`)');
   require(/install -m 0755 mkfs\/mkfs\.erofs \/usr\/local\/bin\/mkfs\.erofs/, 'must install mkfs.erofs to /usr/local/bin');
   require(/install -m 0755 fuse\/erofsfuse \/usr\/local\/bin\/erofsfuse/, 'must install erofsfuse to /usr/local/bin');
@@ -315,6 +337,110 @@ function replaceOnce(text, needle, replacement) {
   return text.replace(needle, replacement);
 }
 
+
+/** The SHA-256 of a file, computed here so fixtures need no host tool. */
+function sha256File(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/** Create one minimal erofs-utils-shaped tarball for the source probes. */
+function makeSourceFixture(base, label, fileVersion, topLevelVersion = fileVersion) {
+  const root = path.join(base, label);
+  const dir = path.join(root, `erofs-utils-${topLevelVersion}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'VERSION'), `${fileVersion}\n2026-01-01\n`);
+  const tarball = path.join(base, `${label}.tar.gz`);
+  const tar = spawnSync(
+    'tar',
+    ['-czf', tarball, '-C', root, `erofs-utils-${topLevelVersion}`],
+    { encoding: 'utf8' },
+  );
+  if (tar.status !== 0) throw new Error(`tar fixture failed: ${tar.stderr}`);
+  return tarball;
+}
+
+function runSourceProbe(script, work, env) {
+  return spawnSync('bash', [script, work], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, EROFS_UTILS_SOURCE_ONLY: '1', ...env },
+  });
+}
+
+/**
+ * Exercise the real fetch/verify code with local fixtures: a valid pinned
+ * source, a mismatched checksum, an unreachable endpoint and a mismatched
+ * revision. Each failure must exit with its own state and diagnostic.
+ */
+function sourceProbeFailures(script) {
+  const failures = [];
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-erofs-source-'));
+  try {
+    const good = makeSourceFixture(base, 'good', '1.9.4');
+    const goodSha = sha256File(good);
+    const goodRun = runSourceProbe(script, path.join(base, 'good-work'), {
+      EROFS_UTILS_URL: `file://${good}`,
+      EROFS_UTILS_SHA256: goodSha,
+      EROFS_UTILS_VERSION: '1.9.4',
+    });
+    if (goodRun.status !== 0 || !String(goodRun.stdout).includes('erofs-utils-1.9.4')) {
+      failures.push(
+        `source probe: valid pinned source was refused (exit ${goodRun.status}): ${goodRun.stderr}`,
+      );
+    }
+
+    const badShaRun = runSourceProbe(script, path.join(base, 'bad-sha-work'), {
+      EROFS_UTILS_URL: `file://${good}`,
+      EROFS_UTILS_SHA256: '0'.repeat(64),
+      EROFS_UTILS_VERSION: '1.9.4',
+    });
+    if (
+      badShaRun.status !== 4
+      || !String(badShaRun.stderr).includes('source integrity check failed')
+      || String(badShaRun.stderr).includes('source download failed')
+    ) {
+      failures.push(
+        `source probe: mismatched checksum was not an integrity error (exit ${badShaRun.status}): ${badShaRun.stderr}`,
+      );
+    }
+
+    const missingRun = runSourceProbe(script, path.join(base, 'missing-work'), {
+      EROFS_UTILS_URL: `file://${path.join(base, 'missing.tar.gz')}`,
+      EROFS_UTILS_SHA256: goodSha,
+      EROFS_UTILS_VERSION: '1.9.4',
+    });
+    if (
+      missingRun.status !== 3
+      || !String(missingRun.stderr).includes('source download failed (network/endpoint)')
+      || String(missingRun.stderr).includes('source integrity check failed')
+    ) {
+      failures.push(
+        `source probe: unreachable source was not a network error (exit ${missingRun.status}): ${missingRun.stderr}`,
+      );
+    }
+
+    const wrongRevision = makeSourceFixture(base, 'wrong-revision', '9.9.9', '1.9.4');
+    const revisionRun = runSourceProbe(script, path.join(base, 'revision-work'), {
+      EROFS_UTILS_URL: `file://${wrongRevision}`,
+      EROFS_UTILS_SHA256: sha256File(wrongRevision),
+      EROFS_UTILS_VERSION: '1.9.4',
+    });
+    if (
+      revisionRun.status !== 5
+      || !String(revisionRun.stderr).includes('source revision check failed')
+    ) {
+      failures.push(
+        `source probe: mismatched revision was not a revision error (exit ${revisionRun.status}): ${revisionRun.stderr}`,
+      );
+    }
+  } catch (error) {
+    failures.push(`source probe setup failed: ${error.message}`);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+  return failures;
+}
+
 function selfTest(files) {
   const baseline = checkFiles(files);
   const failures = baseline.map((error) => `baseline must pass: ${error}`);
@@ -333,7 +459,13 @@ function selfTest(files) {
       '',
     ), 'must COPY erofsfuse'],
     ['prebuilt agent loses command probe', 'Dockerfile.agent.prebuilt', (text) => replaceOnce(text, 'RUN command -v git erofsfuse fusermount3 fuse-overlayfs', 'RUN true'), 'must probe `command -v git erofsfuse fusermount3 fuse-overlayfs`'],
-    ['build script stops verifying the checksum', BUILD_SCRIPT, (text) => replaceOnce(text, 'sha256sum -c -', 'true'), 'must verify the pinned SHA-256'],
+    ['build script reverts to the unreachable upstream', BUILD_SCRIPT, (text) => replaceOnce(
+      text,
+      'https://github.com/erofs/erofs-utils/archive/refs/tags/v${EROFS_UTILS_VERSION}.tar.gz',
+      'https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.git/snapshot/erofs-utils-${EROFS_UTILS_VERSION}.tar.gz',
+    ), 'must not depend on git.kernel.org'],
+    ['build script loses the integrity diagnostic', BUILD_SCRIPT, (text) => replaceOnce(text, 'source integrity check failed', 'check failed'), 'must report a source checksum failure distinctly'],
+    ['build script loses the revision diagnostic', BUILD_SCRIPT, (text) => text.split('source revision check failed').join('check failed'), 'must report a source revision failure distinctly'],
     ['build script stops building erofsfuse', BUILD_SCRIPT, (text) => replaceOnce(text, '--enable-fuse', '--disable-fuse'), 'must build erofsfuse'],
     ['UI image gains sandbox tooling', UNRELATED_IMAGE, (text) => `${text}\nRUN apt-get install -y fuse3 erofsfuse\n`, 'must not carry EROFS runtime tool'],
   ];
@@ -351,12 +483,16 @@ function selfTest(files) {
       failures.push(`${name}: mutation escaped the guard (expected "${expected}")`);
     }
   }
+  failures.push(...sourceProbeFailures(path.join(ROOT, BUILD_SCRIPT)));
   if (failures.length > 0) {
     process.stderr.write(failures.map((failure) => `[ERROR] ${failure}`).join('\n') + '\n');
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(`runtime-image-tools self-test: ${mutations.length} negative mutations rejected\n`);
+  process.stdout.write(
+    `runtime-image-tools self-test: ${mutations.length} negative mutations rejected, ` +
+      '4 source verification probes passed\n',
+  );
 }
 
 const files = loadFiles();
