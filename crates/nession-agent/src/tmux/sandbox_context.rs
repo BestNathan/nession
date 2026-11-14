@@ -45,6 +45,7 @@ pub struct SandboxEnterInput<'a> {
     pub draft: &'a SandboxPolicyDraft,
     pub images: &'a [ManagedImageGrant],
     pub server_url: &'a str,
+    pub server_auth_token: &'a str,
     pub working_dir: &'a str,
 }
 
@@ -375,6 +376,7 @@ impl SessionManager {
             draft,
             images,
             server_url,
+            server_auth_token,
             working_dir,
         } = input;
         let Some(runtime) = self.sandbox_runtime().cloned() else {
@@ -567,6 +569,7 @@ impl SessionManager {
                 &cache,
                 images,
                 server_url,
+                server_auth_token,
                 &runtime.settings().state_dir,
                 workspace_override,
             )

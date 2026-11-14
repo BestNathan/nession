@@ -18,17 +18,23 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX;
 
+use nession_protocol::TokenVerifier;
+
 use super::{ImageError, ImageManager};
 
 /// One HTTP response writer for the image blob route.
 #[derive(Clone)]
 pub struct ImageHttpService {
     manager: Arc<ImageManager>,
+    /// The Server Token this route accepts (#3440). Empty means the Server's
+    /// own WebSocket authentication is disabled too, and the route is
+    /// unauthenticated for the same reason.
+    auth: TokenVerifier,
 }
 
 impl ImageHttpService {
-    pub fn new(manager: Arc<ImageManager>) -> Self {
-        Self { manager }
+    pub fn new(manager: Arc<ImageManager>, auth: TokenVerifier) -> Self {
+        Self { manager, auth }
     }
 
     /// Answer one blob request.
@@ -48,18 +54,21 @@ impl ImageHttpService {
         if method != Method::GET && method != Method::HEAD {
             return status(StatusCode::METHOD_NOT_ALLOWED, &[("Allow", "GET, HEAD")]);
         }
+        // Authentication first: an unauthenticated caller must not learn whether
+        // a digest exists from the status code.
+        if self.auth.is_enabled() {
+            let Some(token) = bearer_token(headers) else {
+                return status(StatusCode::FORBIDDEN, &[("WWW-Authenticate", "Bearer")]);
+            };
+            if !self.auth.verify(token.trim()) {
+                return status(StatusCode::FORBIDDEN, &[("WWW-Authenticate", "Bearer")]);
+            }
+        }
         let size = match self.manager.ready_blob(raw_digest).await {
             Ok(size) => size,
             Err(ImageError::NotFound(_)) => return status(StatusCode::NOT_FOUND, &[]),
             Err(_) => return status(StatusCode::SERVICE_UNAVAILABLE, &[]),
         };
-        let token = bearer_token(headers);
-        let Some(token) = token else {
-            return status(StatusCode::FORBIDDEN, &[("WWW-Authenticate", "Bearer")]);
-        };
-        if self.manager.authorize(token, raw_digest).await.is_err() {
-            return status(StatusCode::FORBIDDEN, &[("WWW-Authenticate", "Bearer")]);
-        }
         let etag = format!("\"{raw_digest}\"");
         if headers
             .get(header::IF_NONE_MATCH)

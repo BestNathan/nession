@@ -38,6 +38,7 @@ const MCP_LANE_LABEL: &str = "mcp ";
 /// Build the Agent-hosted MCP service when `[mcp] enabled = true`.
 pub(crate) fn build(
     config: &AgentConfig,
+    agent_token: &str,
     agent_id: &str,
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionRegistry>,
@@ -49,9 +50,7 @@ pub(crate) fn build(
         return Ok(None);
     }
     // Fail closed for a directly constructed config too.
-    config
-        .mcp
-        .validate_for_host(&config.agent_token, "agent_token")?;
+    config.mcp.validate_for_host(agent_token, "agent_token")?;
 
     let cluster: Arc<dyn ClusterBackend> = if config.server_url.trim().is_empty() {
         Arc::new(UnavailableClusterBackend::new(
@@ -80,7 +79,7 @@ pub(crate) fn build(
         });
     let service_config = ServiceConfig {
         path: config.mcp.path.clone(),
-        auth_token: config.agent_token.clone(),
+        auth_token: nession_protocol::TokenVerifier::new(agent_token),
         tool_timeout: std::time::Duration::from_secs(config.mcp.tool_timeout_secs),
         max_concurrent_calls: config.mcp.max_concurrent_calls,
         allowed_origins: config.mcp.allowed_origins.clone(),

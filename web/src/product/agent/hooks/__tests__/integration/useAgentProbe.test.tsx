@@ -54,13 +54,13 @@ describe('useAgentProbe', () => {
     const store = createStore();
 
     const { result } = renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential: 'tok' }),
+      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
 
     await waitFor(() => expect(result.current.probing).toBe(false));
 
-    expect(testAddressesMock).toHaveBeenCalledWith(CANDIDATES, { credential: 'tok' });
+    expect(testAddressesMock).toHaveBeenCalledWith(CANDIDATES);
     expect(store.get(probeResultsAtom).get('agent-1')).toMatchObject({
       orderedUrls: ['ws://b/ws', 'ws://a/ws'],
     });
@@ -79,7 +79,7 @@ describe('useAgentProbe', () => {
     const store = createStore();
 
     const { result } = renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential: 'tok' }),
+      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
 
@@ -90,28 +90,15 @@ describe('useAgentProbe', () => {
     expect(cached?.orderedUrls).toEqual(['ws://a/ws', 'ws://b/ws']);
   });
 
-  it('probes nothing without a credential', async () => {
-    const store = createStore();
-
-    renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential: undefined }),
-      { wrapper: wrapper(store) },
-    );
-
-    await Promise.resolve();
-    expect(testAddressesMock).not.toHaveBeenCalled();
-    expect(store.get(probeResultsAtom).size).toBe(0);
-  });
-
   it('probes nothing with no candidates, and nothing with no agent', async () => {
     const store = createStore();
 
     renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: [], credential: 'tok' }),
+      () => useAgentProbe({ agentId: 'agent-1', addresses: [] }),
       { wrapper: wrapper(store) },
     );
     renderHook(
-      () => useAgentProbe({ agentId: null, addresses: CANDIDATES, credential: 'tok' }),
+      () => useAgentProbe({ agentId: null, addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
 
@@ -120,23 +107,22 @@ describe('useAgentProbe', () => {
   });
 
   /**
-   * A re-attach re-mints the credential, which is the fingerprint moving — so
-   * "Re-test" re-measures because the dialog re-fetched attach info, not
-   * because something explicitly asked for a second measurement.
+   * "Re-test" bumps a counter rather than relying on a reply carrying a new
+   * credential: the bump is what makes a repeated measurement explicit.
    */
-  it('re-measures when the credential changes', async () => {
+  it('re-measures when the caller bumps reprobeKey', async () => {
     testAddressesMock.mockResolvedValue([latency('ws://a/ws', 20), latency('ws://b/ws', 5)]);
     const store = createStore();
 
     const { rerender } = renderHook(
-      ({ credential }: { credential: string }) =>
-        useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential }),
-      { wrapper: wrapper(store), initialProps: { credential: 'first' } },
+      ({ reprobeKey }: { reprobeKey: number }) =>
+        useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, reprobeKey }),
+      { wrapper: wrapper(store), initialProps: { reprobeKey: 0 } },
     );
     await waitFor(() => expect(testAddressesMock).toHaveBeenCalledTimes(1));
 
     testAddressesMock.mockResolvedValue([latency('ws://a/ws', 3), latency('ws://b/ws', 40)]);
-    rerender({ credential: 'second' });
+    rerender({ reprobeKey: 1 });
 
     await waitFor(() => expect(testAddressesMock).toHaveBeenCalledTimes(2));
     await waitFor(() =>
@@ -145,7 +131,7 @@ describe('useAgentProbe', () => {
         'ws://b/ws',
       ]),
     );
-    expect(testAddressesMock).toHaveBeenLastCalledWith(CANDIDATES, { credential: 'second' });
+    expect(testAddressesMock).toHaveBeenLastCalledWith(CANDIDATES);
   });
 
   it('does not re-probe when only the array identity changes', async () => {
@@ -154,7 +140,7 @@ describe('useAgentProbe', () => {
 
     const { rerender } = renderHook(
       ({ addresses }: { addresses: ProbedAddress[] }) =>
-        useAgentProbe({ agentId: 'agent-1', addresses, credential: 'tok' }),
+        useAgentProbe({ agentId: 'agent-1', addresses }),
       { wrapper: wrapper(store), initialProps: { addresses: CANDIDATES } },
     );
     await waitFor(() => expect(testAddressesMock).toHaveBeenCalledTimes(1));
@@ -178,11 +164,11 @@ describe('useAgentProbe', () => {
     const store = createStore();
 
     const { rerender } = renderHook(
-      ({ credential }: { credential: string }) =>
-        useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential }),
-      { wrapper: wrapper(store), initialProps: { credential: 'first' } },
+      ({ reprobeKey }: { reprobeKey: number }) =>
+        useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, reprobeKey }),
+      { wrapper: wrapper(store), initialProps: { reprobeKey: 0 } },
     );
-    rerender({ credential: 'second' });
+    rerender({ reprobeKey: 1 });
 
     // The newer measurement resolves first, the older one second.
     second.resolve([latency('ws://a/ws', 1), latency('ws://b/ws', 99)]);
@@ -203,7 +189,7 @@ describe('useAgentProbe', () => {
     const store = createStore();
 
     const { unmount } = renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential: 'tok' }),
+      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
     unmount();
@@ -226,7 +212,7 @@ describe('useAgentProbe', () => {
     testAddressesMock.mockReturnValue(new Promise(() => {}));
 
     const { result } = renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, credential: 'tok' }),
+      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
 

@@ -2,8 +2,8 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    current_timestamp, info, json, warn, AgentStatus, ConnectionHandler, CredentialScope,
-    EnvSnapshot, HandlerAction, Message, P2pGrantPayload, ProtocolMessage,
+    current_timestamp, info, json, warn, AgentStatus, ConnectionHandler, EnvSnapshot,
+    HandlerAction, Message, ProtocolMessage,
 };
 
 impl ConnectionHandler {
@@ -120,33 +120,32 @@ impl ConnectionHandler {
             .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
         let agent_address = agent_ws_url.clone();
 
-        // Mint the credential, and hand it to the agent that will **verify** it
-        // before the client that will **present** it is told the token (#1013).
-        //
-        // That ordering is the whole design. A client dials the agent the
-        // instant it holds a token, so a grant that had not arrived yet would
-        // refuse a legitimate attach — a race the client cannot detect and the
-        // user cannot act on. Awaiting the acknowledgement first makes it
-        // impossible rather than unlikely.
-        let credential = self
-            .p2p_broker
-            .mint(
-                &agent_id,
-                session_id,
-                &agent.ip_address,
-                agent.port,
-                CredentialScope::for_attach(&session_name),
-            )
-            .await;
-
-        let grant = P2pGrantPayload {
-            // The command transport injects the authoritative one.
-            request_id: String::new(),
-            credential: credential.token.clone(),
-            agent_id: agent_id.clone(),
-            session_id: session_id.to_string(),
-            scope: credential.scope.clone(),
-            expires_at: credential.expires_at.to_rfc3339(),
+        // The durable Agent Token handed off by the authenticated registration
+        // (#3440). No mint, no grant, no expiry: the Agent verifies this value
+        // for as long as it remains the Agent's current token. An Agent that
+        // has not synchronized one (an older binary, or one that has not
+        // re-registered since the Server restarted) is refused with a reason a
+        // user can act on rather than a credential that can never work.
+        let Some(agent_token) = agent
+            .agent_token
+            .as_ref()
+            .map(nession_common::SecretString::as_str)
+            .filter(|token| !token.is_empty())
+        else {
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "server.session.attach",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "error",
+                        "message": format!(
+                            "Agent '{agent_id}' has not synchronized its Agent Token; it must reconnect to this Server before a direct attach can authenticate"
+                        )
+                    }
+                })
+                .to_string(),
+            ))));
         };
 
         // Serialise the full probed-address list for multi-address clients.
@@ -240,33 +239,6 @@ impl ConnectionHandler {
             // the browser subscribing to terminal.output.
             Ok(HandlerAction::Reply(None))
         } else {
-            // The credential is handed to the client **only here**, so this is
-            // the only branch that needs the agent to have been told (#1013).
-            // The relay branch mints one too — it did before this change — but
-            // nothing presents it until relay carries a credential of its own.
-            // A credential the verifier never received can only fail later, in the
-            // browser, with less to go on — so a refused grant fails the attach
-            // here, where the reason is still in hand.
-            if let Err(refusal) = self.grant_p2p_credential(&agent_id, &grant).await {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
-                    json!({
-                        "msg_type": "server.session.attach",
-                        "id": msg.id,
-                        "timestamp": current_timestamp(),
-                        "payload": {
-                            "status": "error",
-                            "message": format!(
-                                "Agent '{agent_id}' would not accept a P2P credential: {refusal}"
-                            )
-                        }
-                    })
-                    .to_string(),
-                ))));
-            }
-
-            let connection_token = credential.token.clone();
-            let connection_token_expires_at = credential.expires_at.to_rfc3339();
-
             // P2P mode: return the full candidate list (with probe status) plus
             // the legacy single `agent_address` for backward compatibility. The
             // client tests latency across `addresses` and falls back per-address.
@@ -284,8 +256,7 @@ impl ConnectionHandler {
                         "session_id": session_id,
                         "agent_address": agent_address,
                         "addresses": addresses_json,
-                        "connection_token": connection_token,
-                        "connection_token_expires_at": connection_token_expires_at,
+                        "agent_token": agent_token,
                         "session_name": session_name,
                         "terminal_cols": self.config.terminal_cols,
                         "terminal_web_font_size": self.config.terminal_web_font_size

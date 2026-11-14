@@ -32,7 +32,7 @@ path = "src/bin/nession-mcp.rs"
 [features]
 default = ["remote"]
 # Out-of-process backends (standalone binary and Agent-embedded cluster tools).
-remote = ["dep:nession-client", "dep:nession-protocol"]
+remote = ["dep:nession-client"]
 
 [dependencies]
 async-trait.workspace = true
@@ -49,7 +49,7 @@ rustls.workspace = true
 rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 nession-client = { path = "../nession-client", optional = true }
-nession-protocol = { path = "../nession-protocol", optional = true }
+nession-protocol = { path = "../nession-protocol" }
 
 # `#3264`: the official MCP Rust SDK owns the Streamable HTTP protocol and
 # transport grammar the endpoint must speak. Nession still owns the flat

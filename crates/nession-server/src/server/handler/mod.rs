@@ -26,8 +26,6 @@ use nession_protocol::contracts::env::v1::{
     SessionEnvBindingProfileState, SessionEnvBindingState, SessionEnvObservedState,
     SessionEnvProfile,
 };
-use nession_protocol::contracts::p2p::agent_url_with_credential;
-use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCurrentContext,
     SandboxPreflightResult,
@@ -73,6 +71,10 @@ pub enum HandlerAction {
         relay_request_id: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
+        /// The target Agent's durable inbound token (#3440). Presented by the
+        /// Server as the first `client.auth` frame on every dial it owns; never
+        /// placed in a URL.
+        agent_token: String,
         /// The stable identity the browser presented on `server.auth`, when it
         /// presented one (#1429).
         ///
@@ -146,8 +148,6 @@ pub struct ConnectionHandler {
     /// that does not carry this id leaves the Agent naming every browser, and
     /// the Server itself, `unknown-client`.
     browser_client_id: Option<String>,
-    /// The P2P credential ledger, for minting on attach (#1013).
-    p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
 /// A clone is a **snapshot of one connection's identity at one moment** — what
@@ -176,9 +176,6 @@ impl Clone for ConnectionHandler {
             env_service: Arc::clone(&self.env_service),
             image_manager: Arc::clone(&self.image_manager),
             db: Arc::clone(&self.db),
-            // Shared, not connection-local: the ledger is the Server's, and a
-            // clone that took a copy of it would be a clone that could not mint.
-            p2p_broker: Arc::clone(&self.p2p_broker),
             config: ConnectionHandlerConfig {
                 server_auth_token: self.config.server_auth_token.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
@@ -217,12 +214,6 @@ pub struct ConnectionHandlerDeps {
     /// Server-owned global EROFS image manager (#3022).
     pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
-    /// The P2P credential ledger (#1013).
-    ///
-    /// A shared dependency rather than per-connection configuration, for the
-    /// same reason `command_broker` is: the credentials it holds outlive any one
-    /// connection and are visible to every one of them.
-    pub p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
 impl ConnectionHandler {
@@ -239,7 +230,6 @@ impl ConnectionHandler {
             env_service: deps.env_service,
             image_manager: deps.image_manager,
             db: deps.db,
-            p2p_broker: deps.p2p_broker,
             config,
             authenticated_client: false,
             registered_agent_id: None,
@@ -607,38 +597,6 @@ impl ConnectionHandler {
     /// Same as [`Self::agent_command`] but with a caller-chosen timeout.
     /// Interactive paths (a user waiting on a click) want a much shorter
     /// deadline than background bookkeeping.
-    /// Push a P2P credential to the agent that will verify it (#1013).
-    ///
-    /// Waits for the acknowledgement, because the caller is about to hand the
-    /// token to a client that will dial immediately. The deadline is short on
-    /// purpose: a client's attach is blocked on this, and a wedged agent should
-    /// fail one in two seconds rather than hold a browser for ten.
-    async fn grant_p2p_credential(
-        &self,
-        agent_id: &str,
-        grant: &P2pGrantPayload,
-    ) -> Result<(), String> {
-        let payload = serde_json::to_value(grant).map_err(|e| e.to_string())?;
-        let response = self
-            .agent_command_with_timeout(
-                agent_id,
-                "agent.p2p.grant",
-                payload,
-                Duration::from_secs(2),
-            )
-            .await?;
-
-        if response.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
-            return Ok(());
-        }
-
-        Err(response
-            .get("error")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("the agent gave no reason")
-            .to_string())
-    }
-
     pub(crate) async fn agent_command_with_timeout(
         &self,
         agent_id: &str,
@@ -1401,7 +1359,6 @@ mod server_env_delete_v1;
 mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
-mod server_image_access_v1;
 mod server_image_build_cancel_v1;
 mod server_image_build_get_v1;
 mod server_image_build_list_v1;

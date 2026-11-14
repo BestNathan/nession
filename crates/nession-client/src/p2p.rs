@@ -23,11 +23,10 @@
 //! [`P2pConnection::into_stream`], and gives it to its own terminal. Terminal I/O
 //! stays in the CLI — moving it here is a stated non-goal of #1015.
 
-use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::session::v1::ClientAttachPayload;
 use nession_protocol::Message;
 
-use crate::connection::{open_ws, WsStream};
+use crate::connection::{authenticate_agent, open_ws, WsStream};
 use crate::error::ClientError;
 use crate::unit::proto_msg;
 use crate::wire;
@@ -49,22 +48,16 @@ impl P2pConnection {
     /// consumer this replaces ended up unable to reach an agent advertised only
     /// over TLS.
     ///
-    /// **`credential` is the server-issued one**, taken from the attach reply's
-    /// `connection_token` (#1013). The Server hands it to the Agent that will
-    /// verify it before it answers the attach, so a caller that dials with the
-    /// token off that reply is correct by construction.
-    ///
-    /// How the credential reaches the URL — the parameter name, the separator
-    /// and the empty case — is
-    /// [`nession_protocol::contracts::p2p::agent_url_with_credential`], which is
-    /// also what the Server's relay dials use. It is not restated here: this
-    /// crate and `nession-server` each had their own copy within days of each
-    /// other and had already disagreed on the empty case.
-    pub async fn connect(url: &str, credential: &str) -> Result<Self, ClientError> {
-        let url = agent_url_with_credential(url, credential);
-        Ok(Self {
-            ws: open_ws(&url).await?,
-        })
+    /// **`agent_token` is the resolved Agent's durable token (#3440)**, taken
+    /// from the attach reply. It is presented as the first protocol frame, not
+    /// in the URL: a browser `WebSocket` cannot set a header, and an access log
+    /// must never carry a durable secret. A refused token is
+    /// [`ClientError::Auth`], not a transport failure.
+    pub async fn connect(url: &str, agent_token: &str) -> Result<Self, ClientError> {
+        let mut ws = open_ws(url).await?;
+        let mut seq = 0;
+        authenticate_agent(&mut ws, &mut seq, agent_token, None).await?;
+        Ok(Self { ws })
     }
 
     /// The socket, once the caller has finished with this type's guarantees.

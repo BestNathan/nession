@@ -99,6 +99,7 @@ mod tests {
             session_count: 2,
             active_sessions: 1,
             protocol_manifest: manifest,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 0,
         }

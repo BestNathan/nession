@@ -13,10 +13,6 @@ import {
   type ImageGetResponsePayload,
 } from '@/generated/protocol/core/server-image-get/v1';
 import {
-  WIRE as ACCESS_WIRE,
-  type ImageAccessResponsePayload,
-} from '@/generated/protocol/core/server-image-access/v1';
-import {
   WIRE as BUILD_SUBMIT_WIRE,
   type ImageBuildDescriptor,
   type ImageBuildSubmitResponsePayload,
@@ -59,11 +55,6 @@ export interface ImageBuildPage {
 }
 
 /** The scoped bearer grant a consumer receives for one digest. */
-export interface ImageAccessGrant {
-  token: string;
-  expires_at: number;
-  path: string;
-}
 
 /**
  * Server-owned global EROFS Image Manager (#3022, #3181, #3334) — the typed
@@ -279,33 +270,6 @@ export class ImagesPlugin implements TransportPlugin {
     return response.image;
   }
 
-  /**
-   * Mint a scoped read grant. Exactly one consumer context is supplied: a
-   * Project's durable reference or an existing Session's resolved context.
-   */
-  async accessImage(locator: {
-    digest: string;
-    projectId?: string;
-    sessionId?: string;
-  }): Promise<ImageAccessGrant> {
-    const payload = locator.projectId
-      ? { project_id: locator.projectId, digest: locator.digest }
-      : { session_id: locator.sessionId, digest: locator.digest };
-    const response = await this.requireConnection().request<ImageAccessResponsePayload>(
-      ACCESS_WIRE,
-      payload,
-    );
-    if (
-      !response.success
-      || !response.token
-      || response.expires_at === null
-      || response.expires_at === undefined
-      || !response.path
-    ) {
-      throw new Error(response.error ?? 'Image access was refused');
-    }
-    return { token: response.token, expires_at: response.expires_at, path: response.path };
-  }
 }
 
 export const imagesApi = new ImagesPlugin();

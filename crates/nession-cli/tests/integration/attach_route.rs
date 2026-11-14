@@ -24,6 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode as AgentAttachMode;
 use nession_agent::connection::ServerClient;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -34,9 +35,10 @@ use nession_client::{ClientConfig, ClientConnection};
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::agent::v1::{AgentAddress, AgentMetadata, NetworkType};
 use nession_protocol::contracts::session::v1::ServerSessionListReply;
-use tokio::io::AsyncReadExt;
+use nession_protocol::SecretString;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Set by `scripts/tmux-run-socket.sh` / the Acceptance Case. Without it a
@@ -136,7 +138,9 @@ impl TestServer {
 struct TestAgent {
     addr: std::net::SocketAddr,
     handle: nession_agent::server::ServerHandle,
-    credentials: Arc<nession_agent::p2p_credentials::P2pCredentials>,
+    /// The durable inbound token this Agent's listener verifies (#3440), also
+    /// what registration advertises to the Server for the attach reply.
+    agent_token: String,
     mutations: nession_agent::execution::MutationLane,
     _tmp: tempfile::TempDir,
 }
@@ -145,7 +149,8 @@ impl TestAgent {
     async fn start(agent_id: &str) -> Self {
         let tmp = tempfile::tempdir().expect("agent sandbox directory");
         let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
-        let credentials = Arc::new(nession_agent::p2p_credentials::P2pCredentials::new());
+        let agent_token = format!("{agent_id}-agent-token");
+        let auth = Arc::new(P2pAuth::new(agent_token.as_str()));
         let mutations = nession_agent::execution::mutation_scheduler();
         let tmux = Arc::new(SessionManager::new());
         let server = AgentServer::new(
@@ -157,7 +162,7 @@ impl TestAgent {
             AgentAttachMode::Plain,
             AgentServerContext {
                 resize,
-                credentials: Arc::clone(&credentials),
+                auth,
                 mutations: Arc::clone(&mutations),
                 tmux: Arc::clone(&tmux),
                 session_metadata: Arc::new(SessionMetadataStore::new(tmux)),
@@ -170,7 +175,7 @@ impl TestAgent {
         Self {
             addr,
             handle,
-            credentials,
+            agent_token,
             mutations,
             _tmp: tmp,
         }
@@ -211,7 +216,7 @@ async fn register_agent(
             )
             .expect("agent extension registry"),
         )),
-        Arc::clone(&agent.credentials),
+        SecretString::new(agent.agent_token.clone()),
         Arc::clone(&agent.mutations),
     );
     client
@@ -394,11 +399,18 @@ async fn refuse_direct_dials(target: std::net::SocketAddr, fail_first: usize) ->
     DirectDialRefuser { addr, hits, handle }
 }
 
-/// A listener that records the request line of every connection and closes it,
-/// so a dial to it can never succeed.
+/// A listener that completes the WebSocket upgrade, records the request URI
+/// and the first frame (`client.auth`), then closes it — so a dial to it can
+/// never succeed, but what the client presented is observable.
+///
+/// The URI and the frame are recorded separately because #3440 moved the
+/// credential between them: the durable Agent Token must arrive on the
+/// authenticated channel, never in a URL an access log would capture.
 struct Tripwire {
     addr: std::net::SocketAddr,
     requests: Arc<Mutex<Vec<String>>>,
+    /// `(msg_type, auth_token)` of the first frame each connection sent.
+    auths: Arc<Mutex<Vec<(String, String)>>>,
     handle: JoinHandle<()>,
 }
 
@@ -408,29 +420,60 @@ async fn start_tripwire() -> Tripwire {
         .expect("bind the tripwire");
     let addr = listener.local_addr().expect("read the tripwire address");
     let requests = Arc::new(Mutex::new(Vec::new()));
-    let seen = Arc::clone(&requests);
+    let auths = Arc::new(Mutex::new(Vec::new()));
+    let seen_requests = Arc::clone(&requests);
+    let seen_auths = Arc::clone(&auths);
     let handle = tokio::spawn(async move {
         loop {
-            let Ok((mut client, _)) = listener.accept().await else {
+            let Ok((client, _)) = listener.accept().await else {
                 break;
             };
-            let seen = Arc::clone(&seen);
+            let seen_requests = Arc::clone(&seen_requests);
+            let seen_auths = Arc::clone(&seen_auths);
             tokio::spawn(async move {
-                let mut buffer = [0_u8; 4096];
-                if let Ok(read) = client.read(&mut buffer).await {
-                    if read > 0 {
-                        let text = String::from_utf8_lossy(&buffer[..read]);
-                        let line = text.lines().next().unwrap_or_default().to_string();
-                        seen.lock().expect("tripwire lock").push(line);
+                // A bare TCP reachability probe sends no upgrade request and
+                // is not a dial worth recording; the timeout returns it here.
+                let uri = Arc::new(Mutex::new(None));
+                let captured = Arc::clone(&uri);
+                let handshake = tokio::time::timeout(
+                    Duration::from_millis(500),
+                    tokio_tungstenite::accept_hdr_async(
+                        client,
+                        move |request: &Request, response: Response| {
+                            *captured.lock().expect("tripwire lock") =
+                                Some(request.uri().to_string());
+                            Ok(response)
+                        },
+                    ),
+                )
+                .await;
+                let Ok(Ok(mut ws)) = handshake else {
+                    return;
+                };
+                if let Some(uri) = uri.lock().expect("tripwire lock").take() {
+                    seen_requests.lock().expect("tripwire lock").push(uri);
+                }
+                let frame = tokio::time::timeout(Duration::from_millis(500), ws.next()).await;
+                if let Ok(Some(Ok(WsMessage::Text(text)))) = frame {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                        let msg_type = parsed["msg_type"].as_str().unwrap_or_default().to_string();
+                        let token = parsed["payload"]["auth_token"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string();
+                        seen_auths
+                            .lock()
+                            .expect("tripwire lock")
+                            .push((msg_type, token));
                     }
                 }
-                drop(client);
             });
         }
     });
     Tripwire {
         addr,
         requests,
+        auths,
         handle,
     }
 }
@@ -766,8 +809,9 @@ async fn sc03_forced_p2p_without_a_credential_never_dials_the_agent() {
             "priority": 1,
             "status": "unknown",
         }],
-        // No `connection_token`: the negative fixture the real Server cannot
-        // produce, because it always mints one before answering.
+        // No `agent_token`: the negative fixture the real Server cannot
+        // produce, because it resolves the Agent's durable token before
+        // answering.
     });
     let relay_payload = serde_json::json!({
         "status": "error",
@@ -788,12 +832,12 @@ async fn sc03_forced_p2p_without_a_credential_never_dials_the_agent() {
         .expect("a P2P plan without a Server-issued credential must not attach");
     let message = format!("{error:#}");
     assert!(
-        message.contains("no connection credential"),
-        "the error must name the missing credential: {message}"
+        message.contains("carried no Agent token"),
+        "the error must name the missing Agent Token: {message}"
     );
     assert!(
         message.contains("no Agent was dialled"),
-        "the error must state that no uncredentialed dial happened: {message}"
+        "the error must state that no unauthenticated dial happened: {message}"
     );
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -816,7 +860,7 @@ async fn sc03_forced_p2p_without_a_credential_never_dials_the_agent() {
         .expect("no usable route exists, so auto must fail rather than claim success");
     let message = format!("{error:#}");
     assert!(
-        message.contains("no connection credential"),
+        message.contains("carried no Agent token"),
         "the auto error must preserve the direct-route reason: {message}"
     );
     assert!(
@@ -833,7 +877,7 @@ async fn sc03_auto_attach_reports_a_bounded_error_when_candidates_and_relay_fail
     let tripwire = start_tripwire().await;
     let tripwire_url = format!("ws://{}/ws", tripwire.addr);
     let malformed_url = "ws://[::not-a-host".to_string();
-    let credential = "server-issued-credential-2811";
+    let agent_token = "server-resolved-agent-token-2811";
     let p2p_payload = serde_json::json!({
         "status": "success",
         "mode": "p2p",
@@ -854,7 +898,7 @@ async fn sc03_auto_attach_reports_a_bounded_error_when_candidates_and_relay_fail
                 "status": "unknown",
             }
         ],
-        "connection_token": credential,
+        "agent_token": agent_token,
     });
     let relay_payload = serde_json::json!({
         "status": "error",
@@ -897,9 +941,20 @@ async fn sc03_auto_attach_reports_a_bounded_error_when_candidates_and_relay_fail
         "the one reachable candidate must have been dialled once: {requests:?}"
     );
     assert!(
-        requests[0].contains(&format!("token={credential}")),
-        "the dial must present the Server-issued credential: {:?}",
+        !requests[0].contains("token=") && !requests[0].contains(agent_token),
+        "the durable Agent Token must never ride the URL: {:?}",
         requests[0]
+    );
+    let auths = tripwire.auths.lock().expect("tripwire lock").clone();
+    assert_eq!(
+        auths.len(),
+        1,
+        "the dial must have presented exactly one authentication frame: {auths:?}"
+    );
+    assert_eq!(
+        auths[0],
+        ("client.auth".to_string(), agent_token.to_string()),
+        "the dial must authenticate with the Server-resolved Agent Token"
     );
 
     server.handle.abort();

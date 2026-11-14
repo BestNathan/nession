@@ -60,7 +60,7 @@ function attachInfo(addresses: AttachInfo['addresses'] = []): AttachInfo {
     session_id: 'agent-1:dev',
     session_name: 'dev',
     agent_address: 'ws://a/ws',
-    connection_token: 'tok',
+    agent_token: 'tok',
     addresses,
   };
 }
@@ -130,12 +130,9 @@ describe('AttachDialog', () => {
     // Both candidate labels appear once attach info resolves.
     expect(await screen.findByText('LAN')).toBeInTheDocument();
     expect(screen.getByText('VPN')).toBeInTheDocument();
-    // …and the dialog measured them itself, with the reply's credential.
+    // …and the dialog measured them itself; the probe is a bare upgrade now.
     await waitFor(() =>
-      expect(testAddressesMock).toHaveBeenCalledWith(
-        expect.anything(),
-        { credential: 'tok' },
-      ),
+      expect(testAddressesMock).toHaveBeenCalledWith(expect.anything()),
     );
     // Pick the VPN path explicitly (server marked it unreachable — user override
     // still allowed).
@@ -238,9 +235,8 @@ describe('AttachDialog', () => {
     await screen.findByText('30ms');
     expect(testAddressesMock).toHaveBeenCalledTimes(1);
 
-    // A fresh reply carries a fresh credential, which is what re-measures — so
-    // Re-test must re-request rather than re-probe a token that expires at
-    // p2p_token_expiry_secs.
+    // Re-test re-requests rather than re-probing the previous reply: the
+    // measured addresses belong to the attach the user is about to start.
     measures(7);
     await user.click(await screen.findByRole('button', { name: /Re-test/ }));
 
@@ -272,7 +268,7 @@ describe('AttachDialog', () => {
       session_id: 'agent-2:prod',
       session_name: 'prod',
       agent_address: 'ws://other/ws',
-      connection_token: 'active-token',
+      agent_token: 'active-token',
       addresses: [],
     };
     store.set(attachInfoAtom, activeInfo);

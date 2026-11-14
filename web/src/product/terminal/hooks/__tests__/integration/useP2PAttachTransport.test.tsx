@@ -24,7 +24,7 @@ function makeAttachInfo(): AttachInfo {
     mode: 'p2p',
     session_id: 'agent:test',
     agent_address: 'ws://a/ws',
-    connection_token: 'token',
+    agent_token: 'token',
   };
 }
 

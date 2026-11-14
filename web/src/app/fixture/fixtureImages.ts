@@ -262,15 +262,6 @@ function requestRegistry(
       image ? { success: true, image } : { success: false, error: 'Image not found' },
     );
   }
-  if (type === 'server.image.access') {
-    const digest = String(payload.digest ?? '');
-    return Promise.resolve({
-      success: true,
-      token: 'fixture-image-token',
-      expires_at: CREATED_AT + 3600,
-      path: `/images/blobs/${digest}`,
-    });
-  }
   return null;
 }
 

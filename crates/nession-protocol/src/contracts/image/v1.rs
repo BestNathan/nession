@@ -452,62 +452,6 @@ impl ImageCacheStatus {
     }
 }
 
-/// `server.image.access`'s request: a scoped read grant for one digest.
-///
-/// Exactly one consumer context authorizes the grant. A Project grant requires
-/// the Project's durable `image_digest` reference. A Session grant requires
-/// that the digest is one of that Managed Session's resolved images; knowing a
-/// digest or another Session's identity is not authorization.
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImageAccessPayload {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    pub digest: String,
-}
-
-/// The one consumer context a client names for an image grant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageAccessConsumer<'a> {
-    Project(&'a str),
-    Session(&'a str),
-}
-
-impl ImageAccessPayload {
-    /// Require exactly one consumer context.
-    pub fn consumer(&self) -> Result<ImageAccessConsumer<'_>, ImageValidationError> {
-        match (self.project_id.as_deref(), self.session_id.as_deref()) {
-            (Some(project_id), None) => Ok(ImageAccessConsumer::Project(project_id)),
-            (None, Some(session_id)) => Ok(ImageAccessConsumer::Session(session_id)),
-            _ => Err(ImageValidationError::AccessRequiresExactlyOneConsumer),
-        }
-    }
-}
-
-/// `server.image.access`'s reply.
-///
-/// `token` is a bearer credential for `path` only. It is stored hashed and
-/// expires; it never grants metadata or another digest.
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImageAccessResponsePayload {
-    pub success: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_kind: Option<String>,
-}
-
 // ── Validation ──────────────────────────────────────────────────────────
 
 /// A deterministic validation failure naming the offending value.
@@ -536,7 +480,6 @@ pub enum ImageValidationError {
     InvalidFixedTimestamp,
     InvalidFixedUuid,
     GetRequiresExactlyOneLocator,
-    AccessRequiresExactlyOneConsumer,
     ErrorTooLong { max: usize },
     InvalidBuildId,
     EmptyClientRequestId,
@@ -610,9 +553,6 @@ impl ImageValidationError {
             }
             Self::GetRequiresExactlyOneLocator => {
                 "server.image.get requires exactly one of digest or alias".to_string()
-            }
-            Self::AccessRequiresExactlyOneConsumer => {
-                "server.image.access requires exactly one of project_id or session_id".to_string()
             }
             Self::ErrorTooLong { max } => {
                 format!("image error must be at most {max} characters")

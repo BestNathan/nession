@@ -10,23 +10,11 @@ export interface AgentProbeInput {
   /** Candidates to test. An empty list probes nothing (a relay attach has none). */
   addresses: ProbedAddress[];
   /**
-   * Credential presented at the upgrade.
-   *
-   * **A probe without one probes nothing.** Since #1013 the agent refuses a
-   * bare upgrade, so measuring without a credential cannot discover anything
-   * about the network — it only manufactures "unreachable" verdicts for
-   * addresses that may be perfectly good. So this refuses rather than guesses.
-   */
-  credential: string | undefined;
-  /**
    * Bump to measure again with the same inputs.
    *
-   * This exists because a re-request for attach info usually — but not
-   * necessarily — returns a *different* credential, and "usually" is not a
-   * guarantee to hang a user-facing control on: a caller whose reply carried the
-   * same credential and the same addresses would find its Re-test silently
-   * inert. The bump makes the re-measurement explicit rather than a side effect
-   * of what the server chose to mint.
+   * This exists because a caller that re-measured with the same addresses and
+   * the same bump would otherwise find its Re-test silently inert. The bump
+   * makes the re-measurement explicit.
    */
   reprobeKey?: number;
 }
@@ -59,15 +47,15 @@ export interface AgentProbeController {
  * differ. The inputs themselves are read through a ref at fire time, which is
  * also what keeps the dependency list honest without disabling the lint.
  */
-export function useAgentProbe({ agentId, addresses, credential, reprobeKey = 0 }: AgentProbeInput): AgentProbeController {
+export function useAgentProbe({ agentId, addresses, reprobeKey = 0 }: AgentProbeInput): AgentProbeController {
   const results = useAtomValue(probeResultsAtom);
   const setResults = useSetAtom(probeResultsAtom);
   const [probing, setProbing] = useState(false);
 
   // What the probe reads. Held in a ref so the effect below can depend on the
   // fingerprint string alone.
-  const inputs = useRef({ agentId, addresses, credential });
-  inputs.current = { agentId, addresses, credential };
+  const inputs = useRef({ agentId, addresses });
+  inputs.current = { agentId, addresses };
 
   /**
    * Which measurement is the current one.
@@ -78,11 +66,11 @@ export function useAgentProbe({ agentId, addresses, credential, reprobeKey = 0 }
    */
   const generation = useRef(0);
 
-  const fingerprint = `${addresses.map((a) => a.url).join('|')}|${credential ?? ''}|${reprobeKey}`;
+  const fingerprint = `${addresses.map((a) => a.url).join('|')}|${reprobeKey}`;
 
   useEffect(() => {
-    const { agentId: id, addresses: candidates, credential: token } = inputs.current;
-    if (!id || !token || candidates.length === 0) {
+    const { agentId: id, addresses: candidates } = inputs.current;
+    if (!id || candidates.length === 0) {
       setProbing(false);
       return;
     }
@@ -90,7 +78,7 @@ export function useAgentProbe({ agentId, addresses, credential, reprobeKey = 0 }
     const mine = (generation.current += 1);
     setProbing(true);
 
-    void testAddresses(candidates, { credential: token }).then((latencies) => {
+    void testAddresses(candidates).then((latencies) => {
       if (generation.current !== mine) {
         return;
       }

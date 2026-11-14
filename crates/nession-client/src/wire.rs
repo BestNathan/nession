@@ -38,6 +38,9 @@
 /// `server.auth` — the handshake, sent by [`crate::ClientConnection::connect`].
 pub const SERVER_AUTH: &str = "server.auth";
 
+/// Agent-direct authentication: the first frame on a P2P socket (#3440).
+pub const CLIENT_AUTH: &str = "client.auth";
+
 /// `server.agent.list` — every agent the Server knows about.
 pub const SERVER_AGENT_LIST: &str = "server.agent.list";
 

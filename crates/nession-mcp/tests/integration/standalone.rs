@@ -19,12 +19,11 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::{AgentConfig, AttachMode};
-use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::{McpConfig, ServerConfig};
-use nession_protocol::contracts::p2p::v1::CredentialScope;
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use rand::Rng;
@@ -155,10 +154,6 @@ async fn start_agent(
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
-    let credentials = Arc::new(P2pCredentials::new());
-    credentials
-        .grant_configured(AGENT_ID, agent_token, CredentialScope::for_standalone())
-        .expect("grant the operator credential");
     let mut server = AgentServer::new(
         "127.0.0.1:0",
         AGENT_ID,
@@ -168,7 +163,7 @@ async fn start_agent(
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials,
+            auth: Arc::new(P2pAuth::new(agent_token)),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::clone(&tmux),
             session_metadata: Arc::new(SessionMetadataStore::with_root(
@@ -191,7 +186,7 @@ async fn start_agent(
             },
             ..Default::default()
         };
-        server.mount_mcp(&config).expect("mount MCP");
+        server.mount_mcp(&config, agent_token).expect("mount MCP");
     }
     let (handle, addr) = server.start().await.expect("start agent");
     tokio::time::sleep(Duration::from_millis(50)).await;

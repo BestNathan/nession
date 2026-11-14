@@ -1139,197 +1139,123 @@ When principals do exist, this is the seam: step 1 becomes "who is this", and th
 relation belongs between steps 3 and 4, where the target and the unit are both
 already resolved.
 
-## The P2P credential boundary
+## Endpoint-owned tokens
 
-The agent's peer-to-peer socket is a **second door** into the agent process, and
+The Agent's peer-to-peer socket is a **second door** into the Agent process, and
 it is not only the terminal data plane: it dispatches session management
 (`agent.session.*`) and the file sandbox (`agent.file.*`) too. Until `#1013` the
-Server minted a token for it and the agent validated nothing, so **anything that
-could reach the agent's port had unauthenticated session and file management**,
-over a transport that never asked who was calling.
+Server minted a token for it and the Agent validated nothing, so anything that
+could reach the Agent's port had unauthenticated session and file management.
 
-### Server issues, agent verifies, and the record travels outbound
+`#3440` replaces the minted-credential model with **one durable token per
+owning endpoint**:
 
-There is no Server↔agent shared secret to sign with — the only credential the
-two share is the user's `auth_token`, which is legitimately the empty string —
-and `nession-agent` has no production cryptography at all. A signed credential
-would therefore mean a new supply-chain surface in the one crate that listens on
-a port, plus key delivery and rotation, where a rotating key invalidates every
-live terminal on each agent reconnect.
-
-Instead the Server **pushes** each credential it mints over the connection the
-agent itself dialled out — the one channel here that is already authenticated in
-the direction that matters, because the agent is the client on it. Nothing
-inbound can reach it, and it already carries every management command the agent
-obeys, so the socket's authority is no stronger an assumption than the authority
-the agent already acts on. The wire is `agent.p2p.grant`
-(`nession_protocol::contracts::p2p::v1`), and it is **acknowledged before the
-token is returned to the client**: a client that dials the instant it holds a
-token is then correct by construction, because the verifier already has the
-record. A failed push fails the attach, because a credential the verifier never
-received can only produce a confusing failure later.
-
-The token is **opaque to the agent** — it looks one up, never parses one. That is
-what lets the Server change how it generates tokens without the agent changing,
-and it is why the credential does not need to be signed.
-
-### Two questions, two layers, one site each
-
-| | Question | Where |
+| Endpoint | Token | Used by |
 |---|---|---|
-| Upgrade | Is there a credential, and is it this agent's? | the Axum WebSocket upgrade handler, before `on_upgrade` |
-| Per frame | Does *this* credential cover *this* wire? | `Frame::route`, before any lane |
+| Server | `auth_token` (Server Token) | Web/CLI/App → Server; Agent → Server control connection; Server-hosted MCP and image HTTP |
+| Agent | `agent_token` (Agent Token) | every inbound Agent connection (direct P2P, Relay, embedded MCP) |
 
-Axum owns the HTTP grammar and the Upgrade response (`#3439`). The credential
-check runs in the upgrade handler **before** `WebSocketUpgrade::on_upgrade`, so
-a refused peer receives a 401 response and never has a WebSocket at all: there
-is no connection to leave in a half-authenticated state. That is structural
-rather than a promise every later handler has to keep. The handler still derives
-the connection authority from the same query credential the handshake always
-used; the per-frame scope gate below is unchanged.
+The two secrets are not interchangeable. The Server Token never authenticates
+to an Agent, and an Agent Token never authenticates to the Server or to another
+Agent.
 
-The per-frame gate is a **scope column on every arm** of the agent's
-`p2p_routes!` invocation, beside the execution policy and derived from the same
-invocation — so a wire cannot be given a lane without being given a scope, and a
-new arm cannot arrive with an implicit "anything goes". It runs in `Frame::route`
-on the reader task, before any lane handoff, which is the only placement where
-the decision is made once, per frame, in arrival order: in `serve` it would run
-on a lane task concurrently with sibling frames and after a lane had already been
-chosen. A refusal **answers and keeps the connection** — a caller outside its
-scope has made an ordinary mistake, and hanging up turns it into a reattach storm
-that reports nothing.
+### The Agent provisions, the Server caches, attach hands off
 
-### Admission is bounded before either question is asked (#2653)
+The Agent resolves its token at startup: an explicit `agent_token` in its
+config is the operator override; otherwise a cryptographically random value is
+generated once and persisted beside the config file with mode 0600, and reused
+across restarts. An unreadable or malformed persisted value fails the start
+rather than triggering a new secret. Rotation is a restart with a new value;
+existing sockets end with the process, so no live connection is re-authorized
+under an old token.
 
-The two layers above decide *who* may connect and *what* they may do. Neither
-bounds how much work a peer can create **before** it answers either question.
-Until `#2653` the accept loop spawned one task per accepted socket and the
-TLS/WebSocket upgrade had no deadline, so a peer that sent nothing held a task
-and a socket indefinitely — a resource-exhaustion path that never reached the
-credential callback at all.
+The Agent sends the token on its authenticated `server.agent.register` frame.
+The Server accepts it only after validating the control connection and the
+registration identity, and stores it **in memory** on the authoritative Agent
+record. The registration guard fences this write: a stale registration cannot
+overwrite a newer token, and re-registration under the current generation
+replaces it atomically. The value is never persisted, never serialized into an
+Agent view or list, and `Debug` renders it `<redacted>`.
 
-The listener therefore owns a *third*, separate boundary:
-[`P2pHandshakePolicy`](../../crates/nession-agent/src/server/websocket.rs)
-bounds how many accepted sockets may be mid-request at once and how long one
-may take. The accept loop takes a slot **before** spawning anything and closes
-the socket immediately when the budget is exhausted; the connection task runs
-TLS and the Axum HTTP request under one finite deadline
-([`nession_runtime::ingress`](../../crates/nession-runtime/src/ingress.rs)).
-A slot is released when the request reaches the router — the upgrade decision or
-the optional MCP route — times out, disconnects, or the listener shuts down.
-Authenticated Sessions never hold one, however long they live. Since `#3439`
-the Server runs the same bounded ingress and keeps the same property; the two
-policies differ only in their configured numbers.
+`server.session.attach` returns the resolved target Agent's token —
+**only** for the Session/Agent that authenticated client asked for, only in P2P
+mode (Relay omits it because the Server dials), and only while the Agent is
+online and has synchronized a token. Missing token state is a structured
+refusal naming the Agent and the repair, not a credential that can never work.
+General discovery/list APIs never carry a token.
 
-This is deliberately not the `#961` execution-lane bound and does not replace it.
-`#961` bounds the Protocol Units an **authenticated** connection may run in
-flight; this bounds becoming an authenticated connection. A listener that bounded
-only the former would still let unauthenticated peers accumulate; one that bounded
-only the latter would starve legitimate clients behind silent sockets. The
-credential check itself is unchanged: a refused upgrade still fails closed, and
-the admission budget only decides whether the agent will spend a handshake on the
-peer in the first place.
+### Authentication is the first protocol frame
 
-### What the credential is, and what it deliberately is not
+A WebSocket upgrade grants no authority. The browser cannot set an
+`Authorization` header on `new WebSocket()`, so the socket authenticates with
+`client.auth { auth_token: <Agent Token>, client_id }` as its first business
+frame:
 
-Scope is *what kind of work*, not *which connection*, and it is enforced per wire
-rather than trusted: a credential minted for one session's terminal is refused on
-another session's PTY, on session management, and on the file sandbox, and the
-refusals differ because the rules do. A relay credential is the narrow one — the
-relay leg sends attach, detach and terminal I/O and nothing else, so
-`sessions: false` and `files: false` are a real boundary rather than a
-precaution.
+| Question | Where |
+|---|---|
+| Is this connection authenticated? | `Frame::route` on the reader task, before any lane |
+| May this wire run? | the same gate: only `client.auth` before authentication |
 
-**Replay is time-bounded and repeatable, not single-use.** A browser re-presents
-the same URL on every reconnect, and the relay leg makes two dials on one
-credential (attach and detach, the second reusing whichever address succeeded).
-Spending a token on first use would break both, so single-use is a client rewrite
-rather than a policy choice. Expiry is the real revocation: deterministic, and
-needing no round trip.
+An empty or wrong token, a repeated `client.auth` after success, or any business
+frame before authentication fails closed and ends the connection. A socket that
+never authenticates is closed after a fixed deadline, so an admitted but silent
+peer cannot hold a connection indefinitely. The immutable `AuthContext` is
+established once; later frames never re-derive it and a second authentication
+cannot rewrite it.
 
-**Renewal happens at the next upgrade, not on the live socket (#2645).** Expiry
-does not close an established connection; it ends the credential's authority for
-a *new* one. The attach success reply therefore states
-`connection_token_expires_at` beside the opaque token, because the browser cannot
-parse the deadline out of the token itself. Before rebuilding a lost P2P
-transport the browser re-attaches through the authenticated
-`server.session.attach` operation and presents the reissued credential. A
-keepalive on the old socket cannot extend it, and the Agent's refusal remains
-authoritative. The Session runtime owns the renewal: it is single-flight, fenced
-to the current attach generation, refused if the reply names another
-Agent/Session, and rebuilt on the currently chosen address so Auto and pinned
-route intent are unchanged. A failed renewal surfaces as a transport failure —
-never as an anonymous fallback or a relaxed upgrade. The Server keeps the 300s
-default in production; the E2E/acceptance fixture uses a shorter lease so the
-expiry boundary is tested without waiting five minutes. Neither the token nor a
-credential-bearing URL is logged.
+This replaces the previous per-attach scoped credential: there is one static
+Agent Token, and it covers the Agent's trusted surface. That is the explicit
+0.x tradeoff recorded in `#3440`: a client that receives Agent A's key can use
+other capabilities and Sessions on Agent A until that key rotates. It is **not**
+per-Session or per-User authorization. Sensitive operations still obey the
+active Session/control lease, stream identity and operation preconditions.
 
-**The issuer can be unavailable, and that is not an Agent failure (#3358).** A
-renewal needs an authenticated Server connection, so a Server outage must not be
-read as a dead Agent endpoint. The Session runtime keeps the active Session and
-route while the issuer is away — it does not spend P2P candidates or force
-Relay — and resumes from the Server's authenticated-ready signal, with a
-bounded, low-frequency fallback check. The credential still authorizes only a
-*new* upgrade: a healthy established socket is never torn down because its
-lease crossed the deadline.
+### Reconnect, rejection and rotation
 
-The credential travels as a query parameter (`?token=`) because a browser cannot
-set a header on `new WebSocket()`. **That means it reaches every access log on
-the path**, which is a known cost of this design and not an oversight: it is why
-the value is opaque and short-lived rather than a durable secret. The parameter
-name is written by hand in three languages and generated in none, so the two
-Rust sides share one function
-(`nession_protocol::contracts::p2p::agent_url_with_credential`) and its inverse
-for reading it back.
+A reconnect presents the cached token; there is no lease to renew and no issuer
+to wait for. While the Server is down, a client that still holds a valid Agent
+Token can reconnect its Session directly and keeps its stream cursor, controller
+lease and connection generation. An explicit Agent rejection clears the cached
+token and stops ordinary retries: after the Server connection is authenticated
+again, one authenticated attach fetches the rotated token and rebuilds the
+transport. Logout, Agent change and runtime disposal discard the cached token;
+it is memory-only, never browser storage, a URL, a log or an error message.
 
 ### The Relay target is Server-owned
 
 An authenticated browser may express a Relay **preference**, not an endpoint.
 `server.session.relay.begin` carries an optional `relay_url`, and until `#2652`
-the Server treated it as authoritative: it appended an Agent-scoped credential
-and dialled whatever host, port and path the browser named. That made the relay
-dial a WebSocket-handshake SSRF primitive and sent a live token to a
-non-Agent peer.
-
-The endpoint set belongs to the Agent. A manual `relay_url` must resolve to one
+the Server treated it as authoritative: it dialled whatever host, port and path
+the browser named, making the relay dial a WebSocket-handshake SSRF primitive.
+The endpoint set belongs to the Agent: a manual `relay_url` must resolve to one
 of the addresses that Agent registered (or its Server-owned legacy address)
-under the WHATWG URL parser: scheme, host, port and path must match, and the
+under the WHATWG URL parser; scheme, host, port and path must match, and the
 Server dials the **registered** spelling rather than the browser's bytes.
-Candidates carrying userinfo, a query or a fragment are refused outright
-instead of normalized, because those are exactly the forms that make two
-targets look equivalent — and the query is where the scoped credential rides.
-The binding check runs **before** the credential is minted or granted, so a
-forged target receives neither a dial nor a token. A refused begin answers with
-a structured error that names the rule and the Agent, never the candidate.
+Candidates carrying userinfo, a query or a fragment are refused outright.
 
-The credential still rides the dial URL's query, but the relay's diagnostics
-never do. Attempt, success, failure and timeout logs state a sanitized endpoint
-(scheme, host, port, path) and a bounded failure category; the raw dial URL —
-and any error display that could embed it — is never formatted into a log or a
-response.
+The Server dials the Agent with the **Agent Token**, presented as the first
+`client.auth` frame on the relay's own socket; the token is never appended to a
+candidate URL. The detach path opens a second socket and authenticates it the
+same way before sending `agent.detach` — there is no unauthenticated second
+dial. Relay diagnostics state a sanitized endpoint (scheme, host, port, path)
+and a bounded failure category, never the raw URL or the token.
 
-### This is a capability, not a principal
+### Admission is bounded before authentication
 
-The Server's relay pipeline above has **no** authorization step and no
-`principal`, deliberately. This boundary does not add one, and the difference is
-worth stating so the two do not read as contradicting: a P2P credential is a
-capability scoped to *work on one agent*, presented by whoever holds it. It
-answers "may this connection do this" and not "who is this". A refusal is
-identical for an unknown credential, an expired one, and one issued for a
-different agent — one 401 at the upgrade, and the reason goes to the agent's log,
-because a body that distinguished them would tell a caller which of its guesses
-was closest.
+The listener still owns a separate pre-authentication budget
+([`P2pHandshakePolicy`](../../crates/nession-agent/src/server/websocket.rs)):
+how many accepted sockets may be mid-request at once and how long a request may
+take. The accept loop takes a slot before spawning anything and closes the
+socket when the budget is exhausted. The slot is released when the HTTP upgrade
+is answered; the protocol-level authentication deadline then bounds the
+unauthenticated `client.auth` window. This remains the `#2653` admission
+boundary, distinct from the `#961` per-connection execution bound.
 
-`ConnectionAuthority` (`crates/nession-agent/src/p2p_credentials.rs`) is the
-shape this takes on the connection: a fact established once at the upgrade and
-consulted by every gate, the same shape the Server uses for
-`registered_agent_id`. It is not a session, and nothing carries it between
-connections.
-
+## Related
 ## Related
 
 - `#678` — the requirement this document implements.
-- `#1013` — the P2P credential this section describes.
+- `#1013` / `#3440` — the P2P authentication boundary this section describes.
 - `#565` — shared `nession-mcp`, which consumes the same contracts rather than
   copying Nession DTOs; see [`docs/architecture/mcp.md`](mcp.md).
 - [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the
