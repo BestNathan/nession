@@ -433,8 +433,9 @@ export function selfTest(){
     const promoter=promotionE2ESelection(promotion,root,main);
     assert.equal(promoter.mode,'selected');
     assert.deepEqual(promoter.issues,[]);
-    assert.deepEqual(promoter.selected.map(x=>x.id),['promotion-delta'],
-      'promotion selects only the modified browser ID');
+    assert.deepEqual(promoter.selected.map(x=>x.id),
+      [...BROWSER_DESIGN_IDS,'promotion-delta'].sort(),
+      'promotion selects all newly added browser IDs in the exact delta, not unchanged IDs');
     assert.ok(promoter.selected.some(x=>x.id==='promotion-delta'),
       'changed browser ID from exact Main..Staging source must be selected');
     assert.ok(!promoter.selected.some(x=>['login','new-browser'].includes(x.id)),
