@@ -9,6 +9,17 @@
 // e2e webServer stack operates tmux. CI-only.
 import { expect, test } from '@playwright/test';
 
+declare global {
+  interface Window {
+    fixtureSessionMetadata?: {
+      /** Report a same-public-id replacement under a new durable instance (#3424). */
+      replaceIncarnation: (sessionId: string) => void;
+      /** Report the current incarnation again: an ordinary list refresh (#3424). */
+      refresh: (sessionId: string) => void;
+    };
+  }
+}
+
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 const SELECTED_ID = 'devbox-01:fix-terminal-reconnect';
@@ -101,6 +112,31 @@ test.describe('Web', () => {
     );
     await expect(page.getByTestId('session-metadata-conflict')).toHaveCount(0);
     await expect(page.getByTestId('session-metadata-editor')).toHaveCount(0);
+  });
+
+  test('a same-name incarnation replacement clears the cached context in place', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=session&sessionMetadata=incarnation');
+
+    await expect(page.getByTestId('session-title')).toHaveText(
+      'Terminal reconnect reliability',
+    );
+
+    // The fixture reports the same public id under a new durable instance;
+    // the production metadata owner fences the old read and reads the new one.
+    await page.evaluate(
+      (id) => window.fixtureSessionMetadata?.replaceIncarnation(id),
+      SELECTED_ID,
+    );
+
+    // No reload, no reconnect: the details view falls back to the session name and
+    // then shows the new instance's empty metadata.
+    await expect(page.getByTestId('session-title')).toHaveText('fix-terminal-reconnect');
+    await expect(page.getByTestId('session-metadata-description-empty')).toContainText(
+      'no saved details yet',
+    );
+    await expect(page.getByTestId('session-details')).not.toContainText(
+      'Terminal reconnect reliability',
+    );
   });
 
   test('an unreachable Agent reports the failure instead of a save', async ({ page }) => {
