@@ -11,9 +11,8 @@ const REPO = 'BestNathan/nession';
 const HEX40=/^[a-f0-9]{40}$/, HEX64=/^[a-f0-9]{64}$/;
 function reject(x){throw Error('trusted Bug Developer dispatcher: '+x);}
 const positive=x=>Number.isSafeInteger(x)&&x>0;
-function inspect(source,root,event) {
+function inspect(source,root,upstream) {
   const run=source?.run,req=source?.request;
-  const upstream=event?.workflow_run;
   if(source?.schema_version!==1||source.kind!=='agent_controller_start_request'||
       !run||run.actor!=='github-actions[bot]'||
       run.event!=='workflow_dispatch'||run.ref!=='refs/heads/main'||
@@ -38,9 +37,9 @@ function readJson(file) {
     reject('unsafe authenticated Controller file');
   return JSON.parse(fs.readFileSync(file,'utf8'));
 }
-export async function dispatchAuthenticatedBug({source,root,event,remote,token,privateKey,
+export async function dispatchAuthenticatedBug({source,root,event,sourceRun,remote,token,privateKey,
   registry,issuerRunId,dispatch=executeDurableAgentDispatch}) {
-  const {issue,actionId}=inspect(source,root,event);
+  const {issue,actionId}=inspect(source,root,sourceRun ?? event?.workflow_run);
   if(!positive(issuerRunId)||typeof remote!=='string'||
       !remote.startsWith('https://x-access-token:')||
       !remote.endsWith('@github.com/'+REPO+'.git')||
@@ -63,7 +62,7 @@ export async function dispatchAuthenticatedBug({source,root,event,remote,token,p
 async function main() {
   const env=process.env;
   if(env.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
-      env.GITHUB_EVENT_NAME!=='workflow_run'||
+      !['workflow_run','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
       env.GITHUB_WORKFLOW!=='Store / Agent Controller Ingest'||
       env.GITHUB_REF!=='refs/heads/main'||!positive(Number(env.GITHUB_RUN_ID))||
       Number(env.GITHUB_RUN_ATTEMPT)!==1)
@@ -72,9 +71,15 @@ async function main() {
     reject('usage: dispatch AUTHENTICATED-REQUEST ROOT-RESULT');
   const source=readJson(process.argv[3]),root=readJson(process.argv[4]);
   const event=readJson(env.GITHUB_EVENT_PATH);
+  // Independently fetched GH REST source, already verified by
+  // controller-request.mjs verify-source BEFORE any Store App token was minted.
+  const sourceRun=env.CONTROLLER_SOURCE_RUN_FILE
+    ?readJson(env.CONTROLLER_SOURCE_RUN_FILE):event.workflow_run;
+  if(env.GITHUB_EVENT_NAME==='workflow_dispatch'&&!env.CONTROLLER_SOURCE_RUN_FILE)
+    reject('bot wake requires authenticated Controller source Run file');
   const registry=readJson('automation/agents/registry.json');
   const outcome=await dispatchAuthenticatedBug({
-    source,root,event,registry,
+    source,root,event,sourceRun,registry,
     remote:env.AGENT_STORE_CONTROLLER_REMOTE,
     token:env.ACTIONS_DISPATCH_TOKEN,privateKey:env.STORE_WRITER_PRIVATE_KEY,
     issuerRunId:Number(env.GITHUB_RUN_ID)});

@@ -85,12 +85,21 @@ export function buildControllerRequest(input,run,registry,defaults={}) {
     permission:'write',ref:'refs/heads/main',run_id:run.run_id});
   return {schema_version:1,kind:'agent_controller_start_request',request:valid,run};
 }
+// A run-name expression changes REST run.name; the workflow identity is
+// still pinned by the exact source path. For the bot path, its source-comment
+// identity must be checked AGAIN against the authenticated ZIP below.
+function validControllerRunName(run){
+  if(run?.actor?.login==='github-actions[bot]')
+    return /^Comment Develop #[1-9][0-9]* comment:[1-9][0-9]*$/.test(run.name??'');
+  return run?.name===WORKFLOW||
+    /^Controller request #[1-9][0-9]*$/.test(run?.name??'');
+}
 export function verifyControllerRequestSource(run,artifacts,expected){
   if(!fields(expected,['run_id','attempt','head_sha'])||
       !positive(expected.run_id)||!positive(expected.attempt)||
       !SHA.test(expected.head_sha??'')||run?.id!==expected.run_id||
       run.run_attempt!==expected.attempt||run.head_sha!==expected.head_sha||
-      run.name!==WORKFLOW||run.path!==PATH||
+      !validControllerRunName(run)||run.path!==PATH||
       run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
       !['BestNathan','github-actions[bot]'].includes(run.actor?.login)||
       !['workflow_dispatch','issue_comment'].includes(run.event)||
@@ -130,7 +139,12 @@ export function inspectControllerRequestZip(zip,digest,run,expected,registry){
       record.run.run_id!==expected.run_id||
       record.run.attempt!==expected.attempt||
       record.run.head_sha!==expected.head_sha||
-      record.run.actor!==run.actor?.login)
+      record.run.actor!==run.actor?.login||
+      (record.run.actor==='github-actions[bot]' &&
+       run.name!=='Comment Develop #'+record.request.issue+
+         ' comment:'+record.run.source_comment_id)||
+      (record.run.actor==='BestNathan'&&
+       run.name!==WORKFLOW&&run.name!=='Controller request #'+record.request.issue))
     fail('Controller Artifact source binding mismatch');
   return record;
 }

@@ -163,8 +163,16 @@ const artifact={id:555,name:'agent-controller-request-1001-1',
 const listing={artifacts:[artifact]};
 assert.deepEqual(verifyControllerRequestSource(upstream,listing,expected),
   {artifact_id:555,digest:artifact.digest});
-const botUpstream={...upstream,actor:{login:'github-actions[bot]'}};
+const botUpstream={...upstream,actor:{login:'github-actions[bot]'},
+  name:'Comment Develop #3433 comment:12345'};
 assert.deepEqual(verifyControllerRequestSource(botUpstream,listing,expected),
+  {artifact_id:555,digest:artifact.digest});
+assert.throws(()=>verifyControllerRequestSource({...botUpstream,
+  name:'Comment Develop #3433 comment:0'},listing,expected),/not trusted/);
+assert.throws(()=>verifyControllerRequestSource({...botUpstream,
+  name:'Acceptance / Agent Controller'},listing,expected),/not trusted/);
+assert.deepEqual(verifyControllerRequestSource({...upstream,
+  name:'Controller request #3001'},listing,expected),
   {artifact_id:555,digest:artifact.digest});
 assert.deepEqual(verifyControllerRequestSource({...upstream,event:'issue_comment'},
   listing,expected),{artifact_id:555,digest:artifact.digest});
@@ -198,6 +206,12 @@ try{
   const botZip=make(botDoc);
   assert.deepEqual(inspectControllerRequestZip(botZip.bytes,botZip.digest,
     botUpstream,expected,registry),botDoc);
+  assert.throws(()=>inspectControllerRequestZip(botZip.bytes,botZip.digest,
+    {...botUpstream,name:'Comment Develop #3001 comment:12345'},expected,registry),
+    /source binding mismatch/);
+  assert.throws(()=>inspectControllerRequestZip(botZip.bytes,botZip.digest,
+    {...botUpstream,name:'Comment Develop #3433 comment:33333'},expected,registry),
+    /source binding mismatch/);
   assert.throws(()=>inspectControllerRequestZip(botZip.bytes,botZip.digest,
     upstream,expected,registry),/source binding mismatch/);
     const qwenZip=make(qwen);
