@@ -54,6 +54,8 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   /#/fixture/workspace?capability=env&env=error        → materialization failed
  *   /#/fixture/workspace?capability=env&env=unavailable  → Agent did not report
  *   /#/fixture/workspace?capability=env&env=race         → first list answer held; imports mutate
+ *   /#/fixture/workspace?capability=env&env=deferred-binding&git=selection-overlap
+ *                                                        → Session A SET held across A→B selection
  */
 
 /**
@@ -344,6 +346,12 @@ export interface FixtureEnvControl {
   isHeld: () => boolean;
 }
 
+/** #3444: deferred Session A binding reply, controlled from Playwright. */
+export interface FixtureDeferredBindingControl {
+  releaseBinding: () => void;
+  isHeld: () => boolean;
+}
+
 /** Read one mutable `env=race` profile, including a just-imported one. */
 function raceEnvContent(
   contents: ReadonlyMap<string, string>,
@@ -408,6 +416,7 @@ function raceEnvWrite(
 export function fixtureEnvSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('env') ?? 'profiles';
   const race = scenario === 'race';
+  const deferredBinding = scenario === 'deferred-binding';
   const files: EnvFileInfo[] = scenario === 'empty' ? [] : [...FILES];
   // The binding is the one mutable piece: SET and REAPPLY change the revision
   // this surface answers from then on.
@@ -422,6 +431,17 @@ export function fixtureEnvSurface(search: string): PluginSurface {
   ]);
   let holdNextList = race;
   let releaseHeldList: (() => void) | null = null;
+  let releaseHeldBinding: (() => void) | null = null;
+
+  if (deferredBinding && typeof window !== 'undefined') {
+    (window as Window & { fixtureEnvBinding?: FixtureDeferredBindingControl }).fixtureEnvBinding = {
+      releaseBinding: () => {
+        releaseHeldBinding?.();
+        releaseHeldBinding = null;
+      },
+      isHeld: () => releaseHeldBinding !== null,
+    };
+  }
 
   if (race && typeof window !== 'undefined') {
     (window as Window & { fixtureEnv?: FixtureEnvControl }).fixtureEnv = {
@@ -474,7 +494,18 @@ export function fixtureEnvSurface(search: string): PluginSurface {
         const refs = Array.isArray(payload.profiles)
           ? (payload.profiles as EnvFileRef[])
           : [];
-        binding = afterSet(binding, refs);
+        const next = afterSet(binding, refs);
+        if (deferredBinding && payload.session_id === FIXTURE_SELECTED_ID) {
+          // The response is held while the user changes the active Session;
+          // the original Server mutation still belongs exclusively to A.
+          return new Promise<T>((resolve) => {
+            releaseHeldBinding = () => {
+              binding = next;
+              resolve({ ...next, warnings: ['A-only late warning'] } as T);
+            };
+          });
+        }
+        binding = next;
         return Promise.resolve(binding as T);
       }
       if (type === SESSION_ENV_BINDING_REAPPLY_WIRE) {
