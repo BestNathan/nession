@@ -43,6 +43,7 @@ import {
   expectFilesSurface as expectFilesAt,
   openShell as openFileLinkShell,
   printReference as printFileReference,
+  readEditor as readFileEditor,
   returnToTerminal as returnFromFiles,
   runLine as runFileLinkCommand,
   seedTerminalFiles,
@@ -1305,6 +1306,32 @@ test.describe('Terminal file references', () => {
     await expectFileEditorAt(page, expect, {
       count: 1, line: 7, column: 3, activeLineText: 'target-line-7',
     });
+    await returnFromFiles(page, expect, 'web');
+    await expect(page.getByTestId('terminal-surface')).toBeVisible();
+  });
+
+  // #3414: a shell at the filesystem root reports CWD `/`, which is not the
+  // source-relative root `''`. A reference that also exists under the source
+  // root must resolve to the absolute path, and when that absolute target does
+  // not exist the reference fails rather than opening the lookalike.
+  test('Web: a relative reference from the filesystem root never falls back into the source root', async ({ page }) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+    seedTerminalFiles(runtime.home);
+    await openFileLinkShell(page, expect, runtime, 'e2e-3414-web');
+    await runFileLinkCommand(page, expect, 'cd /');
+    // `src/deep/target.py` exists in the source root. The pre-#3414 join
+    // resolved this reference there; the correct join asks the filesystem
+    // root's `/src/deep/target.py`, which does not exist.
+    await printFileReference(page, expect, 'src/deep/target.py:3');
+    await activateFileReference(page, 'src/deep/target.py:3');
+    const error = page.getByTestId('files-web-handoff-error');
+    await expect(error).toBeVisible();
+    await expect(error).toContainText('/src/deep/target.py');
+    await expect(error).toContainText('moved or deleted');
+    const editor = await readFileEditor(page);
+    expect(editor.count).toBe(0);
+    expect(String(editor.text ?? '')).not.toContain('target-line-');
     await returnFromFiles(page, expect, 'web');
     await expect(page.getByTestId('terminal-surface')).toBeVisible();
   });
