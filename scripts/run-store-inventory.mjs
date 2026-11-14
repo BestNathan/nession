@@ -180,7 +180,7 @@ export function checkInventory(manifest,workflows){
         ['.github/workflows/store-agent-bootstrap.yml',['bootstrap','main_push_only']],
         ['.github/workflows/store-agent-controller-ingest.yml',['controller_initialization','main_workflow_run_or_authenticated_bot_dispatch']],
         ['.github/workflows/agent-controller-dispatch.yml',['controller_dispatch','owner_main_dispatch_or_issue_comment']],
-        ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment']],
+        ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment_or_authenticated_bot_dispatch']],
         ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_reconcile','main_workflow_run']],
         ['.github/workflows/e2e-full-failure-ingest.yml',['e2e_failure_admission','main_workflow_run']],
         ['.github/workflows/acceptance-e2e-failure-bug.yml',['e2e_failure_bug_publish','main_workflow_run']],
@@ -221,9 +221,19 @@ export function checkInventory(manifest,workflows){
                !body.includes('bug-develop-comment.mjs verify')))||
            (needs==='owner_main_dispatch_or_issue_comment'&&
               (!/^  issue_comment:\s*$/m.test(triggers)||!/^  workflow_dispatch:\s*$/m.test(triggers)))||
-           (needs==='main_workflow_run_or_owner_comment'&&
-              (!/^  workflow_run:\s*$/m.test(triggers)||!/^  issue_comment:\s*$/m.test(triggers)||
-               /^  workflow_dispatch:\s*$/m.test(triggers))))
+           (needs==='main_workflow_run_or_owner_comment_or_authenticated_bot_dispatch'&&
+              (!/^  workflow_run:\s*$/m.test(triggers)||
+               !/^  issue_comment:\s*$/m.test(triggers)||
+               !/^  workflow_dispatch:\s*$/m.test(triggers)||
+               !body.includes('      source_run_id:')||
+               !body.includes("github.actor == 'github-actions[bot]'")||
+               !body.includes("github.ref == 'refs/heads/main'")||
+               !body.includes("github.run_attempt == 1")||
+               !body.includes('node scripts/lib/agent/orchestration/development-ingest.mjs source')||
+               !body.includes('node scripts/lib/agent/orchestration/development-ingest.mjs ingest')||
+               !body.includes('development-ingest-selftest.mjs')||
+               !body.includes('jq -e --argjson id "$SOURCE_RUN_ID"')||
+               !body.includes('actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100'))))
           fail('active agent-store Writer trigger deviates from declared limited-trust profile');
         // A known App writer is not exempt from the bounded CAS publisher.
         if(findStorePushes(body).some(push=>
