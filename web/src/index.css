@@ -227,6 +227,29 @@ html {
   background: var(--nession-terminal-background);
 }
 
+/* ── App keyboard-avoidance scroll ancestor (#3523) ────────────────────────
+   A soft keyboard changes the visible region, not the shell's layout box. The
+   Experience scrollport is a real browser scroller only while it has a legal
+   avoidance range; the scrollbar is hidden so the range cannot change the
+   well's width (and therefore never re-fits the terminal). Overscroll stays
+   inside it rather than chaining to the locked body. */
+[data-keyboard-avoidance-scrollport] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: contain;
+}
+[data-keyboard-avoidance-scrollport]::-webkit-scrollbar {
+  display: none;
+}
+
+/* Vertical drags that the outer avoidance range owns are pre-empted in the
+   scrollport's capture listener; xterm's own touch scroller must not see them
+   a second time. When no range exists the attribute is absent and xterm keeps
+   its existing #2659 routing untouched. */
+[data-keyboard-avoidance-scrollable='true'] [data-terminal-viewport] .xterm-viewport {
+  overflow-y: hidden;
+}
+
 /* Capsule composer typography — token vars only; beats global touch textarea bump. */
 .shell [data-testid='terminal-capsule'] [data-testid='capsule-ghost-input'] {
   font-size: var(--nession-terminal-capsule-font-size);

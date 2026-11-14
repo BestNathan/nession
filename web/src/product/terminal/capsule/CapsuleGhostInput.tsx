@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
+import { KEYBOARD_AVOIDANCE_TARGET_ATTRIBUTE } from '@/platform/viewport/appViewport';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
 import {
   capsuleFieldPadClass,
@@ -134,6 +135,7 @@ export function CapsuleGhostInput({
       <textarea
         ref={textareaRef}
         data-testid="capsule-ghost-input"
+        {...{ [KEYBOARD_AVOIDANCE_TARGET_ATTRIBUTE]: '' }}
         value={value}
         rows={1}
         disabled={disabled}
