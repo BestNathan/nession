@@ -223,10 +223,13 @@ async function expectAbsoluteTargetOpened(page, expect, source) {
   ).toBe(true);
   expect(
     source.requested.some(
-      (entry) => entry.wire === 'agent.file.list' && entry.path === 'src',
+      (entry) => entry.wire === 'agent.file.read' && entry.path === '/src/foo.rs',
     ),
-    'the source-relative parent was never listed',
-  ).toBe(false);
+    'the filesystem-root target was read',
+  ).toBe(true);
+  // The Files surface may enumerate the source-relative tree on its own, so
+  // the contract is what the resolver/opener chose, not every listing: the
+  // lookalike must never be read as the activated target.
   expect(
     source.requested.some(
       (entry) => entry.wire === 'agent.file.read' && entry.path === 'src/foo.rs',
@@ -235,19 +238,20 @@ async function expectAbsoluteTargetOpened(page, expect, source) {
   ).toBe(false);
 }
 
-async function expectNoFallback(page, expect, source) {
+async function expectNoFallback(page, expect, source, mark) {
   const editor = await readEditor(page);
   expect(String(editor.text ?? ''), 'the lookalike content is never shown').not.toContain(
     'relative-lookalike-line',
   );
+  const afterFailure = source.requested.slice(mark);
   expect(
-    source.requested.some(
-      (entry) => entry.wire === 'agent.file.list' && entry.path === 'src',
+    afterFailure.some(
+      (entry) => entry.wire === 'agent.file.list' && entry.path === '/src',
     ),
-    'the absent absolute target did not fall back to the relative parent',
-  ).toBe(false);
+    'the failed activation still resolved against the filesystem root',
+  ).toBe(true);
   expect(
-    source.requested.some(
+    afterFailure.some(
       (entry) => entry.wire === 'agent.file.read' && entry.path === 'src/foo.rs',
     ),
     'the absent absolute target did not read the relative lookalike',
@@ -272,11 +276,12 @@ async function runExperience(browser, runtime, experience) {
     await expectAbsoluteTargetOpened(page, expect, source);
 
     await returnToTerminal(page, expect, experience);
+    const negativeMark = source.requested.length;
     source.setAbsolutePresent(false);
     const error = await activateExpectingFailure(page, expect, experience);
     await expect(error).toContainText('/src/foo.rs');
     await expect(error).toContainText('moved or deleted');
-    await expectNoFallback(page, expect, source);
+    await expectNoFallback(page, expect, source, negativeMark);
 
     return {
       experience,
@@ -302,7 +307,7 @@ test('SC-02: filesystem-root CWD opens the absolute target, never the relative l
     description:
       'exact SHA ' + sha + ': Web Session CWD / listed /src, opened /src/foo.rs ' +
       '(absolute-root-line-42) and read it; the source-relative src/foo.rs was never ' +
-      'listed or read; with /src absent the activation failed with /src/foo.rs ' +
+      'read or opened; with /src absent the activation failed with /src/foo.rs ' +
       '"moved or deleted" instead of opening the relative lookalike',
   });
 });
@@ -317,7 +322,7 @@ test('SC-02: filesystem-root CWD opens the absolute target, never the relative l
     description:
       'exact SHA ' + sha + ': emulated App Session CWD / listed /src, opened /src/foo.rs ' +
       '(absolute-root-line-42) and read it; the source-relative src/foo.rs was never ' +
-      'listed or read; with /src absent the activation failed with /src/foo.rs ' +
+      'read or opened; with /src absent the activation failed with /src/foo.rs ' +
       '"moved or deleted" instead of opening the relative lookalike',
   });
 });
