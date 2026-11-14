@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "94142c48016544eb949b19abae34c01f911c44bb2694dc7648666cd3f0f86794",
+  "run_id": 43646463932,
+  "run_attempt": 1,
+  "issue": 3500,
+  "criterion": "SC-03",
+  "criterion_text": "Two distinct Manifests with the same EROFS Blob can enter separate Sandbox Sessions with different Env/targets without duplicate physical mount or premature unmount; old Session remains pinned after tag mutation.",
+  "stage": "staging",
+  "target_sha": "1b266632e4eb385a156eed48a2cc0a8a086aaaa6",
+  "contract_sha256": "fc8b3900ec9771636193d807e0e7e1b09b007a2dce0c48fc2677b0649016c7a0",
+  "case_revision": "1b266632e4eb385a156eed48a2cc0a8a086aaaa6",
+  "case_tree_sha": "91f2467a8c5351fba5fe9ebe8133e42593f3e7e9",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T22:13:02.945Z",
+  "finished_at": "2026-11-14T22:13:30.161Z",
+  "duration_ms": 27216,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Two distinct Manifests over one EROFS Blob entered separate Sessions with different Env/targets without a duplicate physical mount or premature unmount, and the old Session remained pinned after the Tag moved",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 1b266632e4eb385a156eed48a2cc0a8a086aaaa6: two Sessions of one EROFS layer kept distinct targets (/opt/node and /opt/rust) and distinct Config Env, shared one physical FUSE mount, releasing the first Session left it mounted, and the last consumer unmounted it"
+        },
+        {
+          "type": "runtime",
+          "value": "two distinct Manifests shared one payload and one physical cache file; the pinned old Manifest still resolved after its Tag moved; mount leases are keyed on the EROFS Blob digest, not the Manifest digest"
+        }
+      ],
+      "duration_ms": 20935,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43646463932,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1b266632e4eb385a156eed48a2cc0a8a086aaaa6",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43646463932",
+    "record_path": "runs/2026-11-14/43646463932-1/3500/SC-03.json",
+    "source_result_sha256": "a8b9a33484e565cfdb4e1c266c9c80e5222f701ade460b389fca8c5baba60ca6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43646463932-1",
+    "sha256": "a8b9a33484e565cfdb4e1c266c9c80e5222f701ade460b389fca8c5baba60ca6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43646463932",
+    "durability": "time-limited; object archival not configured"
+  }
+}

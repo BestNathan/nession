@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "69f99f410f4d30a8943871d233541763fdac3dee6787dd4dc02728c9d6fb1d3a",
+  "run_id": 43646463932,
+  "run_attempt": 1,
+  "issue": 3500,
+  "criterion": "SC-04",
+  "criterion_text": "Unsupported Image platform, missing mount target, overlapping/untrusted target, absent executable directory or failed dependency results in actionable preflight/Enter refusal without unsafe Native fallback.",
+  "stage": "staging",
+  "target_sha": "1b266632e4eb385a156eed48a2cc0a8a086aaaa6",
+  "contract_sha256": "fc8b3900ec9771636193d807e0e7e1b09b007a2dce0c48fc2677b0649016c7a0",
+  "case_revision": "1b266632e4eb385a156eed48a2cc0a8a086aaaa6",
+  "case_tree_sha": "a41515f3bf4eabaa40021c3ed1af8cc845b93799",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T22:13:30.161Z",
+  "finished_at": "2026-11-14T22:13:41.749Z",
+  "duration_ms": 11587,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Unsupported Image platform, missing mount target, untrusted/overlapping target, absent executable directory and failed dependency all refused before launch without a Native fallback",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 1b266632e4eb385a156eed48a2cc0a8a086aaaa6: a missing io.nession.path.prepend executable directory was refused during prepare before any Pane, process or execution record existed"
+        },
+        {
+          "type": "runtime",
+          "value": "an incompatible image platform, a missing mount proposal, absolute/.. /untrusted targets, reserved image environment variables and a digest-mismatched dependency all failed closed with typed errors; no path fell back to Native"
+        }
+      ],
+      "duration_ms": 5732,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43646463932,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1b266632e4eb385a156eed48a2cc0a8a086aaaa6",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43646463932",
+    "record_path": "runs/2026-11-14/43646463932-1/3500/SC-04.json",
+    "source_result_sha256": "3974e3b438916e1a2d2630ae2c16f3ab6972c67302522e03cee5c8b898095080"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43646463932-1",
+    "sha256": "3974e3b438916e1a2d2630ae2c16f3ab6972c67302522e03cee5c8b898095080",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43646463932",
+    "durability": "time-limited; object archival not configured"
+  }
+}
