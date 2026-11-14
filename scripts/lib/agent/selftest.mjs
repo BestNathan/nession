@@ -40,6 +40,7 @@ assert.equal(auditIssue(validBatch).ok,true,'fixture must be a valid integration
 // execution errors. Rejection diagnostics must not reproduce model content.
 for (const code of [
   'ISSUE_AUDIT_LABEL_CONTRACT',
+  'ISSUE_AUDIT_FIELD_CONTRACT',
   'ISSUE_AUDIT_E2E_PROTECTED',
   'ISSUE_AUDIT_CONTRACT_REJECTED',
   'ISSUE_AUDIT_TIER_PROPOSAL',
