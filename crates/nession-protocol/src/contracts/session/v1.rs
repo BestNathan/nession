@@ -987,6 +987,16 @@ pub struct WebSessionInfo {
     pub foreground_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    ///
+    /// A recyclable `agent_id:session_name` is not an incarnation: this id is
+    /// replaced when the name is killed and recreated. Web clients key their
+    /// name-addressed projections (Session metadata, #3424) on it, so a list
+    /// push that reports a different id invalidates the previous incarnation's
+    /// cached context. Absent only for a legacy Session that has not been asked
+    /// yet, so an absent value is not an incarnation change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     /// The focused Session's Server-owned Project membership (#3082).
     ///
     /// Absent for a Session with no Project. This is durable membership, not an

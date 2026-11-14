@@ -2858,6 +2858,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // fills it in from a later query.
                                 foreground_command: None,
                                 working_dir: None,
+                                instance_id: s.instance_id,
                                 // Project membership is Server-owned (#3082);
                                 // a direct Agent view has no authority for it.
                                 project_id: None,
