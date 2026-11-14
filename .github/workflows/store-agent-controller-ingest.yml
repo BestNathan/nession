@@ -12,8 +12,8 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  issues: read
+  actions: write
+  issues: write
 
 concurrency:
   group: store-agent-controller-ingest
@@ -32,7 +32,9 @@ jobs:
         )
       ) &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.actor.login == 'BestNathan' &&
+      (github.event.workflow_run.actor.login == 'BestNathan' ||
+       (github.event.workflow_run.event == 'workflow_dispatch' &&
+        github.event.workflow_run.actor.login == 'github-actions[bot]')) &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
     runs-on: ubuntu-24.04
@@ -56,6 +58,8 @@ jobs:
           set -euo pipefail
           node scripts/lib/agent/orchestration/controller-start-selftest.mjs
           node scripts/lib/agent/orchestration/controller-request-selftest.mjs
+          node scripts/lib/agent/orchestration/bug-develop-comment.mjs self-test
+          node scripts/lib/agent/orchestration/controller-bug-dispatch-selftest.mjs
           ./gates/run run-store-integrity
       - name: Independently verify successful owner/main Run and unique Artifact
         env:
@@ -75,6 +79,19 @@ jobs:
           [[ "$id" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/controller-request.zip"
           node scripts/lib/agent/orchestration/controller-request.mjs consume             "$RUNNER_TEMP/controller-request.zip" "$digest"             "$RUNNER_TEMP/controller-source.json" "$SOURCE_RUN_ID" "$SOURCE_ATTEMPT" "$SOURCE_SHA"             > "$RUNNER_TEMP/controller-authorized-request.json"
+      - name: Independently re-read the original Owner Bug comment before Store credentials
+        if: github.event.workflow_run.actor.login == 'github-actions[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue="$(jq -er .request.issue "$RUNNER_TEMP/controller-authorized-request.json")"
+          comment="$(jq -er .run.source_comment_id "$RUNNER_TEMP/controller-authorized-request.json")"
+          [[ "$issue" =~ ^[1-9][0-9]*$ ]]
+          [[ "$comment" =~ ^[1-9][0-9]*$ ]]
+          node scripts/lib/agent/orchestration/bug-develop-comment.mjs verify "$issue" "$comment"
+
       - name: Check source SHA ancestry and live Issue before giving Store write authority
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,4 +145,46 @@ jobs:
             echo "- Verified agent-store commit: $(jq -r .commit_sha "$RUNNER_TEMP/controller-start-result.json")"
             echo "- Pending Developer action: $(jq -r .first_action_id "$RUNNER_TEMP/controller-start-result.json")"
             echo "- No Agent tool executed and no Worker was dispatched."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mark newly initialized Bug development in progress
+        if: github.event.workflow_run.actor.login == 'github-actions[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.created == true and .replayed == false' "$RUNNER_TEMP/controller-start-result.json"
+          issue="$(jq -er .issue "$RUNNER_TEMP/controller-start-result.json")"
+          # The globally serialized Ingest has just committed the unique root.
+          # A later /develop request is denied by this canonical coordination label.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$issue/labels" \
+            -f 'labels[]=status:in-progress' > /dev/null
+
+      - name: Dispatch the one persisted Qwen Developer Outbox Action
+        if: github.event.workflow_run.actor.login == 'github-actions[bot]'
+        env:
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/controller-bug-dispatch.mjs dispatch \
+            "$RUNNER_TEMP/controller-authorized-request.json" \
+            "$RUNNER_TEMP/controller-start-result.json" \
+            | tee "$RUNNER_TEMP/bug-developer-dispatch-result.json"
+          jq -e '(.status == "dispatched" or .status == "ambiguous" or
+            .status == "reconcile" or .status == "replayed") and
+            (.issue > 0) and (.action_id | test("^[a-f0-9]{64}$"))' \
+            "$RUNNER_TEMP/bug-developer-dispatch-result.json" > /dev/null
+          {
+            echo '## Owner Bug Developer dispatch'
+            echo "- Issue: #$(jq -r .issue "$RUNNER_TEMP/bug-developer-dispatch-result.json")"
+            echo "- Action: $(jq -r .action_id "$RUNNER_TEMP/bug-developer-dispatch-result.json")"
+            echo "- Status: $(jq -r .status "$RUNNER_TEMP/bug-developer-dispatch-result.json")"
+            echo "- Worker Run: $(jq -r '.run_id // "NOT VERIFIED"' "$RUNNER_TEMP/bug-developer-dispatch-result.json")"
+            echo '- Ambiguous/timeout does not authorize another POST.'
           } >> "$GITHUB_STEP_SUMMARY"
