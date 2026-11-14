@@ -723,7 +723,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // keepalive. `select!` polls both arms regardless of whether the other is
     // parked, so a stalled business frame never delays a ping.
     let ping_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
-    let mut relay_task = tokio::spawn(async move {
+    let mut relay_writer = RelayWriterGuard(tokio::spawn(async move {
         let mut ping_ticker = tokio::time::interval(ping_period);
         ping_ticker.tick().await; // consume the immediate first tick
         loop {
@@ -753,7 +753,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
                 }
             }
         }
-    });
+    }));
 
     // The work this connection has in flight (#961-C, #961-E). Read-only units
     // run on the query lane — this connection's own, since it is admission — and
@@ -774,218 +774,259 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // It is logged once below and is what makes a browser's close event
     // correlatable with the Server's own view (#3358 SC-05).
     let mut close_reason = "peer-closed";
-    while let Some(frame) = read.next().await {
-        let frame = frame?;
 
-        // Not a protocol message: a close, a ping, a pong, a binary frame.
-        // Connection lifecycle, handled where it stands *and ahead of the
-        // barrier below*, because a slow operation must not hold the connection
-        // open — the requirement names ping and close explicitly. The work
-        // still in flight is ended with the connection, further down.
-        let Message::Text(text) = frame else {
-            if let HandlerAction::Close = handler.handle_message(frame).await? {
-                close_reason = "client-close";
-                break;
-            }
-            claim_agent_channel(&handler, &command_broker, &sender).await;
-            continue;
-        };
+    // Read and dispatch to completion, and **capture** the outcome rather than
+    // returning through the function. Teardown below must run for every way the
+    // read loop ends — a normal close, a transport error, a malformed frame, a
+    // handler failure, a failed relay — and a `?` in the loop used to return
+    // past the lane shutdown, the generation-fenced broker release, the client
+    // retirement and the writer wait (#3547). The block is all of the fallible
+    // work and nothing else: when it ends, its borrows of `read`, `handler`,
+    // `lanes` and `sender` are released and the teardown owns them again.
+    let reader_result: anyhow::Result<()> = async {
+        while let Some(frame) = read.next().await {
+            let frame = match frame {
+                Ok(frame) => frame,
+                Err(error) => {
+                    close_reason = "read-error";
+                    return Err(error.into());
+                }
+            };
 
-        // Decoded once, here: the policy is read from the envelope's own
-        // `msg_type` — and, for a mutation, from its payload — and the message
-        // that is dispatched below is the one this decode produced. A frame
-        // whose envelope cannot be read ends the connection — which is what it
-        // did when the handler did the decoding inside the loop, and the reason
-        // it is still done inside the loop instead of inside the task that will
-        // run it.
-        let msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)?;
-        let policy = policy_for_wire(&msg.msg_type, &msg.payload);
-
-        match policy {
-            ExecutionPolicy::Query => {
-                // The claim comes first: it is what binds this connection as the
-                // agent's control channel, and a query may reach for the broker
-                // as soon as its task is scheduled.
+            // Not a protocol message: a close, a ping, a pong, a binary frame.
+            // Connection lifecycle, handled where it stands *and ahead of the
+            // barrier below*, because a slow operation must not hold the connection
+            // open — the requirement names ping and close explicitly. The work
+            // still in flight is ended with the connection, further down.
+            let Message::Text(text) = frame else {
+                match handler.handle_message(frame).await {
+                    Ok(HandlerAction::Close) => {
+                        close_reason = "client-close";
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        close_reason = "handler-error";
+                        return Err(error);
+                    }
+                }
                 claim_agent_channel(&handler, &command_broker, &sender).await;
-                // `query` waits here when the connection's lane is
-                // full. That wait is the bound the requirement asks for: the
-                // frame that would exceed the lane is not *read* until there is
-                // room for it, so a connection cannot grow tasks with its
-                // message count.
-                lanes
-                    .query(answer(handler.clone(), msg, sender.clone(), "a query"))
-                    .await;
                 continue;
+            };
+
+            // Decoded once, here: the policy is read from the envelope's own
+            // `msg_type` — and, for a mutation, from its payload — and the message
+            // that is dispatched below is the one this decode produced. A frame
+            // whose envelope cannot be read ends the connection — which is what it
+            // did when the handler did the decoding inside the loop, and the reason
+            // it is still done inside the loop instead of inside the task that will
+            // run it.
+            let msg: ProtocolMessage<serde_json::Value> = match serde_json::from_str(&text) {
+                Ok(msg) => msg,
+                Err(error) => {
+                    close_reason = "malformed-frame";
+                    return Err(error.into());
+                }
+            };
+            let policy = policy_for_wire(&msg.msg_type, &msg.payload);
+
+            match policy {
+                ExecutionPolicy::Query => {
+                    // The claim comes first: it is what binds this connection as the
+                    // agent's control channel, and a query may reach for the broker
+                    // as soon as its task is scheduled.
+                    claim_agent_channel(&handler, &command_broker, &sender).await;
+                    // `query` waits here when the connection's lane is
+                    // full. That wait is the bound the requirement asks for: the
+                    // frame that would exceed the lane is not *read* until there is
+                    // room for it, so a connection cannot grow tasks with its
+                    // message count.
+                    lanes
+                        .query(answer(handler.clone(), msg, sender.clone(), "a query"))
+                        .await;
+                    continue;
+                }
+                ExecutionPolicy::Key(key) => {
+                    // Claimed here for the same reason as a query's: the mutation
+                    // reaches for the broker as soon as its key's worker runs it,
+                    // and the claim is about *this* connection rather than about the
+                    // frame that prompted it.
+                    claim_agent_channel(&handler, &command_broker, &sender).await;
+                    // Waits only when that resource's own queue is at its depth. The
+                    // wait parks the reader, which is the backpressure — see
+                    // `server::execution`. A mutation for another resource is not
+                    // behind it.
+                    lanes
+                        .key(
+                            key,
+                            Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+                        )
+                        .await;
+                    continue;
+                }
+                ExecutionPolicy::Ordered => {
+                    // Authentication, agent registration, the relay mode
+                    // transitions — applied, and answered, after everything read
+                    // before them, which is what their determinism is made of on a
+                    // connection that is no longer serial. The barrier covers both
+                    // lanes: an `attach` must not be applied while the `create` it
+                    // is about is still queued. See `ExecutionPolicy::Ordered`.
+                    lanes.drain().await;
+                }
+                ExecutionPolicy::Inline => {}
             }
-            ExecutionPolicy::Key(key) => {
-                // Claimed here for the same reason as a query's: the mutation
-                // reaches for the broker as soon as its key's worker runs it,
-                // and the claim is about *this* connection rather than about the
-                // frame that prompted it.
-                claim_agent_channel(&handler, &command_broker, &sender).await;
-                // Waits only when that resource's own queue is at its depth. The
-                // wait parks the reader, which is the backpressure — see
-                // `server::execution`. A mutation for another resource is not
-                // behind it.
-                lanes
-                    .key(
-                        key,
-                        Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+
+            let action = match handler.handle_protocol_message(msg).await {
+                Ok(action) => action,
+                Err(error) => {
+                    close_reason = "handler-error";
+                    return Err(error);
+                }
+            };
+            claim_agent_channel(&handler, &command_broker, &sender).await;
+
+            match action {
+                HandlerAction::Reply(Some(response)) => {
+                    // A reply is not droppable, so it waits for room rather than
+                    // failing. The only error left is the queue being closed, which
+                    // means this connection is over: leave the loop by the normal
+                    // exit so the cleanup below still runs, instead of returning
+                    // through `?` and skipping it.
+                    if sender.send_reply(response).await.is_err() {
+                        close_reason = "outbound-closed";
+                        break;
+                    }
+                }
+                HandlerAction::Reply(None) => {
+                    // No response needed, continue
+                }
+                HandlerAction::Relay {
+                    agent_ws_urls,
+                    session_id,
+                    session_name,
+                    relay_request_id,
+                    client_id,
+                    agent_token,
+                    browser_client_id,
+                    env_snapshots,
+                    cols,
+                    rows,
+                    size_known,
+                    needs_bootstrap,
+                    subscription_id,
+                } => {
+                    let mut dispatch = RelayDispatch {
+                        handler: &handler,
+                        lanes: &mut lanes,
+                        command_broker: &command_broker,
+                        sender: &sender,
+                    };
+                    let outcome = relay_bidirectional_via_channel(
+                        &mut read,
+                        sender.clone(),
+                        &mut dispatch,
+                        RelayRequest {
+                            agent_ws_urls: &agent_ws_urls,
+                            session_name: &session_name,
+                            relay_request_id: &relay_request_id,
+                            agent_token: &agent_token,
+                            // The browser's own id wherever it has one: the Agent's
+                            // control bookkeeping names clients, and the client is
+                            // the only party that can recognise its own name
+                            // (#1429).
+                            client_id: browser_client_id.as_deref().unwrap_or(&client_id),
+                            // A pre-ID legacy browser receives no route proof:
+                            // its Server-generated fallback is not its own identity.
+                            authenticated_browser_id: browser_client_id.as_deref(),
+                            env_snapshots: &env_snapshots,
+                            cols,
+                            rows,
+                            size_known,
+                            needs_bootstrap,
+                            subscription_id: subscription_id.as_deref(),
+                        },
                     )
                     .await;
-                continue;
-            }
-            ExecutionPolicy::Ordered => {
-                // Authentication, agent registration, the relay mode
-                // transitions — applied, and answered, after everything read
-                // before them, which is what their determinism is made of on a
-                // connection that is no longer serial. The barrier covers both
-                // lanes: an `attach` must not be applied while the `create` it
-                // is about is still queued. See `ExecutionPolicy::Ordered`.
-                lanes.drain().await;
-            }
-            ExecutionPolicy::Inline => {}
-        }
-
-        let action = handler.handle_protocol_message(msg).await?;
-        claim_agent_channel(&handler, &command_broker, &sender).await;
-
-        match action {
-            HandlerAction::Reply(Some(response)) => {
-                // A reply is not droppable, so it waits for room rather than
-                // failing. The only error left is the queue being closed, which
-                // means this connection is over: leave the loop by the normal
-                // exit so the cleanup below still runs, instead of returning
-                // through `?` and skipping it.
-                if sender.send_reply(response).await.is_err() {
-                    close_reason = "outbound-closed";
+                    // Relay ended — clean up the client registration so the
+                    // cleanup block below (WS-close path) doesn't double-free.
+                    client_registry.unregister(&session_id, &client_id).await;
+                    match outcome {
+                        Ok(RelayEnd::Ended) => {
+                            // Don't break — the WebSocket stays open for dashboard
+                            // use.
+                            continue;
+                        }
+                        Ok(RelayEnd::AgentEnded) => {
+                            // The Agent's terminal stream ended while this browser
+                            // still had the relay live. Nothing will arrive again,
+                            // and the browser cannot see its own healthy socket and
+                            // the dead tunnel apart — that silence *is* the frozen
+                            // terminal #2179 reports. Closing the connection is what
+                            // makes the client's own reconnect path run: it records
+                            // the truncation and re-begins the relay with a fresh
+                            // history bootstrap. A client that asked to stop, or one
+                            // whose socket already ended, takes `Ended` instead.
+                            warn!(
+                                session = %session_name,
+                                close_reason = "relay-agent-ended",
+                                "Relay for session '{}' ended: the Agent's terminal stream ended \
+                                 while the client was still attached; closing the connection so it \
+                                 re-attaches",
+                                session_name
+                            );
+                            close_reason = "relay-agent-ended";
+                            // Deliberately no Close frame here. A clean close frame
+                            // lets the browser reconnect before the re-registering
+                            // Agent has republished its Sessions, so the client can
+                            // observe a transiently empty Session list while it is
+                            // rebuilding the relay. Dropping the socket keeps the
+                            // pre-existing reconnect timing; the reason is recorded
+                            // above and in the connection-end log for correlation.
+                            break;
+                        }
+                        Ok(RelayEnd::ClientStalled) => {
+                            // The client stopped draining its terminal (#961). Every
+                            // remaining answer for it is one it is not reading, and
+                            // the screen it is showing is no longer the session's —
+                            // so the connection ends here rather than sitting open
+                            // on a terminal that has stopped moving. The client
+                            // re-attaches, and is handed a redrawn screen.
+                            //
+                            // The close is the socket's rather than a frame's: a
+                            // `Close` sent through the queue would have to wait for
+                            // room in exactly the queue this client is not draining,
+                            // so the frame that says "you are not reading" would be
+                            // the one that never gets written. Breaking here drops
+                            // the socket, which is the same fact without the wait.
+                            warn!(
+                                session = %session_name,
+                                close_reason = "relay-client-stalled",
+                                "Relay for session '{}' ended: the client stopped draining its \
+                                 terminal; closing the connection",
+                                session_name
+                            );
+                            // Deliberately no Close frame: the queue this client is
+                            // not draining is exactly where it would wait. The
+                            // browser observes 1006; this log is the Server-side
+                            // reason it correlates with (#3358 SC-05).
+                            close_reason = "relay-client-stalled";
+                            break;
+                        }
+                        Err(e) => {
+                            close_reason = "relay-error";
+                            return Err(e);
+                        }
+                    }
+                }
+                HandlerAction::Close => {
+                    close_reason = "client-close";
                     break;
                 }
             }
-            HandlerAction::Reply(None) => {
-                // No response needed, continue
-            }
-            HandlerAction::Relay {
-                agent_ws_urls,
-                session_id,
-                session_name,
-                relay_request_id,
-                client_id,
-                agent_token,
-                browser_client_id,
-                env_snapshots,
-                cols,
-                rows,
-                size_known,
-                needs_bootstrap,
-                subscription_id,
-            } => {
-                let mut dispatch = RelayDispatch {
-                    handler: &handler,
-                    lanes: &mut lanes,
-                    command_broker: &command_broker,
-                    sender: &sender,
-                };
-                let outcome = relay_bidirectional_via_channel(
-                    &mut read,
-                    sender.clone(),
-                    &mut dispatch,
-                    RelayRequest {
-                        agent_ws_urls: &agent_ws_urls,
-                        session_name: &session_name,
-                        relay_request_id: &relay_request_id,
-                        agent_token: &agent_token,
-                        // The browser's own id wherever it has one: the Agent's
-                        // control bookkeeping names clients, and the client is
-                        // the only party that can recognise its own name
-                        // (#1429).
-                        client_id: browser_client_id.as_deref().unwrap_or(&client_id),
-                        // A pre-ID legacy browser receives no route proof:
-                        // its Server-generated fallback is not its own identity.
-                        authenticated_browser_id: browser_client_id.as_deref(),
-                        env_snapshots: &env_snapshots,
-                        cols,
-                        rows,
-                        size_known,
-                        needs_bootstrap,
-                        subscription_id: subscription_id.as_deref(),
-                    },
-                )
-                .await;
-                // Relay ended — clean up the client registration so the
-                // cleanup block below (WS-close path) doesn't double-free.
-                client_registry.unregister(&session_id, &client_id).await;
-                match outcome {
-                    Ok(RelayEnd::Ended) => {
-                        // Don't break — the WebSocket stays open for dashboard
-                        // use.
-                        continue;
-                    }
-                    Ok(RelayEnd::AgentEnded) => {
-                        // The Agent's terminal stream ended while this browser
-                        // still had the relay live. Nothing will arrive again,
-                        // and the browser cannot see its own healthy socket and
-                        // the dead tunnel apart — that silence *is* the frozen
-                        // terminal #2179 reports. Closing the connection is what
-                        // makes the client's own reconnect path run: it records
-                        // the truncation and re-begins the relay with a fresh
-                        // history bootstrap. A client that asked to stop, or one
-                        // whose socket already ended, takes `Ended` instead.
-                        warn!(
-                            session = %session_name,
-                            close_reason = "relay-agent-ended",
-                            "Relay for session '{}' ended: the Agent's terminal stream ended \
-                             while the client was still attached; closing the connection so it \
-                             re-attaches",
-                            session_name
-                        );
-                        close_reason = "relay-agent-ended";
-                        // Deliberately no Close frame here. A clean close frame
-                        // lets the browser reconnect before the re-registering
-                        // Agent has republished its Sessions, so the client can
-                        // observe a transiently empty Session list while it is
-                        // rebuilding the relay. Dropping the socket keeps the
-                        // pre-existing reconnect timing; the reason is recorded
-                        // above and in the connection-end log for correlation.
-                        break;
-                    }
-                    Ok(RelayEnd::ClientStalled) => {
-                        // The client stopped draining its terminal (#961). Every
-                        // remaining answer for it is one it is not reading, and
-                        // the screen it is showing is no longer the session's —
-                        // so the connection ends here rather than sitting open
-                        // on a terminal that has stopped moving. The client
-                        // re-attaches, and is handed a redrawn screen.
-                        //
-                        // The close is the socket's rather than a frame's: a
-                        // `Close` sent through the queue would have to wait for
-                        // room in exactly the queue this client is not draining,
-                        // so the frame that says "you are not reading" would be
-                        // the one that never gets written. Breaking here drops
-                        // the socket, which is the same fact without the wait.
-                        warn!(
-                            session = %session_name,
-                            close_reason = "relay-client-stalled",
-                            "Relay for session '{}' ended: the client stopped draining its \
-                             terminal; closing the connection",
-                            session_name
-                        );
-                        // Deliberately no Close frame: the queue this client is
-                        // not draining is exactly where it would wait. The
-                        // browser observes 1006; this log is the Server-side
-                        // reason it correlates with (#3358 SC-05).
-                        close_reason = "relay-client-stalled";
-                        break;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-            HandlerAction::Close => {
-                close_reason = "client-close";
-                break;
-            }
         }
+        Ok(())
     }
+    .await;
 
     info!(close_reason, "WebSocket connection ended");
 
@@ -1051,8 +1092,16 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // same unbounded wait this stage exists to remove, one level down. The grace
     // here is the terminal stall grace: "how long may a frame wait to be handed
     // over before we stop waiting" is the same question, asked at shutdown.
+    //
+    // The handler holds a sender of its own, so it has to go too: teardown is
+    // the last thing this connection will ever ask of it, and leaving the clone
+    // alive is what would turn the wait below into the grace, every time. A
+    // verified web client's registry subscriber also holds one — that clone is
+    // not this connection's to drop — which is what the bounded wait and abort
+    // are still for.
+    drop(handler);
     drop(sender);
-    if tokio::time::timeout(terminal_stall_grace, &mut relay_task)
+    if tokio::time::timeout(terminal_stall_grace, &mut relay_writer.0)
         .await
         .is_err()
     {
@@ -1061,10 +1110,30 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
              aborting it so the connection can close",
             terminal_stall_grace
         );
-        relay_task.abort();
+        relay_writer.0.abort();
     }
 
-    Ok(())
+    // The reader's error is still the connection's outcome; the teardown above
+    // ran either way, so returning it here no longer skips anything.
+    reader_result
+}
+
+/// The connection's writer task, aborted if the connection future is dropped
+/// before the teardown reaches it.
+///
+/// A bare `JoinHandle` is not an owner: dropping it detaches the task instead of
+/// ending it, and this task owns the socket's write half. A panic unwinding
+/// through the connection drops its future — and runtime cancellation drops it
+/// too — before the ordinary teardown runs, so the task has to be held by
+/// something whose `Drop` ends it. The normal path still waits for the task and
+/// aborts it only after the bounded grace; this guard is what keeps a dropped
+/// future from leaving the writer, and the peer's socket, alive indefinitely.
+struct RelayWriterGuard(tokio::task::JoinHandle<()>);
+
+impl Drop for RelayWriterGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Point the agent's control channel at this connection.
