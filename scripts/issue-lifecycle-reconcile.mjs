@@ -467,7 +467,7 @@ async function selfTest() {
   const candidate = {number:60,merged_at:'2026-11-14T10:50:17Z',
     merge_commit_sha:targetMain,base:{ref:'main',repo:{full_name:'BestNathan/nession'}},
     head:{sha:stagingSha,repo:{full_name:'BestNathan/nession'}}};
-  const reads = async (path) => {
+  const historicalRead = async (path) => {
     if(path.endsWith('/branches/main')) return {commit:{sha:currentMain}};
     if(path.endsWith('/commits/'+targetMain)) return mainMerge;
     if(path.endsWith('/commits/'+targetMain+'/pulls?per_page=10'))return [candidate];
@@ -477,27 +477,27 @@ async function selfTest() {
       return mainCompare(sha,targetMain);
     throw Error('unexpected historical main fixture '+path);
   };
-  const repository='BestNathan/nession';
-  assert.equal(await verifyManualPostMergeTarget(repository,targetMain,
-    [sourceMerge],'fixture-token',reads),targetMain);
+  const historicalRepo='BestNathan/nession';
+  assert.equal(await verifyManualPostMergeTarget(historicalRepo,targetMain,
+    [sourceMerge],'fixture-token',historicalRead),targetMain);
   for (const wrong of [
     async path => path.endsWith('/commits/'+targetMain+'/pulls?per_page=10')
-      ? [{...candidate,merge_commit_sha:stagingSha}] : reads(path),
+      ? [{...candidate,merge_commit_sha:stagingSha}] : historicalRead(path),
     async path => path.endsWith('/commits/'+targetMain)
-      ? {...mainMerge,parents:[{sha}]} : reads(path),
+      ? {...mainMerge,parents:[{sha}]} : historicalRead(path),
     async path => path.endsWith('/branches/main')
       ? {commit:{sha:'f'.repeat(40)}} :
       path.endsWith('/compare/'+targetMain+'...'+'f'.repeat(40))
-        ? {status:'diverged'} : reads(path),
+        ? {status:'diverged'} : historicalRead(path),
     async path => path.endsWith('/compare/'+sha+'...'+targetMain)
-      ? {status:'diverged'} : reads(path),
-  ]) await assert.rejects(verifyManualPostMergeTarget(repository,targetMain,
+      ? {status:'diverged'} : historicalRead(path),
+  ]) await assert.rejects(verifyManualPostMergeTarget(historicalRepo,targetMain,
     [sourceMerge],'fixture-token',wrong),/historical (?:main )?target/);
-  await assert.rejects(verifyManualPostMergeTarget(repository,targetMain,
-    [{...sourceMerge,merged_at:null}],'fixture-token',reads),
+  await assert.rejects(verifyManualPostMergeTarget(historicalRepo,targetMain,
+    [{...sourceMerge,merged_at:null}],'fixture-token',historicalRead),
     /no verified Issue-linked/);
-  await assert.rejects(verifyManualPostMergeTarget(repository,'bad',
-    [sourceMerge],'fixture-token',reads),/invalid historical main/);
+  await assert.rejects(verifyManualPostMergeTarget(historicalRepo,'bad',
+    [sourceMerge],'fixture-token',historicalRead),/invalid historical main/);
 
   const reopened = [{ event: 'reopened', actor: { type: 'User' }, created_at: '2026-11-11T02:00:00Z' }];
   const recovery = [{ body: '/accept', user: { type: 'User' },
