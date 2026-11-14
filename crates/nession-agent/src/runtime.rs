@@ -312,12 +312,20 @@ pub async fn run(
 
     let tmux_version = crate::tmux::util::tmux_version().await;
     let os_version = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+    let platform = nession_erofs::oci::descriptor::Platform::for_consumer(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        None,
+    );
 
     let metadata = AgentMetadata {
         tmux_version,
         os_version,
         nession_version: env!("CARGO_PKG_VERSION").to_string(),
         image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
+        architecture: platform.architecture,
+        os: platform.os,
+        variant: platform.variant,
     };
 
     // Before any session can exist, and before the server connection, so a

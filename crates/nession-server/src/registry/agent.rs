@@ -166,6 +166,9 @@ impl AgentRegistry {
                             os_version: String::new(),
                             nession_version: String::new(),
                             image_tag: String::new(),
+                            architecture: String::new(),
+                            os: String::new(),
+                            variant: None,
                         });
                     let addresses = decode_addresses(&row.addresses);
                     let info = AgentInfo {
@@ -850,6 +853,9 @@ mod tests {
                 os_version: "linux".to_string(),
                 nession_version: "0.1".to_string(),
                 image_tag: "unknown".to_string(),
+                architecture: String::new(),
+                os: String::new(),
+                variant: None,
             },
             session_count: 0,
             active_sessions: 0,

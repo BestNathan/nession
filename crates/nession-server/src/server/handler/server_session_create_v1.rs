@@ -6,10 +6,14 @@ use super::{
     ClientSessionCreateResponsePayload, ConnectionHandler, Duration, EnvFileRef, EnvSource,
     HandlerAction, ProtocolMessage,
 };
-use nession_protocol::contracts::image::v1::{normalize_image_digest, ImageStatus};
+use nession_erofs::oci::descriptor::Platform;
+use nession_protocol::contracts::image::v1::normalize_image_digest;
 use nession_protocol::contracts::session::v1::{
-    ClientManagedCreate, ManagedImageGrant, ManagedImageRole, ManagedSessionImages,
+    ClientManagedCreate, ManagedImageGrant, ManagedImageObjectGrant, ManagedImageRole,
+    ManagedSessionImages,
 };
+
+use crate::image::{agent_platform, ImageResolution};
 
 // How long the Server waits for the Agent's create answer. Production keeps
 // the operator-facing 30s/300s windows; unit tests use short values so an
@@ -28,6 +32,13 @@ const MANAGED_CREATE_RESPONSE_WAIT: Duration = Duration::from_secs(300);
 struct PreparedManagedCreate {
     images: ManagedSessionImages,
     attempt_id: String,
+}
+
+/// The identity fields of one resolved Managed image grant.
+struct ManagedImageGrantIdentity {
+    digest: String,
+    path: String,
+    objects: Vec<ManagedImageObjectGrant>,
 }
 
 impl ConnectionHandler {
@@ -131,6 +142,10 @@ impl ConnectionHandler {
 
         // Check agent exists and is online
         let agent = self.agent_registry.get(agent_id).await;
+        // The Agent's advertised OCI platform selects a platform Manifest from
+        // an Index. An older Agent that advertises none keeps the legacy
+        // digest-addressed path only (#3499).
+        let managed_platform = agent.as_ref().and_then(agent_platform);
         match agent {
             Some(a) if a.status == AgentStatus::Online => {}
             Some(_) => {
@@ -161,6 +176,7 @@ impl ConnectionHandler {
                     &name,
                     request,
                     &request_id,
+                    managed_platform.as_ref(),
                 )
                 .await
             {
@@ -516,6 +532,78 @@ impl ConnectionHandler {
     /// artifact; the Server mints a scoped grant for each one and records the
     /// `preparing` context. The Agent remains the owner of cache preparation
     /// and sandbox capability validation.
+    /// Resolve one Managed artifact to its pinned Manifest grant.
+    ///
+    /// A catalog image yields the final Manifest digest plus the Manifest,
+    /// Config and EROFS routes the Agent may fetch. A historical
+    /// digest-addressed EROFS row keeps the accepted single-digest grant.
+    #[allow(clippy::too_many_arguments)]
+    async fn resolve_managed_grant(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        digest: &str,
+        platform: Option<&Platform>,
+        role: &str,
+        label: &str,
+    ) -> Result<(ManagedImageGrantIdentity, crate::db::ResolvedImageBinding), String> {
+        match self
+            .image_manager
+            .resolve_managed_image(project_id, session_id, digest, platform)
+            .await
+            .map_err(|error| format!("{label}: {error}"))?
+        {
+            ImageResolution::Manifest(access) => {
+                let path = access
+                    .objects
+                    .first()
+                    .map(|object| object.path.clone())
+                    .ok_or_else(|| format!("{label}: resolved Manifest has no route"))?;
+                let objects = access
+                    .objects
+                    .iter()
+                    .map(|object| ManagedImageObjectGrant {
+                        digest: object.digest.clone(),
+                        media_type: object.media_type.clone(),
+                        size_bytes: object.size_bytes,
+                        path: object.path.clone(),
+                    })
+                    .collect();
+                let binding = crate::db::ResolvedImageBinding {
+                    role: role.to_string(),
+                    requested_digest: digest.to_string(),
+                    manifest_digest: Some(access.manifest_digest.clone()),
+                    layer_digest: access.layer_digest.clone(),
+                };
+                Ok((
+                    ManagedImageGrantIdentity {
+                        digest: access.manifest_digest,
+                        path,
+                        objects,
+                    },
+                    binding,
+                ))
+            }
+            ImageResolution::Legacy(grant) => {
+                let binding = crate::db::ResolvedImageBinding {
+                    role: role.to_string(),
+                    requested_digest: digest.to_string(),
+                    manifest_digest: None,
+                    layer_digest: digest.to_string(),
+                };
+                Ok((
+                    ManagedImageGrantIdentity {
+                        digest: digest.to_string(),
+                        path: grant.path,
+                        objects: Vec::new(),
+                    },
+                    binding,
+                ))
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn begin_managed_create(
         &self,
         project: Option<&crate::db::ProjectRow>,
@@ -524,6 +612,7 @@ impl ConnectionHandler {
         session_name: &str,
         request: &ClientManagedCreate,
         attempt_id: &str,
+        platform: Option<&Platform>,
     ) -> Result<PreparedManagedCreate, String> {
         let Some(project) = project else {
             return Err("Managed creation requires a Project".to_string());
@@ -557,58 +646,76 @@ impl ConnectionHandler {
         };
         let workspace_digest = normalize_image_digest(&workspace_digest)
             .map_err(|error| format!("Project Source image: {}", error.message()))?;
-        let workspace = self
+        // The legacy source commit remains available for a digest-addressed
+        // EROFS row; a catalog Manifest identity may have no legacy row.
+        let workspace_source_sha = self
             .image_manager
             .get(Some(&workspace_digest), None)
             .await
-            .map_err(|error| format!("Project Source image: {error}"))?;
-        if workspace.status != ImageStatus::Ready {
-            return Err(format!(
-                "Project Source image {workspace_digest} is not ready"
-            ));
-        }
+            .ok()
+            .and_then(|descriptor| descriptor.source_sha);
 
         let base_digest = normalize_image_digest(&request.base_digest)
             .map_err(|error| format!("Base Runtime image: {}", error.message()))?;
-        let base = self
-            .image_manager
-            .grant_managed_access(project_id, &base_digest)
-            .await
-            .map_err(|error| format!("Base Runtime image: {error}"))?;
-        let workspace_grant = self
-            .image_manager
-            .grant_managed_access(project_id, &workspace_digest)
-            .await
-            .map_err(|error| format!("Project Source image: {error}"))?;
+        let (base_grant, base_binding) = self
+            .resolve_managed_grant(
+                project_id,
+                &session_id,
+                &base_digest,
+                platform,
+                "base",
+                "Base Runtime image",
+            )
+            .await?;
+        let (workspace_grant, workspace_binding) = self
+            .resolve_managed_grant(
+                project_id,
+                &session_id,
+                &workspace_digest,
+                platform,
+                "workspace",
+                "Project Source image",
+            )
+            .await?;
 
         let mut images = vec![
             ManagedImageGrant {
                 role: ManagedImageRole::Base,
-                digest: base_digest.clone(),
-                path: base.path,
+                digest: base_grant.digest,
+                path: base_grant.path,
                 target: None,
+                objects: base_grant.objects,
             },
             ManagedImageGrant {
                 role: ManagedImageRole::Workspace,
-                digest: workspace_digest.clone(),
+                digest: workspace_grant.digest,
                 path: workspace_grant.path,
                 target: None,
+                objects: workspace_grant.objects,
             },
         ];
+        let mut resolved_images = vec![base_binding, workspace_binding];
         for toolchain in &request.toolchains {
             let digest = normalize_image_digest(&toolchain.digest)
                 .map_err(|error| format!("Toolchain image: {}", error.message()))?;
-            let grant = self
-                .image_manager
-                .grant_managed_access(project_id, &digest)
-                .await
-                .map_err(|error| format!("Toolchain image {digest}: {error}"))?;
+            let (grant, binding) = self
+                .resolve_managed_grant(
+                    project_id,
+                    &session_id,
+                    &digest,
+                    platform,
+                    "toolchain",
+                    &format!("Toolchain image {digest}"),
+                )
+                .await?;
             images.push(ManagedImageGrant {
                 role: ManagedImageRole::Toolchain,
-                digest,
+                digest: grant.digest,
                 path: grant.path,
                 target: Some(toolchain.target.clone()),
+                objects: grant.objects,
             });
+            resolved_images.push(binding);
         }
 
         let row = crate::db::SessionManagedContextRow {
@@ -619,11 +726,12 @@ impl ConnectionHandler {
             base_digest,
             workspace_digest,
             toolchains: request.toolchains.clone(),
-            source_sha: workspace.source_sha,
+            source_sha: workspace_source_sha,
             workspace: None,
             status: "preparing".to_string(),
             error: None,
             updated_at: chrono::Utc::now().timestamp(),
+            resolved_images,
         };
         self.db
             .begin_session_managed_context(&row)

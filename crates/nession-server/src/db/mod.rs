@@ -32,6 +32,7 @@ use sea_orm::{
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 use sea_orm_migration::MigratorTrait;
+use serde::{Deserialize, Serialize};
 
 pub struct Database {
     conn: DatabaseConnection,
@@ -157,6 +158,26 @@ pub struct SessionManagedContextRow {
     pub status: String,
     pub error: Option<String>,
     pub updated_at: i64,
+    /// The resolved Manifest identity of each requested image (#3499).
+    ///
+    /// A legacy digest-only binding records its EROFS digest as both the
+    /// requested and layer digest and leaves `manifest_digest` absent.
+    pub resolved_images: Vec<ResolvedImageBinding>,
+}
+
+/// One image's final runtime identity inside a Managed Session binding.
+///
+/// `requested_digest` is what the create named; `manifest_digest` is the
+/// immutable Manifest the Server resolved and authorized (absent for the
+/// legacy digest-addressed path); `layer_digest` is the physical EROFS
+/// identity the Agent's mount layer uses.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedImageBinding {
+    pub role: String,
+    pub requested_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<String>,
+    pub layer_digest: String,
 }
 
 /// A Managed create may legitimately stay `preparing` for the Server's 300 s
@@ -990,6 +1011,7 @@ impl Database {
             status: Set(row.status.clone()),
             error: Set(row.error.clone()),
             updated_at: Set(row.updated_at),
+            resolved_images_json: Set(serde_json::to_string(&row.resolved_images).ok()),
         };
         session_managed_context::Entity::insert(model)
             .on_conflict(
@@ -1006,6 +1028,7 @@ impl Database {
                         session_managed_context::Column::Status,
                         session_managed_context::Column::Error,
                         session_managed_context::Column::UpdatedAt,
+                        session_managed_context::Column::ResolvedImagesJson,
                     ])
                     .to_owned(),
             )
@@ -1091,21 +1114,59 @@ impl Database {
 
     /// Delete one Session's Managed context (idempotent).
     pub async fn delete_session_managed_context(&self, session_id: &str) -> Result<()> {
+        let row = self.get_session_managed_context(session_id).await?;
         session_managed_context::Entity::delete_by_id(session_id.to_owned())
             .exec(&self.conn)
             .await
             .context("failed to delete session managed context")?;
+        if let Some(row) = row {
+            self.release_session_image_pins(&row).await;
+        }
         Ok(())
     }
 
     /// Delete every Managed context owned by one Agent.
     pub async fn delete_session_managed_contexts_by_agent(&self, agent_id: &str) -> Result<()> {
+        let rows = session_managed_context::Entity::find()
+            .filter(session_managed_context::Column::AgentId.eq(agent_id))
+            .all(&self.conn)
+            .await
+            .context("failed to read agent session managed contexts")?;
+        let rows: Vec<SessionManagedContextRow> = rows
+            .into_iter()
+            .map(session_managed_context_row_from_model)
+            .collect();
         session_managed_context::Entity::delete_many()
             .filter(session_managed_context::Column::AgentId.eq(agent_id))
             .exec(&self.conn)
             .await
             .context("failed to delete agent session managed contexts")?;
+        for row in &rows {
+            self.release_session_image_pins(row).await;
+        }
         Ok(())
+    }
+
+    /// Release the catalog pins a Managed Session's resolved images hold.
+    ///
+    /// Best-effort: a missing/already-expired pin does not block removing the
+    /// Session record, and a failed unpin can only keep dead bytes longer than
+    /// necessary, never make a live image disappear.
+    async fn release_session_image_pins(&self, row: &SessionManagedContextRow) {
+        for binding in &row.resolved_images {
+            let digest = binding
+                .manifest_digest
+                .as_deref()
+                .unwrap_or(&binding.requested_digest);
+            let Ok(pin_id) = nession_erofs::catalog::pin::pin_id(
+                nession_erofs::catalog::pin::ConsumerKind::Session,
+                &row.session_id,
+                digest,
+            ) else {
+                continue;
+            };
+            let _ = nession_erofs::catalog::pin::unpin(self.connection(), &pin_id).await;
+        }
     }
 
     /// Remove Managed contexts for Sessions the Agent no longer reports.
@@ -1277,6 +1338,10 @@ fn session_managed_context_row_from_model(
         status: model.status,
         error: model.error,
         updated_at: model.updated_at,
+        resolved_images: model
+            .resolved_images_json
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default(),
     }
 }
 
@@ -2161,6 +2226,7 @@ mod tests {
             status: status.to_string(),
             error: None,
             updated_at,
+            resolved_images: Vec::new(),
         };
 
         db.begin_session_managed_context(&row("preparing", now))
