@@ -220,6 +220,27 @@ pub async fn reachable(conn: &impl ConnectionTrait, roots: &[String]) -> Result<
     Ok(reachable)
 }
 
+/// Parent digests that name `child_digest` under one role.
+pub async fn parents_for_reference(
+    conn: &impl ConnectionTrait,
+    child_digest: &str,
+    role: &str,
+) -> Result<Vec<String>> {
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT parent_digest FROM catalog_references \
+         WHERE child_digest = ? AND role = ? ORDER BY parent_digest",
+        vec![child_digest.into(), role.into()],
+    )
+    .await?;
+    rows.iter()
+        .map(|row| {
+            row.try_get("", "parent_digest")
+                .map_err(|error| anyhow::anyhow!("catalog reference is invalid: {error}"))
+        })
+        .collect()
+}
+
 /// Delete one object row and every edge that names it.
 pub async fn delete_object(
     conn: &impl ConnectionTrait,

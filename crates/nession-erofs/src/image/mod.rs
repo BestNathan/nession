@@ -6,8 +6,8 @@ pub mod resolve;
 
 pub use inspect::{inspect_index, inspect_manifest, IndexInspection, ManifestInspection};
 pub use publish::{
-    publish_index, publish_manifest, IndexEntry, IndexPublication, IndexPublishOutcome,
-    ManifestPublication, PublishOutcome,
+    publish_index, publish_manifest, publish_manifest_untagged, IndexEntry, IndexPublication,
+    IndexPublishOutcome, ManifestPublication, PublishOutcome,
 };
 pub use resolve::{resolve_digest, resolve_legacy_digest, resolve_tag, ResolvedImage};
 
