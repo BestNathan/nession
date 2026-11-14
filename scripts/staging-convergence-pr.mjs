@@ -10,6 +10,8 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {planBatch} from './staging-convergence-batch.mjs';
 import {catalogFromPaths,planDigest} from './issue-e2e-plan.mjs';
+// Fixture-only catalog: proves unchanged Browser Design cases are not selected.
+import {BROWSER_DESIGN_IDS} from '../design/scripts/browser-design-catalog.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
