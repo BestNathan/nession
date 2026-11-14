@@ -72,7 +72,10 @@ function isE2EFixtureCatalog(file) {
 }
 
 function isRuntime(file) {
-  return file.startsWith('crates/') ||
+  // Root ignore rules determine which sources/build inputs become visible to
+  // the checkout (e.g. EROFS build modules). Never classify them as tooling.
+  return file === '.gitignore' ||
+    file.startsWith('crates/') ||
     file.startsWith('web/') ||
     file.startsWith('design/') ||
     file.startsWith('.cargo/') ||
@@ -249,6 +252,30 @@ function selfTest() {
     'design/tokens.json', 'Cargo.lock']) {
     assert.equal(categorizeChangedPath(file), 'app-runtime', file + ' must be runtime');
   }
+  // #3520: the root .gitignore can expose/hide build inputs, not just docs.
+  // PR #3515 combined EROFS source, Case catalog, workflow and ignore-rule
+  // changes, so its historical scope must be known mixed risk, never unknown
+  // and never Not Required.
+  assert.equal(categorizeChangedPath('.gitignore'), 'app-runtime');
+  const ignoreRules = classifyChangedPaths(['.gitignore']);
+  assert.equal(ignoreRules.category, 'app-runtime');
+  assert.equal(ignoreRules.applicable, true);
+  const historicalConvergence = classifyChangedPaths([
+    '.github/workflows/store-qwen-publisher.yml',
+    '.gitignore',
+    'crates/nession-erofs/src/build/import.rs',
+    'e2e/acceptance/cases/3498/SC-04/verify.cjs',
+  ]);
+  assert.equal(historicalConvergence.category, 'mixed');
+  assert.equal(historicalConvergence.applicable, true);
+  assert.throws(() => notRequiredReceipt('a'.repeat(40), ignoreRules),
+    /not-required classification/,
+    'build-input ignore changes must never emit a Full Not Required receipt');
+  assert.equal(classifyChangedPaths(['.gitignore', 'justfile']).category, 'unknown',
+    'truly unrecognized paths must still fail closed in the same batch');
+  assert.equal(categorizeChangedPath('local/.gitignore'), 'unknown',
+    'root path recognition must not broadly trust arbitrary nested dotfiles');
+
   for (const file of ['justfile', '.github/CODEOWNERS', 'terraform/main.tf']) {
     assert.equal(categorizeChangedPath(file), 'unknown', file + ' must fail closed as unknown');
   }

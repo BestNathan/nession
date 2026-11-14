@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptancePlanSection } from './acceptance-plan.mjs';
+import { extractSection, parseSuccessCriteria } from './requirement-acceptance.mjs';
 import { buildAcceptanceContext } from './acceptance-executor.mjs';
 
 export function selectMergedAgentIssues({ issueNumbers, issues, stage, targetSha, runId }) {
@@ -20,7 +21,13 @@ export function selectMergedAgentIssues({ issueNumbers, issues, stage, targetSha
     const context = buildAcceptanceContext(issue, stage, {
       targetRef: targetSha, runId, method: 'agent',
     });
-    return context.criteria.length > 0;
+    // Only outstanding criteria need another Agent invocation. Never repeat
+    // an already-projected Pass/N/A merely because a duplicate merge wake ran.
+    const checklist = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria')).criteria;
+    return context.criteria.some(row => {
+      const checked = checklist.get(row.criterion)?.checked === true;
+      return !checked || !['pass', 'n/a'].includes(String(row.current_result).toLowerCase());
+    });
   });
 }
 
@@ -52,6 +59,15 @@ function selfTest() {
   const base = { issueNumbers: [42], issues: [issue], targetSha: 'a'.repeat(40), runId: 10 };
   assert.deepEqual(selectMergedAgentIssues({ ...base, stage: 'staging' }), [42]);
   assert.deepEqual(selectMergedAgentIssues({ ...base, stage: 'post-merge' }), [42]);
+  assert.deepEqual(selectMergedAgentIssues({ ...base, stage: 'post-merge',
+    issues: [{ ...issue, state: 'closed', state_reason: 'completed' }] }), [42],
+  'a briefly closed merge snapshot must retain outstanding main SCs');
+  const acceptedMain = issue.body
+    .replace('- [ ] SC-03', '- [x] SC-03')
+    .replace('| SC-03 | post-merge | Pending |', '| SC-03 | post-merge | Pass |');
+  assert.deepEqual(selectMergedAgentIssues({ ...base, stage: 'post-merge',
+    issues: [{ ...issue, body: acceptedMain }] }), [],
+  'already accepted main SCs must not launch duplicate model work');
   assert.deepEqual(selectMergedAgentIssues({ ...base, stage: 'staging',
     issues: [{ ...issue, body: issue.body.replace('method: agent', 'method: case') }] }), []);
   assert.deepEqual(selectMergedAgentIssues({ ...base, stage: 'staging',

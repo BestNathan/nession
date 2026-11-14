@@ -78,6 +78,9 @@ pnpm-debug.log*
 dist/
 build/
 out/
+# A Rust module directory named `build/` is source, not build output.
+!crates/nession-erofs/src/build/
+!crates/nession-erofs/src/build/**
 
 # ================================
 # Database
