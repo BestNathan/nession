@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8be5e66d32c14cafb98ef4f8b3a6dd9ff00e77affa2b07a496f11fe7fd3b70fb",
+  "run_id": 43606734680,
+  "run_attempt": 1,
+  "issue": 3498,
+  "criterion": "SC-04",
+  "criterion_text": "The authenticated client integrates with Server's access policy so an Agent receives only scoped internal digest grants, not upstream OCI Registry credentials or unapproved cross-tenant image visibility.",
+  "stage": "staging",
+  "target_sha": "1248d82386685d1e927185ca5c4d3649c542ab5c",
+  "contract_sha256": "dab0a185dcfe6df72e598e60245b13684741d33b332c1fafa878929bdcabc03f",
+  "case_revision": "1248d82386685d1e927185ca5c4d3649c542ab5c",
+  "case_tree_sha": "2b8f98d06fa9e27cebae7caf89d168d05705ea18",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T14:50:48.817Z",
+  "finished_at": "2026-11-14T14:52:10.251Z",
+  "duration_ms": 81433,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Server-owned import authorization gates pull before I/O and credentials, Agent-facing grants carry only local digests, and the Agent dependency graph excludes the registry feature",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 1248d82386685d1e927185ca5c4d3649c542ab5c: a Server-owned authorizer denial and a cross-tenant tenant-a/tenant-b denial both failed before any registry HTTP request or credential-provider call, and before any catalog/tag write; the imported Agent-facing grant contained only local Manifest/Config/EROFS digests with no provider secret, username, bearer token or registry URL; the private registry Bearer challenge downloaded with only repository:team/private:pull, refused a challenge scope naming another repository, and redacted credential Debug output; the Server integration test supplied a Server-owned secret provider and tenant policy, denied a tenant-b import before any HTTP request or provider call, and left no local tag/blob; cargo metadata shows nession-erofs default features include registry while nession-agent declares default-features=false with only cache,mount"
+        }
+      ],
+      "duration_ms": 75510,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43606734680,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "3ff3e88f6e7c2564d0ded666e99ef1b8132ff8a9",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "1248d82386685d1e927185ca5c4d3649c542ab5c",
+        "stage": "staging",
+        "issue": 3498,
+        "criterion": "SC-04",
+        "job_id": 132482885706,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43606734680",
+    "record_path": "runs/2026-11-14/43606734680-1/3498/SC-04.json",
+    "source_result_sha256": "d125542b6cb968e3978d070a62d5628d21390b5f1715e981fe16cd61e0819dbf"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43606734680-1",
+    "sha256": "d125542b6cb968e3978d070a62d5628d21390b5f1715e981fe16cd61e0819dbf",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43606734680",
+    "durability": "time-limited; object archival not configured"
+  }
+}
