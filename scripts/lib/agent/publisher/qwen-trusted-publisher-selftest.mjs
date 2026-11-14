@@ -34,6 +34,27 @@ assert.equal(assertQwenPublisherRunAuthority(env,event,ingester,receipt)
 // name, head, artifact and receipt; only the event shape differs.
 assert.equal(assertQwenPublisherRunAuthority(env,event,
   {...ingester,event:'issue_comment'},receipt).source_run_id,87001);
+// #3491: a bot/main workflow_dispatch after completed Store Ingest is
+// source-bound to the same original receipt and no new Publisher authority.
+const botEnv={...env,GITHUB_EVENT_NAME:'workflow_dispatch',
+  GITHUB_ACTOR:'github-actions[bot]'};
+const botIngester={...ingester,event:'workflow_dispatch',
+  actor:{login:'github-actions[bot]'}};
+const botEvent={repository:{full_name:REPO},sender:{login:'github-actions[bot]'},
+  inputs:{source_ingest_run_id:'88001'}};
+assert.equal(assertQwenPublisherRunAuthority(botEnv,botEvent,botIngester,receipt)
+  .source_run_id,87001);
+for(const [environment,e,source] of [
+  [{...botEnv,GITHUB_ACTOR:'BestNathan'},botEvent,botIngester],
+  [{...botEnv,GITHUB_RUN_ATTEMPT:'2'},botEvent,botIngester],
+  [botEnv,{...botEvent,repository:{full_name:'evil/repo'}},botIngester],
+  [botEnv,{...botEvent,sender:{login:'BestNathan'}},botIngester],
+  [botEnv,{...botEvent,inputs:{source_ingest_run_id:'88002'}},botIngester],
+  [botEnv,{...botEvent,inputs:{source_ingest_run_id:'88001-x'}},botIngester],
+  [botEnv,botEvent,{...botIngester,actor:{login:'BestNathan'}}],
+  [botEnv,botEvent,{...botIngester,event:'issue_comment'}],
+])assert.throws(()=>assertQwenPublisherRunAuthority(
+  environment,e,source,receipt),/trusted Qwen Publisher Runner/);
 for(const bad of [
   {env:{...env,GITHUB_EVENT_NAME:'pull_request'}},
   {env:{...env,GITHUB_REF:'refs/pull/99/merge'}},
