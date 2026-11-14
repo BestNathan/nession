@@ -26,8 +26,8 @@ on:
   # every SHA, Issue declaration, approval, check and protected merge.
   issue_comment:
     types: [created]
-  # A completed Full may use its dynamic run-name as the REST name; accept
-  # that shape without changing any trusted source or Full attestation gate (#3205).
+  # #3465: Full E2E is a periodic Main diagnostic, not a convergence wake
+  # or an authorization source for either merge direction.
   # #3211: PR-native staging -> main promotion has native exact-head PR
   # checks too. Wake on those completed source checks; the controller still
   # revalidates the bot PR, exact SHA, deployment and Issue evidence.
@@ -37,7 +37,7 @@ on:
   # Wake only on completed checks for repository-owned immutable sync heads;
   # the trusted controller still revalidates every source and receipt.
   workflow_run:
-    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'E2E / Full Regression', 'Release / Staging Artifacts']
+    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'Release / Staging Artifacts']
     types: [completed]
 
 permissions:
@@ -102,16 +102,6 @@ jobs:
               github.event.workflow_run.path == '.github/workflows/release-staging.yml' &&
               github.event.workflow_run.name == 'Release / Staging Artifacts' &&
               github.event.workflow_run.repository.full_name == github.repository
-            ) ||
-            (
-              (
-                github.event.workflow_run.name == 'E2E / Full Regression' ||
-                github.event.workflow_run.name == github.event.workflow_run.display_title
-              ) &&
-              github.event.workflow_run.path == '.github/workflows/e2e-full-regression.yml' &&
-              github.event.workflow_run.event == 'workflow_dispatch' &&
-              github.event.workflow_run.head_branch == 'main' &&
-              startsWith(github.event.workflow_run.display_title, 'Convergence Full chore/staging-sync-')
             )
           )
         )
@@ -215,7 +205,7 @@ jobs:
             echo '### Pull requests'
             jq -r '.[] | "- " + .direction + ": " + .url + " (" + .action + "; " + .outcome + (if .reason then "; " + .reason else "" end) + (if .issue_number then "; Issue #" + (.issue_number|tostring) else "" end) + (if .integration_head then "; integration " + .integration_head else "" end) + ")"' "$RUNNER_TEMP/convergence-results.json"
             echo
-            echo 'Merges require authenticated exact-head PR Quality/Case/E2E, clean GitHub mergeability and promotion-specific staging/Issue acceptance. Blockers remain open for repair.'
+            echo 'Merges require authenticated exact-head scoped PR Quality/Case/E2E, clean GitHub mergeability and applicable promotion-specific staging/Issue acceptance. Periodic Main Full is non-blocking (#3465).'
           } >> "$GITHUB_STEP_SUMMARY"
           blocked="$(jq '[.[] | select(.outcome != "MERGED")] | length' "$RUNNER_TEMP/convergence-results.json")"
           if [[ "$blocked" -gt 0 ]]; then
