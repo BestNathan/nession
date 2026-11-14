@@ -3,6 +3,8 @@
 //! This crate owns portable EROFS mechanics only:
 //!
 //! - [`digest`]: byte-level `sha256:` identity and file verification;
+//! - [`oci`]: standard OCI Index/Manifest/Config/Descriptor model, exact-byte
+//!   import and fail-closed v1 EROFS validation (#3495);
 //! - [`store`]: a content-addressed, atomically published blob store;
 //! - [`build`]/[`git`]: a deterministic, non-executing source snapshot and
 //!   fixed `mkfs.erofs` build;
@@ -16,6 +18,7 @@
 //! Features let a consumer compile only the mechanics it uses.
 
 pub mod digest;
+pub mod oci;
 
 #[cfg(feature = "store")]
 pub mod store;
