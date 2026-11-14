@@ -28,6 +28,14 @@ const run={id:runId,run_attempt:1,event:'workflow_dispatch',
   head_repository:{full_name:'BestNathan/nession'}};
 const valid={environment,event,run,issue,actionId};
 assert.equal(assertDispatchAuthority(valid).issuer_run_id,runId);
+// Workflow input schema now includes a bot-only locator with default "0".
+// Existing Owner/manual dispatch must remain valid with the new default.
+assert.equal(assertDispatchAuthority({...valid,event:{...event,
+  inputs:{...event.inputs,source_publisher_run_id:'0',
+    recovery_run_id:'0'}}}).issue,issue);
+assert.throws(()=>assertDispatchAuthority({...valid,event:{...event,
+  inputs:{...event.inputs,source_publisher_run_id:'43607502468',
+    recovery_run_id:'0'}}}),/authenticated owner\/main/);
 const botWake={...valid,environment:{...environment,GITHUB_ACTOR:'github-actions[bot]'},
   run:{...run,actor:{login:'github-actions[bot]'}},
   issue:3433,actionId:'c'.repeat(64),
