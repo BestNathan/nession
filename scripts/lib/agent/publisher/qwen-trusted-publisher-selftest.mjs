@@ -39,6 +39,7 @@ assert.equal(assertQwenPublisherRunAuthority(env,event,
 const botEnv={...env,GITHUB_EVENT_NAME:'workflow_dispatch',
   GITHUB_ACTOR:'github-actions[bot]'};
 const botIngester={...ingester,event:'workflow_dispatch',
+  name:'Qwen Developer Ingest worker:87001',
   actor:{login:'github-actions[bot]'}};
 const botEvent={repository:{full_name:REPO},sender:{login:'github-actions[bot]'},
   inputs:{source_ingest_run_id:'88001'}};
@@ -53,6 +54,8 @@ for(const [environment,e,source] of [
   [botEnv,{...botEvent,inputs:{source_ingest_run_id:'88001-x'}},botIngester],
   [botEnv,botEvent,{...botIngester,actor:{login:'BestNathan'}}],
   [botEnv,botEvent,{...botIngester,event:'issue_comment'}],
+  [botEnv,botEvent,{...botIngester,name:'Store / Agent Development Ingest'}],
+  [botEnv,botEvent,{...botIngester,name:'Qwen Developer Ingest worker:87002'}],
 ])assert.throws(()=>assertQwenPublisherRunAuthority(
   environment,e,source,receipt),/trusted Qwen Publisher Runner/);
 for(const bad of [
