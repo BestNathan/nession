@@ -171,9 +171,9 @@ function sourceContext(){
   if(bot&&(!positive(sourceComment)||
     Object.keys(raw.inputs??{}).some(k=>!['issue_number','input_sha','developer',
       'reviewer','acceptor','source_comment_id'].includes(k)) ||
-    raw.inputs?.input_sha!=='' ||
-    raw.inputs?.developer!=='' || raw.inputs?.reviewer!=='' ||
-    raw.inputs?.acceptor!=='')) fail('bot requires exact comment-only Controller inputs');
+    (raw.inputs?.input_sha??'')!=='' ||
+    (raw.inputs?.developer??'')!=='' || (raw.inputs?.reviewer??'')!=='' ||
+    (raw.inputs?.acceptor??'')!=='')) fail('bot requires exact comment-only Controller inputs');
   if(!bot&&process.env.GITHUB_EVENT_NAME==='workflow_dispatch' &&
     raw.inputs?.source_comment_id) fail('only Comment Router may specify origin comment');
   const input=process.env.GITHUB_EVENT_NAME==='issue_comment'?
