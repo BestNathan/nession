@@ -7,6 +7,13 @@ metadata:
     component: server
 spec:
   replicas: 1
+  # The Server owns one durable image build root with an exclusive lifetime
+  # lock (#3334). A rolling update would start the replacement while this pod
+  # still owns the lock, so the new manager would fail closed and the old pod
+  # would never be replaced (#3454). Recreate enforces the documented
+  # single-owner deployment condition.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: nession
