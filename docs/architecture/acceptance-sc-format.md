@@ -111,8 +111,12 @@ The existing Issue-close guard reopens invalid external closures; automated
 reconciliation must reject incomplete SCs *before* writing Closed, because
 `GITHUB_TOKEN` events may not re-trigger the guard. A closed PR or a GitHub
 `Fixes #N` keyword is never an Acceptance Pass. The merged-SHA Acceptance
-planner must still see the Issue Open until its remaining SCs are evaluated.
-Bug and Requirement use the same decision. Duplicate events are no-ops.
+planner uses its exact merged-commit PR association and preserves a briefly
+Closed Issue **only if the canonical close verdict is incomplete**, while the
+guard restores Open; already-accepted and `not_planned` Issues are not
+rescheduled. Stage selectors skip already accepted SCs to avoid repeated
+model work. Bug and Requirement use the same decision. Duplicate events are
+no-ops.
 
 An exact `/accept` comment on an open native Issue from an authorized GitHub
 user is an optional recovery trigger, not part of the normal required path.
