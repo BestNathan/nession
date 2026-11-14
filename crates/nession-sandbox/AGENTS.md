@@ -82,9 +82,17 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
 - The Base Runtime image owns its mountpoint directories (`/bin/sh`,
   `/workspace`, each `/opt/<name>`, `/dev`, `/proc`, `/home`, `/tmp`,
   `/run/nession`). The read-only composed root cannot grow them at launch.
-- Every mountpoint is under the execution directory and recorded. Cleanup
-  unmounts in reverse order and only paths recorded beneath that execution;
-  reconciliation never trusts an arbitrary record path.
+- Read-only image mounts are **shared and lease-managed** (#3449). The
+  Agent-owned `nession_erofs::mount_manager::MountManager` owns one physical
+  FUSE mount per verified digest for an Agent identity/mount namespace. The
+  Sandbox calls `acquire` and records a consumer lease; a lease carries no
+  unmount authority. Only the manager reclaims after the last identified
+  consumer and a strict, bounded unmount. The manager root is not the
+  execution directory.
+- Execution-owned resources (the writable Overlay mount and temporary files)
+  remain under the execution directory and are recorded. Cleanup unmounts or
+  releases only this execution's own resources; reconciliation never trusts
+  an arbitrary record path and never unmounts a manager-owned physical mount.
 
 ## Per-implementation discovery (#3161)
 

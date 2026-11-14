@@ -11,6 +11,8 @@
 //! tmux server.
 
 use std::collections::BTreeMap;
+#[cfg(target_os = "linux")]
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,6 +41,17 @@ pub struct LaunchRequest {
     pub inner_command: Vec<String>,
     /// The private tmux socket to hide from the sandbox.
     pub tmux_socket: Option<PathBuf>,
+}
+
+/// One durable consumer of a shared, content-addressed EROFS mount (#3449).
+///
+/// The manager owns the physical mount; the record owns the consumer identity
+/// and the generation that fences stale mountpoint reuse after a restart.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SharedMountRecord {
+    pub digest: String,
+    pub mountpoint: String,
+    pub generation: String,
 }
 
 /// One live execution record, durable across Agent restarts.
@@ -72,10 +85,15 @@ pub struct ExecutionRecord {
     /// path; cleanup removes only a direct child of `runtime_root`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_dir: Option<String>,
-    /// Host mountpoints of prepared EROFS images owned by this execution.
+    /// Host mountpoints of execution-owned mounts (the writable overlay).
     /// Reconciliation unmounts only paths beneath `execution_dir`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<String>,
+    /// Shared read-only EROFS consumers held by this execution (#3449). The
+    /// physical mountpoints live under the Agent mount-manager root, not this
+    /// execution directory; cleanup releases these consumer identities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_mounts: Vec<SharedMountRecord>,
     /// The verified-mechanism names the execution reported.
     #[serde(default)]
     pub mechanisms: Vec<String>,
@@ -775,12 +793,84 @@ fn remove_owned_composition_workspace(settings: &SandboxSettings, record: &Execu
     }
 }
 
+/// Release the shared EROFS consumers this record still owns (#3449).
+///
+/// A failed release keeps the record: the manager retains the physical mount
+/// and its durable identity so a later reconciliation can retry.
+#[cfg(target_os = "linux")]
+fn release_shared_mounts(
+    settings: &SandboxSettings,
+    record: &ExecutionRecord,
+    report: &mut CleanupReport,
+) -> Result<()> {
+    let Some(manager) = &settings.mount_manager else {
+        if record.shared_mounts.is_empty() {
+            return Ok(());
+        }
+        return Err(SandboxError::Cleanup(
+            "the shared EROFS mount manager is not configured; refusing to forget recorded consumers"
+                .to_string(),
+        ));
+    };
+    for shared in &record.shared_mounts {
+        match manager.release_consumers(
+            &shared.digest,
+            &record.execution_id,
+            Some(&shared.generation),
+        ) {
+            Ok(()) => report.evidence.push((
+                "released-shared-mount".to_string(),
+                format!("{} {}", shared.digest, shared.mountpoint),
+            )),
+            Err(error) => {
+                report.evidence.push((
+                    "shared-mount-release-failed".to_string(),
+                    format!("{}: {error:#}", shared.digest),
+                ));
+                return Err(SandboxError::Cleanup(format!(
+                    "could not release the shared EROFS mount of {}: {error:#}",
+                    shared.digest
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Adopt the durable consumers of a live record after an Agent restart.
+#[cfg(target_os = "linux")]
+fn adopt_shared_mounts(settings: &SandboxSettings, record: &ExecutionRecord) -> Vec<String> {
+    let Some(manager) = &settings.mount_manager else {
+        return Vec::new();
+    };
+    let consumers: Vec<nession_erofs::mount_manager::ConsumerRef> = record
+        .shared_mounts
+        .iter()
+        .map(|shared| nession_erofs::mount_manager::ConsumerRef {
+            digest: shared.digest.clone(),
+            execution_id: record.execution_id.clone(),
+            generation: shared.generation.clone(),
+        })
+        .collect();
+    if consumers.is_empty() {
+        return Vec::new();
+    }
+    manager
+        .adopt_consumers(&consumers)
+        .unavailable
+        .into_iter()
+        .map(|(digest, reason)| format!("{digest}: {reason}"))
+        .collect()
+}
+
 /// Remove the record and the execution directory.
 pub(crate) fn remove_owned_paths(
     settings: &SandboxSettings,
     record: &ExecutionRecord,
     report: &mut CleanupReport,
 ) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    release_shared_mounts(settings, record, report)?;
     #[cfg(target_os = "linux")]
     crate::linux::erofs::unmount_recorded(
         &record.mounts,
@@ -862,6 +952,9 @@ pub fn reconcile(
     };
 
     let mut outcomes = Vec::new();
+    #[cfg(target_os = "linux")]
+    let mut protected_digests = HashSet::new();
+    let mut unreadable_record = false;
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -884,7 +977,10 @@ pub fn reconcile(
             Some(record) => record,
             None => {
                 // An unreadable record is left in place: deleting it would
-                // discard the only pointer to resources we may own.
+                // discard the only pointer to resources we may own, and
+                // orphan reclamation is skipped because consumers cannot be
+                // proven absent.
+                unreadable_record = true;
                 outcomes.push(ReconcileOutcome::Failed(
                     path.file_stem()
                         .and_then(|stem| stem.to_str())
@@ -904,6 +1000,18 @@ pub fn reconcile(
                 .any(|pane| pane.session_name == record.session_name),
         };
         if alive {
+            #[cfg(target_os = "linux")]
+            {
+                for shared in &record.shared_mounts {
+                    protected_digests.insert(shared.digest.clone());
+                }
+                for unavailable in adopt_shared_mounts(settings, &record) {
+                    tracing::warn!(
+                        execution = %record.execution_id,
+                        "could not adopt a shared EROFS consumer: {unavailable}"
+                    );
+                }
+            }
             outcomes.push(ReconcileOutcome::Active(Box::new(record)));
             continue;
         }
@@ -917,6 +1025,25 @@ pub fn reconcile(
                 record.execution_id,
                 error.to_string(),
             )),
+        }
+    }
+    // A mount whose creation preceded its durable record, or whose record was
+    // already gone, is reclaimed only after a verified identity check. Live
+    // records protect their digests, and an unreadable record blocks the scan
+    // because no consumer absence can be proven.
+    #[cfg(target_os = "linux")]
+    if !unreadable_record {
+        if let Some(manager) = &settings.mount_manager {
+            let report = manager.reclaim_orphans(&protected_digests);
+            for digest in &report.reclaimed {
+                tracing::info!(%digest, "reclaimed an unrecorded shared EROFS mount");
+            }
+            for (digest, reason) in &report.reclaim_failed {
+                tracing::warn!(
+                    %digest,
+                    "could not reclaim an unrecorded shared EROFS mount: {reason}"
+                );
+            }
         }
     }
     Ok(outcomes)
@@ -972,6 +1099,7 @@ mod tests {
             working_dir: String::new(),
             effective_policy: None,
             mounts: Vec::new(),
+            shared_mounts: Vec::new(),
             channel_dir: None,
             mechanisms: Vec::new(),
             warnings: Vec::new(),
