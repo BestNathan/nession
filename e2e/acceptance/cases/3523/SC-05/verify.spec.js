@@ -36,13 +36,38 @@ const command = (page, text) => page.evaluate((value) => {
   terminal.input(value + '\n', true);
 }, text);
 
-/** Toggle the `+` context disclosure without moving focus off the composer. */
-async function toggleContextDisclosure(page, expect, close) {
-  const disclosure = page.getByTestId('capsule-context-disclosure');
+/**
+ * Open `+` and establish the deterministic concurrent state.
+ *
+ * The context list takes focus (its first item), which by product design closes
+ * the soft-keyboard session. Restoring the composer afterwards keeps the panel
+ * open and re-establishes the keyboard session, which is the state this
+ * criterion is about: both owners present at once.
+ */
+async function openContextDisclosure(page, expect) {
   await page.getByTestId('capsule-capability-more').evaluate((element) => {
     element.click();
   });
-  await expect(disclosure).toHaveCount(close ? 0 : 1, { timeout: 15_000 });
+  await expect(page.getByTestId('capsule-context-disclosure')).toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await page.getByTestId('capsule-ghost-input').focus();
+  await expect.poll(async () => (await viewportEnvironment(page))?.keyboard, {
+    timeout: 15_000,
+  }).toBe('open');
+  await expect.poll(async () => (await avoidanceState(page))?.scrollable, {
+    timeout: 15_000,
+  }).toBe(true);
+}
+
+/** Close `+` while the composer keeps focus, so the session stays coherent. */
+async function closeContextDisclosure(page, expect) {
+  await page.getByTestId('capsule-capability-more').evaluate((element) => {
+    element.click();
+  });
+  await expect(page.getByTestId('capsule-context-disclosure')).toHaveCount(0, {
+    timeout: 15_000,
+  });
 }
 
 test('SC-05: keyboard avoidance and the expanded panel share one reserve', async ({ page }) => {
@@ -71,7 +96,7 @@ test('SC-05: keyboard avoidance and the expanded panel share one reserve', async
   expect(keyboardOnly?.occlusion).toBe(before?.occlusion);
   expect(requests.length, 'keyboard-only open sends no PTY resize').toBe(0);
 
-  await toggleContextDisclosure(page, expect, false);
+  await openContextDisclosure(page, expect);
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, {
     timeout: 15_000,
   }).toBeGreaterThan(0);
@@ -85,7 +110,7 @@ test('SC-05: keyboard avoidance and the expanded panel share one reserve', async
   expect((await viewportEnvironment(page))?.keyboard).toBe('open');
   expect(requests.length, 'normal-buffer panel sends no PTY resize').toBe(0);
 
-  await toggleContextDisclosure(page, expect, true);
+  await closeContextDisclosure(page, expect);
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance, {
     timeout: 15_000,
   }).toBe(0);
@@ -104,7 +129,7 @@ test('SC-05: keyboard avoidance and the expanded panel share one reserve', async
     timeout: 10_000,
   }).toBe(true);
   const tuiKeyboard = await terminalGeometry(page);
-  await toggleContextDisclosure(page, expect, false);
+  await openContextDisclosure(page, expect);
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, {
     timeout: 15_000,
   }).toBeGreaterThan(0);
@@ -135,7 +160,7 @@ test('SC-05: keyboard avoidance and the expanded panel share one reserve', async
   expect((await terminalGeometry(page))?.rows, 'keyboard reopen does not re-reserve')
     .toBe(rowsWithPanel);
 
-  await toggleContextDisclosure(page, expect, true);
+  await closeContextDisclosure(page, expect);
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance, {
     timeout: 15_000,
   }).toBe(0);
@@ -154,7 +179,11 @@ test('SC-05: keyboard avoidance and the expanded panel share one reserve', async
     description: 'exact SHA ' + sha + ': with a 300px keyboard-like inset and Capsule focus at ' +
       '390x844 the normal-buffer + context disclosure published panelClearance without changing ' +
       'the composer occlusion (' + before?.occlusion + '), xterm rows (' + before?.rows + ') or ' +
-      'the pane ' + paneBefore + ', and sent zero agent.terminal.resize frames; in a real ' +      'alternate-screen + mouse-reporting TUI the panel policy ' +
+      'the pane ' + paneBefore + ', and sent zero agent.terminal.resize frames. The context list ' +
+      'takes focus on open (its first item), so the Case restored the composer and proved the ' +
+      'concurrent keyboard + panel state survived: the outer range returned and the panel stayed ' +
+      'open. In a real ' +
+      'alternate-screen + mouse-reporting TUI the panel policy ' +
       (fallback ? 'fell back to compact (no rows)' : 'reserved rows through the authorized path') +
       ' with occlusion unchanged, and closing/reopening the keyboard left the panel row result ' +
       '(' + rowsWithPanel + ') unchanged; closing the panel restored TUI rows ' + tuiKeyboard?.rows +
