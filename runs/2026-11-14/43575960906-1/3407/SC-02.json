@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9372cc5676001cc800b64ce42c6c78abff45dc7d3397f1df9bda72737b8a54bc",
+  "run_id": 43575960906,
+  "run_attempt": 1,
+  "issue": 3407,
+  "criterion": "SC-02",
+  "criterion_text": "Explicit workspace choice overrides Project Location; otherwise a matching Project Existing Location is selected; otherwise Session-name auto-allocation is used. Wrong-Agent paths, unavailable Agents, missing directories and unauthorized explicit selections fail with actionable states, without hidden fallback or deletion of any external directory.",
+  "stage": "staging",
+  "target_sha": "a358f9a62b2664ad396fdf6b2f0859d5167f847c",
+  "contract_sha256": "9a47cdf75c4dc19649720cb1939c831293dbc4101206c08713ff4ae74e3b1af4",
+  "case_revision": "a358f9a62b2664ad396fdf6b2f0859d5167f847c",
+  "case_tree_sha": "071814e30fff6cab71dc06a65c423144bea95b81",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T08:32:40.487Z",
+  "finished_at": "2026-11-14T08:32:47.114Z",
+  "duration_ms": 6627,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify-agent.cjs",
+      "result": "Pass",
+      "summary": "The Agent-side Project Location and managed-resolution rules are proven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a358f9a62b2664ad396fdf6b2f0859d5167f847c: the Agent accepted only a real, canonical Project Location directory, refused a symlinked or missing location, refused a location combined with a Project EROFS lower, and persisted the managed Workspace lower pin across resolution"
+        }
+      ],
+      "duration_ms": 328,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-server.cjs",
+      "result": "Pass",
+      "summary": "Server-side Workspace selection precedence and fail-closed routing are proven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a358f9a62b2664ad396fdf6b2f0859d5167f847c: an explicit managed selection outranked the Project Location; auto selected the matching Project Location on the target Agent; a location declared only on another Agent, and an offline Agent were refused with actionable states; Enter forwarded only the resolved path and no lower grant for an external Project Location"
+        }
+      ],
+      "duration_ms": 430,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43575960906,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a358f9a62b2664ad396fdf6b2f0859d5167f847c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43575960906",
+    "record_path": "runs/2026-11-14/43575960906-1/3407/SC-02.json",
+    "source_result_sha256": "18bd49e8038784a7a346b2c57c558f12392c4de76c55cc05f96e70a444c801e8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43575960906-1",
+    "sha256": "18bd49e8038784a7a346b2c57c558f12392c4de76c55cc05f96e70a444c801e8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43575960906",
+    "durability": "time-limited; object archival not configured"
+  }
+}

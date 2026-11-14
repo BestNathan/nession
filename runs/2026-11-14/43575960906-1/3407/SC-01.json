@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "14cc85e7965ce9864ad32a3585b2af62674ef9b0c71b7b93e25da7bebf7c4ac6",
+  "run_id": 43575960906,
+  "run_attempt": 1,
+  "issue": 3407,
+  "criterion": "SC-01",
+  "criterion_text": "On one Agent, concurrent get-or-create for a given scope/name returns exactly one stable managed workspace ID; it survives Agent restart and is listable with no live Session, and a future same-named Session reuses it without overwriting or creating another directory.",
+  "stage": "staging",
+  "target_sha": "a358f9a62b2664ad396fdf6b2f0859d5167f847c",
+  "contract_sha256": "9a47cdf75c4dc19649720cb1939c831293dbc4101206c08713ff4ae74e3b1af4",
+  "case_revision": "a358f9a62b2664ad396fdf6b2f0859d5167f847c",
+  "case_tree_sha": "f86542c8984ddade30393d64e7583265a2e4318f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T08:31:04.998Z",
+  "finished_at": "2026-11-14T08:32:40.486Z",
+  "duration_ms": 95488,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Stable managed Workspace identity, restart durability and the observed inventory are proven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a358f9a62b2664ad396fdf6b2f0859d5167f847c: concurrent get-or-create returned one stable ws_ id; a reopened Agent registry returned the same id and durable bytes with no live Session; the same name in another namespace received a different id; the Session-scoped Server units relayed the Agent inventory and refused a descriptor that leaked a physical path"
+        }
+      ],
+      "duration_ms": 89620,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43575960906,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a358f9a62b2664ad396fdf6b2f0859d5167f847c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43575960906",
+    "record_path": "runs/2026-11-14/43575960906-1/3407/SC-01.json",
+    "source_result_sha256": "c381149403b2c7bb7db6697750f7a6bc4473e7b1024a1b204f45b3ea7b1b1070"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43575960906-1",
+    "sha256": "c381149403b2c7bb7db6697750f7a6bc4473e7b1024a1b204f45b3ea7b1b1070",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43575960906",
+    "durability": "time-limited; object archival not configured"
+  }
+}
