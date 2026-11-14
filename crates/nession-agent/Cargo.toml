@@ -27,7 +27,7 @@ nession-github = { path = "../nession-github" }
 nession-sandbox = { path = "../nession-sandbox" }
 # The reusable EROFS cache mechanics (#3303). The Agent adapter supplies the
 # configured root and identity; the crate owns download/verify/publish/pin.
-nession-erofs = { path = "../nession-erofs", default-features = false, features = ["cache"] }
+nession-erofs = { path = "../nession-erofs", default-features = false, features = ["cache", "mount"] }
 # The shared MCP access layer (#565). The Agent supplies the node backend and
 # reuses the Server client for the cluster backend.
 nession-mcp = { path = "../nession-mcp", features = ["remote"] }
