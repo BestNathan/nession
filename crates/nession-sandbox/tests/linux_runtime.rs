@@ -435,6 +435,11 @@ mod helpers {
         }
     }
 
+    /// Canonical digest spelling for the shared mount manager API.
+    pub(super) fn sha256_digest(hex: &str) -> String {
+        format!("sha256:{hex}")
+    }
+
     pub(super) fn sha256_file(file: &Path) -> String {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -1459,13 +1464,11 @@ fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_on
     let image_root = dir.path().join("images");
     let (erofsfuse, fusermount) = default_helpers(dir.path());
     let root = dir.path().join("standalone-mounts");
+    let digest = sha256_digest(&images.base_digest);
 
     let manager_a = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
-    let verified = nession_erofs::mount_manager::VerifiedImage::new(
-        images.base_digest.clone(),
-        images.base.clone(),
-    )
-    .expect("verified image");
+    let verified = nession_erofs::mount_manager::VerifiedImage::new(digest.clone(), images.base)
+        .expect("verified image");
     let lease = manager_a.acquire(&verified, "exec-live").expect("acquire");
     let generation = lease.generation().to_string();
     let mountpoint = lease.mountpoint().to_path_buf();
@@ -1479,15 +1482,13 @@ fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_on
 
     let manager_b = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
     let report = manager_b.adopt_consumers(&[nession_erofs::mount_manager::ConsumerRef {
-        digest: images.base_digest.clone(),
+        digest: digest.clone(),
         execution_id: "exec-live".to_string(),
         generation: generation.clone(),
     }]);
     assert_eq!(report.adopted.len(), 1, "{report:?}");
     assert!(report.unavailable.is_empty(), "{report:?}");
-    let status = manager_b
-        .lookup(&images.base_digest)
-        .expect("adopted status");
+    let status = manager_b.lookup(&digest).expect("adopted status");
     assert_eq!(status.consumers, 1);
     assert!(status.mounted);
     assert_eq!(status.generation.as_deref(), Some(generation.as_str()));
@@ -1497,7 +1498,7 @@ fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_on
     );
 
     manager_b
-        .release_consumers(&images.base_digest, "exec-live", Some(&generation))
+        .release_consumers(&digest, "exec-live", Some(&generation))
         .expect("release the adopted consumer");
     assert!(
         !nession_sandbox::linux::erofs::is_mounted(&mountpoint),
@@ -1517,7 +1518,7 @@ fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_on
     assert!(status.success());
     let manager_c = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
     let report = manager_c.adopt_consumers(&[nession_erofs::mount_manager::ConsumerRef {
-        digest: images.base_digest.clone(),
+        digest: digest.clone(),
         execution_id: "exec-gone".to_string(),
         generation,
     }]);
@@ -1530,14 +1531,11 @@ fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_on
         "a missing mount is reported unavailable: {report:?}"
     );
     assert!(
-        !manager_c
-            .lookup(&images.base_digest)
-            .expect("status")
-            .mounted,
+        !manager_c.lookup(&digest).expect("status").mounted,
         "an absent mount is never served as live"
     );
     let mut protected = std::collections::HashSet::new();
-    protected.insert(images.base_digest.clone());
+    protected.insert(digest.clone());
     assert!(
         manager_c.reclaim_orphans(&protected).reclaimed.is_empty(),
         "a record-protected digest is not reclaimed"
@@ -1546,7 +1544,7 @@ fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_on
         manager_c
             .reclaim_orphans(&std::collections::HashSet::new())
             .reclaimed
-            .contains(&images.base_digest),
+            .contains(&digest),
         "an unprotected stale identity is reclaimed"
     );
     print_evidence(&serde_json::json!({
@@ -1578,12 +1576,10 @@ fn a_failed_shared_unmount_is_durable_bounded_and_retryable() {
         std::fs::set_permissions(&failing, permissions).expect("chmod");
     }
     let root = dir.path().join("standalone-mounts");
+    let digest = sha256_digest(&images.base_digest);
     let manager = standalone_manager(&root, &image_root, &erofsfuse, &failing);
-    let verified = nession_erofs::mount_manager::VerifiedImage::new(
-        images.base_digest.clone(),
-        images.base.clone(),
-    )
-    .expect("verified image");
+    let verified = nession_erofs::mount_manager::VerifiedImage::new(digest.clone(), images.base)
+        .expect("verified image");
     let lease = manager.acquire(&verified, "exec-unmount").expect("acquire");
     let generation = lease.generation().to_string();
     let mountpoint = lease.mountpoint().to_path_buf();
@@ -1594,7 +1590,7 @@ fn a_failed_shared_unmount_is_durable_bounded_and_retryable() {
         "the failed unmount is bounded"
     );
     assert!(format!("{error:#}").contains("failed"), "{error:#}");
-    let status = manager.lookup(&images.base_digest).expect("status");
+    let status = manager.lookup(&digest).expect("status");
     assert_eq!(
         status.state,
         nession_erofs::mount_manager::MountState::Failed
@@ -1604,17 +1600,13 @@ fn a_failed_shared_unmount_is_durable_bounded_and_retryable() {
     assert!(status.failure.is_some(), "the failure is durable evidence");
 
     manager
-        .release_consumers(&images.base_digest, "exec-unmount", Some(&generation))
+        .release_consumers(&digest, "exec-unmount", Some(&generation))
         .expect("the retry succeeds");
     assert!(
         !nession_sandbox::linux::erofs::is_mounted(&mountpoint),
         "the retry removes the physical mount"
     );
-    assert!(manager
-        .lookup(&images.base_digest)
-        .expect("status")
-        .failure
-        .is_none());
+    assert!(manager.lookup(&digest).expect("status").failure.is_none());
     print_evidence(&serde_json::json!({
         "failed_unmount_retained": true,
         "retry_succeeded": true,
@@ -1630,12 +1622,10 @@ fn concurrent_shared_acquisitions_keep_one_physical_mount() {
     let image_root = dir.path().join("images");
     let (erofsfuse, fusermount) = default_helpers(dir.path());
     let root = dir.path().join("standalone-mounts");
+    let digest = sha256_digest(&images.base_digest);
     let manager = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
-    let verified = nession_erofs::mount_manager::VerifiedImage::new(
-        images.base_digest.clone(),
-        images.base.clone(),
-    )
-    .expect("verified image");
+    let verified = nession_erofs::mount_manager::VerifiedImage::new(digest.clone(), images.base)
+        .expect("verified image");
 
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
     let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1672,14 +1662,14 @@ fn concurrent_shared_acquisitions_keep_one_physical_mount() {
             "all consumers share one mount generation"
         );
     }
-    let status = manager.lookup(&images.base_digest).expect("status");
+    let status = manager.lookup(&digest).expect("status");
     assert_eq!(status.consumers, 4);
     assert!(status.mounted);
     barrier.wait();
     for thread in threads {
         thread.join().expect("consumer thread");
     }
-    let status = manager.lookup(&images.base_digest).expect("status");
+    let status = manager.lookup(&digest).expect("status");
     assert_eq!(status.consumers, 0);
     assert!(
         !status.mounted,
