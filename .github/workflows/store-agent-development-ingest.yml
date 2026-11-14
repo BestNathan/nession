@@ -244,7 +244,7 @@ jobs:
       # downstream Publisher. Historical #1997 Cursor Ingest remains unchanged.
       - name: Select authenticated Qwen Publisher wake without credentials
         id: qwen
-        if: github.event_name == 'workflow_run' || github.event_name == 'issue_comment'
+        if: github.event_name == 'workflow_run' || github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail

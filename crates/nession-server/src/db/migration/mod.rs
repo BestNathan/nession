@@ -15,6 +15,7 @@ mod m006_session_project_bindings;
 mod m007_erofs_images;
 mod m008_session_managed_context;
 mod m009_image_access_grants_consumers;
+mod m010_session_managed_manifest;
 
 pub struct Migrator;
 
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m007_erofs_images::Migration),
             Box::new(m008_session_managed_context::Migration),
             Box::new(m009_image_access_grants_consumers::Migration),
+            Box::new(m010_session_managed_manifest::Migration),
         ]
     }
 }

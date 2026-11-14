@@ -9,7 +9,10 @@ pub use publish::{
     publish_index, publish_manifest, publish_manifest_untagged, IndexEntry, IndexPublication,
     IndexPublishOutcome, ManifestPublication, PublishOutcome,
 };
-pub use resolve::{resolve_digest, resolve_legacy_digest, resolve_tag, ResolvedImage};
+pub use resolve::{
+    resolve_digest, resolve_for_platform, resolve_legacy_digest, resolve_root,
+    resolve_root_for_platform, resolve_tag, ResolvedImage, ResolvedRoot, ResolvedTarget,
+};
 
 use anyhow::Result;
 use sea_orm::DatabaseConnection;

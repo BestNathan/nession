@@ -2,7 +2,9 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{reply_json, ConnectionHandler, HandlerAction, ProtocolMessage};
-use crate::db::SessionProjectBindingRow;
+use crate::db::{
+    SessionProjectBindingRemoveOutcome, SessionProjectBindingSet, SessionProjectBindingSetOutcome,
+};
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 use nession_protocol::contracts::session::v1::{
     SessionProjectBindingResponse, SessionProjectBindingUpdatePayload,
@@ -35,6 +37,17 @@ fn refusal(id: &str, kind: &str, error: &str) -> HandlerAction {
     )
 }
 
+fn conflict(id: &str, expected_revision: Option<u64>, current_revision: u64) -> HandlerAction {
+    refusal(
+        id,
+        "conflict",
+        &format!(
+            "Project membership changed (expected revision {}, current {current_revision})",
+            expected_revision.unwrap_or_default()
+        ),
+    )
+}
+
 impl ConnectionHandler {
     /// `server.session.project.set` — associate, change or remove one Session's
     /// explicit Project membership (#3082 SC-03).
@@ -43,7 +56,9 @@ impl ConnectionHandler {
     /// never touches the Session's cwd, ENV binding, mounts, image or process.
     /// The Session must already exist; the Project must exist when one is named.
     /// `expected_revision` is the last revision the caller observed (0 for an
-    /// unassociated Session); a mismatch is a deterministic conflict.
+    /// unassociated Session); the comparison and write share one write-locked
+    /// database transaction (#3509), so a concurrent update is a deterministic
+    /// conflict rather than a lost update.
     pub(super) async fn handle_client_session_project_set(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -102,71 +117,42 @@ impl ConnectionHandler {
             }
         }
 
-        let current = match self
-            .db
-            .get_session_project_binding(&payload.session_id)
-            .await
-        {
-            Ok(current) => current,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to read project binding for {}: {e:#}",
-                    payload.session_id
-                );
-                return Ok(refusal(
-                    &msg.id,
-                    "unavailable",
-                    "Project membership could not be read",
-                ));
-            }
-        };
-        let current_revision = current
-            .as_ref()
-            .map(|binding| binding.revision)
-            .unwrap_or(0);
-        if let Some(expected) = payload.expected_revision {
-            if expected != current_revision {
-                return Ok(refusal(
-                    &msg.id,
-                    "conflict",
-                    &format!(
-                        "Project membership changed (expected revision {expected}, current {current_revision})"
-                    ),
-                ));
-            }
-        }
-
         let now = chrono::Utc::now().timestamp();
         match payload.project_id {
             Some(project_id) => {
-                let revision = current_revision.saturating_add(1);
-                let row = SessionProjectBindingRow {
+                let set = SessionProjectBindingSet {
                     session_id: payload.session_id.clone(),
                     agent_id: agent_id.to_string(),
                     project_id: project_id.clone(),
-                    incarnation_id: incarnation_id.clone().unwrap_or_default(),
+                    incarnation_id: incarnation_id.unwrap_or_default(),
                     agent_created_at: created_at,
-                    revision,
                     updated_at: now,
                 };
-                match self.db.upsert_session_project_binding(&row).await {
-                    Ok(()) => {
+                match self
+                    .db
+                    .set_session_project_binding_if_revision(&set, payload.expected_revision)
+                    .await
+                {
+                    Ok(SessionProjectBindingSetOutcome::Applied(binding)) => {
                         self.broadcast_sessions().await;
                         Ok(reply(
                             &msg.id,
                             SessionProjectBindingResponse {
                                 success: true,
-                                project_id: Some(project_id),
-                                revision: Some(revision),
+                                project_id: Some(binding.project_id),
+                                revision: Some(binding.revision),
                                 error: None,
                                 error_kind: None,
                             },
                         ))
                     }
+                    Ok(SessionProjectBindingSetOutcome::Conflict { current_revision }) => Ok(
+                        conflict(&msg.id, payload.expected_revision, current_revision),
+                    ),
                     Err(e) => {
                         tracing::error!(
                             "Failed to set project binding for {}: {e:#}",
-                            row.session_id
+                            set.session_id
                         );
                         Ok(refusal(
                             &msg.id,
@@ -178,10 +164,13 @@ impl ConnectionHandler {
             }
             None => match self
                 .db
-                .delete_session_project_binding(&payload.session_id)
+                .remove_session_project_binding_if_revision(
+                    &payload.session_id,
+                    payload.expected_revision,
+                )
                 .await
             {
-                Ok(()) => {
+                Ok(SessionProjectBindingRemoveOutcome::Removed) => {
                     self.broadcast_sessions().await;
                     Ok(reply(
                         &msg.id,
@@ -194,6 +183,9 @@ impl ConnectionHandler {
                         },
                     ))
                 }
+                Ok(SessionProjectBindingRemoveOutcome::Conflict { current_revision }) => Ok(
+                    conflict(&msg.id, payload.expected_revision, current_revision),
+                ),
                 Err(e) => {
                     tracing::error!(
                         "Failed to remove project binding for {}: {e:#}",

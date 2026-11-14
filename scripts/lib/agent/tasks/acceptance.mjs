@@ -12,6 +12,16 @@ export function acceptanceModelView(context) {
   return {
     issue:context.issue,stage:context.stage,target_ref:context.target_ref,
     deployment:context.deployment,ci_evidence:context.ci_evidence??null,
+    // Independent trusted-main GitHub Job/Step receipt; never infer this
+    // result from a model assertion or merely from test source code.
+    pr_web_quality:context.stage==='pr' ? context.pr_web_quality??null : null,
+    // A SCN-05 governance criterion can verify the PR's executed tooling
+    // self-tests even when Web tests are correctly inapplicable. This typed
+    // receipt is never itself proof of a Web integration-test execution.
+    pr_tooling_quality:context.stage==='pr' ? context.pr_tooling_quality??null : null,
+    proof_boundary:context.stage==='pr' && context.pr_tooling_quality
+      ? 'pr_tooling_quality proves exact-HEAD executed CI tooling Gates; a null pr_web_quality is expected for governance/policy SCs, not proof of their failure. Inspect deterministic negative/positive source fixtures separately. Neither receipt automatically grants SC Pass.'
+      : null,
     acceptance_sources:context.acceptance_sources??null,
     source_manifest:context.source_manifest??null,
     source_evidence_rule:context.source_manifest ?

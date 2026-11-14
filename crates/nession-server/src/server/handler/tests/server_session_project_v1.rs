@@ -5,6 +5,8 @@ use crate::db::{ProjectRow, SessionEnvBindingRow};
 use crate::registry::session::{SessionInfo, SessionStatus};
 use nession_protocol::contracts::project::v1::ProjectLocation;
 use serde_json::{json, Value};
+use std::sync::Arc;
+use tokio::sync::Barrier;
 
 const PROJECT_ID: &str = "project-123e4567-e89b-42d3-a456-426614174000";
 const OTHER_PROJECT_ID: &str = "project-123e4567-e89b-42d3-a456-426614174001";
@@ -349,4 +351,211 @@ async fn a_reused_session_name_does_not_inherit_membership() {
         project_id_for(&list_sessions(&mut h).await, &first.session_id),
         None
     );
+}
+
+/// Two clients that both observed revision 1 issue their sets together. The
+/// compare-and-swap admits exactly one; the other is told the membership
+/// changed instead of silently losing its acknowledged update (#3509 SC-01).
+#[tokio::test]
+async fn concurrent_associations_with_the_same_expected_revision_commit_once() {
+    let deps = TestDeps::new().await;
+    let mut left_client = deps.handler("");
+    let mut right_client = deps.handler("");
+    left_client.authenticated_client = true;
+    right_client.authenticated_client = true;
+    seed_project(&left_client, PROJECT_ID).await;
+    seed_project(&left_client, OTHER_PROJECT_ID).await;
+    let session = seed_session(&mut left_client, "s1").await;
+    let initial = set_project(
+        &mut left_client,
+        json!({ "session_id": session.session_id, "project_id": PROJECT_ID }),
+    )
+    .await;
+    assert_eq!(initial["payload"]["revision"], 1);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let left = async {
+        barrier.wait().await;
+        set_project(
+            &mut left_client,
+            json!({
+                "session_id": session.session_id,
+                "project_id": PROJECT_ID,
+                "expected_revision": 1,
+            }),
+        )
+        .await
+    };
+    let right = async {
+        barrier.wait().await;
+        set_project(
+            &mut right_client,
+            json!({
+                "session_id": session.session_id,
+                "project_id": OTHER_PROJECT_ID,
+                "expected_revision": 1,
+            }),
+        )
+        .await
+    };
+    let (left, right) = tokio::join!(left, right);
+
+    let (winner, winner_project, loser) = match (
+        left["payload"]["success"].as_bool(),
+        right["payload"]["success"].as_bool(),
+    ) {
+        (Some(true), Some(false)) => (&left, PROJECT_ID, &right),
+        (Some(false), Some(true)) => (&right, OTHER_PROJECT_ID, &left),
+        _ => panic!("exactly one concurrent set commits: {left} / {right}"),
+    };
+    assert_eq!(winner["payload"]["revision"], 2);
+    assert_eq!(winner["payload"]["project_id"], winner_project);
+    assert_eq!(loser["payload"]["error_kind"], "conflict");
+
+    let stored = deps
+        .db
+        .get_session_project_binding(&session.session_id)
+        .await
+        .unwrap()
+        .expect("the winning association is stored");
+    assert_eq!(stored.project_id, winner_project);
+    assert_eq!(stored.revision, 2);
+}
+
+/// Two clients race a first association of the same unassociated Session.
+/// Only one insert commits; the other is a conflict rather than a second
+/// revision-1 association (#3509 SC-02).
+#[tokio::test]
+async fn concurrent_first_associations_commit_once() {
+    let deps = TestDeps::new().await;
+    let mut left_client = deps.handler("");
+    let mut right_client = deps.handler("");
+    left_client.authenticated_client = true;
+    right_client.authenticated_client = true;
+    seed_project(&left_client, PROJECT_ID).await;
+    seed_project(&left_client, OTHER_PROJECT_ID).await;
+    let session = seed_session(&mut left_client, "s1").await;
+
+    let barrier = Arc::new(Barrier::new(2));
+    let left = async {
+        barrier.wait().await;
+        set_project(
+            &mut left_client,
+            json!({
+                "session_id": session.session_id,
+                "project_id": PROJECT_ID,
+                "expected_revision": 0,
+            }),
+        )
+        .await
+    };
+    let right = async {
+        barrier.wait().await;
+        set_project(
+            &mut right_client,
+            json!({
+                "session_id": session.session_id,
+                "project_id": OTHER_PROJECT_ID,
+                "expected_revision": 0,
+            }),
+        )
+        .await
+    };
+    let (left, right) = tokio::join!(left, right);
+
+    let (winner, winner_project, loser) = match (
+        left["payload"]["success"].as_bool(),
+        right["payload"]["success"].as_bool(),
+    ) {
+        (Some(true), Some(false)) => (&left, PROJECT_ID, &right),
+        (Some(false), Some(true)) => (&right, OTHER_PROJECT_ID, &left),
+        _ => panic!("exactly one first association commits: {left} / {right}"),
+    };
+    assert_eq!(winner["payload"]["revision"], 1);
+    assert_eq!(loser["payload"]["error_kind"], "conflict");
+
+    let stored = deps
+        .db
+        .get_session_project_binding(&session.session_id)
+        .await
+        .unwrap()
+        .expect("the winning association is stored");
+    assert_eq!(stored.project_id, winner_project);
+    assert_eq!(stored.revision, 1);
+}
+
+/// A set and a remove at the same observed revision. Whichever commits first
+/// owns the outcome; the loser must neither erase it nor resurrect the old
+/// binding (#3509 SC-02).
+#[tokio::test]
+async fn concurrent_association_and_removal_never_lose_the_committed_state() {
+    let deps = TestDeps::new().await;
+    let mut setter = deps.handler("");
+    let mut remover = deps.handler("");
+    setter.authenticated_client = true;
+    remover.authenticated_client = true;
+    seed_project(&setter, PROJECT_ID).await;
+    seed_project(&setter, OTHER_PROJECT_ID).await;
+    let session = seed_session(&mut setter, "s1").await;
+    let initial = set_project(
+        &mut setter,
+        json!({ "session_id": session.session_id, "project_id": PROJECT_ID }),
+    )
+    .await;
+    assert_eq!(initial["payload"]["revision"], 1);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let set = async {
+        barrier.wait().await;
+        set_project(
+            &mut setter,
+            json!({
+                "session_id": session.session_id,
+                "project_id": OTHER_PROJECT_ID,
+                "expected_revision": 1,
+            }),
+        )
+        .await
+    };
+    let remove = async {
+        barrier.wait().await;
+        set_project(
+            &mut remover,
+            json!({
+                "session_id": session.session_id,
+                "project_id": null,
+                "expected_revision": 1,
+            }),
+        )
+        .await
+    };
+    let (set, remove) = tokio::join!(set, remove);
+    let stored = deps
+        .db
+        .get_session_project_binding(&session.session_id)
+        .await
+        .unwrap();
+
+    match (
+        set["payload"]["success"].as_bool(),
+        remove["payload"]["success"].as_bool(),
+    ) {
+        (Some(true), Some(false)) => {
+            assert_eq!(set["payload"]["project_id"], OTHER_PROJECT_ID);
+            assert_eq!(set["payload"]["revision"], 2);
+            assert_eq!(remove["payload"]["error_kind"], "conflict");
+            let stored = stored.expect("the winning set is stored");
+            assert_eq!(stored.project_id, OTHER_PROJECT_ID);
+            assert_eq!(stored.revision, 2);
+        }
+        (Some(false), Some(true)) => {
+            assert_eq!(set["payload"]["error_kind"], "conflict");
+            assert_eq!(remove["payload"]["revision"], 0);
+            assert!(
+                stored.is_none(),
+                "the winning removal leaves no binding for the losing set"
+            );
+        }
+        _ => panic!("exactly one concurrent mutation commits: {set} / {remove}"),
+    }
 }
