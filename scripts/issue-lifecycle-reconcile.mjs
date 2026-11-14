@@ -442,8 +442,7 @@ async function selfTest() {
   assert.equal(isMainMergeAncestorOfStaging(sha, 'bad', validCompare), false);
   // #3425: manual historical main target overrides only the pending post-
   // merge Agent stage after independent GitHub merge and ancestry proofs.
-  const mergedMainBody = body.replace('when: pr\\n',
-    'when: merged\\n    branch: main\\n').replace('| Pass |', '| Pending |');
+  const mergedMainBody = mainPendingBody;
   const sourceMainPr = {...mainPr, head: {...mainPr.head,
     repo: {full_name:'BestNathan/nession'}}, base: {...mainPr.base,
     repo: {full_name:'BestNathan/nession'}}};
