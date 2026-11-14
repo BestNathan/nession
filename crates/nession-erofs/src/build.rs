@@ -18,6 +18,20 @@
 //! [`ProcessControl`], which bounds its wall time, forwards cancellation by
 //! terminating and reaping it, and reports its first diagnostic line. Dropping a
 //! Tokio future is not how this builder cancels work.
+//!
+//! Source acquisition adapters (#3497) live in the gated submodules:
+//! bounded archive/HTTPS inputs, raw EROFS import, the external OCI conversion
+//! boundary, and the standard Config/Manifest publication helper. None of them
+//! executes input content.
+
+#[cfg(feature = "sources")]
+pub mod archive;
+#[cfg(feature = "sources")]
+pub mod import;
+#[cfg(feature = "sources")]
+pub mod oci;
+#[cfg(feature = "sources")]
+pub mod publication;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

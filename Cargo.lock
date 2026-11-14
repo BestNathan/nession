@@ -2161,6 +2161,7 @@ name = "nession-erofs"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "futures-util",
  "httptest",
  "libc",
@@ -2169,6 +2170,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tar",
  "tempfile",
  "tokio",
  "uuid",
@@ -3037,6 +3039,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",

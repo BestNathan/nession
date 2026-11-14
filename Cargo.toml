@@ -66,6 +66,10 @@ tokio-rustls = "0.25"
 rand = "0.8"
 base64 = "0.21"
 sha2 = "0.10"
+# Bounded, path-safe source archive extraction (#3497). Already in the local
+# dependency graph; declared here so the reusable EROFS crate uses one version.
+tar = "0.4"
+flate2 = "1.0"
 # Endpoint identity for the Server-owned Agent binding (#2652). Already in the
 # graph through tungstenite; this makes the security decision use the same
 # WHATWG URL parser the dial does instead of hand-splitting authority strings.
