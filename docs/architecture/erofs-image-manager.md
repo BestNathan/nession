@@ -7,6 +7,12 @@
 > Upstream model: [#3021 Project](project.md), [product-model.md](../design/product-model.md),
 > [agent-process-discovery.md](agent-process-discovery.md) for the Agent/Server
 > trust style this follows.
+>
+> The approved OCI/EROFS object model, Manifest-as-image-revision identity,
+> storage layout and staged migration are owned by
+> [OCI/EROFS image infrastructure](oci-erofs-image-infrastructure.md) (#3494).
+> This document describes the current digest-addressed Manager behavior that
+> the child phases migrate; it does not duplicate the target format contract.
 
 ## Ownership
 
