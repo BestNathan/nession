@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "976e73571e2b02d752213aca84be1b92e46a304c03d2eca07d8d1a21ed6de0f4",
+  "run_id": 43557135731,
+  "run_attempt": 1,
+  "issue": 3449,
+  "criterion": "SC-03",
+  "criterion_text": "An interrupted/failed FUSE mount, helper timeout, stderr-pipe stall, busy/failed unmount, concurrent acquire-vs-release and mismatched preexisting mount do not return a false successful lease, invalidate a live consumer or irreversibly forget a still-mounted resource; cleanup remains bounded, observable and retryable.",
+  "stage": "staging",
+  "target_sha": "5a299a0f6baa417be191ca46890bb825a9c6ff1f",
+  "contract_sha256": "9384bbe9c7f4cf6565190376cbbe221687da95519452911c521c6da7a1c8ba70",
+  "case_revision": "5a299a0f6baa417be191ca46890bb825a9c6ff1f",
+  "case_tree_sha": "bee8abc168f2dbb29338b17d1da298c6321dd951",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T04:35:33.246Z",
+  "finished_at": "2026-11-14T04:36:11.631Z",
+  "duration_ms": 38385,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo test -p nession-sandbox --test linux_runtime a_failed_shared_unmount_is_durable_bounded_and_retryable -- --nocapture failed (exit 101): \u001b[1m\u001b[92m   Compiling\u001b[0m nession-sandbox v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-sandbox)\n\u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 0.69s\n\u001b[1m\u001b[92m     Running\u001b[0m tests/linux_runtime.rs (target/debug/deps/linux_runtime-23373c76efb21d16)\n\nthread 'a_failed_shared_unmount_is_durable_bounded_and_retryable' (4971) panicked at crates/nession-sandbox/tests/linux_runtime.rs:1586:6:\nverified image: invalid EROFS image digest 912decf5b4de632dcc8279c56f2a6ca51a9c44cd2f4d54cab96e829706d07e38\n\nStack backtrace:\n   0: anyhow::error::<impl anyhow::Error>::msg\n   1: anyhow::__private::format_err\n   2: nession_erofs::mount_manager::VerifiedImage::new\n   3: linux_runtime::a_failed_shared_unmount_is_durable_bounded_and_retryable\n   4: linux_runtime::a_failed_shared_unmount_is_durable_bounded_and_retryable::{{closure}}\n   5: core::ops::function::FnOnce::call_once\n   6: test::__rust_begin_short_backtrace::<core::result::Result<(), alloc::string::String>, fn() -> core::result::Result<(), alloc::string::String>>\n   7: test::run_test::{closure#0}\n   8: std::sys::backtrace::__rust_begin_short_backtrace::<test::run_test::{closure#1}, ()>\n   9: <std::thread::lifecycle::spawn_unchecked<test::run_test::{closure#1}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}\n  10: <std::sys::thread::unix::Thread>::new::thread_start\n  11: <unknown>\n  12: <unknown>\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n   1: core::panicking::panic_fmt\n   2: core::result::unwrap_failed\n   3: core::result::Result<T,E>::expect\n   4: linux_runtime::a_failed_shared_unmount_is_durable_bounded_and_retryable\n   5: linux_runtime::a_failed_shared_unmount_is_durable_bounded_and_retryable::{{closure}}\n   6: core::ops::function::FnOnce::call_once\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-sandbox --test linux_runtime`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 32432,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43557135731,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "98d5d912b7b8f3975301a2a0c24ac7e895972b05",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "5a299a0f6baa417be191ca46890bb825a9c6ff1f",
+        "stage": "staging",
+        "issue": 3449,
+        "criterion": "SC-03",
+        "job_id": 132332430661,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43557135731",
+    "record_path": "runs/2026-11-14/43557135731-1/3449/SC-03.json",
+    "source_result_sha256": "2e33cd66d9dc03247b3731c0a27087616006043898a4f7503d038bc02ff89601"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43557135731-1",
+    "sha256": "2e33cd66d9dc03247b3731c0a27087616006043898a4f7503d038bc02ff89601",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43557135731",
+    "durability": "time-limited; object archival not configured"
+  }
+}
