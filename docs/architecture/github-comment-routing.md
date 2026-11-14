@@ -105,6 +105,17 @@ It supports the already registered Qwen Developer only. For example, post it
 under #3433 if that Bug is still open and unclaimed; do **not** post it under
 an already progressing #3444/#3451 PR.
 
+GitHub deliberately suppresses the `workflow_run` cascade for a
+`workflow_dispatch` initiated with `GITHUB_TOKEN`. After dispatching the
+unprivileged Controller, the Router therefore re-reads its exact authenticated
+Run/Attempt from GitHub, requires **completed success**, and performs one
+explicit `workflow_dispatch` to `Store / Agent Controller Ingest` with only
+`source_run_id`. That Store workflow accepts the bot-only main request,
+re-fetches the real Controller Run/Artifact and revalidates the original human
+comment *before* minting the scoped Store App token. A Router receipt still
+does not assert Store creation or Worker execution. Duplicate wakes are detected
+by their exact source-bound Run name; the Store CAS root is never reset.
+
 The existing Comment Router confirms owner identity and the original open Bug
 Issue via REST; it refuses edited comments, arbitrary providers, existing
 `status:in-progress` and related open implementation PRs. It dispatches
