@@ -12,6 +12,9 @@ export function acceptanceModelView(context) {
   return {
     issue:context.issue,stage:context.stage,target_ref:context.target_ref,
     deployment:context.deployment,ci_evidence:context.ci_evidence??null,
+    // Independent trusted-main GitHub Job/Step receipt; never infer this
+    // result from a model assertion or merely from test source code.
+    pr_web_quality:context.stage==='pr' ? context.pr_web_quality??null : null,
     acceptance_sources:context.acceptance_sources??null,
     source_manifest:context.source_manifest??null,
     source_evidence_rule:context.source_manifest ?
