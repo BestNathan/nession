@@ -776,10 +776,23 @@ mod tests {
         let cmd =
             GitCmd::new(fake.to_string_lossy(), dir.path()).with_timeout(Duration::from_secs(30));
 
-        let cancelled =
-            tokio::time::timeout(Duration::from_millis(300), cmd.run(&["status"], 1024)).await;
-        assert!(cancelled.is_err(), "the future should still be running");
+        // A fixed 300 ms timeout can observe an early spawn/read error under
+        // load and incorrectly treat it as cancellation. First prove the
+        // controlled child actually started and is still running, then abort
+        // the task that owns its process. The abort drops the caller future,
+        // exercising kill_on_drop without relying on scheduler timing.
+        let running = tokio::spawn(async move { cmd.run(&["status"], 1024).await });
         let pid = wait_for_pid(&pidfile).await;
+        assert!(
+            process_running(pid) && !running.is_finished(),
+            "the controlled git child must be alive before cancellation"
+        );
+        running.abort();
+        let cancelled = running.await.expect_err("the task should be cancelled");
+        assert!(
+            cancelled.is_cancelled(),
+            "unexpected task failure: {cancelled}"
+        );
         assert!(
             wait_for_exit(pid).await,
             "cancellation left the direct git child {pid} alive"
