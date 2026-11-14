@@ -269,7 +269,50 @@ async function selfTest() {
     assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100&sort=created&direction=desc')
       ? [{ body: marker(plan), user: { login: 'github-actions[bot]', type: 'Bot' } }]
       : { workflow_runs: [] })).state, 'already-acknowledged');
-    console.log('github-comment-router: source checks, context, replay guards passed');
+    // #3488: post-Controller wake must authenticate the exact completed
+    // source Run before issuing exactly one GITHUB_TOKEN workflow_dispatch.
+    const dev={...plan,handler:'develop',command:'/develop dev-qwen-01',
+      workflow:'acceptance-agent-controller.yml'};
+    const sourceRun={id:321,display_title:workflowTitle(dev),
+      event:'workflow_dispatch',head_branch:'main',repository:repo,
+      head_repository:repo,actor:{login:'github-actions[bot]'},
+      path:'.github/workflows/acceptance-agent-controller.yml',
+      status:'completed',conclusion:'success',run_attempt:1};
+    let wakes=0;
+    const wakeReader=async(path,options={})=>{
+      if(options.method==='POST'){
+        assert.ok(path.endsWith('/store-agent-controller-ingest.yml/dispatches'));
+        assert.deepEqual(options.body,{ref:'main',inputs:{source_run_id:'321'}});
+        wakes++;
+        return null;
+      }
+      if(path.includes('/acceptance-agent-controller.yml/runs?'))
+        return {workflow_runs:[sourceRun]};
+      if(path.endsWith('/actions/runs/321'))
+        return sourceRun;
+      if(path.includes('/store-agent-controller-ingest.yml/runs?'))
+        return {workflow_runs:[]};
+      throw Error('unexpected waker API '+path);
+    };
+    const wake=await wakeBugDeveloper(dev,wakeReader,async()=>{});
+    assert.equal(wake.state,'store-ingest-requested');
+    assert.equal(wakes,1,'exactly one post-Controller Store wake');
+    await assert.rejects(wakeBugDeveloper(dev,async(path,options)=>{
+      if(path.endsWith('/actions/runs/321'))return {...sourceRun,conclusion:'failure'};
+      return wakeReader(path,options);
+    },async()=>{}),/authenticated completed success/);
+    assert.equal(wakes,1,'failed source Run cannot request privileged Ingest');
+    const existing=await wakeBugDeveloper(dev,async(path,options)=>{
+      if(path.includes('/store-agent-controller-ingest.yml/runs?'))
+        return {workflow_runs:[{id:456,display_title:'Bug Developer Ingest controller:321',
+          event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
+          head_branch:'main',repository:repo}]};
+      return wakeReader(path,options);
+    },async()=>{});
+    assert.equal(existing.state,'already-woken');
+    assert.equal(existing.ingest_run_id,456);
+    assert.equal(wakes,1,'readback prevents a second Store wake');
+        console.log('github-comment-router: source checks, context, replay guards passed');
   } finally {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
