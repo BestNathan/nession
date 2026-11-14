@@ -206,6 +206,7 @@ fn sandbox_capability_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
         decl_of::<sandbox::SandboxActionResult>(cfg),
         decl_of::<sandbox::SandboxActionErrorKind>(cfg),
         decl_of::<nession_protocol::contracts::session::v1::ManagedImageGrant>(cfg),
+        decl_of::<nession_protocol::contracts::session::v1::ManagedImageObjectGrant>(cfg),
         decl_of::<nession_protocol::contracts::session::v1::ManagedImageRole>(cfg),
     ]
 }

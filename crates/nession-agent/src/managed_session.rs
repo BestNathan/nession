@@ -24,7 +24,7 @@ use nession_protocol::contracts::sandbox::v1::{
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 use std::path::{Path, PathBuf};
 
-use crate::erofs_cache::{DownloadGrant, ErofsCache};
+use crate::erofs_cache::{resolve_grant_image, ErofsCache, ResolvedManifestBinding};
 
 /// The sandbox path the initial Pane starts in. The composed root exposes the
 /// Project image and writable overlay here; the host has no such directory.
@@ -36,8 +36,12 @@ pub struct PreparedManagedSession {
     pub policy: SandboxPolicy,
     /// The Agent-owned host directory bound at `/workspace`.
     pub workspace: PathBuf,
-    /// `(role, digest, resolved cache path)` for diagnostics and tests.
+    /// `(role, digest, resolved cache path)` for diagnostics and tests. The
+    /// digest is the physical EROFS layer the mount manager keys on.
     pub images: Vec<(ManagedImageRole, String, PathBuf)>,
+    /// The final resolved Manifest identity per Manifest-aware grant (#3499).
+    /// Empty for a legacy digest-addressed grant set.
+    pub manifests: Vec<ResolvedManifestBinding>,
 }
 
 /// Derive the blob HTTP origin from the Agent's configured Server URL.
@@ -110,6 +114,7 @@ pub async fn prepare(
     }
 
     let mut resolved = Vec::with_capacity(images.len());
+    let mut manifests = Vec::new();
     // The target travels with the grant it was validated on: two toolchain
     // grants may legitimately share a digest, so a later digest lookup could
     // attach the wrong `/opt/<name>`.
@@ -119,27 +124,29 @@ pub async fn prepare(
         .into_iter()
         .chain(toolchains.iter().copied())
     {
-        if !image.path.starts_with("/images/blobs/") {
-            anyhow::bail!(
-                "authorization route '{}' is not an image blob path",
-                image.path
-            );
-        }
-        let grant = DownloadGrant {
-            url: format!("{origin}{}", image.path),
-            token: server_auth_token.to_string(),
-        };
-        let cached = cache
-            .get_or_fetch(&image.digest, &grant)
+        let resolved_image = resolve_grant_image(cache, image, &origin, server_auth_token)
             .await
             .with_context(|| format!("cannot prepare the {:?} image", image.role))?;
-        resolved.push((image.role, image.digest.clone(), cached.path.clone()));
+        if let Some(manifest_digest) = resolved_image.manifest_digest.clone() {
+            manifests.push(ResolvedManifestBinding {
+                role: image.role,
+                manifest_digest,
+                layer_digest: resolved_image.layer_digest.clone(),
+            });
+        }
+        resolved.push((
+            image.role,
+            resolved_image.layer_digest.clone(),
+            resolved_image.layer_path.clone(),
+        ));
         image_refs.push((
             image.role,
             image.target.clone(),
             SandboxImageRef {
-                digest: image.digest.clone(),
-                source: cached.path.display().to_string(),
+                // The composition carries the physical EROFS identity so the
+                // mount manager shares one mount across Manifests.
+                digest: resolved_image.layer_digest,
+                source: resolved_image.layer_path.display().to_string(),
             },
         ));
     }
@@ -221,6 +228,7 @@ pub async fn prepare(
         policy,
         workspace: workspace_dir,
         images: resolved,
+        manifests,
     })
 }
 
@@ -247,6 +255,7 @@ mod tests {
             digest: digest.to_string(),
             path: format!("/images/blobs/{digest}"),
             target: target.map(str::to_string),
+            objects: Vec::new(),
         }
     }
 
@@ -489,5 +498,225 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.to_string().contains("more than one Base Runtime"));
+    }
+
+    struct ManifestFixture {
+        manifest: Vec<u8>,
+        config: Vec<u8>,
+        layer: Vec<u8>,
+    }
+
+    fn manifest_fixture(payload: &[u8], env: &str) -> ManifestFixture {
+        use nession_erofs::oci::annotation::{
+            MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+        };
+        use nession_erofs::oci::config::{ImageConfig, RootFs, RuntimeConfig};
+        use nession_erofs::oci::descriptor::Descriptor;
+        use nession_erofs::oci::manifest::Manifest;
+        use nession_erofs::oci::{to_bytes, RawDocument};
+        use serde_json::Map;
+
+        let layer = payload.to_vec();
+        let layer_digest = digest_for(&layer);
+        let config = ImageConfig {
+            created: None,
+            author: None,
+            architecture: "amd64".to_string(),
+            os: "linux".to_string(),
+            os_version: None,
+            os_features: Some(vec!["erofs".to_string()]),
+            variant: None,
+            config: RuntimeConfig {
+                env: Some(vec![format!("K={env}")]),
+                ..RuntimeConfig::default()
+            },
+            rootfs: RootFs {
+                fs_type: "layers".to_string(),
+                diff_ids: vec![layer_digest.clone()],
+                extra: Map::new(),
+            },
+            history: Vec::new(),
+            extra: Map::new(),
+        };
+        let config = to_bytes(&config).unwrap();
+        let config_document = RawDocument::from_bytes(config.clone());
+        let manifest = Manifest {
+            schema_version: 2,
+            media_type: Some(MEDIA_TYPE_MANIFEST.to_string()),
+            config: Descriptor {
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                digest: config_document.digest().to_string(),
+                size: config_document.size().unwrap(),
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: Map::new(),
+            },
+            layers: vec![Descriptor {
+                media_type: MEDIA_TYPE_EROFS.to_string(),
+                digest: layer_digest,
+                size: layer.len() as u64,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: Map::new(),
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+            extra: Map::new(),
+        };
+        ManifestFixture {
+            manifest: to_bytes(&manifest).unwrap(),
+            config,
+            layer,
+        }
+    }
+
+    fn manifest_grant(
+        role: ManagedImageRole,
+        fixture: &ManifestFixture,
+        target: Option<&str>,
+    ) -> ManagedImageGrant {
+        use nession_erofs::oci::annotation::{
+            MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+        };
+        let manifest_digest = digest_for(&fixture.manifest);
+        let objects = vec![
+            nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
+                digest: manifest_digest.clone(),
+                media_type: MEDIA_TYPE_MANIFEST.to_string(),
+                size_bytes: fixture.manifest.len() as u64,
+                path: format!("/images/blobs/{manifest_digest}"),
+            },
+            nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
+                digest: digest_for(&fixture.config),
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                size_bytes: fixture.config.len() as u64,
+                path: format!("/images/blobs/{}", digest_for(&fixture.config)),
+            },
+            nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
+                digest: digest_for(&fixture.layer),
+                media_type: MEDIA_TYPE_EROFS.to_string(),
+                size_bytes: fixture.layer.len() as u64,
+                path: format!("/images/blobs/{}", digest_for(&fixture.layer)),
+            },
+        ];
+        ManagedImageGrant {
+            role,
+            digest: manifest_digest.clone(),
+            path: format!("/images/blobs/{manifest_digest}"),
+            target: target.map(str::to_string),
+            objects,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_manifest_grant_mounts_the_layer_identity_and_shares_one_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = b"one shared managed payload";
+        let base_fixture = manifest_fixture(payload, "base");
+        let workspace_fixture = manifest_fixture(payload, "workspace");
+        let server = Server::run();
+        for fixture in [&base_fixture, &workspace_fixture] {
+            for (bytes, digest) in [
+                (&fixture.manifest, digest_for(&fixture.manifest)),
+                (&fixture.config, digest_for(&fixture.config)),
+            ] {
+                server.expect(
+                    Expectation::matching(request::method_path(
+                        "GET",
+                        format!("/images/blobs/{digest}"),
+                    ))
+                    .times(1)
+                    .respond_with(
+                        httptest::http::Response::builder()
+                            .status(200)
+                            .body(bytes.clone())
+                            .unwrap(),
+                    ),
+                );
+            }
+        }
+        let layer_digest = digest_for(&base_fixture.layer);
+        server.expect(
+            Expectation::matching(request::method_path(
+                "GET",
+                format!("/images/blobs/{layer_digest}"),
+            ))
+            .times(1)
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(200)
+                    .body(base_fixture.layer.clone())
+                    .unwrap(),
+            ),
+        );
+        let cache = cache(&dir.path().join("cache")).await;
+        let state = dir.path().join("sandbox-state");
+        std::fs::create_dir_all(&state).unwrap();
+        let images = vec![
+            manifest_grant(ManagedImageRole::Base, &base_fixture, None),
+            manifest_grant(ManagedImageRole::Workspace, &workspace_fixture, None),
+        ];
+        let prepared = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
+            .await
+            .unwrap();
+        let composition = prepared
+            .policy
+            .filesystem
+            .as_ref()
+            .unwrap()
+            .composition
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            composition.base.digest, layer_digest,
+            "the mount identity is the EROFS layer, not the Manifest"
+        );
+        assert_eq!(
+            composition
+                .workspace
+                .as_ref()
+                .unwrap()
+                .image
+                .as_ref()
+                .unwrap()
+                .digest,
+            layer_digest
+        );
+        assert_eq!(prepared.manifests.len(), 2);
+        let manifest_digests: Vec<&str> = prepared
+            .manifests
+            .iter()
+            .map(|binding| binding.manifest_digest.as_str())
+            .collect();
+        assert!(manifest_digests.contains(&digest_for(&base_fixture.manifest).as_str()));
+        assert!(manifest_digests.contains(&digest_for(&workspace_fixture.manifest).as_str()));
+        assert_eq!(
+            cache.fetch_count(),
+            5,
+            "two Manifests/Configs and one payload"
+        );
+        assert_eq!(
+            std::fs::read_dir(cache.root().join("sha256"))
+                .unwrap()
+                .count(),
+            5,
+            "the shared payload produced one physical file"
+        );
+
+        // A second prepare reuses every verified object.
+        let transfers = cache.bytes_transferred();
+        let fetches = cache.fetch_count();
+        prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
+            .await
+            .unwrap();
+        assert_eq!(cache.bytes_transferred(), transfers);
+        assert_eq!(cache.fetch_count(), fetches);
     }
 }

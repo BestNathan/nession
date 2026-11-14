@@ -1246,6 +1246,7 @@ pub(crate) fn session_to_info(
         attached_clients: s.attached_clients,
         foreground_command: s.foreground_command.clone(),
         working_dir: s.working_dir.clone(),
+        instance_id: s.instance_id.clone(),
         project_id: project_id.map(std::string::ToString::to_string),
         last_activity: s.last_activity.to_rfc3339(),
     }

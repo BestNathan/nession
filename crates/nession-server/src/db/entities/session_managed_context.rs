@@ -23,6 +23,9 @@ pub struct Model {
     pub status: String,
     pub error: Option<String>,
     pub updated_at: i64,
+    /// Canonical JSON of the resolved Manifest identity per requested image
+    /// (#3499); absent for a binding created before Manifest resolution.
+    pub resolved_images_json: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

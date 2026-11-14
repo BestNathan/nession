@@ -307,7 +307,29 @@ path: string,
 /**
  * `/opt/<name>` for a toolchain image; absent otherwise.
  */
-target?: string | null, };
+target?: string | null, 
+/**
+ * Reachable OCI objects of a resolved Manifest; empty for a legacy
+ * digest-addressed EROFS grant.
+ */
+objects?: Array<ManagedImageObjectGrant>, };
+export type ManagedImageObjectGrant = { 
+/**
+ * `sha256:<64 lowercase hex>` of the exact object bytes.
+ */
+digest: string, 
+/**
+ * The standard OCI media type of those bytes.
+ */
+media_type: string, 
+/**
+ * Exact byte count, verified by both sides.
+ */
+size_bytes: number, 
+/**
+ * Authorized route, `/images/blobs/<digest>`.
+ */
+path: string, };
 export type ManagedImageRole = "base" | "workspace" | "toolchain";
 
 // ── Operations ──
