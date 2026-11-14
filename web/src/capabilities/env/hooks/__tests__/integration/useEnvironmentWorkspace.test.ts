@@ -404,6 +404,25 @@ describe('useEnvironmentWorkspace', () => {
     expect(result.current.screen.selectedKey).toBeNull();
   });
 
+  it('ignores an A-owned Import callback invoked after A→B→A without mutating the new editor', async () => {
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) => useEnvironmentWorkspace(sessionId),
+      { initialProps: { sessionId: 'session-a' as string | null } },
+    );
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    const staleImport = result.current.onImported;
+    rerender({ sessionId: 'session-b' });
+    rerender({ sessionId: 'session-a' });
+    act(() => result.current.screen.startNew());
+    const calls = envApi.listEnvFiles.mock.calls.length;
+
+    act(() => staleImport(A_REF));
+    expect(result.current.screen.editor).toEqual({ kind: 'new' });
+    expect(result.current.screen.selectedKey).toBeNull();
+    expect(envApi.listEnvFiles).toHaveBeenCalledTimes(calls);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it('suppresses stale Session A reapply feedback without blocking B', async () => {
     const delayed = deferred<ReturnType<typeof bindingResponse>>();
     bindingHook.useSessionEnvBinding.mockReturnValue({
