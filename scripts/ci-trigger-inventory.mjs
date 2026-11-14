@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CATALOG, workflowName, upstreamWorkflowNames, approvedExternalWorkflowRunSource } from './workflow-conventions.mjs';
+import { CATALOG, workflowName, upstreamWorkflowNames, approvedExternalWorkflowRunSource, approvedCommentCaseRunSource } from './workflow-conventions.mjs';
 
 const ROOT=path.resolve(fileURLToPath(new URL('../',import.meta.url)));
 const DIR=path.join(ROOT,'.github/workflows');
@@ -61,7 +61,8 @@ export function inspectWorkflows(){
     const upstream=inventory.find(x=>x.name===source);
     if(!upstream){
       const content=fs.readFileSync(path.join(DIR,item.file),'utf8');
-      if(approvedExternalWorkflowRunSource(item.file,content,source))continue;
+      if(approvedExternalWorkflowRunSource(item.file,content,source) ||
+        approvedCommentCaseRunSource(item.file,content,source,item.upstream))continue;
       throw Error('dangling workflow_run consumer: '+item.name+' -> '+source);
     }
     upstream.downstream.push(item.name);

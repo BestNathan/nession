@@ -113,6 +113,22 @@ jobs:
           [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
           [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
           [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Staging Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
+      # Older merged Main Case source and workflow code may have different
+      # SHAs. GitHub owns this original dispatch input step before checkout;
+      # the trusted ingester verifies it just like manual Staging (#3316).
+      - name: "Authenticate manual Post-Merge Case ${{ inputs.issue_number }} ${{ inputs.criterion }} ${{ inputs.target_sha }}"
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'post-merge'
+        shell: bash
+        env:
+          DISPATCH_ISSUE: ${{ inputs.issue_number }}
+          DISPATCH_CRITERION: ${{ inputs.criterion }}
+          DISPATCH_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Manual Post-Merge Cases must dispatch from trusted main" >&2; exit 1; }
+          [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
+          [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Post-Merge Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
       - name: Resolve target identity
         id: target
         env:
@@ -600,6 +616,22 @@ jobs:
           [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
           [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
           [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Staging Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
+      # Older merged Main Case source and workflow code may have different
+      # SHAs. GitHub owns this original dispatch input step before checkout;
+      # the trusted ingester verifies it just like manual Staging (#3316).
+      - name: "Authenticate manual Post-Merge Case ${{ inputs.issue_number }} ${{ inputs.criterion }} ${{ inputs.target_sha }}"
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'post-merge'
+        shell: bash
+        env:
+          DISPATCH_ISSUE: ${{ inputs.issue_number }}
+          DISPATCH_CRITERION: ${{ inputs.criterion }}
+          DISPATCH_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Manual Post-Merge Cases must dispatch from trusted main" >&2; exit 1; }
+          [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
+          [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Post-Merge Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
       - name: Resolve target identity
         id: target
         env:

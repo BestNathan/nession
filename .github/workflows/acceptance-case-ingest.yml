@@ -2,7 +2,11 @@ name: Acceptance / Case Ingest
 
 on:
   workflow_run:
-    workflows: ["Acceptance / Cases"]
+    # GitHub replaces completed workflow_run.name with a dynamic run-name.
+    # Comment /case runs are still the same pinned Acceptance / Cases workflow.
+    # The trusted ingester separately validates exact source workflow path,
+    # event, source branch and a bounded comment-name identity.
+    workflows: ["Acceptance / Cases", "Comment Case #*"]
     types: [completed]
 
 permissions:

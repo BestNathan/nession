@@ -112,7 +112,23 @@ const DOMAIN_PREFIX = {
   store: 'Store /',
   task: 'Task /',
 };
-const stripComment = (line) => line.replace(/\s+#.*$/, '');
+// A YAML '#' starts a comment only outside quoted scalars. Dynamic
+// workflow run-name patterns may contain an honest literal '#'.
+const stripComment = (line) => {
+  let quote = '';
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      if (quote === '"' && ch === '\\') { i += 1; continue; }
+      if (ch === quote) {
+        if (quote === "'" && line[i + 1] === "'") { i += 1; continue; }
+        quote = '';
+      }
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+};
 const unquote = (s) => {
   const trimmed = stripComment(s).trim();
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
@@ -153,6 +169,16 @@ export function approvedExternalWorkflowRunSource(consumerFile, content, display
       !/^    branches: \[prototype, knowledge\]\s*$/m.test(content)) return false;
   const found = content.match(/^    if: >-\n((?: {6}.*\n)+)    name: Build independent Pages\s*$/m);
   return Boolean(found) && found[1].replace(/\s+/g,' ').trim() === EXTERNAL_PAGES_RUN_GUARD;
+}
+
+// Only this known Case ingester may subscribe to comment-bound run names.
+// Its execution code still requires the *exact* Acceptance / Cases file path,
+// main workflow_dispatch source and GitHub-bound Issue/SC before any Store write.
+export function approvedCommentCaseRunSource(consumerFile, content, name, upstream) {
+  return consumerFile === 'acceptance-case-ingest.yml' &&
+    name === 'Comment Case #*' &&
+    upstream.includes('Acceptance / Cases') &&
+    /^    workflows: \["Acceptance \/ Cases", "Comment Case #\*"\]\s*$/m.test(content);
 }
 
 export function upstreamWorkflowNames(content) {
@@ -280,7 +306,10 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
     const consumer = upstreamWorkflowNames(content);
     if (!consumer.valid) errors.push(file + ': malformed/empty on.workflow_run.workflows');
     for (const name of consumer.names) {
-      if (!names.has(name) && !approvedExternalWorkflowRunSource(file, content, name)) errors.push(file + ': dangling workflow_run upstream display name: ' + name);
+      if (!names.has(name) && !approvedExternalWorkflowRunSource(file, content, name) &&
+          !approvedCommentCaseRunSource(file, content, name, consumer.names)) {
+        errors.push(file + ': dangling workflow_run upstream display name: ' + name);
+      }
     }
     for (const reference of reusableReferences(content)) {
       if (!files.has(reference)) errors.push(file + ': missing reusable workflow path: ' + reference);
@@ -371,6 +400,19 @@ function selfTest() {
   assert.deepEqual(auditWorkflows(trustedPath, catalog).errors, []);
   assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
+  const commentCaseUpstream =
+    'on:\n  workflow_run:\n    workflows: ["Acceptance / Cases", "Comment Case #*"]\n    types: [completed]\n';
+  const parsedCaseUpstream = upstreamWorkflowNames(commentCaseUpstream);
+  assert.deepEqual(parsedCaseUpstream.names, ['Acceptance / Cases', 'Comment Case #*']);
+  assert.equal(approvedCommentCaseRunSource('acceptance-case-ingest.yml',
+    commentCaseUpstream, 'Comment Case #*', parsedCaseUpstream.names), true);
+  assert.equal(approvedCommentCaseRunSource('untrusted.yml',
+    commentCaseUpstream, 'Comment Case #*', parsedCaseUpstream.names), false);
+  assert.equal(approvedCommentCaseRunSource('acceptance-case-ingest.yml',
+    commentCaseUpstream.replace('Acceptance / Cases', 'Other'),
+    'Comment Case #*', parsedCaseUpstream.names), false);
+  assert.equal(approvedCommentCaseRunSource('acceptance-case-ingest.yml',
+    commentCaseUpstream, 'Other*', parsedCaseUpstream.names), false);
   assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
   // The two unprivileged orphan producers cannot create a generic bypass.
   const signalConsumer = [
