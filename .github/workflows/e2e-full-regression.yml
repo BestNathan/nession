@@ -9,15 +9,10 @@ run-name: >-
       format('Convergence Full {0}@{1}', inputs.target_ref, inputs.target_sha) ||
       format('Full Regression {0}@{1}', github.ref_name, github.sha)) }}
 
-# Periodic Main health is independent of postmerge exact-SHA release
-# qualification (#2323). Default every 12h via GitHub Vars.
+# #3465: periodic Main diagnostics are never merge / release admission.
+# Default cadence every 12h via GitHub Vars; manual investigations remain
+# available, but Main pushes and convergence PRs do not auto-dispatch Full.
 on:
-  # Runtime-affecting Main merges need an immediate exact-merge-SHA Full;
-  # docs-only and workflow-router-only changes are not runtime evidence.
-  # Every Main push now runs this workflow so a non-applicable merge produces
-  # an explicit Not Required receipt instead of a silent path-filter skip.
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       target_ref:
@@ -53,67 +48,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  scope:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      applicable: ${{ steps.classify.outputs.applicable }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Classify the pushed change against the Full suite inputs
-        id: classify
-        env:
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          node scripts/e2e-full-applicability.mjs self-test
-          mkdir -p "$RUNNER_TEMP/e2e-scope"
-          applicable=true
-          : > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
-          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            git diff --name-only "$BEFORE" "$AFTER" | jq -R . | jq -s .               > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
-            applicable="$(node scripts/e2e-full-applicability.mjs classify               "$RUNNER_TEMP/e2e-scope/changed-paths.json"               "$RUNNER_TEMP/e2e-scope/classification.json" "$AFTER")"
-          else
-            echo "[]" > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
-            echo '{"applicable":true,"reason":"unverifiable-base","target_sha":"'"$AFTER"'"}'               > "$RUNNER_TEMP/e2e-scope/classification.json"
-            applicable=true
-          fi
-          echo "applicable=${applicable}" >> "$GITHUB_OUTPUT"
-          # The Acceptance harness reads job logs, not step summaries or
-          # artifacts. Emit the Not Required decision as a bounded, run-bound
-          # receipt a trusted collector can re-attest (#2478 SC-03).
-          echo "impact: applicable=${applicable} category=$(jq -r '.category // "unknown"' "$RUNNER_TEMP/e2e-scope/classification.json") reason=$(jq -r .reason "$RUNNER_TEMP/e2e-scope/classification.json") target=${AFTER}"
-          if [[ "$applicable" != "true" ]]; then
-            node scripts/e2e-full-applicability.mjs log-receipt \
-              "$RUNNER_TEMP/e2e-scope/classification.json"
-          fi
-          {
-            echo "## Full E2E applicability"
-            echo
-            echo "- Target SHA: \`${AFTER}\`"
-            echo "- Applicable: \`${applicable}\`"
-            echo "- Reason: \`$(jq -r .reason "$RUNNER_TEMP/e2e-scope/classification.json")\`"
-            if [[ "$applicable" != "true" ]]; then
-              echo "- Receipt: explicit **Not Required** (the Full suite is not run for this merge)"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the Not Required receipt
-        if: steps.classify.outputs.applicable != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-full-not-required-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/e2e-scope/e2e-full-not-required.json
-          if-no-files-found: error
-          retention-days: 30
-
   admit:
     if: github.event_name == 'schedule'
     concurrency:
@@ -150,17 +84,16 @@ jobs:
           node scripts/e2e-regression-policy.mjs admit-main-history
 
   full:
-    needs: [admit, scope]
+    needs: [admit]
     concurrency:
       group: e2e-full-regression-execution
       cancel-in-progress: false
     if: >-
       ${{ always() &&
           (github.event_name == 'workflow_dispatch' ||
-           (github.event_name == 'push' &&
-            needs.scope.result == 'success' &&
-            needs.scope.outputs.applicable == 'true') ||
-           (needs.admit.result == 'success' && needs.admit.outputs.run == 'true')) }}
+           (github.event_name == 'schedule' &&
+            needs.admit.result == 'success' &&
+            needs.admit.outputs.run == 'true')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 65
     permissions:
@@ -197,9 +130,9 @@ jobs:
         id: pin
         env:
           REQUESTED_REF: ${{ inputs.target_ref }}
-          # Push qualifies only its immutable merge commit, never a newer
-          # moving origin/main tip. Manual dispatch keeps explicit pinning.
-          REQUESTED_SHA: ${{ github.event_name == 'push' && github.sha || inputs.target_sha }}
+          # Periodic Main always tests the checked Main ref. A manual run may
+          # pin an explicit reachable SHA for independent investigation.
+          REQUESTED_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
           ref="$REQUESTED_REF"
