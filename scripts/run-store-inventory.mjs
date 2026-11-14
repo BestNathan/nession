@@ -552,7 +552,7 @@ function selfTest(){
     /Controller manual request must be unprivileged/);
   const unsafeControllerActor=new Map(sources);
   unsafeControllerActor.set(controllerRequest,unsafeControllerActor.get(controllerRequest)
-    .replace("github.actor == 'BestNathan'","github.actor == 'anyone'"));
+    .replaceAll("github.actor == 'BestNathan'","github.actor == 'anyone'"));
   assert.throws(()=>checkInventory(manifest,unsafeControllerActor),
     /Controller manual request must be unprivileged/);
   const unsafeControllerWriter=new Map(sources);

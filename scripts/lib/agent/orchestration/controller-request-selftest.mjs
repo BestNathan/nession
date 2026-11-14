@@ -44,6 +44,31 @@ const qwen=buildControllerRequest({...inputs,developer:'dev-qwen-01',
 assert.equal(qwen.request.developer,'dev-qwen-01');
 assert.equal(qwen.request.issue,issue);
 assert.equal(qwen.request.sha,inputs.input_sha);
+
+// #3488: bot may only carry an exact owner comment identity, never an
+// arbitrary provider/default/SHA. Ingest independently re-reads that comment
+// before granting the Store App token.
+const botRun={...context,actor:'github-actions[bot]',
+  source_comment_id:12345};
+const botInput={issue_number:'3433',input_sha:sourceSha,
+  developer:'dev-qwen-01',reviewer:'review-qwen-01',
+  acceptor:'accept-qwen-01'};
+const botDoc=buildControllerRequest(botInput,botRun,registry);
+assert.equal(botDoc.request.issue,3433);
+assert.equal(botDoc.run.source_comment_id,12345);
+for (const altered of [
+  {...botRun,source_comment_id:0},
+  {...botRun,source_comment_id:'12345'},
+  {...botRun,event:'issue_comment'},
+  {...botRun,ref:'refs/heads/feature'},
+]) assert.throws(()=>buildControllerRequest(botInput,altered,registry),
+  /untrusted Controller request context/);
+for (const mutated of [
+  {...botInput,input_sha:'b'.repeat(40)},
+  {...botInput,developer:'dev-cursor-01'},
+  {...botInput,reviewer:'review-cursor-01'},
+]) assert.throws(()=>buildControllerRequest(mutated,botRun,registry),
+  /untrusted Controller request context/);
 assert.deepEqual(qwen.request,{
   issue,sha:inputs.input_sha,developer:'dev-qwen-01',
   reviewer:'review-qwen-01',acceptor:'accept-qwen-01',
@@ -138,6 +163,9 @@ const artifact={id:555,name:'agent-controller-request-1001-1',
 const listing={artifacts:[artifact]};
 assert.deepEqual(verifyControllerRequestSource(upstream,listing,expected),
   {artifact_id:555,digest:artifact.digest});
+const botUpstream={...upstream,actor:{login:'github-actions[bot]'}};
+assert.deepEqual(verifyControllerRequestSource(botUpstream,listing,expected),
+  {artifact_id:555,digest:artifact.digest});
 assert.deepEqual(verifyControllerRequestSource({...upstream,event:'issue_comment'},
   listing,expected),{artifact_id:555,digest:artifact.digest});
 for(const change of [
@@ -167,7 +195,12 @@ try{
   const right=make(request);
   assert.deepEqual(inspectControllerRequestZip(right.bytes,right.digest,
     upstream,expected,registry),request);
-  const qwenZip=make(qwen);
+  const botZip=make(botDoc);
+  assert.deepEqual(inspectControllerRequestZip(botZip.bytes,botZip.digest,
+    botUpstream,expected,registry),botDoc);
+  assert.throws(()=>inspectControllerRequestZip(botZip.bytes,botZip.digest,
+    upstream,expected,registry),/source binding mismatch/);
+    const qwenZip=make(qwen);
   assert.deepEqual(inspectControllerRequestZip(qwenZip.bytes,qwenZip.digest,
     upstream,expected,registry),qwen);
   const forgedQwen=make({...qwen,request:{...qwen.request,

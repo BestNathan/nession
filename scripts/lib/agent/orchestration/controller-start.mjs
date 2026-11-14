@@ -129,6 +129,14 @@ function validatedAttestedRequest(filename){
   }
   const source=event?.workflow_run;
   const run=document?.run;
+  const botBug=run?.event==='workflow_dispatch' &&
+    run.actor==='github-actions[bot]' &&
+    Number.isSafeInteger(run.source_comment_id) &&
+    run.source_comment_id>0 &&
+    document?.request?.sha===run.head_sha &&
+    document?.request?.developer==='dev-qwen-01' &&
+    document?.request?.reviewer==='review-qwen-01' &&
+    document?.request?.acceptor==='accept-qwen-01';
   const qwenComment=run?.event==='issue_comment'&&
     document?.request?.issue===3001&&
     document.request.sha===run.head_sha&&
@@ -142,7 +150,7 @@ function validatedAttestedRequest(filename){
       run.workflow_path!=='.github/workflows/acceptance-agent-controller.yml'||
       (run.event!=='workflow_dispatch'&&!qwenComment)||
       source?.event!==run.event||run.ref!=='refs/heads/main'||
-      run.actor!=='BestNathan'||!SHA.test(run.head_sha??'')||
+      (run.actor!=='BestNathan'&&!botBug)||!SHA.test(run.head_sha??'')||
       source?.id!==run.run_id||source?.run_attempt!==run.attempt||
       source?.head_sha!==run.head_sha||
       source?.head_repository?.full_name!==REPO||
