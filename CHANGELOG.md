@@ -766,3 +766,10 @@
 - Categories: architecture, protocol, security, agent, server, web
 - Reason: Document the #3440 durable Server/Agent token model: registration-generation caching, handoff to the resolved Agent, recovery and rotation, the trusted-endpoint boundary, and the future user-identity direction
 - Source: https://github.com/BestNathan/nession/issues/3440
+
+## 2026-11-14T11:33:51Z | update | Terminal tools capsule chord and command ownership
+- Path: topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md
+- Topic: terminal
+- Categories: terminal, interaction, capsule, design, ownership
+- Reason: Record #3492's mode-aware upper-panel clearance: read-only policy selection from buffer/mouse state, alternate/mouse row reservation through the authorized ControlLease path, observer no-resize boundary, latched compact fallback, and exact-head browser/Agent evidence
+- Source: https://github.com/BestNathan/nession/issues/3492

@@ -186,7 +186,7 @@
       },
       {
         "title": "Terminal tools capsule chord and command ownership",
-        "description": "One upper Capsule slot for Terminal Keys and Quick Commands: one-shot modifier chords, Insert vs Run, and separate fit and scroll clearances",
+        "description": "One upper Capsule slot for Terminal Keys and Quick Commands: one-shot modifier chords, Insert vs Run, and mode-aware upper-panel clearance (reversible scroll for shells, reserved rows for full-screen TUIs)",
         "path": "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
         "status": "verified",
         "categories": [
@@ -196,7 +196,7 @@
           "design",
           "ownership"
         ],
-        "updated_at": "2026-11-04T08:40:00Z"
+        "updated_at": "2026-11-14T11:33:51Z"
       },
       {
         "title": "Web terminal emulator engine and component ownership",
