@@ -492,7 +492,7 @@ async function selfTest() {
     async path => path.endsWith('/compare/'+sha+'...'+targetMain)
       ? {status:'diverged'} : reads(path),
   ]) await assert.rejects(verifyManualPostMergeTarget(repository,targetMain,
-    [sourceMerge],'fixture-token',wrong),/historical target/);
+    [sourceMerge],'fixture-token',wrong),/historical (?:main )?target/);
   await assert.rejects(verifyManualPostMergeTarget(repository,targetMain,
     [{...sourceMerge,merged_at:null}],'fixture-token',reads),
     /no verified Issue-linked/);
