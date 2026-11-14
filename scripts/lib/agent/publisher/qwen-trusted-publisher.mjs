@@ -97,8 +97,9 @@ export function assertQwenPublisherRunAuthority(env,event,ingester,receipt){
       ingester.status!=='completed'||ingester.conclusion!=='success'||
       ingester.run_attempt!==1||
       ingester.path!=='.github/workflows/store-agent-development-ingest.yml'||
-      !(ingester.name==='Store / Agent Development Ingest'||
-        (botWake&&ingester.name==='Qwen Developer Ingest worker:'+receipt.run_id))||
+      (botWake
+        ? ingester.name!=='Qwen Developer Ingest worker:'+receipt.run_id
+        : ingester.name!=='Store / Agent Development Ingest')||
       ingester.head_branch!=='main'||
       ingester.repository?.full_name!==REPO||
       ingester.head_repository?.full_name!==REPO||
