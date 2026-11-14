@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "protocol", "agent", "integration", "ownership"]
 status: verified
 created_at: 2026-11-11T13:15:17Z
-updated_at: 2026-11-11T13:15:17Z
-sources: ["https://github.com/BestNathan/nession/issues/3264", "https://github.com/BestNathan/nession/pull/3289", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/crates/nession-mcp/src/tools/mod.rs"]
+updated_at: 2026-11-14T10:05:23Z
+sources: ["https://github.com/BestNathan/nession/issues/3264", "https://github.com/BestNathan/nession/pull/3289", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/crates/nession-mcp/src/tools/mod.rs", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/pull/3493"]
 ---
 
 # Nession MCP access layer semantic tool ownership and protocol versions
@@ -47,13 +47,15 @@ the endpoint runs or how a request routes.
   SSE stream and `DELETE` termination. The wire grammar is owned by the
   official Rust `rmcp` SDK, driven through hyper on a host's already-accepted
   connection; Nession keeps its own ToolHandler/ToolRegistry.
-- **Security and limits:** inbound bearer auth is fail-closed. A request
-  presenting a browser `Origin` is refused unless it matches
-  `[mcp] allowed_origins` (empty by default). The Host allowlist derives from
-  the listener bind and is disabled for an unspecified bind, where bearer auth
-  and the Origin policy remain the boundary. Request bodies (4 MiB), header
-  read time, tool deadlines and concurrent executions are bounded. No MCP Tool
-  mints or returns a P2P credential.
+- **Security and limits:** inbound bearer auth is endpoint-owned and
+  fail-closed (#3440): a Server-hosted MCP verifies the Server Token, an
+  Agent-hosted MCP verifies that Agent's durable Agent Token, and each refuses
+  the other value. A request presenting a browser `Origin` is refused unless it
+  matches `[mcp] allowed_origins` (empty by default). The Host allowlist derives
+  from the listener bind and is disabled for an unspecified bind, where bearer
+  auth and the Origin policy remain the boundary. Request bodies (4 MiB),
+  header read time, tool deadlines and concurrent executions are bounded. No
+  MCP Tool mints or returns a P2P credential.
 
 ## Context and evidence
 
@@ -68,7 +70,8 @@ Origin/auth/timeout negatives and SIGTERM shutdown.
 The Session authority used by the Agent-owned Tools is described by
 [Session metadata and display identity ownership](session-metadata-and-display-identity-ownership.md):
 both the Server and MCP route Session work to the owning Agent rather than
-creating a second authority.
+creating a second authority. The bearer each host verifies is described by
+[Endpoint-owned Server and Agent tokens](endpoint-owned-server-and-agent-tokens.md).
 
 ## Limits and when to revisit
 

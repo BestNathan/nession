@@ -745,3 +745,24 @@
 - Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
 - Reason: Record the #3449 ownership boundary between Server image bytes/grants and the Agent-owned shared mount manager, consumer leases and execution-scoped composition
 - Source: https://github.com/BestNathan/nession/issues/3449
+
+## 2026-11-14T10:05:23Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
+- Reason: Replace per-digest expiring access grants and the removed server.image.access unit with path-only grants and Server-Token blob authentication at the endpoint (#3440)
+- Source: https://github.com/BestNathan/nession/issues/3440
+
+## 2026-11-14T10:05:23Z | update | Nession MCP access layer semantic tool ownership and protocol versions
+- Path: topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md
+- Topic: engineering
+- Categories: architecture, protocol, agent, integration, ownership
+- Reason: Record endpoint-owned MCP bearer verification: each host verifies its own Server or Agent token and refuses the other (#3440)
+- Source: https://github.com/BestNathan/nession/issues/3440
+
+## 2026-11-14T10:05:23Z | create | Endpoint-owned Server and Agent tokens
+- Path: topics/engineering/endpoint-owned-server-and-agent-tokens.md
+- Topic: engineering
+- Categories: architecture, protocol, security, agent, server, web
+- Reason: Document the #3440 durable Server/Agent token model: registration-generation caching, handoff to the resolved Agent, recovery and rotation, the trusted-endpoint boundary, and the future user-identity direction
+- Source: https://github.com/BestNathan/nession/issues/3440

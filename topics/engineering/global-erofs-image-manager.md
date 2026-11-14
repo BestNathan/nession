@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "erofs", "images", "server", "storage", "security", "agent", "workspace", "sandbox"]
 status: verified
 created_at: 2026-11-09T12:54:48Z
-updated_at: 2026-11-14T05:51:34Z
-sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/issues/3023", "https://github.com/BestNathan/nession/pull/3125", "https://github.com/BestNathan/nession/issues/3181", "https://github.com/BestNathan/nession/pull/3309", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/sandbox-policy-and-execution.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/cache.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/sandbox/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/db/migration/m009_image_access_grants_consumers.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-agent/src/sandbox_images.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/web/src/capabilities/images/ImagesPlugin.ts", "https://github.com/BestNathan/nession/issues/3334", "https://github.com/BestNathan/nession/pull/3354", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/builds.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/web/src/capabilities/images/ImagesPlugin.ts", "https://github.com/BestNathan/nession/issues/3449", "https://github.com/BestNathan/nession/pull/3450", "https://github.com/BestNathan/nession/blob/46d7a906730f9fc048e4bbf43d5e5fd3b23183fe/crates/nession-erofs/src/mount_manager.rs"]
+updated_at: 2026-11-14T10:05:23Z
+sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/issues/3023", "https://github.com/BestNathan/nession/pull/3125", "https://github.com/BestNathan/nession/issues/3181", "https://github.com/BestNathan/nession/pull/3309", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/sandbox-policy-and-execution.md", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/cache.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/sandbox/v1.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/db/migration/m009_image_access_grants_consumers.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-agent/src/sandbox_images.rs", "https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/web/src/capabilities/images/ImagesPlugin.ts", "https://github.com/BestNathan/nession/issues/3334", "https://github.com/BestNathan/nession/pull/3354", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/builds.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/web/src/capabilities/images/ImagesPlugin.ts", "https://github.com/BestNathan/nession/issues/3449", "https://github.com/BestNathan/nession/pull/3450", "https://github.com/BestNathan/nession/blob/46d7a906730f9fc048e4bbf43d5e5fd3b23183fe/crates/nession-erofs/src/mount_manager.rs", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/pull/3493"]
 ---
 
 
@@ -32,23 +32,23 @@ adapter and the protocol projection.
 Workspace discovers a Session-free Images capability, Project and Sandbox own
 independent selection flows, and an existing Session can Enter a Sandbox Pane
 whose root is composed from Server-authorized images. The Server remains the
-only owner of metadata and bytes; the Agent only fetches what a scoped grant
-authorizes.
+only owner of metadata and bytes; the Agent only fetches paths the Server
+resolved for it, authenticating with the Server Token (#3440).
 
 ## Ownership
 
 | Thing | Owner |
 |---|---|
 | Source validation, build worker, `mkfs.erofs`, digest | `nession-erofs` + `nession-server/src/image` |
-| Image/alias/lease/grant metadata | Server SQLite (`m007_erofs_images`; ephemeral grants rebuilt by `m009_image_access_grants_consumers`) |
+| Image/alias/lease metadata | Server SQLite (`m007_erofs_images`; the retired `m009_image_access_grants_consumers` table is not read for authorization) |
 | `image_digest` reference | Project declaration (`projects.image_digest`); Project never owns bytes |
 | Workspace Images discovery/operation | `web/src/capabilities/images` (Session-free capability; no permanent sidebar item) |
-| Sandbox image selection/composition | Sandbox capability owns target/mode/digest pins; Server mints grants; Agent prepares the local composition |
+| Sandbox image selection/composition | Sandbox capability owns target/mode/digest pins; the Server resolves path grants; the Agent prepares the local composition |
 | Sandbox policy/execution | `nession-sandbox`; it is not a container or image manager |
 | Physical read-only mount sharing | `nession-erofs::mount_manager` (#3449): one FUSE mount per verified digest per Agent identity/mount namespace, consumer leases, strict reclamation |
 | Mount manager instance, cache pins, durable consumers | `nession-agent`; Sandbox records leases and owns only execution-scoped composition |
 
-The physical mount layer is separate from image ownership: the Server still owns bytes and grants, while the Agent-owned `MountManager` deduplicates read-only FUSE mounts by digest and hands each execution a non-unmount-capable lease. See [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md#shared-recoverable-erofs-mounts-3449) for the lease/recovery contract and its merged-staging evidence (#3449).
+The physical mount layer is separate from image ownership: the Server still owns bytes and their path resolution, while the Agent-owned `MountManager` deduplicates read-only FUSE mounts by digest and hands each execution a non-unmount-capable lease. See [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md#shared-recoverable-erofs-mounts-3449) for the lease/recovery contract and its merged-staging evidence (#3449).
 
 The canonical cross-reference is [Project declaration and Workspace location
 ownership](project-declaration-and-workspace-location-ownership.md), which
@@ -160,18 +160,20 @@ exists.
 - **Aliases** are mutable tags (`[a-z0-9][a-z0-9._-]{0,127}`) that resolve to a
   digest only after the bytes are ready. Moving a tag changes the tag, not the
   old digest's references.
-- **Access grants.** `server.image.access` mints a random, SHA-256-stored,
-  expiring bearer token for exactly one consumer: a Project that durably
-  references the digest, or an authenticated Session whose ready Managed
-  context resolved it. The token is bound to `(project_id | session_id,
-  digest)`. Sandbox Enter is a separate Server-originated path: after
-  validating the Web-safe selection and Server readiness, it mints one
-  `grant_sandbox_access(session_id, digest)` per selected image. Knowing a
-  digest never authorizes its bytes.
+- **Path grants.** The Server resolves a Ready digest to a blob route for an
+  authorized consumer: a Project that durably references the digest, or an
+  authenticated Session whose ready Managed context resolved it. Sandbox Enter
+  is a separate Server-originated path: after validating the Web-safe selection
+  and Server readiness, it returns one path-only `ManagedImageGrant` per
+  selected image. There is no per-digest bearer to mint (#3440); the scope
+  rules decide which route the Server hands out, not who may read the bytes.
 - **HTTP.** The existing Server listener serves
   `/images/blobs/<digest>` with GET/HEAD, `200`/`206`/`304`/`403`/`404`/`416`,
-  one `Range`, `ETag`, `Accept-Ranges` and `X-Nession-Image-Digest`. A grant for
-  Project A cannot read Project B's bytes by knowing its digest.
+  one `Range`, `ETag`, `Accept-Ranges` and `X-Nession-Image-Digest`. The route
+  requires the Server Token and authenticates it **before** resolving the
+  digest: a missing or wrong bearer is `403` regardless of the digest, and an
+  authenticated unknown digest is `404`. See
+  [Endpoint-owned Server and Agent tokens](endpoint-owned-server-and-agent-tokens.md).
 - **Complete inventory.** `server.image.list` takes absolute `offset`, `limit`
   (default/max 200) and an optional `query` over alias, digest, image id and
   persisted source. The reply carries `total`, `next_offset` while more rows
@@ -197,11 +199,12 @@ exists.
 ## Agent cache and durable storage (#3023)
 
 The Agent consumes a digest, never a logical image: the Server resolves the
-image and mints a scoped grant, and the Agent keeps only a local copy of bytes
-it was authorized to read. The cache is the Agent-side mirror of the Server's
-blob store; it does not build, tag or resolve images. The durable download,
-resume, verify and pin mechanics live in `nession-erofs::cache`; the Agent owns
-the configured root and identity and projects readiness into the wire contract.
+image to an authorized path, and the Agent keeps only a local copy of bytes it
+fetched with the Server Token. The cache is the Agent-side mirror of the
+Server's blob store; it does not build, tag or resolve images. The durable
+download, resume, verify and pin mechanics live in `nession-erofs::cache`; the
+Agent owns the configured root and identity and projects readiness into the
+wire contract.
 
 - **Configuration.** `[erofs] storage_dir` in the Agent TOML. Precedence is
   explicit TOML, `NESION_EROFS_STORAGE_DIR`, `$NESION_HOME/erofs`, then the
@@ -241,7 +244,7 @@ All five runtime criteria passed source-aligned Cases in Case Smoke run
 documentation criterion passed the trusted agent in run `42616398587` at the
 same head. The Cases build a real EROFS image with `erofs-utils` (superblock
 magic at byte 1024), prove shallow/tagless/committable snapshots, deterministic
-digest reuse, HTTP Range/ETag/403/404/416 and Project-isolated grants, GC
+digest reuse, HTTP Range/ETag/403/404/416 and Project-scoped path resolution, GC
 protection and restart persistence. Staging deployed server/agent/ui image
 `5e9a2d8`; the server pod started with the m007 migration applied.
 
@@ -289,7 +292,7 @@ keeps `AGENT_EROFS_STORAGE_DIR=/data/erofs` on the existing
   `/opt/<name>` Toolchain), enforces read-only/overlay rules, and pins the
   resolved digest at selection time. It never exposes native image paths to the
   Web client. Alias mutation changes the alias, not an existing pinned digest.
-- **Enter.** The Agent fetches each grant into its identity cache, creates an
+- **Enter.** The Agent fetches each resolved image path into its identity cache, creates an
   Agent-owned bounded workspace, builds the canonical `filesystem.composition`
   (Base at `/`, workspace overlay at `/workspace`, toolchains at
   `/opt/<name>`), and hands local paths to `nession-sandbox`. Preflight composes
@@ -330,9 +333,10 @@ observed Running at that image.
   root is the V1 deployment condition. Build retention is
   `image_build_retention_secs`; a disabled GC schedule also disables the
   scheduled build-directory cleanup.
-- Digest dedupe is physical only; every consumer authorization is checked
-  independently. A Project referencing a missing digest remains a declaration;
-  `server.image.access` refuses until the image is ready. An Agent cache
+- Digest dedupe is physical only; the Server checks the Project/Session scope
+  before it hands out a path, while the blob route itself is guarded by the
+  Server Token. A Project referencing a missing digest remains a declaration;
+  the Server resolves no path until the image is ready. An Agent cache
   observation is not persisted Server state: it is re-read through the
   authenticated Session context.
 - The Agent cache is a delivered component with its own configuration and
