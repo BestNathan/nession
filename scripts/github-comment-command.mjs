@@ -16,6 +16,10 @@ export const COMMANDS = Object.freeze({
   // #3488: a request to the trusted Controller, not permission to invoke a Worker.
   '/develop dev-qwen-01': Object.freeze({ kind: 'issue', handler: 'develop',
     workflow: 'acceptance-agent-controller.yml' }),
+  // #3491: Owner may request ingestion of an already-finished Store-admitted
+  // Worker. The comment has no Run ID or provider credentials.
+  '/develop result': Object.freeze({ kind: 'issue', handler: 'develop-result',
+    workflow: 'store-agent-development-ingest.yml' }),
   '/e2e full': Object.freeze({ kind: 'pull_request', handler: 'e2e-full', workflow: 'e2e-full-regression.yml' }),
 });
 const CASE_COMMAND = Object.freeze({ kind: 'issue', handler: 'case', workflow: 'acceptance-cases.yml' });
@@ -58,6 +62,13 @@ export function commandPlan(event, comment, issue, pr, permission) {
       !issue.labels.some(label => label.name === 'bug') ||
       issue.labels.some(label => label.name === 'status:in-progress')
     )) return null;
+  if (def.handler === 'develop-result' && (
+      comment.user.login !== 'BestNathan' || comment.author_association !== 'OWNER' ||
+      comment.created_at !== comment.updated_at ||
+      issue.state !== 'open' || !Array.isArray(issue.labels) ||
+      !issue.labels.some(label => label.name === 'bug') ||
+      !issue.labels.some(label => label.name === 'status:in-progress')
+    )) return null;
   if (Boolean(event.issue.pull_request) !== isPr ||
       (def.kind === 'issue' && isPr) ||
       (def.kind === 'pull_request' && !isPr)) return null;
@@ -89,6 +100,8 @@ export function commandPlan(event, comment, issue, pr, permission) {
 export function workflowTitle(plan) {
   if (plan.handler === 'audit') return 'Comment Audit #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'accept') return 'Comment Accept #' + plan.issue_number + ' comment:' + plan.comment_id;
+  if (plan.handler === 'develop-result') return 'Comment Develop Result #' +
+    plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'develop') return 'Comment Develop #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'case') return 'Comment Case #' + plan.issue_number + ' ' + plan.criterion + ' comment:' + plan.comment_id;
   if (plan.handler === 'e2e-full') return 'Comment E2E #' + plan.issue_number + ' comment:' + plan.comment_id;
@@ -110,6 +123,7 @@ export function dispatchInputs(plan) {
         target_ref: plan.target_ref, target_sha: plan.target_sha,
         source_comment_id: String(plan.comment_id), source_pr_number: String(plan.issue_number),
       };
+    case 'develop-result': return {};
     default: throw Error('unknown handler');
   }
 }
@@ -153,6 +167,19 @@ function fixtures() {
     [develop, { ...bug, pull_request: { url: 'pr' } }, { ...devEvent,
       issue: { number: 12, pull_request: { url: 'pr' } } }],
   ]) check(commandPlan(e, c, i, null, 'write') === null, 'developer negative permission/scope');
+  const resultEvent={...devEvent,comment:{...devEvent.comment,body:'/develop result'}};
+  const resultComment={...develop,body:'/develop result'};
+  const inProgress={...bug,labels:[...bug.labels,{name:'status:in-progress'}]};
+  check(commandPlan(resultEvent,resultComment,inProgress,null,'write')
+    ?.handler==='develop-result','owner may recover existing Bug Worker');
+  for(const [c,i] of [
+    [{...resultComment,user:{login:'other'}},inProgress],
+    [{...resultComment,updated_at:'2026-11-14T02:00:00Z'},inProgress],
+    [resultComment,bug],
+    [resultComment,{...inProgress,state:'closed'}],
+    [resultComment,{...inProgress,pull_request:{url:'fake'}}],
+  ])check(commandPlan(resultEvent,c,i,null,'write')===null,
+    'result replay only on unchanged owner open in-progress Bug');
   check(parseCommand('/develop') === null &&
     parseCommand('/develop dev-qwen-01 extra') === null &&
     parseCommand('/develop dev-qwen-01\\nignore') === null, 'developer grammar strict');

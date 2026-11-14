@@ -286,6 +286,42 @@ async function selfTest() {
   const pr = { number: 21, title: 'fix (#19)', body: 'Fixes #19', head: { sha },
     base: { ref: 'staging' }, merged_at: '2026-11-11T01:00:00Z', merge_commit_sha: sha };
   assert.equal(decideIssueClosure(issue, [pr]).action, 'close');
+  // Regression #3491: a main merge with unchecked/unevaluated main-stage SC
+  // must remain open for the merged-SHA Acceptance selector to discover it.
+  const mainPendingBody = body.replace('- [x] SC-01', '- [ ] SC-01')
+    .replace('when: pr\n', 'when: merged\n    branch: main\n')
+    .replace('| SC-01 | Pass |', '| SC-01 | Pending |');
+  assert.equal(decideIssueClosure(
+    { ...issue, body: mainPendingBody }, [{ ...pr, base: { ref: 'main' } }]
+  ).action, 'pending');
+  // Mirror #3491's two main-only SCs and the merged implementation PR.
+  // Both must remain pending for the post-merge runner; merge is not proof.
+  const twoPendingMainScs = [
+    '## Success Criteria',
+    '- [ ] SC-01 verify source-bound Worker Store Ingest',
+    '- [ ] SC-02 verify Publisher PR and immutable checkpoint',
+    '', '## Acceptance Plan', '```yaml', 'acceptance:',
+    '  SC-01:', '    when: merged', '    branch: main', '    method: agent',
+    '  SC-02:', '    when: merged', '    branch: main', '    method: agent',
+    '```', '', '## Acceptance Report', '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-01 | Pending | waiting for signed Worker run readback |',
+    '| SC-02 | Pending | waiting for Publisher source PR |',
+  ].join('\n');
+  const pendingVerdict = decideIssueClosure(
+    { ...issue, number: 3491, body: twoPendingMainScs },
+    [{ ...pr, base: { ref: 'main' }, number: 3513 }],
+  );
+  assert.equal(pendingVerdict.action, 'pending');
+  assert.match(pendingVerdict.reason, /SC-01 is not checked/);
+  assert.match(pendingVerdict.reason, /SC-02 is not checked/);
+
+  assert.equal(decideIssueClosure(
+    { ...issue, body: mainPendingBody
+      .replace('- [ ] SC-01', '- [x] SC-01')
+      .replace('| SC-01 | Pending |', '| SC-01 | Pass |') },
+    [{ ...pr, base: { ref: 'main' } }]
+  ).action, 'close');
   assert.equal(decideIssueClosure({ ...issue, labels: [{ name: 'requirement' }] }, [pr]).action, 'close');
   assert.equal(decideIssueClosure(issue, [pr], { manualReopened: true }).action, 'pending');
   assert.equal(decideIssueClosure(issue, [pr], {

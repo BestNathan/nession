@@ -11,6 +11,7 @@ mod image_build_restart;
 mod mcp;
 mod offline_grace;
 mod probe_sweep;
+mod registry_boundary;
 mod relay;
 mod session_command;
 mod session_registry;

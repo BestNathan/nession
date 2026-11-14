@@ -40,8 +40,9 @@ function object(value, label) {
   return value;
 }
 
-// `staging` is the Staging Development Complete proof for THIS Issue: every
-// applicable SC passed in one eligible lane at the exact tested revision.
+// `staging` is the release pipeline's staging milestone at an exact source
+// revision. It does not prove completion of Issue SCs scheduled for main or
+// deployment; only requirement-acceptance + issue-lifecycle-reconcile own closure.
 export function lifecycleState({ staging, promotion = null, regression = null, release = null }) {
   const staged = object(staging, 'staging evidence');
   const stageLane = lane(staged.environment_id ?? staged.lane);
@@ -112,10 +113,6 @@ export function lifecycleState({ staging, promotion = null, regression = null, r
     main_promoted: mainPromoted,
     regression_qualified: regressionQualified,
     released,
-    // The owner rule: an ordinary Issue is complete when its applicable SCs
-    // pass in an eligible Staging lane. It does not wait for Main promotion or
-    // for any Full Regression. Later failures open incidents, not fake Pending.
-    issue_may_close: developmentComplete,
     blockers,
   };
 }
@@ -130,12 +127,14 @@ function selfTest() {
 
   assert.equal(lifecycleState({ staging: { ...staging, applicable_sc_passed: false } }).state,
     'in-development');
-  assert.equal(lifecycleState({ staging: { ...staging, applicable_sc_passed: false } }).issue_may_close,
+  assert.equal(lifecycleState({ staging: { ...staging, applicable_sc_passed: false } }).development_complete,
     false);
 
   const staged = lifecycleState({ staging });
   assert.equal(staged.state, 'development-complete');
-  assert.equal(staged.issue_may_close, true);
+  assert.equal(staged.development_complete, true);
+  assert.equal(Object.hasOwn(staged, 'issue_may_close'), false,
+    'release staging milestone must never authorize Issue closure');
   assert.equal(staged.main_promoted, false);
   assert.deepEqual(staged.blockers, ['not-promoted-to-main']);
 
