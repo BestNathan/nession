@@ -68,25 +68,39 @@ function successfulJob(jobs, name, step, run, attempt) {
 
 // Pure attestation: callers supply GitHub REST run/job observations obtained
 // using read-only trusted-main credentials, never from the PR or model.
-export function attestPrWebQuality(sha, runsPayload, jobsPayload) {
-  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
-  if (!Array.isArray(runsPayload?.workflow_runs)) {
-    return { status: 'pending', reason: 'Quality workflow run listing unavailable' };
-  }
-  const matching = runsPayload.workflow_runs.filter(run =>
+function matchingQualityRuns(runs, sha) {
+  return (Array.isArray(runs) ? runs : []).filter(run =>
     run?.name === 'CI / Quality Gate' &&
     [WORKFLOW, WORKFLOW + '@refs/heads/main'].includes(run.path) &&
     run.event === 'pull_request' && run.head_sha === sha &&
     run.repository?.full_name === REPO &&
     run.head_repository?.full_name === REPO &&
-    positiveInteger(run.id) && positiveInteger(run.run_attempt));
+    positiveInteger(run.id) && positiveInteger(run.run_attempt))
+    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')) ||
+      b.id - a.id);
+}
+
+export function requiresPrToolingEvidence(context) {
+  // SCN-05 is the existing CI/GitHub-governance proof scenario. Only
+  // criteria that explicitly concern Gate/CI execution ask for this receipt.
+  // It documents tested tooling, never a successful Web integration run.
+  return context?.stage === 'pr' &&
+    /\bSCN-05\b/.test(String(context.requirement_body ?? '')) &&
+    (context.criteria ?? []).some(item =>
+      /\b(?:CI|Quality|Gate|workflow|test)\b/i.test(String(item.text ?? '')));
+}
+
+export function attestPrWebQuality(sha, runsPayload, jobsPayload) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  if (!Array.isArray(runsPayload?.workflow_runs)) {
+    return { status: 'pending', reason: 'Quality workflow run listing unavailable' };
+  }
+  const matching = matchingQualityRuns(runsPayload.workflow_runs, sha);
   if (!matching.length) {
     return { status: 'pending', reason: 'no authenticated exact-HEAD PR Quality run' };
   }
   // A new run/attempt supersedes an earlier one; never borrow an earlier
   // successful attempt while its rerun is still pending or has failed.
-  matching.sort((a,b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')) ||
-    b.id - a.id);
   const run = matching[0];
   if (!Array.isArray(jobsPayload?.jobs) ||
       jobsPayload.total_count > 100 || jobsPayload.jobs.length > 100) {
@@ -134,15 +148,7 @@ export function collectPrWebQuality(sha, request = githubJson) {
     if (!Array.isArray(runs?.workflow_runs)) {
       return { status: 'pending', reason: 'GitHub Quality run listing unavailable' };
     }
-    const candidates = runs.workflow_runs.filter(run =>
-      run?.name === 'CI / Quality Gate' &&
-      [WORKFLOW, WORKFLOW + '@refs/heads/main'].includes(run.path) &&
-      run.event === 'pull_request' && run.head_sha === sha &&
-      run.repository?.full_name === REPO &&
-      run.head_repository?.full_name === REPO &&
-      positiveInteger(run.id) && positiveInteger(run.run_attempt))
-      .sort((a,b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')) ||
-        b.id - a.id);
+    const candidates = matchingQualityRuns(runs.workflow_runs, sha);
     if (!candidates.length) return attestPrWebQuality(sha, runs, null);
     const run = candidates[0];
     const jobs = request('/repos/' + REPO + '/actions/runs/' + run.id +
@@ -151,6 +157,65 @@ export function collectPrWebQuality(sha, request = githubJson) {
   } catch (error) {
     console.error('Trusted PR Quality readback failed:', error instanceof Error ? error.message : String(error));
     return { status: 'pending', reason: 'authenticated GitHub Quality readback unavailable' };
+  }
+}
+
+
+// This second typed receipt comes from the SAME PR Quality run selector as
+// Web execution proof. It attests the canonical tooling self-test suite for
+// CI-governance SCs (SCN-05). A skipped web-tests job is not promoted to Pass.
+export function attestPrToolingQuality(sha, runsPayload, jobsPayload) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  const matching = matchingQualityRuns(runsPayload?.workflow_runs, sha);
+  if (!matching.length) {
+    return { status: 'pending', reason: 'no authenticated exact-HEAD PR Quality run' };
+  }
+  const run = matching[0];
+  if (run.status !== 'completed' || run.conclusion !== 'success') {
+    return { status: run.status === 'completed' ? 'fail' : 'pending',
+      reason: 'Quality workflow is ' + String(run.status ?? 'unknown') +
+        '/' + String(run.conclusion ?? 'pending') };
+  }
+  if (!Array.isArray(jobsPayload?.jobs) || jobsPayload.total_count > 100 ||
+      jobsPayload.jobs.length > 100) {
+    return { status: 'pending', reason: 'exact-attempt Quality job evidence unavailable' };
+  }
+  const tooling = successfulJob(jobsPayload.jobs, 'tooling-check',
+    'Verify repository tooling Gates', run, run.run_attempt);
+  const aggregate = successfulJob(jobsPayload.jobs, 'web-check',
+    CHECK_STEP, run, run.run_attempt);
+  if (!tooling.id || !aggregate.id) {
+    const reason = [tooling.reason, aggregate.reason].filter(Boolean).join('; ');
+    const fail = jobsPayload.jobs.some(job =>
+      ['tooling-check', 'web-check'].includes(job.name) &&
+      job.status === 'completed' &&
+      ['failure', 'timed_out', 'cancelled', 'skipped'].includes(job.conclusion));
+    return { status: fail ? 'fail' : 'pending', reason };
+  }
+  return { status: 'pass', receipt: {
+    kind: 'pr_tooling_quality_execution_v1', repository: REPO,
+    workflow: WORKFLOW, head_sha: sha,
+    run_id: run.id, run_attempt: run.run_attempt, result: 'success',
+    tooling_job_id: tooling.id, aggregate_job_id: aggregate.id,
+    tooling_gate_step: 'Verify repository tooling Gates',
+    aggregate_step: CHECK_STEP,
+    note: 'Verified Quality tooling Gates only; not a Web integration test receipt',
+  }};
+}
+
+export function collectPrToolingQuality(sha, request = githubJson) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  try {
+    const q = new URLSearchParams({head_sha: sha, event: 'pull_request', per_page: '25'});
+    const runs = request('/repos/' + REPO + '/actions/workflows/ci-quality.yml/runs?' + q);
+    const candidate = matchingQualityRuns(runs?.workflow_runs, sha)[0];
+    const jobs = candidate ? request('/repos/' + REPO + '/actions/runs/' + candidate.id +
+      '/attempts/' + candidate.run_attempt + '/jobs?per_page=100') : null;
+    return attestPrToolingQuality(sha, runs, jobs);
+  } catch (error) {
+    console.error('Trusted PR tooling Quality readback failed:',
+      error instanceof Error ? error.message : String(error));
+    return { status: 'pending', reason: 'authenticated GitHub tooling Quality readback unavailable' };
   }
 }
 
@@ -220,6 +285,36 @@ function selfTest() {
   assert.equal(attestPrWebQuality(sha, newestPending, {
     jobs: [job('web-tests', 10, GATE_STEP), { ...jobs.jobs[1], status: 'in_progress', conclusion: null }],
   }).status, 'pending');
+  // Real SCN-05 fixtures must observe the successfully executed canonical
+  // tooling suite while still refusing to claim a skipped Web test executed.
+  const toolingJobs = { total_count: 2,
+    jobs: [job('tooling-check', 12, 'Verify repository tooling Gates'),
+      jobs.jobs[1]] };
+  const completed = { workflow_runs: [{
+    ...run, status: 'completed', conclusion: 'success',
+  }] };
+  const tooling = attestPrToolingQuality(sha, completed, toolingJobs);
+  assert.equal(tooling.status, 'pass');
+  assert.equal(tooling.receipt.tooling_job_id, 12);
+  assert.equal(attestPrToolingQuality(sha, completed, {
+    ...toolingJobs, jobs: [jobs.jobs[0], jobs.jobs[1]],
+  }).status, 'pending');
+  assert.equal(attestPrToolingQuality(sha, completed, {
+    ...toolingJobs, jobs: [{ ...toolingJobs.jobs[0], conclusion: 'failure' }, jobs.jobs[1]],
+  }).status, 'fail');
+  assert.equal(attestPrToolingQuality(sha, completed, {
+    ...toolingJobs, jobs: [{ ...toolingJobs.jobs[0], run_attempt: 1 }, jobs.jobs[1]],
+  }).status, 'pending');
+  assert.equal(attestPrToolingQuality(other, completed, toolingJobs).status, 'pending');
+  assert.equal(attestPrToolingQuality(sha, { workflow_runs: [run] },
+    toolingJobs).status, 'pending');
+  assert.equal(requiresPrToolingEvidence({ stage: 'pr',
+    requirement_body: 'SCN-05 (trusted CI / Workflow provenance)',
+    criteria: [{ text: 'An exact-head Web Gate cannot Pass while pending' }] }), true);
+  assert.equal(requiresPrToolingEvidence({ stage: 'pr',
+    requirement_body: 'SCN-01 Web fixtures',
+    criteria: [{ text: 'An exact-head Web Gate cannot Pass while pending' }] }), false);
+
   const body = 'Scenario mapping: SCN-01 Web integration fixtures; exact PR HEAD Quality/Web.';
   const executable = { criterion: 'SC-03', text: 'A deterministic integration test records bounded requests and checks navigation-away behavior.' };
   const staticSc = { criterion: 'SC-01', text: 'Opening an App Files directory issues a bounded number of requests.' };
