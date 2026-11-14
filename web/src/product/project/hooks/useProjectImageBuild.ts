@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   imagesApi,
   isTerminalBuild,
@@ -84,21 +84,20 @@ function useBuildRecovery(
 
 /** Follow the durable record while it is active. */
 function useBuildFollow(
-  build: ImageBuildDescriptor | null,
-  active: boolean,
-  setBuild: (build: ImageBuildDescriptor) => void,
+  setBuild: Dispatch<SetStateAction<ImageBuildDescriptor | null>>,
 ): void {
-  const buildId = build?.build_id ?? null;
   useEffect(() => {
-    if (!buildId || !active) {
-      return;
-    }
+    // Register before any submission can begin. Subscribing only after the
+    // submitted build renders as active loses terminal notifications arriving
+    // between commit and the next passive effect.
     return imagesApi.onBuildChanged((next) => {
-      if (next.build_id === buildId) {
-        setBuild(next);
-      }
+      setBuild((current) =>
+        current && !isTerminalBuild(current) && current.build_id === next.build_id
+          ? next
+          : current,
+      );
     });
-  }, [buildId, active, setBuild]);
+  }, [setBuild]);
 }
 
 /** Resolve a succeeded build's immutable registry descriptor. */
@@ -144,7 +143,7 @@ export function useProjectImageBuild(
   const active = build !== null && !isTerminalBuild(build);
 
   useBuildRecovery(repositoryUrl, reference, setBuildState, setBuiltImageState);
-  useBuildFollow(build, active, setBuildState);
+  useBuildFollow(setBuildState);
   useBuiltImage(build, setBuiltImageState);
 
   const start = useCallback(async () => {
