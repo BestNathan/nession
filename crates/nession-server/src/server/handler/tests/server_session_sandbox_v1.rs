@@ -655,3 +655,388 @@ async fn preflight_refuses_local_root_with_mounts_before_routing() {
         .unwrap_or_default()
         .contains("Local cannot carry"));
 }
+
+// ---------------------------------------------------------------------------
+// #3407 SC-02/SC-04: Project Location resolution and the managed Workspace
+// EROFS lower.
+// ---------------------------------------------------------------------------
+
+use nession_protocol::contracts::project::v1::ProjectLocation;
+
+fn source_digest() -> String {
+    format!("sha256:{}", "c".repeat(64))
+}
+
+async fn seed_project(
+    h: &ConnectionHandler,
+    project_id: &str,
+    locations: Vec<ProjectLocation>,
+    image_digest: Option<String>,
+) {
+    h.db.insert_project(&crate::db::ProjectRow {
+        project_id: project_id.to_string(),
+        name: "Fixtures".to_string(),
+        description: None,
+        source: None,
+        locations,
+        session_defaults: None,
+        image_digest,
+        created_at: 1,
+        updated_at: 1,
+    })
+    .await
+    .unwrap();
+}
+
+async fn bind_project(h: &ConnectionHandler, session_id: &str, agent_id: &str, project_id: &str) {
+    h.db.upsert_session_project_binding(&crate::db::SessionProjectBindingRow {
+        session_id: session_id.to_string(),
+        agent_id: agent_id.to_string(),
+        project_id: project_id.to_string(),
+        incarnation_id: String::new(),
+        agent_created_at: 0,
+        revision: 1,
+        updated_at: 1,
+    })
+    .await
+    .unwrap();
+}
+
+fn workspace_policy(workspace: serde_json::Value) -> serde_json::Value {
+    json!({
+        "enabled": true,
+        "filesystem": {
+            "access": { "read": [], "write": [] },
+            "rootfs": { "kind": "image", "digest": base_digest() },
+            "workspace": workspace,
+        },
+    })
+}
+
+fn preflight_ok() -> serde_json::Value {
+    json!({
+        "success": true,
+        "result": {
+            "ok": true,
+            "generation": "gen-1",
+            "mechanisms": ["filesystem.erofs"],
+            "errors": [],
+            "warnings": [],
+            "catalog": {
+                "status": "available",
+                "platform": "linux",
+                "backend": "linux-bwrap",
+                "probe_generation": "probe-1",
+                "source": "agent-host-probe",
+                "resource_fields": [],
+                "syscall_fields": [],
+            },
+        }
+    })
+}
+
+#[tokio::test]
+async fn preflight_auto_selects_the_matching_project_location() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    seed_project(
+        &h,
+        "p1",
+        vec![ProjectLocation {
+            agent_id: "a1".to_string(),
+            path: "/work/project".to_string(),
+        }],
+        Some(source_digest()),
+    )
+    .await;
+    bind_project(&h, "a1:s1", "a1", "p1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.preflight",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "policy": workspace_policy(json!({ "kind": "auto" })),
+            "images": [],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.preflight",
+            preflight_ok(),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["ok"], true);
+    assert_eq!(sent["payload"]["project_location"], "/work/project");
+    let images = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(
+        images.len(),
+        1,
+        "the Project Location is not an image lower"
+    );
+    assert_eq!(images[0]["role"], "base");
+}
+
+#[tokio::test]
+async fn preflight_explicit_project_location_on_another_agent_fails_closed() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    seed_project(
+        &h,
+        "p1",
+        vec![ProjectLocation {
+            agent_id: "a2".to_string(),
+            path: "/work/project".to_string(),
+        }],
+        None,
+    )
+    .await;
+    bind_project(&h, "a1:s1", "a1", "p1").await;
+
+    let reply = parse_reply(
+        h.handle_message(proto_msg(
+            "server.session.sandbox.preflight",
+            json!({
+                "session_id": "a1:s1",
+                "generation": "gen-1",
+                "policy": workspace_policy(json!({ "kind": "project_location" })),
+            }),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_eq!(reply["payload"]["ok"], false);
+    assert_eq!(
+        reply["payload"]["errors"][0]["field"],
+        "filesystem.workspace"
+    );
+    assert_eq!(
+        reply["payload"]["errors"][0]["code"],
+        "project-location-missing"
+    );
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("no Existing Location on this Agent"));
+}
+
+#[tokio::test]
+async fn preflight_managed_workspace_pins_the_project_source_image_as_lower() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    insert_ready_image(&h, "image-source", &source_digest()).await;
+    seed_project(&h, "p1", Vec::new(), Some(source_digest())).await;
+    bind_project(&h, "a1:s1", "a1", "p1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.preflight",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "policy": workspace_policy(json!({ "kind": "managed", "name": "fix-terminal" })),
+            "images": [],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.preflight",
+            preflight_ok(),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["ok"], true);
+    assert!(sent["payload"]["project_location"].is_null());
+    let images = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[1]["role"], "workspace");
+    assert_eq!(images[1]["digest"], source_digest());
+    assert_eq!(images[1]["mode"], "overlay");
+}
+
+#[tokio::test]
+async fn enter_forwards_the_resolved_project_location_and_grants() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    insert_ready_image(&h, "image-source", &source_digest()).await;
+    seed_project(
+        &h,
+        "p1",
+        vec![ProjectLocation {
+            agent_id: "a1".to_string(),
+            path: "/work/project".to_string(),
+        }],
+        Some(source_digest()),
+    )
+    .await;
+    bind_project(&h, "a1:s1", "a1", "p1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.enter",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "enter_id": "enter-1",
+            "policy": workspace_policy(json!({ "kind": "auto" })),
+            "images": [],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.enter",
+            json!({ "success": true, "result": { "success": true } }),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], true);
+    assert_eq!(sent["payload"]["project_location"], "/work/project");
+    let grants = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(
+        grants.len(),
+        1,
+        "the Project Location carries no lower grant"
+    );
+    assert_eq!(grants[0]["role"], "base");
+}
+
+#[tokio::test]
+async fn enter_grants_the_project_source_image_for_a_managed_workspace() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    insert_ready_image(&h, "image-source", &source_digest()).await;
+    seed_project(&h, "p1", Vec::new(), Some(source_digest())).await;
+    bind_project(&h, "a1:s1", "a1", "p1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.enter",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "enter_id": "enter-1",
+            "policy": workspace_policy(json!({ "kind": "auto" })),
+            "images": [],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.enter",
+            json!({ "success": true, "result": { "success": true } }),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], true);
+    assert!(sent["payload"]["project_location"].is_null());
+    let grants = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(grants.len(), 2);
+    assert_eq!(grants[1]["role"], "workspace");
+    assert_eq!(grants[1]["digest"], source_digest());
+    assert!(grants[1]["target"].is_null());
+    assert!(grants[1]["token"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn preflight_managed_selection_overrides_the_project_location() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    insert_ready_image(&h, "image-source", &source_digest()).await;
+    seed_project(
+        &h,
+        "p1",
+        vec![ProjectLocation {
+            agent_id: "a1".to_string(),
+            path: "/work/project".to_string(),
+        }],
+        Some(source_digest()),
+    )
+    .await;
+    bind_project(&h, "a1:s1", "a1", "p1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.preflight",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "policy": workspace_policy(json!({ "kind": "managed", "name": "chosen" })),
+            "images": [],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.preflight",
+            preflight_ok(),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["ok"], true);
+    assert!(
+        sent["payload"]["project_location"].is_null(),
+        "an explicit managed selection must not be redirected to the Project Location"
+    );
+    let images = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[1]["role"], "workspace");
+}
+
+#[tokio::test]
+async fn preflight_refuses_an_offline_agent_before_workspace_resolution() {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    register_session(&h, "a1:s1").await;
+    let reply = parse_reply(
+        h.handle_message(proto_msg(
+            "server.session.sandbox.preflight",
+            json!({
+                "session_id": "a1:s1",
+                "generation": "gen-1",
+                "policy": workspace_policy(json!({ "kind": "auto" })),
+            }),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_eq!(reply["payload"]["ok"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Agent 'a1' not found"));
+}

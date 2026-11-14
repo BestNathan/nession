@@ -1220,6 +1220,166 @@ done < /proc/self/mountinfo
 }
 
 #[test]
+fn a_managed_workspace_keeps_its_durable_upper_across_overlay_reentry() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    // The durable managed Workspace root is authorized separately from the
+    // execution state directory (#3407).
+    let durable_root = dir.path().join("agent-workspaces");
+    settings.agent_workspaces_root = Some(durable_root.clone());
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let managed = durable_root.join("ws_acceptance");
+    std::fs::create_dir_all(&managed).expect("managed workspace");
+
+    let policy = || {
+        serde_json::from_value::<SandboxPolicy>(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "composition": {
+                    "base": {
+                        "digest": format!("sha256:{}", images.base_digest),
+                        "source": images.base.to_string_lossy()
+                    },
+                    "workspace": {
+                        "image": {
+                            "digest": format!("sha256:{}", images.project_digest),
+                            "source": images.project.to_string_lossy()
+                        },
+                        "write": managed.to_string_lossy(),
+                        "ownership": "agent"
+                    },
+                    "toolchains": []
+                }
+            },
+            "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+            "enforcement": "required"
+        }))
+        .expect("managed composition policy fixture")
+    };
+
+    // First Enter: write through the Overlay into the durable upper.
+    let first_script = "\
+set -eu
+read line < /workspace/project.txt
+[ \"$line\" = project ] && echo LOWER-OK
+printf 'durable work\\n' > /workspace/reentry.txt
+overlay=no
+while IFS= read -r mount; do
+  case \"$mount\" in
+    *fuse.fuse-overlayfs*) overlay=yes ;;
+  esac
+done < /proc/self/mountinfo
+[ \"$overlay\" = yes ] && echo OVERLAY-OK
+";
+    let mut first = launch(
+        &settings,
+        LaunchRequest {
+            policy: policy(),
+            session_name: format!("managed-reentry-{}", std::process::id()),
+            instance_id: "instance-managed-reentry".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                first_script.to_string(),
+            ],
+            tmux_socket: None,
+        },
+    );
+    verify_or_report(&mut first, "the first managed composition must verify");
+    let (first_status, first_stdout, first_stderr) = wait_for_exit(&mut first);
+    assert!(
+        first_status.success(),
+        "the first managed composition failed: stdout={first_stdout} stderr={first_stderr}"
+    );
+    for marker in ["LOWER-OK", "OVERLAY-OK"] {
+        assert!(
+            first_stdout.contains(marker),
+            "the first managed composition did not prove {marker}: {first_stdout} {first_stderr}"
+        );
+    }
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the first composition");
+    let durable = managed.join("upper").join("reentry.txt");
+    assert_eq!(
+        std::fs::read_to_string(&durable).expect("durable upper file"),
+        "durable work\n",
+        "the sandbox write must land in the managed durable upper"
+    );
+
+    // Second Enter: the same lower and the same managed Workspace observe the
+    // previously written bytes.
+    let second_script = "\
+set -eu
+read line < /workspace/reentry.txt
+[ \"$line\" = 'durable work' ] && echo REENTRY-OK
+read project < /workspace/project.txt
+[ \"$project\" = project ] && echo LOWER-OK
+";
+    let mut second = launch(
+        &settings,
+        LaunchRequest {
+            policy: policy(),
+            session_name: format!("managed-reentry-{}", std::process::id()),
+            instance_id: "instance-managed-reentry".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                second_script.to_string(),
+            ],
+            tmux_socket: None,
+        },
+    );
+    verify_or_report(
+        &mut second,
+        "the re-entered managed composition must verify",
+    );
+    let (second_status, second_stdout, second_stderr) = wait_for_exit(&mut second);
+    assert!(
+        second_status.success(),
+        "the re-entered managed composition failed: stdout={second_stdout} stderr={second_stderr}"
+    );
+    for marker in ["REENTRY-OK", "LOWER-OK"] {
+        assert!(
+            second_stdout.contains(marker),
+            "the re-entered managed composition did not prove {marker}: {second_stdout} {second_stderr}"
+        );
+    }
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the second composition");
+    assert!(
+        managed.is_dir(),
+        "cleanup must release the lease, not delete the managed Workspace"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&durable).expect("durable upper survives cleanup"),
+        "durable work\n"
+    );
+    print_evidence(&serde_json::json!({
+        "managed_workspace": managed.to_string_lossy(),
+        "project_lower_digest": format!("sha256:{}", images.project_digest),
+        "first_overlay": true,
+        "durable_upper_preserved": true,
+        "reentry_same_bytes": true,
+        "workspace_survived_cleanup": true,
+    }));
+}
+
+#[test]
 fn two_compositions_share_images_and_release_only_their_own_mounts() {
     require_composition_tools();
     let dir = tempfile::tempdir().expect("tempdir");

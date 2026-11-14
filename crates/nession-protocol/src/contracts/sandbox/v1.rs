@@ -207,8 +207,29 @@ pub struct SandboxFilesystemComposition {
     pub toolchains: Vec<SandboxToolchainImage>,
 }
 
-/// The `/workspace` view: an optional read-only Project source image plus an
-/// Agent-owned writable directory bound over it.
+/// Who owns the writable directory of a prepared composition (#3407).
+///
+/// The Sandbox only mounts the directory; the distinction lets every host-path
+/// check stay truthful. An `agent` directory must stay under an Agent-owned
+/// root and may carry an Overlay upper/work. A `project_location` is a Project
+/// declaration the Agent only validated and bound: it is never created,
+/// written to as metadata storage or deleted, and it cannot carry a Project
+/// EROFS lower because the Overlay would have to store upper/work inside a
+/// user-owned tree.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxWorkspaceOwnership {
+    /// An Agent-owned, bounded writable directory.
+    #[default]
+    Agent,
+    /// A Project Existing Location: external, user-owned storage.
+    ProjectLocation,
+}
+
+/// The `/workspace` view: an optional read-only Project source EROFS plus the
+/// selected writable directory bound over it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,8 +238,11 @@ pub struct SandboxWorkspace {
     /// Read-only Project source EROFS, when the Project has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<SandboxImageRef>,
-    /// Absolute Agent-owned writable directory bound at `/workspace`.
+    /// Absolute writable directory bound at `/workspace`.
     pub write: String,
+    /// Who owns `write`. Absent (older records) is Agent-owned.
+    #[serde(default)]
+    pub ownership: SandboxWorkspaceOwnership,
 }
 
 /// One read-only toolchain EROFS and its `/opt/<name>` mount target.

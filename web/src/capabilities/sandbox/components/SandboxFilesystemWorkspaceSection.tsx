@@ -153,13 +153,46 @@ function SelectedManaged({
   );
 }
 
+function SelectedProjectLocation({
+  workspace,
+  onChange,
+}: {
+  workspace: SandboxFilesystemWorkspace;
+  onChange: (workspace: SandboxFilesystemWorkspace | undefined) => void;
+}) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-surface)] border border-border px-3 py-2"
+      data-testid="sandbox-workspace-project-selected"
+    >
+      <p className={chromeSansRole('primary')}>{workspaceLabel(workspace)}</p>
+      <p className="text-muted-foreground" data-testid="sandbox-workspace-project-status">
+        The Session Project&rsquo;s Existing Location on this Agent, bound at /workspace.
+        It is user-owned: the Agent never creates, copies or deletes it.
+      </p>
+      <div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="sandbox-workspace-project-clear"
+          onClick={() => onChange(undefined)}
+        >
+          Clear Workspace selection
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Workspace (`/workspace`): the default working directory.
  *
- * The selection is one Agent resource: auto-allocation by Session name, the
- * Project's Existing Location (not yet resolved by the runtime), or an
- * Agent-managed Workspace by stable id or name. The inventory is read from
- * the Agent; this editor never creates a second registry.
+ * The selection is one Agent resource: execution scratch, auto-allocation by
+ * Session name (a matching Project Existing Location first), the Project's
+ * Existing Location, or an Agent-managed Workspace by stable id or name. The
+ * inventory is read from the Agent; this editor never creates a second
+ * registry.
  */
 export function SandboxFilesystemWorkspaceSection({
   sessionId,
@@ -172,6 +205,7 @@ export function SandboxFilesystemWorkspaceSection({
 }: SandboxFilesystemWorkspaceProps) {
   const inventory = useAgentWorkspaces(sessionId);
   const managed = workspace?.kind === 'managed' ? workspace : null;
+  const projectLocation = workspace?.kind === 'project_location';
   const rootfsReason = !rootfsIsImage
     ? 'A Workspace selection requires an image RootFS; choose a Base Runtime image in RootFS first.'
     : null;
@@ -211,16 +245,18 @@ export function SandboxFilesystemWorkspaceSection({
         <Button
           type="button"
           role="radio"
-          aria-checked={false}
-          variant="outline"
+          aria-checked={projectLocation}
+          variant={projectLocation ? 'secondary' : 'outline'}
           className="justify-start"
           data-testid="sandbox-workspace-project"
-          disabled
-          title="The runtime does not resolve Project Location yet."
+          disabled={rootfsReason !== null}
+          onClick={() => onChange({ kind: 'project_location' })}
         >
-          Project Location (not available yet)
+          Project Location
         </Button>
-        {managed ? (
+        {projectLocation ? (
+          <SelectedProjectLocation workspace={workspace} onChange={onChange} />
+        ) : managed ? (
           <SelectedManaged workspace={managed} inventory={inventory} onChange={onChange} />
         ) : (
           <ManagedWorkspacePicker

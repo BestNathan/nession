@@ -6,7 +6,8 @@ use super::{
     HandlerAction, ProtocolMessage, SandboxActionErrorKind, SandboxActionResult,
 };
 use nession_protocol::contracts::sandbox::v1::{
-    validate_image_selections, SandboxFieldError, SandboxImageRole, SandboxImageSelection,
+    validate_image_selections, SandboxFieldError, SandboxImageMode, SandboxImageRole,
+    SandboxImageSelection,
 };
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 
@@ -107,6 +108,28 @@ impl ConnectionHandler {
                 "filesystem.composition replaces filesystem.access; clear the access lists before selecting images",
             ));
         }
+        let workspace = match self
+            .resolve_sandbox_workspace(&agent_id, &payload.session_id, &payload.policy, &images)
+            .await
+        {
+            Ok(workspace) => workspace,
+            Err((error, field_error)) => {
+                return Ok(refuse_with_fields(
+                    SandboxActionErrorKind::Invalid,
+                    &error,
+                    vec![field_error],
+                ));
+            }
+        };
+        let mut images = images;
+        if let Some(digest) = workspace.lower_digest {
+            images.push(SandboxImageSelection {
+                role: SandboxImageRole::Workspace,
+                digest,
+                target: None,
+                mode: SandboxImageMode::Overlay,
+            });
+        }
         if let Err(errors) = validate_image_selections(&images) {
             return Ok(refuse_with_fields(
                 SandboxActionErrorKind::Invalid,
@@ -159,6 +182,7 @@ impl ConnectionHandler {
                     "enter_id": payload.enter_id,
                     "policy": payload.policy,
                     "images": grants,
+                    "project_location": workspace.project_location,
                     "working_dir": payload.working_dir,
                 }),
                 SANDBOX_ENTER_TIMEOUT,

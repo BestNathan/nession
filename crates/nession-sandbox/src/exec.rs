@@ -652,30 +652,104 @@ fn validate_composition_paths(
         }
     }
     if let Some(workspace) = &composition.workspace {
-        let metadata = std::fs::symlink_metadata(&workspace.write).map_err(|error| {
-            SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} does not exist: {error}",
-                workspace.write.display()
-            ))
-        })?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        validate_composition_workspace(workspace, settings)?;
+    }
+    Ok(Vec::new())
+}
+
+/// Validate the prepared `/workspace` writable directory.
+///
+/// This is the one owner of the host-side workspace rules, shared by
+/// preflight/Enter (`validate_composition_paths`) and the Linux mount
+/// (`linux::erofs`). An Agent-owned directory must stay under an authorized
+/// Agent root; a Project Location is external and is never treated as owned.
+pub(crate) fn validate_composition_workspace(
+    workspace: &crate::policy::CompiledWorkspace,
+    settings: &SandboxSettings,
+) -> Result<PathBuf> {
+    use nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership;
+
+    let write = workspace.write.as_path();
+    if write == std::path::Path::new("/") {
+        return Err(SandboxError::InvalidPolicy(
+            "the composition workspace must not be the host root".to_string(),
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(write).map_err(|error| {
+        SandboxError::InvalidPolicy(format!(
+            "workspace write directory {} does not exist: {error}",
+            write.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "workspace write directory {} must be a real directory",
+            write.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o200 == 0 {
             return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} must be a real directory",
-                workspace.write.display()
-            )));
-        }
-        let canonical_write =
-            std::fs::canonicalize(&workspace.write).unwrap_or_else(|_| workspace.write.clone());
-        let canonical_state = std::fs::canonicalize(&settings.state_dir)
-            .unwrap_or_else(|_| settings.state_dir.clone());
-        if !canonical_write.starts_with(&canonical_state) {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is outside the Agent sandbox state directory",
-                canonical_write.display()
+                "workspace write directory {} is not writable",
+                write.display()
             )));
         }
     }
-    Ok(Vec::new())
+    let canonical_write = std::fs::canonicalize(write).map_err(|error| {
+        SandboxError::InvalidPolicy(format!(
+            "workspace write directory {} cannot be resolved: {error}",
+            write.display()
+        ))
+    })?;
+    match workspace.ownership {
+        SandboxWorkspaceOwnership::Agent => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                let euid = unsafe { libc::geteuid() };
+                if euid != 0 && metadata.uid() != euid {
+                    return Err(SandboxError::InvalidPolicy(format!(
+                        "workspace write directory {} is not owned by the Agent user",
+                        write.display()
+                    )));
+                }
+            }
+            let canonical_state = std::fs::canonicalize(&settings.state_dir)
+                .unwrap_or_else(|_| settings.state_dir.clone());
+            let durable_root = settings
+                .agent_workspaces_root
+                .as_ref()
+                .map(|root| std::fs::canonicalize(root).unwrap_or_else(|_| root.clone()));
+            let under_state = canonical_write.starts_with(&canonical_state);
+            let under_durable = durable_root
+                .as_ref()
+                .is_some_and(|root| canonical_write.starts_with(root));
+            if !under_state && !under_durable {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "workspace write directory {} is outside the Agent sandbox state \
+                     directory and the Agent Workspace root",
+                    canonical_write.display()
+                )));
+            }
+        }
+        SandboxWorkspaceOwnership::ProjectLocation => {
+            if workspace.image.is_some() {
+                return Err(SandboxError::InvalidPolicy(
+                    "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
+                ));
+            }
+            if canonical_write != write {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "Project Location workspace {} resolves to {}; name the canonical path",
+                    write.display(),
+                    canonical_write.display()
+                )));
+            }
+        }
+    }
+    Ok(canonical_write)
 }
 
 /// Build the report shared by both backends.
@@ -954,6 +1028,7 @@ pub fn reconcile(
     let mut outcomes = Vec::new();
     #[cfg(target_os = "linux")]
     let mut protected_digests = HashSet::new();
+    #[cfg(target_os = "linux")]
     let mut unreadable_record = false;
     for entry in entries {
         let entry = match entry {
@@ -980,7 +1055,10 @@ pub fn reconcile(
                 // discard the only pointer to resources we may own, and
                 // orphan reclamation is skipped because consumers cannot be
                 // proven absent.
-                unreadable_record = true;
+                #[cfg(target_os = "linux")]
+                {
+                    unreadable_record = true;
+                }
                 outcomes.push(ReconcileOutcome::Failed(
                     path.file_stem()
                         .and_then(|stem| stem.to_str())
@@ -1110,6 +1188,81 @@ mod tests {
             execution_dir: dir.join("state").join(id).display().to_string(),
             restricted_network: false,
             agent_pid: std::process::id(),
+        }
+    }
+
+    #[test]
+    fn an_agent_workspace_must_live_under_an_authorized_root() {
+        use nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut settings = settings(dir.path());
+        let outside = tempfile::tempdir().expect("outside");
+        let outside_workspace = outside.path().join("workspace");
+        std::fs::create_dir_all(&outside_workspace).expect("outside workspace");
+        let compiled = crate::policy::CompiledWorkspace {
+            image: None,
+            write: outside_workspace,
+            ownership: SandboxWorkspaceOwnership::Agent,
+        };
+        let error = validate_composition_workspace(&compiled, &settings).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("outside the Agent sandbox state"));
+
+        settings.agent_workspaces_root = Some(dir.path().join("agent-workspaces"));
+        let managed = dir.path().join("agent-workspaces").join("ws_acceptance");
+        std::fs::create_dir_all(&managed).expect("managed workspace");
+        let compiled = crate::policy::CompiledWorkspace {
+            image: None,
+            write: managed.clone(),
+            ownership: SandboxWorkspaceOwnership::Agent,
+        };
+        assert_eq!(
+            validate_composition_workspace(&compiled, &settings).unwrap(),
+            std::fs::canonicalize(&managed).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_project_location_is_external_but_must_be_a_canonical_directory() {
+        use nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let settings = settings(dir.path());
+        let location = tempfile::tempdir().expect("location");
+        let canonical = std::fs::canonicalize(location.path()).unwrap();
+        let compiled = crate::policy::CompiledWorkspace {
+            image: None,
+            write: canonical.clone(),
+            ownership: SandboxWorkspaceOwnership::ProjectLocation,
+        };
+        assert_eq!(
+            validate_composition_workspace(&compiled, &settings).unwrap(),
+            canonical
+        );
+
+        let missing = crate::policy::CompiledWorkspace {
+            image: None,
+            write: location.path().join("missing"),
+            ownership: SandboxWorkspaceOwnership::ProjectLocation,
+        };
+        assert!(validate_composition_workspace(&missing, &settings)
+            .unwrap_err()
+            .to_string()
+            .contains("does not exist"));
+
+        #[cfg(unix)]
+        {
+            let link = location.path().join("link");
+            std::os::unix::fs::symlink(&canonical, &link).unwrap();
+            let linked = crate::policy::CompiledWorkspace {
+                image: None,
+                write: link,
+                ownership: SandboxWorkspaceOwnership::ProjectLocation,
+            };
+            assert!(validate_composition_workspace(&linked, &settings)
+                .unwrap_err()
+                .to_string()
+                .contains("real directory"));
         }
     }
 

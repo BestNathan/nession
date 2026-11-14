@@ -1439,6 +1439,7 @@ mod server_session_sandbox_focus_v1;
 mod server_session_sandbox_images;
 mod server_session_sandbox_preflight_v1;
 mod server_session_sandbox_return_to_native_v1;
+mod server_session_sandbox_workspace;
 mod server_workspace_create_v1;
 mod server_workspace_delete_v1;
 mod server_workspace_list_v1;
