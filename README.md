@@ -45,6 +45,17 @@ commits therefore never run `gitops-guard`; their defense is
 pre-push. Guard runs on human pushes (rollback reverted, hand edits) as the
 second line.
 
+## Server rollout strategy
+
+`base/nession/deployment-server.yaml` uses `strategy.type: Recreate`. The
+Server holds an exclusive lifetime lock on its durable image build root
+(`/data/server/images/build/.owner.lock`, #3334); `RollingUpdate` would start a
+replacement while the old pod still owns the lock, so the new manager would
+fail closed and the rollout would deadlock (#3454). Recreate terminates the old
+pod before starting the replacement, preserving the documented single-owner
+condition. Do not change this to RollingUpdate without first replacing the
+lifetime lock with a rolling-update-safe ownership model.
+
 ## Guard and app management
 
 - `gitops-guard` CI (this branch's `.github/workflows/`) rejects any
