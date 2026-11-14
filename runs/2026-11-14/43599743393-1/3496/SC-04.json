@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "fbee33e17646c6dde162b2d00524fef204ed98aff1ca0d1103410a9392ec482a",
+  "run_id": 43599743393,
+  "run_attempt": 1,
+  "issue": 3496,
+  "criterion": "SC-04",
+  "criterion_text": "A historical #3022 SQLite/Blob fixture migrates to Manifest identities preserving existing aliases and references without rebuilding or moving EROFS bytes; injected failed migration rolls back without exposing broken refs.",
+  "stage": "staging",
+  "target_sha": "cd31156d2015bfc57a2e4d38a30cfb4e28022546",
+  "contract_sha256": "95f815d020a60d39112b98779bfe2b2f815b1b390541be31f2c9f4bc8e3727e1",
+  "case_revision": "cd31156d2015bfc57a2e4d38a30cfb4e28022546",
+  "case_tree_sha": "01bdf986865a216d97b760fce335d92d9263ce01",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T13:29:00.902Z",
+  "finished_at": "2026-11-14T13:29:08.791Z",
+  "duration_ms": 7889,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A historical #3022 digest-addressed fixture migrates to Manifest identities without moving EROFS bytes, with idempotence and transactional rollback",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA cd31156d2015bfc57a2e4d38a30cfb4e28022546: a legacy images/image_aliases SQLite fixture with one ready EROFS Blob migrated to a deterministic Config+Manifest; the same Blob digest and exact bytes stayed in the CAS (no rebuild or move), the legacy alias resolved to the new Manifest, a second migration changed nothing, a missing-Blob fixture left zero mappings, and rollback removed only migrated mappings/alias tags while the legacy rows and bytes remained"
+        }
+      ],
+      "duration_ms": 1995,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43599743393,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "b9f36e96ee583b23f75c7a5ae27711c075abc0f2",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "cd31156d2015bfc57a2e4d38a30cfb4e28022546",
+        "stage": "staging",
+        "issue": 3496,
+        "criterion": "SC-04",
+        "job_id": 132461746448,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43599743393",
+    "record_path": "runs/2026-11-14/43599743393-1/3496/SC-04.json",
+    "source_result_sha256": "26ba32f89bdd2936974e69c5f009a56cbe94e4d26b2932466b961ab1786ac503"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43599743393-1",
+    "sha256": "26ba32f89bdd2936974e69c5f009a56cbe94e4d26b2932466b961ab1786ac503",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43599743393",
+    "durability": "time-limited; object archival not configured"
+  }
+}
