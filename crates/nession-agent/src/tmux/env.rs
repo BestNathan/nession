@@ -1813,6 +1813,9 @@ esac"#,
         for (key, value) in &adapter.env {
             command.env(key, value);
         }
+        // The test's user config lives in `home`; a ZDOTDIR inherited from the
+        // developer's own shell must not redirect it.
+        command.env("NESSON_USER_ZDOTDIR", home);
         let mut child = command.spawn().expect("the shell starts");
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
