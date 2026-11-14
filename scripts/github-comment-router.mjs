@@ -409,12 +409,12 @@ async function selfTest() {
         task:'implement',agent_id:'dev-qwen-01',sha:'b'.repeat(40)},
         status:'dispatched',attempts:1,receipt:{status:'verified',
           dispatch_id:'a'.repeat(64),source_run_id:workerId}}]};
-    const stateBytes=Buffer.from(JSON.stringify(stateDoc)+'\\n');
+    const stateBytes=Buffer.from(JSON.stringify(stateDoc)+'\n');
     const headDoc={version:3,
       path:'workflows/issues/3433/states/00000003.json',
       sha256:createHash('sha256').update(stateBytes).digest('hex')};
     const wrap=obj=>({type:'file',encoding:'base64',
-      content:Buffer.from(JSON.stringify(obj)+'\\n').toString('base64')});
+      content:Buffer.from(JSON.stringify(obj)+'\n').toString('base64')});
     const worker={id:workerId,run_attempt:1,status:'completed',
       conclusion:'success',path:'.github/workflows/agent-develop.yml',
       name:'Agent / Development',event:'workflow_dispatch',
