@@ -969,6 +969,12 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
     });
     record();
   });
+  // The observer must start from the verified P2P baseline. Merely recording
+  // some later degraded state cannot prove a synchronized-to-loss transition.
+  const routeStatesBeforeCut = await page.evaluate(() =>
+    (window as unknown as { __e2eRouteStates?: string[] }).__e2eRouteStates ?? [],
+  );
+  expect(routeStatesBeforeCut).toEqual(['synchronized']);
 
   // A burst that spans the physical route cut.
   const COUNT = 800;
