@@ -199,8 +199,7 @@ async function verifiedStagingTargetForMainPR(repository, prs, token, request) {
 // No caller-controlled Issue text may substitute for these witnesses.
 export async function verifyManualPostMergeTarget(repository, targetSha, prs,
   token, request = githubRequest) {
-  if (!SHA.test(String(targetSha || '')) || !Array.isArray(prs) ||
-      !Array.isArray(prs.filter(p => p?.merged_at)) || !token)
+  if (!SHA.test(String(targetSha || '')) || !Array.isArray(prs) || !token)
     throw Error('invalid historical main acceptance request');
   const { prefix } = repoParts(repository);
   const sourcePrs = prs.filter(p => p?.base?.ref === 'main' &&
