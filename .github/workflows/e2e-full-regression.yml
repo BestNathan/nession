@@ -6,7 +6,8 @@ run-name: >-
   ${{ inputs.source_comment_id &&
       format('Comment E2E #{0} comment:{1}', inputs.source_pr_number, inputs.source_comment_id) ||
       (github.event_name == 'workflow_dispatch' &&
-      format('Convergence Full {0}@{1}', inputs.target_ref, inputs.target_sha) ||
+      format('Convergence Full {0}@{1}', inputs.target_ref,
+        inputs.target_sha || (inputs.target_ref == 'main' && github.sha) || 'tip') ||
       format('Full Regression {0}@{1}', github.ref_name, github.sha)) }}
 
 # #3465: periodic Main diagnostics are never merge / release admission.
@@ -130,10 +131,11 @@ jobs:
         id: pin
         env:
           REQUESTED_REF: ${{ inputs.target_ref }}
-          # A scheduled run must test its event's immutable Main SHA even
-          # when Main moves while the runner is queued (#3465). Manual runs
-          # may choose an explicit reachable historical SHA.
-          REQUESTED_SHA: ${{ github.event_name == 'schedule' && github.sha || inputs.target_sha }}
+          # Scheduled Full and default manual Main runs pin the immutable
+          # event SHA even if Main advances before the runner starts (#3465).
+          # An explicitly supplied SHA stays explicit; manual non-Main refs
+          # without SHA still select the live ref tip for investigation.
+          REQUESTED_SHA: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.target_ref == 'main' && inputs.target_sha == '')) && github.sha || inputs.target_sha }}
         run: |
           set -euo pipefail
           ref="$REQUESTED_REF"
