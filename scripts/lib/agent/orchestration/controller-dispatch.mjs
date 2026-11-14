@@ -23,6 +23,8 @@ import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-reco
 import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
+import {authenticatePublisherReviewerWake}
+  from './publisher-reviewer-wake.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V2 as QWEN_KEY_FAILURE_V2,
@@ -56,14 +58,24 @@ const REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13a
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
-export function assertDispatchAuthority({environment,event,run,issue,actionId}) {
+export function assertDispatchAuthority({environment,event,run,issue,actionId,
+  publisherWakeProof=null}) {
+  // A bot input has no independent authority. A trusted-main read-only
+  // attester must first bind the exact Publisher Job + Store Reviewer Outbox.
+  const publisherWake=environment.GITHUB_ACTOR==='github-actions[bot]'&&
+    publisherWakeProof?.issue===issue&&
+    publisherWakeProof?.action_id===actionId&&
+    publisherWakeProof?.source_publisher_run_id===
+      Number(event?.inputs?.source_publisher_run_id)&&
+    event?.inputs?.recovery_run_id!==undefined&&
+    String(event.inputs.recovery_run_id)==='0';
   const commanded=environment.GITHUB_EVENT_NAME==='issue_comment';
   const qwenV2Comment=commanded&&event?.action==='created'&&
     event?.issue?.number===3001&&event.issue.state==='open'&&
     !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&issue===3001&&
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId;
-  const permitted=commanded
+  const permitted=publisherWake||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -102,13 +114,13 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
            (String(requested)===String(QWEN_KEY_FAILURE_V3.run_id)&&
             issue===QWEN_KEY_FAILURE_V3.issue&&
             actionId===QWEN_KEY_FAILURE_V3.action_id);
-       })());
+       })()));
   if(environment.GITHUB_ACTIONS!=='true'||
       environment.GITHUB_REPOSITORY!==REPO||
       environment.GITHUB_REF!=='refs/heads/main'||
       environment.GITHUB_WORKFLOW!=='Agent / Controller Dispatch'||
       !permitted||
-      environment.GITHUB_ACTOR!=='BestNathan'||
+      (environment.GITHUB_ACTOR!=='BestNathan'&&!publisherWake)||
       !HEX40.test(environment.GITHUB_SHA??'')||
       !positive(Number(environment.GITHUB_RUN_ID))||
       Number(environment.GITHUB_RUN_ATTEMPT)!==1||
@@ -119,7 +131,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
       run?.event!==environment.GITHUB_EVENT_NAME||
       run?.path!==WORKFLOW||
       run?.name!=='Agent / Controller Dispatch'||
-      run?.actor?.login!=='BestNathan'||
+      run?.actor?.login!==environment.GITHUB_ACTOR||
       run?.head_branch!=='main'||
       run?.head_sha!==environment.GITHUB_SHA||
       run?.repository?.full_name!==REPO||
@@ -271,7 +283,10 @@ async function main(){
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
   const run=await api(token,'/actions/runs/'+env.GITHUB_RUN_ID);
-  assertDispatchAuthority({environment:env,event,run,issue,actionId});
+  const publisherWakeProof=env.GITHUB_ACTOR==='github-actions[bot]'?
+    await authenticatePublisherReviewerWake({environment:env,event,token}):null;
+  assertDispatchAuthority({environment:env,event,run,issue,actionId,
+    publisherWakeProof});
   const issueRecord=await api(token,'/issues/'+issue);
   if(issueRecord.number!==issue||issueRecord.state!=='open'||issueRecord.pull_request||
       issueRecord.repository_url!=='https://api.github.com/repos/'+REPO)
@@ -356,7 +371,7 @@ async function main(){
     // Only an authenticated owner/main Workflow Dispatch may bind the
     // original Qwen native Store checkpoint. The binder is a no-op for
     // every other Action; it does not POST the Worker itself.
-    if(!commanded){
+    if(!commanded&&!publisherWakeProof){
       bindQwenRepairCheckpoint({remote:storeRemote,issue,actionId});
     }
     const signer={key,key_id:'main-controller',

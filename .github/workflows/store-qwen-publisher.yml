@@ -120,6 +120,9 @@ jobs:
     runs-on: ubuntu-24.04
     environment: cursor
     timeout-minutes: 22
+    outputs:
+      reviewer_issue: ${{ steps.publisher_proof.outputs.reviewer_issue }}
+      reviewer_action_id: ${{ steps.publisher_proof.outputs.reviewer_action_id }}
     steps:
       - name: Checkout exact main-owned Publisher script only
         uses: actions/checkout@v4
@@ -270,6 +273,14 @@ jobs:
             echo "- No model code or native plaintext was executed by this job."
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # A model-free job may only request Controller dispatch of the
+          # immutable Reviewer Outbox emitted by this authenticated Publisher.
+          reviewer_action="$(jq -r '.reviewer_action_id // ""' "$RUNNER_TEMP/qwen-publisher-result.json")"
+          if [[ "$reviewer_action" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "reviewer_action_id=$reviewer_action" >> "$GITHUB_OUTPUT"
+            echo "reviewer_issue=$(jq -er .issue "$RUNNER_TEMP/qwen-publisher-result.json")" >> "$GITHUB_OUTPUT"
+          fi
+
           # This proof is minted only by the previously trusted main-only
           # Publisher. A repair or replay must not forge a fresh Store writer
           # receipt. The original immutable artifact remains the authority.
@@ -293,3 +304,40 @@ jobs:
           path: ${{ runner.temp }}/qwen-publisher-result.json
           retention-days: 90
           if-no-files-found: error
+
+  # #3550: the Publisher job never gets an Actions writer. Only this separate,
+  # credential-free job asks the existing main-owned Controller to authenticate
+  # and CAS-dispatch the exact Reviewer Outbox. GitHub suppresses recursive
+  # workflow_run delivery for GITHUB_TOKEN-started workflows.
+  wake-reviewer:
+    needs: publish
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'github-actions[bot]' &&
+      github.run_attempt == 1 &&
+      needs.publish.result == 'success' &&
+      needs.publish.outputs.reviewer_action_id != '' &&
+      needs.publish.outputs.reviewer_issue != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Request existing signed Controller dispatch, no Store or model credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWER_ISSUE: ${{ needs.publish.outputs.reviewer_issue }}
+          REVIEWER_ACTION: ${{ needs.publish.outputs.reviewer_action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_ACTOR" == 'github-actions[bot]' && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 && "$REVIEWER_ISSUE" =~ ^[1-9][0-9]*$ ]]
+          [[ "$REVIEWER_ACTION" =~ ^[a-f0-9]{64}$ ]]
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/agent-controller-dispatch.yml/dispatches" \
+            -f ref=main \
+            -f "inputs[issue_number]=$REVIEWER_ISSUE" \
+            -f "inputs[action_id]=$REVIEWER_ACTION" \
+            -f "inputs[source_publisher_run_id]=$GITHUB_RUN_ID"

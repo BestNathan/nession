@@ -28,6 +28,25 @@ const run={id:runId,run_attempt:1,event:'workflow_dispatch',
   head_repository:{full_name:'BestNathan/nession'}};
 const valid={environment,event,run,issue,actionId};
 assert.equal(assertDispatchAuthority(valid).issuer_run_id,runId);
+const botWake={...valid,environment:{...environment,GITHUB_ACTOR:'github-actions[bot]'},
+  run:{...run,actor:{login:'github-actions[bot]'}},
+  issue:3433,actionId:'c'.repeat(64),
+  event:{...event,inputs:{issue_number:'3433',action_id:'c'.repeat(64),
+    source_publisher_run_id:'43607502468',recovery_run_id:'0'}}};
+const verifiedPublisherWake={issue:3433,action_id:'c'.repeat(64),
+  source_publisher_run_id:43607502468,pr_head_sha:'a'.repeat(40)};
+assert.equal(assertDispatchAuthority({...botWake,
+  publisherWakeProof:verifiedPublisherWake}).issue,3433);
+for(const bad of [
+  {publisherWakeProof:null},
+  {publisherWakeProof:{...verifiedPublisherWake,issue:3434}},
+  {publisherWakeProof:{...verifiedPublisherWake,action_id:'d'.repeat(64)}},
+  {publisherWakeProof:{...verifiedPublisherWake,source_publisher_run_id:1}},
+  {event:{...botWake.event,inputs:{...botWake.event.inputs,recovery_run_id:'1'}}},
+  {environment:{...botWake.environment,GITHUB_ACTOR:'untrusted'}},
+  {run:{...botWake.run,actor:{login:'BestNathan'}}},
+])assert.throws(()=>assertDispatchAuthority({...botWake,...bad}),
+  /authenticated owner\/main/);
 // Explicit owner/main dispatch mode: normal requests retain the original
 // two-input contract. Only the single independently attested failed Qwen
 // Run may carry an optional recovery_run_id; no arbitrary Job retry.
