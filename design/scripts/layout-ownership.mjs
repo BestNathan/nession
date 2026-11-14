@@ -30,6 +30,28 @@ export const LAYOUT_RECIPE_OWNER = 'web/src/app/workspace/layout/workspaceLayout
 export const MASTER_DETAIL_MARKER =
   'grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)]';
 export const SCROLL_OWNER_MARKER = 'data-workspace-scroll-owner';
+/**
+ * The App Experience's keyboard-avoidance scroll ancestor (#3523).
+ *
+ * A soft keyboard changes the visible region, not the Terminal's layout size.
+ * Exactly one Experience owner may publish this scroll owner; capability-local
+ * code claiming it would create a second outer scroll that competes with the
+ * active layer and can feed scroll/viewport movement into terminal geometry.
+ */
+export const KEYBOARD_SCROLL_OWNER_MARKER = 'data-keyboard-avoidance-scrollport';
+export const KEYBOARD_SCROLL_OWNER_SYMBOL = 'KEYBOARD_AVOIDANCE_SCROLLPORT_ATTRIBUTE';
+export const KEYBOARD_SCROLL_OWNER_FILE =
+  'web/src/app/experiences/app/AppKeyboardAvoidanceScrollport.tsx';
+/**
+ * The only module allowed to read `window.visualViewport` (#3523).
+ *
+ * The App environment publishes one shell-local layout/visible/occlusion
+ * snapshot. A second reader anywhere else — capability content, the terminal
+ * runtime, or a surface that then feeds a "keyboard height" into rows — is a
+ * competing owner and breaks the geometry firewall.
+ */
+export const APP_VIEWPORT_OWNER_ROOT = 'web/src/platform/viewport/';
+export const VISUAL_VIEWPORT_READ_RE = /\bwindow\.visualViewport\b|\bvisualViewport\b/g;
 
 const CONTENT_ROOTS = ['web/src/capabilities/', 'web/src/product/'];
 const FRAME_UTILITY_RE =
@@ -82,6 +104,20 @@ const RULES = {
     owner: LAYOUT_RECIPE_OWNER,
     repair:
       'replace the numeric spacing with a token-backed arbitrary value (var(--nession-*)) or leave spacing to the local consumer',
+  },
+  'no-foreign-keyboard-scroll-owner': {
+    expected:
+      'the App Experience owns one keyboard-avoidance scroll ancestor for the active layer',
+    owner: KEYBOARD_SCROLL_OWNER_FILE + ' + docs/design/composition.md §14',
+    repair:
+      'remove the keyboard scroll-owner marker from capability/product code; let AppLayout/ShellMain host the one Experience scrollport',
+  },
+  'no-foreign-visual-viewport': {
+    expected:
+      'only the App viewport environment reads window.visualViewport and publishes layout/visible/occlusion snapshots',
+    owner: APP_VIEWPORT_OWNER_ROOT,
+    repair:
+      'consume the published App viewport snapshot (or a surface-owned clearance) instead of reading visualViewport directly; never feed a visual-viewport height into terminal rows',
   },
 };
 
@@ -176,6 +212,30 @@ export function scanLayoutSource(source, file = '<fixture>') {
     pushOccurrences(violations, masked, RAW_SPACING_RE, {
       file,
       rule: 'no-recipe-raw-spacing',
+    });
+  }
+
+  // Keyboard avoidance has one Experience owner and one viewport reader
+  // (#3523). Both checks are deliberately narrow: they reject a second owner,
+  // not a component's local flex/grid, and the environment's own module is the
+  // documented exception.
+  if (file !== KEYBOARD_SCROLL_OWNER_FILE
+    && !file.startsWith(APP_VIEWPORT_OWNER_ROOT)) {
+    for (const marker of [KEYBOARD_SCROLL_OWNER_MARKER, KEYBOARD_SCROLL_OWNER_SYMBOL]) {
+      if (!masked.includes(marker)) continue;
+      violations.push({
+        file,
+        line: lineNumber(masked, masked.indexOf(marker)),
+        kind: 'no-foreign-keyboard-scroll-owner',
+        actual: marker,
+        ...RULES['no-foreign-keyboard-scroll-owner'],
+      });
+    }
+  }
+  if (!file.startsWith(APP_VIEWPORT_OWNER_ROOT)) {
+    pushOccurrences(violations, masked, VISUAL_VIEWPORT_READ_RE, {
+      file,
+      rule: 'no-foreign-visual-viewport',
     });
   }
 
