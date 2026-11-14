@@ -881,11 +881,11 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
     await attachToSession(page, sessionName, 'Relay');
     await waitForInteractiveShell(page);
     await submitTerminalCommand(page, ptyProbeInstaller());
-    await startPtyProbe(page, 'mouse-vt200');
+    await startPtyProbe(page, 'mouse-sgr');
     expect(await readBufferType(page)).toBe('normal');
     await waitForStableGrid(page);
     const before = await readGrid(page);
-    const wheelReportsBefore = await countInBuffer(page, '^[[M');
+    const wheelReportsBefore = await countInBuffer(page, '^[[<');
 
     await openKeys(page);
     await expect.poll(async () => (await readGrid(page)).rows, { timeout: 15_000 })
@@ -898,7 +898,7 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
     expect(grid).not.toBeNull();
     await page.mouse.move(grid!.x + grid!.width / 2, grid!.y + grid!.height * 0.2);
     await page.mouse.wheel(0, 240);
-    await expect.poll(async () => countInBuffer(page, '^[[M'), { timeout: 15_000 })
+    await expect.poll(async () => countInBuffer(page, '^[[<'), { timeout: 15_000 })
       .toBeGreaterThan(wheelReportsBefore);
 
     await closeKeys(page);
@@ -936,7 +936,16 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
       .toBe(settled.rows);
 
     // Closing derives rows from the current (landscape) viewport and leaves no
-    // stale reserve or panel behind.
+    // stale reserve or panel behind. Wait for the panel's animation to settle
+    // before clicking its dismissal control.
+    let previousHeight = -1;
+    await expect.poll(async () => {
+      const box = await page.getByTestId('capsule-capability-projection').boundingBox();
+      const height = box?.height ?? -1;
+      const stable = height === previousHeight;
+      previousHeight = height;
+      return stable;
+    }, { timeout: 10_000, intervals: [200] }).toBe(true);
     await closeKeys(page);
     await waitForStableGrid(page);
     const closed = await readGrid(page);

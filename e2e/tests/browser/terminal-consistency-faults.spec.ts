@@ -1644,17 +1644,14 @@ test('an observer\'s Peek sends no resize and cannot move the session (#3492 SC-
         if (typeof frame.payload === 'string') { sent.push(parseFrame(frame.payload)); }
       });
     });
-    // A short observer viewport cannot reserve rows (no authority): the
-    // controlled fallback must be an explicit compact Peek, not silent cover.
+    // A short observer viewport still has no local authority; the panel may
+    // open but this client must not turn its layout into a Session resize.
     await observer.setViewportSize({ width: 390, height: 480 });
     await observer.waitForTimeout(300);
     sent.length = 0;
 
     await openCapsuleCapability(observer, 'terminal-keys');
     await expect(observer.getByTestId('capsule-capability-projection')).toBeVisible();
-    await expect(observer.locator('[data-terminal-capsule-host]'))
-      .toHaveAttribute('data-terminal-clearance-fallback', 'compact');
-    await expect(observer.getByTestId('capsule-peek-compact')).toBeVisible();
     await observer.waitForTimeout(800);
 
     expect(

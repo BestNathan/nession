@@ -95,6 +95,12 @@ export class TerminalGeometry {
   private panelClearanceListener: (() => void) | null = null;
   /** Last clearance state published to Product/UI, deduplicated. */
   private lastClearanceState: TerminalClearanceState | null = null;
+  /**
+   * Fallback is latched for one open panel. The compact panel changes its own
+   * measured height; recomputing the decision downward would expand it, make
+   * the reserve insufficient again, and oscillate forever.
+   */
+  private fallbackLatched = false;
 
   constructor(private readonly controller: TerminalGeometryHost) {
     const config = readTerminalClientConfig();
@@ -297,6 +303,7 @@ export class TerminalGeometry {
   private reserveFor(cellHeight: number, baseHeight: number): TerminalClearanceState {
     const policy = this.controller.clearancePolicy;
     if (policy !== 'viewport-reserve' || this.container === null) {
+      this.fallbackLatched = false;
       return { policy, requestedPx: 0, reservedPx: 0, fallback: false };
     }
     const requestedPx = this.px(
@@ -306,9 +313,12 @@ export class TerminalGeometry {
     );
     const maxReserve = Math.max(0, baseHeight - MIN_RESERVED_ROWS * cellHeight);
     const reservedPx = Math.min(requestedPx, maxReserve);
-    const fallback = requestedPx > 0
-      && (this.controller.isObserverReadOnly || requestedPx > maxReserve);
-    return { policy, requestedPx, reservedPx, fallback };
+    if (requestedPx === 0) {
+      this.fallbackLatched = false;
+    } else if (this.controller.isObserverReadOnly || requestedPx > maxReserve) {
+      this.fallbackLatched = true;
+    }
+    return { policy, requestedPx, reservedPx, fallback: this.fallbackLatched };
   }
 
   /**

@@ -207,7 +207,7 @@ describe('occlusionScroll helpers', () => {
       stopPropagation: vi.fn(),
     } as unknown as WheelEvent;
 
-    expect(occlusion.handleWheel(event)).toBe(false);
+    expect(occlusion.handleWheel(event)).toBe(true);
     expect(port.scrollLines).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
@@ -228,9 +228,9 @@ describe('occlusionScroll helpers', () => {
       stopPropagation: vi.fn(),
     } as unknown as WheelEvent;
 
-    // `false` lets xterm continue its wheel path, which reports the wheel to
-    // the application as a mouse event.
-    expect(occlusion.handleWheel(event)).toBe(false);
+    // `true` is "not handled" — the event continues to xterm, which reports it
+    // to the application.
+    expect(occlusion.handleWheel(event)).toBe(true);
     expect(port.scrollLines).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
@@ -250,7 +250,7 @@ describe('occlusionScroll helpers', () => {
       stopPropagation: vi.fn(),
     } as unknown as WheelEvent;
 
-    expect(occlusion.handleWheel(event)).toBe(true);
+    expect(occlusion.handleWheel(event)).toBe(false);
     expect(port.scrollLines).toHaveBeenCalled();
   });
 
@@ -432,9 +432,9 @@ describe('upper panel scroll clearance (#2710 SC-08/SC-09)', () => {
       preventDefault: vi.fn(),
       stopPropagation: vi.fn(),
     }) as unknown as WheelEvent;
-    expect(occlusion.handleWheel(wheel(48))).toBe(true);
+    expect(occlusion.handleWheel(wheel(48))).toBe(false);
     expect(screen.style.transform).toBe('translateY(-48px)');
-    expect(occlusion.handleWheel(wheel(-48))).toBe(true);
+    expect(occlusion.handleWheel(wheel(-48))).toBe(false);
     expect(screen.style.transform).toBe('');
     expect(port.scrollLines).not.toHaveBeenCalled();
   });

@@ -239,6 +239,41 @@ describe('TerminalGeometry fixed-column sizing (#2581 SC-06)', () => {
     }
   });
 
+  it('latches the compact fallback so its own smaller height cannot oscillate', () => {
+    const restore = installObserver();
+    try {
+      const h = makeHarness();
+      h.setPolicy('viewport-reserve');
+      const host = document.createElement('div');
+      host.setAttribute('data-terminal-capsule-host', '');
+      const container = document.createElement('div');
+      host.appendChild(container);
+      document.body.appendChild(host);
+      // Taller than the reserve cap on a 600px box with 16px cells leaves
+      // fewer than MIN_RESERVED_ROWS.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '560px');
+      const geometry = new TerminalGeometry(h.host);
+      geometry.observe(container, 8, 16);
+      fire(1024, 600);
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBe('compact');
+
+      // The compact panel now reports a smaller height. The fallback must stay
+      // latched; otherwise it would expand, fail the reserve and loop.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '100px');
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBe('compact');
+
+      // Closing clears it.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '0px');
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBeNull();
+      geometry.dispose();
+      host.remove();
+    } finally {
+      restore();
+    }
+  });
+
   it('does not report an unchanged grid twice to the transport', () => {
     const restore = installObserver();
     try {
