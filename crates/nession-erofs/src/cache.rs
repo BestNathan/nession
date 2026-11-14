@@ -13,16 +13,22 @@
 //! The runtime adapter owns the concrete identity and its durable root.
 
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex as AsyncMutex;
 
 use crate::digest::{is_valid_digest, regular_file_digest, DIGEST_PREFIX};
+/// A scoped, single-digest bearer grant minted by `server.image.access`.
+///
+/// The type lives with the distribution HTTP owner; this re-export keeps the
+/// accepted `cache::DownloadGrant` path stable.
+pub use crate::distribution::http::DownloadGrant;
+use crate::distribution::transfer::{ProgressObserver, TransferEngine, TransferSpec};
+
+pub mod eviction;
+pub mod fetch;
 
 /// The local readiness of one digest, observed without downloading or mutating.
 ///
@@ -96,17 +102,8 @@ impl TransferState {
     }
 }
 
-/// How often a streaming transfer refreshes its observable byte count.
-const PROGRESS_UPDATE_BYTES: u64 = 256 * 1024;
 /// Bound on a reported transfer error; the cache never emits an unbounded body.
 const TRANSFER_DETAIL_MAX_CHARS: usize = 512;
-
-struct TransferOutcome {
-    transferred: u64,
-    /// Full durable bytes in the `.part` after this transfer.
-    downloaded_bytes: u64,
-    total_bytes: Option<u64>,
-}
 
 /// Clears an in-flight entry when the transfer future is dropped or cancelled.
 /// Durable bytes remain in the `.part`, so the next observation is `Resumable`.
@@ -171,13 +168,6 @@ pub struct CacheDiagnostics {
     pub stale_partials: u64,
     pub evicted_blobs: u64,
     pub reconciled_partials: u64,
-}
-
-/// A scoped, single-digest bearer grant minted by `server.image.access`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DownloadGrant {
-    pub url: String,
-    pub token: String,
 }
 
 /// A verified image in the persistent cache.
@@ -275,9 +265,8 @@ pub struct ErofsCache {
     /// `<configured_root>/agents/<identity>` — this Agent's mutable namespace.
     root: PathBuf,
     identity: String,
-    client: reqwest::Client,
-    /// One fetch per digest. The map entry is removed when no waiter remains.
-    locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    /// The one authorized-resume/verify/publish engine (#3499).
+    engine: TransferEngine,
     /// Digests with an active consumer; eviction refuses to remove them.
     pinned: Mutex<HashMap<String, u32>>,
     /// Per-digest live transfer observations. Absent means no active worker.
@@ -328,17 +317,12 @@ impl ErofsCache {
             })?;
         }
         refuse_symlinked_identity_root(&root)?;
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(30 * 60))
-            .build()
-            .context("cannot build the EROFS download client")?;
+        let engine = TransferEngine::new().context("cannot build the EROFS download client")?;
         Ok(Self {
             configured_root,
             root,
             identity: identity.to_string(),
-            client,
-            locks: Mutex::new(HashMap::new()),
+            engine,
             pinned: Mutex::new(HashMap::new()),
             transfers: Mutex::new(HashMap::new()),
             bytes_transferred: AtomicU64::new(0),
@@ -666,83 +650,75 @@ impl ErofsCache {
     /// transfers zero image-body bytes. Corrupt/partial content is removed and
     /// retried on a later call; it is never returned as a hit.
     pub async fn get_or_fetch(&self, digest: &str, grant: &DownloadGrant) -> Result<CachedImage> {
+        self.get_or_fetch_bounded(digest, grant, None).await
+    }
+
+    /// Fetch with an explicit descriptor size and transfer bound.
+    ///
+    /// Metadata objects pass their descriptor size so a stale or substituted
+    /// document fails even if a matching digest were somehow declared. The
+    /// default bound is the distribution owner's object bound.
+    pub async fn get_or_fetch_bounded(
+        &self,
+        digest: &str,
+        grant: &DownloadGrant,
+        expected_size: Option<u64>,
+    ) -> Result<CachedImage> {
         let final_path = self.blob_path(digest)?;
-        if self.verify_file(&final_path, digest).await.unwrap_or(false) {
-            return Ok(CachedImage {
-                digest: digest.to_string(),
-                size_bytes: std::fs::metadata(&final_path)
-                    .with_context(|| format!("cannot stat {}", final_path.display()))?
-                    .len(),
-                path: final_path,
-                from_cache: true,
-            });
-        }
-        if final_path.exists() {
-            let _ = std::fs::remove_file(&final_path);
-        }
-        let lock = self.digest_lock(digest);
-        let _guard = lock.lock().await;
-        // Another caller may have published while this one waited.
-        if self.verify_file(&final_path, digest).await.unwrap_or(false) {
-            return Ok(CachedImage {
-                digest: digest.to_string(),
-                size_bytes: std::fs::metadata(&final_path)
-                    .with_context(|| format!("cannot stat {}", final_path.display()))?
-                    .len(),
-                path: final_path,
-                from_cache: true,
-            });
-        }
-        self.fetch_count.fetch_add(1, Ordering::Relaxed);
         let part = self.partial_path(digest)?;
+        if let Some(size_bytes) = self.engine.cached(digest, &final_path).await {
+            return Ok(CachedImage {
+                digest: digest.to_string(),
+                size_bytes,
+                path: final_path,
+                from_cache: true,
+            });
+        }
         let mut transfer = TransferGuard::new(self, digest);
-        let outcome = match self.download(digest, grant, &part).await {
+        let sink = CacheProgressSink {
+            cache: self,
+            digest,
+        };
+        let spec = TransferSpec {
+            digest,
+            grant,
+            final_path: &final_path,
+            partial_path: &part,
+            max_bytes: crate::distribution::http::DEFAULT_MAX_OBJECT_BYTES,
+            expected_size,
+        };
+        let outcome = match self.engine.fetch(spec, &sink).await {
             Ok(outcome) => outcome,
             Err(error) => {
-                // `download` already recorded the truthful durable state
-                // (resumable when bytes survive, failed otherwise).
+                // The engine already recorded the truthful durable state:
+                // a surviving `.part` is resumable, otherwise the attempt is
+                // failed with a bounded diagnostic.
                 transfer.disarm();
+                self.transfer_error(digest, &format!("{error:#}"));
                 return Err(error);
             }
         };
-        self.bytes_transferred
-            .fetch_add(outcome.transferred, Ordering::Relaxed);
-        self.set_transfer_verifying(digest, outcome.downloaded_bytes, outcome.total_bytes);
-        if !self.verify_file(&part, digest).await.unwrap_or(false) {
-            let _ = std::fs::remove_file(&part);
-            self.fail_transfer(digest, format!("downloaded image does not match {digest}"));
-            transfer.disarm();
-            anyhow::bail!("downloaded image does not match {digest}");
-        }
-        let size_bytes = std::fs::metadata(&part)
-            .with_context(|| format!("cannot stat {}", part.display()))?
-            .len();
-        if let Err(error) = std::fs::rename(&part, &final_path) {
-            self.fail_transfer(
-                digest,
-                format!(
-                    "cannot publish {} as {}: {error}",
-                    part.display(),
-                    final_path.display()
-                ),
-            );
-            transfer.disarm();
-            return Err(error).with_context(|| {
-                format!(
-                    "cannot publish {} as {}",
-                    part.display(),
-                    final_path.display()
-                )
-            });
+        if !outcome.from_cache {
+            self.fetch_count.fetch_add(1, Ordering::Relaxed);
+            self.bytes_transferred
+                .fetch_add(outcome.transferred, Ordering::Relaxed);
         }
         self.clear_transfer(digest);
         transfer.disarm();
         Ok(CachedImage {
             digest: digest.to_string(),
             path: final_path,
-            size_bytes,
-            from_cache: false,
+            size_bytes: outcome.size_bytes,
+            from_cache: outcome.from_cache,
         })
+    }
+
+    /// Whether an active consumer pins this digest against eviction.
+    pub fn is_pinned(&self, digest: &str) -> bool {
+        self.pinned
+            .lock()
+            .map(|pinned| pinned.get(digest).copied().unwrap_or(0) > 0)
+            .unwrap_or(false)
     }
 
     /// Remove a cached blob when no consumer pins it. Returns true if removed.
@@ -788,17 +764,6 @@ impl ErofsCache {
         Ok(removed)
     }
 
-    fn digest_lock(&self, digest: &str) -> Arc<AsyncMutex<()>> {
-        let mut locks = self
-            .locks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        locks
-            .entry(digest.to_string())
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone()
-    }
-
     async fn verify_file(&self, path: &Path, digest: &str) -> Result<bool> {
         let path = path.to_path_buf();
         let actual = tokio::task::spawn_blocking(move || regular_file_digest(&path))
@@ -806,172 +771,31 @@ impl ErofsCache {
             .context("image verification task")??;
         Ok(actual.as_deref() == Some(digest))
     }
-
-    async fn download(
-        &self,
-        digest: &str,
-        grant: &DownloadGrant,
-        part: &Path,
-    ) -> Result<TransferOutcome> {
-        if grant.token.is_empty() {
-            anyhow::bail!("image download grant has no token");
-        }
-        if !(grant.url.starts_with("https://") || grant.url.starts_with("http://")) {
-            anyhow::bail!("image download grant must be an http(s) URL");
-        }
-        let existing = tokio::fs::metadata(part)
-            .await
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        self.begin_transfer(digest, existing);
-        let result = self.download_stream(digest, grant, part, existing).await;
-        if let Err(error) = &result {
-            // Keep a truthful final state: durable bytes are resumable,
-            // otherwise the attempt is failed with a bounded diagnostic.
-            self.transfer_error(digest, &format!("{error:#}"));
-        }
-        result
-    }
-
-    async fn download_stream(
-        &self,
-        digest: &str,
-        grant: &DownloadGrant,
-        part: &Path,
-        existing: u64,
-    ) -> Result<TransferOutcome> {
-        let mut request = self
-            .client
-            .get(&grant.url)
-            .bearer_auth(&grant.token)
-            .header(reqwest::header::ACCEPT_ENCODING, "identity");
-        if existing > 0 {
-            request = request.header(reqwest::header::RANGE, format!("bytes={existing}-"));
-        }
-        let response = request.send().await.context("image download failed")?;
-        let status = response.status();
-        let headers = response.headers().clone();
-        let content_length = header_u64(&headers, reqwest::header::CONTENT_LENGTH);
-        let (mut file, resumed_bytes, total_bytes) = if status
-            == reqwest::StatusCode::PARTIAL_CONTENT
-        {
-            let content_range = headers
-                .get(reqwest::header::CONTENT_RANGE)
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("image server returned 206 without Content-Range")
-                })?;
-            let (start, end, total) = parse_content_range(content_range).ok_or_else(|| {
-                anyhow::anyhow!("image server returned an invalid Content-Range `{content_range}`")
-            })?;
-            if existing == 0 {
-                anyhow::bail!(
-                    "image server returned an unexpected partial response for a cold download"
-                );
-            }
-            if start != existing {
-                anyhow::bail!("image resume range starts at {start}, expected {existing}");
-            }
-            let expected = end - start + 1;
-            if let Some(length) = content_length {
-                if length != expected {
-                    anyhow::bail!(
-                        "image resume length {length} disagrees with Content-Range length {expected}"
-                    );
-                }
-            }
-            if let Some(total) = total {
-                if total < end + 1 {
-                    anyhow::bail!(
-                        "image resume range ends at {} but the declared total is {total}",
-                        end + 1
-                    );
-                }
-            }
-            let file = tokio::fs::OpenOptions::new()
-                .append(true)
-                .open(part)
-                .await
-                .context("cannot resume a partial image download")?;
-            self.update_transfer_progress(digest, existing, total);
-            (file, existing, total)
-        } else if status.is_success() {
-            // A 200 response restarts from byte zero even if the request asked
-            // for a Range; `File::create` truncates the stale partial.
-            let file = tokio::fs::File::create(part)
-                .await
-                .context("cannot create a partial image download")?;
-            self.update_transfer_progress(digest, 0, content_length);
-            (file, 0, content_length)
-        } else if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
-            let _ = tokio::fs::remove_file(part).await;
-            anyhow::bail!("image server refused the resume range; retry the download");
-        } else {
-            anyhow::bail!(
-                "image download refused with HTTP {} for {digest}",
-                status.as_u16()
-            );
-        };
-        let mut stream = response.bytes_stream();
-        let mut transferred = 0_u64;
-        let mut last_reported = 0_u64;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("image body stream failed")?;
-            file.write_all(&chunk)
-                .await
-                .context("image body write failed")?;
-            transferred += chunk.len() as u64;
-            if transferred.saturating_sub(last_reported) >= PROGRESS_UPDATE_BYTES {
-                self.update_transfer_progress(digest, resumed_bytes + transferred, total_bytes);
-                last_reported = transferred;
-            }
-        }
-        file.flush().await?;
-        file.sync_all().await?;
-        let downloaded_bytes = resumed_bytes + transferred;
-        if let Some(total) = total_bytes {
-            if downloaded_bytes > total {
-                let _ = tokio::fs::remove_file(part).await;
-                anyhow::bail!(
-                    "image body reached {downloaded_bytes} bytes but the declared total is {total}"
-                );
-            }
-        }
-        self.update_transfer_progress(digest, downloaded_bytes, total_bytes);
-        Ok(TransferOutcome {
-            transferred,
-            downloaded_bytes,
-            total_bytes,
-        })
-    }
 }
 
-fn header_u64(
-    headers: &reqwest::header::HeaderMap,
-    name: reqwest::header::HeaderName,
-) -> Option<u64> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse().ok())
+/// Projects the distribution engine's events into this cache's #3412 state.
+///
+/// The cache remains the one owner of the Agent-facing per-digest progress
+/// vocabulary; the engine only reports measured bytes.
+struct CacheProgressSink<'a> {
+    cache: &'a ErofsCache,
+    digest: &'a str,
 }
 
-/// Parse one `Content-Range: bytes <start>-<end>/<total|*>` value.
-fn parse_content_range(value: &str) -> Option<(u64, u64, Option<u64>)> {
-    let rest = value.strip_prefix("bytes ")?;
-    let (range, total) = rest.split_once('/')?;
-    let (start, end) = range.split_once('-')?;
-    let start = start.parse().ok()?;
-    let end = end.parse().ok()?;
-    if end < start {
-        return None;
+impl ProgressObserver for CacheProgressSink<'_> {
+    fn started(&self, durable_bytes: u64) {
+        self.cache.begin_transfer(self.digest, durable_bytes);
     }
-    let total = if total == "*" {
-        None
-    } else {
-        Some(total.parse().ok()?)
-    };
-    Some((start, end, total))
+
+    fn progress(&self, downloaded_bytes: u64, total_bytes: Option<u64>) {
+        self.cache
+            .update_transfer_progress(self.digest, downloaded_bytes, total_bytes);
+    }
+
+    fn verifying(&self, downloaded_bytes: u64, total_bytes: Option<u64>) {
+        self.cache
+            .set_transfer_verifying(self.digest, downloaded_bytes, total_bytes);
+    }
 }
 
 fn bounded_transfer_detail(detail: &str) -> String {
@@ -1575,6 +1399,7 @@ mod tests {
 #[cfg(test)]
 mod progress_tests {
     use super::*;
+    use crate::distribution::http::parse_content_range;
     use std::io::{Read, Write};
 
     struct DurableProbe;

@@ -192,6 +192,9 @@ async fn register_agent_with_server(
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
