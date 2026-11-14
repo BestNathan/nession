@@ -69,6 +69,13 @@ function notifyBindingResult(
   }
 }
 
+function useSessionNavigation(screen: EnvironmentScreen, refresh: () => Promise<void>) {
+  return useCallback(() => {
+    screen.showSession();
+    void refresh();
+  }, [screen, refresh]);
+}
+
 /**
  * The Environment Workspace composition (#1202, Session-first in #2654):
  * reusable profile list + the current Session binding + the shared screen
@@ -140,10 +147,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
     return resp.success;
   }, [binding]);
 
-  const showSession = useCallback(() => {
-    screen.showSession();
-    void refreshBinding();
-  }, [screen, refreshBinding]);
+  const showSession = useSessionNavigation(screen, refreshBinding);
 
   const save = useCallback(
     async (input: EnvProfileSaveInput): Promise<EnvWriteResponse> => {
