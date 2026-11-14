@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ba4aebc54937c2d0f3c96d267d8de18eadaeada0f97d22c3653d80db81828879",
+  "run_id": 43553384369,
+  "run_attempt": 1,
+  "issue": 3412,
+  "criterion": "SC-03",
+  "criterion_text": "At byte transfer completion, a Digest is still Verifying/not mount-ready until full SHA-256 verification and atomic cache publication. Corrupt bytes, failed ranges and expired grants yield truthful failure/retryable states and never expose a false Verified or Ready result.",
+  "stage": "staging",
+  "target_sha": "9740c39eea1b647bd8c90ad8b7bf23d90f48eea9",
+  "contract_sha256": "1c747cb9cbd0bc5a5e5a217492c6b2c7c65ebdb47125917ab2d67cb569638b8e",
+  "case_revision": "9740c39eea1b647bd8c90ad8b7bf23d90f48eea9",
+  "case_tree_sha": "9d8cb37ba0c488550bb2a488d261ac4e9b754d53",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T03:50:01.781Z",
+  "finished_at": "2026-11-14T03:50:08.414Z",
+  "duration_ms": 6633,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Verification barrier, corrupt-bytes refusal, grant failure and bounded redacted diagnostics are proven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 9740c39eea1b647bd8c90ad8b7bf23d90f48eea9: completing the byte stream produced Verifying while still active (not mount-ready); a digest mismatch and a refused/expired grant produced Failed with a bounded diagnostic; no case exposed a false Verified or a local cache path"
+        }
+      ],
+      "duration_ms": 762,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43553384369,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "9740c39eea1b647bd8c90ad8b7bf23d90f48eea9",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43553384369",
+    "record_path": "runs/2026-11-14/43553384369-1/3412/SC-03.json",
+    "source_result_sha256": "2c2456866c8a9e35f422a52d260271349725be3496f65f3c96926a3e0cad0274"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43553384369-1",
+    "sha256": "2c2456866c8a9e35f422a52d260271349725be3496f65f3c96926a3e0cad0274",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43553384369",
+    "durability": "time-limited; object archival not configured"
+  }
+}

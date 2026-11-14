@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "81a9beb5d419d4c27d403787b791449ddd5fbf35200ccdbe6ae57b47236d3712",
+  "run_id": 43553384369,
+  "run_attempt": 1,
+  "issue": 3412,
+  "criterion": "SC-04",
+  "criterion_text": "After Agent/cache owner restart or UI transport reconnect, querying the Agent reconstructs and returns the same authoritative verified/resumable state and bytes from durable files without a new transfer; throttled events do not replace snapshot truth and offline/stale observations are not shown as actively downloading.",
+  "stage": "staging",
+  "target_sha": "9740c39eea1b647bd8c90ad8b7bf23d90f48eea9",
+  "contract_sha256": "1c747cb9cbd0bc5a5e5a217492c6b2c7c65ebdb47125917ab2d67cb569638b8e",
+  "case_revision": "9740c39eea1b647bd8c90ad8b7bf23d90f48eea9",
+  "case_tree_sha": "fee968feb50d13e5165311f15ec01bf35dfba8bd",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T03:50:08.414Z",
+  "finished_at": "2026-11-14T03:50:14.841Z",
+  "duration_ms": 6427,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Restart/reconnect reconstruction from durable files and inactive resumable state are proven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 9740c39eea1b647bd8c90ad8b7bf23d90f48eea9: after reopening the same durable cache root and identity, a verified blob was Verified and a surviving .part was Resumable with its durable byte count and active=false; neither required a new transfer and no event replaced the snapshot"
+        }
+      ],
+      "duration_ms": 565,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43553384369,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "9740c39eea1b647bd8c90ad8b7bf23d90f48eea9",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43553384369",
+    "record_path": "runs/2026-11-14/43553384369-1/3412/SC-04.json",
+    "source_result_sha256": "b62d15d5c38bef4c72c8e8e1df6e3db17eb877ea13cfd10fee78d61495931fe7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43553384369-1",
+    "sha256": "b62d15d5c38bef4c72c8e8e1df6e3db17eb877ea13cfd10fee78d61495931fe7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43553384369",
+    "durability": "time-limited; object archival not configured"
+  }
+}
