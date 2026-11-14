@@ -75,34 +75,111 @@ pub async fn publish_manifest(
     publication: &ManifestPublication,
     now: i64,
 ) -> Result<PublishOutcome> {
-    let (_, manifest) = parse_manifest(publication.manifest.bytes())
+    let manifest = validate_publication(
+        store,
+        &publication.layer,
+        &publication.config,
+        &publication.manifest,
+    )?;
+    publish_verified(
+        conn,
+        store,
+        VerifiedPublication {
+            tag: Some((
+                publication.repository.as_str(),
+                publication.tag.as_str(),
+                &publication.expectation,
+            )),
+            manifest: &manifest,
+            config: &publication.config,
+            manifest_document: &publication.manifest,
+            layer: &publication.layer,
+            now,
+        },
+    )
+    .await
+}
+
+/// Publish one Config+Manifest without a Tag.
+///
+/// The objects and descriptor edges become catalog rows, but no mutable Tag
+/// points at them. They remain unreachable until a later Tag/pin (or the
+/// catalog GC). This is the identity a build publishes before any consumer
+/// pins it.
+pub async fn publish_manifest_untagged(
+    conn: &DatabaseConnection,
+    store: &BlobStore,
+    layer: Descriptor,
+    config: RawDocument,
+    manifest_document: RawDocument,
+    now: i64,
+) -> Result<PublishOutcome> {
+    let manifest = validate_publication(store, &layer, &config, &manifest_document)?;
+    publish_verified(
+        conn,
+        store,
+        VerifiedPublication {
+            tag: None,
+            manifest: &manifest,
+            config: &config,
+            manifest_document: &manifest_document,
+            layer: &layer,
+            now,
+        },
+    )
+    .await
+}
+
+fn validate_publication(
+    store: &BlobStore,
+    layer: &Descriptor,
+    config_document: &RawDocument,
+    manifest_document: &RawDocument,
+) -> Result<Manifest> {
+    let (_, manifest) = parse_manifest(manifest_document.bytes())
         .context("published Manifest bytes are invalid")?;
     let (_, config) =
-        parse_config(publication.config.bytes()).context("published Config bytes are invalid")?;
+        parse_config(config_document.bytes()).context("published Config bytes are invalid")?;
     validate_manifest_config(&manifest, &config)?;
-    publication
-        .config
+    config_document
         .verify_against(&manifest.config)
         .context("Config bytes do not match the Manifest config descriptor")?;
     let manifest_layer = manifest
         .layers
         .first()
         .context("Manifest has no EROFS layer")?;
-    if manifest_layer != &publication.layer {
+    if manifest_layer != layer {
         anyhow::bail!("layer descriptor does not match the published Manifest");
     }
     if manifest_layer.media_type != MEDIA_TYPE_EROFS {
         anyhow::bail!("layer media type must be {MEDIA_TYPE_EROFS}");
     }
     store
-        .verify_named_size(&publication.layer.digest, publication.layer.size)
+        .verify_named_size(&layer.digest, layer.size)
         .context("EROFS layer is not a verified CAS object")?;
+    Ok(manifest)
+}
+
+struct VerifiedPublication<'a> {
+    tag: Option<(&'a str, &'a str, &'a TagExpectation)>,
+    manifest: &'a Manifest,
+    config: &'a RawDocument,
+    manifest_document: &'a RawDocument,
+    layer: &'a Descriptor,
+    now: i64,
+}
+
+async fn publish_verified(
+    conn: &DatabaseConnection,
+    store: &BlobStore,
+    publication: VerifiedPublication<'_>,
+) -> Result<PublishOutcome> {
     let config_blob = store.put_bytes(publication.config.bytes())?;
-    if config_blob.digest != manifest.config.digest {
+    if config_blob.digest != publication.manifest.config.digest {
         anyhow::bail!("Config bytes do not publish under the Manifest config digest");
     }
-    let manifest_blob = store.put_bytes(publication.manifest.bytes())?;
-    if manifest_blob.digest != publication.manifest.digest() {
+    let manifest_blob = store.put_bytes(publication.manifest_document.bytes())?;
+    if manifest_blob.digest != publication.manifest_document.digest() {
         anyhow::bail!("Manifest bytes do not publish under their own digest");
     }
 
@@ -113,38 +190,39 @@ pub async fn publish_manifest(
         size_bytes: publication.layer.size,
         kind: ObjectKind::Erofs,
     };
-    record_object(&transaction, &layer_object, now).await?;
+    record_object(&transaction, &layer_object, publication.now).await?;
     record_object(
         &transaction,
         &StoredObject {
-            digest: manifest.config.digest.clone(),
-            media_type: manifest.config.media_type.clone(),
-            size_bytes: manifest.config.size,
+            digest: publication.manifest.config.digest.clone(),
+            media_type: publication.manifest.config.media_type.clone(),
+            size_bytes: publication.manifest.config.size,
             kind: ObjectKind::Config,
         },
-        now,
+        publication.now,
     )
     .await?;
     record_object(
         &transaction,
         &StoredObject {
             digest: manifest_blob.digest.clone(),
-            media_type: manifest
+            media_type: publication
+                .manifest
                 .media_type
                 .clone()
                 .unwrap_or_else(|| MEDIA_TYPE_MANIFEST.to_string()),
             size_bytes: manifest_blob.size_bytes,
             kind: ObjectKind::Manifest,
         },
-        now,
+        publication.now,
     )
     .await?;
     record_reference(
         &transaction,
         &manifest_blob.digest,
-        &manifest.config.digest,
+        &publication.manifest.config.digest,
         "config",
-        now,
+        publication.now,
     )
     .await?;
     record_reference(
@@ -152,30 +230,37 @@ pub async fn publish_manifest(
         &manifest_blob.digest,
         &publication.layer.digest,
         "layer",
-        now,
+        publication.now,
     )
     .await?;
-    if let Some(subject) = &manifest.subject {
+    if let Some(subject) = &publication.manifest.subject {
         if store.contains(&subject.digest)? {
             record_reference(
                 &transaction,
                 &manifest_blob.digest,
                 &subject.digest,
                 "subject",
-                now,
+                publication.now,
             )
             .await?;
         }
     }
-    let tag_update = set_tag(
-        &transaction,
-        &publication.repository,
-        &publication.tag,
-        &manifest_blob.digest,
-        &publication.expectation,
-        now,
-    )
-    .await?;
+    let previous = match publication.tag {
+        Some((repository, tag, expectation)) => Some(
+            set_tag(
+                &transaction,
+                repository,
+                tag,
+                &manifest_blob.digest,
+                expectation,
+                publication.now,
+            )
+            .await?
+            .previous,
+        ),
+        None => None,
+    }
+    .flatten();
     transaction
         .commit()
         .await
@@ -184,7 +269,7 @@ pub async fn publish_manifest(
         manifest_digest: manifest_blob.digest,
         config_digest: config_blob.digest,
         layer_digest: publication.layer.digest.clone(),
-        previous_tag_digest: tag_update.previous,
+        previous_tag_digest: previous,
     })
 }
 

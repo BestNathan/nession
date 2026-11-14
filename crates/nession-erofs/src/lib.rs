@@ -52,6 +52,22 @@ pub use blob::digest::{
 pub use blob::store;
 #[cfg(feature = "store")]
 pub use blob::store::{BlobDigest, BlobStore, StoreUsage};
+#[cfg(feature = "sources")]
+pub use build::archive::{
+    fetch_and_extract, ArchiveFetcher, ArchiveFormat, ArchiveLimits, ArchiveReceipt, ArchiveSource,
+    ReqwestFetcher,
+};
+#[cfg(feature = "sources")]
+pub use build::import::{
+    import_raw_erofs, validate_erofs_file, ImportOutcome, RawErofsImport, EROFS_MAGIC,
+    EROFS_MAGIC_OFFSET, MAX_IMPORT_BYTES,
+};
+#[cfg(feature = "sources")]
+pub use build::oci::{
+    pinned_digest, OciConversion, OciConversionRequest, OciErofsConverter, ProcessOciConverter,
+};
+#[cfg(feature = "sources")]
+pub use build::publication::{host_platform, image_documents, publish_layer, LayerPublication};
 #[cfg(feature = "build")]
 pub use build::{
     discard_packaged_image, discard_snapshot_artifacts, manifest_tree, packaged_image_path,
