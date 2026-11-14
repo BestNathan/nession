@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "abc590d4b021e3fe429f450dbbdb8b65288d573009c6855b417c9928986061f0",
+  "run_id": 43560852748,
+  "run_attempt": 1,
+  "issue": 3449,
+  "criterion": "SC-04",
+  "criterion_text": "With a live tmux Pane and its bound EROFS mount across Agent restart, recovered consumer ownership prevents eviction/unmount and returns truthful mount status; a missing, stale, unknown or orphaned physical mount is not silently adopted or served, and is reconciled only after identity/liveness checks. Exercise both a surviving-mount and a disappeared-mount case.",
+  "stage": "staging",
+  "target_sha": "46d7a906730f9fc048e4bbf43d5e5fd3b23183fe",
+  "contract_sha256": "9384bbe9c7f4cf6565190376cbbe221687da95519452911c521c6da7a1c8ba70",
+  "case_revision": "46d7a906730f9fc048e4bbf43d5e5fd3b23183fe",
+  "case_tree_sha": "257e3112a7ed61d472b66655da90223752b39c0f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T05:20:53.638Z",
+  "finished_at": "2026-11-14T05:21:01.857Z",
+  "duration_ms": 8219,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Restart recovery adopts surviving verified mounts, preserves their consumers, and never serves or adopts a missing, stale or unknown physical mount",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Linux kernel 7.0.0-1017-azure"
+        },
+        {
+          "type": "runtime",
+          "value": "a new manager instance adopted a surviving verified mount and its durable consumer"
+        },
+        {
+          "type": "runtime",
+          "value": "a consumer whose physical mount disappeared was reported unavailable and never served"
+        },
+        {
+          "type": "runtime",
+          "value": "an unprotected stale identity was reclaimed only after mountinfo proved the mount gone"
+        }
+      ],
+      "duration_ms": 2361,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43560852748,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "46d7a906730f9fc048e4bbf43d5e5fd3b23183fe",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43560852748",
+    "record_path": "runs/2026-11-14/43560852748-1/3449/SC-04.json",
+    "source_result_sha256": "a04fee8adab85e520116a8b72fe7c09f49afe9209160c3c94d9a00b82050dc1c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43560852748-1",
+    "sha256": "a04fee8adab85e520116a8b72fe7c09f49afe9209160c3c94d9a00b82050dc1c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43560852748",
+    "durability": "time-limited; object archival not configured"
+  }
+}

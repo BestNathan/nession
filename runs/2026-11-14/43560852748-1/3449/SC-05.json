@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2f636c82b00daeddf018e93f5ebc4bf9ee1f4bdfaa59615e7f9258a6197ad134",
+  "run_id": 43560852748,
+  "run_attempt": 1,
+  "issue": 3449,
+  "criterion": "SC-05",
+  "criterion_text": "A composed Base/Workspace/Toolchain Sandbox uses shared EROFS leases but keeps each execution's writable overlay independent; normal exit, detach/reconnect, failed launch and reconciliation release only their own consumers, preserve other live Sessions, pin backing cache bytes while needed, and leave no unowned EROFS/Overlay mounts after verified final cleanup.",
+  "stage": "staging",
+  "target_sha": "46d7a906730f9fc048e4bbf43d5e5fd3b23183fe",
+  "contract_sha256": "9384bbe9c7f4cf6565190376cbbe221687da95519452911c521c6da7a1c8ba70",
+  "case_revision": "46d7a906730f9fc048e4bbf43d5e5fd3b23183fe",
+  "case_tree_sha": "211f5ab53d6ac3760ac014de029afbe3650e8d9d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T05:21:01.858Z",
+  "finished_at": "2026-11-14T05:21:12.239Z",
+  "duration_ms": 10381,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Composed executions share read-only EROFS leases, keep independent writable overlays, and release only their own consumers with no unowned mounts left after final cleanup",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "a Base/Workspace/Toolchain composition ran a shell and Git over shared leases"
+        },
+        {
+          "type": "runtime",
+          "value": "each execution kept its own writable Overlay upper/work; shared read-only mounts were reused"
+        },
+        {
+          "type": "runtime",
+          "value": "detach, peer cleanup and final cleanup released only their own consumers and left no owned mounts"
+        }
+      ],
+      "duration_ms": 4526,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43560852748,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "46d7a906730f9fc048e4bbf43d5e5fd3b23183fe",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43560852748",
+    "record_path": "runs/2026-11-14/43560852748-1/3449/SC-05.json",
+    "source_result_sha256": "c73917eea631accffc64dd98458790cc0157c30661fa88321d6af9f0d049c2f4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43560852748-1",
+    "sha256": "c73917eea631accffc64dd98458790cc0157c30661fa88321d6af9f0d049c2f4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43560852748",
+    "durability": "time-limited; object archival not configured"
+  }
+}
