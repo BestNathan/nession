@@ -921,6 +921,8 @@ function selfTest() {
 
   // The projector must not accept a raw Pass without a source-bound Web
   // execution receipt; pure static SCs keep their normal source-proof path.
+  // Here a text claim is intentional: 'source' is reserved for a declared,
+  // pinned orphan-branch manifest, independently rejected by #3068's owner.
   const webBody = fixtureBody()
     .replace('SC-01 deterministic update works',
       'SC-01 A deterministic integration test records Web navigation requests and verifies retries')
@@ -932,7 +934,7 @@ function selfTest() {
   });
   const rawWebPass = normalizeAcceptanceResult(webContext, {
     criteria: [{ criterion: 'SC-01', result: 'Pass',
-      evidence: [{ type: 'source', value: 'Web test source reviewed' }] }],
+      evidence: [{ type: 'text', value: 'Code inspection alone is not an authenticated exact-head Web Quality receipt' }] }],
   }, 'agent-cursor');
   assert.throws(() => applyAcceptanceResultToBody(webBody, rawWebPass),
     /lacks authenticated exact-head Web Quality receipt/);
