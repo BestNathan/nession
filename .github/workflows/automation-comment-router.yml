@@ -88,3 +88,17 @@ jobs:
           EXPECTED_PLATFORM: ${{ needs.resolve.outputs.platform }}
           EXPECTED_RUNTIME_PROFILE: ${{ needs.resolve.outputs.runtime_profile }}
         run: node scripts/github-comment-router.mjs dispatch
+      - name: Explicitly wake authenticated Store Ingest for the Owner Bug Controller
+        if: needs.resolve.outputs.handler == 'develop'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_HANDLER: ${{ needs.resolve.outputs.handler }}
+          EXPECTED_ISSUE: ${{ needs.resolve.outputs.issue_number }}
+          EXPECTED_COMMENT: ${{ needs.resolve.outputs.comment_id }}
+          EXPECTED_SHA: ${{ needs.resolve.outputs.target_sha }}
+          EXPECTED_REF: ${{ needs.resolve.outputs.target_ref }}
+          EXPECTED_CRITERION: ${{ needs.resolve.outputs.criterion }}
+          EXPECTED_STAGE: ${{ needs.resolve.outputs.stage }}
+          EXPECTED_PLATFORM: ${{ needs.resolve.outputs.platform }}
+          EXPECTED_RUNTIME_PROFILE: ${{ needs.resolve.outputs.runtime_profile }}
+        run: node scripts/github-comment-router.mjs wake-developer
