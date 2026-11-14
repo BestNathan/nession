@@ -1106,6 +1106,35 @@ mod tests {
         assert!(manager.lookup(verified.digest()).is_none());
     }
 
+    /// #3499: two configs that share one EROFS layer acquire the same physical
+    /// mount; releasing one consumer keeps the mount for the other, and the
+    /// last release removes it.
+    #[test]
+    fn two_consumers_of_one_layer_share_one_physical_mount() {
+        let root = tempfile::tempdir().unwrap();
+        let (source, digest) = image(root.path(), b"one shared physical layer");
+        let manager = manager(
+            root.path(),
+            "#!/bin/sh\nexit 0\n",
+            vec![root.path().join("images")],
+        );
+        let verified = VerifiedImage::new(digest.clone(), source).unwrap();
+        let first = manager.acquire(&verified, "exec-a").unwrap();
+        let second = manager.acquire(&verified, "exec-b").unwrap();
+        assert_eq!(first.mountpoint(), second.mountpoint());
+        let status = manager.lookup(&digest).unwrap();
+        assert!(status.mounted);
+        assert_eq!(status.consumers, 2);
+        drop(first);
+        let status = manager.lookup(&digest).unwrap();
+        assert!(status.mounted, "the remaining consumer keeps the mount");
+        assert_eq!(status.consumers, 1);
+        drop(second);
+        let status = manager.lookup(&digest).unwrap();
+        assert!(!status.mounted);
+        assert_eq!(status.consumers, 0);
+    }
+
     #[test]
     fn a_digest_mismatch_fails_closed_without_spawning_the_helper() {
         let root = tempfile::tempdir().unwrap();
