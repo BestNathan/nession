@@ -3260,13 +3260,15 @@ impl AgentServer {
         agent_token: &str,
     ) -> Result<()> {
         self.mcp = crate::server::mcp::build(
-            config,
-            agent_token,
-            &self.agent_id,
+            crate::server::mcp::McpHost {
+                config,
+                agent_token,
+                agent_id: &self.agent_id,
+                default_working_dir: &self.default_working_dir,
+                terminal_cols: self.terminal_cols,
+            },
             Arc::clone(&self.tmux_manager),
             Arc::clone(&self.sessions),
-            &self.default_working_dir,
-            self.terminal_cols,
             Arc::clone(&self.mutations),
         )?;
         Ok(())

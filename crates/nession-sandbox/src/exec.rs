@@ -954,6 +954,10 @@ pub fn reconcile(
     let mut outcomes = Vec::new();
     #[cfg(target_os = "linux")]
     let mut protected_digests = HashSet::new();
+    /// Read only by the Linux shared-mount reclamation below, so a macOS build
+    /// would otherwise carry a write-only variable. Gating it with its consumer
+    /// keeps `-D warnings` honest on both hosts.
+    #[cfg(target_os = "linux")]
     let mut unreadable_record = false;
     for entry in entries {
         let entry = match entry {
@@ -980,7 +984,10 @@ pub fn reconcile(
                 // discard the only pointer to resources we may own, and
                 // orphan reclamation is skipped because consumers cannot be
                 // proven absent.
-                unreadable_record = true;
+                #[cfg(target_os = "linux")]
+                {
+                    unreadable_record = true;
+                }
                 outcomes.push(ReconcileOutcome::Failed(
                     path.file_stem()
                         .and_then(|stem| stem.to_str())

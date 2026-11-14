@@ -35,17 +35,33 @@ use nession_runtime::lane::KeyedLane;
 /// the endpoint is not mistaken for a peer-to-peer frame's.
 const MCP_LANE_LABEL: &str = "mcp ";
 
+/// The borrowed host facts an MCP mount is built from.
+///
+/// Bundled so the mount signature stays a state description plus the services
+/// it reuses, rather than accumulating one scalar per Host capability.
+pub(crate) struct McpHost<'a> {
+    pub config: &'a AgentConfig,
+    /// The resolved durable Agent Token this endpoint verifies (#3440).
+    pub agent_token: &'a str,
+    pub agent_id: &'a str,
+    pub default_working_dir: &'a str,
+    pub terminal_cols: u16,
+}
+
 /// Build the Agent-hosted MCP service when `[mcp] enabled = true`.
 pub(crate) fn build(
-    config: &AgentConfig,
-    agent_token: &str,
-    agent_id: &str,
+    host: McpHost<'_>,
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionRegistry>,
-    default_working_dir: &str,
-    terminal_cols: u16,
     mutations: Arc<KeyedLane<ResourceKey>>,
 ) -> anyhow::Result<Option<Arc<McpService>>> {
+    let McpHost {
+        config,
+        agent_token,
+        agent_id,
+        default_working_dir,
+        terminal_cols,
+    } = host;
     if !config.mcp.enabled {
         return Ok(None);
     }
