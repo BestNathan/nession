@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8028cdc76c9890e452db9d02b2b73228fc886b43cf39e0b3cc440b21aaa0fb93",
+  "run_id": 43566893565,
+  "run_attempt": 1,
+  "issue": 3407,
+  "criterion": "SC-05",
+  "criterion_text": "In a Session-scoped Sandbox Web/App UI, the current Agent's reusable Workspace inventory (including auto-created/unbound entries), Project references, statuses and safe actions can be inspected; Filesystem can select one without duplicating the registry, with truthful offline/locked/deletion confirmations and no invented global entry.",
+  "stage": "staging",
+  "target_sha": "34fab94af966d06787d8ebd5df20cae82451c7ec",
+  "contract_sha256": "9a47cdf75c4dc19649720cb1939c831293dbc4101206c08713ff4ae74e3b1af4",
+  "case_revision": "34fab94af966d06787d8ebd5df20cae82451c7ec",
+  "case_tree_sha": "a5f1ee6a0f5a17a60094c569da87086f5323e743",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T06:35:22.983Z",
+  "finished_at": "2026-11-14T06:35:37.344Z",
+  "duration_ms": 14361,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.ts",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify.spec.ts:79:59",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 17
+      },
+      "duration_ms": 8674,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43566893565,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "e5b8cca1c6c1667662be19c5338fffc8d6c9f9eb",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "34fab94af966d06787d8ebd5df20cae82451c7ec",
+        "stage": "staging",
+        "issue": 3407,
+        "criterion": "SC-05",
+        "job_id": 132362594916,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43566893565",
+    "record_path": "runs/2026-11-14/43566893565-1/3407/SC-05.json",
+    "source_result_sha256": "b53eecd972f4d5cf4f195fc2ef416ee212e6cdfb75fc8208ca86e61f5ce97c48"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43566893565-1",
+    "sha256": "b53eecd972f4d5cf4f195fc2ef416ee212e6cdfb75fc8208ca86e61f5ce97c48",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43566893565",
+    "durability": "time-limited; object archival not configured"
+  }
+}
