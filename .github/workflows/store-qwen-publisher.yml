@@ -9,6 +9,14 @@ on:
     workflows: ["Store / Agent Development Ingest"]
     branches: [main]
     types: [completed]
+  # Only the main-owned Store Ingest may request this after a bot-dispatched
+  # Worker suppressed the natural workflow_run chain.
+  workflow_dispatch:
+    inputs:
+      source_ingest_run_id:
+        description: "Original authenticated Qwen Store Ingest Run, bot/main only"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,7 +25,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: trusted-qwen-publisher-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  group: trusted-qwen-publisher-${{ github.event.workflow_run.id || inputs.source_ingest_run_id }}-${{ github.event.workflow_run.run_attempt || '1' }}
   cancel-in-progress: false
 
 jobs:
@@ -25,16 +33,22 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_run' &&
-      github.event.action == 'completed' &&
-      (github.event.workflow_run.event == 'workflow_run' ||
-       github.event.workflow_run.event == 'issue_comment') &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.run_attempt == 1 &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.path == '.github/workflows/store-agent-development-ingest.yml' &&
-      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+      (
+        (github.event_name == 'workflow_run' &&
+         github.event.action == 'completed' &&
+         (github.event.workflow_run.event == 'workflow_run' ||
+          github.event.workflow_run.event == 'issue_comment') &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.run_attempt == 1 &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.path == '.github/workflows/store-agent-development-ingest.yml' &&
+         github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+         github.event.workflow_run.head_repository.full_name == 'BestNathan/nession') ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.actor == 'github-actions[bot]' &&
+         github.run_attempt == 1 &&
+         inputs.source_ingest_run_id != '')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     outputs:
@@ -45,19 +59,29 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_INGEST_RUN: ${{ github.event.workflow_run.id }}
-          SOURCE_INGEST_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_INGEST_RUN: ${{ github.event.workflow_run.id || inputs.source_ingest_run_id }}
+          SOURCE_INGEST_SHA: ${{ github.event.workflow_run.head_sha || '' }}
         shell: bash
         run: |
           set -euo pipefail
           echo "qwen=false" >> "$GITHUB_OUTPUT"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_INGEST_RUN" \
-            > "$RUNNER_TEMP/ingest-run.json"
+          [[ "$SOURCE_INGEST_RUN" =~ ^[1-9][0-9]{0,14}$ ]]
+          for n in $(seq 1 30); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_INGEST_RUN" \
+              > "$RUNNER_TEMP/ingest-run.json"
+            [[ "$GITHUB_EVENT_NAME" != workflow_dispatch ]] && break
+            if jq -e '.status == "completed"' "$RUNNER_TEMP/ingest-run.json" >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
           jq -e --argjson id "$SOURCE_INGEST_RUN" --arg sha "$SOURCE_INGEST_SHA" '
-            .id == $id and .head_sha == $sha and
+            .id == $id and ($sha == "" or .head_sha == $sha) and
             .run_attempt == 1 and .status == "completed" and
             .conclusion == "success" and
-            (.event == "workflow_run" or .event == "issue_comment") and
+            (.event == "workflow_run" or .event == "issue_comment" or
+              ($sha == "" and .event == "workflow_dispatch" and
+               .actor.login == "github-actions[bot]")) and
             .path == ".github/workflows/store-agent-development-ingest.yml" and
             .head_branch == "main" and
             .repository.full_name == "BestNathan/nession" and
@@ -120,7 +144,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-          UPSTREAM: ${{ github.event.workflow_run.id }}
+          UPSTREAM: ${{ github.event.workflow_run.id || inputs.source_ingest_run_id }}
           RECEIPT_ARTIFACT: ${{ needs.detect.outputs.source_artifact }}
         shell: bash
         run: |
