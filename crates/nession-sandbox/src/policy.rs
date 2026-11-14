@@ -148,7 +148,11 @@ impl CompiledComposition {
             .chain(self.toolchains.iter().flat_map(|image| image.env.iter()))
         {
             match positions.get(name) {
-                Some(&position) => merged[position].1 = value.clone(),
+                Some(&position) => {
+                    if let Some(slot) = merged.get_mut(position) {
+                        slot.1 = value.clone();
+                    }
+                }
                 None => {
                     positions.insert(name.clone(), merged.len());
                     merged.push((name.clone(), value.clone()));
@@ -740,7 +744,7 @@ fn compile_image(
 
 /// Bound on the number of Config Env defaults accepted from one image.
 ///
-/// This mirrors `nession_erofs::image::usage`'s bounded input: the Agent
+/// This mirrors `nession_erofs::oci::usage`'s bounded input: the Agent
 /// parses the Config, and the Sandbox independently re-validates the prepared
 /// policy as a trust boundary.
 const MAX_IMAGE_ENV_ENTRIES: usize = 128;
@@ -810,7 +814,11 @@ fn validate_image_env(
             continue;
         }
         match positions.get(&entry.name) {
-            Some(&position) => merged[position].1 = entry.value.clone(),
+            Some(&position) => {
+                if let Some(slot) = merged.get_mut(position) {
+                    slot.1 = entry.value.clone();
+                }
+            }
             None => {
                 positions.insert(entry.name.clone(), merged.len());
                 merged.push((entry.name.clone(), entry.value.clone()));

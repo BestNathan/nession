@@ -100,7 +100,7 @@ pub struct ResolvedGrantImage {
     pub layer_path: PathBuf,
     /// Typed read-only Config/annotation suggestions. Present only for a
     /// Manifest-aware grant whose Config bytes were verified.
-    pub usage: Option<nession_erofs::image::ImageRuntimeUsage>,
+    pub usage: Option<nession_erofs::oci::usage::ImageRuntimeUsage>,
 }
 
 /// Fetch one Server grant into this Agent's verified cache (#3499).
@@ -191,7 +191,7 @@ pub async fn resolve_grant_image(
     )
     .await
     .with_context(|| format!("cannot prepare Manifest image {}", grant.digest))?;
-    let usage = nession_erofs::image::ImageRuntimeUsage::from_manifest_and_config(
+    let usage = nession_erofs::oci::usage::ImageRuntimeUsage::from_manifest_and_config(
         &fetched.manifest,
         &fetched.config,
     )

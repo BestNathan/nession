@@ -92,10 +92,10 @@ if (!capabilities.backend) {
     ]);
     const resolver = crateTests(
       'nession-erofs',
-      ['--features', 'catalog', 'image::usage::tests::escapes_and_malformed_prepends_are_refused'],
+      ['--features', 'catalog', 'oci::usage::tests::escapes_and_malformed_prepends_are_refused'],
       600_000,
     );
-    assertRan(resolver, ['image::usage::tests::escapes_and_malformed_prepends_are_refused']);
+    assertRan(resolver, ['oci::usage::tests::escapes_and_malformed_prepends_are_refused']);
     const platform = crateTests(
       'nession-erofs',
       [

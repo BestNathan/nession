@@ -299,7 +299,7 @@ pub fn mount_composition(
         let path = mount_image(toolchain, &image_root, manager, execution_id, &mut mounted)?;
         if let Some(prepend) = &toolchain.path_prepend {
             let executable_dir = path.join(prepend);
-            let metadata = std::fs::metadata(&executable_dir).map_err(|error| {
+            let metadata = std::fs::symlink_metadata(&executable_dir).map_err(|error| {
                 SandboxError::Prepare(format!(
                     "toolchain image {} at {} declares io.nession.path.prepend `{}`, but \
                      {}/{} is not an executable directory: {error}",
@@ -310,10 +310,10 @@ pub fn mount_composition(
                     prepend.display()
                 ))
             })?;
-            if !metadata.is_dir() {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(SandboxError::Prepare(format!(
                     "toolchain image {} at {} declares io.nession.path.prepend `{}`, but \
-                     {}/{} is not a directory",
+                     {}/{} must be a real directory",
                     toolchain.digest,
                     toolchain.target.display(),
                     prepend.display(),

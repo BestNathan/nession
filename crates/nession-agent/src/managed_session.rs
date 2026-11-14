@@ -18,8 +18,8 @@
 use anyhow::{Context, Result};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxEnforcement, SandboxFilesystemAccess, SandboxFilesystemComposition,
-    SandboxFilesystemPolicy, SandboxImageRef, SandboxPolicy, SandboxToolchainImage,
-    SandboxWorkspace, SANDBOX_POLICY_VERSION,
+    SandboxFilesystemPolicy, SandboxImageEnvDefault, SandboxImageRef, SandboxPolicy,
+    SandboxToolchainImage, SandboxWorkspace, SANDBOX_POLICY_VERSION,
 };
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 use std::path::{Path, PathBuf};
@@ -29,6 +29,17 @@ use crate::erofs_cache::{resolve_grant_image, ErofsCache, ResolvedManifestBindin
 /// The sandbox path the initial Pane starts in. The composed root exposes the
 /// Project image and writable overlay here; the host has no such directory.
 pub const MANAGED_WORKING_DIR: &str = "/workspace";
+
+/// One resolved image and the composition fields it contributes (#3500).
+struct ResolvedImageRef {
+    role: ManagedImageRole,
+    /// The actual toolchain target, after the request override or the
+    /// Manifest's `io.nession.mount.default` proposal.
+    target: Option<String>,
+    image: SandboxImageRef,
+    env: Vec<SandboxImageEnvDefault>,
+    path_prepend: Option<String>,
+}
 
 /// One prepared Managed Session, before tmux creates anything.
 #[derive(Debug, Clone)]
@@ -114,13 +125,7 @@ pub async fn prepare(
     // The target travels with the grant it was validated on: two toolchain
     // grants may legitimately share a digest, so a later digest lookup could
     // attach the wrong `/opt/<name>`.
-    let mut image_refs: Vec<(
-        ManagedImageRole,
-        Option<String>,
-        SandboxImageRef,
-        Vec<nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault>,
-        Option<String>,
-    )> = Vec::with_capacity(images.len());
+    let mut image_refs: Vec<ResolvedImageRef> = Vec::with_capacity(images.len());
     for image in [base, workspace]
         .into_iter()
         .chain(toolchains.iter().copied())
@@ -153,10 +158,10 @@ pub async fn prepare(
             resolved_image.layer_digest.clone(),
             resolved_image.layer_path.clone(),
         ));
-        image_refs.push((
-            image.role,
+        image_refs.push(ResolvedImageRef {
+            role: image.role,
             target,
-            SandboxImageRef {
+            image: SandboxImageRef {
                 // The composition carries the physical EROFS identity so the
                 // mount manager shares one mount across Manifests.
                 digest: resolved_image.layer_digest,
@@ -164,7 +169,7 @@ pub async fn prepare(
             },
             env,
             path_prepend,
-        ));
+        });
     }
 
     // Group the fetched images by role.
@@ -172,23 +177,26 @@ pub async fn prepare(
     let mut base_env = Vec::new();
     let mut workspace_ref = None;
     let mut toolchain_refs = Vec::new();
-    for (role, target, image, env, path_prepend) in image_refs {
-        match role {
+    for resolved_image in image_refs {
+        match resolved_image.role {
             ManagedImageRole::Base => {
-                base_env = env;
-                base_ref = Some(image);
+                base_env = resolved_image.env;
+                base_ref = Some(resolved_image.image);
             }
-            ManagedImageRole::Workspace => workspace_ref = Some(image),
+            ManagedImageRole::Workspace => workspace_ref = Some(resolved_image.image),
             ManagedImageRole::Toolchain => {
-                let Some(target) = target else {
-                    anyhow::bail!("toolchain image {} has no /opt/<name> target", image.digest);
+                let Some(target) = resolved_image.target else {
+                    anyhow::bail!(
+                        "toolchain image {} has no /opt/<name> target",
+                        resolved_image.image.digest
+                    );
                 };
                 toolchain_refs.push(SandboxToolchainImage {
-                    digest: image.digest,
-                    source: image.source,
+                    digest: resolved_image.image.digest,
+                    source: resolved_image.image.source,
                     target,
-                    env,
-                    path_prepend,
+                    env: resolved_image.env,
+                    path_prepend: resolved_image.path_prepend,
                 });
             }
         }

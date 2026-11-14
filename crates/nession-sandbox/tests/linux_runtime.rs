@@ -1827,7 +1827,7 @@ fn a_missing_prepend_directory_fails_before_any_process_launches() {
     let records = std::fs::read_dir(&settings.state_dir)
         .map(|entries| {
             entries
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|entry| {
                     entry
                         .path()
