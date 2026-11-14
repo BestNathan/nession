@@ -367,6 +367,7 @@ mod tests {
                     nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
             }),
             toolchains: Vec::new(),
+            base_env: Vec::new(),
         };
         let policy = materialize_with_composition(
             &draft(serde_json::json!({ "enabled": true })),

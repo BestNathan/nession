@@ -16,6 +16,7 @@ pub mod descriptor;
 pub mod index;
 pub mod layout;
 pub mod manifest;
+pub mod usage;
 pub mod validation;
 
 use anyhow::{Context, Result};
@@ -29,6 +30,11 @@ pub use config::{History, ImageConfig, RootFs, RuntimeConfig};
 pub use descriptor::{Descriptor, Platform};
 pub use index::Index;
 pub use manifest::Manifest;
+pub use usage::{
+    parse_config_env, resolve_path_prepend, validate_env_name, ImageEnvDefault, ImageRuntimeUsage,
+    MAX_IMAGE_ENV_ENTRIES, MAX_IMAGE_ENV_KEY_BYTES, MAX_IMAGE_ENV_TOTAL_BYTES,
+    MAX_IMAGE_ENV_VALUE_BYTES,
+};
 pub use validation::{
     select_platform, validate_config, validate_descriptor, validate_index, validate_manifest,
     validate_manifest_config,
