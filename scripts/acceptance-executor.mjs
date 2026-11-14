@@ -10,6 +10,10 @@ import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
+import {
+  collectPrWebQuality, enforcePrWebQuality, requiresWebIntegrationExecution,
+  validWebQualityReceipt,
+} from './acceptance-pr-web-quality-receipt.mjs';
 
 export { normalizeAcceptanceResult };
 import {
@@ -358,6 +362,17 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   const missing = expected.filter((id) => !resultMap.has(id));
   if (missing.length) throw new Error('acceptance result is missing criteria: ' + missing.join(', '));
 
+  // The frozen, trusted-main result must carry independent exact-head Web
+  // execution proof when a PR criterion requires that integration test.
+  // Never allow a model/caller-crafted Pass to skip the normalization barrier.
+  for (const [id, result] of resultMap) {
+    if (stage === 'pr' && result.result === 'Pass' &&
+        requiresWebIntegrationExecution(contract.criteria.get(id), body) &&
+        !validWebQualityReceipt(normalized.pr_web_quality_receipt, normalized.target_ref)) {
+      throw new Error(id + ' Pass lacks authenticated exact-head Web Quality receipt');
+    }
+  }
+
   for (const [id] of resultMap) {
     const previous = automatedRunId(contract.rows.get(id).evidence);
     if (previous != null && previous > runId &&
@@ -442,6 +457,12 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     method: 'agent',
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
+  // The trusted prepare step has read-only Actions credentials. Read the
+  // required Web Gate only for executable Web integration SCs, not every PR.
+  if (context.stage === 'pr' && context.criteria.some(item =>
+    requiresWebIntegrationExecution(item, context.requirement_body))) {
+    context.pr_web_quality = collectPrWebQuality(context.target_ref);
+  }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
 }
@@ -451,7 +472,8 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
   const normalized = verifiedIssueAuditCriterion(
     context, normalizeAcceptanceResult(context, raw, source));
-  fs.writeFileSync(outFile, JSON.stringify(normalized, null, 2) + '\n');
+  const gated = enforcePrWebQuality(context, normalized);
+  fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
 }
 
 function isSupersededRunError(error) {
@@ -897,8 +919,33 @@ function selfTest() {
       criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
     }, 'case-runner')), /selected method does not match/);
 
+  // The projector must not accept a raw Pass without a source-bound Web
+  // execution receipt; pure static SCs keep their normal source-proof path.
+  const webBody = fixtureBody()
+    .replace('SC-01 deterministic update works',
+      'SC-01 A deterministic integration test records Web navigation requests and verifies retries')
+    .replace('## Product alignment', 'Scenario: Web integration fixtures\n\n## Product alignment')
+    .replace('| SC-01 | staging |', '| SC-01 | pr |');
+  const webIssue = { ...issue, body: webBody };
+  const webContext = buildAcceptanceContext(webIssue, 'pr', {
+    targetRef: 'a'.repeat(40), runId: 700, method: 'agent',
+  });
+  const rawWebPass = normalizeAcceptanceResult(webContext, {
+    criteria: [{ criterion: 'SC-01', result: 'Pass',
+      evidence: [{ type: 'source', value: 'Web test source reviewed' }] }],
+  }, 'agent-cursor');
+  assert.throws(() => applyAcceptanceResultToBody(webBody, rawWebPass),
+    /lacks authenticated exact-head Web Quality receipt/);
+  const downgraded = enforcePrWebQuality(webContext, rawWebPass);
+  assert.equal(downgraded.criteria[0].result, 'Pending');
+  assert.match(applyAcceptanceResultToBody(webBody, downgraded),
+    /\| SC-01 \| pr \| Pending \|/);
+
   // Existing acceptance-executor-selftest Gate also exercises the exact-PR
   // collector. These fixtures run without GitHub secrets or network calls.
+  execFileSync(process.execPath,
+    [fileURLToPath(new URL('./acceptance-pr-web-quality-receipt.mjs',import.meta.url)),'self-test'],
+    {stdio:'inherit'});
   execFileSync(process.execPath,
     [fileURLToPath(new URL('./acceptance-staging-batch-pr-evidence.mjs',import.meta.url)),'self-test'],
     {stdio:'inherit'});
