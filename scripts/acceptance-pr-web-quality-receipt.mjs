@@ -17,7 +17,14 @@ const CHECK_STEP = 'Enforce applicable Quality results at the stable check name'
 export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   const text = String(criterion?.text ?? '');
   if (!/\bweb\b|\bchromium\b|\.tsx\b|web-test-integration/i.test(String(issueBody))) return false;
-  return /\bintegration[ -]+tests?\s+(?:records?|checks?|verifies?|asserts?|runs?|executes?|passes?|covers?|fails?)\b|\b(?:run|execute|pass|verify)\s+(?:the\s+)?(?:deterministic\s+)?(?:web\s+)?integration[ -]+tests?\b/i.test(text);
+  const executedTest = /\bintegration[ -]+tests?\s+(?:records?|checks?|verifies?|asserts?|runs?|executes?|passes?|covers?|fails?)\b|\b(?:run|execute|pass|verify)\s+(?:the\s+)?(?:deterministic\s+)?(?:web\s+)?integration[ -]+tests?\b/i.test(text);
+  // #3528 SC-02 says the commit "passes the source-aligned Web
+  // Integration/Quality check", not "an integration test records ...".
+  // This is also an executable exact-head obligation, unlike policy text
+  // which merely describes when a future criterion may be accepted.
+  const gateResult = /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|complete(?:s|d)?|execut(?:e|ed)|verif(?:y|ied))\b.{0,130}\b(?:web-test-integration|web[ -]+integration(?:\/quality)?|web[ -]+quality)\b/i.test(text) ||
+    /\b(?:web-test-integration|web[ -]+integration\/quality)\b.{0,100}\b(?:pass(?:ed)?|success|successful|green|completed|executed)\b/i.test(text);
+  return executedTest || gateResult;
 }
 
 function positiveInteger(value) {
@@ -220,6 +227,28 @@ function selfTest() {
   assert.equal(requiresWebIntegrationExecution(executable, body), true);
   assert.equal(requiresWebIntegrationExecution(staticSc, body), false);
   assert.equal(requiresWebIntegrationExecution(governance, body), false);
+  // Real #3528 SC-02: positive exact-head Quality proof must be made visible
+  // to Agent; the earlier implementation accidentally classified it as static.
+  const qualitySc = { criterion: 'SC-02',
+    text: 'The new test-only commit passes the source-aligned Web Integration/Quality check at its exact PR head and leaves the Issues list/row assertions intact.' };
+  assert.equal(requiresWebIntegrationExecution(qualitySc, body), true);
+  const policySc = { criterion: 'SC-01',
+    text: 'For a PR SC explicitly requiring executable Web integration-test evidence, a successful source review of the test file cannot produce Pass while its exact-head Web Gate is pending.' };
+  assert.equal(requiresWebIntegrationExecution(policySc, body), false);
+  const governancePositive = { criterion: 'SC-02',
+    text: 'Once the independent required exact-head Gate actually completes success, the existing source-aligned Agent/ingester may issue Pass.' };
+  assert.equal(requiresWebIntegrationExecution(governancePositive, body), false);
+  const qualityContext = {
+    stage: 'pr', target_ref: sha, requirement_body: body,
+    criteria: [staticSc, qualitySc], pr_web_quality: { status: 'pending', reason: 'Web Quality still running' },
+  };
+  const qualityResult = {
+    criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: [{ type: 'source', value: 'source only' }] },
+      { criterion: 'SC-02', result: 'Pass', evidence: [{ type: 'source', value: 'test source only' }] }],
+  };
+  assert.equal(enforcePrWebQuality(qualityContext, qualityResult).criteria[1].result, 'Pending');
+  assert.equal(enforcePrWebQuality({ ...qualityContext, pr_web_quality: pass },
+    qualityResult).criteria[1].result, 'Pass');
   assert.equal(requiresWebIntegrationExecution(executable, 'Rust backend integration tests'), false);
   const context = {
     stage: 'pr', target_ref: sha, requirement_body: body,
