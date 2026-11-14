@@ -50,6 +50,25 @@ export interface EnvironmentWorkspace {
   onImported: (ref: EnvFileRef) => void;
 }
 
+function useSessionScreenEpoch(sessionId: string | null, reset: () => void) {
+  const epoch = useRef(0);
+  useLayoutEffect(() => {
+    epoch.current += 1;
+    reset();
+  }, [reset, sessionId]);
+  return epoch;
+}
+
+function notifyBindingResult(
+  resp: { success: boolean; warnings: string[]; error?: string },
+  failureMessage: string,
+): void {
+  resp.warnings.forEach((warning) => toast.warning(warning));
+  if (!resp.success) {
+    toast.error(resp.error ?? failureMessage);
+  }
+}
+
 /**
  * The Environment Workspace composition (#1202, Session-first in #2654):
  * reusable profile list + the current Session binding + the shared screen
@@ -68,12 +87,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
   // mutation. The binding hook already fences its own data writes, but returns
   // stale answers to callers. Never let their late completion close another
   // Session's draft, change its editor or show misleading toasts.
-  const sessionEpoch = useRef(0);
-  const reset = screen.reset;
-  useLayoutEffect(() => {
-    sessionEpoch.current += 1;
-    reset();
-  }, [reset, sessionId]);
+  const sessionEpoch = useSessionScreenEpoch(sessionId, screen.reset);
 
   const selectedProfile =
     profiles.profiles.find((p) => refKey(p) === screen.selectedKey) ?? null;
@@ -104,10 +118,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       if (epoch !== sessionEpoch.current) {
         return false;
       }
-      resp.warnings.forEach((warning) => toast.warning(warning));
-      if (!resp.success) {
-        toast.error(resp.error ?? 'Failed to update the Session binding');
-      }
+      notifyBindingResult(resp, 'Failed to update the Session binding');
       if (resp.binding) {
         // The Server answered with the resulting desired state, even when the
         // Agent failed to materialize it. The draft is spent; the Session view
@@ -125,10 +136,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
     if (epoch !== sessionEpoch.current) {
       return false;
     }
-    resp.warnings.forEach((warning) => toast.warning(warning));
-    if (!resp.success) {
-      toast.error(resp.error ?? 'Failed to reapply the Session binding');
-    }
+    notifyBindingResult(resp, 'Failed to reapply the Session binding');
     return resp.success;
   }, [binding]);
 
