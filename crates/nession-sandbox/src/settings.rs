@@ -41,6 +41,11 @@ pub struct SandboxSettings {
     /// Agent-authorized root containing prepared EROFS images. A composition
     /// may mount only files beneath this directory.
     pub erofs_image_root: Option<PathBuf>,
+    /// The Agent-owned shared EROFS mount manager (#3449). The Agent creates
+    /// one per identity/mount namespace; a composition without it fails
+    /// closed rather than mounting physical images per execution.
+    #[cfg(target_os = "linux")]
+    pub mount_manager: Option<std::sync::Arc<nession_erofs::mount_manager::MountManager>>,
     /// The unprivileged EROFS FUSE helper.
     pub erofsfuse_path: PathBuf,
     /// The FUSE unmount helper.
@@ -73,6 +78,8 @@ impl SandboxSettings {
             bridge_subcommand: "__nession-sandbox-bridge".to_string(),
             launcher_shell: PathBuf::from("/bin/sh"),
             erofs_image_root: None,
+            #[cfg(target_os = "linux")]
+            mount_manager: None,
             erofsfuse_path: PathBuf::from("erofsfuse"),
             fusermount_path: PathBuf::from("fusermount3"),
             fuse_overlayfs_path: PathBuf::from("fuse-overlayfs"),
