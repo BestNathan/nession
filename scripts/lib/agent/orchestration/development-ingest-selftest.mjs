@@ -205,6 +205,6 @@ for(const [environment,bad] of [
   ...['','0','-1','1.2','foo','43578706212-extra','43578706212\\n'].map(source_run_id=>
     [botEnv,{...botEvent,inputs:{source_run_id}}]),
 ])assert.throws(()=>resolveTrustedIngestSource({environment,event:bad}),
-  /trusted Ingest authority|bot\/main post-Worker wake/);
+  /trusted Ingest authority|bot\/main post-Worker wake|manual checkpoint recovery requires exact owner\/main/);
 
 console.log('Development Ingest v2: signed parent, exact Worker/Action owner fallback and forgery negatives passed');
