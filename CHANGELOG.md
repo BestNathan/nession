@@ -731,3 +731,17 @@
 - Categories: acceptance, ci, e2e, release
 - Reason: Replace the duplicate PR timing identity and distinguish Agent acceptance from PR Case Smoke evidence, preserving immutable legacy reads after Issue #3388
 - Source: https://github.com/BestNathan/nession/issues/3388
+
+## 2026-11-14T05:51:34Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Replace the per-execution read-only EROFS mount claim with the #3449 shared mount manager: digest-keyed physical mounts, consumer leases without unmount authority, strict reclamation, durable generation/identity recovery and cache pins, plus merged-staging SC-01..SC-05 evidence
+- Source: https://github.com/BestNathan/nession/issues/3449
+
+## 2026-11-14T05:51:34Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
+- Reason: Record the #3449 ownership boundary between Server image bytes/grants and the Agent-owned shared mount manager, consumer leases and execution-scoped composition
+- Source: https://github.com/BestNathan/nession/issues/3449
