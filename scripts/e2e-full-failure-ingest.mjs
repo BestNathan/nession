@@ -182,12 +182,32 @@ function selfTest() {
     'workflow must not reject REST dynamic Main schedule names');
   assert.ok(guard.includes("format('Convergence Full main@{0}'"),
     'manual Main Full must be source-SHA bound in intake routing');
+  // #3465 real regression: workflow_dispatch with default target_ref=main
+  // and omitted target_sha used to name the run "Convergence Full main@".
+  // Intake correctly rejected that name, silently losing failure evidence.
+  // Require the producer to pin BOTH its run-name and actual checkout to
+  // github.sha; otherwise restoring only the consumer would be unsafe.
+  const producer = fs.readFileSync(
+    new URL('../.github/workflows/e2e-full-regression.yml', import.meta.url), 'utf8');
+  assert.ok(producer.includes(
+    "inputs.target_sha || (inputs.target_ref == 'main' && github.sha) || 'tip'"),
+    'manual Main default run-name must bind the immutable dispatch SHA');
+  assert.ok(producer.includes(
+    "github.event_name == 'workflow_dispatch' && inputs.target_ref == 'main' && inputs.target_sha == ''"),
+    'manual Main default checkout must pin the same immutable dispatch SHA');
+  assert.ok(producer.includes("github.event_name == 'schedule'"),
+    'Main schedule still pins the immutable event SHA');
+  assert.ok(!/\n  push:\s*\n\s*branches: \[main\]/.test(producer),
+    'Main push must not re-enable Full as an implicit convergence dependency');
   for (const bad of [
     { ...input, run: { ...run, event: 'pull_request' } },
     { ...input, run: { ...run, name: 'Full Regression main@'+'c'.repeat(40) } },
     { ...input, run: { ...run, event:'workflow_dispatch',
       name:'Convergence Full chore/staging-sync@'+sha } },
     { ...input, run: { ...run, event:'workflow_dispatch',name:WORKFLOW_NAME } },
+    { ...input, run: { ...run, event:'workflow_dispatch',name:'Convergence Full main@' } },
+    { ...input, run: { ...run, event:'workflow_dispatch',
+      name:'Convergence Full staging@'+sha } },
     { ...input, run: { ...run, head_sha: 'c'.repeat(40) } },
     { ...input, archiveSha256: '0'.repeat(64) },
     { ...input, artifacts: { artifacts: [{ ...artifact, workflow_run: { id: 999, head_sha: sha } }] } },
