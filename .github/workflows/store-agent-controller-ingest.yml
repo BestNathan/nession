@@ -148,6 +148,7 @@ jobs:
       - name: Commit exactly one immutable Issue Controller root using Store CAS
         env:
           STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          CONTROLLER_SOURCE_RUN_FILE: ${{ runner.temp }}/controller-source.json
         run: |
           set -euo pipefail
           test -n "$STORE_APP_TOKEN"
