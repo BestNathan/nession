@@ -34,7 +34,7 @@ export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   // an independent exact-SHA CI receipt REQUIRED for Pass.
   const requiredUnitReceipt = /^SC-\d{2,}$/.test(String(criterion?.criterion ?? '')) &&
     String(issueBody).split(/\r?\n/).some(line =>
-      line.includes(criterion.criterion) &&
+      (line.match(/\bSC-\d{2,}\b/g) ?? []).includes(criterion.criterion) &&
       /\bSCN-01\b/.test(line) &&
       /\bWeb\s+unit[- ]test\s+CI\b/i.test(line) &&
       /\b(?:independent\s+)?exact[- ]SHA\s+CI\s+receipts?\s+(?:are\s+)?required\s+for\s+Pass\b/i.test(line));
