@@ -7,12 +7,19 @@ const { assertRan } = require('../../../shared/control-mode-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
-  const output = agentCacheTests('cache::progress_negative_tests::');
-  assertRan(output, [
+  const negative = agentCacheTests('cache::progress_negative_tests::');
+  assertRan(negative, [
     'cache::progress_negative_tests::verifying_is_active_but_not_verified',
-    'cache::progress_negative_tests::a_digest_mismatch_is_failed_not_verified',
     'cache::progress_negative_tests::a_refused_grant_is_failed_without_a_partial',
     'cache::progress_negative_tests::transfer_details_redact_absolute_paths_and_bound_length',
+  ]);
+  // The corrupt-bytes case lives with the other successful-progress tests
+  // (it needs a real download), so it is selected by its own module path.
+  const corrupt = agentCacheTests(
+    'cache::progress_tests::a_digest_mismatch_is_failed_not_verified',
+  );
+  assertRan(corrupt, [
+    'cache::progress_tests::a_digest_mismatch_is_failed_not_verified',
   ]);
   evidence.push({
     type: 'runtime',
