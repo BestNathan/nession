@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "dc4da065c20402637546ae369434faf85d3559af",
+  "run_id": 43563241276,
+  "run_attempt": 1,
+  "plan_digest": "5d445a376dd0ac428bd2ea95f69e2699d9a2a52bbde905962aaaaff36ffeadb0",
+  "artifact_digest": "sha256:6b6e383a3689ed5b5b08e74ce52c9e298e9706bea231758106ad8453978e78ee",
+  "results": [
+    {
+      "id": "files-context-create",
+      "result": "Pass",
+      "discovered": 9,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 233
+    },
+    {
+      "id": "fixture-visual",
+      "result": "Pending",
+      "discovered": 14,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 1,
+      "assertions": 111
+    },
+    {
+      "id": "images-workspace-capability",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 48
+    },
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 262
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 31,
+      "passed": 31,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 895
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 30,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 139
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 104,
+      "passed": 104,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 836
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "discovered": 65,
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 730
+    }
+  ]
+}
