@@ -86,6 +86,34 @@ pub struct MountManagerConfig {
     pub pinner: Option<Arc<dyn BlobPinner>>,
 }
 
+/// The physical mount operations the manager performs.
+///
+/// Production always uses [`RealMountBackend`]; unit tests inject a fake so the
+/// sharing/recovery state machine can be exercised without FUSE, root or the
+/// `erofsfuse` helper. Keeping the seam here (rather than in `mount.rs`) leaves
+/// the verified-mount contract itself untouched.
+trait MountBackend: Send + Sync {
+    fn mount(&self, image: &Path, mountpoint: &Path, settings: &MountSettings) -> Result<()>;
+    fn unmount(&self, settings: &MountSettings, mountpoint: &Path) -> Result<()>;
+    fn is_erofs_mount(&self, mountpoint: &Path) -> bool;
+}
+
+struct RealMountBackend;
+
+impl MountBackend for RealMountBackend {
+    fn mount(&self, image: &Path, mountpoint: &Path, settings: &MountSettings) -> Result<()> {
+        mount::mount_shared(image, mountpoint, settings)
+    }
+
+    fn unmount(&self, settings: &MountSettings, mountpoint: &Path) -> Result<()> {
+        mount::unmount_shared(&settings.fusermount, mountpoint)
+    }
+
+    fn is_erofs_mount(&self, mountpoint: &Path) -> bool {
+        mount::is_erofs_mount(mountpoint)
+    }
+}
+
 /// One consumer identity persisted in a sandbox execution record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumerRef {
@@ -208,6 +236,7 @@ impl MountEntry {
 struct ManagerInner {
     root: PathBuf,
     settings: MountSettings,
+    backend: Arc<dyn MountBackend>,
     authorized_roots: Vec<PathBuf>,
     pinner: Option<Arc<dyn BlobPinner>>,
     entries: Mutex<HashMap<String, Arc<MountEntry>>>,
@@ -233,6 +262,22 @@ impl MountManager {
     ///
     /// Opening performs no mount and adopts nothing.
     pub fn open(config: MountManagerConfig) -> Result<Arc<Self>> {
+        Self::open_with_backend_inner(config, Arc::new(RealMountBackend))
+    }
+
+    /// Test seam: exercise the manager against an injected mount backend.
+    #[cfg(test)]
+    fn open_with_mounts(
+        config: MountManagerConfig,
+        backend: Arc<dyn MountBackend>,
+    ) -> Result<Arc<Self>> {
+        Self::open_with_backend_inner(config, backend)
+    }
+
+    fn open_with_backend_inner(
+        config: MountManagerConfig,
+        backend: Arc<dyn MountBackend>,
+    ) -> Result<Arc<Self>> {
         let root = config.root;
         if !root.is_absolute() {
             anyhow::bail!("the EROFS mount manager root must be absolute");
@@ -260,6 +305,7 @@ impl MountManager {
             inner: Arc::new(ManagerInner {
                 root,
                 settings: config.settings,
+                backend,
                 authorized_roots,
                 pinner: config.pinner,
                 entries: Mutex::new(HashMap::new()),
@@ -290,7 +336,7 @@ impl MountManager {
     /// Read-only lookup by digest. Never creates a mount or a consumer.
     pub fn lookup(&self, digest: &str) -> Option<MountStatus> {
         let entry = self.entry(digest)?;
-        Some(status_of(&entry, &self.inner.settings.mountinfo_path))
+        Some(status_of(&self.inner, &entry))
     }
 
     /// Read-only lookup by canonical physical mountpoint. An unknown path is
@@ -305,7 +351,7 @@ impl MountManager {
                 .find(|entry| entry.mountpoint == canonical || entry.mountpoint == mountpoint)
                 .cloned()
         }?;
-        Some(status_of(&entry, &self.inner.settings.mountinfo_path))
+        Some(status_of(&self.inner, &entry))
     }
 
     /// Acquire one consumer-scoped lease for a verified image.
@@ -327,10 +373,7 @@ impl MountManager {
                         state.phase = MountState::Unmounted;
                         continue;
                     };
-                    if !mount::is_erofs_mount_at(
-                        &entry.mountpoint,
-                        &self.inner.settings.mountinfo_path,
-                    ) {
+                    if !self.inner.backend.is_erofs_mount(&entry.mountpoint) {
                         let failure = format!(
                             "the shared EROFS mount {} for {} disappeared",
                             entry.mountpoint.display(),
@@ -402,11 +445,10 @@ impl MountManager {
                     // cannot leave two mounts aliased.
                     state.phase = MountState::Unmounting;
                     drop(state);
-                    let reclaim = mount::unmount_shared_at(
-                        &self.inner.settings.fusermount,
-                        &entry.mountpoint,
-                        &self.inner.settings.mountinfo_path,
-                    );
+                    let reclaim = self
+                        .inner
+                        .backend
+                        .unmount(&self.inner.settings, &entry.mountpoint);
                     let mut state = lock(&entry.state);
                     match reclaim {
                         Ok(()) => {
@@ -550,7 +592,7 @@ impl MountManager {
                 ));
                 continue;
             }
-            if !mount::is_erofs_mount_at(&entry.mountpoint, &self.inner.settings.mountinfo_path) {
+            if !self.inner.backend.is_erofs_mount(&entry.mountpoint) {
                 report.unavailable.push((
                     consumer.digest.clone(),
                     "the physical EROFS mount is no longer present".to_string(),
@@ -661,7 +703,7 @@ impl MountManager {
             if in_use {
                 continue;
             }
-            if !mount::is_erofs_mount_at(&entry.mountpoint, &self.inner.settings.mountinfo_path) {
+            if !self.inner.backend.is_erofs_mount(&entry.mountpoint) {
                 let mut state = lock(&entry.state);
                 state.phase = MountState::Unmounted;
                 state.generation = None;
@@ -674,11 +716,11 @@ impl MountManager {
             }
             let mut state = lock(&entry.state);
             state.phase = MountState::Unmounting;
-            match mount::unmount_shared_at(
-                &self.inner.settings.fusermount,
-                &entry.mountpoint,
-                &self.inner.settings.mountinfo_path,
-            ) {
+            match self
+                .inner
+                .backend
+                .unmount(&self.inner.settings, &entry.mountpoint)
+            {
                 Ok(()) => {
                     state.phase = MountState::Unmounted;
                     state.generation = None;
@@ -717,9 +759,7 @@ impl MountManager {
                     .entry(&digest)
                     .map(|entry| entry.identity_path.exists())
                     .unwrap_or(false);
-                if known_identity
-                    || !mount::is_erofs_mount_at(&path, &self.inner.settings.mountinfo_path)
-                {
+                if known_identity || !self.inner.backend.is_erofs_mount(&path) {
                     continue;
                 }
                 let entry = self.entry_or_create(&digest);
@@ -728,11 +768,7 @@ impl MountManager {
                     continue;
                 }
                 state.phase = MountState::Unmounting;
-                match mount::unmount_shared_at(
-                    &self.inner.settings.fusermount,
-                    &path,
-                    &self.inner.settings.mountinfo_path,
-                ) {
+                match self.inner.backend.unmount(&self.inner.settings, &path) {
                     Ok(()) => {
                         state.phase = MountState::Unmounted;
                         state.generation = None;
@@ -824,13 +860,14 @@ impl MountManager {
             source: source.to_path_buf(),
             created_at: now_seconds(),
         };
-        mount::mount_shared(source, &entry.mountpoint, &self.inner.settings)?;
+        self.inner
+            .backend
+            .mount(source, &entry.mountpoint, &self.inner.settings)?;
         if let Err(error) = write_identity(&entry.identity_path, &identity) {
-            let rollback = mount::unmount_shared_at(
-                &self.inner.settings.fusermount,
-                &entry.mountpoint,
-                &self.inner.settings.mountinfo_path,
-            );
+            let rollback = self
+                .inner
+                .backend
+                .unmount(&self.inner.settings, &entry.mountpoint);
             return match rollback {
                 Ok(()) => Err(error),
                 Err(rollback) => Err(error.context(format!(
@@ -942,11 +979,7 @@ fn reclaim_if_unused(
         return Ok(());
     }
     state.phase = MountState::Unmounting;
-    match mount::unmount_shared_at(
-        &inner.settings.fusermount,
-        &entry.mountpoint,
-        &inner.settings.mountinfo_path,
-    ) {
+    match inner.backend.unmount(&inner.settings, &entry.mountpoint) {
         Ok(()) => {
             state.phase = MountState::Unmounted;
             state.generation = None;
@@ -981,9 +1014,9 @@ fn adopt_token(state: &mut EntryState, execution_id: &str, generation: &str) -> 
     token
 }
 
-fn status_of(entry: &MountEntry, mountinfo_path: &Path) -> MountStatus {
+fn status_of(inner: &ManagerInner, entry: &MountEntry) -> MountStatus {
     let state = lock(&entry.state);
-    let mounted = mount::is_erofs_mount_at(&entry.mountpoint, mountinfo_path);
+    let mounted = inner.backend.is_erofs_mount(&entry.mountpoint);
     let phase = if state.phase == MountState::Mounted && state.consumers.is_empty() {
         MountState::Idle
     } else {
@@ -1084,47 +1117,52 @@ mod tests {
         .unwrap()
     }
 
+    /// A backend that records successful mounts in memory. Sharing/recovery
+    /// tests use this so they do not need FUSE, root or an `erofsfuse` binary.
+    #[derive(Default)]
+    struct FakeMountBackend {
+        mounted: Mutex<HashSet<PathBuf>>,
+    }
+
+    impl MountBackend for FakeMountBackend {
+        fn mount(&self, _image: &Path, mountpoint: &Path, _settings: &MountSettings) -> Result<()> {
+            std::fs::create_dir_all(mountpoint).unwrap();
+            self.mounted
+                .lock()
+                .unwrap()
+                .insert(mountpoint.to_path_buf());
+            Ok(())
+        }
+
+        fn unmount(&self, _settings: &MountSettings, mountpoint: &Path) -> Result<()> {
+            self.mounted.lock().unwrap().remove(mountpoint);
+            Ok(())
+        }
+
+        fn is_erofs_mount(&self, mountpoint: &Path) -> bool {
+            self.mounted.lock().unwrap().contains(mountpoint)
+        }
+    }
+
+    fn manager_with_fake_mounts(root: &Path, authorized: Vec<PathBuf>) -> Arc<MountManager> {
+        MountManager::open_with_mounts(
+            MountManagerConfig {
+                root: root.join("mounts-root"),
+                settings: MountSettings::new(root.join("erofsfuse"), root.join("fusermount3")),
+                authorized_roots: authorized,
+                pinner: None,
+            },
+            Arc::new(FakeMountBackend::default()),
+        )
+        .unwrap()
+    }
+
     fn image(root: &Path, bytes: &[u8]) -> (PathBuf, String) {
         let images = root.join("images");
         std::fs::create_dir_all(&images).unwrap();
         let path = images.join("image.erofs");
         std::fs::write(&path, bytes).unwrap();
         (path, digest_of_bytes(bytes))
-    }
-
-    /// A manager whose fake helper records its mount in a private mount table.
-    ///
-    /// The production probe reads `/proc/self/mountinfo`; a fake helper can
-    /// never create a real FUSE mount, so the test injects the observation
-    /// path instead of asserting against the host mount namespace.
-    fn mounted_manager(root: &Path) -> Arc<MountManager> {
-        let mountinfo = root.join("mountinfo");
-        std::fs::write(&mountinfo, "").unwrap();
-        let helper = root.join("erofsfuse");
-        executable(
-            &helper,
-            &format!(
-                "#!/bin/sh\nprintf '1 0 0:1 / %s rw - fuse.erofsfuse erofsfuse rw\\n' \"$2\" >> '{}'\n",
-                mountinfo.display()
-            ),
-        );
-        let fusermount = root.join("fusermount3");
-        executable(
-            &fusermount,
-            &format!(
-                "#!/bin/sh\nif [ \"$1\" = \"-u\" ]; then \
-                 grep -v -F \" $2 \" '{path}' > '{path}.tmp' || true; \
-                 mv '{path}.tmp' '{path}' 2>/dev/null || true; fi\nexit 0\n",
-                path = mountinfo.display()
-            ),
-        );
-        MountManager::open(MountManagerConfig {
-            root: root.join("mounts-root"),
-            settings: MountSettings::new(helper, fusermount).with_mountinfo_path(&mountinfo),
-            authorized_roots: vec![root.join("images")],
-            pinner: None,
-        })
-        .unwrap()
     }
 
     #[test]
@@ -1171,7 +1209,7 @@ mod tests {
     fn two_consumers_of_one_layer_share_one_physical_mount() {
         let root = tempfile::tempdir().unwrap();
         let (source, digest) = image(root.path(), b"one shared physical layer");
-        let manager = mounted_manager(root.path());
+        let manager = manager_with_fake_mounts(root.path(), vec![root.path().join("images")]);
         let verified = VerifiedImage::new(digest.clone(), source).unwrap();
         let first = manager.acquire(&verified, "exec-a").unwrap();
         let second = manager.acquire(&verified, "exec-b").unwrap();
