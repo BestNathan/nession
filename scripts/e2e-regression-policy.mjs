@@ -10,12 +10,12 @@ const SHA = /^[0-9a-f]{40}$/;
 const LANE = /^[a-z][a-z0-9-]{0,62}$/;
 export const DEFAULT_INTERVALS = Object.freeze({ staging: 2, main: 12 });
 
-// Owner of the trusted Main Full Regression run-source policy (#2323 SC-12):
-// the scheduled cadence, the immediate post-promotion push for runtime
-// changes, and a manual re-run of the same Main workflow. Every consumer that
-// accepts a Main Full run as evidence or as a failure source imports this
-// predicate instead of copying the list; a narrower copy is what left the push
-// route half-wired between the workflow guard and its intake/evidence owners.
+// Owner of trusted Main Full Regression source events (#3465).
+// New runs are periodic Main diagnostics or explicit manual investigations,
+// never implicit convergence/merge Gates. Retain 'push' ONLY to authenticate
+// historical source observations created by the former immediate-Main route;
+// no push trigger is installed in the current Full workflow. Consumers share
+// this event allowlist rather than silently dropping legacy evidence.
 export const TRUSTED_MAIN_FULL_EVENTS = Object.freeze(['schedule', 'workflow_dispatch', 'push']);
 
 export function isTrustedMainFullEvent(event) {
