@@ -4,9 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-# Server composition: build, CAS, catalog and source adapters. Mechanics-only
-# consumers disable defaults.
-default = ["build", "store", "catalog", "sources"]
+# Server composition: build, CAS, catalog, source adapters and the external OCI
+# Distribution client. Mechanics-only consumers disable defaults.
+default = ["build", "store", "catalog", "sources", "registry"]
 store = []
 build = ["store", "dep:tempfile"]
 cache = ["dep:futures-util", "dep:reqwest", "dep:tokio", "dep:libc"]
@@ -17,9 +17,22 @@ catalog = ["store", "dep:sea-orm", "dep:tokio"]
 # Source adapters (#3497): checksum-verified archive/HTTPS inputs, raw EROFS
 # import and an external OCI-to-EROFS converter boundary.
 sources = ["build", "catalog", "dep:tar", "dep:flate2", "dep:reqwest"]
+# External OCI Distribution pull/push (#3498). The Agent's feature set
+# (`cache`, `mount`) deliberately does not enable this module: credentials stay
+# in the Server-owned provider and never reach an Agent build.
+registry = [
+    "store",
+    "catalog",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:futures-util",
+    "dep:base64",
+    "dep:thiserror",
+]
 
 [dependencies]
 anyhow.workspace = true
+base64 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 futures-util = { workspace = true, optional = true }
@@ -30,10 +43,12 @@ sha2.workspace = true
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 tempfile = { version = "3.8", optional = true }
+thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 httptest = "0.16"
 tempfile = "3.8"
 tokio = { workspace = true, features = ["full", "test-util"] }
