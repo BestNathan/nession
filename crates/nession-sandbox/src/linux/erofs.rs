@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use nession_erofs::digest::file_digest;
 use nession_erofs::mount::{self, MountSettings};
 use nession_erofs::mount_manager::{MountLease, MountManager, VerifiedImage};
+use nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership;
 
 use crate::error::{Result, SandboxError};
 use crate::exec::SharedMountRecord;
@@ -249,9 +250,14 @@ pub fn mount_composition(
                 .to_string(),
         ));
     };
-    let write = validate_workspace_write(&workspace.write, &settings.state_dir)?;
+    let write = crate::exec::validate_composition_workspace(workspace, settings)?;
     mounted.resolved.workspace = match &workspace.image {
         Some(image) => {
+            if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
+                return Err(SandboxError::InvalidPolicy(
+                    "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
+                ));
+            }
             let lower = mount_image(image, &image_root, manager, execution_id, &mut mounted)?;
             let upper = write.join("upper");
             let work = write.join("work");
@@ -386,54 +392,6 @@ fn verify_image(image: &CompiledImage, image_root: &Path) -> Result<PathBuf> {
         )));
     }
     Ok(canonical)
-}
-
-fn validate_workspace_write(write: &Path, state_dir: &Path) -> Result<PathBuf> {
-    let metadata = std::fs::symlink_metadata(write).map_err(|error| {
-        SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} does not exist: {error}",
-            write.display()
-        ))
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} must be a real directory",
-            write.display()
-        )));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let euid = unsafe { libc::geteuid() };
-        use std::os::unix::fs::MetadataExt;
-        if euid != 0 && metadata.uid() != euid {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is not owned by the Agent user",
-                write.display()
-            )));
-        }
-        if metadata.permissions().mode() & 0o200 == 0 {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is not writable",
-                write.display()
-            )));
-        }
-    }
-    let canonical_write = std::fs::canonicalize(write).map_err(|error| {
-        SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} cannot be resolved: {error}",
-            write.display()
-        ))
-    })?;
-    let canonical_state =
-        std::fs::canonicalize(state_dir).unwrap_or_else(|_| state_dir.to_path_buf());
-    if !canonical_write.starts_with(&canonical_state) {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} is outside the Agent sandbox state directory",
-            canonical_write.display()
-        )));
-    }
-    Ok(canonical_write)
 }
 
 /// Merge the Project image and the bounded writable upper/work through the

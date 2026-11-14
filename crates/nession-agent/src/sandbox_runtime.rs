@@ -154,10 +154,15 @@ impl SandboxRuntime {
         if let Some(seconds) = config.sandbox.launch_timeout_secs {
             settings.launch_timeout = Duration::from_secs(seconds);
         }
-        if let Some(agent_dir) = agent_dir {
+        if let Some(agent_dir) = &agent_dir {
             // Identity, env files and metadata live here. A sandbox must not
             // see them even when no filesystem policy was requested.
-            settings.private_directories.push(agent_dir);
+            settings.private_directories.push(agent_dir.clone());
+            // The durable Agent Workspace registry is the second authorized
+            // writable root (#3407). Its child directories may be bound as the
+            // composition `/workspace`; nothing else under the Agent data
+            // directory becomes an Agent-owned workspace.
+            settings.agent_workspaces_root = Some(agent_dir.join("workspaces"));
         }
         // One shared EROFS mount manager per Agent identity/mount namespace
         // (#3449). Its authorized root is exactly the verified image root; a

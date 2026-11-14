@@ -11,6 +11,8 @@
 //! construction stays in `nession-tmux`; Session lifecycle stays in
 //! [`SessionManager`](super::manager::SessionManager).
 
+use std::path::{Path, PathBuf};
+
 use anyhow::{Context as _, Result};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCatalogStatus,
@@ -19,7 +21,7 @@ use nession_protocol::contracts::sandbox::v1::{
     SandboxNativePane, SandboxPaneRef, SandboxPaneScope, SandboxPolicyDraft,
     SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS, SANDBOX_CATALOG_VERSION,
 };
-use nession_protocol::contracts::session::v1::ManagedImageGrant;
+use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 use nession_sandbox::{
     draft_from_policy, materialize, materialize_with_composition, preflight_unprepared_composition,
     requested_mechanisms, ExecutionRecord, LaunchRequest, SandboxError,
@@ -44,7 +46,22 @@ pub struct SandboxEnterInput<'a> {
     pub enter_id: &'a str,
     pub draft: &'a SandboxPolicyDraft,
     pub images: &'a [ManagedImageGrant],
+    /// The Server-resolved Project Existing Location on this Agent (#3407).
+    /// Present only when the effective Workspace branch is the Project
+    /// Location; an explicit managed selection ignores it.
+    pub project_location: Option<&'a str>,
     pub server_url: &'a str,
+    pub working_dir: &'a str,
+}
+
+/// One explicit preflight request (#3124, Workspace resolution #3407).
+pub struct SandboxPreflightInput<'a> {
+    pub session_name: &'a str,
+    pub generation: &'a str,
+    pub probe_generation: &'a str,
+    pub draft: &'a SandboxPolicyDraft,
+    pub images: &'a [SandboxImageSelection],
+    pub project_location: Option<&'a str>,
     pub working_dir: &'a str,
 }
 
@@ -136,13 +153,17 @@ impl SessionManager {
     /// any host resource.
     pub async fn sandbox_preflight(
         &self,
-        session_name: &str,
-        generation: &str,
-        probe_generation: &str,
-        draft: &SandboxPolicyDraft,
-        images: &[SandboxImageSelection],
-        working_dir: &str,
+        input: SandboxPreflightInput<'_>,
     ) -> SandboxPreflightResult {
+        let SandboxPreflightInput {
+            session_name,
+            generation,
+            probe_generation,
+            draft,
+            images,
+            project_location,
+            working_dir,
+        } = input;
         let context = match self.sandbox_context(session_name).await {
             Ok(context) => context,
             Err(error) => {
@@ -190,6 +211,21 @@ impl SessionManager {
             warnings: Vec::new(),
             catalog: catalog.clone(),
         };
+        let field_refusal = |field: &str, code: &str, message: &str| SandboxPreflightResult {
+            ok: false,
+            error: Some(message.to_string()),
+            generation: context.generation.clone(),
+            policy_digest: None,
+            backend: None,
+            mechanisms: Vec::new(),
+            errors: vec![SandboxFieldError {
+                field: field.to_string(),
+                code: code.to_string(),
+                message: message.to_string(),
+            }],
+            warnings: Vec::new(),
+            catalog: catalog.clone(),
+        };
 
         if context.generation != generation {
             return refuse(
@@ -224,6 +260,28 @@ impl SessionManager {
                 "not-enterable",
             );
         };
+        let selected_workspace = draft
+            .filesystem
+            .as_ref()
+            .and_then(|filesystem| filesystem.workspace.as_ref());
+        if matches!(
+            selected_workspace,
+            Some(SandboxFilesystemWorkspace::ProjectLocation)
+        ) && project_location.is_none()
+        {
+            return field_refusal(
+                "filesystem.workspace",
+                "project-location-missing",
+                "this Session's Project declares no Existing Location on this Agent; add one for this Agent or choose a managed Workspace",
+            );
+        }
+        // A managed selection outranks a Project Location; only an effective
+        // Project Location branch carries the Server-resolved path.
+        let project_location = match selected_workspace {
+            Some(SandboxFilesystemWorkspace::ProjectLocation)
+            | Some(SandboxFilesystemWorkspace::Auto) => project_location,
+            _ => None,
+        };
         let cache = runtime.erofs_cache();
         let composition = if images.is_empty() {
             None
@@ -235,7 +293,7 @@ impl SessionManager {
                     "not-enterable",
                 );
             };
-            match crate::sandbox_images::preflight_composition(cache, images) {
+            match crate::sandbox_images::preflight_composition(cache, images, project_location) {
                 Ok(composition) => Some(composition),
                 Err(error) => {
                     return SandboxPreflightResult {
@@ -374,6 +432,7 @@ impl SessionManager {
             enter_id,
             draft,
             images,
+            project_location,
             server_url,
             working_dir,
         } = input;
@@ -465,28 +524,22 @@ impl SessionManager {
                 None,
             );
         };
-        let workspace_override = match draft
+        // Selection precedence (#3407 SC-02): an explicit managed Workspace
+        // outranks the Project Location; otherwise a matching Project Existing
+        // Location is selected; otherwise the Session-name managed Workspace
+        // is allocated. An explicit Project Location without a matching
+        // declaration fails closed; it never falls back silently.
+        let lower_digest = images
+            .iter()
+            .find(|grant| grant.role == ManagedImageRole::Workspace)
+            .map(|grant| grant.digest.as_str());
+        let selected_workspace = draft
             .filesystem
             .as_ref()
-            .and_then(|filesystem| filesystem.workspace.as_ref())
-        {
+            .and_then(|filesystem| filesystem.workspace.as_ref());
+        let workspace_override = match selected_workspace {
             None => None,
-            Some(SandboxFilesystemWorkspace::ProjectLocation) => {
-                return refusal(
-                    SandboxActionErrorKind::Invalid,
-                    "Project Location Workspace selection is not available yet; choose a managed Workspace"
-                        .to_string(),
-                    Some(vec![SandboxFieldError {
-                        field: "filesystem.workspace".to_string(),
-                        code: "unsupported".to_string(),
-                        message: "Project Location resolution is pending".to_string(),
-                    }]),
-                )
-            }
-            Some(SandboxFilesystemWorkspace::Managed {
-                workspace_id,
-                name,
-            }) => {
+            Some(SandboxFilesystemWorkspace::Managed { workspace_id, name }) => {
                 let Some(manager) = self.workspaces() else {
                     return refusal(
                         SandboxActionErrorKind::Unavailable,
@@ -496,9 +549,12 @@ impl SessionManager {
                 };
                 match resolve_managed_workspace(
                     manager,
-                    workspace_id.as_deref(),
-                    name.as_deref(),
-                    session_name,
+                    ManagedWorkspaceRequest {
+                        workspace_id: workspace_id.as_deref(),
+                        name: name.as_deref(),
+                        session_name,
+                        lower_digest,
+                    },
                 )
                 .await
                 {
@@ -516,26 +572,77 @@ impl SessionManager {
                     }
                 }
             }
-            Some(SandboxFilesystemWorkspace::Auto) => {
-                let Some(manager) = self.workspaces() else {
-                    return refusal(
-                        SandboxActionErrorKind::Unavailable,
-                        "this Agent has no Workspace registry configured".to_string(),
-                        None,
-                    );
-                };
-                match resolve_managed_workspace(manager, None, None, session_name).await {
-                    Ok(workspace) => Some(workspace),
+            Some(SandboxFilesystemWorkspace::ProjectLocation) => {
+                match resolve_project_location(project_location, lower_digest) {
+                    Ok(path) => Some(
+                        crate::sandbox_images::SandboxWorkspaceOverride::ProjectLocation { path },
+                    ),
                     Err(error) => {
                         return refusal(
-                            SandboxActionErrorKind::Unavailable,
-                            format!("cannot resolve the automatic Workspace: {error:#}"),
+                            SandboxActionErrorKind::Invalid,
+                            format!("{error:#}"),
                             Some(vec![SandboxFieldError {
                                 field: "filesystem.workspace".to_string(),
-                                code: "unavailable".to_string(),
-                                message: format!("{error:#}"),
+                                code: "project-location".to_string(),
+                                message: "the Project Location is not usable for this Enter"
+                                    .to_string(),
                             }]),
                         )
+                    }
+                }
+            }
+            Some(SandboxFilesystemWorkspace::Auto) => {
+                if let Some(path) = project_location {
+                    match resolve_project_location(Some(path), lower_digest) {
+                        Ok(path) => Some(
+                            crate::sandbox_images::SandboxWorkspaceOverride::ProjectLocation {
+                                path,
+                            },
+                        ),
+                        Err(error) => {
+                            return refusal(
+                                SandboxActionErrorKind::Invalid,
+                                format!("{error:#}"),
+                                Some(vec![SandboxFieldError {
+                                    field: "filesystem.workspace".to_string(),
+                                    code: "project-location".to_string(),
+                                    message: "the Project Location is not usable for this Enter"
+                                        .to_string(),
+                                }]),
+                            )
+                        }
+                    }
+                } else {
+                    let Some(manager) = self.workspaces() else {
+                        return refusal(
+                            SandboxActionErrorKind::Unavailable,
+                            "this Agent has no Workspace registry configured".to_string(),
+                            None,
+                        );
+                    };
+                    match resolve_managed_workspace(
+                        manager,
+                        ManagedWorkspaceRequest {
+                            workspace_id: None,
+                            name: None,
+                            session_name,
+                            lower_digest,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(workspace) => Some(workspace),
+                        Err(error) => {
+                            return refusal(
+                                SandboxActionErrorKind::Unavailable,
+                                format!("cannot resolve the automatic Workspace: {error:#}"),
+                                Some(vec![SandboxFieldError {
+                                    field: "filesystem.workspace".to_string(),
+                                    code: "unavailable".to_string(),
+                                    message: format!("{error:#}"),
+                                }]),
+                            )
+                        }
                     }
                 }
             }
@@ -982,19 +1089,30 @@ impl SessionManager {
     }
 }
 
-/// The Session's active Pane: the one row tmux marks as both the current
-/// Window and that Window's active Pane.
-/// Resolve one managed Workspace and acquire its RW lease.
+/// One managed Workspace resolution request (#3407).
+struct ManagedWorkspaceRequest<'a> {
+    workspace_id: Option<&'a str>,
+    name: Option<&'a str>,
+    session_name: &'a str,
+    lower_digest: Option<&'a str>,
+}
+
+/// Resolve one managed Workspace, acquire its RW lease and pin the Project
+/// EROFS lower its durable upper belongs to.
 ///
 /// An explicit stable id is leased directly; an explicit name is reused or
 /// created in the default namespace; `auto` uses the Session name. The caller
 /// holds the lease until the execution is cleaned up.
 async fn resolve_managed_workspace(
     manager: &std::sync::Arc<crate::workspace_manager::WorkspaceManager>,
-    workspace_id: Option<&str>,
-    name: Option<&str>,
-    session_name: &str,
-) -> Result<(std::path::PathBuf, crate::workspace_manager::WorkspaceLease)> {
+    request: ManagedWorkspaceRequest<'_>,
+) -> Result<crate::sandbox_images::SandboxWorkspaceOverride> {
+    let ManagedWorkspaceRequest {
+        workspace_id,
+        name,
+        session_name,
+        lower_digest,
+    } = request;
     let workspace_id = match (workspace_id, name) {
         (Some(workspace_id), None) => workspace_id.to_string(),
         (None, Some(name)) => {
@@ -1015,9 +1133,65 @@ async fn resolve_managed_workspace(
     };
     let path = manager.workspace_directory(&workspace_id)?;
     let lease = manager.lease(&workspace_id).await?;
-    Ok((path, lease))
+    // A changed/missing lower on a Workspace whose durable upper was prepared
+    // against a Project image is refused before any host resource is created.
+    manager
+        .pin_lower_digest(&workspace_id, lower_digest)
+        .await?;
+    Ok(crate::sandbox_images::SandboxWorkspaceOverride::Managed { path, lease })
 }
 
+/// Validate the Server-resolved Project Existing Location at use time.
+///
+/// The path is external and user-owned: it must exist on this Agent as a real
+/// directory and is never created, canonicalized behind a symlink, or deleted.
+/// A Project Location cannot carry a Project EROFS lower because the Overlay
+/// would have to keep upper/work inside the user's directory.
+fn resolve_project_location(path: Option<&str>, lower_digest: Option<&str>) -> Result<PathBuf> {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        anyhow::bail!(
+            "this Session's Project declares no Existing Location on this Agent; add one for this Agent or choose a managed Workspace"
+        );
+    };
+    if lower_digest.is_some() {
+        anyhow::bail!(
+            "a Project Location cannot be combined with a Project EROFS lower; choose a managed Workspace"
+        );
+    }
+    let declared = Path::new(path);
+    if !declared.is_absolute() {
+        anyhow::bail!("the Project Location `{path}` must be an absolute path");
+    }
+    let metadata = std::fs::symlink_metadata(declared).map_err(|error| {
+        anyhow::anyhow!(
+            "the Project Location {} is not available on this Agent: {error}",
+            declared.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        anyhow::bail!(
+            "the Project Location {} must be a real directory",
+            declared.display()
+        );
+    }
+    let canonical = std::fs::canonicalize(declared).map_err(|error| {
+        anyhow::anyhow!(
+            "the Project Location {} cannot be resolved: {error}",
+            declared.display()
+        )
+    })?;
+    if canonical != declared {
+        anyhow::bail!(
+            "the Project Location {} resolves to {}; declare the canonical path",
+            declared.display(),
+            canonical.display()
+        );
+    }
+    Ok(canonical)
+}
+
+/// The Session's active Pane: the one row tmux marks as both the current
+/// Window and that Window's active Pane.
 fn active_pane_of(panes: &[PaneSummary], session_name: &str) -> Option<PaneSummary> {
     panes
         .iter()
@@ -1285,5 +1459,158 @@ mod tests {
             &catalog,
         );
         assert_ne!(first, inside);
+    }
+
+    #[test]
+    fn a_project_location_must_be_a_real_canonical_directory() {
+        let location = tempfile::tempdir().unwrap();
+        let canonical = std::fs::canonicalize(location.path()).unwrap();
+        assert_eq!(
+            resolve_project_location(canonical.to_str(), None).unwrap(),
+            canonical
+        );
+
+        let missing = location.path().join("missing");
+        let error = resolve_project_location(missing.to_str(), None).unwrap_err();
+        assert!(format!("{error:#}").contains("not available on this Agent"));
+
+        let relative = resolve_project_location(Some("work/project"), None).unwrap_err();
+        assert!(format!("{relative:#}").contains("absolute"));
+
+        let error = resolve_project_location(
+            canonical.to_str(),
+            Some(&format!("sha256:{}", "a".repeat(64))),
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("Project EROFS lower"));
+
+        let error = resolve_project_location(None, None).unwrap_err();
+        assert!(format!("{error:#}").contains("no Existing Location on this Agent"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_project_location_is_refused() {
+        let location = tempfile::tempdir().unwrap();
+        let target = std::fs::canonicalize(location.path()).unwrap();
+        let link = location.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let error = resolve_project_location(link.to_str(), None).unwrap_err();
+        assert!(format!("{error:#}").contains("must be a real directory"));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_explicit_managed_workspace_is_refused() {
+        let state = tempfile::tempdir().unwrap();
+        let manager = std::sync::Arc::new(
+            crate::workspace_manager::WorkspaceManager::open(state.path().join("workspaces"))
+                .unwrap(),
+        );
+        let unknown = format!("ws_{}", uuid::Uuid::new_v4());
+        let error = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: Some(&unknown),
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("workspace not found"));
+        // An unauthorized identity form is refused before any lookup.
+        let error = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: Some("../escape"),
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("not a valid managed workspace identity"));
+    }
+
+    #[tokio::test]
+    async fn a_managed_workspace_pins_its_project_lower_across_resolution() {
+        let state = tempfile::tempdir().unwrap();
+        let manager = std::sync::Arc::new(
+            crate::workspace_manager::WorkspaceManager::open(state.path().join("workspaces"))
+                .unwrap(),
+        );
+        let first_lower = format!("sha256:{}", "a".repeat(64));
+        let other_lower = format!("sha256:{}", "b".repeat(64));
+        let resolved = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: None,
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: Some(&first_lower),
+            },
+        )
+        .await
+        .unwrap();
+        let path = match resolved {
+            crate::sandbox_images::SandboxWorkspaceOverride::Managed { path, .. } => path,
+            _ => panic!("auto must resolve to a managed Workspace"),
+        };
+        assert!(path.is_dir());
+        // The lease is released for the rest of this test; a new resolution
+        // must observe the persisted pin, not an in-memory claim.
+        drop(manager);
+
+        let manager = std::sync::Arc::new(
+            crate::workspace_manager::WorkspaceManager::open(state.path().join("workspaces"))
+                .unwrap(),
+        );
+        let changed = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: None,
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: Some(&other_lower),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{changed:#}").contains("refusing a different lower"));
+        let missing = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: None,
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{missing:#}").contains("re-enter with the same lower"));
+        let listed = manager.list(None).await.unwrap();
+        let workspace_id = listed.first().unwrap().workspace_id.clone();
+        let again = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: Some(workspace_id.as_str()),
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: Some(&first_lower),
+            },
+        )
+        .await
+        .unwrap();
+        match again {
+            crate::sandbox_images::SandboxWorkspaceOverride::Managed {
+                path: again_path, ..
+            } => {
+                assert_eq!(again_path, path);
+            }
+            _ => panic!("an explicit id must resolve to the managed Workspace"),
+        }
     }
 }
