@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Main-owned comment router. All domain evidence and mutations remain in their existing owners.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { commandPlan, parseCommand, workflowTitle, dispatchInputs } from './github-comment-command.mjs';
@@ -105,6 +106,89 @@ async function acknowledge(read, plan, link) {
   await read('/repos/' + REPO + '/issues/' + plan.issue_number + '/comments',
     { method: 'POST', body: { body } });
 }
+// #3491: Recover a completed Worker from immutable agent-store only. The
+// Owner comment contains no Run ID; the Store receipt is authoritative. This
+// read-only preflight does not mint credentials or trust model-provided output.
+export async function wakeQwenResult(plan,read=api) {
+  if(plan?.handler!=='develop-result'||plan.workflow!=='store-agent-development-ingest.yml'||
+     !Number.isSafeInteger(plan.issue_number)||plan.issue_number<1)
+    throw Error('Qwen replay must be an authorized owner Bug result command');
+  const root='workflows/issues/'+plan.issue_number;
+  async function storeJson(file) {
+    const data=await read('/repos/'+REPO+'/contents/'+file+'?ref=agent-store');
+    if(data?.type!=='file'||data.encoding!=='base64'||
+       typeof data.content!=='string'||data.content.length>400000)
+      throw Error('unsafe immutable Store content');
+    const bytes=Buffer.from(data.content.replace(/\\s/g,''),'base64');
+    return {bytes,json:JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes))};
+  }
+  const head=(await storeJson(root+'/head.json')).json;
+  if(!Number.isSafeInteger(head.version)||head.version<1||
+     head.path!==root+'/states/'+String(head.version).padStart(8,'0')+'.json'||
+     !/^[a-f0-9]{64}$/.test(head.sha256??''))
+    throw Error('untrusted Store head or state path');
+  const state=await storeJson(head.path);
+  if(createHash('sha256').update(state.bytes).digest('hex')!==head.sha256||
+     state.json.issue!==plan.issue_number||state.json.version!==head.version||
+     !Array.isArray(state.json.outbox))
+    throw Error('immutable Store state digest/Issue mismatch');
+  const ready=state.json.outbox.filter(action=>
+    action?.task?.type==='dispatch'&&action.task.role==='developer'&&
+    action.task.task==='implement'&&action.task.agent_id==='dev-qwen-01'&&
+    /^[a-f0-9]{40}$/.test(action.task.sha??'')&&
+    /^[a-f0-9]{64}$/.test(action.id??'')&&
+    action.status==='dispatched'&&action.attempts===1&&
+    action.receipt?.status==='verified'&&
+    action.receipt?.dispatch_id===action.id&&
+    Number.isSafeInteger(action.receipt.source_run_id)&&
+    action.receipt.source_run_id>0);
+  if(ready.length!==1)throw Error('no unique pending immutable Qwen Worker receipt');
+  const original=ready[0],id=original.receipt.source_run_id;
+  const run=await read('/repos/'+REPO+'/actions/runs/'+id);
+  if(run?.id!==id||run.run_attempt!==1||run.status!=='completed'||
+     run.conclusion!=='success'||run.path!=='.github/workflows/agent-develop.yml'||
+     run.name!=='Agent / Development'||run.event!=='workflow_dispatch'||
+     run.actor?.login!=='github-actions[bot]'||
+     run.repository?.full_name!==REPO||
+     run.head_repository?.full_name!==REPO||
+     run.head_branch!=='main'||run.head_sha!==original.task.sha)
+    throw Error('Store Worker source is not successful exact-sha main Qwen');
+  const artifacts=await read('/repos/'+REPO+'/actions/runs/'+id+'/artifacts?per_page=100');
+  if(!Array.isArray(artifacts?.artifacts)||
+     artifacts.total_count!==artifacts.artifacts.length||
+     artifacts.total_count>100)
+    throw Error('incomplete Worker Artifact inventory');
+  for(const prefix of ['development-worker-claim','development-worker']){
+    const entries=artifacts.artifacts.filter(a=>a.name===prefix+'-'+id+'-1');
+    if(entries.length!==1||entries[0].expired!==false||
+       entries[0].workflow_run?.id!==id||
+       entries[0].workflow_run?.head_sha!==run.head_sha||
+       !/^sha256:[a-f0-9]{64}$/.test(entries[0].digest??'')||
+       !Number.isSafeInteger(entries[0].size_in_bytes)||
+       entries[0].size_in_bytes<1)
+      throw Error('missing or forged original Worker Artifact');
+  }
+  const workflow='store-agent-development-ingest.yml';
+  const data=await read('/repos/'+REPO+'/actions/workflows/'+workflow+
+    '/runs?event=workflow_dispatch&per_page=100');
+  if(!Array.isArray(data?.workflow_runs))throw Error('bad Store Ingest wake inventory');
+  const wakeName='Qwen Developer Ingest worker:'+id;
+  const existing=data.workflow_runs.filter(r=>
+    r.display_title===wakeName&&r.event==='workflow_dispatch'&&
+    r.actor?.login==='github-actions[bot]'&&r.head_branch==='main'&&
+    r.repository?.full_name===REPO);
+  if(existing.length>1)throw Error('ambiguous Qwen Store Ingest wake');
+  if(existing.length===1)return {state:'already-woken',source_run_id:id,
+    url:existing[0].html_url};
+  if(data.workflow_runs.length===100&&
+     !(Date.parse(data.workflow_runs.at(-1)?.created_at)<Date.parse(run.created_at)))
+    throw Error('unbounded Store wake inventory; no blind redispatch');
+  await read('/repos/'+REPO+'/actions/workflows/'+workflow+'/dispatches',{
+    method:'POST',body:{ref:'main',inputs:{source_run_id:String(id)}},
+  });
+  return {state:'store-ingest-requested',source_run_id:id,
+    url:'https://github.com/'+REPO+'/actions/workflows/'+workflow};
+}
 async function dispatch(plan, read = api) {
   const comments = await read('/repos/' + REPO + '/issues/' +
     plan.issue_number + '/comments?per_page=100&sort=created&direction=desc');
@@ -112,6 +196,11 @@ async function dispatch(plan, read = api) {
   if (comments.some(c => c?.body?.includes(marker(plan)) &&
       c?.user?.type === 'Bot' && c?.user?.login === 'github-actions[bot]'))
     return { state: 'already-acknowledged' };
+  if(plan.handler==='develop-result'){
+    const woke=await wakeQwenResult(plan,read);
+    await acknowledge(read,plan,woke.url);
+    return woke;
+  }
   const runs = await inventory(read, plan);
   const previous = findRun(runs, plan);
   if (previous) {
