@@ -863,8 +863,8 @@ impl Database {
     /// The revision comparison and the write run in one `BEGIN IMMEDIATE`
     /// transaction, so a concurrent set or remove cannot slip between them.
     /// `Some(revision)` commits only while the stored row still carries that
-    /// revision; revision `0` also matches an absent row (the create-time
-    /// pending state), so a first association may insert. `None` keeps the
+    /// revision; revision `0` also matches an absent row (an unassociated
+    /// Session), so a first association may insert. `None` keeps the
     /// documented last-writer-wins behavior and still advances the stored
     /// revision monotonically.
     ///
@@ -2576,29 +2576,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn conditional_binding_set_accepts_the_pending_revision_zero_row() {
+    async fn conditional_binding_set_accepts_a_pending_create_binding() {
         let db = new_db().await;
         let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
-        db.upsert_session_project_binding(&SessionProjectBindingRow {
-            session_id: "a1:s1".to_owned(),
-            agent_id: "a1".to_owned(),
-            project_id: project_id.to_owned(),
-            incarnation_id: String::new(),
-            agent_created_at: 0,
-            revision: 0,
-            updated_at: chrono::Utc::now().timestamp(),
-        })
-        .await
-        .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 0))
+            .await
+            .unwrap();
 
+        // A create-time binding is already revision 1, but its tmux identity is
+        // pending; an explicit set at the observed revision adopts it.
         let outcome = db
-            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_id, 10), Some(0))
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_id, 10), Some(1))
             .await
             .unwrap();
         let SessionProjectBindingSetOutcome::Applied(committed) = outcome else {
-            panic!("a pending create-time binding is updatable at revision 0");
+            panic!("a pending create-time binding is updatable");
         };
-        assert_eq!(committed.revision, 1);
+        assert_eq!(committed.revision, 2);
+        assert_eq!(committed.agent_created_at, 10);
     }
 
     #[tokio::test]
