@@ -140,6 +140,32 @@ function fixture() {
       criteria: [{ criterion: 'SC-01', result: 'Pass' },
         { criterion: 'SC-03', result: 'Pass' }] },
   };
+  // #3479: a historical source-only Agent Pass is not reusable for an SC
+  // that requires independently executed Web integration-test evidence.
+  const receipt = {
+    kind: 'pr_web_quality_execution_v1', repository: 'BestNathan/nession',
+    workflow: '.github/workflows/ci-quality.yml', head_sha: sha,
+    run_id: 50, run_attempt: 2, web_tests_job_id: 51,
+    web_check_job_id: 52, web_gate_step: 'Verify Web and design Gates',
+    web_check_step: 'Enforce applicable Quality results at the stable check name',
+  };
+  const webCriterion = { criterion: 'SC-03',
+    text: 'A deterministic integration test records Web requests and verifies navigation away.' };
+  const webContext = { ...context, stage: 'pr',
+    requirement_body: 'Web integration fixtures', criteria: [webCriterion],
+    pr_web_quality: { status: 'pass', receipt } };
+  const webProof = { ...proof, result: { ...proof.result,
+    stage: 'pr', selected_criteria: ['SC-03'],
+    criteria: [{ criterion: 'SC-03', result: 'Pass' }] } };
+  assert.equal(proofCovers(webProof, webContext, webCriterion,
+    { runId: 100, source: 'agent-cursor' }), false);
+  assert.equal(proofCovers({ ...webProof, result: { ...webProof.result,
+    pr_web_quality_receipt: receipt } }, webContext, webCriterion,
+    { runId: 100, source: 'agent-cursor' }), true);
+  assert.equal(proofCovers({ ...webProof, result: { ...webProof.result,
+    pr_web_quality_receipt: receipt } }, {
+    ...webContext, pr_web_quality: { status: 'pending' },
+  }, webCriterion, { runId: 100, source: 'agent-cursor' }), false);
   let fetches = 0;
   const good = selectOutstanding(context, id => { fetches++; assert.equal(id, 100); return proof; });
   assert.deepEqual(good.reused, ['SC-01', 'SC-03']);
