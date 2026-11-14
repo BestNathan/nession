@@ -446,6 +446,18 @@ export function issuesFromAssociatedPulls(pulls, targetSha, owner, name) {
   return [...numbers].sort((a, b) => a - b);
 }
 
+// A merge event can race GitHub's automatic Issue closure. The close guard
+// reopens an incomplete Issue asynchronously, but the merged-SHA planner may
+// observe its briefly closed snapshot first. Such a source-bound obligation
+// must remain discoverable, without treating completed or not_planned Issues
+// as eligible work.
+export function isMergedRefAcceptanceCandidate(issue) {
+  if (!isAcceptanceIssue(issue) || issue.state_reason === 'not_planned') return false;
+  if (isOpenAcceptanceIssue(issue)) return true;
+  return String(issue.state).toLowerCase() === 'closed' &&
+    completedIssueAcceptanceDecision(issue).kind === 'reopen';
+}
+
 async function requirementIssuesForRef({ owner, name, sha, token }) {
   const targetSha = String(sha ?? '').trim();
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) {
@@ -460,7 +472,7 @@ async function requirementIssuesForRef({ owner, name, sha, token }) {
   const issues = [];
   for (const number of numbers) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
-    if (isOpenAcceptanceIssue(issue)) {
+    if (isMergedRefAcceptanceCandidate(issue)) {
       issues.push(issue);
     }
   }
@@ -727,6 +739,20 @@ function runSelfTest() {
     number: 3491, labels: [{ name: 'bug' }], state: 'closed',
     body: mergedMainPending,
   }).kind, 'reopen');
+
+  // Live merge race: GitHub may close a referenced Issue for seconds before
+  // the close guard reopens it. Merged-SHA selection must not lose Pending SCs.
+  const mergedMainClosed = { number: 3491, state: 'closed',
+    state_reason: 'completed', labels: [{ name: 'bug' }], body: mergedMainPending };
+  assert.equal(isMergedRefAcceptanceCandidate(mergedMainClosed), true);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed, state: 'open' }), true);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed,
+    state_reason: 'not_planned' }), false);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed,
+    body: mergedMainPending.replace('- [ ] SC-02', '- [x] SC-02')
+      .replace('| SC-02 | Pending |', '| SC-02 | Pass |') }), false);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed,
+    labels: [{ name: 'ci' }] }), false);
 
   // Staging-target PR may defer only explicitly declared merged-staging
   // proof. Main promotion and Issue closure must still reject Pending.
