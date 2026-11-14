@@ -130,9 +130,10 @@ jobs:
         id: pin
         env:
           REQUESTED_REF: ${{ inputs.target_ref }}
-          # Periodic Main always tests the checked Main ref. A manual run may
-          # pin an explicit reachable SHA for independent investigation.
-          REQUESTED_SHA: ${{ inputs.target_sha }}
+          # A scheduled run must test its event's immutable Main SHA even
+          # when Main moves while the runner is queued (#3465). Manual runs
+          # may choose an explicit reachable historical SHA.
+          REQUESTED_SHA: ${{ github.event_name == 'schedule' && github.sha || inputs.target_sha }}
         run: |
           set -euo pipefail
           ref="$REQUESTED_REF"
