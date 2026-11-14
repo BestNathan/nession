@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Main-owned authenticated intake for trusted Main Full Regression failures:
-// the scheduled cadence and the immediate post-promotion push route (#2323
-// SC-12). This records observations only: it never dispatches an Agent or
-// declares Pass.
+// Main-owned authenticated intake for independent Main Full failures (#3465):
+// periodic schedule, explicit Main manual recheck, legacy Main-push receipts.
+// The source run's dynamic name is not the trusted workflow identity. This
+// records observations only, never a Pass or an unauthorized Agent action.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +18,20 @@ const positive = n => Number.isSafeInteger(n) && n > 0;
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const reject = message => { throw new Error('e2e full-failure ingest rejected: ' + message); };
 
+// GitHub REST may put the run-name in run.name instead of the workflow's
+// static name. Bind the only allowed dynamic titles to the Main source SHA.
+// Manual source-ref dispatches to other branches must never be recorded as
+// failures of Main (their run.head_sha still points at the dispatcher Main).
+function canonicalMainFullRunName(run) {
+  const sha=run?.head_sha;
+  if(!SHA40.test(sha??''))return false;
+  if(run.event==='schedule'||run.event==='push')
+    return run.name===WORKFLOW_NAME||run.name==='Full Regression main@'+sha;
+  if(run.event==='workflow_dispatch')
+    return run.name==='Convergence Full main@'+sha;
+  return false;
+}
+
 function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha256 }) {
   assert.equal(event?.repository?.full_name, REPO);
   assert.equal(event?.workflow_run?.id, run?.id);
@@ -26,7 +40,8 @@ function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha25
   assert.equal(run?.repository?.full_name, REPO);
   assert.equal(run?.head_repository?.full_name, REPO);
   assert.equal(run?.path, WORKFLOW_PATH);
-  assert.equal(run?.name, WORKFLOW_NAME);
+  assert.ok(canonicalMainFullRunName(run),
+    'run name/event must identify the exact Main Full source SHA');
   assert.equal(workflow?.path, WORKFLOW_PATH);
   assert.equal(workflow?.name, WORKFLOW_NAME);
   assert.equal(workflow?.id, run?.workflow_id);
@@ -122,7 +137,8 @@ function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha25
 }
 function selfTest() {
   const sha = 'a'.repeat(40), d = 'b'.repeat(64);
-  const run = { id: 501, run_attempt: 2, workflow_id: 9, path: WORKFLOW_PATH, name: WORKFLOW_NAME,
+  const run = { id: 501, run_attempt: 2, workflow_id: 9, path: WORKFLOW_PATH,
+    name: 'Full Regression main@'+sha,
     event: 'schedule', head_branch: 'main', head_sha: sha, status: 'completed', conclusion: 'failure',
     repository: { full_name: REPO }, head_repository: { full_name: REPO }, html_url: 'https://example.invalid/run/501' };
   const job = { name: 'full', run_id: 501, run_attempt: 2, head_sha: sha, status: 'completed',
@@ -144,11 +160,16 @@ function selfTest() {
   assert.equal(result.record.agent_dispatch, 'NOT_AUTHORIZED');
   assert.equal(result.record.candidate.results[0].failures[0].stable_frame, 'terminal-attach.spec.ts:42:9');
   assert.match(result.record_path, new RegExp(sha));
-  // Both trusted Main routes are eligible failure sources; dedup is by
-  // fingerprint, so the same error from either route lands in one Bug.
+  // Historical canonical names, dynamic schedule/push names, and explicit
+  // exact-Main manual runs all reach the same authenticated dedup pipeline.
   for (const event of TRUSTED_MAIN_FULL_EVENTS) {
-    assert.equal(verify({ ...input, run: { ...run, event } }).record.source.event, event);
+    const name=event==='workflow_dispatch'
+      ? 'Convergence Full main@'+sha : 'Full Regression main@'+sha;
+    assert.equal(verify({ ...input, run: { ...run, event, name } }).record.source.event,
+      event);
   }
+  assert.equal(verify({...input,run:{...run,name:WORKFLOW_NAME}}).record.source.event,
+    'schedule','legacy static-name source remains readable');
   // The workflow guard is the first hop of the same policy. Keep it in parity
   // with the executable owner instead of silently dropping a route.
   const guard = fs.readFileSync(
@@ -157,8 +178,16 @@ function selfTest() {
     assert.ok(guard.includes(`github.event.workflow_run.event == '${event}'`),
       `workflow guard must admit the ${event} Full source route`);
   }
+  assert.ok(guard.includes("format('Full Regression main@{0}'"),
+    'workflow must not reject REST dynamic Main schedule names');
+  assert.ok(guard.includes("format('Convergence Full main@{0}'"),
+    'manual Main Full must be source-SHA bound in intake routing');
   for (const bad of [
     { ...input, run: { ...run, event: 'pull_request' } },
+    { ...input, run: { ...run, name: 'Full Regression main@'+'c'.repeat(40) } },
+    { ...input, run: { ...run, event:'workflow_dispatch',
+      name:'Convergence Full chore/staging-sync@'+sha } },
+    { ...input, run: { ...run, event:'workflow_dispatch',name:WORKFLOW_NAME } },
     { ...input, run: { ...run, head_sha: 'c'.repeat(40) } },
     { ...input, archiveSha256: '0'.repeat(64) },
     { ...input, artifacts: { artifacts: [{ ...artifact, workflow_run: { id: 999, head_sha: sha } }] } },
