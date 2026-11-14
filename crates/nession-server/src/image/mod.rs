@@ -1318,6 +1318,8 @@ impl ImageManager {
                 "successful image build scratch bytes could not be released"
             );
         }
+        self.publish_catalog_identity(&state, &digest, built.blob.size_bytes)
+            .await;
         state.status = ImageBuildStatus::Succeeded;
         state.digest = Some(digest);
         state.size_bytes = built.blob.size_bytes;
@@ -1339,6 +1341,47 @@ impl ImageManager {
         // that is only finalizing.
         self.release_runtime(&state.build_id);
         self.publish_state(&state);
+    }
+
+    /// Publish the standard Config+Manifest identity for a successful build
+    /// (#3497). The legacy digest/alias registry remains authoritative for old
+    /// consumers; this adds the Manifest-addressed identity beside it.
+    async fn publish_catalog_identity(&self, state: &BuildState, digest: &str, size_bytes: u64) {
+        let conn = self.db.connection();
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(
+            nession_erofs::oci::annotation::ANNOTATION_KIND.to_string(),
+            "directory".to_string(),
+        );
+        let publication = nession_erofs::build::publication::LayerPublication {
+            repository: "builds".to_string(),
+            tag: None,
+            expectation: nession_erofs::catalog::tag::TagExpectation::Absent,
+            layer: nession_erofs::oci::descriptor::Descriptor {
+                media_type: nession_erofs::oci::annotation::MEDIA_TYPE_EROFS.to_string(),
+                digest: digest.to_string(),
+                size: size_bytes,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: serde_json::Map::new(),
+            },
+            platform: nession_erofs::build::publication::host_platform(),
+            env: Vec::new(),
+            annotations,
+        };
+        if let Err(error) =
+            nession_erofs::build::publication::publish_layer(conn, &self.blobs, &publication).await
+        {
+            tracing::warn!(
+                build_id = %state.build_id,
+                image_id = %state.image_id,
+                error = %format!("{error:#}"),
+                "standard image Manifest identity could not be published"
+            );
+        }
     }
 
     async fn finish_failed(
@@ -2125,7 +2168,8 @@ mod tests {
             std::fs::read_dir(dir.path().join("blobs/sha256"))
                 .unwrap()
                 .count(),
-            1
+            3,
+            "one EROFS payload plus its Config and Manifest identity"
         );
         let by_alias = manager.get(None, Some("latest")).await.unwrap();
         assert_eq!(by_alias.digest, first.digest);
@@ -2461,6 +2505,39 @@ mod tests {
         assert!(manager.blob_store().contains(&digest).unwrap());
     }
 
+    /// #3497 SC-01: a successful existing Git/local build path publishes a
+    /// standards-valid Manifest/Config whose layer is the built EROFS digest.
+    #[tokio::test]
+    async fn a_successful_build_publishes_a_standard_manifest_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/standard", b"standard image bytes");
+        let descriptor = manager
+            .build(&local("/source/standard"), None)
+            .await
+            .unwrap();
+        let digest = descriptor.digest.clone().unwrap();
+        let manifest_digest = nession_erofs::catalog::reference::parents_for_reference(
+            db.connection(),
+            &digest,
+            "layer",
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("the build must publish a catalog Manifest edge");
+        let inspection =
+            nession_erofs::image::inspect::inspect_manifest(manager.blob_store(), &manifest_digest)
+                .unwrap();
+        assert_eq!(inspection.layer_digest, digest);
+        assert!(inspection.config.supports_erofs());
+        assert_eq!(
+            inspection.usage.kind,
+            Some(nession_erofs::oci::ImageKind::Directory)
+        );
+    }
+
     /// #3180 SC-02: one sweep deletes at most the configured candidate count;
     /// the deferred candidates stay in the database and a follow-up sweep
     /// resumes them. The report is the observable result of the operation.
@@ -2562,8 +2639,14 @@ mod tests {
         assert_eq!(diagnostics.ready_images, 1);
         assert_eq!(diagnostics.failed_images, 1);
         assert_eq!(diagnostics.building_images, 0);
-        assert_eq!(diagnostics.blobs, 1);
-        assert_eq!(diagnostics.blob_bytes, b"ready-bytes".len() as u64);
+        assert_eq!(
+            diagnostics.blobs, 3,
+            "one EROFS payload plus its Config and Manifest identity"
+        );
+        assert!(
+            diagnostics.blob_bytes > b"ready-bytes".len() as u64,
+            "the Config and Manifest bytes are stored beside the payload"
+        );
         assert_eq!(diagnostics.temp_files, 1);
         assert_eq!(diagnostics.temp_bytes, b"unpublished".len() as u64);
     }
