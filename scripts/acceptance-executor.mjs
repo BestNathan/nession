@@ -11,8 +11,9 @@ import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
-  collectPrWebQuality, enforcePrWebQuality, requiresWebIntegrationExecution,
-  validWebQualityReceipt,
+  collectPrWebQuality, collectPrToolingQuality,
+  enforcePrWebQuality, requiresWebIntegrationExecution,
+  requiresPrToolingEvidence, validWebQualityReceipt,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
 export { normalizeAcceptanceResult };
@@ -462,6 +463,9 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   if (context.stage === 'pr' && context.criteria.some(item =>
     requiresWebIntegrationExecution(item, context.requirement_body))) {
     context.pr_web_quality = collectPrWebQuality(context.target_ref);
+  }
+  if (requiresPrToolingEvidence(context)) {
+    context.pr_tooling_quality = collectPrToolingQuality(context.target_ref);
   }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
