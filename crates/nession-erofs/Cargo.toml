@@ -9,15 +9,15 @@ default = ["build", "store"]
 store = []
 build = ["store", "dep:tempfile"]
 cache = ["dep:futures-util", "dep:reqwest", "dep:tokio", "dep:libc"]
-mount = ["dep:serde", "dep:serde_json"]
+mount = []
 
 [dependencies]
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 futures-util = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
 sha2.workspace = true
 tempfile = { version = "3.8", optional = true }
 tokio = { workspace = true, optional = true }
