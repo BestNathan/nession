@@ -973,7 +973,7 @@ async fn enter_grants_the_project_source_image_for_a_managed_workspace() {
     assert_eq!(grants[1]["role"], "workspace");
     assert_eq!(grants[1]["digest"], source_digest());
     assert!(grants[1]["target"].is_null());
-    assert!(grants[1]["token"].as_str().is_some());
+    assert!(grants[1].get("token").is_none());
 }
 
 #[tokio::test]
