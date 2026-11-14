@@ -668,9 +668,20 @@ mod tests {
         Path::new(&format!("/proc/{pid}")).exists()
     }
 
+    /// How long a controlled child may take to reach its start barrier.
+    ///
+    /// This is not the timeout under test: the child is expected to start, and
+    /// the bound only keeps a hung fixture from hanging the suite. `llvm-cov`
+    /// instrumentation plus a loaded CI host can delay a fork/exec well past
+    /// two seconds, so the budget is deliberately generous and asserted by the
+    /// test's own deadline instead (#3462).
+    #[cfg(target_os = "linux")]
+    const CHILD_BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
+
     #[cfg(target_os = "linux")]
     async fn wait_for_pid(path: &Path) -> u32 {
-        for _ in 0..200 {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
             if let Ok(text) = std::fs::read_to_string(path) {
                 if let Ok(pid) = text.trim().parse() {
                     return pid;
@@ -683,7 +694,8 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     async fn wait_for_exit(pid: u32) -> bool {
-        for _ in 0..300 {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
             if !process_running(pid) {
                 return true;
             }
