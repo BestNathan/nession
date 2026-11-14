@@ -60,18 +60,26 @@ export function buildControllerRequest(input,run,registry,defaults={}) {
   });
   const valid=request({...input,developer:developer.agent_id,
     reviewer:reviewer.agent_id,acceptor:acceptor.agent_id});
+  const botBug=run?.event==='workflow_dispatch' &&
+    run?.actor==='github-actions[bot]' && positive(run.source_comment_id) &&
+    input.input_sha===run.head_sha &&
+    input.developer==='dev-qwen-01' &&
+    input.reviewer==='review-qwen-01' &&
+    input.acceptor==='accept-qwen-01';
   const canary=run?.event==='issue_comment'&&
     Number(input.issue_number)===QWEN_V2_BOOTSTRAP_ISSUE&&
     input.input_sha===run.head_sha&&
     input.developer==='dev-qwen-01'&&
     input.reviewer==='review-qwen-01'&&
     input.acceptor==='accept-qwen-01';
-  if(!fields(run,['repository','workflow','workflow_path','event','ref','head_sha',
-    'run_id','attempt','actor'])||run.repository!==REPO||
+  if(!(fields(run,['repository','workflow','workflow_path','event','ref','head_sha',
+    'run_id','attempt','actor']) ||
+    (botBug && fields(run,['repository','workflow','workflow_path','event','ref','head_sha',
+      'run_id','attempt','actor','source_comment_id'])))||run.repository!==REPO||
     run.workflow!==WORKFLOW||run.workflow_path!==PATH||
     (run.event!=='workflow_dispatch'&&!canary)||run.ref!=='refs/heads/main'||
     !SHA.test(run.head_sha??'')||!positive(run.run_id)||!positive(run.attempt)||
-    run.actor!=='BestNathan')fail('untrusted Controller request context');
+    (run.actor!=='BestNathan'&&!botBug))fail('untrusted Controller request context');
   // Fail before artifact publication if the assigned roles are not registered.
   startDevelopment(registry,valid,{repository:REPO,event:'workflow_dispatch',
     permission:'write',ref:'refs/heads/main',run_id:run.run_id});
@@ -84,7 +92,7 @@ export function verifyControllerRequestSource(run,artifacts,expected){
       run.run_attempt!==expected.attempt||run.head_sha!==expected.head_sha||
       run.name!==WORKFLOW||run.path!==PATH||
       run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
-      run.actor?.login!=='BestNathan'||
+      !['BestNathan','github-actions[bot]'].includes(run.actor?.login)||
       !['workflow_dispatch','issue_comment'].includes(run.event)||
       run.head_branch!=='main'||run.status!=='completed'||run.conclusion!=='success')
     fail('source Run is not trusted owner main workflow_dispatch');
@@ -157,14 +165,29 @@ export function qwenV2OwnerCommentInput(event,env){
 }
 function sourceContext(){
   const raw=JSON.parse(read(process.env.GITHUB_EVENT_PATH,64*1024).toString('utf8'));
+  const bot=process.env.GITHUB_EVENT_NAME==='workflow_dispatch' &&
+    process.env.GITHUB_ACTOR==='github-actions[bot]';
+  const sourceComment=bot?Number(raw.inputs?.source_comment_id):null;
+  if(bot&&(!positive(sourceComment)||
+    Object.keys(raw.inputs??{}).some(k=>!['issue_number','input_sha','developer',
+      'reviewer','acceptor','source_comment_id'].includes(k)) ||
+    raw.inputs?.input_sha!=='' ||
+    raw.inputs?.developer!=='' || raw.inputs?.reviewer!=='' ||
+    raw.inputs?.acceptor!=='')) fail('bot requires exact comment-only Controller inputs');
+  if(!bot&&process.env.GITHUB_EVENT_NAME==='workflow_dispatch' &&
+    raw.inputs?.source_comment_id) fail('only Comment Router may specify origin comment');
   const input=process.env.GITHUB_EVENT_NAME==='issue_comment'?
-    qwenV2OwnerCommentInput(raw,process.env):raw.inputs;
+    qwenV2OwnerCommentInput(raw,process.env):
+    bot?{issue_number:raw.inputs.issue_number,input_sha:process.env.GITHUB_SHA,
+      developer:'dev-qwen-01',reviewer:'review-qwen-01',acceptor:'accept-qwen-01'}:
+    Object.fromEntries(Object.entries(raw.inputs).filter(([k])=>k!=='source_comment_id'));
   return {input,run:{repository:process.env.GITHUB_REPOSITORY,
     workflow:process.env.GITHUB_WORKFLOW,workflow_path:PATH,
     event:process.env.GITHUB_EVENT_NAME,ref:process.env.GITHUB_REF,
     head_sha:process.env.GITHUB_SHA,run_id:Number(process.env.GITHUB_RUN_ID),
     attempt:Number(process.env.GITHUB_RUN_ATTEMPT),
-    actor:process.env.GITHUB_ACTOR}};
+    actor:process.env.GITHUB_ACTOR,
+    ...(bot?{source_comment_id:sourceComment}:{})}};
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
   try{
