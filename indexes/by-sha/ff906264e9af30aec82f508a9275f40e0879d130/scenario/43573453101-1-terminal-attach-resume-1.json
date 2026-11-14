@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43573453101,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3407-project-location-lower",
+    "target_sha": "ff906264e9af30aec82f508a9275f40e0879d130",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43573453101",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "33533f6288a088c62908dd51f43522f5627cf56e9b15f15dd905412169d782c4"
+  },
+  "record": "runs/2026-11-14/43573453101-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "e4925cb97f26c50a46e8cb35eec12b1f5da1c1160370cd0b4c0c7a735d31eaee"
+}
