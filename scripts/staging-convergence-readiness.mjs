@@ -78,12 +78,14 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
     return fail('STALE_PR_SHA');
   if(pr.mergeable_state==='dirty' && pr.mergeable===false)
     return fail('MERGE_CONFLICT');
-  // Protected staging requires rust-check/web-check on the *integration*
-  // head. A direct main -> staging PR can be "behind" with all source checks
-  // green yet be rejected by GitHub (HTTP 405, required statuses expected).
-  // The checked integration branch contains staging + main ancestry and must
-  // become genuinely clean. Never waive required checks for a behind PR.
-  if(pr.mergeable!==true||pr.mergeable_state!=='clean')
+  // GitHub's mergeable_state=unstable can reflect *optional* checks still
+  // running, even when the required exact-HEAD Quality / Case / E2E receipts
+  // are all green (#3465, observed #3341 and merged #3472). Do not turn
+  // optional unrelated jobs into a fourth universal convergence Gate.
+  // Still reject merge conflicts, behind/blocked/unknown and negative GitHub
+  // mergeability. GitHub's protected merge API remains authoritative.
+  if(pr.mergeable!==true||
+     !['clean','unstable'].includes(pr.mergeable_state))
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
   const checks=requiredSourceRuns(pr.number,expectedHead,workflowRuns);
   if(!checks.ready)return checks;
@@ -478,12 +480,37 @@ function selfTest(){
   assert.equal(evaluatePull({pr:{...pr,mergeable:false,mergeable_state:'behind'},
     action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
     'behind does not override a GitHub-negative mergeability verdict');
-  for (const state of ['unknown','blocked','dirty','unstable']) {
+  for (const state of ['unknown','blocked','dirty']) {
     assert.equal(evaluatePull({pr:{...pr,mergeable_state:state},
       action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
       'GitHub blocked/unknown state must fail closed: '+state);
   }
+  // GitHub "unstable" is a coarse summary of ALL check runs. Independent
+  // source-bound required checks above still refuse a newer red/pending run;
+  // unrelated Docker build or optional PR Acceptance must not delay sync.
+  const unstable={...pr,mergeable_state:'unstable'};
+  assert.equal(evaluatePull({pr:unstable,action:'sync-main-to-lane',plan,
+    baseSha:b,workflowRuns:runs}).ready,true,
+    'non-required pending check must not block source-authorized sync');
+  assert.equal(evaluatePull({pr:unstable,action:'sync-main-to-lane',plan,
+    baseSha:b,workflowRuns:runs.slice(1)}).ready,false,
+    'unstable cannot excuse missing exact-HEAD required checks');
+  assert.equal(evaluatePull({pr:unstable,action:'sync-main-to-lane',plan,
+    baseSha:b,workflowRuns:runs.map(x=>({...x,conclusion:'failure'}))}).ready,false,
+    'unstable cannot excuse failed required checks');
+  assert.equal(evaluatePull({pr:{...unstable,mergeable:false},
+    action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
+    'unstable cannot override GitHub-negative mergeability');
   const promo={...pr,base:{ref:'main',sha:a},head:{ref:'staging',sha:b,repo:{full_name:REPO}}};
+  const promotionRuns=runs.map(x=>({...x,head_sha:b}));
+  assert.equal(evaluatePull({pr:{...promo,mergeable_state:'unstable'},
+    action:'promote-lane-to-main',plan,baseSha:a,
+    workflowRuns:promotionRuns}).ready,true,
+    'optional pending checks must not block scope-qualified promotion either');
+  assert.equal(evaluatePull({pr:{...promo,mergeable_state:'unstable'},
+    action:'promote-lane-to-main',plan,baseSha:a,
+    workflowRuns:promotionRuns.slice(1)}).ready,false,
+    'promotion must retain mandatory exact-HEAD checks under unstable');
   assert.equal(evaluatePull({pr:{...promo,mergeable_state:'behind'},action:'promote-lane-to-main',
     plan,baseSha:a,workflowRuns:runs}).ready,false,
     'promotion is not eligible merely because its branch is behind');
