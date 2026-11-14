@@ -2,9 +2,8 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    agent_url_with_credential, current_timestamp, info, json, relay_begin_reply, warn,
-    AddressStatus, AgentStatus, ClientRelayBeginPayload, ConnectionHandler, CredentialScope,
-    HandlerAction, Message, P2pGrantPayload, ProtocolMessage, SessionRefusal,
+    info, relay_begin_reply, warn, AddressStatus, AgentStatus, ClientRelayBeginPayload,
+    ConnectionHandler, HandlerAction, ProtocolMessage, SessionRefusal,
 };
 
 impl ConnectionHandler {
@@ -155,57 +154,26 @@ impl ConnectionHandler {
             session_name
         );
 
-        // Mint the relay credential and hand it to the agent that will verify
-        // it, **before any dial** (#1013). Same ordering as the p2p path, for
-        // the same reason: the dial is what presents it.
-        //
-        // The credential rides **on the URLs** rather than beside them, and that
-        // is what makes both relay dials work without knowing about it — the
-        // attach dial iterates this list, and the detach dial reuses the one that
-        // succeeded. A credential threaded alongside would have to reach both
-        // sites and stay in step with them; this way there is one place it can
-        // be forgotten, and it is here.
-        let credential = self
-            .p2p_broker
-            .mint(
-                &agent_id,
-                session_id,
-                &agent.ip_address,
-                agent.port,
-                CredentialScope::for_relay(&session_name),
-            )
-            .await;
-
-        let grant = P2pGrantPayload {
-            request_id: String::new(),
-            credential: credential.token.clone(),
-            agent_id: agent_id.clone(),
-            session_id: session_id.to_string(),
-            scope: credential.scope.clone(),
-            expires_at: credential.expires_at.to_rfc3339(),
+        // The Server dials the Agent itself, so it presents the Agent's own
+        // durable token rather than any per-attach grant (#3440). Missing token
+        // state is refused here, before a dial, with the same actionable reason
+        // the P2P attach gives.
+        let Some(agent_token) = agent
+            .agent_token
+            .as_ref()
+            .map(nession_common::SecretString::as_str)
+            .filter(|token| !token.is_empty())
+        else {
+            return Ok(relay_begin_reply(
+                &msg.id,
+                SessionRefusal {
+                    status: "error".to_string(),
+                    message: format!(
+                        "Agent '{agent_id}' has not synchronized its Agent Token; it must reconnect to this Server before relay can authenticate"
+                    ),
+                },
+            ));
         };
-
-        if let Err(refusal) = self.grant_p2p_credential(&agent_id, &grant).await {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
-                json!({
-                    "msg_type": "server.session.attach",
-                    "id": msg.id,
-                    "timestamp": current_timestamp(),
-                    "payload": {
-                        "status": "error",
-                        "message": format!(
-                            "Agent '{agent_id}' would not accept a relay credential: {refusal}"
-                        )
-                    }
-                })
-                .to_string(),
-            ))));
-        }
-
-        let relay_urls: Vec<String> = relay_urls
-            .into_iter()
-            .map(|url| agent_url_with_credential(&url, &credential.token))
-            .collect();
 
         let client_id = uuid::Uuid::new_v4().to_string();
         if let Some(ref sender) = self.client_sender {
@@ -241,6 +209,7 @@ impl ConnectionHandler {
             session_name,
             relay_request_id: msg.id,
             client_id,
+            agent_token: agent_token.to_string(),
             browser_client_id: self.browser_client_id.clone(),
             env_snapshots: Vec::new(),
             cols,

@@ -330,6 +330,10 @@ pub struct SessionManager {
     /// creation derives its authorized blob HTTP base from this value; the
     /// Server never guesses its own public hostname.
     server_url: String,
+    /// The Server Token used as the Bearer credential for authorized image
+    /// blob reads (#3440). Empty on a standalone Agent, where there is no
+    /// Server to fetch from.
+    server_auth_token: nession_common::SecretString,
 }
 
 /// The result of one Session create.
@@ -363,6 +367,7 @@ impl SessionManager {
             sandbox: None,
             workspaces: None,
             server_url: String::new(),
+            server_auth_token: nession_common::SecretString::new(String::new()),
         }
     }
 
@@ -417,6 +422,17 @@ impl SessionManager {
     /// The central Server URL this manager was composed with, when any.
     pub fn server_url(&self) -> &str {
         &self.server_url
+    }
+
+    /// Record the Server Token used for authorized image blob reads (#3440).
+    pub fn with_server_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.server_auth_token = nession_common::SecretString::new(token);
+        self
+    }
+
+    /// The Server Token for authorized image blob reads, when configured.
+    pub fn server_auth_token(&self) -> &str {
+        self.server_auth_token.as_str()
     }
 
     /// The Sandbox runtime this manager was composed with, when any.

@@ -399,6 +399,7 @@ test.describe('Web 1440×900', () => {
   test('Workspace / Sandbox outside', async ({ page }) => {
     await page.goto('/#/fixture/workspace?capability=sandbox');
     await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
     await expect(page.getByTestId('sandbox-working-dir')).toBeVisible();
 

@@ -27,7 +27,13 @@ export type ServerSessionSandboxEnterPayload = { request_id: string, session_nam
  * durable cache and builds the local composition; the Server never sends
  * a native cache path.
  */
-images: Array<ManagedImageGrant>, working_dir: string, };
+images: Array<ManagedImageGrant>, 
+/**
+ * The Project Existing Location the Server resolved for this Session on
+ * this Agent (#3407), when the effective Workspace selection is the
+ * Project Location. The Agent re-validates the path at use time.
+ */
+project_location?: string | null, working_dir: string, };
 export type SandboxContextStatus = "inside" | "outside" | "unknown";
 export type SandboxPaneScope = { session_name: string, 
 /**
@@ -299,10 +305,6 @@ digest: string,
  */
 path: string, 
 /**
- * Scoped bearer grant for exactly this digest.
- */
-token: string, 
-/**
  * `/opt/<name>` for a toolchain image; absent otherwise.
  */
 target?: string | null, };
@@ -317,7 +319,13 @@ export type ServerSessionSandboxEnterCall = { request_id: string, session_name: 
  * durable cache and builds the local composition; the Server never sends
  * a native cache path.
  */
-images: Array<ManagedImageGrant>, working_dir: string, };
+images: Array<ManagedImageGrant>, 
+/**
+ * The Project Existing Location the Server resolved for this Session on
+ * this Agent (#3407), when the effective Workspace selection is the
+ * Project Location. The Agent re-validates the path at use time.
+ */
+project_location?: string | null, working_dir: string, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

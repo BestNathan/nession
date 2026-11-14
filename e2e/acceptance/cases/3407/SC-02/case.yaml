@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 3407
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify-agent.cjs
+  - type: runtime
+    entry: verify-server.cjs
+result_policy: all-pass

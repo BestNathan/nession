@@ -508,6 +508,7 @@ fn prepare_inner(
         Some(composition) => Some(erofs::mount_composition(
             composition,
             execution_dir,
+            execution_id,
             settings,
         )?),
         None => None,
@@ -568,6 +569,10 @@ fn prepare_inner(
         mounts: mounted
             .as_ref()
             .map(erofs::MountedComposition::mountpoints)
+            .unwrap_or_default(),
+        shared_mounts: mounted
+            .as_ref()
+            .map(erofs::MountedComposition::shared_mounts)
             .unwrap_or_default(),
         channel_dir: runtime_dir.map(|dir| dir.display().to_string()),
         mechanisms: report.mechanisms.clone(),

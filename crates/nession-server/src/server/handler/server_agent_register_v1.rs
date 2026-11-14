@@ -15,7 +15,7 @@ impl ConnectionHandler {
 
         // Empty server auth_token means no-auth mode: accept any agent
         let auth_ok = self.config.server_auth_token.is_empty()
-            || payload.auth_token == self.config.server_auth_token;
+            || payload.auth_token.as_str() == self.config.server_auth_token;
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
@@ -188,6 +188,8 @@ impl ConnectionHandler {
             // reconnected since — and for that straggler the relay gate refuses
             // rather than guesses.
             protocol_manifest: Some(protocol_manifest),
+            agent_token: (!payload.agent_token.is_empty())
+                .then(|| nession_common::SecretString::new(payload.agent_token.as_str())),
             probe_generation: 0,
             offline_generation: 0,
         };

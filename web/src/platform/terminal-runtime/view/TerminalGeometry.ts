@@ -2,6 +2,14 @@ import { fitFontToColumns, rowsForHeight } from '../sizing';
 import { readTerminalClientConfig } from '../terminalConfig';
 import type { Grid } from '../grid';
 import type { TerminalCellSize } from '../emulator';
+import { TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT } from '../capsule/occlusionScroll';
+import {
+  MIN_RESERVED_ROWS,
+  TERMINAL_CAPSULE_CLEARANCE_STATE_EVENT,
+  TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE,
+  type TerminalClearancePolicy,
+  type TerminalClearanceState,
+} from '../capsule/clearancePolicy';
 
 /**
  * The controller surface geometry may use (#2581 SC-06).
@@ -13,6 +21,8 @@ import type { TerminalCellSize } from '../emulator';
  */
 export interface TerminalGeometryHost {
   readonly isObserverReadOnly: boolean;
+  /** The buffer/mouse-derived upper-panel policy (#3492). */
+  readonly clearancePolicy: TerminalClearancePolicy;
   readonly statedTerminalCols: number | null;
   readonly cellDimensions: TerminalCellSize;
   publishViewportResize(cols: number, rows: number): void;
@@ -80,6 +90,17 @@ export class TerminalGeometry {
   private lastReported: { cols: number; rows: number } | null = null;
   /** The width the current font was fitted for; `null` forces a fit. */
   private fittedWidth: number | null = null;
+  /** The capsule host whose panel-clearance changes can require a re-reserve. */
+  private host: HTMLElement | null = null;
+  private panelClearanceListener: (() => void) | null = null;
+  /** Last clearance state published to Product/UI, deduplicated. */
+  private lastClearanceState: TerminalClearanceState | null = null;
+  /**
+   * Fallback is latched for one open panel. The compact panel changes its own
+   * measured height; recomputing the decision downward would expand it, make
+   * the reserve insufficient again, and oscillate forever.
+   */
+  private fallbackLatched = false;
 
   constructor(private readonly controller: TerminalGeometryHost) {
     const config = readTerminalClientConfig();
@@ -110,6 +131,17 @@ export class TerminalGeometry {
     // padding, so reading it back is what tells the grid what the content box
     // left out.
     this.container = container;
+    const host = container.closest('[data-terminal-capsule-host]');
+    if (host instanceof HTMLElement) {
+      this.host = host;
+      this.panelClearanceListener = () => this.onPanelClearanceChanged();
+      host.addEventListener(
+        TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT,
+        this.panelClearanceListener,
+      );
+    } else {
+      this.host = null;
+    }
     this.isFirstFire = true;
     this.lastContainer = { width: 0, height: 0 };
     this.lastReported = null;
@@ -203,7 +235,7 @@ export class TerminalGeometry {
     rows: number;
   } | null {
     const width = this.lastContainer.width;
-    const height = this.usableHeight();
+    const height = this.availableHeight();
     if (width <= 0 || height === null) { return null; }
 
     let cell: { width: number; height: number };
@@ -234,29 +266,93 @@ export class TerminalGeometry {
       fits = contentWidth <= width;
     }
 
-    const rows = rowsForHeight(height, cell.height);
+    const reserve = this.reserveFor(cell.height, height);
+    const rows = rowsForHeight(Math.max(0, height - reserve.reservedPx), cell.height);
+    this.publishClearanceState(reserve);
     if (rows === null) { return null; }
     return { cell, contentWidth, fits, rows };
   }
 
   /**
-   * The usable height: the content box plus the capsule band this mode
-   * reserves, minus the band itself (#1503). The grid must never draw rows the
-   * well is not showing, and the band is chrome drawn over it in both modes.
+   * The height the terminal can draw into before the upper-panel exception.
+   *
+   * The content box plus the capsule band this mode reserves, minus the band
+   * itself (#1503): the grid must never draw rows the well is not showing.
    */
-  private usableHeight(): number | null {
+  private availableHeight(): number | null {
     const container = this.container;
     if (container === null) { return null; }
     const style = getComputedStyle(container);
-    const number = (value: string): number => {
-      const parsed = Number.parseFloat(value);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-    };
-    const reserved = number(style.paddingBottom);
-    const band = number(
+    const reserved = this.px(style.paddingBottom);
+    const band = this.px(
       style.getPropertyValue('--nession-local-terminal-capsule-occlusion'),
     );
     return this.lastContainer.height + reserved - band;
+  }
+
+  /**
+   * Rows spent on an open upper panel under `viewport-reserve` (#3492).
+   *
+   * The alternate screen and mouse-owning TUIs cannot be visually panned, so
+   * the only truthful clearance is real grid rows. The reservation is capped
+   * to leave {@link MIN_RESERVED_ROWS} visible; when the panel asks for more
+   * than that, or this client has no ControlLease authority, the state says
+   * `fallback` so the UI can compact the Peek instead of silently covering the
+   * application.
+   */
+  private reserveFor(cellHeight: number, baseHeight: number): TerminalClearanceState {
+    const policy = this.controller.clearancePolicy;
+    if (policy !== 'viewport-reserve' || this.container === null) {
+      this.fallbackLatched = false;
+      return { policy, requestedPx: 0, reservedPx: 0, fallback: false };
+    }
+    const requestedPx = this.px(
+      getComputedStyle(this.container).getPropertyValue(
+        '--nession-local-terminal-capsule-panel-clearance',
+      ),
+    );
+    const maxReserve = Math.max(0, baseHeight - MIN_RESERVED_ROWS * cellHeight);
+    const reservedPx = Math.min(requestedPx, maxReserve);
+    if (requestedPx === 0) {
+      this.fallbackLatched = false;
+    } else if (this.controller.isObserverReadOnly || requestedPx > maxReserve) {
+      this.fallbackLatched = true;
+    }
+    return { policy, requestedPx, reservedPx, fallback: this.fallbackLatched };
+  }
+
+  /**
+   * State one observed clearance to Product/UI. The host attribute is also the
+   * E2E-visible contract (`data-terminal-clearance-fallback="compact"`).
+   */
+  private publishClearanceState(state: TerminalClearanceState): void {
+    const previous = this.lastClearanceState;
+    if (previous !== null
+      && previous.policy === state.policy
+      && previous.reservedPx === state.reservedPx
+      && previous.requestedPx === state.requestedPx
+      && previous.fallback === state.fallback) {
+      return;
+    }
+    this.lastClearanceState = state;
+    const host = this.host;
+    if (host === null) { return; }
+    if (state.fallback) {
+      host.setAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE, 'compact');
+    } else {
+      host.removeAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE);
+    }
+    if (typeof CustomEvent === 'function') {
+      host.dispatchEvent(new CustomEvent<TerminalClearanceState>(
+        TERMINAL_CAPSULE_CLEARANCE_STATE_EVENT,
+        { detail: state },
+      ));
+    }
+  }
+
+  private px(value: string): number {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   }
 
   /**
@@ -317,10 +413,54 @@ export class TerminalGeometry {
     this.debounceTimer = null;
   }
 
+  /**
+   * The upper panel appeared/changed/closed. Only `viewport-reserve` spends
+   * that height on rows; the scroll policy must never reflow for a Peek
+   * (#2710, #3492).
+   */
+  private onPanelClearanceChanged(): void {
+    if (this.controller.clearancePolicy !== 'viewport-reserve') {
+      return;
+    }
+    this.sync();
+  }
+
+  /** The application's buffer/mouse modes changed; select the new policy now. */
+  onClearancePolicyChanged(): void {
+    // A mode transition can also end a TUI while a panel is open: dropping the
+    // reservation restores the rows the normal buffer owns.
+    this.sync();
+  }
+
+  /**
+   * Re-apply geometry from the current observation without forcing a report.
+   * `report` deduplicates the grid and keeps the 200ms PTY debounce, so an
+   * animated panel or a mode flip cannot produce resize spam.
+   */
+  private sync(): void {
+    if (this.lastContainer.width <= 0 || this.lastContainer.height <= 0) { return; }
+    const grid = this.applyGeometry({ fitFont: false, ordered: false });
+    if (grid === null) { return; }
+    if (this.controller.isObserverReadOnly) {
+      this.controller.publishViewportResize(grid.cols, grid.rows);
+      return;
+    }
+    this.report(grid, { force: false });
+  }
+
   dispose(): void {
     this.observer?.disconnect();
     this.observer = null;
     this.container = null;
+    if (this.host && this.panelClearanceListener) {
+      this.host.removeEventListener(
+        TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT,
+        this.panelClearanceListener,
+      );
+    }
+    this.host = null;
+    this.panelClearanceListener = null;
+    this.lastClearanceState = null;
     if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
     this.debounceTimer = null;
   }

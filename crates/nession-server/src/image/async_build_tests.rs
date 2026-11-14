@@ -164,7 +164,6 @@ fn real_builder(dir: &Path, mkfs: Arc<dyn MkfsRunner>) -> Arc<dyn ImageBuildBack
 fn options(dir: &Path, max_concurrent: usize) -> ImageManagerOptions {
     ImageManagerOptions {
         max_concurrent_builds: max_concurrent,
-        access_token_ttl_secs: 60,
         build_root: dir.join("builds"),
         build_stage_timeout: Some(Duration::from_secs(30)),
         build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,

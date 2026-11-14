@@ -25,14 +25,19 @@ async fn async_main() -> Result<()> {
     // Loaded before the runtime initializes logging, so a config that cannot be
     // read fails without a log destination to report to — the error goes to the
     // shell, which is where the operator is.
-    let config = load_config()?;
+    let (config, config_path) = load_config()?;
     // This binary is always started directly — a daemon parent re-execs the CLI,
     // not this — so there is nobody to announce readiness to.
-    nession_agent::runtime::run(config, nession_common::readiness::Readiness::Unwatched).await
+    nession_agent::runtime::run(
+        config,
+        config_path,
+        nession_common::readiness::Readiness::Unwatched,
+    )
+    .await
 }
 
 /// Load agent configuration from a TOML file, falling back to defaults.
-fn load_config() -> Result<AgentConfig> {
+fn load_config() -> Result<(AgentConfig, std::path::PathBuf)> {
     let config_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "config.toml".to_string());
@@ -42,11 +47,14 @@ fn load_config() -> Result<AgentConfig> {
             .with_context(|| format!("failed to read config file: {config_path}"))?;
         let config: AgentConfig = toml::from_str(&config_str)
             .with_context(|| format!("failed to parse config file: {config_path}"))?;
-        Ok(config)
+        Ok((config, std::path::PathBuf::from(&config_path)))
     } else {
         // Reaches stdout only in the fallback case, where logging is not up yet
         // either — the runtime logs the "running on defaults" fact itself.
         eprintln!("No config file found at '{config_path}', using defaults");
-        Ok(AgentConfig::default())
+        Ok((
+            AgentConfig::default(),
+            std::path::PathBuf::from(&config_path),
+        ))
     }
 }

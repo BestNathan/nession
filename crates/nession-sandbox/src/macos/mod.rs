@@ -243,6 +243,7 @@ pub fn prepare(
         working_dir: working_dir.display().to_string(),
         effective_policy: Some(compiled.normalized.clone()),
         mounts: Vec::new(),
+        shared_mounts: Vec::new(),
         channel_dir: None,
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),

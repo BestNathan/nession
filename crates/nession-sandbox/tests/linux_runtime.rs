@@ -42,6 +42,27 @@ mod helpers {
         settings
     }
 
+    /// Attach the Agent-owned shared EROFS mount manager (#3449).
+    pub(super) fn attach_mount_manager(settings: &mut SandboxSettings, dir: &Path) {
+        let image_root = settings
+            .erofs_image_root
+            .clone()
+            .expect("the composition fixture authorizes an image root");
+        let manager = nession_erofs::mount_manager::MountManager::open(
+            nession_erofs::mount_manager::MountManagerConfig {
+                root: dir.join("erofs-mounts"),
+                settings: nession_erofs::mount::MountSettings::new(
+                    settings.erofsfuse_path.clone(),
+                    settings.fusermount_path.clone(),
+                ),
+                authorized_roots: vec![image_root],
+                pinner: None,
+            },
+        )
+        .expect("open the shared EROFS mount manager");
+        settings.mount_manager = Some(manager);
+    }
+
     pub(super) fn policy(workspace: &Path, with_cgroup: bool, network: &str) -> SandboxPolicy {
         let mut value = serde_json::json!({
             "version": 1,
@@ -412,6 +433,11 @@ mod helpers {
             project,
             toolchain,
         }
+    }
+
+    /// Canonical digest spelling for the shared mount manager API.
+    pub(super) fn sha256_digest(hex: &str) -> String {
+        format!("sha256:{hex}")
     }
 
     pub(super) fn sha256_file(file: &Path) -> String {
@@ -1085,6 +1111,7 @@ fn an_erofs_composition_runs_a_shell_with_a_writable_overlay_workspace() {
 
     let mut settings = settings(dir.path());
     settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let workspace_write = settings.state_dir.join("workspaces").join("composition");
     std::fs::create_dir_all(&workspace_write).expect("workspace write");
@@ -1158,6 +1185,7 @@ done < /proc/self/mountinfo
     );
 
     let mountpoints = record.mounts.clone();
+    let shared = record.shared_mounts.clone();
     let report = running
         .prepared
         .into_handle()
@@ -1166,7 +1194,14 @@ done < /proc/self/mountinfo
     for mountpoint in &mountpoints {
         assert!(
             !nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "cleanup must unmount {mountpoint}"
+            "cleanup must unmount the execution-owned {mountpoint}"
+        );
+    }
+    for consumer in &shared {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(&consumer.mountpoint)),
+            "the last consumer must release the shared mount {}",
+            consumer.mountpoint
         );
     }
     assert_cleaned(&settings, &record);
@@ -1178,8 +1213,169 @@ done < /proc/self/mountinfo
         "erofs_mount": true,
         "overlay_mount": true,
         "host_etc_shadow_hidden": true,
-        "mounts_unmounted": mountpoints.len(),
+        "mounts_unmounted": mountpoints.len() + shared.len(),
+        "shared_mounts": shared.len(),
         "cleanup_evidence": report.evidence_lines(),
+    }));
+}
+
+#[test]
+fn a_managed_workspace_keeps_its_durable_upper_across_overlay_reentry() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    // The durable managed Workspace root is authorized separately from the
+    // execution state directory (#3407).
+    let durable_root = dir.path().join("agent-workspaces");
+    settings.agent_workspaces_root = Some(durable_root.clone());
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let managed = durable_root.join("ws_acceptance");
+    std::fs::create_dir_all(&managed).expect("managed workspace");
+
+    let policy = || {
+        serde_json::from_value::<SandboxPolicy>(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "composition": {
+                    "base": {
+                        "digest": format!("sha256:{}", images.base_digest),
+                        "source": images.base.to_string_lossy()
+                    },
+                    "workspace": {
+                        "image": {
+                            "digest": format!("sha256:{}", images.project_digest),
+                            "source": images.project.to_string_lossy()
+                        },
+                        "write": managed.to_string_lossy(),
+                        "ownership": "agent"
+                    },
+                    "toolchains": []
+                }
+            },
+            "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+            "enforcement": "required"
+        }))
+        .expect("managed composition policy fixture")
+    };
+
+    // First Enter: write through the Overlay into the durable upper.
+    let first_script = "\
+set -eu
+read line < /workspace/project.txt
+[ \"$line\" = project ] && echo LOWER-OK
+printf 'durable work\\n' > /workspace/reentry.txt
+overlay=no
+while IFS= read -r mount; do
+  case \"$mount\" in
+    *fuse.fuse-overlayfs*) overlay=yes ;;
+  esac
+done < /proc/self/mountinfo
+[ \"$overlay\" = yes ] && echo OVERLAY-OK
+";
+    let mut first = launch(
+        &settings,
+        LaunchRequest {
+            policy: policy(),
+            session_name: format!("managed-reentry-{}", std::process::id()),
+            instance_id: "instance-managed-reentry".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                first_script.to_string(),
+            ],
+            tmux_socket: None,
+        },
+    );
+    verify_or_report(&mut first, "the first managed composition must verify");
+    let (first_status, first_stdout, first_stderr) = wait_for_exit(&mut first);
+    assert!(
+        first_status.success(),
+        "the first managed composition failed: stdout={first_stdout} stderr={first_stderr}"
+    );
+    for marker in ["LOWER-OK", "OVERLAY-OK"] {
+        assert!(
+            first_stdout.contains(marker),
+            "the first managed composition did not prove {marker}: {first_stdout} {first_stderr}"
+        );
+    }
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the first composition");
+    let durable = managed.join("upper").join("reentry.txt");
+    assert_eq!(
+        std::fs::read_to_string(&durable).expect("durable upper file"),
+        "durable work\n",
+        "the sandbox write must land in the managed durable upper"
+    );
+
+    // Second Enter: the same lower and the same managed Workspace observe the
+    // previously written bytes.
+    let second_script = "\
+set -eu
+read line < /workspace/reentry.txt
+[ \"$line\" = 'durable work' ] && echo REENTRY-OK
+read project < /workspace/project.txt
+[ \"$project\" = project ] && echo LOWER-OK
+";
+    let mut second = launch(
+        &settings,
+        LaunchRequest {
+            policy: policy(),
+            session_name: format!("managed-reentry-{}", std::process::id()),
+            instance_id: "instance-managed-reentry".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                second_script.to_string(),
+            ],
+            tmux_socket: None,
+        },
+    );
+    verify_or_report(
+        &mut second,
+        "the re-entered managed composition must verify",
+    );
+    let (second_status, second_stdout, second_stderr) = wait_for_exit(&mut second);
+    assert!(
+        second_status.success(),
+        "the re-entered managed composition failed: stdout={second_stdout} stderr={second_stderr}"
+    );
+    for marker in ["REENTRY-OK", "LOWER-OK"] {
+        assert!(
+            second_stdout.contains(marker),
+            "the re-entered managed composition did not prove {marker}: {second_stdout} {second_stderr}"
+        );
+    }
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the second composition");
+    assert!(
+        managed.is_dir(),
+        "cleanup must release the lease, not delete the managed Workspace"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&durable).expect("durable upper survives cleanup"),
+        "durable work\n"
+    );
+    print_evidence(&serde_json::json!({
+        "managed_workspace": managed.to_string_lossy(),
+        "project_lower_digest": format!("sha256:{}", images.project_digest),
+        "first_overlay": true,
+        "durable_upper_preserved": true,
+        "reentry_same_bytes": true,
+        "workspace_survived_cleanup": true,
     }));
 }
 
@@ -1190,6 +1386,7 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
     let images = build_composition_images(dir.path());
     let mut settings = settings(dir.path());
     settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let first_write = settings.state_dir.join("workspaces").join("first");
     let second_write = settings.state_dir.join("workspaces").join("second");
@@ -1227,16 +1424,52 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
     verify_or_report(&mut second, "the second composition barrier must verify");
     let first_record = first.prepared.record().clone();
     let second_record = second.prepared.record().clone();
+    // One verified digest maps to exactly one physical read-only mount, and
+    // both executions consume it through distinct leases (#3449).
+    assert_eq!(
+        first_record.shared_mounts.len(),
+        second_record.shared_mounts.len()
+    );
+    let mut first_shared: Vec<&str> = first_record
+        .shared_mounts
+        .iter()
+        .map(|shared| shared.mountpoint.as_str())
+        .collect();
+    let mut second_shared: Vec<&str> = second_record
+        .shared_mounts
+        .iter()
+        .map(|shared| shared.mountpoint.as_str())
+        .collect();
+    first_shared.sort_unstable();
+    second_shared.sort_unstable();
+    assert_eq!(
+        first_shared, second_shared,
+        "the two executions must share the same physical EROFS mountpoints"
+    );
+    for consumer in &first_record.shared_mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(&consumer.mountpoint)),
+            "the shared mount {} must be live",
+            consumer.mountpoint
+        );
+        let status = settings
+            .mount_manager
+            .as_ref()
+            .expect("mount manager")
+            .lookup(&consumer.digest)
+            .expect("a known shared digest");
+        assert_eq!(status.consumers, 2, "both executions hold a lease");
+    }
     for mountpoint in &first_record.mounts {
         assert!(
             nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "the first composition mount {mountpoint} must be live"
+            "the first execution-owned mount {mountpoint} must be live"
         );
     }
     for mountpoint in &second_record.mounts {
         assert!(
             nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "the second composition mount {mountpoint} must be live"
+            "the second execution-owned mount {mountpoint} must be live"
         );
     }
 
@@ -1248,10 +1481,11 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
         Path::new(&format!("/proc/{}", first.pane_pid)).exists(),
         "the detached composition Pane must stay alive"
     );
-    for mountpoint in &first_record.mounts {
+    for consumer in &first_record.shared_mounts {
         assert!(
-            nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "a detached composition must keep {mountpoint} mounted"
+            nession_sandbox::linux::erofs::is_mounted(Path::new(&consumer.mountpoint)),
+            "a detached composition must keep {} mounted",
+            consumer.mountpoint
         );
     }
 
@@ -1265,16 +1499,27 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
     for mountpoint in &first_record.mounts {
         assert!(
             !nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "the first composition's {mountpoint} must be unmounted"
+            "the first execution-owned {mountpoint} must be unmounted"
+        );
+    }
+    for consumer in &first_record.shared_mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(&consumer.mountpoint)),
+            "releasing one consumer must keep the shared mount {} live",
+            consumer.mountpoint
+        );
+        let status = settings
+            .mount_manager
+            .as_ref()
+            .expect("mount manager")
+            .lookup(&consumer.digest)
+            .expect("a known shared digest");
+        assert_eq!(
+            status.consumers, 1,
+            "the surviving execution keeps its lease"
         );
     }
     assert_cleaned(&settings, &first_record);
-    for mountpoint in &second_record.mounts {
-        assert!(
-            nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "the second composition's {mountpoint} must remain mounted"
-        );
-    }
     assert!(
         Path::new(&format!("/proc/{}", second.pane_pid)).exists(),
         "the second composition must stay alive when only its peer is cleaned"
@@ -1290,8 +1535,23 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
     for mountpoint in second_record.mounts.iter() {
         assert!(
             !nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
-            "the second composition's {mountpoint} must be unmounted"
+            "the second execution-owned {mountpoint} must be unmounted"
         );
+    }
+    for consumer in &second_record.shared_mounts {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(&consumer.mountpoint)),
+            "the last consumer must unmount {}",
+            consumer.mountpoint
+        );
+        let status = settings
+            .mount_manager
+            .as_ref()
+            .expect("mount manager")
+            .lookup(&consumer.digest)
+            .expect("a known shared digest");
+        assert_eq!(status.consumers, 0);
+        assert!(!status.mounted, "the physical mount is gone");
     }
     assert_cleaned(&settings, &second_record);
     print_evidence(&serde_json::json!({
@@ -1299,7 +1559,285 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
         "second_execution": second_record.execution_id,
         "detached_pane_survived": true,
         "shared_images_remained_mounted": true,
-        "first_mounts_released": first_record.mounts.len(),
-        "second_mounts_released": second_record.mounts.len(),
+        "one_physical_mount_per_digest": true,
+        "first_mounts_released": first_record.mounts.len() + first_record.shared_mounts.len(),
+        "second_mounts_released": second_record.mounts.len() + second_record.shared_mounts.len(),
+        "shared_mounts": first_record.shared_mounts.len(),
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// #3449 shared, recoverable EROFS mount manager
+// ---------------------------------------------------------------------------
+
+fn standalone_manager(
+    root: &Path,
+    images: &Path,
+    erofsfuse: &Path,
+    fusermount: &Path,
+) -> std::sync::Arc<nession_erofs::mount_manager::MountManager> {
+    match nession_erofs::mount_manager::MountManager::open(
+        nession_erofs::mount_manager::MountManagerConfig {
+            root: root.to_path_buf(),
+            settings: nession_erofs::mount::MountSettings::new(erofsfuse, fusermount),
+            authorized_roots: vec![images.to_path_buf()],
+            pinner: None,
+        },
+    ) {
+        Ok(manager) => manager,
+        Err(error) => panic!("open a shared EROFS mount manager: {error:#}"),
+    }
+}
+
+fn default_helpers(dir: &Path) -> (PathBuf, PathBuf) {
+    let erofsfuse = dir.join("real-erofsfuse");
+    let fusermount = dir.join("real-fusermount");
+    // Resolve the real helpers through PATH so the test proves the native
+    // path, not a fixture.
+    let Some(erofsfuse_source) = which("erofsfuse") else {
+        panic!("erofsfuse is available");
+    };
+    let Some(fusermount_source) = which("fusermount3") else {
+        panic!("fusermount3 is available");
+    };
+    if let Err(error) = std::os::unix::fs::symlink(&erofsfuse_source, &erofsfuse) {
+        panic!("link erofsfuse: {error}");
+    }
+    if let Err(error) = std::os::unix::fs::symlink(&fusermount_source, &fusermount) {
+        panic!("link fusermount3: {error}");
+    }
+    (erofsfuse, fusermount)
+}
+
+fn which(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+#[test]
+fn a_restarted_manager_adopts_a_verified_mount_and_never_serves_a_disappeared_one() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let image_root = dir.path().join("images");
+    let (erofsfuse, fusermount) = default_helpers(dir.path());
+    let root = dir.path().join("standalone-mounts");
+    let digest = sha256_digest(&images.base_digest);
+
+    let manager_a = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
+    let verified = nession_erofs::mount_manager::VerifiedImage::new(digest.clone(), images.base)
+        .expect("verified image");
+    let lease = manager_a.acquire(&verified, "exec-live").expect("acquire");
+    let generation = lease.generation().to_string();
+    let mountpoint = lease.mountpoint().to_path_buf();
+    assert!(
+        mountpoint.join("bin/sh").exists(),
+        "the shared image is readable"
+    );
+    // Simulate an Agent process that exits without dropping its lease.
+    std::mem::forget(lease);
+    std::mem::forget(manager_a);
+
+    let manager_b = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
+    let report = manager_b.adopt_consumers(&[nession_erofs::mount_manager::ConsumerRef {
+        digest: digest.clone(),
+        execution_id: "exec-live".to_string(),
+        generation: generation.clone(),
+    }]);
+    assert_eq!(report.adopted.len(), 1, "{report:?}");
+    assert!(report.unavailable.is_empty(), "{report:?}");
+    let status = manager_b.lookup(&digest).expect("adopted status");
+    assert_eq!(status.consumers, 1);
+    assert!(status.mounted);
+    assert_eq!(status.generation.as_deref(), Some(generation.as_str()));
+    assert!(
+        mountpoint.join("bin/sh").exists(),
+        "the adopted mount is readable"
+    );
+
+    manager_b
+        .release_consumers(&digest, "exec-live", Some(&generation))
+        .expect("release the adopted consumer");
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(&mountpoint),
+        "the last adopted consumer releases the physical mount"
+    );
+
+    // Disappeared mount: a live record must not be silently served.
+    let lease = manager_b.acquire(&verified, "exec-gone").expect("acquire");
+    let generation = lease.generation().to_string();
+    let mountpoint = lease.mountpoint().to_path_buf();
+    std::mem::forget(lease);
+    let status = Command::new("fusermount3") // not-tmux: test forces mount loss
+        .arg("-u")
+        .arg(&mountpoint)
+        .status()
+        .expect("run fusermount3");
+    assert!(status.success());
+    let manager_c = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
+    let report = manager_c.adopt_consumers(&[nession_erofs::mount_manager::ConsumerRef {
+        digest: digest.clone(),
+        execution_id: "exec-gone".to_string(),
+        generation,
+    }]);
+    assert!(report.adopted.is_empty(), "{report:?}");
+    assert!(
+        report
+            .unavailable
+            .iter()
+            .any(|(_, reason)| reason.contains("no longer present")),
+        "a missing mount is reported unavailable: {report:?}"
+    );
+    assert!(
+        !manager_c.lookup(&digest).expect("status").mounted,
+        "an absent mount is never served as live"
+    );
+    let mut protected = std::collections::HashSet::new();
+    protected.insert(digest.clone());
+    assert!(
+        manager_c.reclaim_orphans(&protected).reclaimed.is_empty(),
+        "a record-protected digest is not reclaimed"
+    );
+    assert!(
+        manager_c
+            .reclaim_orphans(&std::collections::HashSet::new())
+            .reclaimed
+            .contains(&digest),
+        "an unprotected stale identity is reclaimed"
+    );
+    print_evidence(&serde_json::json!({
+        "adopted_after_restart": true,
+        "missing_mount_reported": true,
+        "stale_identity_reclaimed": true,
+    }));
+}
+
+#[test]
+fn a_failed_shared_unmount_is_durable_bounded_and_retryable() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let image_root = dir.path().join("images");
+    let (erofsfuse, _) = default_helpers(dir.path());
+    let failing = dir.path().join("fail-once-fusermount");
+    std::fs::write(
+        &failing,
+        "#!/bin/sh\n\
+         if [ ! -f \"$0.counter\" ]; then : > \"$0.counter\"; exit 1; fi\n\
+         exec fusermount3 \"$@\"\n",
+    )
+    .expect("write failing fusermount");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&failing).expect("stat").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&failing, permissions).expect("chmod");
+    }
+    let root = dir.path().join("standalone-mounts");
+    let digest = sha256_digest(&images.base_digest);
+    let manager = standalone_manager(&root, &image_root, &erofsfuse, &failing);
+    let verified = nession_erofs::mount_manager::VerifiedImage::new(digest.clone(), images.base)
+        .expect("verified image");
+    let lease = manager.acquire(&verified, "exec-unmount").expect("acquire");
+    let generation = lease.generation().to_string();
+    let mountpoint = lease.mountpoint().to_path_buf();
+    let started = std::time::Instant::now();
+    let error = lease.release().expect_err("the first unmount must fail");
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "the failed unmount is bounded"
+    );
+    assert!(format!("{error:#}").contains("failed"), "{error:#}");
+    let status = manager.lookup(&digest).expect("status");
+    assert_eq!(
+        status.state,
+        nession_erofs::mount_manager::MountState::Failed
+    );
+    assert!(status.mounted, "the live mount is retained");
+    assert_eq!(status.consumers, 0);
+    assert!(status.failure.is_some(), "the failure is durable evidence");
+
+    manager
+        .release_consumers(&digest, "exec-unmount", Some(&generation))
+        .expect("the retry succeeds");
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(&mountpoint),
+        "the retry removes the physical mount"
+    );
+    assert!(manager.lookup(&digest).expect("status").failure.is_none());
+    print_evidence(&serde_json::json!({
+        "failed_unmount_retained": true,
+        "retry_succeeded": true,
+        "bounded": true,
+    }));
+}
+
+#[test]
+fn concurrent_shared_acquisitions_keep_one_physical_mount() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let image_root = dir.path().join("images");
+    let (erofsfuse, fusermount) = default_helpers(dir.path());
+    let root = dir.path().join("standalone-mounts");
+    let digest = sha256_digest(&images.base_digest);
+    let manager = standalone_manager(&root, &image_root, &erofsfuse, &fusermount);
+    let verified = nession_erofs::mount_manager::VerifiedImage::new(digest.clone(), images.base)
+        .expect("verified image");
+
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut threads = Vec::new();
+    for index in 0..4 {
+        let manager = std::sync::Arc::clone(&manager);
+        let verified = verified.clone();
+        let barrier = std::sync::Arc::clone(&barrier);
+        let observed = std::sync::Arc::clone(&observed);
+        threads.push(std::thread::spawn(move || {
+            let execution = format!("exec-{index}");
+            let lease = manager.acquire(&verified, &execution).expect("acquire");
+            observed.lock().expect("observed").push((
+                lease.mountpoint().to_path_buf(),
+                lease.generation().to_string(),
+            ));
+            barrier.wait();
+            barrier.wait();
+            lease.release().expect("release");
+        }));
+    }
+    barrier.wait();
+    let observed = observed.lock().expect("observed").clone();
+    assert_eq!(observed.len(), 4);
+    let mountpoint = observed[0].0.clone();
+    let generation = observed[0].1.clone();
+    for (candidate, candidate_generation) in &observed {
+        assert_eq!(
+            candidate, &mountpoint,
+            "one physical mount serves all consumers"
+        );
+        assert_eq!(
+            candidate_generation, &generation,
+            "all consumers share one mount generation"
+        );
+    }
+    let status = manager.lookup(&digest).expect("status");
+    assert_eq!(status.consumers, 4);
+    assert!(status.mounted);
+    barrier.wait();
+    for thread in threads {
+        thread.join().expect("consumer thread");
+    }
+    let status = manager.lookup(&digest).expect("status");
+    assert_eq!(status.consumers, 0);
+    assert!(
+        !status.mounted,
+        "the last release unmounts the physical mount"
+    );
+    print_evidence(&serde_json::json!({
+        "consumers": 4,
+        "physical_mounts": 1,
+        "generation": generation,
     }));
 }

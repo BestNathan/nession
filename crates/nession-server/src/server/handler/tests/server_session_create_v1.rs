@@ -175,6 +175,7 @@ async fn project_session_create_reports_an_offline_agent_without_creating() {
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: None,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 1,
         })

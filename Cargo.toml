@@ -33,6 +33,10 @@ opt-level = 0
 
 [workspace.dependencies]
 tokio = { version = "1.35", features = ["full"] }
+# The Server/Agent HTTP ingress and WebSocket Upgrade owner (#3439). The hosts
+# mount explicit routes on it; the shared runtime supplies the accepted-
+# connection serving primitive.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
 rustls = "0.22"
 rustls-pemfile = "2.0"

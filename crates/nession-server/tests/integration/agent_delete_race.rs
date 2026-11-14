@@ -77,7 +77,6 @@ impl Fixture {
             env_service: Arc::clone(&self.env),
             image_manager: image_manager(Arc::clone(&self.db))?,
             db: Arc::clone(&self.db),
-            p2p_broker: Arc::new(nession_server::broker::ConnectionBroker::new(300)),
         })
     }
 
@@ -175,6 +174,7 @@ fn agent_info(agent_id: &str, last_heartbeat: chrono::DateTime<Utc>) -> AgentInf
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     }

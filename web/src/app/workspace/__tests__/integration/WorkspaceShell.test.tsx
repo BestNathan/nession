@@ -77,7 +77,6 @@ describe('WorkspaceShell contextual capability presentation', () => {
       'workspace-tool-session',
       'workspace-tool-agent',
       'workspace-tool-env',
-      'workspace-tool-images',
       'workspace-tool-sandbox',
       'workspace-tool-claude-code',
       'workspace-tool-git',

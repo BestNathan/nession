@@ -92,15 +92,14 @@ export interface AttachInfo {
   session_name?: string;
   // For P2P mode:
   agent_address?: string; // Legacy single URL (first/tunnel-preferred address)
-  connection_token?: string;
   /**
-   * RFC 3339 deadline the Server states for `connection_token` (#2645).
+   * The resolved target Agent's durable token (#3440).
    *
-   * The token is opaque, so this is how the client knows a new physical
-   * connection needs a fresh credential. Absent on older Servers; the Agent's
-   * refusal remains authoritative either way.
+   * Handed off only by an authenticated attach for this Agent, kept in runtime
+   * memory, presented as the first `client.auth` frame and never placed in a
+   * URL or browser storage. Relay mode omits it: the Server dials the Agent.
    */
-  connection_token_expires_at?: string;
+  agent_token?: string;
   /** Full candidate list with probe status (issue #43). Empty for relay. */
   addresses?: ProbedAddress[];
   /**

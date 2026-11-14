@@ -351,3 +351,24 @@ test('App: a Terminal file reference opens the pushed Files viewer at its line',
   await returnFromFiles(page, expect, 'app');
   await expect(page.getByTestId('terminal-surface')).toBeVisible();
 });
+
+// #3414: from a Session shell at `/`, the same relative reference must resolve
+// against the filesystem root, not the source-relative root. With the absolute
+// target absent the App must show the failure instead of the lookalike file.
+test('App: a relative reference from the filesystem root never falls back into the source root', async ({ page }) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+  seedTerminalFiles(runtime.home);
+  await openFileLinkApp(page, expect, runtime, 'e2e-3414-app');
+  await runFileLinkCommand(page, expect, 'cd /');
+  await printFileReference(page, expect, 'src/deep/target.py:3');
+  await activateFileReference(page, 'src/deep/target.py:3');
+  const error = page.getByTestId('files-app-handoff-error');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText('/src/deep/target.py');
+  await expect(error).toContainText('moved or deleted');
+  await expect(page.locator('.cm-editor')).toHaveCount(0);
+  await returnFromFiles(page, expect, 'app');
+  await expect(page.getByTestId('terminal-surface')).toBeVisible();
+});

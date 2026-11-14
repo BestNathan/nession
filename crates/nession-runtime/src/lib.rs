@@ -73,5 +73,6 @@
 //! which drops, which fails a request — stay with the two runtimes, and so do the
 //! counters those policies are observed by.
 
+pub mod ingress;
 pub mod lane;
 pub mod outbound;

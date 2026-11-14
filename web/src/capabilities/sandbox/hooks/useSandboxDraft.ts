@@ -1,7 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type {
   SandboxCurrentContext,
+  SandboxFilesystemPolicy,
+  SandboxFilesystemRoot,
+  SandboxFilesystemWorkspace,
   SandboxKvEntry,
+  SandboxMount,
   SandboxPolicyDraft,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import {
@@ -11,6 +15,8 @@ import {
   removeKvRow,
   updateKvRow,
 } from '../model';
+
+const EMPTY_ACCESS = { read: [] as string[], write: [] as string[] };
 
 export interface SandboxDraftState {
   draft: SandboxPolicyDraft;
@@ -22,6 +28,11 @@ export interface SandboxDraftState {
   updateFilesystemPath: (field: 'read' | 'write', index: number, value: string) => void;
   removeFilesystemPath: (field: 'read' | 'write', index: number) => void;
   clearFilesystemAccess: () => void;
+  setFilesystemRootfs: (rootfs: SandboxFilesystemRoot | undefined) => void;
+  addMount: (mount: SandboxMount) => void;
+  updateMountTarget: (index: number, target: string) => void;
+  removeMount: (index: number) => void;
+  setFilesystemWorkspace: (workspace: SandboxFilesystemWorkspace | undefined) => void;
   addEgressRule: (field: 'allow' | 'deny') => void;
   updateEgressRule: (field: 'allow' | 'deny', index: number, value: string) => void;
   removeEgressRule: (field: 'allow' | 'deny', index: number) => void;
@@ -32,22 +43,30 @@ export interface SandboxDraftState {
   reset: () => void;
 }
 
+function withFilesystem(
+  draft: SandboxPolicyDraft,
+  update: (filesystem: SandboxFilesystemPolicy) => SandboxFilesystemPolicy,
+): SandboxPolicyDraft {
+  const filesystem = draft.filesystem ?? { access: { ...EMPTY_ACCESS } };
+  return { ...draft, filesystem: update(filesystem) };
+}
+
 function withFilesystemList(
   draft: SandboxPolicyDraft,
   field: 'read' | 'write',
   update: (list: string[]) => string[],
 ): SandboxPolicyDraft {
-  const access = draft.filesystem?.access ?? { read: [], write: [] };
-  const list = update(field === 'read' ? access.read : access.write);
-  return {
-    ...draft,
-    filesystem: {
+  return withFilesystem(draft, (filesystem) => {
+    const access = filesystem.access ?? EMPTY_ACCESS;
+    const list = update(field === 'read' ? access.read : access.write);
+    return {
+      ...filesystem,
       access: {
         read: field === 'read' ? list : access.read,
         write: field === 'write' ? list : access.write,
       },
-    },
-  };
+    };
+  });
 }
 
 function withEgressList(
@@ -71,6 +90,79 @@ function withEgressList(
   };
 }
 
+/** Declaration edits for the Filesystem editor (#3405, #3408). */
+function useFilesystemDeclarationMutations(
+  setDraft: Dispatch<SetStateAction<SandboxPolicyDraft>>,
+) {
+  const setFilesystemRootfs = useCallback((rootfs: SandboxFilesystemRoot | undefined) => {
+    setDraft((current) =>
+      withFilesystem(current, (filesystem) => {
+        const next = { ...filesystem };
+        if (rootfs) {
+          next.rootfs = rootfs;
+        } else {
+          delete next.rootfs;
+        }
+        return next;
+      }),
+    );
+  }, [setDraft]);
+
+  const addMount = useCallback((mount: SandboxMount) => {
+    setDraft((current) =>
+      withFilesystem(current, (filesystem) => ({
+        ...filesystem,
+        mounts: [...(filesystem.mounts ?? []), mount],
+      })),
+    );
+  }, [setDraft]);
+
+  const updateMountTarget = useCallback((index: number, target: string) => {
+    setDraft((current) =>
+      withFilesystem(current, (filesystem) => ({
+        ...filesystem,
+        mounts: (filesystem.mounts ?? []).map((mount, at) =>
+          at === index ? { ...mount, target } : mount,
+        ),
+      })),
+    );
+  }, [setDraft]);
+
+  const removeMount = useCallback((index: number) => {
+    setDraft((current) =>
+      withFilesystem(current, (filesystem) => ({
+        ...filesystem,
+        mounts: (filesystem.mounts ?? []).filter((_, at) => at !== index),
+      })),
+    );
+  }, [setDraft]);
+
+  const setFilesystemWorkspace = useCallback(
+    (workspace: SandboxFilesystemWorkspace | undefined) => {
+      setDraft((current) =>
+        withFilesystem(current, (filesystem) => {
+          const next = { ...filesystem };
+          if (workspace) {
+            next.workspace = workspace;
+          } else {
+            delete next.workspace;
+          }
+          return next;
+        }),
+      );
+    },
+    [setDraft],
+  );
+
+  return {
+    setFilesystemRootfs,
+    addMount,
+    updateMountTarget,
+    removeMount,
+    setFilesystemWorkspace,
+  };
+}
+
 /**
  * The explicit outside-draft (#3124, #3143).
  *
@@ -82,6 +174,7 @@ function withEgressList(
 export function useSandboxDraft(context: SandboxCurrentContext | null): SandboxDraftState {
   const baseline = useMemo(() => draftForContext(context), [context]);
   const [draft, setDraft] = useState<SandboxPolicyDraft>(baseline);
+  const declaration = useFilesystemDeclarationMutations(setDraft);
   const dirty = draftSignature(draft) !== draftSignature(baseline);
 
   const patch = useCallback((next: Partial<SandboxPolicyDraft>) => {
@@ -112,7 +205,12 @@ export function useSandboxDraft(context: SandboxCurrentContext | null): SandboxD
   }, []);
 
   const clearFilesystemAccess = useCallback(() => {
-    setDraft((current) => ({ ...current, filesystem: undefined }));
+    setDraft((current) =>
+      withFilesystem(current, (filesystem) => ({
+        ...filesystem,
+        access: { read: [], write: [] },
+      })),
+    );
   }, []);
 
   const addEgressRule = useCallback((field: 'allow' | 'deny') => {
@@ -188,6 +286,7 @@ export function useSandboxDraft(context: SandboxCurrentContext | null): SandboxD
     updateFilesystemPath,
     removeFilesystemPath,
     clearFilesystemAccess,
+    ...declaration,
     addEgressRule,
     updateEgressRule,
     removeEgressRule,

@@ -1036,7 +1036,10 @@ mod tests {
         let first = ops.read_file("file.txt", None, None).await.unwrap();
         assert!(!first.revision.is_empty());
 
-        ops.write_file("file.txt", &encode_b64("two"))
+        // A different length guarantees a metadata-visible change even on a
+        // filesystem whose `mtime` granularity is coarser than two immediate
+        // writes; the revision contract must still distinguish the writes.
+        ops.write_file("file.txt", &encode_b64("two-longer"))
             .await
             .unwrap();
         let second = ops.read_file("file.txt", None, None).await.unwrap();

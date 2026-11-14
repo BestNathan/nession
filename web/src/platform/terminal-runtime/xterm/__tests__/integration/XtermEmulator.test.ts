@@ -43,6 +43,33 @@ describe('XtermEmulator', () => {
     expect(instance.terminal.cols).toBeGreaterThan(0);
   });
 
+  it('reports an application mouse-tracking mode change once per transition (#3492)', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    instance.mount(container);
+    const listener = vi.fn();
+    const subscription = instance.onModesChange(listener);
+
+    await new Promise<void>((resolve) => {
+      instance.write('\x1b[?1000h', resolve);
+    });
+    expect(instance.readModes().mouseTrackingMode).not.toBe('none');
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // A write that does not change the interaction modes is not a transition.
+    await new Promise<void>((resolve) => {
+      instance.write('plain output', resolve);
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    subscription.dispose();
+    await new Promise<void>((resolve) => {
+      instance.write('\x1b[?1000l', resolve);
+    });
+    expect(instance.readModes().mouseTrackingMode).toBe('none');
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it('should preserve scrollback after attach/detach cycle', () => {
     // Create two containers
     const container1 = document.createElement('div');

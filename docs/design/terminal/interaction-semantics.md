@@ -71,21 +71,44 @@ their existing path. Chords are owned by the interaction runtime, so a UI
 adapter cannot invent an escape string, a sequential write, or an IME-dependent
 keydown.
 
-## Upper-panel scroll clearance (#2710)
+## Upper-panel clearance (#2710, #3492)
 
 The Capsule publishes two independent measures:
 
 - **Fit occlusion** (`--nession-local-terminal-capsule-occlusion`) is measured
-  from the composer shell. It controls the viewport fit and must **never**
-  include the temporary upper panel, or opening a Peek will resize xterm rows
-  and the PTY/tmux pane.
-- **Panel scroll clearance** (`--nession-local-terminal-capsule-panel-clearance`)
-  measures how far the highest open surface rises above the composer. It adds
-  a **reversible local visual scroll range**; it is not an unconditional screen
-  translation or a change in the remote terminal buffer.
+  from the composer shell. It controls the base viewport fit and never absorbs
+  the temporary upper panel by itself.
+- **Panel clearance** (`--nession-local-terminal-capsule-panel-clearance`)
+  measures how far the highest open surface rises above the composer. How it is
+  spent depends on the application's **actual terminal modes**.
 
-**A panel opening must not automatically push xterm content upward.** The
-existing screen origin and any current history anchor remain where they were.
+### Mode-aware policy (#3492)
+
+| Terminal state | Policy | Behavior |
+| --- | --- | --- |
+| Normal buffer, no mouse tracking | `scroll-clearance` | #2710's reversible local visual pan. xterm rows, PTY and tmux size are unchanged. |
+| Alternate screen | `viewport-reserve` | The measured panel clearance reduces the **usable grid height**, so xterm rows and the authorized PTY/tmux rows follow the reduced height and the application redraws its own bottom/status/input rows above the panel. Columns stay canonical. |
+| Normal buffer with mouse tracking | `viewport-reserve` | Same reserved-height path; the application keeps wheel/pointer ownership. |
+| No resize authority or too little usable height | `compact fallback` | The panel is bounded and offers an explicit Compact/Expand control instead of silently covering the TUI's rows. |
+
+The policy is derived from `buffer.active.type` and the mouse-tracking mode that
+xterm already tracks. It is never inferred from process names. A mode transition
+re-selects the policy without remounting the terminal; closing the panel derives
+rows from the **current** viewport, never a remembered size.
+
+A reserve is Session-global. Only the authorized ControlLease holder may request
+the row change through the existing authoritative resize flow; an observer's
+local Peek publishes no resize and cannot move the Session's geometry. Stable
+final geometry is published (deduplicated rows and the existing resize debounce)
+so animation, repeated observations and mode flips do not spam the PTY.
+
+### Scroll clearance (#2710, normal shell)
+
+The following remains the contract for the normal-buffer/no-mouse policy:
+
+**Under scroll-clearance, a panel opening must not automatically push xterm
+content upward.** The existing screen origin and any current history anchor
+remain where they were.
 The user can then swipe toward the live bottom to spend the panel scroll range
 and reveal the newest prompt above the panel. Swiping the other way first
 **recovers the original top rows**, then continues into real xterm history.
@@ -97,11 +120,11 @@ history: that rule clipped the top rows with no way to recover them (#2710
 post-acceptance report).
 
 Only the **normal local buffer without mouse tracking** uses this visual range.
-In alternate-screen or mouse-reporting TUI modes the application owns its
-screen and wheel/mouse input, so it is never transformed. The visual scroll
-range must not change xterm rows, the PTY size, tmux pane size or cursor
-coordinates; touch gestures owned by the direction pad and App navigation
-keep their existing priority. A viewport or panel height change may clamp
+Alternate-screen and mouse-reporting TUI modes own their screen and wheel/mouse
+input, so they take the `viewport-reserve` policy above instead of a transform.
+Under scroll-clearance the visual range must not change xterm rows, the PTY
+size, tmux pane size or cursor coordinates; touch gestures owned by the
+direction pad and App navigation keep their existing priority. A viewport or panel height change may clamp
 the visual pan to the new clearance, but must not invent an auto-follow jump
 while the user is browsing history.
 
@@ -112,8 +135,13 @@ The implementation needs regression evidence for these boundaries:
    history, including when the xterm buffer has no scrollback.
 3. An upward drag can reach the latest output above the panel; both directions
    work continuously on the same gesture.
-4. Closing/switching panels, mouse-reporting/alternate-screen applications,
-   keyboard/IME, scroll-wheel and session continuity remain unaffected.
+4. Closing/switching panels restores current-viewport rows, and mode
+   transitions between the normal shell and a mouse-reporting/alternate-screen
+   TUI select the correct policy without a stale transform or remount.
+5. A mouse-owning TUI keeps its wheel/touch input; opening the panel does not
+   consume or redirect it.
+6. An observer's panel never requests a resize; an unavailable or too-small
+   reserve exposes the compact/expand fallback rather than covering the TUI.
 
 ## Touch direction pad (#2657)
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
   SandboxCurrentContext,
-  SandboxImageSelection,
   SandboxPolicyDraft,
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
@@ -29,10 +28,9 @@ export interface SandboxPreflightState {
 export function useSandboxPreflight(options: {
   sessionId: string | null;
   context: SandboxCurrentContext | null;
-  images: readonly SandboxImageSelection[];
   workingDir: string;
 }): SandboxPreflightState {
-  const { sessionId, context, images, workingDir } = options;
+  const { sessionId, context, workingDir } = options;
   const [preflight, setPreflight] = useState<{
     signature: string;
     result: SandboxPreflightResult;
@@ -57,11 +55,10 @@ export function useSandboxPreflight(options: {
           generation: context.generation,
           probeGeneration: context.catalog.probe_generation,
           policy: draft,
-          images,
           workingDir,
         })
         .then((result) =>
-          setPreflight({ signature: sandboxDraftSignature(draft, images), result }),
+          setPreflight({ signature: sandboxDraftSignature(draft), result }),
         )
         .catch((failure: unknown) => {
           setPreflightError(
@@ -72,7 +69,7 @@ export function useSandboxPreflight(options: {
         })
         .finally(() => setPreflightBusy(false));
     },
-    [sessionId, context, images, workingDir],
+    [sessionId, context, workingDir],
   );
 
   const clearPreflight = useCallback(() => {

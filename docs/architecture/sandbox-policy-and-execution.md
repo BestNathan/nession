@@ -92,22 +92,29 @@ authorized EROFS cache (#3023); `nession-sandbox` re-verifies the exact bytes
 before mounting anything.
 
 - **Input.** `base` (read-only at `/`), optional `workspace.image`
-  (read-only Project source) plus `workspace.write` (Agent-owned bounded
-  writable directory), and zero or more `toolchains` whose targets are exactly
-  `/opt/<lowercase name>`. Every image carries its `sha256:<64 hex>` digest and
-  an absolute source path. Sources must be regular files, not symlinks, and
-  must canonicalize beneath the Agent-authorized EROFS image root. Compile
-  rejects malformed digests, unnormalized/relative paths, duplicate toolchain
-  targets, non-`/opt` targets, and combining `composition` with
-  `filesystem.access` (one owner for the root).
+  (read-only Project source) plus `workspace.write` (the writable directory)
+  and `workspace.ownership` (`agent` or `project_location`), and zero or more
+  `toolchains` whose targets are exactly `/opt/<lowercase name>`. Every image
+  carries its `sha256:<64 hex>` digest and an absolute source path. Sources
+  must be regular files, not symlinks, and must canonicalize beneath the
+  Agent-authorized EROFS image root. Compile rejects malformed digests,
+  unnormalized/relative paths, duplicate toolchain targets, non-`/opt`
+  targets, combining `composition` with `filesystem.access` (one owner for the
+  root), and a Project Location workspace carrying a Project EROFS lower. An
+  `agent`-owned write directory must stay under the sandbox state directory or
+  the Agent Workspace root; a `project_location` is an external declared
+  directory the Agent validated, never created or deleted, and must be a real
+  canonical directory.
 - **Mount mechanics.** The Linux backend mounts each image read-only with the
   unprivileged `erofsfuse` helper (a usable `/dev/fuse` is required). The probe,
-  helper invocation, mountpoint readiness check and unmount live in the
-  reusable `nession_erofs::mount` primitive (#3303), which returns an owned
-  `ErofsMount` handle. `nession-sandbox` keeps source-root authorization, byte
-  verification (through `nession_erofs::digest`), mount ordering, the overlay
-  composition and the per-execution cleanup record; the primitive never sees
-  an image role or a mount plan. A Project
+  bounded helper invocation, mountpoint readiness identity check and strict
+  unmount live in the reusable `nession_erofs::mount` primitive (#3303).
+  Content-addressed sharing, consumer leases, the same-digest state machine and
+  durable mount identity live in `nession_erofs::mount_manager` (#3449).
+  `nession-sandbox` keeps source-root authorization, byte verification (through
+  `nession_erofs::digest`), mount ordering, the overlay composition and the
+  per-execution cleanup record; neither manager nor primitive sees an image
+  role or a mount plan. A Project
   source image is merged with the bounded write directory through
   `fuse-overlayfs` (`lowerdir=<Project image>,upperdir=<write>/upper,workdir=<write>/work`);
   a workspace without an image is a direct writable bind. Bubblewrap starts
@@ -125,14 +132,30 @@ before mounting anything.
   `/dev/fuse`, `fuse-overlayfs` when a Project image is present, or the
   authorized image root reports `UnsupportedPolicy`; there is no Native
   fallback and no kernel-loop mount substitution.
-- **Lifecycle.** Every mountpoint lives under the execution directory
-  (`mounts/...`), is recorded in the durable execution record, and is unmounted
-  (reverse order: toolchains, overlay, Project image, Base Runtime) before the
-  directory/record are removed. Reconciliation unmounts only recorded paths
-  beneath that execution's own directory. A failed unmount keeps the record for
-  retry rather than leaking the mount. Read-only images remain available to
-  other Sessions because each execution has its own mountpoints over shared
-  image bytes.
+- **Shared physical mounts (#3449).** Read-only Base, Project and toolchain
+  images are consumed through the Agent-owned
+  `nession_erofs::mount_manager::MountManager`. One verified
+  `sha256:<digest>` normally corresponds to one physical read-only FUSE mount
+  per Agent identity/mount namespace; the manager derives the mountpoint from
+  the digest and serializes same-digest mount/unmount transitions. Each
+  execution acquires a consumer lease that records `(digest, mountpoint,
+  generation)` in its durable record and carries no unmount authority.
+  Queries (`lookup`, `lookup_by_mountpoint`) never acquire. The manager
+  performs a strict, bounded unmount only after the last identified consumer
+  is gone; a failed unmount retains the mount, its identity sidecar and the
+  cache pin for a retry. Restart reconciliation adopts a mount only when the
+  durable identity, generation and mountinfo agree; a missing, stale, unknown
+  or orphaned mount is reported unavailable, never silently served or adopted
+  by digest guess. A mount created before its record is persisted is reclaimed
+  as an orphan after identity checks. Multiple digests never alias one
+  mountpoint, and the manager never falls back to a lazy unmount for shared
+  reclamation.
+- **Lifecycle.** Execution-owned mountpoints (the writable Overlay) and
+  temporary resources live under the execution directory (`mounts/...`), are
+  recorded in the durable execution record, and are unmounted in reverse order
+  before the directory/record are removed. Reconciliation touches only those
+  recorded paths; shared read-only mounts are released through the manager.
+  A failed unmount keeps the record for retry rather than leaking the mount.
 - **macOS.** EROFS composition is rejected with an explicit
   `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
   equivalence is claimed.
@@ -149,10 +172,15 @@ The current managed-session and existing-Session paths still allocate a
 per-execution writable directory
 (`<sandbox state>/managed/<uuid>/workspace` or
 `<sandbox state>/sandbox-workspaces/workspace-<uuid>`). A Filesystem
-declaration that selects a managed Workspace now binds that Agent-owned
+declaration that selects a managed Workspace binds that Agent-owned durable
 directory at `/workspace` and holds its RW lease until execution cleanup; the
-directory is not deleted. A managed Workspace with a Project EROFS lower
-(Overlay upper/work) and Project Location resolution are not implemented yet.
+directory is not deleted. The Server resolves the Session Project's matching
+Existing Location for `project_location` and `auto`, and adds the Project
+source image as the managed Workspace's pinned EROFS lower; the durable
+`upper/work` lives under the managed directory, so later Enters see the same
+upper. The Agent records the lower digest in the Workspace registry and
+refuses a changed or missing lower. A Project Location is bound directly and
+cannot carry a lower. See [#3407](https://github.com/BestNathan/nession/issues/3407).
 
 ## Managed EROFS Session creation (#3062)
 

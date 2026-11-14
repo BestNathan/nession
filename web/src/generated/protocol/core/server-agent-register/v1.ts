@@ -21,7 +21,21 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type AgentRegisterPayload = { agent_id: string, hostname: string, ip_address: string, port: number, auth_token: string, metadata: AgentMetadata, 
+export type AgentRegisterPayload = { agent_id: string, hostname: string, ip_address: string, port: number, 
+/**
+ * The Server Token: this Agent's outbound control-plane credential.
+ */
+auth_token: string, 
+/**
+ * The durable inbound Agent Token (#3440).
+ *
+ * Sent only over the authenticated Server control connection. The Server
+ * caches it in memory under this registration's authoritative generation
+ * and hands it to an authenticated session attach for this Agent only.
+ * Older Agents omit it; such an Agent registers but has no P2P token until
+ * it re-registers with the field, and attach refuses P2P clearly.
+ */
+agent_token: string, metadata: AgentMetadata, 
 /**
  * Human-readable display name (set via agent config or Web UI rename).
  * When absent the UI falls back to hostname.
@@ -127,7 +141,21 @@ export type ContractVersion = number;
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type AgentRegisterCall = { agent_id: string, hostname: string, ip_address: string, port: number, auth_token: string, metadata: AgentMetadata, 
+export type AgentRegisterCall = { agent_id: string, hostname: string, ip_address: string, port: number, 
+/**
+ * The Server Token: this Agent's outbound control-plane credential.
+ */
+auth_token: string, 
+/**
+ * The durable inbound Agent Token (#3440).
+ *
+ * Sent only over the authenticated Server control connection. The Server
+ * caches it in memory under this registration's authoritative generation
+ * and hands it to an authenticated session attach for this Agent only.
+ * Older Agents omit it; such an Agent registers but has no P2P token until
+ * it re-registers with the field, and attach refuses P2P clearly.
+ */
+agent_token: string, metadata: AgentMetadata, 
 /**
  * Human-readable display name (set via agent config or Web UI rename).
  * When absent the UI falls back to hostname.

@@ -154,10 +154,46 @@ impl SandboxRuntime {
         if let Some(seconds) = config.sandbox.launch_timeout_secs {
             settings.launch_timeout = Duration::from_secs(seconds);
         }
-        if let Some(agent_dir) = agent_dir {
+        if let Some(agent_dir) = &agent_dir {
             // Identity, env files and metadata live here. A sandbox must not
             // see them even when no filesystem policy was requested.
-            settings.private_directories.push(agent_dir);
+            settings.private_directories.push(agent_dir.clone());
+            // The durable Agent Workspace registry is the second authorized
+            // writable root (#3407). Its child directories may be bound as the
+            // composition `/workspace`; nothing else under the Agent data
+            // directory becomes an Agent-owned workspace.
+            settings.agent_workspaces_root = Some(agent_dir.join("workspaces"));
+        }
+        // One shared EROFS mount manager per Agent identity/mount namespace
+        // (#3449). Its authorized root is exactly the verified image root; a
+        // missing root leaves the manager absent, so composition fails closed.
+        #[cfg(target_os = "linux")]
+        let mount_manager = settings.erofs_image_root.as_ref().and_then(|image_root| {
+            let config = nession_erofs::mount_manager::MountManagerConfig {
+                root: settings.state_dir.join("erofs-mounts"),
+                settings: nession_erofs::mount::MountSettings::new(
+                    settings.erofsfuse_path.clone(),
+                    settings.fusermount_path.clone(),
+                ),
+                authorized_roots: vec![image_root.clone()],
+                pinner: erofs_cache.clone().map(|cache| {
+                    Arc::new(crate::erofs_cache::CachePinner::new(cache))
+                        as Arc<dyn nession_erofs::mount_manager::BlobPinner>
+                }),
+            };
+            match nession_erofs::mount_manager::MountManager::open(config) {
+                Ok(manager) => Some(manager),
+                Err(error) => {
+                    tracing::warn!(
+                        "could not open the shared EROFS mount manager; compositions fail closed: {error:#}"
+                    );
+                    None
+                }
+            }
+        });
+        #[cfg(target_os = "linux")]
+        {
+            settings.mount_manager = mount_manager;
         }
         let runtime = Self::new(settings);
         // `new` returns an `Arc`, so expose the cache through a one-shot

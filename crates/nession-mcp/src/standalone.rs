@@ -202,7 +202,7 @@ impl StandaloneConfig {
             .unwrap_or_else(|| allowed_hosts_for_bind(&self.mcp.listen_address));
         ServiceConfig {
             path: self.mcp.path.clone(),
-            auth_token: self.mcp.auth_token.clone(),
+            auth_token: nession_protocol::TokenVerifier::new(self.mcp.auth_token.clone()),
             tool_timeout: Duration::from_secs(self.mcp.tool_timeout_secs),
             max_concurrent_calls: self.mcp.max_concurrent_calls,
             allowed_origins: self.mcp.allowed_origins.clone(),

@@ -13,9 +13,12 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use nession_erofs::digest::file_digest;
-use nession_erofs::mount::{self, ErofsMount, MountSettings};
+use nession_erofs::mount::{self, MountSettings};
+use nession_erofs::mount_manager::{MountLease, MountManager, VerifiedImage};
+use nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership;
 
 use crate::error::{Result, SandboxError};
+use crate::exec::SharedMountRecord;
 use crate::policy::{CompiledComposition, CompiledImage};
 use crate::settings::SandboxSettings;
 
@@ -46,24 +49,28 @@ pub struct ResolvedComposition {
 
 /// One mount this execution owns, in creation order.
 enum OwnedMount {
-    /// A read-only EROFS image mount with its primitive-owned handle.
-    Erofs(ErofsMount),
-    /// A `fuse-overlayfs` merge; the Sandbox owns its cleanup policy.
+    /// A consumer lease over a shared physical EROFS mount (#3449). The lease
+    /// cannot unmount; only the manager reclaims the physical mount.
+    Shared(MountLease),
+    /// A `fuse-overlayfs` merge; the Sandbox owns its cleanup policy and the
+    /// mountpoint is execution-scoped.
     Overlay(PathBuf),
 }
 
 impl OwnedMount {
     fn path(&self) -> &Path {
         match self {
-            Self::Erofs(mount) => mount.mountpoint(),
+            Self::Shared(lease) => lease.mountpoint(),
             Self::Overlay(path) => path,
         }
     }
 }
 
-/// Live mounts owned by one execution. Cleanup unmounts exactly these paths.
+/// Live mounts owned by one execution. Cleanup releases exactly these
+/// consumers and unmounts exactly the execution-scoped mounts.
 pub struct MountedComposition {
     mounts: Vec<OwnedMount>,
+    shared: Vec<SharedMountRecord>,
     fusermount: PathBuf,
     resolved: ResolvedComposition,
 }
@@ -73,23 +80,31 @@ impl MountedComposition {
         &self.resolved
     }
 
-    /// Mountpoints recorded in the durable execution record.
+    /// Execution-scoped mountpoints recorded in the durable execution record.
     pub fn mountpoints(&self) -> Vec<String> {
         self.mounts
             .iter()
+            .filter(|mount| matches!(mount, OwnedMount::Overlay(_)))
             .map(|mount| mount.path().display().to_string())
             .collect()
     }
 
-    /// Unmount every owned image, eagerly rather than relying on Drop.
+    /// Shared EROFS consumers recorded in the durable execution record.
+    pub fn shared_mounts(&self) -> Vec<SharedMountRecord> {
+        self.shared.clone()
+    }
+
+    /// Release every shared consumer and unmount every execution-scoped
+    /// mount, eagerly rather than relying on Drop.
     pub fn unmount(&mut self, report: &mut crate::exec::CleanupReport) -> Result<()> {
         let mounts = std::mem::take(&mut self.mounts);
+        self.shared.clear();
         let mut failure = None;
         for mount in mounts.into_iter().rev() {
             let path = mount.path().display().to_string();
             let outcome = match mount {
-                OwnedMount::Erofs(mut mount) => mount
-                    .unmount()
+                OwnedMount::Shared(lease) => lease
+                    .release()
                     .map_err(|error| SandboxError::Prepare(format!("{error:#}"))),
                 OwnedMount::Overlay(path) => mount::unmount_one(&self.fusermount, &path)
                     .map_err(|error| SandboxError::Prepare(format!("{error:#}"))),
@@ -116,7 +131,7 @@ impl Drop for MountedComposition {
         let mounts = std::mem::take(&mut self.mounts);
         for mount in mounts.into_iter().rev() {
             match mount {
-                OwnedMount::Erofs(handle) => drop(handle),
+                OwnedMount::Shared(lease) => drop(lease),
                 OwnedMount::Overlay(path) => {
                     let _ = mount::unmount_one(&self.fusermount, &path);
                 }
@@ -157,10 +172,11 @@ pub fn overlay_available(settings: &SandboxSettings) -> bool {
     mount::executable(&settings.fuse_overlayfs_path)
 }
 
-/// Verify and mount every image in one composition.
+/// Verify and acquire every image in one composition.
 pub fn mount_composition(
     composition: &CompiledComposition,
     execution_dir: &Path,
+    execution_id: &str,
     settings: &SandboxSettings,
 ) -> Result<MountedComposition> {
     let image_root = settings.erofs_image_root.as_ref().ok_or_else(|| {
@@ -174,6 +190,11 @@ pub fn mount_composition(
             image_root.display()
         ))
     })?;
+    let manager = settings.mount_manager.as_ref().ok_or_else(|| {
+        SandboxError::UnsupportedPolicy(
+            "filesystem.composition requires the Agent's shared EROFS mount manager".to_string(),
+        )
+    })?;
     let mounts_dir = execution_dir.join("mounts");
     std::fs::create_dir_all(&mounts_dir).map_err(|error| {
         SandboxError::Prepare(format!(
@@ -182,9 +203,9 @@ pub fn mount_composition(
         ))
     })?;
 
-    let helpers = mount_settings(settings);
     let mut mounted = MountedComposition {
         mounts: Vec::new(),
+        shared: Vec::new(),
         fusermount: settings.fusermount_path.clone(),
         resolved: ResolvedComposition {
             base: PathBuf::new(),
@@ -195,10 +216,10 @@ pub fn mount_composition(
 
     let base = mount_image(
         &composition.base,
-        &mounts_dir.join("base"),
         &image_root,
-        &helpers,
-        &mut mounted.mounts,
+        manager,
+        execution_id,
+        &mut mounted,
     )?;
     if !base.join("bin/sh").exists() && !base.join("usr/bin/sh").exists() {
         return Err(SandboxError::Prepare(format!(
@@ -229,16 +250,15 @@ pub fn mount_composition(
                 .to_string(),
         ));
     };
-    let write = validate_workspace_write(&workspace.write, &settings.state_dir)?;
+    let write = crate::exec::validate_composition_workspace(workspace, settings)?;
     mounted.resolved.workspace = match &workspace.image {
         Some(image) => {
-            let lower = mount_image(
-                image,
-                &mounts_dir.join("workspace-image"),
-                &image_root,
-                &helpers,
-                &mut mounted.mounts,
-            )?;
+            if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
+                return Err(SandboxError::InvalidPolicy(
+                    "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
+                ));
+            }
+            let lower = mount_image(image, &image_root, manager, execution_id, &mut mounted)?;
             let upper = write.join("upper");
             let work = write.join("work");
             for directory in [&upper, &work] {
@@ -275,14 +295,8 @@ pub fn mount_composition(
         None => WorkspaceMount::Bind(write),
     };
 
-    for (index, toolchain) in composition.toolchains.iter().enumerate() {
-        let path = mount_image(
-            toolchain,
-            &mounts_dir.join(format!("toolchain-{index}")),
-            &image_root,
-            &helpers,
-            &mut mounted.mounts,
-        )?;
+    for toolchain in &composition.toolchains {
+        let path = mount_image(toolchain, &image_root, manager, execution_id, &mut mounted)?;
         mounted
             .resolved
             .toolchains
@@ -310,16 +324,25 @@ fn require_dir(base: &Path, relative: &Path) -> Result<()> {
 
 fn mount_image(
     image: &CompiledImage,
-    mountpoint: &Path,
     image_root: &Path,
-    settings: &MountSettings,
-    mounted: &mut Vec<OwnedMount>,
+    manager: &MountManager,
+    execution_id: &str,
+    mounted: &mut MountedComposition,
 ) -> Result<PathBuf> {
     let source = verify_image(image, image_root)?;
-    let handle = ErofsMount::mount(&source, mountpoint, settings)
+    let verified = VerifiedImage::new(image.digest.clone(), source)
         .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
-    mounted.push(OwnedMount::Erofs(handle));
-    Ok(mountpoint.to_path_buf())
+    let lease = manager
+        .acquire(&verified, execution_id)
+        .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+    let mountpoint = lease.mountpoint().to_path_buf();
+    mounted.shared.push(SharedMountRecord {
+        digest: lease.digest().to_string(),
+        mountpoint: mountpoint.display().to_string(),
+        generation: lease.generation().to_string(),
+    });
+    mounted.mounts.push(OwnedMount::Shared(lease));
+    Ok(mountpoint)
 }
 
 /// Re-verify the exact local bytes before mounting anything.
@@ -369,54 +392,6 @@ fn verify_image(image: &CompiledImage, image_root: &Path) -> Result<PathBuf> {
         )));
     }
     Ok(canonical)
-}
-
-fn validate_workspace_write(write: &Path, state_dir: &Path) -> Result<PathBuf> {
-    let metadata = std::fs::symlink_metadata(write).map_err(|error| {
-        SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} does not exist: {error}",
-            write.display()
-        ))
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} must be a real directory",
-            write.display()
-        )));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let euid = unsafe { libc::geteuid() };
-        use std::os::unix::fs::MetadataExt;
-        if euid != 0 && metadata.uid() != euid {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is not owned by the Agent user",
-                write.display()
-            )));
-        }
-        if metadata.permissions().mode() & 0o200 == 0 {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is not writable",
-                write.display()
-            )));
-        }
-    }
-    let canonical_write = std::fs::canonicalize(write).map_err(|error| {
-        SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} cannot be resolved: {error}",
-            write.display()
-        ))
-    })?;
-    let canonical_state =
-        std::fs::canonicalize(state_dir).unwrap_or_else(|_| state_dir.to_path_buf());
-    if !canonical_write.starts_with(&canonical_state) {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} is outside the Agent sandbox state directory",
-            canonical_write.display()
-        )));
-    }
-    Ok(canonical_write)
 }
 
 /// Merge the Project image and the bounded writable upper/work through the

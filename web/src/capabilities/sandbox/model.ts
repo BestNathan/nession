@@ -1,10 +1,12 @@
 import type {
   SandboxCapabilityCatalog,
-  SandboxImageMode,
-  SandboxImageSelection,
   SandboxCurrentContext,
   SandboxFieldEntry,
+  SandboxFilesystemPolicy,
+  SandboxFilesystemRoot,
+  SandboxFilesystemWorkspace,
   SandboxImplementationSupport,
+  ImageCacheObservation,
   SandboxKvEntry,
   SandboxOptionSupport,
   SandboxPolicyDraft,
@@ -85,6 +87,19 @@ function cloneDraft(draft: SandboxPolicyDraft): SandboxPolicyDraft {
             read: [...draft.filesystem.access.read],
             write: [...draft.filesystem.access.write],
           },
+          ...(draft.filesystem.rootfs ? { rootfs: { ...draft.filesystem.rootfs } } : {}),
+          ...(draft.filesystem.mounts
+            ? {
+                mounts: draft.filesystem.mounts.map((mount) => ({
+                  source: { ...mount.source },
+                  target: mount.target,
+                  read_only: mount.read_only,
+                })),
+              }
+            : {}),
+          ...(draft.filesystem.workspace
+            ? { workspace: { ...draft.filesystem.workspace } }
+            : {}),
         }
       : undefined,
     network: draft.network
@@ -355,77 +370,138 @@ export function namespaceDisabledReason(
     : optionDisabledReason(catalog, IMPLEMENTATION_PATHS.linuxNamespaces, namespace);
 }
 
-/** One Sandbox-owned image selection, before the Server resolves it. */
-export type SandboxImageChoice = SandboxImageSelection;
+/** Whether the draft declares a prepared image root/mounts/Workspace. */
+export function declarationActive(filesystem: SandboxFilesystemPolicy | undefined): boolean {
+  return (
+    filesystem?.rootfs !== undefined
+    || (filesystem?.mounts?.length ?? 0) > 0
+    || filesystem?.workspace !== undefined
+  );
+}
+
+/** Every digest the declaration asks the Agent to prepare. */
+export function declaredDigests(draft: SandboxPolicyDraft): string[] {
+  const filesystem = draft.filesystem;
+  if (!filesystem) {
+    return [];
+  }
+  const digests: string[] = [];
+  if (filesystem.rootfs?.kind === 'image') {
+    digests.push(filesystem.rootfs.digest);
+  }
+  for (const mount of filesystem.mounts ?? []) {
+    digests.push(mount.source.digest);
+  }
+  return [...new Set(digests)];
+}
+
+/** Whether an image root + mounts/Workspace replace the V1 access maps. */
+export function accessConflictsWithDeclaration(
+  filesystem: SandboxFilesystemPolicy | undefined,
+): boolean {
+  const prepared =
+    filesystem?.rootfs?.kind === 'image'
+    || (filesystem?.mounts?.length ?? 0) > 0
+    || filesystem?.workspace !== undefined;
+  return (
+    prepared
+    && ((filesystem?.access.read.length ?? 0) > 0 || (filesystem?.access.write.length ?? 0) > 0)
+  );
+}
 
 /**
- * Infer the canonical role from the target the user typed.
+ * The V1 mount target rule, mirrored for inline feedback.
  *
- * `/` is the Base Runtime, `/workspace` is the merged writable workspace and
- * `/opt/<name>` is a read-only toolchain. Other targets are refused instead of
- * being guessed into a composition the Agent would reject.
+ * `nession-sandbox::compile` remains the authority; this only helps the
+ * editor show an error before preflight.
  */
-export function sandboxImageChoice(input: {
-  digest: string;
-  target: string;
-  mode: SandboxImageMode;
-}): { choice: SandboxImageSelection } | { error: string } {
-  const target = input.target.trim();
-  if (target === '/') {
-    if (input.mode !== 'read_only') {
-      return { error: 'The Base Runtime image at / is read-only.' };
-    }
-    return {
-      choice: { role: 'base', digest: input.digest, mode: 'read_only' },
-    };
+export function mountTargetError(target: string): string | null {
+  const match = /^\/opt\/([a-z0-9][a-z0-9._-]{0,62})$/.exec(target.trim());
+  if (!match) {
+    return 'Mount targets are /opt/<lowercase-name> in the first implementation.';
   }
-  if (target === '/workspace') {
-    if (input.mode !== 'overlay') {
-      return { error: 'The workspace image at /workspace requires the overlay mode.' };
-    }
-    return {
-      choice: { role: 'workspace', digest: input.digest, mode: 'overlay' },
-    };
-  }
-  if (target.startsWith('/opt/') && target.length > 5 && !target.includes('..')) {
-    if (input.mode !== 'read_only') {
-      return { error: 'A toolchain image under /opt is read-only.' };
-    }
-    return {
-      choice: {
-        role: 'toolchain',
-        digest: input.digest,
-        target,
-        mode: 'read_only',
-      },
-    };
-  }
-  return {
-    error: 'Use / for the Base Runtime, /workspace for the workspace, or /opt/<name> for a toolchain.',
-  };
+  return null;
 }
 
-/** Whether these selections can become a coherent composition. */
-export function sandboxImagesValid(selections: readonly SandboxImageSelection[]): boolean {
-  if (selections.length === 0) {
-    return true;
+/** A short, human label for a RootFS selection. */
+export function rootfsLabel(rootfs: SandboxFilesystemRoot | undefined): string {
+  if (!rootfs) {
+    return 'Local host root';
   }
-  const bases = selections.filter((selection) => selection.role === 'base');
-  const workspaces = selections.filter((selection) => selection.role === 'workspace');
-  return bases.length === 1 && workspaces.length <= 1;
+  return rootfs.kind === 'local' ? 'Local host root' : 'Base Runtime image';
 }
 
-/** A stable signature over the draft and its Sandbox-owned image selections. */
-export function sandboxSelectionSignature(
-  selections: readonly SandboxImageSelection[],
-): string {
-  return JSON.stringify(selections);
+/** A short, human label for a Workspace selection. */
+export function workspaceLabel(workspace: SandboxFilesystemWorkspace | undefined): string {
+  if (!workspace) {
+    return 'Execution scratch directory';
+  }
+  switch (workspace.kind) {
+    case 'auto':
+      return 'Auto by Session name';
+    case 'project_location':
+      return 'Project Location';
+    case 'managed':
+      return workspace.workspace_id
+        ? `Managed ${workspace.workspace_id}`
+        : `Managed “${workspace.name ?? ''}”`;
+  }
 }
 
-/** One signature for the policy draft and the Sandbox-owned image selections. */
-export function sandboxDraftSignature(
-  draft: SandboxPolicyDraft,
-  images: readonly SandboxImageSelection[],
-): string {
-  return `${draftSignature(draft)}|${sandboxSelectionSignature(images)}`;
+/** A stable signature over the draft alone; the declaration is part of it. */
+export function sandboxDraftSignature(draft: SandboxPolicyDraft): string {
+  return draftSignature(draft);
+}
+
+/** The Agent's measured cache phase, in user-facing words. */
+export function observationPhaseLabel(phase: ImageCacheObservation['phase']): string {
+  switch (phase) {
+    case 'absent':
+      return 'Not cached';
+    case 'resumable':
+      return 'Resumable partial';
+    case 'downloading':
+      return 'Downloading';
+    case 'verifying':
+      return 'Verifying';
+    case 'verified':
+      return 'Verified';
+    case 'failed':
+      return 'Cache failed';
+    case 'unavailable':
+      return 'Cache unavailable';
+  }
+}
+
+/** Whether the cache phase is mount-ready (only a verified digest is). */
+export function observationReady(phase: ImageCacheObservation['phase']): boolean {
+  return phase === 'verified';
+}
+
+/** A compact byte count; `—` when the Agent did not measure one. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) {
+    return '—';
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/** `downloaded / total` with a percent only when the total is measured. */
+export function transferLabel(observation: ImageCacheObservation): string {
+  const downloaded = formatBytes(observation.downloaded_bytes);
+  const total = observation.total_bytes;
+  if (total === null || total === undefined || total <= 0) {
+    return observation.downloaded_bytes ? `${downloaded} transferred` : 'Size not measured';
+  }
+  return `${downloaded} / ${formatBytes(total)}`;
 }

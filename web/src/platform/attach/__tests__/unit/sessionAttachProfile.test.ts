@@ -22,7 +22,7 @@ function info(overrides: Partial<AttachInfo> = {}): AttachInfo {
   return {
     mode: 'p2p',
     session_id: 'agent-1:dev',
-    connection_token: 'tok',
+    agent_token: 'tok',
     agent_address: 'ws://a/ws',
     addresses: [addr('ws://a/ws')],
     ...overrides,
@@ -89,8 +89,8 @@ describe('buildOptionsFingerprint', () => {
   });
 
   it('does not include the connection token', () => {
-    const a = info({ connection_token: 'tok-1' });
-    const b = info({ connection_token: 'tok-2' });
+    const a = info({ agent_token: 'tok-1' });
+    const b = info({ agent_token: 'tok-2' });
     expect(buildOptionsFingerprint(a)).toBe(buildOptionsFingerprint(b));
   });
 

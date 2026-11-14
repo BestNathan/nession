@@ -4,7 +4,6 @@ export {
   IMAGE_BUILD_UPDATED_WIRE,
   imagesApi,
   ImagesPlugin,
-  type ImageAccessGrant,
   type ImageBuildDescriptor,
   type ImageBuildPage,
   type ImageDescriptor,
@@ -22,6 +21,9 @@ export {
   ImagesWebLayout,
   ImagesAppLayout,
   ImagesDetail,
+  ImagesPanel,
+  ImagesLibraryPanel,
+  ImagesBuildsPanel,
 } from './components/ImagesWorkspace';
 export {
   IMAGE_PAGE_SIZE,

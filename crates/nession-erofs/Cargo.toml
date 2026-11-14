@@ -4,12 +4,16 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-# The default composition is the Server's: deterministic build + blob store.
-default = ["build", "store"]
+# The default composition is the Server's: deterministic build, blob store and
+# Manifest catalog. Consumers that need mechanics only disable defaults.
+default = ["build", "store", "catalog"]
 store = []
 build = ["store", "dep:tempfile"]
 cache = ["dep:futures-util", "dep:reqwest", "dep:tokio", "dep:libc"]
 mount = []
+# Server image catalog (#3496): schema/metadata logic over the Server's own
+# SQLite connection. It never opens a second database.
+catalog = ["store", "dep:sea-orm", "dep:tokio"]
 
 [dependencies]
 anyhow.workspace = true
@@ -18,6 +22,7 @@ serde_json.workspace = true
 futures-util = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
+sea-orm = { workspace = true, optional = true }
 sha2.workspace = true
 tempfile = { version = "3.8", optional = true }
 tokio = { workspace = true, optional = true }

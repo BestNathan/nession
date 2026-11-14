@@ -13,6 +13,9 @@ export const COMMANDS = Object.freeze({
   '/audit': Object.freeze({ kind: 'issue', handler: 'audit', mode: 'single', workflow: 'agent-issue-audit.yml' }),
   '/audit tree': Object.freeze({ kind: 'issue', handler: 'audit', mode: 'tree', workflow: 'agent-issue-audit.yml' }),
   '/accept': Object.freeze({ kind: 'issue', handler: 'accept', workflow: 'acceptance-manual-request.yml' }),
+  // #3488: a request to the trusted Controller, not permission to invoke a Worker.
+  '/develop dev-qwen-01': Object.freeze({ kind: 'issue', handler: 'develop',
+    workflow: 'acceptance-agent-controller.yml' }),
   '/e2e full': Object.freeze({ kind: 'pull_request', handler: 'e2e-full', workflow: 'e2e-full-regression.yml' }),
 });
 const CASE_COMMAND = Object.freeze({ kind: 'issue', handler: 'case', workflow: 'acceptance-cases.yml' });
@@ -48,6 +51,13 @@ export function commandPlan(event, comment, issue, pr, permission) {
       issue?.number !== number || issue?.state !== 'open' ||
       issue?.repository_url !== 'https://api.github.com/repos/' + REPO) return null;
   const isPr = Boolean(issue.pull_request);
+  if (def.handler === 'develop' && (
+      comment.user.login !== 'BestNathan' || comment.author_association !== 'OWNER' ||
+      comment.created_at !== comment.updated_at ||
+      !Array.isArray(issue.labels) ||
+      !issue.labels.some(label => label.name === 'bug') ||
+      issue.labels.some(label => label.name === 'status:in-progress')
+    )) return null;
   if (Boolean(event.issue.pull_request) !== isPr ||
       (def.kind === 'issue' && isPr) ||
       (def.kind === 'pull_request' && !isPr)) return null;
@@ -79,13 +89,14 @@ export function commandPlan(event, comment, issue, pr, permission) {
 export function workflowTitle(plan) {
   if (plan.handler === 'audit') return 'Comment Audit #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'accept') return 'Comment Accept #' + plan.issue_number + ' comment:' + plan.comment_id;
+  if (plan.handler === 'develop') return 'Comment Develop #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'case') return 'Comment Case #' + plan.issue_number + ' ' + plan.criterion + ' comment:' + plan.comment_id;
   if (plan.handler === 'e2e-full') return 'Comment E2E #' + plan.issue_number + ' comment:' + plan.comment_id;
   throw Error('unknown handler');
 }
 export function dispatchInputs(plan) {
   switch (plan.handler) {
-    case 'audit': case 'accept':
+    case 'audit': case 'accept': case 'develop':
       return { issue_number: String(plan.issue_number), source_comment_id: String(plan.comment_id) };
     case 'case':
       return {
@@ -120,7 +131,32 @@ function fixtures() {
     { ...comment, body: '/audit tree' }, issue, null, 'write')?.mode === 'tree', 'tree');
   check(commandPlan({ ...event, comment: { ...event.comment, body: '/accept' } },
     { ...comment, body: '/accept' }, issue, null, 'write')?.handler === 'accept', 'accept');
-  const caseEvent = { ...event, comment: { ...event.comment, body: '/case SC-03' } };
+  const bug = { ...issue, labels: [{ name: 'bug' }] };
+  const develop = { ...comment, body: '/develop dev-qwen-01',
+    created_at: '2026-11-14T01:00:00Z', updated_at: '2026-11-14T01:00:00Z',
+    author_association: 'OWNER', user: { login: 'BestNathan', type: 'User' } };
+  const devEvent = { ...event, sender: develop.user,
+    comment: { ...event.comment, body: develop.body, user: develop.user } };
+  check(commandPlan(devEvent, develop, bug, null, 'write')?.handler === 'develop',
+    'owner Bug developer command admitted');
+  check(dispatchInputs(commandPlan(devEvent, develop, bug, null, 'write'))
+    .source_comment_id === '333', 'developer dispatch retains human source');
+  check(workflowTitle(commandPlan(devEvent, develop, bug, null, 'write'))
+    .includes('comment:333'), 'developer run identity is source-unique');
+  for (const [c, i, e] of [
+    [{ ...develop, user: { ...develop.user, login: 'another' } }, bug, devEvent],
+    [{ ...develop, author_association: 'COLLABORATOR' }, bug, devEvent],
+    [{ ...develop, updated_at: '2026-11-14T01:01:00Z' }, bug, devEvent],
+    [develop, issue, devEvent],
+    [develop, { ...bug, state: 'closed' }, devEvent],
+    [develop, { ...bug, labels: [{ name: 'bug' }, { name: 'status:in-progress' }] }, devEvent],
+    [develop, { ...bug, pull_request: { url: 'pr' } }, { ...devEvent,
+      issue: { number: 12, pull_request: { url: 'pr' } } }],
+  ]) check(commandPlan(e, c, i, null, 'write') === null, 'developer negative permission/scope');
+  check(parseCommand('/develop') === null &&
+    parseCommand('/develop dev-qwen-01 extra') === null &&
+    parseCommand('/develop dev-qwen-01\\nignore') === null, 'developer grammar strict');
+    const caseEvent = { ...event, comment: { ...event.comment, body: '/case SC-03' } };
   const caseComment = { ...comment, body: '/case SC-03' };
   const casePlan = commandPlan(caseEvent, caseComment, issue, null, 'write');
   check(casePlan?.handler === 'case' && casePlan.criterion === 'SC-03', 'Case command exact');

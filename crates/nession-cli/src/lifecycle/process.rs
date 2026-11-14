@@ -215,9 +215,11 @@ mod tests {
         // Boot time should be in the past
         assert!(boot_time < now);
 
-        // Boot time should be reasonable (within last 30 days)
-        let thirty_days = 30 * 24 * 3600;
-        assert!(boot_time > now - thirty_days);
+        // Boot time should be a plausible wall-clock instant. A long-running
+        // host may have booted months or years ago; 30 days rejected valid
+        // uptimes on this machine.
+        let ten_years = 10 * 365 * 24 * 3600;
+        assert!(boot_time > now - ten_years);
     }
 
     #[test]

@@ -36,9 +36,10 @@
 //! `2025-03-26` clients keep the `initialize`/`Mcp-Session-Id` lifecycle. The
 //! wire grammar and header validation come from the official `rmcp` SDK.
 //!
-//! [`http::sniff`] is how an embedding host keeps its existing `/ws` listener:
-//! it reads one HTTP request head, lets the WebSocket handshake replay it, and
-//! hands `/mcp` connections to [`McpService::serve`].
+//! Embedded hosts mount [`McpService::handle`] as an explicit route on their
+//! Axum router; the host's HTTP stack has already parsed the request, so no
+//! head is replayed. The standalone binary owns its own listener and uses
+//! [`http::sniff`] plus [`McpService::serve`] there.
 
 pub mod backend;
 pub mod error;

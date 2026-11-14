@@ -289,6 +289,7 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       // A long configuration state has exactly one scroller, the policy panel;
       // its fields keep one label/control edge.
       await page.goto('/#/fixture/workspace?capability=sandbox');
+      await page.getByTestId('sandbox-section-policies').click();
       await page.getByTestId('sandbox-tab-filesystem').click();
       await growUntilWorkspaceScrolls(page, 'sandbox-fs-read-add');
       const sandboxForm = page.locator('[data-recipe="configuration-form"]').first();

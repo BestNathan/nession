@@ -66,6 +66,22 @@ export class SandboxPlugin implements TransportPlugin {
     return response.cache_statuses;
   }
 
+  /**
+   * Measured per-digest transfer observations (#3412): phase, downloaded and
+   * total bytes, activity and a bounded detail. A partial download is never
+   * reported as verified or mount-ready.
+   */
+  async imageCacheObservations(
+    sessionId: string,
+    cacheDigests: readonly string[],
+  ): Promise<SandboxContextResponse['cache_observations']> {
+    const response = await this.context(sessionId, cacheDigests);
+    if (!response.success) {
+      throw new Error(response.error ?? 'Agent image cache progress is unavailable');
+    }
+    return response.cache_observations;
+  }
+
   /** Validate one draft against the exact context generation. */
   async preflight(request: {
     sessionId: string;

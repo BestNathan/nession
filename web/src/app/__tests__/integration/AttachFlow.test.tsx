@@ -46,7 +46,7 @@ const attachInfoResponse = {
   mode: 'p2p' as const,
   session_id: 'a1:fix',
   session_name: 'fix',
-  connection_token: 'tok',
+  agent_token: 'tok',
   agent_address: 'ws://a/ws',
   addresses: [{
     url: 'ws://a/ws', label: 'lan', network_type: 'lan' as const,

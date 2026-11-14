@@ -1,18 +1,18 @@
-//! The shared-listener front door for MCP Streamable HTTP (`#3264`).
+//! The standalone MCP host's front door (`#3264`).
 //!
-//! A hosting Server/Agent already owns a TCP (optionally TLS) listener whose
-//! next step is a WebSocket upgrade. MCP needs a *second* HTTP route on that
-//! same listener without a second port and without a framework change to the
-//! handshake that carries terminal traffic.
-//!
-//! [`sniff`] reads exactly one request head with a bounded deadline, then:
+//! The standalone `nession-mcp` binary owns a TCP (optionally TLS) listener
+//! that only serves MCP. [`sniff`] reads exactly one request head with a
+//! bounded deadline, then:
 //!
 //! * for a WebSocket upgrade, returns a [`PrefixedStream`] that replays the
-//!   consumed bytes, so the host's existing tungstenite handshake — including
-//!   its credential callback — runs unchanged;
+//!   consumed bytes, so the host can answer with an explicit 400;
 //! * for anything else, returns the parsed head **and** a stream that replays
 //!   the head plus any buffered bytes, so the HTTP/1.1 connection driver sees
 //!   the original request exactly once.
+//!
+//! Embedded Server/Agent hosts do not use this module: their Axum router owns
+//! the HTTP grammar and mounts [`crate::McpService::handle`] as a route
+//! (`#3439`).
 //!
 //! The HTTP grammar itself is hyper's; this module only classifies one head.
 

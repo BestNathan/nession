@@ -15,11 +15,15 @@ nession-protocol = { path = "../nession-protocol" }
 # The execution primitives this Server's connections share with the agent's
 # (#961-F). A runtime's, not a provider's — see that crate's Cargo.toml.
 nession-runtime = { path = "../nession-runtime" }
-nession-erofs = { path = "../nession-erofs" }
+nession-erofs = { path = "../nession-erofs", features = ["catalog"] }
 # The shared MCP access layer (#565). The Server supplies the backends; the
 # catalog, protocol lifecycle, auth and transport live in this crate.
 nession-mcp = { path = "../nession-mcp", default-features = false }
 tokio.workspace = true
+# The HTTP ingress and WebSocket Upgrade owner (#3439).
+axum.workspace = true
+# Streaming the blob body from a file into an Axum response.
+tokio-util = { version = "0.7", features = ["io"] }
 tokio-tungstenite.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true

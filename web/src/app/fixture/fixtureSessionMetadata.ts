@@ -107,7 +107,7 @@ function fixtureAttachInfo(
     mode: relay ? 'relay' : 'p2p',
     session_id: sessionId,
     session_name: sessionName,
-    connection_token: relay ? undefined : 'fixture-attach-token',
+    agent_token: relay ? undefined : 'fixture-agent-token',
     terminal_cols: 96,
     addresses: [
       {

@@ -98,6 +98,7 @@ describe('Images Workspace capability', () => {
     });
     await screen.findByText('image-1');
     expect(screen.getByTestId('images-page-label')).toHaveTextContent('1–2 of 235');
+    await userEvent.click(screen.getAllByTestId('image-row')[0]);
     const detail = await screen.findByTestId('images-detail');
     expect(detail).toHaveTextContent('sha256:');
     expect(detail).toHaveTextContent('Server-owned immutable image');
@@ -163,14 +164,8 @@ describe('Images Workspace capability', () => {
     expect(screen.getByText('Registry unavailable')).toBeInTheDocument();
   });
 
-  it('pushes one App detail depth and leaves it back to the list', async () => {
-    const pushes: ({ title: string; onLeave: () => void } | null)[] = [];
-    const depth = {
-      setPush: (push: { title: string; onLeave: () => void } | null) => {
-        pushes.push(push);
-      },
-    };
-    render(<ImagesWorkspace ctx={context('app')} depth={depth} />);
+  it('expands one Library row inline at a time without pushing history', async () => {
+    render(<ImagesWorkspace ctx={context('app')} />);
     resolveEmptyBuilds(surface);
     surface.resolveNext('server.image.list', {
       images: [image(1), image(2)],
@@ -178,11 +173,18 @@ describe('Images Workspace capability', () => {
     });
     await screen.findByText('image-1');
     expect(screen.queryByTestId('images-detail')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByText('image-1'));
-    expect(pushes[pushes.length - 1]?.title).toBe('image-1');
-    expect(screen.getByTestId('images-detail')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /All images/ }));
-    expect(pushes[pushes.length - 1]).toBeNull();
+
+    await userEvent.click(screen.getAllByTestId('image-row')[0]);
+    expect(screen.getByTestId('images-detail')).toHaveTextContent('image-1');
+    expect(screen.getByTestId('image-detail-row')).toBeInTheDocument();
+
+    // Opening another row closes the previous inline detail.
+    await userEvent.click(screen.getAllByTestId('image-row')[1]);
+    expect(screen.getByTestId('images-detail')).toHaveTextContent('image-2');
+    expect(screen.getAllByTestId('image-detail-row')).toHaveLength(1);
+
+    // Activating the same row again collapses it.
+    await userEvent.click(screen.getAllByTestId('image-row')[1]);
     expect(screen.queryByTestId('images-detail')).not.toBeInTheDocument();
   });
 
@@ -193,6 +195,7 @@ describe('Images Workspace capability', () => {
       builds: [runningBuild()],
       total: 1,
     });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
     const row = await screen.findByTestId('image-build-row');
     expect(row).toHaveTextContent('Building');
     expect(screen.getByTestId('image-build-stage')).toHaveTextContent(
@@ -222,6 +225,7 @@ describe('Images Workspace capability', () => {
     resolveEmptyBuilds(surface);
     surface.resolveNext('server.image.list', { images: [], total: 0 });
     await screen.findByTestId('images-empty');
+    await userEvent.click(screen.getByTestId('images-section-builds'));
     surface.setConnectionState('reconnecting');
     surface.setConnectionState('connected');
     // The mock drops settled requests, so a new pending inventory read is the

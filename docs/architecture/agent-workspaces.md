@@ -44,6 +44,9 @@ configured durable location; the sandbox mount validation already confines
 - An unreadable, malformed or unknown-version registry is a hard error. The
   manager reports the inventory API unavailable rather than starting empty and
   fabricating readiness.
+- A record may pin `lower_digest`: the Project source EROFS the durable
+  Overlay upper was first prepared against. It is a property of the stored
+  bytes, not a lookup alias; a changed or missing lower is refused.
 
 ## Identity, names and namespaces
 
@@ -80,19 +83,37 @@ back when an explicit selection is invalid, missing or offline.
 
 ## Sandbox `/workspace` attachment
 
-`filesystem.workspace` is resolved on Enter:
+`filesystem.workspace` is resolved on Enter with one precedence
+(#3407 SC-02):
 
-1. an explicit stable `workspace_id` is leased directly;
-2. an explicit `name` is reused/created in the default namespace, then leased;
-3. `auto` uses the Session name in the default namespace (Project Location
-   resolution is not implemented yet).
+1. an explicit stable `workspace_id` or `name` selects that managed Workspace
+   and outranks the Project Location;
+2. otherwise a matching current-Agent Project Existing Location is selected
+   (`auto`, or the explicit `project_location` selection);
+3. otherwise the Session name is `get_or_create`d in the default namespace.
 
-The selected directory becomes the composition's writable `/workspace` bind.
-The execution holds the RW lease; cleanup releases it without deleting any
-durable bytes. The per-execution scratch directory is removed. A managed
-Workspace combined with a Project EROFS lower is refused in this
-implementation: the lower would require an Overlay whose upper/work lives in
-the managed directory, and that contract is not implemented yet.
+Only the Server knows the Session's Project binding; it resolves the matching
+`{agent_id, path}` for the target Agent and sends it with the Enter/preflight
+request. The Agent re-validates that path at use time: it must be absolute, a
+real (non-symlink) directory and already canonical. A wrong-Agent location is
+never a candidate, an explicit `project_location` without a matching
+declaration is refused, and no branch silently falls back.
+
+A managed Workspace becomes the composition's writable `/workspace`; the
+execution holds the RW lease and cleanup releases it without deleting durable
+bytes. The selected directory is Agent-owned, so it may also be the durable
+Overlay upper: when the Project pins a source EROFS image, the Server adds it
+as the workspace lower, and the Sandbox merges `lowerdir=<Project image>`
+with `upperdir=<workspace>/upper, workdir=<workspace>/work`. The first
+attachment records the lower digest in the Workspace registry; a later
+attachment with a different or missing lower is refused instead of merging a
+different Project image into the same durable upper (#3407 SC-04).
+
+A Project Existing Location is bound directly, with `ownership:
+project_location`. It is external and user-owned: the Agent never writes
+Overlay metadata into it, never deletes or copies it, and refuses a
+declaration that combines it with a Project EROFS lower. The per-execution
+scratch directory remains available when no Workspace is selected.
 
 Leases are in-memory. An Agent restart drops them; the durable execution
 record remains the attachment authority, and reconstructing leases from it is
@@ -134,8 +155,10 @@ Server-cached claim.
 
 ## Limits / when to revisit
 
-- Project Location discovery/selection is not implemented; a managed
-  Workspace with a Project EROFS lower is refused.
+- Project Location selection is limited to the current Project's declaration
+  on the current Agent; there is no cross-Agent copy or fallback. A managed
+  Workspace with a lower is pinned to that lower until the Workspace is
+  deleted/recreated; changing the Project image requires a new Workspace.
 - A managed Workspace is exclusive for RW attachment in the first
   implementation; concurrent sharing needs a separate decision.
 - The Agent data directory must be a durable mount. A container writable layer

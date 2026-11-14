@@ -7,7 +7,7 @@ function makeAttachInfo(): AttachInfo {
     mode: 'p2p',
     session_id: 'agent:test',
     agent_address: 'ws://legacy/ws',
-    connection_token: 'tok',
+    agent_token: 'tok',
     addresses: [
       { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
       { url: 'ws://b/ws', label: 'B', network_type: 'vpn', priority: 5, status: 'reachable' },

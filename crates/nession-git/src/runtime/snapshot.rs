@@ -299,7 +299,9 @@ mod tests {
         let dir = repo();
         fs::write(dir.path().join("new.txt"), "one\n").unwrap();
         let before = state(dir.path()).await;
-        fs::write(dir.path().join("new.txt"), "two\n").unwrap();
+        // A different length keeps the metadata change observable even when
+        // the filesystem's mtime granularity is coarser than two writes.
+        fs::write(dir.path().join("new.txt"), "two-longer\n").unwrap();
         let after = state(dir.path()).await;
         assert_ne!(before.snapshot.token, after.snapshot.token);
     }

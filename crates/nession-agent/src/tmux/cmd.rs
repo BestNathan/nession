@@ -243,6 +243,11 @@ pub fn global() -> &'static TmuxCmd {
         // one tests and the short-lived CLI take, and it has to reach the same
         // state before its own first tmux command.
         //
+        // The lazy path must create the socket directory too: tmux does not,
+        // and the first command otherwise fails with "No such file or
+        // directory" whenever no earlier `configure()` ran in this process.
+        // BestEffort for the same reason as the config write below.
+        let _ = tmux_socket::prepare_socket_dir(cmd.socket_path());
         // BestEffort: a socket directory that cannot be written is a state
         // `configure()` reports and this one has no caller to report to. A
         // missing file is harmless — tmux tolerates `-f` naming nothing.

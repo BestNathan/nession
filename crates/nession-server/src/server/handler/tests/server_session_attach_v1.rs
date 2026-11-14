@@ -91,11 +91,14 @@ async fn attach_agent_offline() {
         .contains("not found"));
 }
 
+/// The durable Agent Token a P2P attach hands off (#3440).
+const AGENT_TOKEN: &str = "agent-token-a";
+
 #[tokio::test]
 async fn attach_p2p_mode_success() {
     let mut h = test_handler("").await;
     h.authenticated_client = true;
-    // Register agent
+    // Register agent, carrying the durable token it will verify.
     h.handle_message(proto_msg(
         "server.agent.register",
         json!({
@@ -104,6 +107,7 @@ async fn attach_p2p_mode_success() {
             "ip_address": "1.2.3.4",
             "port": 19091,
             "auth_token": "",
+            "agent_token": AGENT_TOKEN,
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "addresses": [],
             "connect_url": null,
@@ -125,53 +129,14 @@ async fn attach_p2p_mode_success() {
     ))
     .await
     .unwrap();
-    // The Server hands the credential to the agent that will verify it
-    // **before** it answers the client (#1013), so the attach cannot
-    // complete unless the agent answers. Standing one in for the test is
-    // the point rather than an inconvenience: what this exercises is the
-    // ordering, and the assertions below would hang for the grant deadline
-    // if the Server answered the client first.
-    let (sender, mut rx) = WsMessageSender::new();
-    let generation = h.command_broker.new_connection_generation();
-    h.command_broker.claim_agent("a1", generation, sender).await;
-    let broker = Arc::clone(&h.command_broker);
 
-    let attach_fut = h.handle_message(proto_msg(
-        "server.session.attach",
-        json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
-    ));
-    let grant_fut = async move {
-        let text = rx
-            .recv()
-            .await
-            .expect("the agent is told before the client is answered")
-            .message
-            .to_text()
-            .unwrap()
-            .to_string();
-        let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(grant["msg_type"], "agent.p2p.grant");
-        assert_eq!(grant["payload"]["agent_id"], "a1");
-        assert_eq!(grant["payload"]["session_id"], "a1:dev");
-        assert_eq!(
-            grant["payload"]["scope"]["terminal"], "dev",
-            "the credential is bound to the session it was minted for"
-        );
-        assert!(
-            grant["payload"]["credential"]
-                .as_str()
-                .is_some_and(|token| !token.is_empty()),
-            "and it carries the credential the client will present"
-        );
-
-        let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
-        broker
-            .resolve_command("a1", &request_id, json!({ "success": true }))
-            .await;
-    };
-
-    let (action, ()) = tokio::join!(attach_fut, grant_fut);
-    let action = action.unwrap();
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.attach",
+            json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
+        ))
+        .await
+        .unwrap();
     let reply = parse_reply(action);
     assert_eq!(reply["payload"]["status"], "success");
     assert_eq!(reply["payload"]["mode"], "p2p");
@@ -182,6 +147,68 @@ async fn attach_p2p_mode_success() {
         .as_str()
         .unwrap()
         .contains("1.2.3.4"));
+    // No mint, no grant, no expiry: the client is handed the token the Agent
+    // registered, and nothing that could be mistaken for a per-attach credential.
+    assert_eq!(reply["payload"]["agent_token"], AGENT_TOKEN);
+    assert!(reply["payload"].get("connection_token").is_none());
+    assert!(reply["payload"]
+        .get("connection_token_expires_at")
+        .is_none());
+}
+
+/// An Agent that has not synchronized a token cannot authenticate a direct
+/// attach. The refusal names the fix rather than handing out a credential that
+/// could never work (#3440).
+#[tokio::test]
+async fn attach_p2p_refuses_when_the_agent_never_synchronized_a_token() {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    h.handle_message(proto_msg(
+        "server.agent.register",
+        json!({
+            "agent_id": "a1",
+            "hostname": "host",
+            "ip_address": "1.2.3.4",
+            "port": 19091,
+            "auth_token": "",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+            "addresses": [],
+            "connect_url": null,
+            "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+        }),
+    ))
+    .await
+    .unwrap();
+    h.handle_message(proto_msg(
+        "server.agent.session-update",
+        json!({
+            "agent_id": "a1",
+            "session_name": "dev",
+            "status": "active",
+            "window_count": 1,
+            "attached_clients": 0,
+        }),
+    ))
+    .await
+    .unwrap();
+
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.attach",
+            json!({ "session_id": "a1:dev", "preferred_mode": "p2p" }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    assert_eq!(reply["payload"]["status"], "error");
+    assert!(
+        reply["payload"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("has not synchronized its Agent Token"),
+        "the refusal must say why and what to do: {reply}"
+    );
+    assert!(reply["payload"].get("agent_token").is_none());
 }
 
 #[tokio::test]
@@ -197,6 +224,7 @@ async fn attach_relay_mode() {
             "ip_address": "1.2.3.4",
             "port": 19091,
             "auth_token": "",
+            "agent_token": AGENT_TOKEN,
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "addresses": [],
             "connect_url": null,
@@ -243,48 +271,22 @@ async fn attach_relay_mode() {
     assert_eq!(phase1["payload"]["status"], "success");
     assert_eq!(phase1["payload"]["mode"], "relay");
     assert_eq!(phase1["payload"]["session_id"], "a1:dev");
+    // Phase 1 states the route; the Agent Token is the Server's to carry to
+    // the relay dials in phase 2, never the browser's (#3440).
+    assert!(
+        phase1["payload"].get("agent_token").is_none(),
+        "relay phase 1 must not hand the token to the browser: {phase1}"
+    );
 
-    // Phase 2: begin relay. The Server hands the credential to the agent
-    // that will verify it **before** it dials (#1013), so this cannot
-    // complete without an agent that answers.
-    let (sender, mut rx) = WsMessageSender::new();
-    let generation = h.command_broker.new_connection_generation();
-    h.command_broker.claim_agent("a1", generation, sender).await;
-    let broker = Arc::clone(&h.command_broker);
-
-    let begin_fut = h.handle_message(proto_msg(
-        "server.session.relay.begin",
-        json!({ "session_id": "a1:dev" }),
-    ));
-    let grant_fut = async move {
-        let text = rx
-            .recv()
-            .await
-            .expect("the agent is told before the server dials it")
-            .message
-            .to_text()
-            .unwrap()
-            .to_string();
-        let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(grant["msg_type"], "agent.p2p.grant");
-        assert_eq!(grant["payload"]["scope"]["terminal"], "dev");
-        assert_eq!(
-            grant["payload"]["scope"]["files"], false,
-            "a relay credential is the narrow one: the relay leg never touches a file"
-        );
-        assert_eq!(
-            grant["payload"]["scope"]["sessions"], false,
-            "and it never creates or kills a session"
-        );
-
-        let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
-        broker
-            .resolve_command("a1", &request_id, json!({ "success": true }))
-            .await;
-    };
-
-    let (action, ()) = tokio::join!(begin_fut, grant_fut);
-    let action = action.unwrap();
+    // Phase 2: begin relay. The Server reads the token the Agent registered
+    // and carries it to the dials (#3440); there is no grant round-trip.
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({ "session_id": "a1:dev" }),
+        ))
+        .await
+        .unwrap();
     match action {
         HandlerAction::Relay {
             agent_ws_urls,
@@ -292,6 +294,7 @@ async fn attach_relay_mode() {
             session_name,
             relay_request_id,
             client_id: _,
+            agent_token,
             browser_client_id: _,
             env_snapshots,
             cols: _,
@@ -303,6 +306,10 @@ async fn attach_relay_mode() {
             assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
             assert!(agent_ws_urls[0].contains("1.2.3.4"));
             assert_eq!(session_name, "dev");
+            assert_eq!(
+                agent_token, AGENT_TOKEN,
+                "the relay dial presents the Agent's own durable token"
+            );
             assert!(
                 !relay_request_id.is_empty(),
                 "Relay begin correlation must be retained"
@@ -318,22 +325,24 @@ async fn attach_relay_mode() {
             // point of the field: absent leaves the agent to decide, which
             // is what every client predating it gets.
             assert_eq!(needs_bootstrap, None);
-            // The credential rides **on the URLs**, which is what makes both
-            // relay dials carry it without knowing about it — the attach dial
-            // iterates this list, and the detach dial reuses the one that
-            // succeeded. A credential threaded beside the URL would have to
-            // be kept in step with two call sites.
+            // The credential is no longer threaded through the URL. It rides
+            // the relay's first `client.auth` frame instead, which keeps it out
+            // of proxy logs and out of the candidate-list bytes.
             assert!(
-                agent_ws_urls.iter().all(|url| url.contains("token=")),
-                "every candidate the dials use carries the credential: {agent_ws_urls:?}"
+                agent_ws_urls.iter().all(|url| !url.contains("token=")),
+                "a URL must not carry the Agent Token: {agent_ws_urls:?}"
             );
         }
         _ => panic!("expected Relay action"),
     }
 }
 
-/// Register `a1` with one advertised address and a relayable session.
-async fn register_relay_agent(h: &mut ConnectionHandler) {
+/// Relay cannot authenticate the dial without the Agent's synchronized token,
+/// so it refuses before opening one (#3440).
+#[tokio::test]
+async fn relay_begin_refuses_when_the_agent_never_synchronized_a_token() {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
     h.handle_message(proto_msg(
         "server.agent.register",
         json!({
@@ -362,6 +371,59 @@ async fn register_relay_agent(h: &mut ConnectionHandler) {
     ))
     .await
     .unwrap();
+    let (client_sender, _client_rx) = WsMessageSender::new();
+    h.set_client_sender(client_sender);
+
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({ "session_id": "a1:dev" }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    assert_eq!(reply["payload"]["status"], "error");
+    assert!(
+        reply["payload"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("has not synchronized its Agent Token"),
+        "the refusal must say why and what to do: {reply}"
+    );
+}
+
+/// Register `a1` with one advertised address, its durable token, and a
+/// relayable session.
+async fn register_relay_agent(h: &mut ConnectionHandler) {
+    h.handle_message(proto_msg(
+        "server.agent.register",
+        json!({
+            "agent_id": "a1",
+            "hostname": "host",
+            "ip_address": "10.0.0.5",
+            "port": 19091,
+            "auth_token": "",
+            "agent_token": AGENT_TOKEN,
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+            "addresses": [{"url": "ws://10.0.0.5:19091/ws", "network_type": "lan"}],
+            "connect_url": null,
+            "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+        }),
+    ))
+    .await
+    .unwrap();
+    h.handle_message(proto_msg(
+        "server.agent.session-update",
+        json!({
+            "agent_id": "a1",
+            "session_name": "dev",
+            "status": "active",
+            "window_count": 1,
+            "attached_clients": 0,
+        }),
+    ))
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -370,9 +432,6 @@ async fn relay_begin_refuses_an_unregistered_manual_endpoint_before_grant() {
     h.authenticated_client = true;
     register_relay_agent(&mut h).await;
 
-    let (sender, mut rx) = WsMessageSender::new();
-    let generation = h.command_broker.new_connection_generation();
-    h.command_broker.claim_agent("a1", generation, sender).await;
     let (client_sender, _client_rx) = WsMessageSender::new();
     h.set_client_sender(client_sender);
 
@@ -399,10 +458,6 @@ async fn relay_begin_refuses_an_unregistered_manual_endpoint_before_grant() {
         !message.contains("attacker") && !message.contains("stolen"),
         "the refusal must not echo the candidate: {message}"
     );
-    assert!(
-        rx.try_recv().is_err(),
-        "a target that is not Agent-bound must not receive a credential grant"
-    );
 }
 
 #[tokio::test]
@@ -417,9 +472,6 @@ async fn relay_begin_refusal_never_dials_a_listening_foreign_target() {
     let mut h = test_handler("").await;
     h.authenticated_client = true;
     register_relay_agent(&mut h).await;
-    let (sender, mut rx) = WsMessageSender::new();
-    let generation = h.command_broker.new_connection_generation();
-    h.command_broker.claim_agent("a1", generation, sender).await;
     let (client_sender, _client_rx) = WsMessageSender::new();
     h.set_client_sender(client_sender);
 
@@ -439,10 +491,6 @@ async fn relay_begin_refusal_never_dials_a_listening_foreign_target() {
             .is_err(),
         "an unregistered relay target must never receive a dial"
     );
-    assert!(
-        rx.try_recv().is_err(),
-        "an unregistered relay target must never trigger a credential grant"
-    );
 }
 
 #[tokio::test]
@@ -451,51 +499,39 @@ async fn relay_begin_accepts_a_manual_endpoint_registered_to_the_agent() {
     h.authenticated_client = true;
     register_relay_agent(&mut h).await;
 
-    let (sender, mut rx) = WsMessageSender::new();
-    let generation = h.command_broker.new_connection_generation();
-    h.command_broker.claim_agent("a1", generation, sender).await;
     let (client_sender, _client_rx) = WsMessageSender::new();
     h.set_client_sender(client_sender);
-    let broker = Arc::clone(&h.command_broker);
 
     // A different spelling of the registered endpoint (case) still binds;
     // the dial receives the Server's registered string.
-    let begin_fut = h.handle_message(proto_msg(
-        "server.session.relay.begin",
-        json!({
-            "session_id": "a1:dev",
-            "relay_url": "WS://10.0.0.5:19091/ws"
-        }),
-    ));
-    let grant_fut = async move {
-        let text = rx
-            .recv()
-            .await
-            .expect("the agent is told before the server dials it")
-            .message
-            .to_text()
-            .unwrap()
-            .to_string();
-        let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(grant["msg_type"], "agent.p2p.grant");
-        assert_eq!(grant["payload"]["session_id"], "a1:dev");
-        let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
-        broker
-            .resolve_command("a1", &request_id, json!({ "success": true }))
-            .await;
-    };
-
-    let (action, ()) = tokio::join!(begin_fut, grant_fut);
-    match action.unwrap() {
-        HandlerAction::Relay { agent_ws_urls, .. } => {
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({
+                "session_id": "a1:dev",
+                "relay_url": "WS://10.0.0.5:19091/ws"
+            }),
+        ))
+        .await
+        .unwrap();
+    match action {
+        HandlerAction::Relay {
+            agent_ws_urls,
+            agent_token,
+            ..
+        } => {
             assert_eq!(
                 agent_ws_urls.len(),
                 1,
                 "a manual choice selects exactly the one registered endpoint"
             );
-            assert!(
-                agent_ws_urls[0].starts_with("ws://10.0.0.5:19091/ws?token="),
-                "the dial uses the registered spelling, never the browser's bytes: {agent_ws_urls:?}"
+            assert_eq!(
+                agent_ws_urls[0], "ws://10.0.0.5:19091/ws",
+                "the dial uses the registered spelling, never the browser's bytes"
+            );
+            assert_eq!(
+                agent_token, AGENT_TOKEN,
+                "the relay leg authenticates with the Agent's own token"
             );
         }
         _ => panic!("expected Relay action"),

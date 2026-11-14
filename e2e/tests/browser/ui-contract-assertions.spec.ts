@@ -592,6 +592,7 @@ for (const width of [1440, 1180, 1024]) {
       await page.goto('/#/fixture/workspace?capability=sandbox');
       const composer = page.getByTestId('sandbox-composer');
       await expect(composer).toBeVisible();
+      await page.getByTestId('sandbox-section-policies').click();
       await page.getByTestId('sandbox-tab-filesystem').click();
       const sandboxForm = composer.locator('[data-recipe="configuration-form"]').first();
       await expect(sandboxForm).toBeVisible();
@@ -618,8 +619,9 @@ for (const width of [1440, 1180, 1024]) {
       // A real field error is the recipe's FormField error, at the field.
       await page.getByTestId('sandbox-tab-resource').click();
       await page.getByTestId('sandbox-resource-add').click();
-      await page.getByTestId('sandbox-tab-overview').click();
+      await page.getByTestId('sandbox-section-overview').click();
       await page.getByTestId('sandbox-preflight').click();
+      await page.getByTestId('sandbox-section-policies').click();
       await page.getByTestId('sandbox-tab-resource').click();
       const fieldError = page.getByTestId('sandbox-resource-key-error-0');
       await expect(fieldError).toHaveAttribute('data-recipe-part', 'form-error');
@@ -726,6 +728,7 @@ for (const width of [390, 375, 844]) {
       await expect(
         page.getByTestId('app-layer-workspace').getByTestId('app-page-header'),
       ).toHaveCount(1);
+      await page.getByTestId('sandbox-section-policies').click();
       await page.getByTestId('sandbox-tab-filesystem').click();
       const sandboxForm = page
         .getByTestId('sandbox-composer')

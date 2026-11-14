@@ -3,7 +3,7 @@ import { DetailSection } from '@/components/ui/resource-detail';
 import type { SandboxPolicyDraft } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
-import type { SandboxTabId } from './SandboxPolicyTabs';
+import type { SandboxPolicyId } from './SandboxPolicyTabs';
 
 function namespacesLabel(policy: SandboxPolicyDraft): string {
   const namespaces = policy.process?.linux_namespaces;
@@ -16,19 +16,29 @@ function namespacesLabel(policy: SandboxPolicyDraft): string {
   return enabled.length === 0 ? 'Baseline only' : enabled.join(', ');
 }
 
-function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: string; value: string }[] {
-  const read = policy.filesystem?.access.read.length ?? 0;
-  const write = policy.filesystem?.access.write.length ?? 0;
+function filesystemValue(policy: SandboxPolicyDraft): string {
+  const filesystem = policy.filesystem;
+  const imageRoot = filesystem?.rootfs?.kind === 'image';
+  const mounts = filesystem?.mounts?.length ?? 0;
+  if (imageRoot || mounts > 0) {
+    const workspace = filesystem?.workspace ? ' · Workspace' : '';
+    return `${imageRoot ? 'Image root' : 'Local root'} · ${mounts} mount${mounts === 1 ? '' : 's'}${workspace}`;
+  }
+  const read = filesystem?.access.read.length ?? 0;
+  const write = filesystem?.access.write.length ?? 0;
+  return read === 0 && write === 0
+    ? 'No explicit paths'
+    : `${read} read · ${write} write paths`;
+}
+
+function summaryRows(policy: SandboxPolicyDraft): { id: SandboxPolicyId; label: string; value: string }[] {
   const network = policy.network;
   const egress = network?.egress;
   return [
     {
       id: 'filesystem',
       label: 'Filesystem',
-      value:
-        read === 0 && write === 0
-          ? 'No explicit paths'
-          : `${read} read · ${write} write paths`,
+      value: filesystemValue(policy),
     },
     {
       id: 'network',
@@ -37,10 +47,10 @@ function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: str
         ? `${network?.mode ?? 'allow'} · ${egress.allow.length} allow · ${egress.deny.length} deny`
         : (network?.mode ?? 'allow'),
     },
-    { id: 'process', label: 'Process', value: namespacesLabel(policy) },
+    { id: 'process', label: 'Linux Namespace', value: namespacesLabel(policy) },
     {
       id: 'resource',
-      label: 'Resource',
+      label: 'Cgroup v2',
       value:
         policy.resource.length === 0
           ? 'No native controls'
@@ -48,7 +58,7 @@ function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: str
     },
     {
       id: 'syscall',
-      label: 'Syscall',
+      label: 'Seccomp',
       value: policy.syscall[0]?.value || 'No profile',
     },
   ];
@@ -56,7 +66,7 @@ function summaryRows(policy: SandboxPolicyDraft): { id: SandboxTabId; label: str
 
 export interface SandboxPolicySummaryProps {
   policy: SandboxPolicyDraft;
-  onSelectTab: (tab: SandboxTabId) => void;
+  onSelectTab: (tab: SandboxPolicyId) => void;
 }
 
 /**
