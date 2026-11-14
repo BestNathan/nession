@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createIssueUpdateTool, enforceE2EReadOnly, completeIssueUpdateProposal } from './update.mjs';
-import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, isIssueAuditRepairableRejection, describeIssueAuditRejection } from '../../../tasks/issue-audit.mjs';
+import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, isIssueAuditRepairableRejection, describeIssueAuditRejection, issueAuditProposalSchemaForIssue } from '../../../tasks/issue-audit.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
@@ -173,6 +173,64 @@ try {
     },
   }),/missing_area/);
   assert.equal(exhaustedLabelCalls,1);
+  assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
+
+  // #3461: preserve BOTH historical #3386/#3433 red Issue Audit scenarios.
+  // The original workflow ran but its model supplied an explicitly blank
+  // title/body alongside a valid labels repair, causing an untyped Error.
+  // These deterministic fake-gh fixtures MUST fail on the original source.
+  assert.deepEqual(
+    Object.keys(issueAuditProposalSchemaForIssue(unlabelled).properties),
+    ['labels','comment','verification_tier','tier_reason'],
+    'a missing-label-only Issue must not expose title/body model authority');
+  for (const scenario of [
+    {target:3386,run:43265738257,proposal:{title:' ',labels:['bug','ci']}},
+    {target:3433,run:43443627069,proposal:{body:'',labels:['bug','ci']}},
+    {target:3433,run:43443627069,proposal:{body:'   ',labels:['bug','ci']}},
+  ]) {
+    writeFileSync(filename,absentLabelSnapshot);
+    let correctionCalls=0;
+    const result=await applyIssueAuditWithContractRetry(issue,{
+      result:JSON.stringify(scenario.proposal),
+    },'example/repo',{
+      contractRepair:async(previous,error)=>{
+        correctionCalls++;
+        assert.equal(error.code,'ISSUE_AUDIT_FIELD_CONTRACT',
+          'historical run '+scenario.run+' must be a typed pre-write rejection');
+        assert.equal(isIssueAuditRepairableRejection(error),true);
+        assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot,
+          'rejected first draft must never mutate issue '+scenario.target);
+        const prompt=renderIssueAuditContractRepairPrompt(unlabelled,previous.result,error.message);
+        assert.match(prompt,/OMIT that field/);
+        return {result:JSON.stringify({labels:['bug','ci']})};
+      },
+    });
+    assert.equal(correctionCalls,1,'exactly one correction for #'+scenario.target);
+    assert.equal(result.contract_repair_attempted,true);
+    const corrected=JSON.parse(readFileSync(filename,'utf8'));
+    assert.equal(corrected.title,unlabelled.title);
+    assert.equal(corrected.body,unlabelled.body);
+    assert.deepEqual(corrected.labels.map(item=>item.name).sort(),['bug','ci']);
+  }
+
+  // Exhausted correction is actionable needs-review, never a green repair.
+  // No model comment, completed E2E result or partial Issue write is permitted.
+  writeFileSync(filename,absentLabelSnapshot);
+  let exhaustedFieldCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:'',labels:['bug','ci'],comment:'must not publish'}),
+  },'example/repo',{
+    contractRepair:async()=>{
+      exhaustedFieldCalls++;
+      assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
+      return {result:JSON.stringify({title:' ',labels:['bug','ci']})};
+    },
+  }),error=>{
+    assert.equal(error.code,'ISSUE_AUDIT_FIELD_CONTRACT');
+    assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_FIELD_CONTRACT');
+    return true;
+  });
+  assert.equal(exhaustedFieldCalls,1);
   assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
   writeFileSync(filename,savedIssue);
 
