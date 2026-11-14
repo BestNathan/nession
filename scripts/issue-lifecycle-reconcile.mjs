@@ -12,6 +12,7 @@ import {
   parseSuccessCriteria,
 } from './requirement-acceptance.mjs';
 import { planStage, validateAcceptancePlan } from './acceptance-plan.mjs';
+import { parseCommand } from './github-comment-command.mjs';
 
 const SHA = /^[0-9a-f]{40}$/i;
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -22,11 +23,13 @@ export function resolveAcceptComment(event, repo, actor) {
       !Number.isSafeInteger(event.issue?.number) || event.issue.number <= 0 ||
       event.sender?.login !== actor) return null;
   const comment = event.comment;
-  if (!comment || comment.body !== '/accept' ||
+  const kind = parseCommand(comment?.body);
+  if (!comment || kind?.handler !== 'accept' ||
       comment.user?.type !== 'User' || comment.user.login !== actor ||
       !TRUSTED_ASSOCIATIONS.has(comment.author_association) ||
       !Number.isSafeInteger(comment.id) || comment.id <= 0) return null;
-  return { issueNumber: event.issue.number, commentId: comment.id };
+  return { issueNumber: event.issue.number, commentId: comment.id,
+    targetMainSha: kind.target_sha ?? null };
 }
 
 export function decideIssueClosure(issue, associatedPrs, options = {}) {
@@ -64,7 +67,9 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   return { action: 'close', reason: 'accepted SCs and merged implementation PRs' };
 }
 
-export function selectManualAgentRuns(issue, prs, { verifiedStagingSha = null } = {}) {
+export function selectManualAgentRuns(issue, prs, {
+  verifiedStagingSha = null, verifiedMainSha = null,
+} = {}) {
   const success = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
   const parsed = validateAcceptancePlan(issue.body, success.criteria.keys(), report.rows);
@@ -86,7 +91,13 @@ export function selectManualAgentRuns(issue, prs, { verifiedStagingSha = null } 
     candidates.sort((a, b) => String(b.merged_at || b.updated_at || '').localeCompare(
       String(a.merged_at || a.updated_at || '')));
     const pr = candidates[0];
-    const sha = stage === 'pr' ? pr?.head?.sha : pr?.merge_commit_sha;
+    // The optional historic-main target is independently authenticated by
+    // verifyManualPostMergeTarget; never reinterpret it as a PR or staging SHA.
+    const sha = stage === 'post-merge' && SHA.test(String(verifiedMainSha || '')) &&
+      prs.some(p => p.base?.ref === 'main' && p.merged_at &&
+        SHA.test(String(p.merge_commit_sha || '')))
+      ? verifiedMainSha
+      : stage === 'pr' ? pr?.head?.sha : pr?.merge_commit_sha;
     if (!SHA.test(String(sha || ''))) {
       // A main-only implementation can reach staging through a subsequent
       // authenticated merge. The caller supplies this SHA only after proving
@@ -182,6 +193,52 @@ async function verifiedStagingTargetForMainPR(repository, prs, token, request) {
   return null;
 }
 
+// An explicit /accept post-merge SHA is an intent, not proof. GitHub itself
+// must independently establish a protected main two-parent PR merge, current
+// main ancestry, and lineage from a merged implementation PR on this Issue.
+// No caller-controlled Issue text may substitute for these witnesses.
+export async function verifyManualPostMergeTarget(repository, targetSha, prs,
+  token, request = githubRequest) {
+  if (!SHA.test(String(targetSha || '')) || !Array.isArray(prs) || !token)
+    throw Error('invalid historical main acceptance request');
+  const { prefix } = repoParts(repository);
+  const sourcePrs = prs.filter(p => p?.base?.ref === 'main' &&
+    p.base?.repo?.full_name === repository &&
+    p.head?.repo?.full_name === repository && Boolean(p.merged_at) &&
+    SHA.test(String(p.merge_commit_sha || '')));
+  if (sourcePrs.length === 0) throw Error('no verified Issue-linked main implementation PR');
+  const [main, commit, pulls] = await Promise.all([
+    request(prefix + '/branches/main', { token }),
+    request(prefix + '/commits/' + targetSha, { token }),
+    request(prefix + '/commits/' + targetSha + '/pulls?per_page=10', { token }),
+  ]);
+  const mainHead = main?.commit?.sha;
+  if (!SHA.test(String(mainHead || '')) || commit?.sha !== targetSha ||
+      !Array.isArray(commit.parents) || commit.parents.length !== 2 ||
+      commit.parents.some(parent => !SHA.test(String(parent?.sha || ''))) ||
+      !Array.isArray(pulls) || pulls.length > 10 ||
+      !pulls.some(p => p?.merged_at && p.merge_commit_sha === targetSha &&
+        p.base?.ref === 'main' && p.base?.repo?.full_name === repository &&
+        p.head?.repo?.full_name === repository)) {
+    throw Error('historical target is not a verified main two-parent PR merge');
+  }
+  const targetOnMain = await request(prefix + '/compare/' + targetSha + '...' +
+    mainHead, { token });
+  if (!isMainMergeAncestorOfStaging(targetSha, mainHead, targetOnMain))
+    throw Error('historical target is not a current protected main ancestor');
+  let associated = false;
+  for (const pr of sourcePrs) {
+    const proof = await request(prefix + '/compare/' + pr.merge_commit_sha + '...' +
+      targetSha, { token });
+    if (isMainMergeAncestorOfStaging(pr.merge_commit_sha, targetSha, proof)) {
+      associated = true;
+      break;
+    }
+  }
+  if (!associated) throw Error('historical main target does not include Issue implementation');
+  return targetSha; // Only the existing read-only Agent/Case projector may Pass.
+}
+
 export function hasUnrecoveredHumanReopen(events, comments) {
   const reopens = events.filter(e => e.event === 'reopened' && e.actor?.type === 'User')
     .map(e => e.created_at).filter(Boolean).sort();
@@ -189,7 +246,8 @@ export function hasUnrecoveredHumanReopen(events, comments) {
   const lastReopen = reopens.at(-1);
   // /accept is an explicit owner/collaborator recovery intent. The later
   // trusted projector still has to prove every applicable SC independently.
-  return !comments.some(c => c.body === '/accept' && c.user?.type === 'User' &&
+  return !comments.some(c => parseCommand(c.body)?.handler === 'accept' &&
+    c.user?.type === 'User' &&
     TRUSTED_ASSOCIATIONS.has(c.author_association) &&
     typeof c.created_at === 'string' && c.created_at > lastReopen);
 }
@@ -255,14 +313,18 @@ async function handleManual(event, repository, actor, token, request = githubReq
     return { action: 'pending', reason: 'explicit blocker prevents manual re-dispatch' };
   }
   const prs = await relatedPulls(repository, command.issueNumber, token, null, request);
-  const directlySelected = selectManualAgentRuns(issue, prs);
+  const verifiedMainSha = command.targetMainSha
+    ? await verifyManualPostMergeTarget(repository, command.targetMainSha, prs,
+      token, request) : null;
+  const directlySelected = selectManualAgentRuns(issue, prs, { verifiedMainSha });
   // Never invent a staging association. When the source PR was correctly
   // merged to main (e.g. scripts-only), authenticate its actual ancestry in
   // staging before scheduling the pending merged/staging Agent criterion.
   const verifiedStagingSha = directlySelected.some(run => run.stage === 'staging')
     ? null : await verifiedStagingTargetForMainPR(repository, prs, token, request);
   const runs = verifiedStagingSha
-    ? selectManualAgentRuns(issue, prs, { verifiedStagingSha }) : directlySelected;
+    ? selectManualAgentRuns(issue, prs, { verifiedStagingSha, verifiedMainSha })
+    : directlySelected;
   for (const run of runs) {
     await request(prefix + '/actions/workflows/agent-sc-acceptance.yml/dispatches', {
       token, method: 'POST',
@@ -378,6 +440,64 @@ async function selfTest() {
     'unverified or divergent source cannot authorize staging replay');
   assert.equal(isMainMergeAncestorOfStaging('bad', stagingSha, validCompare), false);
   assert.equal(isMainMergeAncestorOfStaging(sha, 'bad', validCompare), false);
+  // #3425: manual historical main target overrides only the pending post-
+  // merge Agent stage after independent GitHub merge and ancestry proofs.
+  const mergedMainBody = mainPendingBody;
+  const sourceMainPr = {...mainPr, head: {...mainPr.head,
+    repo: {full_name:'BestNathan/nession'}}, base: {...mainPr.base,
+    repo: {full_name:'BestNathan/nession'}}};
+  const targetMain = 'c'.repeat(40), currentMain = 'd'.repeat(40);
+  assert.deepEqual(selectManualAgentRuns(
+    {...issue, body:mergedMainBody},[sourceMainPr],{verifiedMainSha:targetMain}),
+    [{stage:'post-merge',target_ref:targetMain}]);
+  assert.deepEqual(selectManualAgentRuns(
+    {...issue,body:stagedBody},[sourceMainPr],{verifiedMainSha:targetMain}), [],
+    'a main override never converts a staging criterion into a main proof');
+  assert.deepEqual(selectManualAgentRuns(
+    {...issue,body:mergedMainBody},[{...sourceMainPr,merged_at:null}],
+    {verifiedMainSha:targetMain}), [],
+    'unmerged implementation cannot authorize a main target');
+  const mainCompare = (base,head) => ({
+    status:base===head?'identical':'ahead',ahead_by:base===head?0:1,
+    behind_by:0,base_commit:{sha:base},merge_base_commit:{sha:base},
+  });
+  const mainMerge = {sha:targetMain,parents:[{sha},{sha:stagingSha}]};
+  const sourceMerge = {...sourceMainPr,merged_at:'2026-11-11T01:00:00Z'};
+  const candidate = {number:60,merged_at:'2026-11-14T10:50:17Z',
+    merge_commit_sha:targetMain,base:{ref:'main',repo:{full_name:'BestNathan/nession'}},
+    head:{sha:stagingSha,repo:{full_name:'BestNathan/nession'}}};
+  const historicalRead = async (path) => {
+    if(path.endsWith('/branches/main')) return {commit:{sha:currentMain}};
+    if(path.endsWith('/commits/'+targetMain)) return mainMerge;
+    if(path.endsWith('/commits/'+targetMain+'/pulls?per_page=10'))return [candidate];
+    if(path.endsWith('/compare/'+targetMain+'...'+currentMain))
+      return mainCompare(targetMain,currentMain);
+    if(path.endsWith('/compare/'+sha+'...'+targetMain))
+      return mainCompare(sha,targetMain);
+    throw Error('unexpected historical main fixture '+path);
+  };
+  const historicalRepo='BestNathan/nession';
+  assert.equal(await verifyManualPostMergeTarget(historicalRepo,targetMain,
+    [sourceMerge],'fixture-token',historicalRead),targetMain);
+  for (const wrong of [
+    async path => path.endsWith('/commits/'+targetMain+'/pulls?per_page=10')
+      ? [{...candidate,merge_commit_sha:stagingSha}] : historicalRead(path),
+    async path => path.endsWith('/commits/'+targetMain)
+      ? {...mainMerge,parents:[{sha}]} : historicalRead(path),
+    async path => path.endsWith('/branches/main')
+      ? {commit:{sha:'f'.repeat(40)}} :
+      path.endsWith('/compare/'+targetMain+'...'+'f'.repeat(40))
+        ? {status:'diverged'} : historicalRead(path),
+    async path => path.endsWith('/compare/'+sha+'...'+targetMain)
+      ? {status:'diverged'} : historicalRead(path),
+  ]) await assert.rejects(verifyManualPostMergeTarget(historicalRepo,targetMain,
+    [sourceMerge],'fixture-token',wrong),/historical (?:main )?target/);
+  await assert.rejects(verifyManualPostMergeTarget(historicalRepo,targetMain,
+    [{...sourceMerge,merged_at:null}],'fixture-token',historicalRead),
+    /no verified Issue-linked/);
+  await assert.rejects(verifyManualPostMergeTarget(historicalRepo,'bad',
+    [sourceMerge],'fixture-token',historicalRead),/invalid historical main/);
+
   const reopened = [{ event: 'reopened', actor: { type: 'User' }, created_at: '2026-11-11T02:00:00Z' }];
   const recovery = [{ body: '/accept', user: { type: 'User' },
     author_association: 'OWNER', created_at: '2026-11-11T02:01:00Z' }];
@@ -394,6 +514,13 @@ async function selfTest() {
     comment: { body: '/accept', id: 7, user: { login: 'owner', type: 'User' },
       author_association: 'OWNER' } };
   assert.equal(resolveAcceptComment(e, 'X/y', 'owner').issueNumber, 19);
+  const historicalEvent = {...e,comment:{...e.comment,
+    body:'/accept post-merge '+targetMain}};
+  assert.equal(resolveAcceptComment(historicalEvent,'X/y','owner')
+    ?.targetMainSha,targetMain);
+  assert.equal(resolveAcceptComment({...historicalEvent,comment:{
+    ...historicalEvent.comment,body:'/accept post-merge bad'}},'X/y','owner'),null);
+
   for (const mutated of [
     { comment: { ...e.comment, body: '/accept now' } },
     { comment: { ...e.comment, author_association: 'CONTRIBUTOR' } },
