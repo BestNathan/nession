@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
 import {
+  capsuleUpperSwitchOptionClass,
+  contextCapsuleCompactStyle,
   contextCapsuleDockClass,
   contextCapsuleIconSlotClass,
   contextCapsuleMarkerClass,
@@ -25,6 +27,8 @@ export interface ContextCapsuleProps {
   onDeepen: (capabilityId: string) => void;
   /** The `+` that opened this surface — where focus goes when it closes. */
   triggerRef: React.RefObject<HTMLButtonElement | null>;
+  /** The terminal could not reserve rows; bound the list with a toggle (#3492). */
+  reserveFallback?: boolean;
 }
 
 /**
@@ -56,7 +60,10 @@ export function ContextCapsule({
   onDismiss,
   onDeepen,
   triggerRef,
+  reserveFallback = false,
 }: ContextCapsuleProps) {
+  const [compact, setCompact] = useState(true);
+  const compactFallback = reserveFallback && compact;
   const rows = useMemo(
     () =>
       resolveContextRows(
@@ -130,7 +137,19 @@ export function ContextCapsule({
       role="group"
       aria-label="Capabilities"
       className={cn(contextCapsuleDockClass, contextCapsuleSurfaceClass)}
+      style={compactFallback ? contextCapsuleCompactStyle : undefined}
     >
+      {reserveFallback ? (
+        <button
+          type="button"
+          data-testid="capsule-context-compact"
+          aria-expanded={!compact}
+          onClick={() => setCompact((value) => !value)}
+          className={capsuleUpperSwitchOptionClass(compact)}
+        >
+          {compact ? 'Expand list' : 'Compact list'}
+        </button>
+      ) : null}
       <div className={contextCapsuleScrollClass} data-testid="capsule-context-scroll">
         {rows.map((row, index) => (
           <ContextRowButton

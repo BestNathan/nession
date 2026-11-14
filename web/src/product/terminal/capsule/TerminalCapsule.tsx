@@ -16,6 +16,7 @@ import {
 } from '@/product/terminal/capsule/types';
 import { useCapsuleLayoutFlip } from '@/product/terminal/capsule/useCapsuleLayoutFlip';
 import { useCapsuleDockClearance } from '@/product/terminal/capsule/hooks/useCapsuleDockClearance';
+import { useTerminalClearanceState } from '@/product/terminal/capsule/hooks/useTerminalClearanceState';
 import { useCapsuleCommandActions } from '@/product/terminal/capsule/hooks/useCapsuleCommandActions';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
@@ -127,6 +128,7 @@ export function TerminalCapsule({
   // publishes the upper panel's *scroll* clearance as a separate value, so an
   // expanded surface never reflows the terminal grid (#2710 SC-08/SC-09).
   useCapsuleDockClearance(shellRef, dockRef);
+  const clearanceState = useTerminalClearanceState(shellRef);
 
   const { applyLineCount, composerLayout, send: stateSend, ...restState } = state;
   const { captureBeforeLayoutChange } = useCapsuleLayoutFlip(composerLayout, inputRowRef);
@@ -179,6 +181,7 @@ export function TerminalCapsule({
       insertText={handleInsertText}
       runCommand={handleRunCommand}
       disabled={disabled}
+      reserveFallback={clearanceState.fallback}
       focusFromContext={peekFocus.focusFromContext}
       onFocusFromContextHandled={peekFocus.onFocusFromContextHandled}
     />
@@ -244,6 +247,7 @@ function CapsuleUpperLayer({
   insertText,
   runCommand,
   disabled,
+  reserveFallback,
   focusFromContext,
   onFocusFromContextHandled,
 }: {
@@ -260,6 +264,8 @@ function CapsuleUpperLayer({
   insertText: (text: string) => void;
   runCommand: (text: string) => void;
   disabled: boolean;
+  /** The terminal cannot reserve rows for this Peek; offer the compact escape. */
+  reserveFallback: boolean;
   focusFromContext: boolean;
   onFocusFromContextHandled: () => void;
 }) {
@@ -271,6 +277,7 @@ function CapsuleUpperLayer({
         onDismiss={onCloseContext}
         onDeepen={onDeepen}
         triggerRef={contextTriggerRef}
+        reserveFallback={reserveFallback}
       />
     );
   }
@@ -287,6 +294,7 @@ function CapsuleUpperLayer({
       runCommand={runCommand}
       disabled={disabled}
       triggerRef={contextTriggerRef}
+      reserveFallback={reserveFallback}
       focusFromContext={focusFromContext}
       onFocusFromContextHandled={onFocusFromContextHandled}
     />

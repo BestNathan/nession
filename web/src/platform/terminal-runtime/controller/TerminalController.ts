@@ -17,6 +17,10 @@ import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
+import {
+  terminalClearancePolicyFor,
+  type TerminalClearancePolicy,
+} from '../capsule/clearancePolicy';
 import { XtermEmulator } from '../xterm/XtermEmulator';
 import { SerializedTerminalWriter, type TerminalWriterLimits } from './SerializedTerminalWriter';
 import { MobileImeInput } from '../input/MobileImeInput';
@@ -228,6 +232,8 @@ export class TerminalController {
   private mobileIme: MobileImeInput | null = null;
   private interaction: TerminalInteractionController | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
+  /** Mouse/alternate mode changes drive the upper-panel clearance policy (#3492). */
+  private modeChangeUnsub: TerminalDisposable | null = null;
   /** OSC 52/5522 protocol state for this viewport (#2598). */
   private clipboardProtocol: TerminalClipboardProtocol | null = null;
   private clipboardHost: TerminalDisposable | null = null;
@@ -842,6 +848,13 @@ export class TerminalController {
     }
 
     this.geometry = new TerminalGeometry(this);
+    // Re-reserve (or release) upper-panel rows when the application switches
+    // between the normal buffer and a mouse-owning/alternate-screen TUI. The
+    // geometry deduplicates the resulting grid and debounces the PTY report.
+    this.modeChangeUnsub?.dispose();
+    this.modeChangeUnsub = this.instance.onModesChange(() => {
+      this.geometry?.onClearancePolicyChanged();
+    });
     requestAnimationFrame(() => {
       if (!this.attached) { return; }
       const dims = this.cellDimensions;
@@ -908,6 +921,9 @@ export class TerminalController {
   private teardownTerminalUi(): void {
     this.hostPasteCleanup?.();
     this.hostPasteCleanup = null;
+
+    this.modeChangeUnsub?.dispose();
+    this.modeChangeUnsub = null;
 
     this.geometry?.dispose();
     this.geometry = null;
@@ -1083,6 +1099,11 @@ export class TerminalController {
 
   get isObserverReadOnly(): boolean {
     return this.observerReadOnly;
+  }
+
+  /** The upper-panel clearance policy the application's own modes select. */
+  get clearancePolicy(): TerminalClearancePolicy {
+    return terminalClearancePolicyFor(this.instance.readModes(), this.instance.readBuffer());
   }
 
   /** Resize the local xterm grid optimistically and notify the transport. */

@@ -3,6 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { TerminalGeometry, type TerminalGeometryHost } from '../../TerminalGeometry';
 import type { TerminalCellSize } from '../../../emulator';
 import { DEFAULT_TERMINAL_COLS } from '../../../terminalConfig';
+import {
+  TERMINAL_CAPSULE_CLEARANCE_STATE_EVENT,
+  TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE,
+  type TerminalClearancePolicy,
+  type TerminalClearanceState,
+} from '../../../capsule/clearancePolicy';
+import { TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT } from '../../../capsule/occlusionScroll';
 
 let captured: ResizeObserverCallback | null = null;
 
@@ -36,6 +43,8 @@ interface Harness {
   published: Array<[number, number]>;
   contentWidths: Array<{ contentWidth: number; fits: boolean }>;
   setCell: (cell: TerminalCellSize) => void;
+  setPolicy: (policy: TerminalClearancePolicy) => void;
+  setObserver: (observer: boolean) => void;
 }
 
 function makeHarness(
@@ -48,8 +57,11 @@ function makeHarness(
   const sentResizes: Array<[number, number]> = [];
   const published: Array<[number, number]> = [];
   const contentWidths: Array<{ contentWidth: number; fits: boolean }> = [];
+  let policy: TerminalClearancePolicy = 'scroll-clearance';
+  let observer = false;
   const host: TerminalGeometryHost = {
-    isObserverReadOnly: false,
+    get isObserverReadOnly() { return observer; },
+    get clearancePolicy() { return policy; },
     statedTerminalCols: null,
     get cellDimensions() { return cell; },
     measureFont: (fontSize) => {
@@ -74,6 +86,8 @@ function makeHarness(
     published,
     contentWidths,
     setCell: (next) => { cell = next; },
+    setPolicy: (next) => { policy = next; },
+    setObserver: (next) => { observer = next; },
   };
 }
 
@@ -152,6 +166,109 @@ describe('TerminalGeometry fixed-column sizing (#2581 SC-06)', () => {
       expect(content?.fits).toBe(true);
       expect(content?.contentWidth).toBeLessThanOrEqual(280);
       geometry.dispose();
+    } finally {
+      restore();
+    }
+  });
+
+  it('reserves real rows for a full-screen TUI and ignores the panel for a normal shell', () => {
+    const restore = installObserver();
+    try {
+      const h = makeHarness();
+      const host = document.createElement('div');
+      host.setAttribute('data-terminal-capsule-host', '');
+      const container = document.createElement('div');
+      host.appendChild(container);
+      document.body.appendChild(host);
+      const geometry = new TerminalGeometry(h.host);
+      geometry.observe(container, 8, 16);
+      fire(1024, 600);
+      expect(h.localResizes[h.localResizes.length - 1]).toEqual([DEFAULT_TERMINAL_COLS, 37]);
+
+      // The normal-buffer scroll policy never spends the panel on rows (#2710).
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '160px');
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+      expect(h.localResizes[h.localResizes.length - 1]).toEqual([DEFAULT_TERMINAL_COLS, 37]);
+
+      // An alternate/mouse-owning TUI reserves the panel's height.
+      h.setPolicy('viewport-reserve');
+      geometry.onClearancePolicyChanged();
+      expect(h.localResizes[h.localResizes.length - 1]).toEqual([DEFAULT_TERMINAL_COLS, 27]);
+
+      // Closing the panel derives rows from the current box again.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '0px');
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+      expect(h.localResizes[h.localResizes.length - 1]).toEqual([DEFAULT_TERMINAL_COLS, 37]);
+      geometry.dispose();
+      host.remove();
+    } finally {
+      restore();
+    }
+  });
+
+  it('publishes a compact fallback when the reserve cannot cover the panel', () => {
+    const restore = installObserver();
+    try {
+      const h = makeHarness();
+      h.setPolicy('viewport-reserve');
+      h.setObserver(true);
+      const host = document.createElement('div');
+      host.setAttribute('data-terminal-capsule-host', '');
+      const container = document.createElement('div');
+      host.appendChild(container);
+      document.body.appendChild(host);
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '160px');
+      const observed: { state: TerminalClearanceState | null } = { state: null };
+      host.addEventListener(TERMINAL_CAPSULE_CLEARANCE_STATE_EVENT, (event) => {
+        observed.state = (event as CustomEvent<TerminalClearanceState>).detail;
+      });
+      const geometry = new TerminalGeometry(h.host);
+      geometry.observe(container, 8, 16);
+      fire(1024, 600);
+
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBe('compact');
+      expect(observed.state?.fallback).toBe(true);
+      expect(observed.state?.policy).toBe('viewport-reserve');
+      // An observer publishes the observed grid but never sends a resize.
+      expect(h.published[h.published.length - 1]).toEqual([DEFAULT_TERMINAL_COLS, 27]);
+      expect(h.sentResizes).toEqual([]);
+      geometry.dispose();
+      host.remove();
+    } finally {
+      restore();
+    }
+  });
+
+  it('latches the compact fallback so its own smaller height cannot oscillate', () => {
+    const restore = installObserver();
+    try {
+      const h = makeHarness();
+      h.setPolicy('viewport-reserve');
+      const host = document.createElement('div');
+      host.setAttribute('data-terminal-capsule-host', '');
+      const container = document.createElement('div');
+      host.appendChild(container);
+      document.body.appendChild(host);
+      // Taller than the reserve cap on a 600px box with 16px cells leaves
+      // fewer than MIN_RESERVED_ROWS.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '560px');
+      const geometry = new TerminalGeometry(h.host);
+      geometry.observe(container, 8, 16);
+      fire(1024, 600);
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBe('compact');
+
+      // The compact panel now reports a smaller height. The fallback must stay
+      // latched; otherwise it would expand, fail the reserve and loop.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '100px');
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBe('compact');
+
+      // Closing clears it.
+      container.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '0px');
+      host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+      expect(host.getAttribute(TERMINAL_CAPSULE_FALLBACK_ATTRIBUTE)).toBeNull();
+      geometry.dispose();
+      host.remove();
     } finally {
       restore();
     }
