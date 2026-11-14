@@ -5,6 +5,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { commandPlan, parseCommand, workflowTitle, dispatchInputs } from './github-comment-command.mjs';
 import { resolveCaseTarget } from './github-comment-case-request.mjs';
+import { verifyLiveBugDevelopSource } from './lib/agent/orchestration/bug-develop-comment.mjs';
 
 const REPO = 'BestNathan/nession';
 const API = 'https://api.github.com';
@@ -50,6 +51,11 @@ export async function resolve(event, read = api) {
         encodeURIComponent(event.comment.user.login) + '/permission')).permission;
   }
   const plan = commandPlan(event, comment, issue, pr, permission);
+  if (plan?.handler === 'develop') {
+    // The same source verifier runs again inside Store Ingest. This is a
+    // read-only, early rejection; it grants no Developer/Store authority.
+    await verifyLiveBugDevelopSource(number, id, read);
+  }
   return plan?.handler === 'case' ? resolveCaseTarget(plan, issue, read) : plan;
 }
 function outputs(plan) {
@@ -95,7 +101,7 @@ async function acknowledge(read, plan, link) {
       (plan.handler === 'case' ? ' / ' + plan.criterion + ' at ' + plan.target_sha : '');
   const body = 'Comment command ' + String.fromCharCode(96) + plan.command +
     String.fromCharCode(96) + ' accepted for ' + target +
-    '. [Actions run](' + link + '). This request is not an Acceptance Pass.\n\n' + marker(plan);
+    '. [Actions run](' + link + '). This request is not an Acceptance Pass or proof that a Developer has started.\n\n' + marker(plan);
   await read('/repos/' + REPO + '/issues/' + plan.issue_number + '/comments',
     { method: 'POST', body: { body } });
 }
@@ -134,6 +140,56 @@ async function dispatch(plan, read = api) {
   await acknowledge(read, plan, link);
   return { state: 'dispatched', url: link };
 }
+// #3488: A GITHUB_TOKEN workflow_dispatch executes Controller, but GitHub
+// intentionally suppresses its workflow_run chain. The trusted human-comment
+// Router explicitly requests the Store Ingest AFTER confirming that Controller
+// completed successfully. Store Ingest re-authenticates Run, Artifact and the
+// original Owner comment before using its own App credentials.
+export async function wakeBugDeveloper(plan, read=api, pause=(ms)=>new Promise(r=>setTimeout(r,ms))) {
+  if(plan?.handler!=='develop' || plan.workflow!=='acceptance-agent-controller.yml')
+    throw Error('Bug Developer wake requires an authenticated command');
+  const runs=await inventory(read,plan);
+  const matches=runs.filter(run=>findRun([run],plan));
+  if(matches.length!==1||!Number.isSafeInteger(matches[0].id)||matches[0].id<1)
+    throw Error('missing or ambiguous exact Controller Run for Bug command');
+  const original=matches[0];
+  let current=null;
+  for(let attempt=0;attempt<40;attempt++){
+    current=await read('/repos/'+REPO+'/actions/runs/'+original.id);
+    if(current.status==='completed')break;
+    await pause(3000);
+  }
+  if(current?.id!==original.id||current.status!=='completed'||
+      current.conclusion!=='success'||current.run_attempt!==1||
+      current.actor?.login!=='github-actions[bot]'||
+      current.path!=='.github/workflows/acceptance-agent-controller.yml'||
+      current.event!=='workflow_dispatch'||current.head_branch!=='main'||
+      current.repository?.full_name!==REPO||current.head_repository?.full_name!==REPO)
+    throw Error('Controller is not authenticated completed success; Store wake denied');
+  const workflow='store-agent-controller-ingest.yml';
+  const prior=await read('/repos/'+REPO+'/actions/workflows/'+workflow+
+    '/runs?event=workflow_dispatch&per_page=100');
+  if(!Array.isArray(prior?.workflow_runs))
+    throw Error('bad Store Ingest Run inventory');
+  const runName='Bug Developer Ingest controller:'+original.id;
+  const wakes=prior.workflow_runs.filter(item=>
+    item.display_title===runName && item.event==='workflow_dispatch' &&
+    item.actor?.login==='github-actions[bot]'&&
+    item.head_branch==='main'&&item.repository?.full_name===REPO);
+  if(wakes.length>1)throw Error('ambiguous existing Store Ingest wakes');
+  if(wakes.length===1)
+    return {state:'already-woken',controller_run_id:original.id,
+      ingest_run_id:wakes[0].id??null};
+  if(prior.workflow_runs.length===100&&
+      !(Date.parse(prior.workflow_runs.at(-1)?.created_at)<Date.parse(plan.created_at)))
+    throw Error('unbounded Store Ingest wake history, refusing duplicate dispatch');
+  await read('/repos/'+REPO+'/actions/workflows/'+workflow+'/dispatches',{
+    method:'POST',body:{ref:'main',inputs:{source_run_id:String(original.id)}},
+  });
+  return {state:'store-ingest-requested',controller_run_id:original.id,
+    note:'Not a Store commit or Worker/PR proof'};
+}
+
 async function main() {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const plan = await resolve(event);
@@ -141,6 +197,13 @@ async function main() {
     outputs(plan);
     console.log(plan ? 'authorized command ' + plan.handler + ' #' + plan.issue_number :
       'ignored unsupported/unauthorized/stale comment');
+    return;
+  }
+  if (process.argv[2] === 'wake-developer') {
+    if(!matchesPlan(plan)||plan.handler!=='develop')
+      throw Error('Bug Developer wake command/source changed; denying');
+    const woke=await wakeBugDeveloper(plan);
+    console.log(JSON.stringify(woke));
     return;
   }
   if (process.argv[2] !== 'dispatch') throw Error('unknown command');
@@ -206,7 +269,50 @@ async function selfTest() {
     assert.equal((await dispatch(plan, async path => path.endsWith('/comments?per_page=100&sort=created&direction=desc')
       ? [{ body: marker(plan), user: { login: 'github-actions[bot]', type: 'Bot' } }]
       : { workflow_runs: [] })).state, 'already-acknowledged');
-    console.log('github-comment-router: source checks, context, replay guards passed');
+    // #3488: post-Controller wake must authenticate the exact completed
+    // source Run before issuing exactly one GITHUB_TOKEN workflow_dispatch.
+    const dev={...plan,handler:'develop',command:'/develop dev-qwen-01',
+      workflow:'acceptance-agent-controller.yml'};
+    const sourceRun={id:321,display_title:workflowTitle(dev),
+      event:'workflow_dispatch',head_branch:'main',repository:repo,
+      head_repository:repo,actor:{login:'github-actions[bot]'},
+      path:'.github/workflows/acceptance-agent-controller.yml',
+      status:'completed',conclusion:'success',run_attempt:1};
+    let wakes=0;
+    const wakeReader=async(path,options={})=>{
+      if(options.method==='POST'){
+        assert.ok(path.endsWith('/store-agent-controller-ingest.yml/dispatches'));
+        assert.deepEqual(options.body,{ref:'main',inputs:{source_run_id:'321'}});
+        wakes++;
+        return null;
+      }
+      if(path.includes('/acceptance-agent-controller.yml/runs?'))
+        return {workflow_runs:[sourceRun]};
+      if(path.endsWith('/actions/runs/321'))
+        return sourceRun;
+      if(path.includes('/store-agent-controller-ingest.yml/runs?'))
+        return {workflow_runs:[]};
+      throw Error('unexpected waker API '+path);
+    };
+    const wake=await wakeBugDeveloper(dev,wakeReader,async()=>{});
+    assert.equal(wake.state,'store-ingest-requested');
+    assert.equal(wakes,1,'exactly one post-Controller Store wake');
+    await assert.rejects(wakeBugDeveloper(dev,async(path,options)=>{
+      if(path.endsWith('/actions/runs/321'))return {...sourceRun,conclusion:'failure'};
+      return wakeReader(path,options);
+    },async()=>{}),/authenticated completed success/);
+    assert.equal(wakes,1,'failed source Run cannot request privileged Ingest');
+    const existing=await wakeBugDeveloper(dev,async(path,options)=>{
+      if(path.includes('/store-agent-controller-ingest.yml/runs?'))
+        return {workflow_runs:[{id:456,display_title:'Bug Developer Ingest controller:321',
+          event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
+          head_branch:'main',repository:repo}]};
+      return wakeReader(path,options);
+    },async()=>{});
+    assert.equal(existing.state,'already-woken');
+    assert.equal(existing.ingest_run_id,456);
+    assert.equal(wakes,1,'readback prevents a second Store wake');
+        console.log('github-comment-router: source checks, context, replay guards passed');
   } finally {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
