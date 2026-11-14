@@ -13,6 +13,7 @@ admission, Gate results, provenance, and independent Acceptance projection.
 | `/audit` | open native Issue | current Issue → Agent / Issue Audit (single) | OWNER/MEMBER/COLLABORATOR |
 | `/audit tree` | open native Issue | current Issue → Agent / Issue Audit (tree) | same |
 | `/accept` | open native Issue | current Issue → Acceptance / Manual Request | same; recovery request only |
+| `/develop dev-qwen-01` | open, unclaimed native Bug Issue | current Bug → trusted Controller → agent-store → Qwen Developer | **BestNathan OWNER only**, exact unedited comment, no in-progress status or linked open PR |
 | `/case SC-NN` | open native Requirement/Bug Issue | trusted associated merged SHA → Acceptance / Cases | OWNER/MEMBER/COLLABORATOR; Case-method SC only |
 | `/e2e full` | open same-repository PR | exact current PR HEAD SHA + branch → E2E / Full Regression | repo owner or collaborator with write+ |
 
@@ -94,6 +95,42 @@ GitHub workflow run may not be visible immediately after a 204 dispatch; in
 that case the bot acknowledgment points to the workflow page rather than
 inventing a Run ID. Any dispatch/receipt uncertainty must be reconciled
 against the authoritative GitHub source records.
+
+## Bug Developer from an Owner comment (#3488)
+
+The first production command is **`/develop dev-qwen-01`**, posted as a
+single unedited line under the Bug Issue itself. It is intentionally not
+`/develop #1234`: Issue identity comes from the GitHub comment, not free text.
+It supports the already registered Qwen Developer only. For example, post it
+under #3433 if that Bug is still open and unclaimed; do **not** post it under
+an already progressing #3444/#3451 PR.
+
+The existing Comment Router confirms owner identity and the original open Bug
+Issue via REST; it refuses edited comments, arbitrary providers, existing
+`status:in-progress` and related open implementation PRs. It dispatches
+**only an unprivileged Controller request** with the Issue number and original
+comment ID. The Controller pins the trusted `main` SHA, resolves the registered
+roles, and emits a uniquely attested request Artifact. The independent
+`Store / Agent Controller Ingest` re-authenticates the original comment,
+actual Run/Attempt/Artifact and GitHub SHA before Store App issuance. It commits
+one immutable Controller root on `agent-store`, marks the Bug in progress, and
+uses the existing Store CAS/write-ahead/HMAC-ticket machinery to dispatch one
+`Agent / Development` Qwen Worker. It never gives the Worker its GitHub writer,
+Store secret, signing key or publisher token.
+
+The Worker edits only bounded tracked source with Read/Edit/Write, and emits
+an untrusted patch and encrypted native Session; the separate Publisher,
+Reviewer, Quality and Acceptance keep their independent responsibilities.
+Repeated comments never reset an existing Controller state, and a 204/timeout
+does not justify blindly dispatching a second Worker. A router acknowledgment
+means *request accepted*, not *Worker started*, *PR published* or *SC Pass*.
+
+For a rejected command, first inspect the original Issue type/status, existing
+PRs, edited comment/author permissions and the router/Controller Run. A failed
+source verification does not trigger a model. Existing historical #1997/#3001
+recovery commands stay pinned and separate. The command is active only after
+the main-owned workflow and script changes have merged and their authenticated
+Run/Store readback has been checked.
 
 ## Migration boundaries
 
