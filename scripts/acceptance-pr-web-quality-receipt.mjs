@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Trusted-main PR Acceptance proof boundary for executable Web integration SCs.
+// Trusted-main PR Acceptance proof boundary for explicitly required Web tests.
 // Model prose/test source is never evidence that a GitHub Quality Gate executed.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -10,10 +10,12 @@ const SHA = /^[a-f0-9]{40}$/i;
 const GATE_STEP = 'Verify Web and design Gates';
 const CHECK_STEP = 'Enforce applicable Quality results at the stable check name';
 
-// A criterion must demand an actual integration-test assertion, not merely
-// discuss a Gate/SC policy or mention a test file in supporting prose.
-// The Issue's Web scenario narrows this to the Web Quality owner, not Rust or
-// independent Browser/Case execution. This classifier has exactly one owner.
+// A criterion can require executed Web Quality in two explicit ways:
+// (1) its own text demands integration-test/Gate execution;
+// (2) the Issue's scoped SCN-01 mapping explicitly binds that SC to Web
+// unit-test CI and an independent exact-head CI receipt as a Pass condition.
+// Merely mentioning a test file or policy is never an execution obligation.
+// One classifier owns both, not a separate CI/Acceptance test catalog.
 export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   const text = String(criterion?.text ?? '');
   if (!/\bweb\b|\bchromium\b|\.tsx\b|web-test-integration/i.test(String(issueBody))) return false;
@@ -24,7 +26,19 @@ export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   // which merely describes when a future criterion may be accepted.
   const gateResult = /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|complete(?:s|d)?|execut(?:e|ed)|verif(?:y|ied))\b.{0,130}\b(?:web-test-integration|web[ -]+integration(?:\/quality)?|web[ -]+quality)\b/i.test(text) ||
     /\b(?:web-test-integration|web[ -]+integration\/quality)\b.{0,100}\b(?:pass(?:ed)?|success|successful|green|completed|executed)\b/i.test(text);
-  return executedTest || gateResult;
+  // #3552 / #3433: unit-test-backed behavior SCs often describe WHAT must
+  // happen, while their SCN-01 mapping states HOW Pass is proved. This
+  // mandatory, criterion-specific receipt contract cannot be replaced by
+  // model inspection of source/test assertions. Keep the match narrow:
+  // the same mapping line must name the SC, SCN-01, Web unit-test CI, and
+  // an independent exact-SHA CI receipt REQUIRED for Pass.
+  const requiredUnitReceipt = /^SC-\d{2,}$/.test(String(criterion?.criterion ?? '')) &&
+    String(issueBody).split(/\r?\n/).some(line =>
+      line.includes(criterion.criterion) &&
+      /\bSCN-01\b/.test(line) &&
+      /\bWeb\s+unit[- ]test\s+CI\b/i.test(line) &&
+      /\b(?:independent\s+)?exact[- ]SHA\s+CI\s+receipts?\s+(?:are\s+)?required\s+for\s+Pass\b/i.test(line));
+  return executedTest || gateResult || requiredUnitReceipt;
 }
 
 function positiveInteger(value) {
@@ -333,6 +347,44 @@ function selfTest() {
   const governancePositive = { criterion: 'SC-02',
     text: 'Once the independent required exact-head Gate actually completes success, the existing source-aligned Agent/ingester may issue Pass.' };
   assert.equal(requiresWebIntegrationExecution(governancePositive, body), false);
+  // #3433: each SC describes terminal behavior; the issue-level SCN-01
+  // contract explicitly requires independent Web unit-test CI receipts.
+  const unitBody = '### SC → scenario mapping\n' +
+    'SC-01 and SC-02: **SCN-01**, deterministic Web transport contract. ' +
+    'Existing ConnectionManager.test.ts / inputQueue.test.ts and Web unit-test CI ' +
+    'provide the source-aligned PR-head lane; independent exact-SHA CI receipts are required for Pass.';
+  const unit01 = { criterion: 'SC-01', text: 'A quiet reconnect drops expired terminal input before flush.' };
+  const unit02 = { criterion: 'SC-02', text: 'A valid reconnect preserves only unapplied input in order.' };
+  const unitStatic = { criterion: 'SC-03', text: 'The implementation docs name the timeout owner.' };
+  assert.equal(requiresWebIntegrationExecution(unit01, unitBody), true);
+  assert.equal(requiresWebIntegrationExecution(unit02, unitBody), true);
+  assert.equal(requiresWebIntegrationExecution(unitStatic, unitBody), false);
+  assert.equal(requiresWebIntegrationExecution(unit01,
+    unitBody.replace('required for Pass', 'recorded for reference')), false);
+  assert.equal(requiresWebIntegrationExecution(unit01,
+    unitBody.replace('Web unit-test CI', 'Rust unit-test CI')), false);
+  const unitContext = { stage: 'pr', target_ref: sha, requirement_body: unitBody,
+    criteria: [unit01,unit02,unitStatic],
+    pr_web_quality: { status: 'fail', reason: 'web-tests completed/failure' } };
+  const unitProposal = { criteria: [unit01,unit02,unitStatic].map(sc=>({
+    criterion: sc.criterion, result:'Pass',
+    evidence:[{type:'source',value:'source assertions only'}] })) };
+  const unitBlocked = enforcePrWebQuality(unitContext, unitProposal);
+  assert.equal(unitBlocked.criteria[0].result, 'Pending');
+  assert.equal(unitBlocked.criteria[1].result, 'Pending');
+  assert.equal(unitBlocked.criteria[2].result, 'Pass');
+  assert.match(unitBlocked.criteria[0].summary, /web-tests completed\/failure/);
+  assert.equal(enforcePrWebQuality({...unitContext,
+    pr_web_quality:{status:'pending',reason:'Web Quality in_progress'}},
+    unitProposal).criteria[0].result, 'Pending');
+  const unitPassed = enforcePrWebQuality({...unitContext,pr_web_quality:pass},unitProposal);
+  assert.equal(unitPassed.criteria[0].result, 'Pass');
+  assert.equal(unitPassed.criteria[1].result, 'Pass');
+  assert.equal(unitPassed.criteria[2].result, 'Pass');
+  assert.equal(enforcePrWebQuality({...unitContext,pr_web_quality:{
+    status:'pass',receipt:{...pass.receipt,head_sha:other}}},
+    unitProposal).criteria[0].result, 'Pending');
+
   const qualityContext = {
     stage: 'pr', target_ref: sha, requirement_body: body,
     criteria: [staticSc, qualitySc], pr_web_quality: { status: 'pending', reason: 'Web Quality still running' },
