@@ -932,7 +932,7 @@ function selfTest() {
   });
   const rawWebPass = normalizeAcceptanceResult(webContext, {
     criteria: [{ criterion: 'SC-01', result: 'Pass',
-      evidence: [{ type: 'source', value: 'Web test source reviewed' }] }],
+      evidence: [{ type: 'text', value: 'Code inspection alone is not an authenticated exact-head Web Quality receipt' }] }],
   }, 'agent-cursor');
   assert.throws(() => applyAcceptanceResultToBody(webBody, rawWebPass),
     /lacks authenticated exact-head Web Quality receipt/);
