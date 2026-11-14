@@ -145,6 +145,7 @@ jobs:
           set -euo pipefail
           node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
+          node scripts/lib/agent/orchestration/development-ingest-selftest.mjs
           node scripts/lib/agent/store/remote-selftest.mjs
           ./gates/run run-store-integrity
       - name: Resolve bounded owner/main source command before any credential use
