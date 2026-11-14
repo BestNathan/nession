@@ -132,7 +132,7 @@ function makeAttachInfo(): AttachInfo {
     mode: 'p2p',
     session_id: 'agent:s1',
     agent_address: 'ws://a/ws',
-    connection_token: 'tok',
+    agent_token: 'tok',
     addresses: [
       { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
       { url: 'ws://b/ws', label: 'B', network_type: 'vpn', priority: 5, status: 'reachable' },
@@ -790,7 +790,7 @@ describe('SessionRuntime', () => {
     // for and no second socket.
     const rt = new SessionRuntime(makeConfig());
     expect(wsInstances).toHaveLength(1);
-    expect(lastWs().url).toBe('ws://a/ws?token=tok');
+    expect(lastWs().url).toBe('ws://a/ws');
     expect(rt.activeUrl).toBe('ws://a/ws');
     expect(rt.getAgentTerminalApi()).not.toBeNull();
     expect(rt.getFilesApi()).not.toBeNull();
@@ -813,135 +813,98 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('renews a spent P2P credential before a lost socket is rebuilt (#2645)', async () => {
+  it('presents the durable Agent token as client.auth and keeps it out of the URL (#3440)', async () => {
+    const rt = new SessionRuntime(makeConfig());
+    rt.setTransportReady(true);
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    await openWs();
+    await flushMicrotasks();
+    answerAttach();
+    await flushMicrotasks();
+
+    expect(lastWs().url).toBe('ws://a/ws');
+    const auth = sentFrames().filter((frame) => frame.msg_type === 'client.auth');
+    expect(auth).toHaveLength(1);
+    expect(auth[0].payload).toMatchObject({ auth_token: 'tok', client_id: 'unit-client' });
+    rt.dispose();
+  });
+
+  it('reuses the cached Agent token on an ordinary reconnect without refetching (#3440)', async () => {
+    const requestFreshAttach = vi.fn();
+    const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerAttach();
+    await flushMicrotasks();
+
+    lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+    rt.resumeOnForeground();
+    await flushMicrotasks();
+    await openWs();
+
+    expect(requestFreshAttach).not.toHaveBeenCalled();
+    const auth = sentFrames().filter((frame) => frame.msg_type === 'client.auth');
+    expect(auth).toHaveLength(2);
+    expect(auth[1].payload).toMatchObject({ auth_token: 'tok' });
+    rt.dispose();
+  });
+
+  it('refetches the Agent token after an identity rejection and redials with it (#3440)', async () => {
     vi.useFakeTimers();
     try {
-      const attachInfo: AttachInfo = {
-        ...makeAttachInfo(),
-        connection_token_expires_at: new Date(Date.now() + 61_000).toISOString(),
-      };
-      const fresh: AttachInfo = {
-        ...makeAttachInfo(),
-        connection_token: 'fresh-token',
-        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
-      };
+      const fresh: AttachInfo = { ...makeAttachInfo(), agent_token: 'fresh-token' };
       const requestFreshAttach = vi.fn().mockResolvedValue(fresh);
-      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach }));
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
       rt.setTransportReady(true);
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      await openWs();
-      await flushMicrotasks();
-      answerAttach();
-      await flushMicrotasks();
-
-      // The first dial still presents the attach-issued credential.
-      expect(requestFreshAttach).not.toHaveBeenCalled();
-      expect(lastWs().url).toBe('ws://a/ws?token=tok');
-
-      // Cross the renewal margin while the socket stays healthy: expiry alone
-      // never rebuilds a working transport.
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(requestFreshAttach).not.toHaveBeenCalled();
-      expect(rt.getAgentTerminalApi()).not.toBeNull();
-
       const before = wsInstances.length;
-      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
-      rt.resumeOnForeground();
-      await flushMicrotasks();
-      await flushMicrotasks();
+
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      answerPending('client.auth', 'ok', { status: 'failed', message: 'bad token' });
+      await drainHandshake();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await drainHandshake();
 
       expect(requestFreshAttach).toHaveBeenCalledWith('agent:s1');
       expect(wsInstances.length).toBe(before + 1);
-      expect(lastWs().url).toContain('token=fresh-token');
+      expect(lastWs().url).toBe('ws://a/ws');
+      await openWs();
+      const auth = sentFrames().filter((frame) => frame.msg_type === 'client.auth');
+      expect(auth[auth.length - 1].payload).toMatchObject({ auth_token: 'fresh-token' });
       rt.dispose();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('reuses an unspent P2P credential and does not reissue it on reconnect (#2645)', async () => {
-    vi.useFakeTimers();
-    try {
-      const attachInfo: AttachInfo = {
-        ...makeAttachInfo(),
-        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
-      };
-      const requestFreshAttach = vi.fn();
-      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach }));
-      rt.setTransportReady(true);
-      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      await openWs();
-      await flushMicrotasks();
-      answerAttach();
-      await flushMicrotasks();
+  it('refetches after the Server authenticates when the rejection could not reach it (#3440)', async () => {
+    const fresh: AttachInfo = { ...makeAttachInfo(), agent_token: 'fresh-token' };
+    const requestFreshAttach = vi.fn()
+      .mockRejectedValueOnce(new Error('server unavailable'))
+      .mockResolvedValueOnce(fresh);
+    const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+    rt.setTransportReady(true);
+    rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
 
-      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
-      rt.resumeOnForeground();
-      await flushMicrotasks();
-      await flushMicrotasks();
+    lastWs().readyState = 1;
+    lastWs().onopen?.(new Event('open'));
+    answerPending('client.auth', 'ok', { status: 'failed', message: 'bad token' });
+    await drainHandshake();
+    await flushMicrotasks();
+    expect(requestFreshAttach).toHaveBeenCalledTimes(1);
 
-      expect(requestFreshAttach).not.toHaveBeenCalled();
-      expect(lastWs().url).toContain('token=tok');
-      rt.dispose();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('fences a renewal that resolves after the attach was replaced (#2645)', async () => {
-    vi.useFakeTimers();
-    try {
-      const attachInfo: AttachInfo = {
-        ...makeAttachInfo(),
-        connection_token_expires_at: new Date(Date.now() + 61_000).toISOString(),
-      };
-      let settleRenewal!: (info: AttachInfo) => void;
-      const requestFreshAttach = vi.fn(
-        () => new Promise<AttachInfo>((resolve) => { settleRenewal = resolve; }),
-      );
-      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach }));
-      const events: string[] = [];
-      rt.subscribeRuntimeEvents((event) => {
-        if (event.type === 'p2p-credential') {
-          events.push(event.outcome);
-        }
-      });
-      rt.setTransportReady(true);
-      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
-      await openWs();
-      await flushMicrotasks();
-      answerAttach();
-      await flushMicrotasks();
-
-      await vi.advanceTimersByTimeAsync(2_000);
-      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
-      rt.resumeOnForeground();
-      await flushMicrotasks();
-      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
-
-      // A fresh attach replaces the authority while the old renewal is still
-      // in flight. It must win; the old reply must be discarded, not installed.
-      const replacement: AttachInfo = {
-        ...makeAttachInfo(),
-        connection_token: 'replacement-token',
-        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
-      };
-      rt.updateContext({ attachInfo: replacement });
-      settleRenewal({
-        ...makeAttachInfo(),
-        connection_token: 'stale-renewed-token',
-        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
-      });
-      await flushMicrotasks();
-      await flushMicrotasks();
-
-      expect(wsInstances.some((ws) => ws.url.includes('stale-renewed-token'))).toBe(false);
-      expect(lastWs().url).toContain('token=replacement-token');
-      expect(events).toContain('failed');
-      rt.dispose();
-    } finally {
-      vi.useRealTimers();
-    }
+    const before = wsInstances.length;
+    rt.resumeAfterServerAuthenticated();
+    await drainHandshake();
+    expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+    expect(wsInstances.length).toBe(before + 1);
+    await openWs();
+    const auth = sentFrames().filter((frame) => frame.msg_type === 'client.auth');
+    expect(auth[auth.length - 1].payload).toMatchObject({ auth_token: 'fresh-token' });
+    rt.dispose();
   });
 
   it('builds no agent API when the plan carries no addresses (#1430)', () => {
@@ -2062,6 +2025,31 @@ describe('SessionRuntime', () => {
       expect(rt.attachState.reconnectCount).toBe(1);
       rt.dispose();
     });
+  });
+
+  it('keeps a relay-begin send race out of the React update path (#3358 SC-10)', async () => {
+    const serverConnection = makeRelayServerConnection('connected');
+    // `isReady()` passed, then the socket closed before the send: the legacy
+    // path throws synchronously from inside updateContext.
+    let allowRelay = false;
+    serverConnection.beginRelay.mockImplementation(() => {
+      if (!allowRelay) { throw new Error('WebSocket not connected'); }
+    });
+    const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
+
+    expect(() => rt.setTransportReady(true)).not.toThrow();
+    await flushMicrotasks();
+    expect(serverConnection.beginRelay).toHaveBeenCalled();
+    expect(rt.attachState.phase).toBe('connecting');
+
+    // The next authenticated state re-drives the relay; the failed attempts
+    // were not terminal and never escaped into React.
+    allowRelay = true;
+    serverConnection.emit('reconnecting');
+    serverConnection.emit('connected');
+    await flushMicrotasks();
+    expect(rt.attachState.phase).toBe('attached');
+    rt.dispose();
   });
 
   it('re-begins relay after server websocket reconnect', async () => {

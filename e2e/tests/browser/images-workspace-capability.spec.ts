@@ -13,15 +13,20 @@ async function openProjectSettings(page: Page): Promise<void> {
   await expect(page.getByTestId('project-settings-dialog')).toBeVisible();
 }
 
-test.describe('Server-owned Images capability (#3181)', () => {
-  test('Workspace exposes the complete paged registry without a Session', async ({ page }) => {
-    await page.goto('/#/fixture/workspace?capability=images&session=none');
-    await expect(page.getByTestId('images-workspace')).toBeVisible();
+test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', () => {
+  test('Sandbox exposes the complete paged registry in its Images section', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=sandbox');
+    await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-section-images').click();
+    await expect(page.getByTestId('sandbox-images')).toBeVisible();
 
-    // A Session is not present, but the Server-owned Images capability is.
-    await expect(page.getByTestId('session-empty-state')).toHaveCount(0);
+    // The Server registry is global; the Session-scoped Sandbox presents it.
     await expect(page.getByTestId('image-row')).toHaveCount(50);
     await expect(page.getByTestId('images-page-label')).toHaveText('1–50 of 235');
+    // The Library is a single list: detail expands inline under its row.
+    await expect(page.getByTestId('images-detail')).toHaveCount(0);
+    await page.getByTestId('image-row').first().click();
+    await expect(page.getByTestId('image-detail-row')).toBeVisible();
     await expect(page.getByTestId('images-detail')).toContainText('Server-owned immutable image');
     await expect(page.getByTestId('images-detail')).toContainText('Server Ready');
 
@@ -81,46 +86,94 @@ test.describe('Server-owned Images capability (#3181)', () => {
     await expect(page.getByTestId('project-image-digest-field')).toHaveText(before);
   });
 
-  test('Sandbox owns its image composition and pins Agent cache observations', async ({
+  test('Sandbox owns Filesystem image declarations and pins Agent cache observations', async ({
     page,
   }) => {
     await page.goto('/#/fixture/workspace?capability=sandbox');
     await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
-    await expect(page.getByTestId('sandbox-image-composition')).toBeVisible();
+    await expect(page.getByTestId('sandbox-filesystem-preview')).toBeVisible();
 
-    await page.getByTestId('sandbox-image-add-open').click();
-    await expect(page.getByTestId('sandbox-image-picker')).toContainText(
-      'Sandbox-specific',
-    );
+    await page.getByTestId('sandbox-rootfs-image').click();
     await page.getByTestId('sandbox-image-row').first().click();
-    await expect(page.getByTestId('sandbox-image-target')).toHaveValue('/');
-    await page.getByTestId('sandbox-image-add').click();
-    await expect(page.getByTestId('sandbox-image-selection')).toHaveCount(1);
-    await expect(page.getByTestId('sandbox-image-cache')).toHaveText('Agent verified');
+    await page.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-rootfs-selected')).toBeVisible();
+    await expect(page.getByTestId('sandbox-rootfs-cache')).toContainText('Verified');
 
-    await page.getByTestId('sandbox-image-add-open').click();
-    await page.getByTestId('sandbox-image-row').nth(1).click();
-    await page.getByTestId('sandbox-image-target').fill('/opt/tool');
-    await page.getByTestId('sandbox-image-add').click();
-    await expect(page.getByTestId('sandbox-image-selection')).toHaveCount(2);
+    await page.getByTestId('sandbox-mount-add').click();
+    const dialog = page.getByTestId('sandbox-image-select-dialog');
+    await dialog.getByTestId('sandbox-image-row').nth(1).click();
+    await dialog.getByTestId('sandbox-mount-target').fill('/opt/tool');
+    await dialog.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-mount-row')).toHaveCount(1);
+    await expect(page.getByTestId('sandbox-filesystem-preview-mount-0')).toContainText(
+      '/opt/tool',
+    );
 
-    await page.getByTestId('sandbox-tab-overview').click();
+    await page.getByTestId('sandbox-section-overview').click();
     await page.getByTestId('sandbox-preflight').click();
     await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
+  });
+
+  test('Workspace observes a durable build stage, cancels and retries it', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=sandbox&images=lifecycle');
+    await page.getByTestId('sandbox-section-images').click();
+    await page.getByTestId('images-section-builds').click();
+    await expect(page.getByTestId('images-builds')).toBeVisible();
+    await expect(page.getByTestId('image-build-row')).toHaveCount(4);
+
+    const running = page.locator('[data-build-id="build-fixture-running"]');
+    await expect(running.getByTestId('image-build-status')).toHaveText('Building');
+    await expect(running.getByTestId('image-build-stage')).toHaveText(
+      'Packaging with mkfs.erofs',
+    );
+    // Measured counts only: no invented percentage during mkfs.
+    await expect(running.getByTestId('image-build-progress')).toContainText('214 files');
+    await expect(running.getByTestId('image-build-progress')).toContainText('2,400,000 bytes');
+    await expect(running.getByTestId('image-build-progress')).not.toContainText('%');
+
+    await running.getByTestId('image-build-cancel').click();
+    await expect(running.getByTestId('image-build-status')).toHaveText('Canceled');
+
+    const failed = page.locator('[data-build-id="build-fixture-failed"]');
+    await expect(failed.getByTestId('image-build-error')).toContainText('mkfs.erofs failed');
+    await failed.getByTestId('image-build-retry').click();
+    await expect(failed.getByTestId('image-build-status')).toHaveText('Succeeded', {
+      timeout: 5000,
+    });
+
+    // Navigating away and back reads the same durable inventory; the canceled
+    // record is still canceled and no Project reference was rebound.
+    await page.goto('/#/fixture?projects=canonical');
+    await expect(page.getByTestId('project-detail')).toHaveCount(0);
+    await page.goto('/#/fixture/workspace?capability=sandbox&images=lifecycle');
+    await page.getByTestId('sandbox-section-images').click();
+    await page.getByTestId('images-section-builds').click();
+    await expect(
+      page.locator('[data-build-id="build-fixture-running"]').getByTestId('image-build-status'),
+    ).toHaveText('Canceled');
+    test.info().annotations.push({
+      type: 'evidence',
+      description:
+        'exact SHA fixture: the Images workspace showed the durable build stage with measured file/byte counts and no percentage, canceled an owned build, retried a failed build, and reloaded the same states after navigating away',
+    });
   });
 
   test('a failed Agent cache is never shown as mount-ready', async ({ page }) => {
     await page.goto(
       '/#/fixture/workspace?capability=sandbox&sandbox=agent-cache-failed',
     );
+    await page.getByTestId('sandbox-section-policies').click();
     await page.getByTestId('sandbox-tab-filesystem').click();
-    await page.getByTestId('sandbox-image-add-open').click();
+    await page.getByTestId('sandbox-rootfs-image').click();
     await page.getByTestId('sandbox-image-row').first().click();
-    await page.getByTestId('sandbox-image-add').click();
-    await expect(page.getByTestId('sandbox-image-cache')).toHaveText('Agent cache failed');
-    await expect(page.getByTestId('sandbox-image-cache')).not.toContainText(
-      'Agent verified',
+    await page.getByTestId('sandbox-image-select-submit').click();
+    await expect(page.getByTestId('sandbox-rootfs-cache')).toHaveText(
+      'Cache failed · 256 KiB',
+    );
+    await expect(page.getByTestId('sandbox-rootfs-cache')).not.toContainText(
+      'Verified',
     );
   });
 });

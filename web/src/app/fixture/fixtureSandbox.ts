@@ -36,6 +36,8 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   …&sandbox=preflight-fail → validation blocked by host capability
  *   …&sandbox=enter-fail  → validated, then the launch barrier refuses
  *   …&sandbox=agent-cache-failed → a selected image's Agent cache failed
+ *   …&sandbox=agent-cache-downloading → one digest is actively downloading
+ *   …&sandbox=agent-cache-resumable → a verified partial download survives
  *
  * The row validation below is a **fixture mirror** of the Agent's rules, so a
  * browser Case can drive the UI's field-error rendering. It is not a second
@@ -56,7 +58,9 @@ type Scenario =
   | 'offline'
   | 'preflight-fail'
   | 'enter-fail'
-  | 'agent-cache-failed';
+  | 'agent-cache-failed'
+  | 'agent-cache-downloading'
+  | 'agent-cache-resumable';
 
 function scenarioOf(search: string): Scenario {
   const requested = new URLSearchParams(search).get('sandbox');
@@ -71,6 +75,8 @@ function scenarioOf(search: string): Scenario {
     case 'preflight-fail':
     case 'enter-fail':
     case 'agent-cache-failed':
+    case 'agent-cache-downloading':
+    case 'agent-cache-resumable':
       return requested;
     default:
       return 'outside';
@@ -633,6 +639,69 @@ function preflight(
   };
 }
 
+function fixtureCacheStatuses(
+  cacheDigests: string[],
+  failed: boolean,
+): SandboxContextResponse['cache_statuses'] {
+  return cacheDigests.map((digest) => ({
+    digest,
+    state: failed ? ('failed' as const) : ('verified' as const),
+    ...(failed ? { detail: 'fixture cache verification failed' } : {}),
+  }));
+}
+
+function fixtureCacheObservations(
+  cacheDigests: string[],
+  scenario: Scenario,
+): SandboxContextResponse['cache_observations'] {
+  return cacheDigests.map((digest, index) => {
+    if (scenario === 'agent-cache-failed') {
+      return {
+        contract_version: 1,
+        digest,
+        phase: 'failed' as const,
+        downloaded_bytes: 262_144,
+        total_bytes: 4_194_304,
+        active: false,
+        updated_at: 1_760_000_000,
+        detail: 'fixture cache verification failed',
+      };
+    }
+    if (scenario === 'agent-cache-downloading' && index === 0) {
+      return {
+        contract_version: 1,
+        digest,
+        phase: 'downloading' as const,
+        downloaded_bytes: 1_048_576,
+        total_bytes: 4_194_304,
+        active: true,
+        updated_at: 1_760_000_100,
+      };
+    }
+    if (scenario === 'agent-cache-resumable' && index === 0) {
+      return {
+        contract_version: 1,
+        digest,
+        phase: 'resumable' as const,
+        downloaded_bytes: 524_288,
+        total_bytes: 4_194_304,
+        active: false,
+        updated_at: 1_760_000_200,
+        detail: 'a verified partial download survives; resume on next Prepare',
+      };
+    }
+    return {
+      contract_version: 1,
+      digest,
+      phase: 'verified' as const,
+      downloaded_bytes: 4_194_304,
+      total_bytes: 4_194_304,
+      active: false,
+      updated_at: 1_760_000_000,
+    };
+  });
+}
+
 interface FixtureSandboxState {
   scenario: Scenario;
   revision: number;
@@ -659,13 +728,11 @@ function answerSandbox(
     const response: SandboxContextResponse = {
       success: true,
       context: contextFor(),
-      cache_statuses: cacheDigests.map((digest) => ({
-        digest,
-        state: state.scenario === 'agent-cache-failed' ? 'failed' : 'verified',
-        ...(state.scenario === 'agent-cache-failed'
-          ? { detail: 'fixture cache verification failed' }
-          : {}),
-      })),
+      cache_statuses: fixtureCacheStatuses(
+        cacheDigests,
+        state.scenario === 'agent-cache-failed',
+      ),
+      cache_observations: fixtureCacheObservations(cacheDigests, state.scenario),
     };
     return Promise.resolve(response);
   }

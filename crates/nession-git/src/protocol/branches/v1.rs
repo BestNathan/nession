@@ -7,13 +7,10 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 
 /// One local branch.
 ///
-/// `camelCase` for the reason `ChangedFile` records: the client reads camelCase,
-/// and a multi-word field without the rule arrives as `undefined` with nothing
-/// to say so.
+/// Nession-owned transport field names are snake_case (#3371).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub name: String,
     /// HEAD points here.
@@ -33,7 +30,6 @@ pub struct Branch {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct Branches {
     pub branches: Vec<Branch>,
     /// The count that was answered for, so the view can offer "more" honestly.

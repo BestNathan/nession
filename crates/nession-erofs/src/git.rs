@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::build::ProcessControl;
+
 /// The exact Git identity a build is allowed to materialize.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitTarget {
@@ -29,9 +31,13 @@ pub struct GitSnapshot {
 
 /// A Git command runner. Tests substitute a recorder; production uses the
 /// process runner.
+///
+/// Every invocation is owned by a [`ProcessControl`] so a build can bound and
+/// cancel a running Git subprocess; dropping the surrounding future is not
+/// cancellation.
 pub trait GitCommandRunner: Send + Sync {
     /// Run one `git` invocation and return trimmed stdout.
-    fn run(&self, args: &[String], cwd: Option<&Path>) -> Result<String>;
+    fn run(&self, args: &[String], cwd: Option<&Path>, control: &ProcessControl) -> Result<String>;
 }
 
 /// Runs the host `git` with a credential-free environment.
@@ -49,7 +55,7 @@ impl ProcessGitRunner {
 }
 
 impl GitCommandRunner for ProcessGitRunner {
-    fn run(&self, args: &[String], cwd: Option<&Path>) -> Result<String> {
+    fn run(&self, args: &[String], cwd: Option<&Path>, control: &ProcessControl) -> Result<String> {
         let mut command = Command::new(self.binary());
         command
             .args(args)
@@ -70,18 +76,7 @@ impl GitCommandRunner for ProcessGitRunner {
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
-        let output = command
-            .output()
-            .with_context(|| format!("failed to execute git {}", args.join(" ")))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!(
-                "git {} failed: {}",
-                args.join(" "),
-                stderr.trim().lines().next().unwrap_or("unknown error")
-            );
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        control.execute(&mut command, &format!("git {}", args.join(" ")))
     }
 }
 
@@ -116,6 +111,7 @@ pub fn materialize(
     target: &GitTarget,
     dest: &Path,
     runner: &dyn GitCommandRunner,
+    control: &ProcessControl,
 ) -> Result<GitSnapshot> {
     if dest.exists() {
         anyhow::bail!("snapshot destination already exists: {}", dest.display());
@@ -123,18 +119,20 @@ pub fn materialize(
     if let Some(sha) = &target.requested_sha {
         let dest_string = dest.to_string_lossy().into_owned();
         let init = arg_list(&["init", dest_string.as_str()]);
-        runner.run(&init, None).context("git init failed")?;
+        runner
+            .run(&init, None, control)
+            .context("git init failed")?;
         let add = arg_list(&["remote", "add", "origin", target.repository_url.as_str()]);
         runner
-            .run(&add, Some(dest))
+            .run(&add, Some(dest), control)
             .context("git remote add failed")?;
         let fetch = arg_list(&["fetch", "--depth", "1", "--no-tags", "origin", sha.as_str()]);
         runner
-            .run(&fetch, Some(dest))
+            .run(&fetch, Some(dest), control)
             .with_context(|| format!("fixed commit {sha} is not fetchable"))?;
         let checkout = arg_list(&["checkout", "--detach", "FETCH_HEAD"]);
         runner
-            .run(&checkout, Some(dest))
+            .run(&checkout, Some(dest), control)
             .context("git checkout of the fixed commit failed")?;
     } else {
         let dest_string = dest.to_string_lossy().into_owned();
@@ -150,11 +148,11 @@ pub fn materialize(
             dest_string.as_str(),
         ]);
         runner
-            .run(&clone, None)
+            .run(&clone, None, control)
             .with_context(|| format!("branch {} is not fetchable", target.reference))?;
     }
 
-    let head = runner.run(&arg_list(&["rev-parse", "HEAD"]), Some(dest))?;
+    let head = runner.run(&arg_list(&["rev-parse", "HEAD"]), Some(dest), control)?;
     if head.len() != 40 || !head.bytes().all(|b| b.is_ascii_hexdigit()) {
         anyhow::bail!("git did not resolve a full commit SHA: {head:?}");
     }
@@ -163,7 +161,7 @@ pub fn materialize(
             anyhow::bail!("resolved commit {head} does not match requested commit {expected}");
         }
     }
-    let status = runner.run(&arg_list(&["status", "--porcelain"]), Some(dest))?;
+    let status = runner.run(&arg_list(&["status", "--porcelain"]), Some(dest), control)?;
     if !status.is_empty() {
         anyhow::bail!("fresh snapshot is not clean: {status}");
     }
@@ -171,7 +169,7 @@ pub fn materialize(
     if !shallow.is_file() {
         anyhow::bail!("snapshot is not shallow: .git/shallow is missing");
     }
-    let tags = runner.run(&arg_list(&["tag", "--list"]), Some(dest))?;
+    let tags = runner.run(&arg_list(&["tag", "--list"]), Some(dest), control)?;
     if !tags.is_empty() {
         anyhow::bail!("snapshot unexpectedly contains tags: {tags}");
     }
@@ -286,7 +284,13 @@ mod tests {
             reference: "main".to_string(),
             requested_sha: None,
         };
-        let snapshot = materialize(&target, &dest, &ProcessGitRunner::default()).unwrap();
+        let snapshot = materialize(
+            &target,
+            &dest,
+            &ProcessGitRunner::default(),
+            &ProcessControl::new(),
+        )
+        .unwrap();
         assert_eq!(snapshot.commit_sha, second);
         assert_eq!(snapshot.branch.as_deref(), Some("main"));
         assert!(dest.join(".git/shallow").is_file());
@@ -308,7 +312,13 @@ mod tests {
             reference: first.clone(),
             requested_sha: Some(first.clone()),
         };
-        let snapshot = materialize(&target, &dest, &ProcessGitRunner::default()).unwrap();
+        let snapshot = materialize(
+            &target,
+            &dest,
+            &ProcessGitRunner::default(),
+            &ProcessControl::new(),
+        )
+        .unwrap();
         assert_eq!(snapshot.commit_sha, first);
         assert_ne!(snapshot.commit_sha, second);
         assert!(snapshot.branch.is_none());
@@ -324,7 +334,13 @@ mod tests {
             reference: "a".repeat(40),
             requested_sha: Some("a".repeat(40)),
         };
-        let error = materialize(&target, &dest, &ProcessGitRunner::default()).unwrap_err();
+        let error = materialize(
+            &target,
+            &dest,
+            &ProcessGitRunner::default(),
+            &ProcessControl::new(),
+        )
+        .unwrap_err();
         assert!(format!("{error:#}").contains("not fetchable"), "{error:#}");
     }
 
@@ -338,7 +354,13 @@ mod tests {
             reference: "main".to_string(),
             requested_sha: None,
         };
-        materialize(&target, &dest, &ProcessGitRunner::default()).unwrap();
+        materialize(
+            &target,
+            &dest,
+            &ProcessGitRunner::default(),
+            &ProcessControl::new(),
+        )
+        .unwrap();
         let config = dest.join(".git/config");
         let mut text = fs::read_to_string(&config).unwrap();
         text.push_str("\n[credential]\n\thelper = store\n");

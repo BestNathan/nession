@@ -32,6 +32,10 @@ pub const AGENTS_CHANGED: &str = "server.agents.changed";
 pub const SESSIONS_CHANGED: &str = "server.sessions.changed";
 pub const COMMANDS_CHANGED: &str = "server.commands.changed";
 pub const GIT_INVALIDATED: &str = "agent.git.invalidated";
+/// A durable image build changed state (#3334). The payload carries the
+/// authoritative descriptor read from the build directory at that transition;
+/// a client that missed a push re-reads `server.image.build.get|list`.
+pub const IMAGE_BUILD_UPDATED: &str = "server.image.build.updated";
 
 /// Shared broadcast channel for agent state pushes. A single sender is held
 /// by the server; every web-client connection spawns a relay task that
@@ -201,6 +205,29 @@ impl WebClientRegistry {
             Ok(json) => self.broadcast(json),
             Err(e) => error!(
                 "WebClientRegistry: failed to serialize {GIT_INVALIDATED}: {}",
+                e
+            ),
+        }
+    }
+
+    /// Push one durable image build transition to every connected web client.
+    pub fn broadcast_image_build_changed(
+        &self,
+        build: &nession_protocol::contracts::image::v1::ImageBuildDescriptor,
+    ) {
+        let payload = serde_json::json!({
+            "msg_type": IMAGE_BUILD_UPDATED,
+            "id": "",
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            "payload": { "build": build },
+        });
+        match serde_json::to_string(&payload) {
+            Ok(json) => self.broadcast(json),
+            Err(e) => error!(
+                "WebClientRegistry: failed to serialize {IMAGE_BUILD_UPDATED}: {}",
                 e
             ),
         }

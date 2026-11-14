@@ -136,7 +136,17 @@ async fn managed_create_pins_and_authorizes_every_artifact() {
         images[0]["path"],
         json!(format!("/images/blobs/{BASE_DIGEST}"))
     );
-    assert_eq!(images[0]["token"].as_str().unwrap().len(), 64);
+    // The Agent fetches these routes with the durable Agent Token it already
+    // holds; a per-artifact bearer is gone (#3440).
+    assert!(
+        images[0].get("token").is_none(),
+        "a managed artifact carries no minted credential: {}",
+        images[0]
+    );
+    assert_eq!(
+        images[1]["path"],
+        json!(format!("/images/blobs/{WORKSPACE_DIGEST}"))
+    );
 
     let context =
         h.db.get_session_managed_context("a1:managed-1")

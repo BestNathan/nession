@@ -60,17 +60,9 @@ async fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
         let db = std::sync::Arc::new(nession_server::db::Database::new(&config.db_path).await?);
-        let blobs = nession_erofs::BlobStore::new(&config.image_blob_dir)
-            .context("failed to open the image blob store")?;
-        let backend: std::sync::Arc<dyn nession_server::image::ImageBuildBackend> =
-            std::sync::Arc::new(nession_server::image::UnavailableBackend);
-        let manager = nession_server::image::ImageManager::new(
-            db,
-            backend,
-            blobs,
-            1,
-            config.image_access_token_expiry_secs,
-        );
+        // Diagnostics reads the registry and blob store only; it deliberately
+        // takes no build-root ownership so it can run beside a live Server.
+        let manager = nession_server::image::ImageManager::unavailable(db, &config.image_blob_dir)?;
         let diagnostics = manager
             .diagnostics()
             .await

@@ -85,7 +85,7 @@ impl ClientConnection {
             .request(proto_msg(
                 wire::SERVER_AUTH,
                 ClientAuthPayload {
-                    auth_token: connection.config.auth_token.clone(),
+                    auth_token: connection.config.auth_token.clone().into(),
                     client_id: Some(client_id),
                 },
             ))
@@ -162,6 +162,53 @@ impl ClientConnection {
                 source,
             })
     }
+}
+
+/// Authenticate an Agent socket as its first protocol frame (#3440).
+///
+/// The Agent accepts no business frame before this succeeds. A refusal is a
+/// delivered answer (`ClientError::Auth`), not a transport failure, so callers
+/// stop retrying instead of treating a wrong token as an unreachable endpoint.
+pub(crate) async fn authenticate_agent(
+    ws: &mut WsStream,
+    seq: &mut u64,
+    agent_token: &str,
+    ai_client_id: Option<String>,
+) -> Result<AuthResponsePayload, ClientError> {
+    let request = proto_msg(
+        wire::CLIENT_AUTH,
+        ClientAuthPayload {
+            auth_token: agent_token.into(),
+            client_id: ai_client_id,
+        },
+    );
+    let (msg_type, payload) = request_envelope(ws, seq, request, DEFAULT_REQUEST_TIMEOUT).await?;
+    if msg_type == "error" {
+        return Err(ClientError::Auth {
+            message: payload
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("the agent refused authentication")
+                .to_string(),
+        });
+    }
+    if msg_type != "ok" {
+        return Err(ClientError::UnexpectedReply {
+            wire: wire::CLIENT_AUTH.to_string(),
+            got: msg_type,
+        });
+    }
+    let reply: AuthResponsePayload =
+        serde_json::from_value(payload).map_err(|source| ClientError::Reply {
+            wire: wire::CLIENT_AUTH.to_string(),
+            source,
+        })?;
+    if reply.status != "success" {
+        return Err(ClientError::Auth {
+            message: reply.message,
+        });
+    }
+    Ok(reply)
 }
 
 /// The per-connection request id counter.

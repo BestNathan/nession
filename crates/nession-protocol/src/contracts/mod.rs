@@ -40,12 +40,12 @@ pub mod file;
 #[cfg(test)]
 mod fixtures;
 pub mod image;
-pub mod p2p;
 pub mod project;
 pub mod sandbox;
 pub mod server;
 pub mod session;
 pub mod terminal;
+pub mod workspace;
 
 /// The build tag of whichever binary is answering.
 ///

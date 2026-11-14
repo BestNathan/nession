@@ -72,11 +72,8 @@ function probed(url: string, status: ProbedAddress['status'], priority = 10): Pr
  * order. Since #1430 the *plan* no longer waits on this — the measurement
  * refines the next attach — so it is a helper, not a plan factory.
  */
-function orderCandidates(
-  addresses: ProbedAddress[],
-  options?: { credential?: string },
-): Promise<string[]> {
-  return testAddresses(addresses, options).then(orderByLatency);
+function orderCandidates(addresses: ProbedAddress[]): Promise<string[]> {
+  return testAddresses(addresses).then(orderByLatency);
 }
 
 beforeEach(() => {
@@ -115,45 +112,27 @@ describe('measureLatency', () => {
     expect(result.latencyMs).toBeNull();
   });
 
-  // ── The credential (#1091) ──────────────────────────────────────────────
-  //
-  // Both halves of these matter and they fail differently: a probe that does not
-  // present the credential is refused by the agent since #1013 and reports every
-  // candidate unreachable, and a probe that reports the credentialled URL back
-  // makes the result unusable as an identity — `AttachDialog` keys its latency
-  // column by `url`, and the chosen URL is passed to `buildAgentWsUrl` again.
-
-  it('presents the credential at the upgrade but reports the bare URL', async () => {
+  it('dials the bare candidate URL and reports it back unchanged', async () => {
     behavior['ws://a/ws'] = { openDelayMs: 5 };
-    const p = measureLatency('ws://a/ws', { credential: 'tok' });
+    const p = measureLatency('ws://a/ws');
     await vi.advanceTimersByTimeAsync(10);
     const result = await p;
 
-    expect(dialed).toEqual(['ws://a/ws?token=tok']);
+    expect(dialed).toEqual(['ws://a/ws']);
     expect(result.url).toBe('ws://a/ws');
     expect(result.latencyMs).not.toBeNull();
   });
 
-  it('dials without a token when there is no credential', async () => {
-    behavior['ws://a/ws'] = { openDelayMs: 5 };
-    const p = measureLatency('ws://a/ws');
-    await vi.advanceTimersByTimeAsync(10);
-    await p;
-
-    expect(dialed).toEqual(['ws://a/ws']);
-  });
-
-  it('carries the credential through the whole fan-out', async () => {
+  it('measures every candidate without a credential', async () => {
     behavior['ws://a/ws'] = { openDelayMs: 5 };
     behavior['ws://b/ws'] = { openDelayMs: 1 };
     const addrs = [probed('ws://a/ws', 'reachable'), probed('ws://b/ws', 'reachable')];
 
-    const p = orderCandidates(addrs, { credential: 'tok' });
+    const p = orderCandidates(addrs);
     await vi.advanceTimersByTimeAsync(10);
     const urls = await p;
 
-    expect(dialed).toEqual(['ws://a/ws?token=tok', 'ws://b/ws?token=tok']);
-    // Bare URLs come back, so the ordering is still usable as a plan.
+    expect(dialed).toEqual(['ws://a/ws', 'ws://b/ws']);
     expect(urls).toEqual(['ws://b/ws', 'ws://a/ws']);
   });
 });

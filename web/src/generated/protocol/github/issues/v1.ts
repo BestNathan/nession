@@ -35,16 +35,16 @@ refresh?: boolean | null, session: string,
  * re-resolves it on every request; it can never name a host/owner/repo.
  */
 remote_name?: string | null, };
-export type IssuesOkV1 = { repository: GithubRepositoryRefV1, issues: Array<GithubIssueSummaryV1>, hasMore: boolean, nextCursor?: string | null, };
-export type GithubIssueSummaryV1 = { number: number, title: string, state: string, author: GithubUserV1, labels: Array<GithubLabelV1>, assignees: Array<GithubUserV1>, updatedAt: string, url: string, };
+export type IssuesOkV1 = { repository: GithubRepositoryRefV1, issues: Array<GithubIssueSummaryV1>, has_more: boolean, next_cursor?: string | null, };
+export type GithubIssueSummaryV1 = { number: number, title: string, state: string, author: GithubUserV1, labels: Array<GithubLabelV1>, assignees: Array<GithubUserV1>, updated_at: string, url: string, };
 export type IssueStateFilterV1 = "open" | "closed" | "all";
 export type GithubLabelV1 = { name: string, color?: string | null, };
 export type GithubUserV1 = { login: string, };
-export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remoteName: string, 
+export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remote_name: string, 
 /**
  * The canonical browser source of this repository, never a credential URL.
  */
-sourceUrl: string, };
+source_url: string, };
 export type SessionTargetV1 = { session: string, 
 /**
  * A remote name discovered by the Agent for this Session. The provider
@@ -72,5 +72,5 @@ refresh?: boolean | null, session: string,
 remote_name?: string | null, };
 
 /** The payload the provider answers with. */
-export type IssuesResponse = { "state": "ok", repository: GithubRepositoryRefV1, issues: Array<GithubIssueSummaryV1>, hasMore: boolean, nextCursor?: string | null, } | { "state": "error", code: GithubErrorCodeV1, message: string, retryAfterSeconds?: number | null, };
+export type IssuesResponse = { "state": "ok", repository: GithubRepositoryRefV1, issues: Array<GithubIssueSummaryV1>, has_more: boolean, next_cursor?: string | null, } | { "state": "error", code: GithubErrorCodeV1, message: string, retry_after_seconds?: number | null, };
 

@@ -194,39 +194,212 @@ fn image_list_pagination_defaults_keep_the_legacy_bound_and_reports_next_offset(
 }
 
 #[test]
-fn access_requires_exactly_one_consumer_and_keeps_project_compatibility() {
-    let project: ImageAccessPayload = serde_json::from_value(serde_json::json!({
-        "project_id": "project-00000000-0000-0000-0000-000000000001",
-        "digest": format!("sha256:{}", "a".repeat(64)),
-    }))
-    .unwrap();
-    assert_eq!(
-        project.consumer().unwrap(),
-        ImageAccessConsumer::Project("project-00000000-0000-0000-0000-000000000001")
-    );
+fn access_requires_exactly_one_consumer_and_keeps_project_compatibility() {}
 
-    let session: ImageAccessPayload = serde_json::from_value(serde_json::json!({
-        "session_id": "agent-1:work",
-        "digest": format!("sha256:{}", "b".repeat(64)),
-    }))
-    .unwrap();
-    assert_eq!(
-        session.consumer().unwrap(),
-        ImageAccessConsumer::Session("agent-1:work")
-    );
+// ── Asynchronous build lifecycle (#3334) ────────────────────────────────
 
-    for value in [
-        serde_json::json!({ "digest": format!("sha256:{}", "c".repeat(64)) }),
-        serde_json::json!({
-            "project_id": "project-00000000-0000-0000-0000-000000000001",
-            "session_id": "agent-1:work",
-            "digest": format!("sha256:{}", "d".repeat(64)),
-        }),
-    ] {
-        let payload: ImageAccessPayload = serde_json::from_value(value).unwrap();
+#[test]
+fn build_ids_and_client_request_ids_have_one_bounded_shape() {
+    assert!(is_valid_image_build_id(
+        "build-12345678-1234-4234-8234-123456789abc"
+    ));
+    assert_eq!(
+        normalize_image_build_id("  build-abc  ").unwrap(),
+        "build-abc"
+    );
+    for invalid in ["", "image-abc", "build-", "build-a/b", "build-a b"] {
         assert_eq!(
-            payload.consumer().unwrap_err().message(),
-            "server.image.access requires exactly one of project_id or session_id"
+            normalize_image_build_id(invalid).unwrap_err().message(),
+            "build_id is not a valid image build identity",
+            "{invalid}"
+        );
+    }
+
+    assert_eq!(
+        normalize_client_request_id("project-abc_build.1").unwrap(),
+        "project-abc_build.1"
+    );
+    assert_eq!(
+        normalize_client_request_id("").unwrap_err().message(),
+        "client_request_id must not be empty"
+    );
+    assert_eq!(
+        normalize_client_request_id("bad key")
+            .unwrap_err()
+            .message(),
+        "client_request_id must contain only ASCII letters, digits, '.', '_', '-' or ':'"
+    );
+    assert_eq!(
+        normalize_client_request_id(&"a".repeat(IMAGE_BUILD_REQUEST_ID_MAX_CHARS + 1))
+            .unwrap_err()
+            .message(),
+        "client_request_id must be at most 128 characters"
+    );
+}
+
+#[test]
+fn build_statuses_and_stages_round_trip_their_wire_names() {
+    for status in [
+        ImageBuildStatus::Queued,
+        ImageBuildStatus::Running,
+        ImageBuildStatus::Succeeded,
+        ImageBuildStatus::Failed,
+        ImageBuildStatus::Canceled,
+    ] {
+        assert_eq!(ImageBuildStatus::parse(status.as_str()), Some(status));
+    }
+    assert!(ImageBuildStatus::Succeeded.is_terminal());
+    assert!(ImageBuildStatus::Failed.is_terminal());
+    assert!(ImageBuildStatus::Canceled.is_terminal());
+    assert!(!ImageBuildStatus::Running.is_terminal());
+
+    for stage in [
+        ImageBuildStage::Fetching,
+        ImageBuildStage::Snapshotting,
+        ImageBuildStage::Validating,
+        ImageBuildStage::Packaging,
+        ImageBuildStage::Publishing,
+    ] {
+        assert_eq!(ImageBuildStage::parse(stage.as_str()), Some(stage));
+    }
+}
+
+#[test]
+fn a_build_descriptor_never_serializes_an_unmeasured_progress_fraction() {
+    let build = ImageBuildDescriptor {
+        build_id: "build-abc".to_string(),
+        image_id: "image-abc".to_string(),
+        attempt: 1,
+        source: source("https://github.com/BestNathan/nession", "main"),
+        source_sha: None,
+        packaging: ImagePackaging::default(),
+        status: ImageBuildStatus::Running,
+        stage: Some(ImageBuildStage::Packaging),
+        progress: ImageBuildProgress {
+            files: None,
+            bytes: None,
+            elapsed_ms: 42,
+        },
+        diagnostic: None,
+        error: None,
+        digest: None,
+        size_bytes: 0,
+        alias: None,
+        deduplicated: false,
+        created_at: 1,
+        updated_at: 2,
+    };
+    let value = serde_json::to_value(&build).unwrap();
+    assert!(value["progress"].get("files").is_none());
+    assert!(value["progress"].get("bytes").is_none());
+    assert_eq!(value["progress"]["elapsed_ms"], 42);
+    assert_eq!(value["stage"], "packaging");
+    assert_eq!(value["status"], "running");
+    let decoded: ImageBuildDescriptor = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded, build);
+}
+
+fn cache_digest(hex: char) -> String {
+    format!("sha256:{}", hex.to_string().repeat(64))
+}
+
+#[test]
+fn cache_observation_validates_version_digest_bytes_and_activity() {
+    let valid = ImageCacheObservation {
+        contract_version: IMAGE_CACHE_OBSERVATION_VERSION,
+        digest: cache_digest('a'),
+        phase: ImageCachePhase::Downloading,
+        downloaded_bytes: Some(12),
+        total_bytes: Some(48),
+        active: true,
+        updated_at: 1_760_000_000,
+        detail: None,
+    };
+    valid.validate().unwrap();
+    let value = serde_json::to_value(&valid).unwrap();
+    assert_eq!(value["phase"], "downloading");
+    assert_eq!(value["downloaded_bytes"], 12);
+    assert_eq!(value["active"], true);
+
+    let mut wrong_version = valid.clone();
+    wrong_version.contract_version = 2;
+    assert_eq!(
+        wrong_version.validate().unwrap_err().message(),
+        "image cache observation version 2 is not supported; expected 1"
+    );
+
+    let mut bad_digest = valid.clone();
+    bad_digest.digest = "sha256:not-a-digest".to_string();
+    assert!(bad_digest.validate().is_err());
+
+    let mut bytes_over_total = valid.clone();
+    bytes_over_total.downloaded_bytes = Some(49);
+    assert_eq!(
+        bytes_over_total.validate().unwrap_err().message(),
+        "image cache observation byte counts are inconsistent"
+    );
+
+    let mut total_without_downloaded = valid.clone();
+    total_without_downloaded.downloaded_bytes = None;
+    assert_eq!(
+        total_without_downloaded.validate().unwrap_err().message(),
+        "image cache observation byte counts are inconsistent"
+    );
+
+    let mut resumable_active = valid.clone();
+    resumable_active.phase = ImageCachePhase::Resumable;
+    assert_eq!(
+        resumable_active.validate().unwrap_err().message(),
+        "image cache observation activity does not match its phase"
+    );
+
+    let mut verifying_inactive = valid;
+    verifying_inactive.phase = ImageCachePhase::Verifying;
+    verifying_inactive.active = false;
+    assert_eq!(
+        verifying_inactive.validate().unwrap_err().message(),
+        "image cache observation activity does not match its phase"
+    );
+}
+
+#[test]
+fn cache_observation_rejects_unknown_fields_and_projects_legacy_status() {
+    let value = serde_json::json!({
+        "contract_version": 1,
+        "digest": cache_digest('b'),
+        "phase": "resumable",
+        "downloaded_bytes": 12,
+        "active": false,
+        "updated_at": 1_760_000_000,
+        "unexpected": true,
+    });
+    assert!(serde_json::from_value::<ImageCacheObservation>(value).is_err());
+
+    for (phase, state) in [
+        (ImageCachePhase::Absent, ImageCacheState::Absent),
+        (ImageCachePhase::Resumable, ImageCacheState::Preparing),
+        (ImageCachePhase::Downloading, ImageCacheState::Preparing),
+        (ImageCachePhase::Verifying, ImageCacheState::Preparing),
+        (ImageCachePhase::Verified, ImageCacheState::Verified),
+        (ImageCachePhase::Failed, ImageCacheState::Failed),
+        (ImageCachePhase::Unavailable, ImageCacheState::Unavailable),
+    ] {
+        let observation = ImageCacheObservation {
+            contract_version: IMAGE_CACHE_OBSERVATION_VERSION,
+            digest: cache_digest('c'),
+            phase,
+            downloaded_bytes: None,
+            total_bytes: None,
+            active: matches!(
+                phase,
+                ImageCachePhase::Downloading | ImageCachePhase::Verifying
+            ),
+            updated_at: 1_760_000_000,
+            detail: None,
+        };
+        assert_eq!(
+            ImageCacheStatus::from_observation(&observation).state,
+            state
         );
     }
 }

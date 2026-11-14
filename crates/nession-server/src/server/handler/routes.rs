@@ -126,6 +126,12 @@ server_routes!(handler, msg, payload;
     "server.session.sandbox.enter" => "server.session.sandbox.enter" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_enter(msg).await,
     "server.session.sandbox.return-to-native" => "server.session.sandbox.return-to-native" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_return(msg).await,
     "server.session.sandbox.focus" => "server.session.sandbox.focus" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_focus(msg).await,
+    // Agent-owned managed Workspace resources (#3407). The Agent owns the
+    // registry and the bytes; the Server authorizes the Session target and
+    // relays. Mutations serialize with the Session's other mutations.
+    "server.workspace.list" => "server.workspace.list" => 1 => Query => handler.handle_client_workspace_list(msg).await,
+    "server.workspace.create" => "server.workspace.create" => 1 => Key(session_by_id(payload)) => handler.handle_client_workspace_create(msg).await,
+    "server.workspace.delete" => "server.workspace.delete" => 1 => Key(session_by_id(payload)) => handler.handle_client_workspace_delete(msg).await,
     "server.session.attach" => "server.session.attach" => 1 => Ordered => handler.handle_client_session_attach(msg).await,
     "server.session.relay.begin" => "server.session.relay.begin" => 1 => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function
@@ -185,5 +191,11 @@ server_routes!(handler, msg, payload;
     "server.image.build" => "server.image.build" => 1 => Inline => handler.handle_client_image_build(msg).await,
     "server.image.list" => "server.image.list" => 1 => Query => handler.handle_client_image_list(msg).await,
     "server.image.get" => "server.image.get" => 1 => Query => handler.handle_client_image_get(msg).await,
-    "server.image.access" => "server.image.access" => 1 => Inline => handler.handle_client_image_access(msg).await,
+    // Asynchronous durable build lifecycle (#3334). Submit/cancel/retry are
+    // small writes to the durable build directory; get/list read it.
+    "server.image.build.submit" => "server.image.build.submit" => 1 => Inline => handler.handle_client_image_build_submit(msg).await,
+    "server.image.build.get" => "server.image.build.get" => 1 => Query => handler.handle_client_image_build_get(msg).await,
+    "server.image.build.list" => "server.image.build.list" => 1 => Query => handler.handle_client_image_build_list(msg).await,
+    "server.image.build.cancel" => "server.image.build.cancel" => 1 => Inline => handler.handle_client_image_build_cancel(msg).await,
+    "server.image.build.retry" => "server.image.build.retry" => 1 => Inline => handler.handle_client_image_build_retry(msg).await,
 );

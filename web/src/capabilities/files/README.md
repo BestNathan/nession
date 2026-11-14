@@ -82,6 +82,17 @@ The App already has a pushed-detail Back guard (`useAppFilesPushedSurface` +
 `AppFilesViewerLayer`) and keeps that behavior. This is a Web selection
 transition, not a global navigation guard, DocumentStore or multi-tab editor.
 
+## Save completion and in-flight edits (#3322)
+
+A write commits the snapshot the viewer captured when Save was requested, but
+the editor stays editable while that request is in flight. On success the
+viewer moves the committed baseline to the submitted snapshot and reports dirty
+against the **latest** editor content: if the editor moved on, the newer edit
+stays visible and dirty and a second guarded save persists it. Dirty clears only
+when the current content equals the snapshot its save committed. A rejected or
+conflicting write keeps the draft dirty, so the Web switch guard and the App
+Back guard still ask before leaving.
+
 ## DocumentStore / EditorStore — boundary, not yet entities
 
 The Phase-4 target model names `DocumentStore` (file content + edit state)

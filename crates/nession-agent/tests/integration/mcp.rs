@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nession_agent::config::{AgentConfig, AttachMode};
-use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
@@ -105,7 +105,9 @@ async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHan
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials: Arc::new(P2pCredentials::new()),
+            // The same durable Agent Token MCP mounts below: one secret gates
+            // both the P2P listener and the embedded MCP endpoint (#3440).
+            auth: Arc::new(P2pAuth::new(TOKEN)),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::clone(&tmux),
             session_metadata: Arc::new(SessionMetadataStore::with_root(
@@ -130,7 +132,7 @@ async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHan
         },
         ..Default::default()
     };
-    server.mount_mcp(&config).expect("mount MCP");
+    server.mount_mcp(&config, TOKEN).expect("mount MCP");
     let (handle, addr) = server.start().await.expect("start");
     tokio::time::sleep(Duration::from_millis(50)).await;
     (addr, handle)
@@ -143,9 +145,20 @@ async fn send(
     session: Option<&str>,
     body: &str,
 ) -> Option<HttpResponse> {
+    send_path(addr, method, "/mcp", token, session, body).await
+}
+
+async fn send_path(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    session: Option<&str>,
+    body: &str,
+) -> Option<HttpResponse> {
     let mut stream = TcpStream::connect(addr).await.ok()?;
     let mut head = format!(
-        "{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
          text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
          Connection: close\r\n",
         body.len()
@@ -259,6 +272,27 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
             .any(|entry| entry["name"] == name),
         "the real tmux Session is missing from Agent truth: {listed}"
     );
+    // Nession-owned transport fields are snake_case (#3371). The MCP result is
+    // Nession's own object, so its multi-word key must use the contract
+    // spelling, and the retired camelCase argument spelling must be refused
+    // rather than silently ignored.
+    assert!(
+        listed["stale_agents"].is_array() && listed.get("staleAgents").is_none(),
+        "the MCP result must use the contract's snake_case key: {listed}"
+    );
+    let camel = call_tool(
+        addr,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agentId": TEST_AGENT_ID }),
+    )
+    .await;
+    assert_eq!(camel["isError"], true, "{camel}");
+    let camel_text = camel["content"][0]["text"].as_str().expect("text content");
+    assert!(
+        camel_text.contains("agent_id"),
+        "the refusal must name the contract argument: {camel_text}"
+    );
 
     // A different Agent must be refused, never silently redirected to this one.
     let wrong_target = call_tool(
@@ -300,5 +334,33 @@ async fn agent_mcp_refuses_an_anonymous_request() {
         .await
         .expect("HTTP answer");
     assert_eq!(response.status, 401);
+    let _ = handle.shutdown().await;
+}
+
+/// `#3439` SC-02: the Agent's single listener is one explicit route table.
+///
+/// MCP owns its configured path; everything else is the P2P upgrade route.
+/// A plain HTTP request to an unmatched path is a 404, and a request that
+/// claims to be an upgrade but is malformed is refused by Axum's extractor
+/// rather than quietly becoming a WebSocket or a closed connection.
+#[tokio::test]
+async fn agent_http_surface_is_explicit() {
+    let (addr, handle) = start_agent_with_mcp().await;
+
+    let unmatched = send_path(addr, "GET", "/not-a-route", None, None, "")
+        .await
+        .expect("HTTP answer");
+    assert_eq!(unmatched.status, 404);
+
+    let not_an_upgrade = send_path(addr, "GET", "/ws", None, None, "")
+        .await
+        .expect("HTTP answer");
+    assert_eq!(not_an_upgrade.status, 404);
+
+    let wrong_method = send_path(addr, "POST", "/ws", None, None, "")
+        .await
+        .expect("HTTP answer");
+    assert_eq!(wrong_method.status, 404, "the P2P fallback is upgrade-only");
+
     let _ = handle.shutdown().await;
 }

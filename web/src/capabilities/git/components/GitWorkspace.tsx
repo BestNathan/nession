@@ -133,6 +133,7 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           selection={selection}
           mutations={mutations}
           onSelect={selectRow}
+          formKey={`${agentId ?? ''}:${sessionId}`}
         />
       )}
     </div>
@@ -253,7 +254,7 @@ function headerSummary(
   if (status.truncated) {
     // A partial listing presented as a whole one is the failure C3 names; the
     // count is the first thing that would be wrong, so it says so here.
-    summary += ` — listing truncated, ${formatBytes(status.truncatedBytes)} not read`;
+    summary += ` — listing truncated, ${formatBytes(status.truncated_bytes)} not read`;
   }
   return summary;
 }
@@ -264,12 +265,15 @@ function GitBody({
   selection,
   mutations,
   onSelect,
+  formKey,
 }: {
   status: ReturnType<typeof useGitStatus>;
   rows: readonly GitRow[] | null;
   selection: GitSelectionState;
   mutations: GitMutationController;
   onSelect: (row: GitRow) => void;
+  /** Session identity: a switch starts a fresh commit draft (#3327). */
+  formKey: string;
 }) {
   if (status.loading) {
     return <GitNotice testId="git-loading">Reading repository state…</GitNotice>;
@@ -332,6 +336,7 @@ function GitBody({
         ) : null}
         {staged > 0 ? (
           <GitCommitForm
+            key={formKey}
             stagedCount={staged}
             busy={mutations.commitBusy}
             onCommit={mutations.commit}

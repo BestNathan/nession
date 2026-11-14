@@ -41,7 +41,7 @@ function branch(overrides: Partial<GitBranch> = {}): GitBranch {
     current: false,
     ahead: 0,
     behind: 0,
-    upstreamGone: false,
+    upstream_gone: false,
     ...overrides,
   };
 }
@@ -52,7 +52,7 @@ function ok(
 ) {
   return {
     state: 'ok',
-    branches: { branches, limit: branches.length, truncatedBytes: 0, truncated: false },
+    branches: { branches, limit: branches.length, truncated_bytes: 0, truncated: false },
     ...extra,
   } as GitBranchesResponse;
 }
@@ -132,7 +132,7 @@ describe('GitBranchesView', () => {
     // `[gone]` arrives with zero counts too. Reporting that as "in sync" would
     // tell the user their branch is pushed when the ref it tracked is gone.
     mockedBranches.mockResolvedValue(
-      ok([branch({ name: 'old', upstream: 'origin/old', upstreamGone: true })]),
+      ok([branch({ name: 'old', upstream: 'origin/old', upstream_gone: true })]),
     );
 
     render(<GitBranchesView ctx={ctx()} />);
@@ -146,7 +146,7 @@ describe('GitBranchesView', () => {
     const branches = [branch({ name: 'b'.repeat(3) }), branch({ name: 'a'.repeat(3) })];
     mockedBranches.mockResolvedValue(
       ok(branches, {
-        branches: { branches, limit: 2, truncatedBytes: 0, truncated: false },
+        branches: { branches, limit: 2, truncated_bytes: 0, truncated: false },
       }),
     );
 
@@ -160,7 +160,7 @@ describe('GitBranchesView', () => {
     // a repository whose whole branch list is on screen is a lie to act on.
     mockedBranches.mockResolvedValue(
       ok([branch()], {
-        branches: { branches: [branch()], limit: 100, truncatedBytes: 0, truncated: false },
+        branches: { branches: [branch()], limit: 100, truncated_bytes: 0, truncated: false },
       }),
     );
 
@@ -173,7 +173,7 @@ describe('GitBranchesView', () => {
   it('reports truncation rather than a listing that quietly stops', async () => {
     mockedBranches.mockResolvedValue(
       ok([branch()], {
-        branches: { branches: [branch()], limit: 1, truncatedBytes: 4096, truncated: true },
+        branches: { branches: [branch()], limit: 1, truncated_bytes: 4096, truncated: true },
       }),
     );
 

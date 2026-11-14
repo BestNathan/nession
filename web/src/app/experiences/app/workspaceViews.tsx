@@ -5,7 +5,6 @@ import { WorkspaceScrollRegion } from '@/app/workspace/layout/workspaceLayout';
 import { EnvAppLayout } from './EnvAppLayout';
 import { FilesAppLayout } from './FilesAppLayout';
 import { SandboxAppLayout } from './SandboxAppLayout';
-import { ImagesAppLayout } from '@/capabilities/images';
 import type { WorkspaceAppViewProps, WorkspaceViewId } from '@/app/workspace/workspaceContext';
 
 /**
@@ -58,9 +57,4 @@ export const APP_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<Workspac
   env: EnvAppLayout,
   files: FilesAppLayout,
   sandbox: SandboxAppLayout,
-  images: ({ ctx, depth }) => (
-    <WorkspaceScrollRegion data-testid="images-app">
-      <ImagesAppLayout ctx={ctx} depth={depth} />
-    </WorkspaceScrollRegion>
-  ),
 };

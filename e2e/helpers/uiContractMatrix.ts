@@ -509,15 +509,15 @@ export async function assertProductionCapabilityCountOnlyChangesScrollExtent(
   );
   const full = await captureProductionWorkspaceCapabilityRow(page, '/#/fixture/workspace');
 
-  // The Session-free Images capability (#3181) and the Session-context,
-  // view-bound Sandbox capability (#3124) each add one eligible entry. The
-  // invariant under test is unchanged: one more eligible entry extends only
-  // the row's horizontal content/scroll axis.
+  // The Session-context, view-bound Sandbox capability (#3124) is the only
+  // eligible entry that Images management adds; the separate Session-free
+  // Images capability (#3181) was retired by #3408 into the Sandbox sections.
+  // The invariant under test is unchanged: one more eligible entry extends
+  // only the row's horizontal content/scroll axis.
   expect(reduced.ids).toEqual([
     'session',
     'agent',
     'env',
-    'images',
     'sandbox',
     'claude-code',
     'git',
@@ -527,7 +527,6 @@ export async function assertProductionCapabilityCountOnlyChangesScrollExtent(
     'session',
     'agent',
     'env',
-    'images',
     'sandbox',
     'claude-code',
     'git',

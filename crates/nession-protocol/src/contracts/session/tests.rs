@@ -151,26 +151,27 @@ fn test_server_terminal_resize_payload_serde() {
 }
 
 #[test]
-fn test_client_session_attach_reply_states_the_credential_deadline() {
-    // #2645: the browser cannot parse the opaque token, so a reconnect learns
-    // from this field whether it must ask for a new one.
+fn test_client_session_attach_reply_states_the_agent_token() {
+    // #3440: the authenticated attach hands off the resolved Agent's durable
+    // token. The relay arm omits it because the Server dials the Agent itself.
     let reply: ClientSessionAttachReply = serde_json::from_value(serde_json::json!({
         "status": "success",
         "mode": "p2p",
         "session_id": "agent:session",
-        "connection_token": "opaque",
-        "connection_token_expires_at": "2026-11-02T12:00:00Z"
+        "agent_token": "agent-token"
     }))
     .unwrap();
     let ClientSessionAttachReply::Attached(payload) = reply else {
         panic!("expected the attached arm");
     };
     assert_eq!(
-        payload.connection_token_expires_at.as_deref(),
-        Some("2026-11-02T12:00:00Z")
+        payload
+            .agent_token
+            .as_ref()
+            .map(crate::secret::RedactedToken::as_str),
+        Some("agent-token")
     );
 
-    // Older Servers and relay replies omit it; decoding must stay compatible.
     let legacy: ClientSessionAttachReply = serde_json::from_value(serde_json::json!({
         "status": "success",
         "mode": "relay",
@@ -180,7 +181,7 @@ fn test_client_session_attach_reply_states_the_credential_deadline() {
     let ClientSessionAttachReply::Attached(legacy) = legacy else {
         panic!("expected the attached arm");
     };
-    assert_eq!(legacy.connection_token_expires_at, None);
+    assert_eq!(legacy.agent_token, None);
 }
 
 #[test]
@@ -633,6 +634,7 @@ fn sandbox_context_and_action_replies_round_trip() {
         error: Some("Agent 'a' is offline".to_string()),
         context: None,
         cache_statuses: Vec::new(),
+        cache_observations: Vec::new(),
     };
     let value = serde_json::to_value(&context).unwrap();
     assert_eq!(value["success"], false);
@@ -715,9 +717,9 @@ fn a_server_managed_create_carries_one_grant_per_role() {
         "name": "managed",
         "managed": {
             "images": [
-                { "role": "base", "digest": DIGEST_A, "path": "/images/blobs/aaa", "token": "t1" },
-                { "role": "workspace", "digest": DIGEST_B, "path": "/images/blobs/bbb", "token": "t2" },
-                { "role": "toolchain", "digest": DIGEST_B, "path": "/images/blobs/bbb", "token": "t3", "target": "/opt/rust" }
+                { "role": "base", "digest": DIGEST_A, "path": "/images/blobs/aaa" },
+                { "role": "workspace", "digest": DIGEST_B, "path": "/images/blobs/bbb" },
+                { "role": "toolchain", "digest": DIGEST_B, "path": "/images/blobs/bbb", "target": "/opt/rust" }
             ]
         }
     }))
@@ -744,7 +746,6 @@ fn unknown_managed_fields_are_refused() {
         "role": "base",
         "digest": DIGEST_A,
         "path": "/images/blobs/aaa",
-        "token": "t",
         "unexpected": true
     }));
     assert!(grant.is_err(), "an unknown grant key must be refused");

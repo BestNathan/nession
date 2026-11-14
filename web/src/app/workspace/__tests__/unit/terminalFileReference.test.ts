@@ -59,6 +59,15 @@ describe('terminalFileReference', () => {
     expect(joinTerminalFileReference('/tmp/work', 'a.ts')).toBe('/tmp/work/a.ts');
   });
 
+  it('keeps the source-relative root and the filesystem root distinct (#3414)', () => {
+    // `''` means "the source root"; `'/'` means the host filesystem root. The
+    // join must not conflate them: only `''` leaves the reference relative.
+    expect(joinTerminalFileReference('', 'src/foo.rs')).toBe('src/foo.rs');
+    expect(joinTerminalFileReference('/', 'src/foo.rs')).toBe('/src/foo.rs');
+    expect(joinTerminalFileReference('/', './src/../foo.rs')).toBe('/foo.rs');
+    expect(joinTerminalFileReference('/', '/src/foo.rs')).toBe('/src/foo.rs');
+  });
+
   it('keeps an absolute reference absolute on the same source', () => {
     expect(joinTerminalFileReference('src/app', '/etc/app.conf')).toBe('/etc/app.conf');
   });
@@ -87,6 +96,65 @@ describe('terminalFileReference', () => {
         column: 3,
       },
     });
+  });
+
+  it('resolves a relative reference from a filesystem-root CWD against the absolute parent (#3414)', async () => {
+    const relativeLookalike = entry('src/foo.rs');
+    const absoluteTarget = {
+      ...entry('src/foo.rs'),
+      path: '/src/foo.rs',
+      full_path: '/src/foo.rs',
+    };
+    const fileOps = makeFileOps({ cwd: '/' });
+    vi.mocked(fileOps.listDir).mockImplementation(async (dir: string) => {
+      if (dir === '/src') {
+        return { entries: [absoluteTarget] };
+      }
+      if (dir === 'src') {
+        return { entries: [relativeLookalike] };
+      }
+      throw new Error(`not_found: ${dir}`);
+    });
+
+    const resolution = await resolveTerminalFileReference(fileOps, 'sess', {
+      path: 'src/foo.rs',
+      line: 42,
+    });
+
+    expect(fileOps.listDir).toHaveBeenCalledWith('/src');
+    expect(fileOps.listDir).not.toHaveBeenCalledWith('src');
+    expect(resolution).toEqual({
+      ok: true,
+      target: {
+        path: '/src/foo.rs',
+        name: 'foo.rs',
+        size: 10,
+        line: 42,
+        column: undefined,
+      },
+    });
+  });
+
+  it('does not fall back to a source-relative lookalike when the root target is absent (#3414)', async () => {
+    const fileOps = makeFileOps({ cwd: '/' });
+    vi.mocked(fileOps.listDir).mockImplementation(async (dir: string) => {
+      if (dir === 'src') {
+        // The wrong target the pre-#3414 join would have selected.
+        return { entries: [entry('src/foo.rs')] };
+      }
+      throw new Error(`not_found: ${dir}`);
+    });
+
+    const resolution = await resolveTerminalFileReference(fileOps, 'sess', {
+      path: 'src/foo.rs',
+    });
+
+    expect(resolution).toEqual({
+      ok: false,
+      reason: expect.stringContaining('/src/foo.rs'),
+    });
+    expect(fileOps.listDir).toHaveBeenCalledWith('/src');
+    expect(fileOps.listDir).not.toHaveBeenCalledWith('src');
   });
 
   it('normalizes ./ and ../ before listing the target directory', async () => {

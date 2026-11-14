@@ -25,19 +25,19 @@ export type CreateCommitRequestV1 = {
 /**
  * The snapshot of the staged state the caller reviewed.
  */
-expectedSnapshot: string, message: string, 
+expected_snapshot: string, message: string, 
 /**
  * Idempotency identity for one user-initiated commit. A retry carrying the
  * same id is answered with the first attempt's outcome instead of creating
  * a second commit (#845 SC-09).
  */
-requestId: string, session: string, };
-export type GitMutationResponseV1<T> = { "state": "ok", } & T | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncatedBytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
+request_id: string, session: string, };
+export type GitMutationResponseV1<T> = { "state": "ok", } & T | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncated_bytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
 export type CreateCommitOkV1 = { commit: CommitCreatedV1, snapshot: GitSnapshotV1, status: RepoStatus, 
 /**
  * True when the post-mutation listing had to be cut off.
  */
-truncated: boolean, truncatedBytes: number, };
+truncated: boolean, truncated_bytes: number, };
 export type CommitCreatedV1 = { 
 /**
  * Full commit id. A commit always changes HEAD, so a success without one
@@ -52,7 +52,7 @@ export type MutationStateOkV1 = { snapshot: GitSnapshotV1, status: RepoStatus,
 /**
  * True when the post-mutation listing had to be cut off.
  */
-truncated: boolean, truncatedBytes: number, };
+truncated: boolean, truncated_bytes: number, };
 export type GitSnapshotV1 = { 
 /**
  * Compare for equality; never parse or construct.
@@ -91,7 +91,7 @@ export type ChangedFile = { path: string,
 /**
  * Present only for renames/copies.
  */
-originalPath?: string | null, kind: ChangeKind, 
+original_path?: string | null, kind: ChangeKind, 
 /**
  * Staged in the index (porcelain `X`).
  */
@@ -110,18 +110,18 @@ export type CreateCommitRequest = {
 /**
  * The snapshot of the staged state the caller reviewed.
  */
-expectedSnapshot: string, message: string, 
+expected_snapshot: string, message: string, 
 /**
  * Idempotency identity for one user-initiated commit. A retry carrying the
  * same id is answered with the first attempt's outcome instead of creating
  * a second commit (#845 SC-09).
  */
-requestId: string, session: string, };
+request_id: string, session: string, };
 
 /** The payload the provider answers with. */
 export type CreateCommitResponse = { "state": "ok", commit: CommitCreatedV1, snapshot: GitSnapshotV1, status: RepoStatus, 
 /**
  * True when the post-mutation listing had to be cut off.
  */
-truncated: boolean, truncatedBytes: number, } | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncatedBytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
+truncated: boolean, truncated_bytes: number, } | { "state": "repository_changed", message: string, snapshot: GitSnapshotV1, status: RepoStatus, truncated: boolean, truncated_bytes: number, } | { "state": "refused", message: string, } | { "state": "failed", message: string, snapshot: GitSnapshotV1 | null, status: RepoStatus | null, } | { "state": "missing_identity", message: string, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, };
 

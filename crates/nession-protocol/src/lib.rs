@@ -58,6 +58,9 @@
 //! contain the thing the document exists to rule out.
 
 pub mod contracts;
+pub mod secret;
+
+pub use secret::{constant_time_eq, RedactedToken, SecretString, TokenVerifier};
 pub mod kernel;
 
 // Flat re-exports for the handful of names almost every caller needs, so a

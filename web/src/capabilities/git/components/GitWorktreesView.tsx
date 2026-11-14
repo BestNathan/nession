@@ -60,7 +60,7 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
     );
   }
 
-  const { worktrees: rows, truncated, truncatedBytes } = worktrees.worktrees;
+  const { worktrees: rows, truncated, truncated_bytes } = worktrees.worktrees;
 
   if (rows.length === 0) {
     // `git worktree list` always reports at least the repository itself, so an
@@ -84,7 +84,7 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
             data-testid="git-worktrees-truncated"
             className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
           >
-            Worktree listing truncated — {formatBytes(truncatedBytes)} not read.
+            Worktree listing truncated — {formatBytes(truncated_bytes)} not read.
           </p>
         ) : null}
       </div>

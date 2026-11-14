@@ -12,6 +12,7 @@ describe('fixtureProjects', () => {
     expect(fixtureProjectsScenario('?projects=error')).toBe('error');
     expect(fixtureProjectsScenario('?projects=offline')).toBe('offline');
     expect(fixtureProjectsScenario('?projects=long')).toBe('long');
+    expect(fixtureProjectsScenario('?projects=stale-list')).toBe('stale-list');
   });
 
   it('answers the five Project wires with deterministic data', async () => {
@@ -48,6 +49,27 @@ describe('fixtureProjects', () => {
     expect(controls.deleteRequests()).toHaveLength(1);
     expect(controls.projects().some((project) => project.project_id === created.project.project_id))
       .toBe(false);
+  });
+
+  it('holds stale-list reads so a newer answer can be settled first', async () => {
+    const { surface, controls } = createFixtureProjectHarness('?projects=stale-list');
+    const older = surface.request<{ projects: Project[] }>('server.project.list', {});
+    expect(controls.pendingLists()).toBe(1);
+
+    await surface.request('server.project.create', { name: 'Created', locations: [] });
+    const newer = surface.request<{ projects: Project[] }>('server.project.list', {});
+    expect(controls.pendingLists()).toBe(2);
+
+    // The newer read answers with the created Project first.
+    expect(controls.releaseLatestList()).toBe(true);
+    await expect(newer).resolves.toMatchObject({
+      projects: expect.arrayContaining([expect.objectContaining({ name: 'Created' })]),
+    });
+
+    // The older read still carries the pre-mutation snapshot.
+    expect(controls.releaseOldestList()).toBe(true);
+    const stale = await older;
+    expect(stale.projects.map((project) => project.name)).toEqual(['Nession', 'Ops notes']);
   });
 
   it('reports a failed list without fabricating projects', async () => {

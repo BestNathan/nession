@@ -45,6 +45,8 @@ async fn test_server_accepts_connection() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -67,6 +69,8 @@ async fn test_agent_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -123,6 +127,8 @@ async fn test_invalid_auth_token() {
         auth_token: "correct_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -172,6 +178,8 @@ async fn test_heartbeat_without_registration() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -223,6 +231,8 @@ async fn test_client_agents_list_unauthenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -262,6 +272,8 @@ async fn test_close_frame_triggers_disconnect() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -293,6 +305,8 @@ async fn test_agent_registration_with_connect_url() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -340,6 +354,8 @@ async fn test_server_local_addr() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -362,6 +378,8 @@ async fn test_client_sessions_list_authenticated() {
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     };
@@ -498,6 +516,8 @@ fn ownership_server_config(db_path: String) -> nession_common::config::ServerCon
         auth_token: "test_token".to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path,
         ..Default::default()
     }
@@ -563,9 +583,19 @@ fn register_payload_on_port(agent_id: &str, port: u16) -> serde_json::Value {
         "ip_address": "127.0.0.1",
         "port": port,
         "auth_token": "test_token",
+        // The durable Agent Token this Agent's own listener would verify
+        // (#3440). The Server caches it and presents it as the relay's first
+        // `client.auth`.
+        "agent_token": agent_token_for(agent_id),
         "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
         "metadata": {"tmux_version": "3.3a", "os_version": "Linux", "nession_version": "0.1.0"},
     })
+}
+
+/// The Agent Token the test Agent registers and therefore the one the relay
+/// must present on its dial.
+fn agent_token_for(agent_id: &str) -> String {
+    format!("agent-token-{agent_id}")
 }
 
 /// Connect as an agent and register `agent_id` on the connection, returning it
@@ -2690,37 +2720,6 @@ async fn start_streaming_mock_agent_endpoint(
 }
 
 /// The next frame of a given type the endpoint received, skipping others.
-/// Answer the P2P grant the Server pushes before it dials (#1013).
-///
-/// The Server will not dial until the agent that will verify the credential has
-/// acknowledged it, so any test driving a relay has to stand in for the agent
-/// here. The wait is also the assertion: a Server that dialled first would never
-/// send this frame at all, and the timeout says so.
-async fn acknowledge_grant(agent: &mut TestWs) -> anyhow::Result<()> {
-    let command = tokio::time::timeout(tokio::time::Duration::from_secs(5), next_json(agent))
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!("the server never granted a credential before dialling the agent")
-        })??;
-
-    let request_id = payload_of(&command, "agent.p2p.grant")?
-        .get("request_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("the grant carries no request id: {command}"))?
-        .to_string();
-
-    send_json(
-        agent,
-        serde_json::json!({
-            "msg_type": "server.agent.command-response",
-            "id": "grant-ack",
-            "timestamp": current_timestamp(),
-            "payload": { "request_id": request_id, "success": true },
-        }),
-    )
-    .await
-}
-
 async fn expect_frame_of_type(
     frames: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
     msg_type: &str,
@@ -3014,7 +3013,6 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
 
     // The agent answers the attach with the history first — see the endpoint.
     let attach = expect_frame_of_type(
@@ -3089,7 +3087,22 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
+    // The relay's first frame is the Agent Token handoff (#3440): the Server
+    // presents the token this Agent registered, not a minted per-attach grant.
+    let handshake = expect_frame_of_type(
+        &mut endpoint.frames,
+        "client.auth",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        handshake["payload"]["auth_token"] == serde_json::json!(agent_token_for("a1")),
+        "the relay must present the registered Agent Token: {handshake}"
+    );
+    anyhow::ensure!(
+        handshake["payload"]["client_id"] == serde_json::json!("browser-proof"),
+        "and bind the browser identity on the same frame: {handshake}"
+    );
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
@@ -3179,7 +3192,6 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
     let _attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
@@ -3281,7 +3293,6 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
 
     // The Server dials the agent and asks it to attach. Nothing is forwarded
     // until that answer arrives, so this frame is also the proof the relay is
@@ -3303,6 +3314,15 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
     anyhow::ensure!(
         replies[0]["payload"]["sessions"].is_array(),
         "the unit the Server serves was not dispatched while the relay was on: {}",
+        replies[0]
+    );
+    // Nession-owned transport fields are snake_case (#3371); this is the
+    // Server's own typed unit, answered on the same connection the relay
+    // borrows, so its multi-word key is asserted where it crosses the wire.
+    anyhow::ensure!(
+        replies[0]["payload"]["stale_agents"].is_array()
+            && replies[0]["payload"].get("staleAgents").is_none(),
+        "the relay-path reply must use the contract's snake_case key: {}",
         replies[0]
     );
     no_frame_of_type_within(
@@ -3330,6 +3350,12 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
     anyhow::ensure!(
         replies[0]["payload"]["sessions"].is_array(),
         "the frame written after the relay ended was not dispatched: {}",
+        replies[0]
+    );
+    anyhow::ensure!(
+        replies[0]["payload"]["stale_agents"].is_array()
+            && replies[0]["payload"].get("staleAgents").is_none(),
+        "the post-relay reply must use the contract's snake_case key: {}",
         replies[0]
     );
     Ok(())
@@ -3396,7 +3422,6 @@ async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyho
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
 
     // The relay is live: the Server has dialled the agent and been told the
     // attach succeeded, which is also the start of the stream.

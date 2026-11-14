@@ -5,9 +5,9 @@
 
 use serde_json::{json, Value};
 
-use crate::image::ImageListPage;
+use crate::image::{BuildListPage, ImageListPage};
 use crate::server::handler::{reply_json, HandlerAction};
-use nession_protocol::contracts::image::v1::ImageDescriptor;
+use nession_protocol::contracts::image::v1::{ImageBuildDescriptor, ImageDescriptor};
 
 pub(super) fn image_success_reply(id: &str, wire: &str, image: &ImageDescriptor) -> HandlerAction {
     reply_json(id, wire, json!({ "success": true, "image": image }))
@@ -24,23 +24,22 @@ pub(super) fn image_list_reply(id: &str, wire: &str, page: &ImageListPage) -> Ha
     reply_json(id, wire, Value::Object(payload))
 }
 
-pub(super) fn image_access_reply(
+pub(super) fn image_build_success_reply(
     id: &str,
     wire: &str,
-    token: &str,
-    expires_at: u64,
-    path: &str,
+    build: &ImageBuildDescriptor,
 ) -> HandlerAction {
-    reply_json(
-        id,
-        wire,
-        json!({
-            "success": true,
-            "token": token,
-            "expires_at": expires_at,
-            "path": path,
-        }),
-    )
+    reply_json(id, wire, json!({ "success": true, "build": build }))
+}
+
+pub(super) fn image_build_list_reply(id: &str, wire: &str, page: &BuildListPage) -> HandlerAction {
+    let mut payload = serde_json::Map::new();
+    payload.insert("builds".to_string(), json!(page.builds));
+    payload.insert("total".to_string(), json!(page.total));
+    if let Some(next_offset) = page.next_offset {
+        payload.insert("next_offset".to_string(), json!(next_offset));
+    }
+    reply_json(id, wire, Value::Object(payload))
 }
 
 pub(super) fn image_error_reply(id: &str, wire: &str, kind: &str, error: &str) -> HandlerAction {

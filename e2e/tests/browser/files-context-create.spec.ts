@@ -21,6 +21,7 @@ declare global {
     fixtureFiles?: {
       reset: () => void;
       revisionOf: (path: string) => string;
+      contentsOf: (path: string) => string | null;
       writeExternal: (path: string, content: string) => void;
       delayNextWrite: (milliseconds: number) => void;
       failNextWrite: (message?: string) => void;
@@ -210,6 +211,45 @@ test('Web: a save against a changed file offers reload/overwrite', async ({ page
   await expect(page.locator('.cm-content')).toContainText('external change');
 });
 
+test('Web: edits typed during a pending save stay dirty after it completes (#3322)', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'index.css');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('B1');
+
+  // Commit B1 while holding the response; the editor moves on to C1.
+  await page.evaluate(() => window.fixtureFiles?.delayNextWrite(800));
+  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('C1');
+
+  // B1's successful write must not mark the newer C1 as saved.
+  await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled({ timeout: 5000 });
+  await expect(page.getByTitle('Unsaved changes')).toBeVisible();
+  // Only the submitted snapshot reached the fixture; C1 is still local.
+  const committed = await page.evaluate(() => window.fixtureFiles?.contentsOf('web/src/index.css'));
+  expect(committed).toContain('B1');
+  expect(committed).not.toContain('C1');
+
+  // The next save persists C1 and only then clears dirty.
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTitle('Unsaved changes')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  expect(
+    await page.evaluate(() => window.fixtureFiles?.contentsOf('web/src/index.css')),
+  ).toContain('B1C1');
+
+  // Re-reading the file shows both persisted writes, not a discarded draft.
+  await clickTree(page, 'App.tsx');
+  await clickTree(page, 'index.css');
+  await expect(page.locator('.cm-content')).toContainText('B1C1');
+});
+
 test('App: create in the pushed folder, read-first viewer, unsaved guard', async ({ page }) => {
   await page.goto('/#/fixture/app');
   await page.getByTestId('app-header-workspace').click();
@@ -308,6 +348,27 @@ test('App: a Terminal file reference opens the pushed Files viewer at its line',
   await expectFileEditorAt(page, expect, {
     count: 1, line: 7, column: 3, activeLineText: 'target-line-7',
   });
+  await returnFromFiles(page, expect, 'app');
+  await expect(page.getByTestId('terminal-surface')).toBeVisible();
+});
+
+// #3414: from a Session shell at `/`, the same relative reference must resolve
+// against the filesystem root, not the source-relative root. With the absolute
+// target absent the App must show the failure instead of the lookalike file.
+test('App: a relative reference from the filesystem root never falls back into the source root', async ({ page }) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+  seedTerminalFiles(runtime.home);
+  await openFileLinkApp(page, expect, runtime, 'e2e-3414-app');
+  await runFileLinkCommand(page, expect, 'cd /');
+  await printFileReference(page, expect, 'src/deep/target.py:3');
+  await activateFileReference(page, 'src/deep/target.py:3');
+  const error = page.getByTestId('files-app-handoff-error');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText('/src/deep/target.py');
+  await expect(error).toContainText('moved or deleted');
+  await expect(page.locator('.cm-editor')).toHaveCount(0);
   await returnFromFiles(page, expect, 'app');
   await expect(page.getByTestId('terminal-surface')).toBeVisible();
 });

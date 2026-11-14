@@ -52,7 +52,7 @@ function ok(
 ) {
   return {
     state: 'ok',
-    worktrees: { worktrees, truncatedBytes: 0, truncated: false },
+    worktrees: { worktrees, truncated_bytes: 0, truncated: false },
     ...extra,
   } as GitWorktreesResponse;
 }
@@ -156,7 +156,7 @@ describe('GitWorktreesView', () => {
   it('reports truncation rather than a listing that quietly stops', async () => {
     mockedWorktrees.mockResolvedValue(
       ok([worktree()], {
-        worktrees: { worktrees: [worktree()], truncatedBytes: 2048, truncated: true },
+        worktrees: { worktrees: [worktree()], truncated_bytes: 2048, truncated: true },
       }),
     );
 

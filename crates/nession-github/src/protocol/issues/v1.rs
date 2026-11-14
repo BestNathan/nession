@@ -42,7 +42,6 @@ pub struct IssuesRequestV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubIssueSummaryV1 {
     pub number: u64,
     pub title: String,
@@ -57,7 +56,6 @@ pub struct GithubIssueSummaryV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct IssuesOkV1 {
     pub repository: GithubRepositoryRefV1,
     pub issues: Vec<GithubIssueSummaryV1>,

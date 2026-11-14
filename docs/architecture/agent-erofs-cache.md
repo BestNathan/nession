@@ -146,6 +146,47 @@ grant or image refuses the Managed create rather than falling back to Native.
 The write workspace lives under the Sandbox state directory, never in the
 cache.
 
+## Per-digest progress observation (#3412)
+
+`ErofsCache::observe_progress` is the cache's read-only per-digest snapshot. It
+does not download, repair, evict or mint a grant. The Agent adapter maps it to
+the versioned `ImageCacheObservation` protocol type and exposes it through the
+existing authenticated `server.session.sandbox.context` query for the selected
+Session's Agent, alongside the legacy `cache_statuses` projection.
+
+- **Phases.** `absent`, `resumable`, `downloading`, `verifying`, `verified`,
+  `failed` and `unavailable`. A surviving `.part` is `resumable`, never
+  `downloading`; only the in-memory worker sets `active`. `verifying` is
+  active but not mount-ready; only a full SHA-256 match and atomic publication
+  is `verified`.
+- **Measured bytes.** `downloaded_bytes` is the durable partial size plus bytes
+  written by the current transfer, refreshed at a bounded interval while
+  streaming (256 KiB). `total_bytes` comes from a validated `Content-Range` or
+  `Content-Length`; it is absent when the server does not provide one, and a
+  percentage must not be synthesized then. Contradictory ranges, lengths or
+  byte totals fail the transfer instead of being reconciled.
+- **Range/restart rules.** A `206` must start at the durable partial offset; a
+  `200` restarts from byte zero and resets the reported count; `416` discards
+  the partial and fails the attempt. A digest mismatch removes the partial and
+  is `failed`. An interrupted transfer with durable bytes becomes `resumable`.
+- **Restart and concurrency.** The in-memory transfer entry is authoritative
+  while a worker runs. With no entry, the durable files decide: a verified
+  blob is `verified`, a `.part` is `resumable`, and neither is `absent`. An
+  Agent restart therefore rebuilds the same truthful state without a new
+  transfer. Concurrent consumers of one digest share the single fetch and see
+  the same non-multiplied progress.
+- **Consumer/security boundary.** The observation never carries a bearer
+  grant, a local cache path or an arbitrary-Digest access right. Detail text is
+  bounded and absolute local paths are redacted. The Server validates the
+  contract version, digest, byte consistency and activity/phase consistency
+  before relaying it; an invalid request digest is refused before any Agent
+  routing. Offline or unknown Agents are represented by the absence of an
+  observation, never as a fabricated zero or failed transfer.
+- **Updates.** This is an authoritative pull snapshot; the UI may poll it at a
+  bounded cadence and re-query after reconnect. No new job store, queue,
+  scheduler or storage format is introduced, and a snapshot always wins over
+  any later event.
+
 ## Failure semantics
 
 - Missing, non-writable, wrongly owned or (for an explicit path) ephemeral

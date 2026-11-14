@@ -9,7 +9,6 @@ use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct ChangedFileEntry {
     pub path: String,
     /// Repository-relative path after a rename/copy, when git reports one.
@@ -24,7 +23,6 @@ pub struct ChangedFileEntry {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct CommitDetail {
     pub oid: String,
     pub short_oid: String,

@@ -19,13 +19,11 @@ pub struct CreateCommitRequestV1 {
     #[serde(flatten)]
     pub target: SessionTargetV1,
     /// The snapshot of the staged state the caller reviewed.
-    #[serde(rename = "expectedSnapshot")]
     pub expected_snapshot: String,
     pub message: String,
     /// Idempotency identity for one user-initiated commit. A retry carrying the
     /// same id is answered with the first attempt's outcome instead of creating
     /// a second commit (#845 SC-09).
-    #[serde(rename = "requestId")]
     pub request_id: String,
 }
 
@@ -33,7 +31,6 @@ pub struct CreateCommitRequestV1 {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct CommitCreatedV1 {
     /// Full commit id. A commit always changes HEAD, so a success without one
     /// is reported as a failure rather than as this shape.
@@ -45,7 +42,6 @@ pub struct CommitCreatedV1 {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct CreateCommitOkV1 {
     pub commit: CommitCreatedV1,
     /// The authoritative post-commit state.
@@ -67,9 +63,9 @@ mod tests {
     fn the_request_names_the_reviewed_state_the_message_and_the_request_id() {
         let request: CreateCommitRequestV1 = serde_json::from_value(serde_json::json!({
             "session": "s",
-            "expectedSnapshot": "abc123",
+            "expected_snapshot": "abc123",
             "message": "feat: change",
-            "requestId": "req-1"
+            "request_id": "req-1"
         }))
         .unwrap();
         assert_eq!(request.expected_snapshot, "abc123");

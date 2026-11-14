@@ -24,7 +24,7 @@ import { SandboxExecutionDetails } from './SandboxExecutionDetails';
 import { SandboxPolicySummary } from './SandboxPolicySummary';
 import {
   SandboxPolicyTabs,
-  type SandboxTabId,
+  type SandboxPolicyId,
 } from './SandboxPolicyTabs';
 
 export interface SandboxInsideViewProps {
@@ -33,8 +33,8 @@ export interface SandboxInsideViewProps {
   onReturnToNative: () => void;
   onFocusPane: (paneId: string) => void;
   experience: 'web' | 'app';
-  activeTab: SandboxTabId;
-  onTabChange: (tab: SandboxTabId) => void;
+  activePolicy: SandboxPolicyId;
+  onPolicyChange: (policy: SandboxPolicyId) => void;
 }
 
 function MissingPolicy() {
@@ -45,20 +45,20 @@ function MissingPolicy() {
   );
 }
 
-function InsideOverview({
+export function SandboxInsideOverview({
   context,
   policy,
   busy,
   onReturnToNative,
   onFocusPane,
-  onTabChange,
+  onPolicyChange,
 }: {
   context: SandboxCurrentContext;
   policy: SandboxCurrentContext['effective_policy'];
   busy: boolean;
   onReturnToNative: () => void;
   onFocusPane: (paneId: string) => void;
-  onTabChange: (tab: SandboxTabId) => void;
+  onPolicyChange: (policy: SandboxPolicyId) => void;
 }) {
   const execution = context.execution;
   if (!execution) {
@@ -68,7 +68,7 @@ function InsideOverview({
     (pane) => pane.execution_id !== execution.execution_id,
   );
   return (
-    <DetailSurface>
+    <DetailSurface data-testid="sandbox-inside">
       <DetailHeader
         level="h2"
         title="Inside Sandbox"
@@ -91,7 +91,7 @@ function InsideOverview({
       />
 
       <SandboxExecutionDetails context={context} />
-      {policy ? <SandboxPolicySummary policy={policy} onSelectTab={onTabChange} /> : null}
+      {policy ? <SandboxPolicySummary policy={policy} onSelectTab={onPolicyChange} /> : null}
 
       <OperationActions>
         {context.native_pane ? (
@@ -143,21 +143,16 @@ function InsideOverview({
 }
 
 /**
- * The inside projection (#3124, #3143).
+ * The Policies section's inside projection (#3124, #3408).
  *
- * The same six peer tabs as the outside composer, but every body is the
- * Agent's observed effective policy/evidence — never the last draft. The
- * Overview carries trust, execution identity and the Pane-only scope; the
- * five domain tabs carry their observed configuration and stay read-only.
+ * Every body is the Agent's observed effective policy/evidence — never the
+ * last draft. The five policy entries stay read-only.
  */
-export function SandboxInsideView({
+export function SandboxInsidePolicyPanels({
   context,
-  busy,
-  onReturnToNative,
-  onFocusPane,
   experience,
-  activeTab,
-  onTabChange,
+  activePolicy,
+  onPolicyChange,
 }: SandboxInsideViewProps) {
   const execution = context.execution;
   const policy = context.effective_policy;
@@ -169,17 +164,7 @@ export function SandboxInsideView({
     );
   }
 
-  const panels: Record<SandboxTabId, ReactNode> = {
-    overview: (
-      <InsideOverview
-        context={context}
-        policy={policy}
-        busy={busy}
-        onReturnToNative={onReturnToNative}
-        onFocusPane={onFocusPane}
-        onTabChange={onTabChange}
-      />
-    ),
+  const panels: Record<SandboxPolicyId, ReactNode> = {
     filesystem: policy ? (
       <DetailSurface>
         <SandboxEffectiveFilesystem policy={policy} mechanisms={execution.mechanisms} />
@@ -227,9 +212,9 @@ export function SandboxInsideView({
     >
       <SandboxPolicyTabs
         experience={experience}
-        value={activeTab}
-        onValueChange={onTabChange}
-        renderPanel={(tab) => panels[tab]}
+        value={activePolicy}
+        onValueChange={onPolicyChange}
+        renderPanel={(policy) => panels[policy]}
       />
     </div>
   );

@@ -87,6 +87,9 @@ pub fn materialize_with_composition(
     }
     policy.filesystem = Some(SandboxFilesystemPolicy {
         access: SandboxFilesystemAccess::default(),
+        rootfs: None,
+        mounts: Vec::new(),
+        workspace: None,
         composition: Some(composition),
     });
     Ok(policy)
@@ -360,6 +363,8 @@ mod tests {
             workspace: Some(nession_protocol::contracts::sandbox::v1::SandboxWorkspace {
                 image: None,
                 write: "/state/workspace".to_string(),
+                ownership:
+                    nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
             }),
             toolchains: Vec::new(),
         };

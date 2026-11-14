@@ -45,6 +45,15 @@ pub struct AgentInfo {
     /// before this server was upgraded and has not reconnected since. The relay
     /// refuses those too.
     pub protocol_manifest: Option<ProtocolManifest>,
+    /// The durable Agent Token synced on this registration (#3440).
+    ///
+    /// **Memory only.** Never persisted, never serialized into an agent view,
+    /// never logged (`SecretString` redacts `Debug`). `None` means this Agent
+    /// registered before the field existed or omitted it; attach refuses P2P
+    /// with a clear reason until a re-registration supplies one. A stale
+    /// registration cannot overwrite it: writes happen while the registration
+    /// guard is held, and `register` replaces the whole record atomically.
+    pub agent_token: Option<nession_common::SecretString>,
     /// Monotonic registration generation, assigned by
     /// [`AgentRegistry::register`].
     ///
@@ -177,6 +186,9 @@ impl AgentRegistry {
                         // Restored agents have no manifest until they register
                         // again — see the field's note on why it is not stored.
                         protocol_manifest: None,
+                        // A restored Agent has no token state until it
+                        // re-registers; attach refuses P2P until then.
+                        agent_token: None,
                         // Zero until the first live registration; a restored
                         // Agent is not a registration a stale probe could
                         // overwrite.
@@ -191,6 +203,20 @@ impl AgentRegistry {
             Err(e) => {
                 tracing::error!("Failed to load agents from database: {:#}", e);
             }
+        }
+    }
+
+    /// Evict the cached Agent Token for one Agent (#3440).
+    ///
+    /// Called when the owning control connection ends: the token state belongs
+    /// to the registration generation, and a later attach must refuse clearly
+    /// until the Agent registers again rather than hand out a value this Server
+    /// can no longer vouch for. A stale connection's release is refused by the
+    /// command broker, so it cannot evict its successor's token.
+    pub async fn clear_agent_token(&self, agent_id: &str) {
+        let mut agents = self.agents.write().await;
+        if let Some(info) = agents.get_mut(agent_id) {
+            info.agent_token = None;
         }
     }
 
@@ -828,6 +854,7 @@ mod tests {
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: None,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 0,
         }

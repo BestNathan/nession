@@ -21,7 +21,6 @@ pub struct UnstageRequestV1 {
     pub path: String,
     /// The snapshot the caller reviewed. A stale token is refused and the index
     /// is left untouched.
-    #[serde(rename = "expectedSnapshot")]
     pub expected_snapshot: String,
 }
 
@@ -42,7 +41,7 @@ mod tests {
         let request: UnstageRequestV1 = serde_json::from_value(serde_json::json!({
             "session": "s",
             "path": "src/lib.rs",
-            "expectedSnapshot": "abc123"
+            "expected_snapshot": "abc123"
         }))
         .unwrap();
         assert_eq!(request.path, "src/lib.rs");

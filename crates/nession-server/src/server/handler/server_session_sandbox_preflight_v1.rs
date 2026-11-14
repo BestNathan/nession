@@ -6,7 +6,10 @@ use super::{
     Duration, HandlerAction, ProtocolMessage, SandboxCapabilityCatalog, SandboxPreflightResult,
 };
 use nession_protocol::contracts::image::v1::ImageStatus;
-use nession_protocol::contracts::sandbox::v1::{validate_image_selections, SandboxFieldError};
+use nession_protocol::contracts::sandbox::v1::{
+    validate_image_selections, SandboxFieldError, SandboxImageMode, SandboxImageRole,
+    SandboxImageSelection,
+};
 
 /// Preflight is the Agent's compile + host-capability check. It creates no
 /// resources, but a cold cache still probes Bubblewrap and the cgroup
@@ -78,7 +81,15 @@ impl ConnectionHandler {
             Err(error) => return Ok(refuse(&error, &payload.generation)),
         };
 
-        if !payload.images.is_empty()
+        let images = match super::server_session_sandbox_images::derive_sandbox_image_selections(
+            &payload.policy,
+            payload.images.clone(),
+        ) {
+            Ok(images) => images,
+            Err(error) => return Ok(refuse(&error, &payload.generation)),
+        };
+
+        if !images.is_empty()
             && payload
                 .policy
                 .filesystem
@@ -97,14 +108,36 @@ impl ConnectionHandler {
                 }],
             ));
         }
-        if let Err(errors) = validate_image_selections(&payload.images) {
+        let workspace = match self
+            .resolve_sandbox_workspace(&agent_id, &payload.session_id, &payload.policy, &images)
+            .await
+        {
+            Ok(workspace) => workspace,
+            Err((error, field_error)) => {
+                return Ok(refuse_with_errors(
+                    &error,
+                    &payload.generation,
+                    vec![field_error],
+                ));
+            }
+        };
+        let mut images = images;
+        if let Some(digest) = workspace.lower_digest {
+            images.push(SandboxImageSelection {
+                role: SandboxImageRole::Workspace,
+                digest,
+                target: None,
+                mode: SandboxImageMode::Overlay,
+            });
+        }
+        if let Err(errors) = validate_image_selections(&images) {
             return Ok(refuse_with_errors(
                 "the Sandbox image selection is not a valid composition",
                 &payload.generation,
                 errors,
             ));
         }
-        for (index, selection) in payload.images.iter().enumerate() {
+        for (index, selection) in images.iter().enumerate() {
             match self.image_manager.get(Some(&selection.digest), None).await {
                 Ok(image) if image.status == ImageStatus::Ready => {}
                 Ok(_) => {
@@ -137,7 +170,7 @@ impl ConnectionHandler {
             agent_id,
             session_name,
             payload.generation,
-            payload.images.len()
+            images.len()
         );
         match self
             .agent_command_with_timeout(
@@ -148,7 +181,8 @@ impl ConnectionHandler {
                     "generation": payload.generation,
                     "probe_generation": payload.probe_generation,
                     "policy": payload.policy,
-                    "images": payload.images,
+                    "images": images,
+                    "project_location": workspace.project_location,
                     "working_dir": payload.working_dir,
                 }),
                 SANDBOX_PREFLIGHT_TIMEOUT,

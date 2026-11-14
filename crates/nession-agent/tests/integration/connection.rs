@@ -4,14 +4,13 @@
 //! send registration/heartbeat/session update messages, and handle responses.
 
 use super::{
-    browser_scope, connect, mint_credential, tmux_show_environment, TestSession, WsSink, WsStream,
-    TEST_AGENT_ID, TEST_CREDENTIAL,
+    connect, tmux_show_environment, TestSession, WsSink, WsStream, TEST_AGENT_ID, TEST_AGENT_TOKEN,
 };
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::{msg_types, ServerClient};
 use nession_agent::extension::ExtensionRegistry;
-use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{
     msg_types as ws_msg_types, new_message as ws_message, AgentServer, AgentServerContext,
     Message as ProtocolMessage, SessionCreatePayload, SessionCreateResponse,
@@ -123,7 +122,7 @@ async fn integration_connection_to_mock_server() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
 
@@ -177,7 +176,7 @@ async fn integration_registration_message_format() {
             )
             .expect("the routes compose"),
         )),
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
 
@@ -203,6 +202,9 @@ async fn integration_registration_message_format() {
     assert_eq!(payload["ip_address"], "192.168.1.100");
     assert_eq!(payload["port"], 9090);
     assert_eq!(payload["auth_token"], "secret-token-123");
+    // The durable inbound Agent Token (#3440) travels with registration so the
+    // Server can hand it to clients that will dial this Agent directly.
+    assert_eq!(payload["agent_token"], TEST_AGENT_TOKEN);
     // Phase 6 removed the one number that stood for every protocol's
     // compatibility. Nothing ever read it, and it is asserted absent rather
     // than merely unmentioned so that re-adding it fails here — a field that
@@ -283,7 +285,7 @@ async fn integration_heartbeat_message_format() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
 
@@ -357,7 +359,7 @@ async fn integration_session_update_message_format() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
 
@@ -434,7 +436,7 @@ async fn integration_reconnection_logic() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
 
@@ -590,14 +592,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
     // --- direct P2P create ---
     let p2p_session = TestSession::new("parity-p2p");
     let p2p_name = p2p_session.name().to_string();
-    let credentials = Arc::new(P2pCredentials::new());
-    mint_credential(
-        &credentials,
-        TEST_AGENT_ID,
-        TEST_CREDENTIAL,
-        browser_scope(),
-    )
-    .unwrap();
+    let auth = Arc::new(P2pAuth::new(TEST_AGENT_TOKEN));
     let tmp = Box::leak(Box::new(tempfile::tempdir().unwrap()));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let server = AgentServer::new(
@@ -609,7 +604,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials: Arc::clone(&credentials),
+            auth: Arc::clone(&auth),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
@@ -619,7 +614,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
     )
     .unwrap();
     let (p2p_handle, addr) = server.start().await.unwrap();
-    let (mut sink, mut stream) = connect(&credentials, addr).await.unwrap();
+    let (mut sink, mut stream) = connect(&auth, addr).await.unwrap();
     let create = ws_message(
         ws_msg_types::SESSION_CREATE,
         SessionCreatePayload {
@@ -680,7 +675,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None,
-        Arc::new(P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
     let (client_handle, _) = client.connect_and_run().await.expect("connect failed");
@@ -874,7 +869,7 @@ async fn a_reconnect_reports_the_surviving_binding() {
         Arc::clone(&tmux),
         "/tmp".to_string(),
         None,
-        Arc::new(P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
     let (handle, _) = client.connect_and_run().await.expect("connect failed");

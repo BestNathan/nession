@@ -333,60 +333,123 @@ pub struct ImageCacheStatus {
     pub detail: Option<String>,
 }
 
-/// `server.image.access`'s request: a scoped read grant for one digest.
+// ── Per-digest cache progress (#3412) ───────────────────────────────────
+
+/// The only per-digest cache observation version this build understands.
+pub const IMAGE_CACHE_OBSERVATION_VERSION: u32 = 1;
+
+/// The truthful phase of one digest in the current Agent's cache.
 ///
-/// Exactly one consumer context authorizes the grant. A Project grant requires
-/// the Project's durable `image_digest` reference. A Session grant requires
-/// that the digest is one of that Managed Session's resolved images; knowing a
-/// digest or another Session's identity is not authorization.
+/// A durable `.part` is `resumable`, not an active download. Byte transfer
+/// completing is `verifying`; only a full SHA-256 match plus atomic
+/// publication is `verified`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageCachePhase {
+    /// No verified blob and no partial download.
+    Absent,
+    /// A durable partial exists; a later fetch can resume it. Not active.
+    Resumable,
+    /// A transfer is receiving bytes now.
+    Downloading,
+    /// Byte transfer finished but full-digest verification/publication has not.
+    /// Not mount-ready.
+    Verifying,
+    /// A verified blob exists in this Agent's identity-namespaced cache.
+    Verified,
+    /// The cached bytes failed verification or a preparation attempt failed.
+    Failed,
+    /// This Agent has no EROFS cache configured.
+    Unavailable,
+}
+
+/// One digest's authoritative cache observation from the current Agent.
+///
+/// The observation is read-only: asking for it never starts a transfer, mints
+/// a grant or exposes a local path. `downloaded_bytes` and `total_bytes` are
+/// measured values, never estimates; `total_bytes` is absent when the
+/// authoritative total is unknown, and consumers must not synthesize a
+/// percentage in that case. `updated_at` is Unix epoch seconds.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImageAccessPayload {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+#[serde(deny_unknown_fields)]
+pub struct ImageCacheObservation {
+    /// [`IMAGE_CACHE_OBSERVATION_VERSION`]. Other versions are refused.
+    pub contract_version: u32,
     pub digest: String,
+    pub phase: ImageCachePhase,
+    /// Durable partial bytes plus bytes written by the current transfer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloaded_bytes: Option<u64>,
+    /// Authoritative total from the Server descriptor or validated HTTP
+    /// `Content-Range`/`Content-Length`; absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
+    /// True only for `downloading` and `verifying`; a surviving `.part` is
+    /// not active.
+    #[serde(default)]
+    pub active: bool,
+    /// Unix epoch seconds of the last measured state change.
+    pub updated_at: u64,
+    /// Bounded diagnostic. Never a local path or bearer grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
-/// The one consumer context a client names for an image grant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageAccessConsumer<'a> {
-    Project(&'a str),
-    Session(&'a str),
-}
-
-impl ImageAccessPayload {
-    /// Require exactly one consumer context.
-    pub fn consumer(&self) -> Result<ImageAccessConsumer<'_>, ImageValidationError> {
-        match (self.project_id.as_deref(), self.session_id.as_deref()) {
-            (Some(project_id), None) => Ok(ImageAccessConsumer::Project(project_id)),
-            (None, Some(session_id)) => Ok(ImageAccessConsumer::Session(session_id)),
-            _ => Err(ImageValidationError::AccessRequiresExactlyOneConsumer),
+impl ImageCacheObservation {
+    /// Validate the version, digest and measured-byte/activity invariants.
+    pub fn validate(&self) -> Result<(), ImageValidationError> {
+        if self.contract_version != IMAGE_CACHE_OBSERVATION_VERSION {
+            return Err(ImageValidationError::UnsupportedCacheObservationVersion {
+                version: self.contract_version,
+            });
         }
+        if !is_valid_image_digest(&self.digest) {
+            return Err(ImageValidationError::CacheObservationInvalidDigest);
+        }
+        if let (Some(downloaded), Some(total)) = (self.downloaded_bytes, self.total_bytes) {
+            if downloaded > total {
+                return Err(ImageValidationError::CacheObservationBytesInconsistent);
+            }
+        }
+        if self.total_bytes.is_some() && self.downloaded_bytes.is_none() {
+            return Err(ImageValidationError::CacheObservationBytesInconsistent);
+        }
+        let must_be_active = matches!(
+            self.phase,
+            ImageCachePhase::Downloading | ImageCachePhase::Verifying
+        );
+        if self.active != must_be_active {
+            return Err(ImageValidationError::CacheObservationActivityInconsistent);
+        }
+        Ok(())
     }
 }
 
-/// `server.image.access`'s reply.
-///
-/// `token` is a bearer credential for `path` only. It is stored hashed and
-/// expires; it never grants metadata or another digest.
-#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImageAccessResponsePayload {
-    pub success: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_kind: Option<String>,
+impl ImageCacheStatus {
+    /// Project an observation into the older readiness vocabulary.
+    ///
+    /// A resumable/downloading/verifying digest is `preparing`; it is never
+    /// mount-ready until the observation itself says `verified`.
+    pub fn from_observation(observation: &ImageCacheObservation) -> Self {
+        let state = match observation.phase {
+            ImageCachePhase::Verified => ImageCacheState::Verified,
+            ImageCachePhase::Resumable
+            | ImageCachePhase::Downloading
+            | ImageCachePhase::Verifying => ImageCacheState::Preparing,
+            ImageCachePhase::Absent => ImageCacheState::Absent,
+            ImageCachePhase::Failed => ImageCacheState::Failed,
+            ImageCachePhase::Unavailable => ImageCacheState::Unavailable,
+        };
+        Self {
+            digest: observation.digest.clone(),
+            state,
+            detail: observation.detail.clone(),
+        }
+    }
 }
 
 // ── Validation ──────────────────────────────────────────────────────────
@@ -417,8 +480,15 @@ pub enum ImageValidationError {
     InvalidFixedTimestamp,
     InvalidFixedUuid,
     GetRequiresExactlyOneLocator,
-    AccessRequiresExactlyOneConsumer,
     ErrorTooLong { max: usize },
+    InvalidBuildId,
+    EmptyClientRequestId,
+    ClientRequestIdTooLong { max: usize },
+    ClientRequestIdInvalid,
+    UnsupportedCacheObservationVersion { version: u32 },
+    CacheObservationInvalidDigest,
+    CacheObservationBytesInconsistent,
+    CacheObservationActivityInconsistent,
 }
 
 impl ImageValidationError {
@@ -484,11 +554,32 @@ impl ImageValidationError {
             Self::GetRequiresExactlyOneLocator => {
                 "server.image.get requires exactly one of digest or alias".to_string()
             }
-            Self::AccessRequiresExactlyOneConsumer => {
-                "server.image.access requires exactly one of project_id or session_id".to_string()
-            }
             Self::ErrorTooLong { max } => {
                 format!("image error must be at most {max} characters")
+            }
+            Self::InvalidBuildId => "build_id is not a valid image build identity".to_string(),
+            Self::EmptyClientRequestId => "client_request_id must not be empty".to_string(),
+            Self::ClientRequestIdTooLong { max } => {
+                format!("client_request_id must be at most {max} characters")
+            }
+            Self::ClientRequestIdInvalid => {
+                "client_request_id must contain only ASCII letters, digits, '.', '_', '-' or ':'"
+                    .to_string()
+            }
+            Self::UnsupportedCacheObservationVersion { version } => {
+                format!(
+                    "image cache observation version {version} is not supported; expected {IMAGE_CACHE_OBSERVATION_VERSION}"
+                )
+            }
+            Self::CacheObservationInvalidDigest => {
+                "image cache observation digest must be a sha256:<64 lowercase hex> digest"
+                    .to_string()
+            }
+            Self::CacheObservationBytesInconsistent => {
+                "image cache observation byte counts are inconsistent".to_string()
+            }
+            Self::CacheObservationActivityInconsistent => {
+                "image cache observation activity does not match its phase".to_string()
             }
         }
     }
@@ -744,4 +835,325 @@ pub fn validate_error_text(raw: &str) -> Result<(), ImageValidationError> {
         });
     }
     Ok(())
+}
+
+// ── Asynchronous build lifecycle (#3334) ────────────────────────────────
+//
+// `server.image.build` v1 remains the documented synchronous compatibility
+// path: it submits the same durable background build and waits for the terminal
+// state. These contracts are the asynchronous family a client uses to submit,
+// observe, cancel and retry without holding a request open. A build record is
+// execution state; only a succeeded build publishes an immutable Image.
+
+/// Prefix of a durable build identity.
+pub const IMAGE_BUILD_ID_PREFIX: &str = "build-";
+/// Maximum length of a client-supplied idempotency key.
+pub const IMAGE_BUILD_REQUEST_ID_MAX_CHARS: usize = 128;
+/// Default page size for `server.image.build.list`.
+pub const IMAGE_BUILD_LIST_DEFAULT_LIMIT: u32 = 64;
+/// The largest page `server.image.build.list` accepts.
+pub const IMAGE_BUILD_LIST_MAX_LIMIT: u32 = 200;
+/// Maximum length of the last bounded build diagnostic.
+pub const IMAGE_DIAGNOSTIC_MAX_CHARS: usize = 1024;
+
+/// The lifecycle of one durable build record.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageBuildStatus {
+    /// Recorded and waiting for a build worker slot.
+    Queued,
+    /// A worker owns this build and is executing a stage.
+    Running,
+    /// An immutable verified blob exists at `digest`.
+    Succeeded,
+    /// The build failed; `error` is the bounded recoverable reason.
+    Failed,
+    /// The client canceled the build; no bytes were published.
+    Canceled,
+}
+
+impl ImageBuildStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "queued" => Some(Self::Queued),
+            "running" => Some(Self::Running),
+            "succeeded" => Some(Self::Succeeded),
+            "failed" => Some(Self::Failed),
+            "canceled" => Some(Self::Canceled),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Succeeded | Self::Failed | Self::Canceled)
+    }
+}
+
+/// The current stage of a running build.
+///
+/// `mkfs.erofs` has no native progress report, so a packaging build reports
+/// this stage and elapsed time, never an invented percentage.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageBuildStage {
+    Fetching,
+    Snapshotting,
+    Validating,
+    Packaging,
+    Publishing,
+}
+
+impl ImageBuildStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fetching => "fetching",
+            Self::Snapshotting => "snapshotting",
+            Self::Validating => "validating",
+            Self::Packaging => "packaging",
+            Self::Publishing => "publishing",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "fetching" => Some(Self::Fetching),
+            "snapshotting" => Some(Self::Snapshotting),
+            "validating" => Some(Self::Validating),
+            "packaging" => Some(Self::Packaging),
+            "publishing" => Some(Self::Publishing),
+            _ => None,
+        }
+    }
+}
+
+/// Measured build progress. Counts are absent until the snapshot manifest has
+/// measured them; no field is a guessed total.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageBuildProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// Time since this attempt started, in milliseconds.
+    #[serde(default)]
+    pub elapsed_ms: u64,
+}
+
+/// One durable build record as the asynchronous units return it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildDescriptor {
+    pub build_id: String,
+    /// The registry row this build will publish (or reuse).
+    pub image_id: String,
+    /// 1 for the first attempt; each retry increments it within this record.
+    pub attempt: u32,
+    pub source: ImageSource,
+    /// The exact resolved Git commit, once pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_sha: Option<String>,
+    pub packaging: ImagePackaging,
+    pub status: ImageBuildStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<ImageBuildStage>,
+    pub progress: ImageBuildProgress,
+    /// The last bounded diagnostic, such as a failed subprocess line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The immutable digest once `status = succeeded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// Whether this build reused bytes that were already published.
+    #[serde(default)]
+    pub deduplicated: bool,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// `server.image.build.submit`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildSubmitPayload {
+    pub source: ImageSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// Optional idempotency key: a repeated submission with the same key and
+    /// the same source returns the existing build record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_request_id: Option<String>,
+}
+
+/// `server.image.build.submit`'s reply: the durable record, returned promptly.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildSubmitResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.build.get`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildGetPayload {
+    pub build_id: String,
+}
+
+/// `server.image.build.get`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildGetResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.build.list`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildListPayload {
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default = "default_build_list_limit")]
+    pub limit: u32,
+}
+
+fn default_build_list_limit() -> u32 {
+    IMAGE_BUILD_LIST_DEFAULT_LIMIT
+}
+
+/// `server.image.build.list`'s reply: the durable inventory, newest first.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildListResponsePayload {
+    pub builds: Vec<ImageBuildDescriptor>,
+    pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `server.image.build.cancel`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildCancelPayload {
+    pub build_id: String,
+}
+
+/// `server.image.build.cancel`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildCancelResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.build.retry`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildRetryPayload {
+    pub build_id: String,
+}
+
+/// `server.image.build.retry`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildRetryResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<ImageBuildDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `build-` followed by a non-empty UUID-shaped identity.
+pub fn is_valid_image_build_id(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix(IMAGE_BUILD_ID_PREFIX) else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest.len() <= 64
+        && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// Validate a build identity supplied by a caller.
+pub fn normalize_image_build_id(raw: &str) -> Result<String, ImageValidationError> {
+    let value = raw.trim();
+    if value.is_empty() || !is_valid_image_build_id(value) {
+        return Err(ImageValidationError::InvalidBuildId);
+    }
+    Ok(value.to_string())
+}
+
+/// Validate an optional client idempotency key.
+///
+/// The key is opaque to the Server except for its bounded shape; it is scoped to
+/// one Server's build root. An empty key is invalid rather than "absent" so a
+/// caller cannot accidentally lose idempotency to a blank field.
+pub fn normalize_client_request_id(raw: &str) -> Result<String, ImageValidationError> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(ImageValidationError::EmptyClientRequestId);
+    }
+    if value.chars().count() > IMAGE_BUILD_REQUEST_ID_MAX_CHARS {
+        return Err(ImageValidationError::ClientRequestIdTooLong {
+            max: IMAGE_BUILD_REQUEST_ID_MAX_CHARS,
+        });
+    }
+    if !value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':'))
+    {
+        return Err(ImageValidationError::ClientRequestIdInvalid);
+    }
+    Ok(value.to_string())
 }

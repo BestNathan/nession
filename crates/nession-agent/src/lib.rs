@@ -21,7 +21,7 @@ pub mod managed_session;
 pub mod memory;
 pub mod netdetect;
 pub mod netwatch;
-pub mod p2p_credentials;
+pub mod p2p_auth;
 pub mod protocol;
 pub mod runtime;
 pub mod sandbox_images;
@@ -30,6 +30,8 @@ pub mod server;
 pub mod session;
 pub mod sync;
 pub mod tmux;
+pub mod token;
+pub mod workspace_manager;
 
 #[cfg(test)]
 mod test_support;

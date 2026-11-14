@@ -21,7 +21,6 @@ pub struct StageRequestV1 {
     pub path: String,
     /// The snapshot the caller reviewed. The mutation is refused, without being
     /// applied, if the repository no longer matches it.
-    #[serde(rename = "expectedSnapshot")]
     pub expected_snapshot: String,
 }
 
@@ -43,7 +42,7 @@ mod tests {
         let request: StageRequestV1 = serde_json::from_value(serde_json::json!({
             "session": "s",
             "path": "src/lib.rs",
-            "expectedSnapshot": "abc123"
+            "expected_snapshot": "abc123"
         }))
         .unwrap();
         assert_eq!(request.path, "src/lib.rs");

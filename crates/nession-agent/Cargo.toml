@@ -32,6 +32,8 @@ nession-erofs = { path = "../nession-erofs", default-features = false, features 
 # reuses the Server client for the cluster backend.
 nession-mcp = { path = "../nession-mcp", features = ["remote"] }
 tokio.workspace = true
+# The HTTP ingress and WebSocket Upgrade owner (#3439).
+axum.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
@@ -50,6 +52,7 @@ async-trait.workspace = true
 futures-util.workspace = true
 tokio-rustls.workspace = true
 base64.workspace = true
+rand.workspace = true
 mime_guess.workspace = true
 # Durable EROFS cache download (#3023): bounded authenticated streaming.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }

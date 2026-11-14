@@ -38,6 +38,7 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::extension::ExtensionUnitPolicy;
+use nession_common::SecretString;
 use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
     AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
@@ -52,6 +53,10 @@ use nession_protocol::contracts::session::v1::{
     ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
     ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
     SessionMetadataUpdatePayload,
+};
+use nession_protocol::contracts::workspace::v1::{
+    AgentWorkspaceDescriptor, AgentWorkspaceKind, AgentWorkspaceStatus,
+    ServerWorkspaceCreatePayload, ServerWorkspaceDeletePayload, ServerWorkspaceListPayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -75,12 +80,10 @@ use nession_runtime::lane::Work;
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
-use crate::p2p_credentials::P2pCredentials;
 use crate::protocol::core_routes;
 use crate::session::metadata::{error_kind_and_detail, SessionMetadataStore};
 use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{SessionBindingInput, SessionManager};
-use nession_protocol::contracts::p2p::v1::P2pGrantPayload;
 use nession_runtime::lane::KeyedLane;
 
 /// Type alias for the WebSocket stream.
@@ -187,12 +190,10 @@ pub struct ServerClient {
     default_working_dir: String,
     /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
-    /// The P2P credentials this agent honours (#1013).
-    ///
-    /// Shared with the P2P listener, which is where they are *checked*; this
-    /// side is where they *arrive*, because the channel that delivers them is
-    /// the one this client dialled out.
-    p2p_credentials: Arc<P2pCredentials>,
+    /// The Agent's durable inbound token (#3440). Sent to the Server on every
+    /// registration so attach can hand it to an authenticated client; never
+    /// put in a URL, log or public view.
+    agent_token: SecretString,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -530,7 +531,7 @@ impl ServerClient {
         tmux: Arc<SessionManager>,
         default_working_dir: String,
         extension_registry: Option<Arc<ExtensionRegistry>>,
-        p2p_credentials: Arc<P2pCredentials>,
+        agent_token: SecretString,
         mutations: Arc<KeyedLane<ResourceKey>>,
     ) -> Self {
         let env_root = nession_common::paths::agent_envs_dir()
@@ -550,7 +551,7 @@ impl ServerClient {
             metadata,
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::clone(&tmux))),
             tmux,
-            p2p_credentials,
+            agent_token,
             mutations,
             env_store: EnvStore::new(env_root),
             session_publish: Arc::new(Mutex::new(None)),
@@ -755,7 +756,8 @@ impl ServerClient {
             hostname: self.hostname.clone(),
             ip_address: self.ip_address.clone(),
             port: self.port,
-            auth_token: self.auth_token.clone(),
+            auth_token: self.auth_token.clone().into(),
+            agent_token: self.agent_token.as_str().into(),
             metadata: self.metadata.clone(),
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
@@ -1389,7 +1391,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1406,6 +1408,10 @@ mod tests {
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-1");
         assert_eq!(parsed["payload"]["hostname"], "test-host");
         assert_eq!(parsed["payload"]["port"], 8080);
+        // The durable Agent Token (#3440) is carried on registration, separate
+        // from the Server Token that authenticates the central connection.
+        assert_eq!(parsed["payload"]["agent_token"], "test-agent-token-000000");
+        assert_eq!(parsed["payload"]["auth_token"], "test-token");
 
         handle.shutdown().await.ok();
         server_handle.abort();
@@ -1437,7 +1443,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1494,7 +1500,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1587,7 +1593,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1666,7 +1672,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1784,7 +1790,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1923,7 +1929,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2026,7 +2032,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2156,7 +2162,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             Some(registry),
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         client.connect_and_run().await.expect("connect failed").0
@@ -2303,7 +2309,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             Some(registry),
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         )
     }
@@ -2555,7 +2561,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2649,7 +2655,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2742,7 +2748,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2855,7 +2861,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2907,7 +2913,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -3104,7 +3110,7 @@ mod tests {
             tmux,
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -3182,7 +3188,7 @@ mod tests {
             tmux,
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -3542,7 +3548,7 @@ esac"#,
             tmux,
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         client.connect_and_run().await.expect("connect failed").0
@@ -3868,6 +3874,42 @@ fn sandbox_session_by_name(payload: &serde_json::Value) -> ResourceKey {
     ResourceKey::Session(str_field(payload, "session_name"))
 }
 
+/// The managed Workspace a create/delete payload names, as a lane key.
+fn workspace_by_name(payload: &serde_json::Value) -> ResourceKey {
+    let namespace = payload
+        .get("namespace")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("default");
+    ResourceKey::Workspace(format!("{namespace}:{}", str_field(payload, "name")))
+}
+
+fn workspace_by_id(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Workspace(str_field(payload, "workspace_id"))
+}
+
+/// Project the manager's observed record into the versioned contract.
+fn workspace_descriptor(
+    workspace: crate::workspace_manager::AgentWorkspace,
+) -> AgentWorkspaceDescriptor {
+    AgentWorkspaceDescriptor {
+        workspace_id: workspace.workspace_id,
+        name: workspace.name,
+        namespace: workspace.namespace,
+        kind: AgentWorkspaceKind::Managed,
+        status: match workspace.status {
+            crate::workspace_manager::WorkspaceStatus::Available => AgentWorkspaceStatus::Available,
+            crate::workspace_manager::WorkspaceStatus::InUse => AgentWorkspaceStatus::InUse,
+            crate::workspace_manager::WorkspaceStatus::Missing => AgentWorkspaceStatus::Missing,
+            crate::workspace_manager::WorkspaceStatus::Error => AgentWorkspaceStatus::Error,
+        },
+        auto_created: workspace.auto_created,
+        created_at: workspace.created_at,
+        last_used_at: workspace.last_used_at,
+        path: None,
+        detail: workspace.detail,
+    }
+}
+
 fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
     ResourceKey::Env(str_field(payload, "name"))
 }
@@ -3888,57 +3930,6 @@ fn is_control(wire: &str) -> bool {
 }
 
 core_routes!(agent, msg, responses;
-    "agent.p2p.grant" => "agent.p2p.grant" => 1 => Key(ResourceKey::Authority) => {
-                    let grant: P2pGrantPayload =
-                        match serde_json::from_value(msg.payload.clone()) {
-                            Ok(grant) => grant,
-                            Err(e) => {
-                                warn!("Invalid agent.p2p.grant payload: {e}");
-                                return Ok(());
-                            }
-                        };
-                    let request_id = grant.request_id.clone();
-
-                    // Stored, not enforced. The Server is waiting on this
-                    // acknowledgement before it hands the token to a client, so
-                    // the reply has to say whether the credential was taken —
-                    // and a refusal here fails the client's attach, which is the
-                    // only honest outcome: an attach that proceeds with a
-                    // credential this agent will not honour fails later, in the
-                    // browser, with less to go on.
-                    let (success, error) = match agent.p2p_credentials.grant(&agent.agent_id, &grant)
-                    {
-                        Ok(credential_id) => {
-                            info!(
-                                credential = %credential_id,
-                                session_id = %grant.session_id,
-                                "Granted a P2P credential"
-                            );
-                            (true, None)
-                        }
-                        Err(refusal) => {
-                            warn!(
-                                ?refusal,
-                                session_id = %grant.session_id,
-                                "Refused a P2P grant"
-                            );
-                            (false, Some(format!("{refusal:?}")))
-                        }
-                    };
-
-                    let response = serde_json::json!({
-                        "msg_type": "server.agent.command-response",
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                        "payload": {
-                            "request_id": request_id,
-                            "command": "p2p.grant",
-                            "success": success,
-                            "error": error,
-                        }
-                    });
-                    responses.send(WsMessage::Text(response.to_string())).await?;
-    }
     "agent.session.list" => "agent.session.list" => 1 => Query => {
                     // The Server's MCP node tools route through here (#565):
                     // `nession_agent_list_sessions` is Agent truth, not the
@@ -4578,31 +4569,47 @@ core_routes!(agent, msg, responses;
                                 (false, None, Some(format!("{e:#}")))
                             }
                         };
-                    let cache_statuses = if payload.cache_digests.is_empty() {
-                        Vec::new()
-                    } else if let Some(cache) = agent
-                        .tmux
-                        .sandbox_runtime()
-                        .and_then(|runtime| runtime.erofs_cache())
-                    {
-                        let mut statuses = Vec::with_capacity(payload.cache_digests.len());
-                        for digest in &payload.cache_digests {
-                            statuses.push(crate::erofs_cache::status(&cache, digest).await);
-                        }
-                        statuses
-                    } else {
-                        payload
-                            .cache_digests
-                            .iter()
-                            .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
-                                digest: digest.clone(),
-                                state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
-                                detail: Some(
-                                    "this Agent has no EROFS cache configured".to_string(),
-                                ),
-                            })
-                            .collect()
-                    };
+                    let (cache_statuses, cache_observations) =
+                        if payload.cache_digests.is_empty() {
+                            (Vec::new(), Vec::new())
+                        } else if let Some(cache) = agent
+                            .tmux
+                            .sandbox_runtime()
+                            .and_then(|runtime| runtime.erofs_cache())
+                        {
+                            let mut statuses = Vec::with_capacity(payload.cache_digests.len());
+                            let mut observations =
+                                Vec::with_capacity(payload.cache_digests.len());
+                            for digest in &payload.cache_digests {
+                                let observation =
+                                    crate::erofs_cache::observation(&cache, digest).await;
+                                statuses.push(
+                                    nession_protocol::contracts::image::v1::ImageCacheStatus::from_observation(
+                                        &observation,
+                                    ),
+                                );
+                                observations.push(observation);
+                            }
+                            (statuses, observations)
+                        } else {
+                            let statuses = payload
+                                .cache_digests
+                                .iter()
+                                .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
+                                    digest: digest.clone(),
+                                    state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
+                                    detail: Some(
+                                        "this Agent has no EROFS cache configured".to_string(),
+                                    ),
+                                })
+                                .collect();
+                            let observations = payload
+                                .cache_digests
+                                .iter()
+                                .map(|digest| crate::erofs_cache::unavailable_observation(digest))
+                                .collect();
+                            (statuses, observations)
+                        };
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
@@ -4614,6 +4621,161 @@ core_routes!(agent, msg, responses;
                             "context": context,
                             "error": error,
                             "cache_statuses": cache_statuses,
+                            "cache_observations": cache_observations,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.workspace.list" => "agent.workspace.list" => 1 => Query => {
+                    let payload: ServerWorkspaceListPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.workspace.list payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": "",
+                                        "command": "workspace.list",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                        "workspaces": [],
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, workspaces, error) = match agent.tmux.workspaces() {
+                        Some(manager) => match manager.list(payload.namespace.as_deref()).await {
+                            Ok(workspaces) => (
+                                true,
+                                workspaces
+                                    .into_iter()
+                                    .map(workspace_descriptor)
+                                    .collect::<Vec<_>>(),
+                                None,
+                            ),
+                            Err(error) => (false, Vec::new(), Some(format!("{error:#}"))),
+                        },
+                        None => (
+                            false,
+                            Vec::new(),
+                            Some("this Agent has no Workspace registry configured".to_string()),
+                        ),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "workspace.list",
+                            "success": success,
+                            "error": error,
+                            "workspaces": workspaces,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.workspace.create" => "agent.workspace.create" => 1 => Key(workspace_by_name(&msg.payload)) => {
+                    let payload: ServerWorkspaceCreatePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.workspace.create payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": "",
+                                        "command": "workspace.create",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, workspace, error) = match agent.tmux.workspaces() {
+                        Some(manager) => match manager
+                            .get_or_create(
+                                payload.namespace.as_deref(),
+                                &payload.name,
+                                payload.auto_created,
+                            )
+                            .await
+                        {
+                            Ok(workspace) => (true, Some(workspace_descriptor(workspace)), None),
+                            Err(error) => (false, None, Some(format!("{error:#}"))),
+                        },
+                        None => (
+                            false,
+                            None,
+                            Some("this Agent has no Workspace registry configured".to_string()),
+                        ),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "workspace.create",
+                            "success": success,
+                            "error": error,
+                            "workspace": workspace,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.workspace.delete" => "agent.workspace.delete" => 1 => Key(workspace_by_id(&msg.payload)) => {
+                    let payload: ServerWorkspaceDeletePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.workspace.delete payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": "",
+                                        "command": "workspace.delete",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, error) = match agent.tmux.workspaces() {
+                        Some(manager) => match manager.delete(&payload.workspace_id).await {
+                            Ok(()) => (true, None),
+                            Err(error) => (false, Some(format!("{error:#}"))),
+                        },
+                        None => (
+                            false,
+                            Some("this Agent has no Workspace registry configured".to_string()),
+                        ),
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "workspace.delete",
+                            "success": success,
+                            "error": error,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4643,12 +4805,15 @@ core_routes!(agent, msg, responses;
                     let result = agent
                         .tmux
                         .sandbox_preflight(
-                            &payload.session_name,
-                            &payload.generation,
-                            &payload.probe_generation,
-                            &payload.policy,
-                            &payload.images,
-                            &payload.working_dir,
+                            crate::tmux::sandbox_context::SandboxPreflightInput {
+                                session_name: &payload.session_name,
+                                generation: &payload.generation,
+                                probe_generation: &payload.probe_generation,
+                                draft: &payload.policy,
+                                images: &payload.images,
+                                project_location: payload.project_location.as_deref(),
+                                working_dir: &payload.working_dir,
+                            },
                         )
                         .await;
                     let response = serde_json::json!({
@@ -4695,7 +4860,9 @@ core_routes!(agent, msg, responses;
                             enter_id: &payload.enter_id,
                             draft: &payload.policy,
                             images: &payload.images,
+                            project_location: payload.project_location.as_deref(),
                             server_url: &agent.server_url,
+                            server_auth_token: &agent.auth_token,
                             working_dir: &payload.working_dir,
                         })
                         .await;
@@ -4919,7 +5086,7 @@ mod versioned_routing {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         )
     }

@@ -20,6 +20,7 @@ import { fixtureImagesSurface } from './fixtureImages';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureSandboxSurface } from './fixtureSandbox';
+import { installWorkspaceSurface } from './fixtureWorkspaces';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureGithubSurface } from './fixtureGithub';
@@ -47,6 +48,11 @@ const fixtureOps = fixtureFileOps();
  * Canonical Workspace surface (#561 Phase 2B): the real plugin shell with
  * deterministic files data, no network. Phase 6 baseline source.
  */
+/** Routes that expose the Session-switch control while a Git request is in flight. */
+function isGitSessionScenario(scenario: string | null): boolean {
+  return scenario === 'selection-overlap' || scenario === 'mutation-overlap';
+}
+
 export function FixtureWorkspace() {
   // Route parameters express session observations; without them the fixture is
   // exactly the canonical screen the golden screenshots capture.
@@ -62,24 +68,7 @@ export function FixtureWorkspace() {
   const [gitSessionId, setGitSessionId] = useState(FIXTURE_SELECTED_ID);
   const gitSessionIdRef = useRef(FIXTURE_SELECTED_ID);
   const fileOps = new URLSearchParams(search).get('files') === 'unavailable' ? null : fixtureOps;
-  const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
-  const githubReady = useFixtureSurface(capability === 'git', search, installGithubSurface);
-  const conversationReady = useFixtureSurface(
-    capability === 'claude-code',
-    search,
-    installConversationSurface,
-  );
-  const envReady = useFixtureSurface(capability === 'env', search, installEnvSurface);
-  const sandboxReady = useFixtureSurface(
-    capability === 'sandbox',
-    search,
-    installSandboxSurface,
-  );
-  const imagesReady = useFixtureSurface(
-    capability === 'images' || capability === 'sandbox',
-    search,
-    installImagesSurface,
-  );
+  const capabilitySurfacesReady = useFixtureCapabilitySurfaces(search, capability);
   // #2803: the Agent capability's two-Agent same-name process scenario. The
   // route names the environment input, and the mounted capability observes the
   // Session change like a real Workspace move.
@@ -93,10 +82,12 @@ export function FixtureWorkspace() {
     subscribeFixtureAgentProcessSession,
     fixtureAgentProcessSessionId,
   );
-  // #2972: the selection-overlap Case moves the Session while a Git read is
-  // still in flight. The control is scoped to that route and removed with it.
+  // #2972 / #3327: these Cases move the Session while a Git read or mutation
+  // is still in flight. The control is scoped to those routes and removed with
+  // them.
+  const gitSessionScenario = isGitSessionScenario(gitScenario);
   useEffect(() => {
-    if (gitScenario !== 'selection-overlap' || typeof window === 'undefined') {
+    if (!gitSessionScenario || typeof window === 'undefined') {
       return;
     }
     const control = window as Window & {
@@ -112,7 +103,7 @@ export function FixtureWorkspace() {
       delete control.fixtureGitSelectSession;
       delete control.fixtureGitSelectedSession;
     };
-  }, [gitScenario]);
+  }, [gitSessionScenario]);
   const sessions = agentProcessScenario ? FIXTURE_AGENT_PROCESS_SESSIONS : FIXTURE_SESSIONS;
   const agents = agentProcessScenario
     ? fixtureAgentProcessesAgents(agentProcessScenario)
@@ -129,7 +120,7 @@ export function FixtureWorkspace() {
   );
   const selectedId = agentProcessScenario
     ? agentProcessSessionId
-    : gitScenario === 'selection-overlap'
+    : gitSessionScenario
       ? gitSessionId
       : metadataControlled
         ? ownershipSessionId
@@ -148,7 +139,8 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !githubReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady || !imagesReady) {
+  const surfacesReady = capabilitySurfacesReady && agentProcessReady;
+  if (!surfacesReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -239,6 +231,11 @@ function installSandboxSurface(search: string): () => void {
   return sandboxApi.install(fixtureSandboxSurface(search));
 }
 
+/** Bind the Agent Workspace registry stub (#3407, #3408). */
+function installWorkspacesSurface(): () => void {
+  return installWorkspaceSurface();
+}
+
 /**
  * Bind the Claude Code conversation stub.
  *
@@ -298,4 +295,42 @@ function useFixtureSurface(
   }, [key, install]);
 
   return !needed || installed === key;
+}
+
+/**
+ * Bind every capability-local surface the requested fixture route needs.
+ *
+ * Readiness is reported as one boolean so the route's render gate stays a
+ * single branch; each surface is still installed and released by
+ * `useFixtureSurface`.
+ */
+function useFixtureCapabilitySurfaces(search: string, capability: CapabilityId): boolean {
+  const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
+  const githubReady = useFixtureSurface(capability === 'git', search, installGithubSurface);
+  const conversationReady = useFixtureSurface(
+    capability === 'claude-code',
+    search,
+    installConversationSurface,
+  );
+  const envReady = useFixtureSurface(capability === 'env', search, installEnvSurface);
+  const sandboxReady = useFixtureSurface(capability === 'sandbox', search, installSandboxSurface);
+  const imagesReady = useFixtureSurface(
+    capability === 'images' || capability === 'sandbox',
+    search,
+    installImagesSurface,
+  );
+  const workspacesReady = useFixtureSurface(
+    capability === 'sandbox',
+    search,
+    installWorkspacesSurface,
+  );
+  return [
+    gitReady,
+    githubReady,
+    conversationReady,
+    envReady,
+    sandboxReady,
+    imagesReady,
+    workspacesReady,
+  ].every(Boolean);
 }

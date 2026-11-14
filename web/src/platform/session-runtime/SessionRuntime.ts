@@ -1,6 +1,6 @@
 import type { AttachInfo } from '@/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
-import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
+import { WebSocketService } from '@/platform/socket';
 import type { ConnectionState, HandshakeSurface, SentSocketMessage } from '@/platform/socket/types';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
 import { WIRE as CLIENT_AUTH_WIRE, type AuthResponsePayload } from '@/generated/protocol/core/client-auth/v1';
@@ -88,13 +88,12 @@ export interface SessionRuntimeConfig {
    */
   createTransport: (opts: ConnectionOptions) => TerminalTransport;
   /**
-   * Reissue this Session's P2P credential through the authenticated Server
-   * attach operation (#2645).
+   * Fetch this Agent's current durable token through the authenticated Server
+   * attach operation (#3440).
    *
-   * Injected by `product/terminal`: `platform` may not import the Sessions
-   * plugin, and the terminal concept owns the composition. Absent in contexts
-   * with no Server (unit fixtures), where a reconnect keeps its current
-   * credential.
+   * Used only to recover from an Agent rejection or after a Server outage — an
+   * ordinary reconnect reuses the cached token. Injected by `product/terminal`
+   * because `platform` may not import the Sessions plugin.
    */
   requestFreshAttach?: (sessionId: string) => Promise<AttachInfo>;
   /**
@@ -197,11 +196,6 @@ export type SessionRuntimeEvent =
   | { type: 'route-intent-changed'; phase: AttachPhase }
   /** The Agent stated the live Session's authoritative fixed columns (#2487). */
   | { type: 'session-terminal-cols'; cols: number }
-  /**
-   * A P2P credential was reissued before a dial, or the attempt to reissue it
-   * failed (#2645). Reason code only — never a credential or credential URL.
-   */
-  | { type: 'p2p-credential'; outcome: 'renewed' | 'failed' };
 
 /**
  * Value equality for the published snapshot.
@@ -258,23 +252,15 @@ const OUTPUT_ACK_MAX_PARSED_BYTES = 256 * 1024;
  */
 const P2P_PROBE_TIMEOUT_MS = 5_000;
 
-/**
- * How early a stated credential deadline is treated as spent.
- *
- * A minute covers ordinary client/server clock skew without renewing a fresh
- * 300s lease on every dial. A shorter test lease (the #2645 fixture) renews on
- * every attempt, which is exactly what that fixture needs.
- */
-const P2P_CREDENTIAL_RENEW_MARGIN_MS = 60_000;
+/** The Agent explicitly refused the P2P identity handshake (#3358 SC-08). */
+class P2PAuthenticationRejectedError extends Error {
+  /** True only for the first rejection in an episode, which may be retried. */
+  retryable = false;
 
-/** The attach reply's stated deadline in epoch milliseconds, if parseable. */
-function credentialExpiryMs(attachInfo: AttachInfo | null): number | null {
-  const stated = attachInfo?.connection_token_expires_at;
-  if (!stated) {
-    return null;
+  constructor(message: string) {
+    super(message);
+    this.name = 'P2PAuthenticationRejectedError';
   }
-  const parsed = Date.parse(stated);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /**
@@ -296,21 +282,22 @@ function credentialExpiryMs(attachInfo: AttachInfo | null): number | null {
  * lanes it was read behind, so the frames that follow are served by the
  * identity it establishes.
  *
- * `auth_token` belongs to the Server's half of this handshake and is ignored by
- * the Agent, which shares the one payload type on purpose — and this socket has
- * no Server token to present anyway: its credential was the per-attach one,
- * already proven at the upgrade (#1013). Putting that credential in this field
- * is exactly the conflation the type documents against.
+ * `auth_token` is the resolved Agent's durable token (#3440). The Agent
+ * verifies it before serving any other frame; the Server Token is never
+ * accepted here, and this socket presents no credential in its URL.
  */
-function p2pClientAuthHandshake(surface: HandshakeSurface): Promise<void> {
+function p2pClientAuthHandshake(
+  surface: HandshakeSurface,
+  agentToken: string,
+): Promise<void> {
   return surface
     .request<AuthResponsePayload>(CLIENT_AUTH_WIRE, {
-      auth_token: '',
+      auth_token: agentToken,
       client_id: getOrCreateClientId(),
     })
     .then((res) => {
       if (res.status !== 'success') {
-        throw new Error(res.message || 'P2P client authentication failed');
+        throw new P2PAuthenticationRejectedError(res.message || 'P2P client authentication failed');
       }
     });
 }
@@ -326,16 +313,16 @@ export class SessionRuntime {
   /** Files capability of the live P2P transport — null outside it. */
   private filesApi: FilesPlugin | null = null;
   /**
-   * A Server-issued P2P credential obtained after the attach-issued one
-   * (#2645). Session-scoped, never persisted, and kept beside the config so a
-   * React config sync carrying the older attach cannot overwrite it.
+   * The durable Agent Token cached for this runtime's Agent, in memory only
+   * (#3440). Never persisted, never placed in a URL; cleared on rejection,
+   * Agent/Session replacement, logout and disposal.
    */
-  private p2pCredential: { token: string; expiresAtMs: number | null; sessionId: string } | null = null;
-  /** Fences a renewal whose attach/session context has since been replaced. */
-  private credentialEpoch = 0;
-  /** Single-flight renewal for the current credential epoch. */
-  private credentialRefresh: Promise<string | null> | null = null;
-  private credentialRefreshGeneration = 0;
+  private agentToken: string | null = null;
+  private agentTokenSessionId: string | null = null;
+  /** The last presented token was refused; a refresh is owed before the next dial. */
+  private agentTokenRejected = false;
+  /** Single-flight token refetch through the authenticated attach. */
+  private agentTokenRefresh: Promise<boolean> | null = null;
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -1162,9 +1149,9 @@ export class SessionRuntime {
     if (
       next.attachInfo !== undefined
       && (next.attachInfo?.session_id !== previousAttachInfo?.session_id
-        || next.attachInfo?.connection_token !== previousAttachInfo?.connection_token)
+        || next.attachInfo?.agent_token !== previousAttachInfo?.agent_token)
     ) {
-      this.invalidateP2PCredential();
+      this.invalidateAgentToken();
     }
     if (previousServerConnection !== this.config.serverConnection
       || routeChanged || planUrlsChanged || previousRelay !== this.effectiveForcedRelay) {
@@ -1221,6 +1208,7 @@ export class SessionRuntime {
     if (this.effectiveForcedRelay) {
       return;
     }
+    // Moving to Relay ends P2P credential recovery for this route.
     this.revokeRelayProof();
     this.forcedRelayFallback = true;
     // A P2P → Relay fallback cuts the route: the Relay subscription cannot
@@ -1255,6 +1243,7 @@ export class SessionRuntime {
     // is also generation-fenced, but dropping the batch immediately keeps its
     // event/byte counts from shaping the new route's first flush.
     this.clearOutputAppliedAckBatch();
+    // A new route intent replaces the credential/issuer episode.
     this.revokeRelayProof();
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
@@ -1448,7 +1437,7 @@ export class SessionRuntime {
     this.disposed = true;
     this.reconcileEpoch += 1;
     this.reconcileInFlight = false;
-    this.invalidateP2PCredential();
+    this.invalidateAgentToken();
     this.revokeRelayProof();
     this.resetTerminalAppliedCursor();
     // End the server-side relay forwarding loop with the runtime that began
@@ -1839,11 +1828,21 @@ export class SessionRuntime {
       rows: resize?.rows,
       needsBootstrap: this.requestBootstrapForAttach(),
     };
-    // Legacy continues non-credit; never fabricate an envelope id.
-    if (conn.beginRelayTracked) {
-      this.relayBeginWire = conn.beginRelayTracked(this.sessionId, opts);
-    } else {
-      conn.beginRelay(this.sessionId, opts);
+    // `isReady()` is a check, not a lock: the Server socket can close between
+    // that check and the send. This method runs from `updateContext`, which
+    // React calls during render/effect — letting a transport error escape here
+    // unmounts the application root instead of recovering the Session. Drop
+    // the attempt; the next Server connection state re-drives it.
+    try {
+      // Legacy continues non-credit; never fabricate an envelope id.
+      if (conn.beginRelayTracked) {
+        this.relayBeginWire = conn.beginRelayTracked(this.sessionId, opts);
+      } else {
+        conn.beginRelay(this.sessionId, opts);
+      }
+    } catch {
+      this.relayBeginWire = null;
+      return;
     }
     const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
@@ -1877,6 +1876,8 @@ export class SessionRuntime {
         // The probe only means anything while the transport *claims* to be
         // connected — that is the exact state a half-open socket hides in.
         this.startLivenessProbe();
+        // A completed identity handshake is a fresh authorization episode.
+        this.agentTokenRejected = false;
         this.maybeStartP2PAttach();
       } else {
         // Anything else: recovery is already running, and a probe tick would
@@ -1910,115 +1911,88 @@ export class SessionRuntime {
     });
   }
 
-  /** The credential this runtime would present next, renewed or not. */
-  private currentP2PCredential(): { token: string | undefined; expiresAtMs: number | null } {
-    if (this.p2pCredential && this.p2pCredential.sessionId === this.config.sessionId) {
-      return {
-        token: this.p2pCredential.token,
-        expiresAtMs: this.p2pCredential.expiresAtMs,
-      };
+  /** The durable Agent Token this runtime would present next. */
+  private currentAgentToken(): string | undefined {
+    if (this.agentToken && this.agentTokenSessionId === this.config.sessionId) {
+      return this.agentToken;
     }
-    return {
-      token: this.config.attachInfo?.connection_token,
-      expiresAtMs: credentialExpiryMs(this.config.attachInfo),
-    };
+    return this.config.attachInfo?.agent_token;
+  }
+
+  /** Drop the cached token and fence any refetch still in flight. */
+  private invalidateAgentToken(): void {
+    this.agentToken = null;
+    this.agentTokenSessionId = null;
+    this.agentTokenRejected = false;
+    this.agentTokenRefresh = null;
   }
 
   /**
-   * Drop a renewed credential and fence any renewal still in flight.
+   * Fetch the Agent's current durable token through the authenticated attach.
    *
-   * Called when a **fresh attach** replaces the authority (new token or a
-   * different Session), never on a steady-state config sync: React re-renders
-   * carry the older attach and must not undo a renewal.
+   * One round trip per rejection episode. The Server's authenticated-ready
+   * signal re-arms it after an outage, so a Server that is down does not turn
+   * into Agent socket churn. Returns whether a token is now cached.
    */
-  private invalidateP2PCredential(): void {
-    this.credentialEpoch += 1;
-    this.credentialRefreshGeneration += 1;
-    this.credentialRefresh = null;
-    this.p2pCredential = null;
-  }
-
-  /**
-   * Resolve the Agent URL for a dial, reissuing the P2P credential first when
-   * its lease is spent (#2645).
-   *
-   * Returns `null` when the URL the transport already holds is still
-   * authoritative. The renewal is single-flight and fenced by
-   * {@link credentialEpoch}: a reply that belongs to a replaced attach or
-   * Session is refused instead of installed. No credential or credential URL
-   * is ever logged; callers observe only the outcome reason code.
-   */
-  /**
-   * Whether the attempt about to dial needs a reissued credential.
-   *
-   * Synchronous by design: a fresh lease keeps the historical synchronous
-   * dial, so the runtime's first socket is still constructed inside the
-   * constructor. A token with no stated deadline is fresh for the first dial;
-   * an older Server cannot say when it expires, so a reconnect reissues it.
-   */
-  private p2pCredentialNeedsRenewal(attempt: number): boolean {
-    const info = this.config.attachInfo;
-    if (this.disposed || !info || info.mode !== 'p2p' || this.effectiveForcedRelay) {
-      return false;
-    }
-    const credential = this.currentP2PCredential();
-    if (!credential.token) {
-      return true;
-    }
-    const deadline = credential.expiresAtMs;
-    return deadline !== null
-      ? Date.now() >= deadline - P2P_CREDENTIAL_RENEW_MARGIN_MS
-      : attempt > 0;
-  }
-
-  private async resolveP2PUrl(attempt: number): Promise<string | null> {
-    if (!this.p2pCredentialNeedsRenewal(attempt)) {
-      return null;
+  private refreshAgentToken(): Promise<boolean> {
+    if (this.agentTokenRefresh) {
+      return this.agentTokenRefresh;
     }
     const reissue = this.config.requestFreshAttach;
     if (!reissue) {
-      return null;
+      return Promise.resolve(false);
     }
-    if (this.credentialRefresh) {
-      return this.credentialRefresh;
-    }
-
-    const epoch = this.credentialEpoch;
-    const generation = ++this.credentialRefreshGeneration;
-    const refresh = (async (): Promise<string | null> => {
+    const refresh = (async (): Promise<boolean> => {
       try {
         const fresh = await reissue(this.config.sessionId);
         if (
           this.disposed
-          || epoch !== this.credentialEpoch
           || fresh.mode !== 'p2p'
           || fresh.session_id !== this.config.sessionId
-          || !fresh.connection_token
+          || !fresh.agent_token
         ) {
-          throw new Error('P2P credential renewal returned a stale or foreign authority');
+          return false;
         }
-        this.p2pCredential = {
-          token: fresh.connection_token,
-          expiresAtMs: credentialExpiryMs(fresh),
-          sessionId: fresh.session_id,
-        };
-        this.emitRuntimeEvent({ type: 'p2p-credential', outcome: 'renewed' });
-        const activeUrl = this.addressPolicy.activeUrl;
-        if (!activeUrl) {
-          throw new Error('No active P2P candidate to renew');
-        }
-        return buildAgentWsUrl(activeUrl, fresh.connection_token);
-      } catch (error) {
-        this.emitRuntimeEvent({ type: 'p2p-credential', outcome: 'failed' });
-        throw error;
+        this.agentToken = fresh.agent_token;
+        this.agentTokenSessionId = fresh.session_id;
+        this.agentTokenRejected = false;
+        return true;
+      } catch {
+        return false;
       } finally {
-        if (this.credentialRefreshGeneration === generation) {
-          this.credentialRefresh = null;
-        }
+        this.agentTokenRefresh = null;
       }
     })();
-    this.credentialRefresh = refresh;
+    this.agentTokenRefresh = refresh;
     return refresh;
+  }
+
+  /**
+   * Recover from a rejected or missing token by fetching the current one and
+   * rebuilding the transport with it.
+   */
+  private async refreshAgentTokenAndReconnect(): Promise<void> {
+    if (this.disposed || this.effectiveForcedRelay) {
+      return;
+    }
+    const refreshed = await this.refreshAgentToken();
+    if (!refreshed || this.disposed) {
+      return;
+    }
+    this.agentTokenRejected = false;
+    this.syncAgentConnection({ forceReconnect: true });
+  }
+
+  /**
+   * The Server WS authenticated again (the registry's authenticated-ready
+   * wake, #3358). A runtime whose last token was rejected re-fetches it; a
+   * runtime with a live socket does nothing.
+   */
+  resumeAfterServerAuthenticated(): void {
+    if (this.disposed || !this.agentTokenRejected) {
+      return;
+    }
+    void this.refreshAgentTokenAndReconnect();
   }
 
   /**
@@ -2036,9 +2010,9 @@ export class SessionRuntime {
    */
   private syncAgentConnection(opts?: { forceReconnect?: boolean }): void {
     const url = this.addressPolicy.activeUrl;
-    const token = this.currentP2PCredential().token;
+    const agentToken = this.currentAgentToken();
 
-    if (!url || !this.config.attachInfo || this.effectiveForcedRelay) {
+    if (!url || !this.config.attachInfo || this.effectiveForcedRelay || !agentToken) {
       const hadBinding = this.agentWs !== null || this.agentTerminalApi !== null;
       this.teardownConnectionHandler();
       this.attachController.cancelActiveAttach();
@@ -2057,7 +2031,7 @@ export class SessionRuntime {
       return;
     }
 
-    const builtUrl = buildAgentWsUrl(url, token);
+    const builtUrl = url;
     const live = this.agentWs;
     if (live && !opts?.forceReconnect && live.getUrl() === builtUrl) {
       // Same agent endpoint: keep the live socket. The reconnect budget was
@@ -2084,13 +2058,38 @@ export class SessionRuntime {
       // already have (#1263).
       persistentReconnect: this.addressPolicy.isManualRoute,
       // Bind the browser's stable identity before any frame this socket
-      // depends on is served (#1429) — see `p2pClientAuthHandshake`.
-      handshake: p2pClientAuthHandshake,
-      // A reconnect must not present a credential whose lease is spent: the
-      // credential is renewed through the authenticated Server before the new
-      // socket dials, while a healthy socket is never touched (#2645).
-      resolveUrl: (attempt) => this.resolveP2PUrl(attempt),
-      needsUrl: (attempt) => this.p2pCredentialNeedsRenewal(attempt),
+      // depends on is served (#1429) — see `p2pClientAuthHandshake`. The
+      // presentation is the durable Agent token (#3440): one rejection clears
+      // it, fetches the current value through the authenticated attach and
+      // retries; a rejection of that fresh value is a real refusal.
+      handshake: async (surface) => {
+        const presented = this.currentAgentToken();
+        if (!presented) {
+          const missing = new P2PAuthenticationRejectedError(
+            'No Agent token is available for this Session',
+          );
+          missing.retryable = true;
+          throw missing;
+        }
+        try {
+          await p2pClientAuthHandshake(surface, presented);
+          this.agentTokenRejected = false;
+        } catch (error) {
+          if (error instanceof P2PAuthenticationRejectedError && !this.agentTokenRejected) {
+            this.agentTokenRejected = true;
+            this.agentToken = null;
+            this.agentTokenSessionId = null;
+            // Fetch before the transport's next dial. A failed fetch keeps
+            // the rejection retryable; `resumeAfterServerAuthenticated`
+            // re-arms it when the Server returns.
+            await this.refreshAgentToken();
+            error.retryable = true;
+          }
+          throw error;
+        }
+      },
+      isHandshakeRefusal: (error) => !(error instanceof P2PAuthenticationRejectedError)
+        || error.retryable !== true,
     });
     this.agentWs = ws;
     this.filesApi = files;

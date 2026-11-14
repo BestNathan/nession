@@ -323,10 +323,17 @@ pub struct SessionManager {
     /// The Agent's Sandbox runtime. `None` refuses an explicit policy rather
     /// than silently executing it as Native.
     sandbox: Option<Arc<crate::sandbox_runtime::SandboxRuntime>>,
+    /// The Agent's managed Workspace registry (#3407). `None` reports the
+    /// inventory API unavailable; Native Sessions are unaffected.
+    workspaces: Option<Arc<crate::workspace_manager::WorkspaceManager>>,
     /// The central Server's configured WebSocket URL (#3062). Managed
     /// creation derives its authorized blob HTTP base from this value; the
     /// Server never guesses its own public hostname.
     server_url: String,
+    /// The Server Token used as the Bearer credential for authorized image
+    /// blob reads (#3440). Empty on a standalone Agent, where there is no
+    /// Server to fetch from.
+    server_auth_token: nession_common::SecretString,
 }
 
 /// The result of one Session create.
@@ -358,7 +365,9 @@ impl SessionManager {
             create_timeout: TMUX_CREATE_TIMEOUT,
             memory_threshold_percent: None,
             sandbox: None,
+            workspaces: None,
             server_url: String::new(),
+            server_auth_token: nession_common::SecretString::new(String::new()),
         }
     }
 
@@ -390,6 +399,20 @@ impl SessionManager {
         self
     }
 
+    /// Attach the Agent's durable managed Workspace registry (#3407).
+    pub fn with_workspaces(
+        mut self,
+        workspaces: Arc<crate::workspace_manager::WorkspaceManager>,
+    ) -> Self {
+        self.workspaces = Some(workspaces);
+        self
+    }
+
+    /// The managed Workspace registry this manager was composed with, when any.
+    pub fn workspaces(&self) -> Option<&Arc<crate::workspace_manager::WorkspaceManager>> {
+        self.workspaces.as_ref()
+    }
+
     /// Record the central Server URL used to derive Managed download URLs.
     pub fn with_server_url(mut self, server_url: impl Into<String>) -> Self {
         self.server_url = server_url.into();
@@ -399,6 +422,17 @@ impl SessionManager {
     /// The central Server URL this manager was composed with, when any.
     pub fn server_url(&self) -> &str {
         &self.server_url
+    }
+
+    /// Record the Server Token used for authorized image blob reads (#3440).
+    pub fn with_server_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.server_auth_token = nession_common::SecretString::new(token);
+        self
+    }
+
+    /// The Server Token for authorized image blob reads, when configured.
+    pub fn server_auth_token(&self) -> &str {
+        self.server_auth_token.as_str()
     }
 
     /// The Sandbox runtime this manager was composed with, when any.
@@ -1212,6 +1246,7 @@ impl SessionManager {
                         prepared,
                         target,
                         &session_name,
+                        None,
                     )
                 })
                 .await

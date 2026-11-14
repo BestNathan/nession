@@ -105,7 +105,7 @@ function RepositoryHeader({
           {loading
             ? 'Resolving the Session repository…'
             : data?.repository
-              ? `${data.repository.remoteName}${data.branch ? ` · ${data.branch}` : ' · detached HEAD'}`
+              ? `${data.repository.remote_name}${data.branch ? ` · ${data.branch}` : ' · detached HEAD'}`
               : 'No hosting identity resolved'}
         </p>
       </div>
@@ -115,12 +115,12 @@ function RepositoryHeader({
           <select
             data-testid="github-remote-select"
             className="h-8 rounded-[var(--nession-radius-control)] border bg-background px-2"
-            value={data.repository?.remoteName ?? ''}
+            value={data.repository?.remote_name ?? ''}
             onChange={(event) => onRemoteChange(event.target.value || undefined)}
           >
             {data.choices.map((choice: GithubRemoteChoice) => (
-              <option key={choice.remoteName} value={choice.remoteName}>
-                {choice.remoteName} · {choice.owner}/{choice.repo}
+              <option key={choice.remote_name} value={choice.remote_name}>
+                {choice.remote_name} · {choice.owner}/{choice.repo}
               </option>
             ))}
           </select>
@@ -216,14 +216,14 @@ function RepositoryBody({
         <GithubIssuesView
           agentId={agentId}
           sessionId={sessionId}
-          remoteName={data.repository.remoteName}
+          remoteName={data.repository.remote_name}
           repository={data.repository}
         />
       ) : section === 'pull-requests' ? (
         <GithubPullRequestsView
           agentId={agentId}
           sessionId={sessionId}
-          remoteName={data.repository.remoteName}
+          remoteName={data.repository.remote_name}
           repository={data.repository}
           branch={data.branch}
         />
@@ -231,7 +231,7 @@ function RepositoryBody({
         <GithubActionsView
           agentId={agentId}
           sessionId={sessionId}
-          remoteName={data.repository.remoteName}
+          remoteName={data.repository.remote_name}
           branch={data.branch}
         />
       )}
@@ -282,14 +282,14 @@ function RemoteChoices({
     <div className="flex flex-wrap gap-2 px-4 pb-4" data-testid="github-remote-choices">
       {choices.map((choice) => (
         <Button
-          key={choice.remoteName}
+          key={choice.remote_name}
           type="button"
           variant="outline"
           size="sm"
-          data-testid={`github-remote-choice-${choice.remoteName}`}
-          onClick={() => onSelect(choice.remoteName)}
+          data-testid={`github-remote-choice-${choice.remote_name}`}
+          onClick={() => onSelect(choice.remote_name)}
         >
-          {choice.remoteName} · {choice.host}/{choice.owner}/{choice.repo}
+          {choice.remote_name} · {choice.host}/{choice.owner}/{choice.repo}
         </Button>
       ))}
     </div>

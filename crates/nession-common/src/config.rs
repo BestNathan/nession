@@ -114,9 +114,6 @@ pub struct ServerConfig {
     /// exhaust the host's disk or process table.
     #[serde(default = "default_image_max_concurrent_builds")]
     pub image_max_concurrent_builds: usize,
-    /// Lifetime of a Project-scoped blob access grant, in seconds.
-    #[serde(default = "default_image_access_token_expiry")]
-    pub image_access_token_expiry_secs: u64,
     /// Interval between bounded image GC sweeps (#3180). `0` disables the
     /// scheduled sweep; an operator can still run one explicit sweep.
     ///
@@ -127,6 +124,17 @@ pub struct ServerConfig {
     /// Maximum image rows one GC sweep may examine (#3180).
     #[serde(default = "default_image_gc_max_candidates")]
     pub image_gc_max_candidates: usize,
+    /// Wall-time bound for one Git or `mkfs.erofs` subprocess in a build
+    /// (#3334). `0` leaves it unbounded; the default bounds a hung remote.
+    #[serde(default = "default_image_build_stage_timeout_secs")]
+    pub image_build_stage_timeout_secs: u64,
+    /// Maximum bytes retained in one durable build's diagnostic log (#3334).
+    #[serde(default = "default_image_build_log_max_bytes")]
+    pub image_build_log_max_bytes: u64,
+    /// Retention for terminal build directories under the configured build
+    /// root (#3334). Published blob bytes and active work are never touched.
+    #[serde(default = "default_image_build_retention_secs")]
+    pub image_build_retention_secs: u64,
     /// How long a relayed terminal frame may wait for room in a client's
     /// outbound queue before the Server gives up on that client (#961).
     ///
@@ -149,21 +157,6 @@ pub struct ServerConfig {
     /// `nession_server::server::execution`.
     #[serde(default = "default_query_concurrency")]
     pub query_concurrency_per_connection: usize,
-    /// How long a P2P credential stays valid after it is minted (#1013).
-    ///
-    /// A credential authorizes a direct Client → Agent connection, and it is
-    /// validated by the **Agent** — the Server mints and forgets, the Agent
-    /// honours it until this deadline passes. So this is the revocation
-    /// window: it bounds how long a credential that leaked (a token in a URL
-    /// reaches access logs) stays useful, and it is the only expiry the
-    /// boundary has. Shorter is safer and costs the user nothing, because a
-    /// client that needs a new one re-attaches and gets one.
-    ///
-    /// Five minutes, which is long enough for a slow first paint and for the
-    /// reconnect budget a browser uses after a dropped socket, and short enough
-    /// that a leaked token is stale by the time anyone notices it leaked.
-    #[serde(default = "default_p2p_token_expiry")]
-    pub p2p_token_expiry_secs: u64,
     /// The fixed column count a new Session is created at (#2487).
     ///
     /// The Server's runtime value comes from `NESSION_TERMINAL_COLS`, written by
@@ -347,8 +340,16 @@ impl ServerConfig {
         if !(1..=8).contains(&self.image_max_concurrent_builds) {
             anyhow::bail!("image_max_concurrent_builds must be in [1, 8]");
         }
-        if !(30..=3600).contains(&self.image_access_token_expiry_secs) {
-            anyhow::bail!("image_access_token_expiry_secs must be in [30, 3600]");
+        if self.image_build_stage_timeout_secs != 0
+            && !(30..=86_400).contains(&self.image_build_stage_timeout_secs)
+        {
+            anyhow::bail!("image_build_stage_timeout_secs must be 0 or in [30, 86400]");
+        }
+        if !(4096..=16 * 1024 * 1024).contains(&self.image_build_log_max_bytes) {
+            anyhow::bail!("image_build_log_max_bytes must be in [4096, 16777216]");
+        }
+        if !(60..=31_536_000).contains(&self.image_build_retention_secs) {
+            anyhow::bail!("image_build_retention_secs must be in [60, 31536000]");
         }
         if self.image_gc_interval_secs != 0
             && !(60..=7 * 24 * 60 * 60).contains(&self.image_gc_interval_secs)
@@ -366,12 +367,6 @@ impl ServerConfig {
 /// The default for [`ServerConfig::terminal_stall_grace_secs`], published so the
 /// outbound queue's own default cannot drift from the config's.
 pub const DEFAULT_TERMINAL_STALL_GRACE_SECS: u64 = 15;
-
-/// The default for [`ServerConfig::p2p_token_expiry_secs`], published so a
-/// test that needs a credential to be *expired* can derive one rather than
-/// hard-code a number that would silently stop testing expiry if the default
-/// moved.
-pub const DEFAULT_P2P_TOKEN_EXPIRY_SECS: u64 = 300;
 
 /// The default for [`ServerConfig::query_concurrency_per_connection`], published
 /// for the same reason: the query lane's own default is this number.
@@ -399,12 +394,13 @@ impl Default for ServerConfig {
             image_blob_dir: default_image_blob_dir(),
             image_build_dir: default_image_build_dir(),
             image_max_concurrent_builds: default_image_max_concurrent_builds(),
-            image_access_token_expiry_secs: default_image_access_token_expiry(),
             image_gc_interval_secs: default_image_gc_interval(),
             image_gc_max_candidates: default_image_gc_max_candidates(),
+            image_build_stage_timeout_secs: default_image_build_stage_timeout_secs(),
+            image_build_log_max_bytes: default_image_build_log_max_bytes(),
+            image_build_retention_secs: default_image_build_retention_secs(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
-            p2p_token_expiry_secs: default_p2p_token_expiry(),
             terminal_cols: default_terminal_cols(),
             terminal_web_font_size: default_terminal_web_font_size(),
             logging: LoggingConfig::default(),
@@ -427,10 +423,6 @@ fn default_terminal_stall_grace() -> u64 {
 
 fn default_query_concurrency() -> usize {
     DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
-}
-
-fn default_p2p_token_expiry() -> u64 {
-    DEFAULT_P2P_TOKEN_EXPIRY_SECS
 }
 
 fn default_heartbeat_interval() -> u64 {
@@ -457,16 +449,24 @@ fn default_image_max_concurrent_builds() -> usize {
     2
 }
 
-fn default_image_access_token_expiry() -> u64 {
-    300
-}
-
 fn default_image_gc_interval() -> u64 {
     6 * 60 * 60
 }
 
 fn default_image_gc_max_candidates() -> usize {
     64
+}
+
+fn default_image_build_stage_timeout_secs() -> u64 {
+    30 * 60
+}
+
+fn default_image_build_log_max_bytes() -> u64 {
+    1024 * 1024
+}
+
+fn default_image_build_retention_secs() -> u64 {
+    7 * 24 * 60 * 60
 }
 
 fn default_db_path() -> String {

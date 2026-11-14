@@ -68,8 +68,8 @@ export function GithubPullRequestsView({
       if (response.state === 'error') {
         throw asGithubError(response) ?? response;
       }
-      setRelation({ relation: response.currentBranch, number: response.currentBranchPr });
-      return { items: response.pullRequests, nextCursor: response.nextCursor ?? null };
+      setRelation({ relation: response.current_branch, number: response.current_branch_pr });
+      return { items: response.pull_requests, nextCursor: response.next_cursor ?? null };
     },
     [filter],
   );
@@ -338,7 +338,7 @@ function GithubPullRequestReader({
     [number],
   );
   const detail = useGithubRequest({ agentId, sessionId, remoteName, load });
-  const pull = detail.data?.pullRequest;
+  const pull = detail.data?.pull_request;
 
   if (detail.error) {
     return <GithubNotice error={detail.error} testId="github-pr-detail-error" onRetry={detail.refresh} />;
@@ -364,7 +364,7 @@ export function GithubPullRequestDetailBody({
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {pull.state}
           {pull.draft ? ' · draft' : ''}
-          {pull.merged ? ' · merged' : ''} · {pull.author.login} · updated {pull.updatedAt}
+          {pull.merged ? ' · merged' : ''} · {pull.author.login} · updated {pull.updated_at}
         </p>
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))} data-testid="github-pr-detail-refs">
           {pull.head.owner}:{pull.head.ref} ({pull.head.sha.slice(0, 7)}) → {pull.base.ref} ({pull.base.sha.slice(0, 7)})

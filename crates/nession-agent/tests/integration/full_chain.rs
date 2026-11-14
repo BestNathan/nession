@@ -8,14 +8,11 @@
 //! - Heartbeat and session sync between agent and server
 //! - Graceful shutdown
 
-use super::{
-    browser_scope, connect, connect_for, mint_credential, TestSession, TEST_AGENT_ID,
-    TEST_CREDENTIAL,
-};
+use super::{connect, TestSession, TEST_AGENT_ID, TEST_AGENT_TOKEN};
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
-use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{
     msg_types as agent_msg_types, new_message, AgentServer, AgentServerContext,
     ClientAttachPayload, ClientDetachPayload, SessionCreatePayload, SessionKillPayload,
@@ -65,6 +62,19 @@ async fn start_test_server(
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
         db_path: db_path.clone(),
+        // Each test Server owns its own durable image roots (#3334). Sharing
+        // the ambient default would make a parallel test Server a second owner
+        // of one build directory, which the Server correctly refuses.
+        image_blob_dir: db_dir
+            .path()
+            .join("images/blobs")
+            .to_string_lossy()
+            .into_owned(),
+        image_build_dir: db_dir
+            .path()
+            .join("images/build")
+            .to_string_lossy()
+            .into_owned(),
         ..Default::default()
     };
 
@@ -129,17 +139,14 @@ async fn next_text_frame(stream: &mut WsStreamHalf, what: &str) -> String {
     }
 }
 
-/// Start a real agent WebSocket server on an OS-assigned port, and mint the
-/// broad credential its listener honours.
+/// Start a real agent WebSocket server on an OS-assigned port.
 ///
-/// The **store** comes back with the address, not the credential string: a dial
-/// that has to name a session (the terminal wires, #1013) can only mint its
-/// credential once the test has generated that name — see [`connect_for`]. It is
-/// the same `Arc` the listener holds.
+/// The **verifier** comes back with the address so a dial can assert it presents
+/// the token this listener honours; it is the same `Arc` the listener holds.
 async fn start_test_agent_server() -> anyhow::Result<(
     std::net::SocketAddr,
     nession_agent::server::ServerHandle,
-    Arc<P2pCredentials>,
+    Arc<P2pAuth>,
     nession_agent::execution::MutationLane,
 )> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
@@ -149,14 +156,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
     // Nothing drains this connection's resize lane, which is the point of the
     // lane: an unread resize costs one superseded value per session.
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
-    // Granted into before it is handed to the listener — see [`mint_credential`].
-    let credentials = Arc::new(P2pCredentials::new());
-    mint_credential(
-        &credentials,
-        TEST_AGENT_ID,
-        TEST_CREDENTIAL,
-        browser_scope(),
-    )?;
+    let auth = Arc::new(P2pAuth::new(TEST_AGENT_TOKEN));
     let server = AgentServer::new(
         "127.0.0.1:0",
         TEST_AGENT_ID,
@@ -166,7 +166,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials: Arc::clone(&credentials),
+            auth: Arc::clone(&auth),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
@@ -176,7 +176,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
     )?;
     let (handle, addr) = server.start().await?;
 
-    Ok((addr, handle, credentials, mutations))
+    Ok((addr, handle, auth, mutations))
 }
 
 /// Connect to central server and register an agent, returning the handle.
@@ -216,7 +216,7 @@ async fn register_agent_with_server(
             Vec::new(),
             nession_agent::protocol::served_descriptors()?,
         )?)),
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         mutations,
     );
 
@@ -279,11 +279,11 @@ async fn test_full_agent_server_integration() {
 #[tokio::test]
 async fn test_client_connects_to_agent_via_p2p() {
     // Start agent server.
-    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+    let (agent_addr, agent_handle, auth, _agent_mutations) =
         start_test_agent_server().await.unwrap();
 
     // Connect a client directly to the agent.
-    let (mut sink, mut stream) = connect(&credentials, agent_addr).await.unwrap();
+    let (mut sink, mut stream) = connect(&auth, agent_addr).await.unwrap();
 
     // Send a session.list request.
     let req = new_message(agent_msg_types::SESSION_LIST, serde_json::json!({}));
@@ -301,6 +301,16 @@ async fn test_client_connects_to_agent_via_p2p() {
         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(parsed["msg_type"], agent_msg_types::OK);
         assert!(parsed["payload"]["sessions"].is_array());
+        // Nession-owned transport fields are snake_case (#3371): the typed
+        // response's multi-word key must arrive under its contract spelling.
+        assert!(
+            parsed["payload"]["stale_agents"].is_array(),
+            "the P2P reply must carry `stale_agents`: {parsed}"
+        );
+        assert!(
+            parsed["payload"].get("staleAgents").is_none(),
+            "the retired camelCase key must not be on the P2P wire: {parsed}"
+        );
     } else {
         panic!("Expected text message");
     }
@@ -324,14 +334,12 @@ async fn test_terminal_io_through_full_chain() {
         .unwrap();
 
     // Start agent server.
-    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+    let (agent_addr, agent_handle, auth, _agent_mutations) =
         start_test_agent_server().await.unwrap();
 
     // The dial comes after the session does: the credential it presents is bound
     // to `session_name`, which is generated per run.
-    let (mut sink, mut stream) = connect_for(&credentials, agent_addr, &session_name)
-        .await
-        .unwrap();
+    let (mut sink, mut stream) = connect(&auth, agent_addr).await.unwrap();
 
     // Attach to session.
     let attach = ClientAttachPayload {
@@ -452,11 +460,9 @@ async fn test_terminal_progress_notification_is_response_less_and_coalesces_one_
         .await
         .unwrap();
 
-    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+    let (agent_addr, agent_handle, auth, _agent_mutations) =
         start_test_agent_server().await.unwrap();
-    let (mut sink, mut stream) = connect_for(&credentials, agent_addr, &session_name)
-        .await
-        .unwrap();
+    let (mut sink, mut stream) = connect(&auth, agent_addr).await.unwrap();
 
     let attach = ClientAttachPayload {
         session_name: session_name.to_string(),
@@ -601,11 +607,11 @@ async fn test_session_lifecycle() {
     let _tmux = SessionManager::new();
 
     // Start agent server.
-    let (agent_addr, agent_handle, credentials, _agent_mutations) =
+    let (agent_addr, agent_handle, auth, _agent_mutations) =
         start_test_agent_server().await.unwrap();
 
     // Connect client.
-    let (mut sink, mut stream) = connect(&credentials, agent_addr).await.unwrap();
+    let (mut sink, mut stream) = connect(&auth, agent_addr).await.unwrap();
 
     // Create a session.
     let session = TestSession::new("e2e-lifecycle");

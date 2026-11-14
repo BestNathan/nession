@@ -70,6 +70,7 @@ pub async fn prepare(
     cache: &ErofsCache,
     images: &[ManagedImageGrant],
     server_url: &str,
+    server_auth_token: &str,
     state_dir: &Path,
 ) -> Result<PreparedManagedSession> {
     let origin = blob_origin(server_url)?;
@@ -126,7 +127,7 @@ pub async fn prepare(
         }
         let grant = DownloadGrant {
             url: format!("{origin}{}", image.path),
-            token: image.token.clone(),
+            token: server_auth_token.to_string(),
         };
         let cached = cache
             .get_or_fetch(&image.digest, &grant)
@@ -190,11 +191,16 @@ pub async fn prepare(
         enabled: true,
         filesystem: Some(SandboxFilesystemPolicy {
             access: SandboxFilesystemAccess::default(),
+            rootfs: None,
+            mounts: Vec::new(),
+            workspace: None,
             composition: Some(SandboxFilesystemComposition {
                 base: base_ref,
                 workspace: Some(SandboxWorkspace {
                     image: Some(workspace_ref),
                     write: workspace_dir.display().to_string(),
+                    ownership:
+                        nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
                 }),
                 toolchains: toolchain_refs,
             }),
@@ -231,12 +237,15 @@ mod tests {
         format!("sha256:{:x}", hasher.finalize())
     }
 
+    /// The Server Token the Agent presents on the image-blob route (#3440).
+    /// The blob origin in these tests is `httptest`, which does not check it.
+    const SERVER_AUTH_TOKEN: &str = "server-auth-token";
+
     fn grant(role: ManagedImageRole, digest: &str, target: Option<&str>) -> ManagedImageGrant {
         ManagedImageGrant {
             role,
             digest: digest.to_string(),
             path: format!("/images/blobs/{digest}"),
-            token: "scoped-token".to_string(),
             target: target.map(str::to_string),
         }
     }
@@ -302,7 +311,7 @@ mod tests {
         let state = dir.path().join("sandbox-state");
         std::fs::create_dir_all(&state).unwrap();
 
-        let first = prepare(&cache, &images, &ws_url(&server), &state)
+        let first = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
             .await
             .unwrap();
         assert!(first.workspace.is_dir());
@@ -338,7 +347,7 @@ mod tests {
         // transfer, and its workspace is its own directory.
         let transferred = cache.bytes_transferred();
         let fetches = cache.fetch_count();
-        let second = prepare(&cache, &images, &ws_url(&server), &state)
+        let second = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
             .await
             .unwrap();
         assert_eq!(cache.bytes_transferred(), transferred);
@@ -354,9 +363,15 @@ mod tests {
         let state = dir.path().join("sandbox-state");
         std::fs::create_dir_all(&state).unwrap();
         let images = vec![grant(ManagedImageRole::Base, &digest_for(b"base"), None)];
-        let error = prepare(&cache, &images, "ws://127.0.0.1:1/ws", &state)
-            .await
-            .unwrap_err();
+        let error = prepare(
+            &cache,
+            &images,
+            "ws://127.0.0.1:1/ws",
+            SERVER_AUTH_TOKEN,
+            &state,
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("Project Source image"));
         assert!(!state.join("managed").exists());
     }
@@ -386,7 +401,7 @@ mod tests {
             grant(ManagedImageRole::Base, &expected, None),
             grant(ManagedImageRole::Workspace, &digest_for(b"workspace"), None),
         ];
-        let error = prepare(&cache, &images, &ws_url(&server), &state)
+        let error = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
             .await
             .unwrap_err();
         assert!(!error.to_string().is_empty());
@@ -434,7 +449,7 @@ mod tests {
             grant(ManagedImageRole::Toolchain, &shared_digest, Some("/opt/b")),
         ];
 
-        let prepared = prepare(&cache, &images, &ws_url(&server), &state)
+        let prepared = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
             .await
             .unwrap();
         let composition = prepared
@@ -464,9 +479,15 @@ mod tests {
             grant(ManagedImageRole::Base, &digest_for(b"b"), None),
             grant(ManagedImageRole::Workspace, &digest_for(b"c"), None),
         ];
-        let error = prepare(&cache, &images, "ws://127.0.0.1:1/ws", &state)
-            .await
-            .unwrap_err();
+        let error = prepare(
+            &cache,
+            &images,
+            "ws://127.0.0.1:1/ws",
+            SERVER_AUTH_TOKEN,
+            &state,
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("more than one Base Runtime"));
     }
 }

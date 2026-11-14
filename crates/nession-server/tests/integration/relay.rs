@@ -12,6 +12,7 @@ use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -19,8 +20,6 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
-use nession_protocol::contracts::p2p::agent_url_with_credential;
-use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
@@ -84,6 +83,8 @@ async fn start_server(
         auth_token: auth_token.to_string(),
         heartbeat_interval_secs: 10,
         heartbeat_timeout_secs: 30,
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
         db_path: db_path.clone(),
         ..Default::default()
     };
@@ -103,28 +104,26 @@ async fn start_server(
 }
 
 /// Start the agent's internal WebSocket server (for P2P/relay connections).
-/// OS picks a free port; returns the real bound address, and the credential
-/// store that listener verifies against.
+/// OS picks a free port; returns the real bound address, the durable Agent
+/// Token that listener verifies, and the mutation lane.
 ///
-/// The store is returned rather than kept private because the `ServerClient`
-/// [`register_agent`] builds must write into **this** one. The Server pushes
-/// the relay credential as `agent.p2p.grant` over the connection the agent
-/// dialled out, and the Agent checks it on the listener the Server then dials —
-/// so two stores would mean a credential granted into one and verified against
-/// the other, which is a relay that refuses every legitimate attach. `runtime`
-/// builds it once for exactly that reason (#1013); in production the store
-/// reaches both through `AgentServerContext`.
+/// The token is returned rather than kept private because the `ServerClient`
+/// [`register_agent`] builds must synchronize **this** one. The Server caches
+/// it at registration and presents it on every relay dial; the Agent verifies
+/// it on the listener the Server dials (#3440). One token for both halves is
+/// what makes the relay work at all; in production it reaches both through
+/// `AgentServerContext`.
 async fn start_agent(
     agent_id: &str,
 ) -> anyhow::Result<(
     std::net::SocketAddr,
     nession_agent::server::ServerHandle,
-    Arc<nession_agent::p2p_credentials::P2pCredentials>,
+    String,
     nession_agent::execution::MutationLane,
 )> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
-    let credentials = Arc::new(nession_agent::p2p_credentials::P2pCredentials::new());
+    let agent_token = format!("{agent_id}-durable-agent-token");
     // One lane for both paths, as in production: this test pairs a listener
     // with a central connection over one agent, which is exactly the shape
     // #1021 is about, so a lane each would leave the invariant unexercised.
@@ -138,7 +137,7 @@ async fn start_agent(
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials: Arc::clone(&credentials),
+            auth: Arc::new(P2pAuth::new(&agent_token)),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
@@ -149,20 +148,20 @@ async fn start_agent(
 
     let (handle, addr) = server.start().await?;
 
-    Ok((addr, handle, credentials, mutations))
+    Ok((addr, handle, agent_token, mutations))
 }
 
 /// Register an agent with the central server so it shows as Online.
 ///
-/// `credentials` must be the store [`start_agent`] handed its listener, not a
-/// fresh one: this connection is where the Server's `agent.p2p.grant` lands,
-/// and the listener is where it is checked (#1013).
+/// `agent_token` must be the token [`start_agent`] handed its listener, not a
+/// fresh one: this connection synchronizes the token the Server later presents
+/// on the relay dial, and the listener is where it is checked (#3440).
 async fn register_agent(
     server_addr: std::net::SocketAddr,
     agent_id: &str,
     auth_token: &str,
     agent_port: u16,
-    credentials: Arc<nession_agent::p2p_credentials::P2pCredentials>,
+    agent_token: &str,
     mutations: nession_agent::execution::MutationLane,
 ) -> anyhow::Result<nession_agent::connection::ServerClientHandle> {
     let metadata = AgentMetadata {
@@ -196,7 +195,8 @@ async fn register_agent(
             Vec::new(),
             nession_agent::protocol::served_descriptors()?,
         )?)),
-        credentials,
+        // The token this Agent's own listener verifies (#3440).
+        nession_common::SecretString::new(agent_token),
         mutations,
     );
 
@@ -500,7 +500,7 @@ async fn relay_attach_and_terminal_io() {
 
     // 1. Start server and agent.
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+    let (agent_addr, agent_handle, agent_token, agent_mutations) =
         start_agent("relay-test-agent").await.unwrap();
 
     // 2. Create a tmux session.
@@ -515,7 +515,7 @@ async fn relay_attach_and_terminal_io() {
         "relay-test-agent",
         "test-token",
         agent_addr.port(),
-        Arc::clone(&agent_credentials),
+        &agent_token,
         // The listener's own lane, so this test really does exercise one agent
         // with two mutating paths rather than two agents' worth of wiring.
         Arc::clone(&agent_mutations),
@@ -701,7 +701,7 @@ async fn relay_carries_the_input_ack_to_the_browser() {
     SessionManager::new().kill_session(&session_name).await.ok();
 
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+    let (agent_addr, agent_handle, agent_token, agent_mutations) =
         start_agent("relay-ack-agent").await.unwrap();
 
     let tmux = SessionManager::new();
@@ -714,7 +714,7 @@ async fn relay_carries_the_input_ack_to_the_browser() {
         "relay-ack-agent",
         "test-token",
         agent_addr.port(),
-        Arc::clone(&agent_credentials),
+        &agent_token,
         Arc::clone(&agent_mutations),
     )
     .await
@@ -907,7 +907,7 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
     SessionManager::new().kill_session(&session_name).await.ok();
 
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+    let (agent_addr, agent_handle, agent_token, agent_mutations) =
         start_agent("relay-identity-agent").await.unwrap();
 
     let tmux = SessionManager::new();
@@ -920,7 +920,7 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
         "relay-identity-agent",
         "test-token",
         agent_addr.port(),
-        Arc::clone(&agent_credentials),
+        &agent_token,
         Arc::clone(&agent_mutations),
     )
     .await
@@ -1102,7 +1102,7 @@ async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscrip
     SessionManager::new().kill_session(&session_name).await.ok();
 
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+    let (agent_addr, agent_handle, agent_token, agent_mutations) =
         start_agent("relay-parser-ack-agent").await.unwrap();
 
     let tmux = SessionManager::new();
@@ -1115,7 +1115,7 @@ async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscrip
         "relay-parser-ack-agent",
         "test-token",
         agent_addr.port(),
-        Arc::clone(&agent_credentials),
+        &agent_token,
         Arc::clone(&agent_mutations),
     )
     .await
@@ -1412,7 +1412,7 @@ async fn relay_forwards_progress_without_a_reply_and_returns_the_current_subscri
     SessionManager::new().kill_session(&session_name).await.ok();
 
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
-    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+    let (agent_addr, agent_handle, agent_token, agent_mutations) =
         start_agent("relay-progress-agent").await.unwrap();
 
     let tmux = SessionManager::new();
@@ -1425,7 +1425,7 @@ async fn relay_forwards_progress_without_a_reply_and_returns_the_current_subscri
         "relay-progress-agent",
         "test-token",
         agent_addr.port(),
-        Arc::clone(&agent_credentials),
+        &agent_token,
         Arc::clone(&agent_mutations),
     )
     .await
@@ -1745,8 +1745,7 @@ async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()>
     SessionManager::new().kill_session(&session_name).await.ok();
 
     let (server_addr, server_handle, _db_dir) = start_server("test-token").await?;
-    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
-        start_agent(AGENT_ID).await?;
+    let (agent_addr, agent_handle, agent_token, agent_mutations) = start_agent(AGENT_ID).await?;
 
     let tmux = SessionManager::new();
     tmux.create_session(&session_name, 80, 24, "/tmp", &[])
@@ -1757,7 +1756,7 @@ async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()>
         AGENT_ID,
         "test-token",
         agent_addr.port(),
-        Arc::clone(&agent_credentials),
+        &agent_token,
         Arc::clone(&agent_mutations),
     )
     .await?;
@@ -1774,26 +1773,15 @@ async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()>
     });
 
     // ── Direct P2P subscriber ────────────────────────────────────────────
-    let credential = format!("route-parity-credential-{session_name}");
-    let grant = P2pGrantPayload {
-        request_id: "route-parity".to_string(),
-        credential: credential.clone(),
-        agent_id: AGENT_ID.to_string(),
-        session_id: format!("{AGENT_ID}:{session_name}"),
-        scope: CredentialScope::for_attach(&session_name),
-        expires_at: "2999-01-01T00:00:00Z".to_string(),
-    };
-    agent_credentials
-        .grant(AGENT_ID, &grant)
-        .map_err(|refusal| anyhow::anyhow!("agent refused the test grant: {refusal:?}"))?;
-    let p2p_url = agent_url_with_credential(&format!("ws://{agent_addr}"), &credential);
-    let (p2p_ws, _) = connect_async(&p2p_url).await?;
+    // The Agent's durable token is the only credential on this socket now
+    // (#3440); it rides the `client.auth` frame, never the URL.
+    let (p2p_ws, _) = connect_async(format!("ws://{agent_addr}")).await?;
     let (mut p2p_sink, mut p2p_stream) = p2p_ws.split();
 
     let auth = msg(
         "client.auth",
         "p2p-auth",
-        serde_json::json!({ "auth_token": "", "client_id": P2P_ID }),
+        serde_json::json!({ "auth_token": agent_token, "client_id": P2P_ID }),
     );
     let reply = send_and_recv(&mut p2p_sink, &mut p2p_stream, &auth).await?;
     anyhow::ensure!(reply["msg_type"] == "ok", "p2p auth failed: {reply}");
@@ -1991,5 +1979,76 @@ async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()>
     client_handle.shutdown().await.ok();
     agent_handle.shutdown().await.ok();
     server_handle.abort();
+    Ok(())
+}
+
+/// The Agent's P2P listener admits exactly its durable token (#3440).
+///
+/// Both refusals are asserted because they are different branches of the same
+/// verifier: a wrong value and no value at all. Neither may be read as "this
+/// Agent has no authentication".
+#[tokio::test]
+async fn the_p2p_listener_refuses_a_missing_or_wrong_agent_token() -> anyhow::Result<()> {
+    let (agent_addr, agent_handle, _agent_token, _mutations) =
+        start_agent("p2p-auth-agent").await?;
+
+    for (case, presented) in [("wrong", "not-the-agent-token"), ("missing", "")] {
+        let (ws, _) = connect_async(format!("ws://{agent_addr}")).await?;
+        let (mut sink, mut stream) = ws.split();
+        let auth = msg(
+            "client.auth",
+            "p2p-auth",
+            serde_json::json!({ "auth_token": presented, "client_id": "intruder" }),
+        );
+        sink.send(WsMessage::Text(auth.to_string())).await?;
+
+        // The listener answers a failed authentication with the shared
+        // `AuthResponsePayload` (`status: "failed"`) — the shape the Browser
+        // classifies as a token rejection (#3440) — and leaves the connection
+        // unauthenticated until the auth deadline. A closed socket is equally a
+        // refusal; what must never happen is an `ok` binding this connection.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut refusal = None;
+        let mut closed = false;
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(2), stream.next()).await {
+                Ok(Some(Ok(WsMessage::Text(text)))) => {
+                    let reply: serde_json::Value = serde_json::from_str(&text)?;
+                    if reply.get("id").and_then(serde_json::Value::as_str) == Some("p2p-auth") {
+                        refusal = Some(reply);
+                        break;
+                    }
+                }
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(_))) | Ok(None) => {
+                    closed = true;
+                    break;
+                }
+                Err(_) => continue,
+            }
+        }
+        if let Some(reply) = refusal {
+            anyhow::ensure!(
+                reply["msg_type"] == "ok" && reply["payload"]["status"] == "failed",
+                "a {case} token must be refused with a failed auth answer: {reply}"
+            );
+            if !presented.is_empty() {
+                anyhow::ensure!(
+                    !reply["payload"]["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains(presented),
+                    "the refusal must not echo the token: {reply}"
+                );
+            }
+        } else {
+            anyhow::ensure!(
+                closed,
+                "a {case} token must be refused, but the listener neither answered nor closed"
+            );
+        }
+    }
+
+    agent_handle.shutdown().await.ok();
     Ok(())
 }

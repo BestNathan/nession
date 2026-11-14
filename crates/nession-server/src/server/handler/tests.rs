@@ -26,7 +26,6 @@ struct TestDeps {
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
     image_manager: Arc<crate::image::ImageManager>,
-    p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
 impl TestDeps {
@@ -48,6 +47,31 @@ impl TestDeps {
             )
             .expect("test image manager"),
         );
+        Self::assemble(db, image_manager)
+    }
+
+    /// One Server whose image manager owns a durable build root (#3334).
+    fn with_db_and_builds(db: Arc<Database>, build_root: std::path::PathBuf) -> Self {
+        let blobs = nession_erofs::BlobStore::new(build_root.join("blobs")).unwrap();
+        let image_manager = Arc::new(
+            crate::image::ImageManager::new(
+                Arc::clone(&db),
+                Arc::new(crate::image::UnavailableBackend),
+                blobs,
+                crate::image::ImageManagerOptions {
+                    max_concurrent_builds: 1,
+                    build_root,
+                    build_stage_timeout: Some(std::time::Duration::from_secs(30)),
+                    build_log_max_bytes: crate::image::DEFAULT_BUILD_LOG_MAX_BYTES,
+                    build_retention_secs: crate::image::DEFAULT_BUILD_RETENTION_SECS,
+                },
+            )
+            .expect("test image manager with durable builds"),
+        );
+        Self::assemble(db, image_manager)
+    }
+
+    fn assemble(db: Arc<Database>, image_manager: Arc<crate::image::ImageManager>) -> Self {
         Self {
             agent_registry: Arc::new(AgentRegistry::new(60, Arc::clone(&db))),
             session_registry: Arc::new(SessionRegistry::new(Arc::clone(&db))),
@@ -55,7 +79,6 @@ impl TestDeps {
             client_registry: Arc::new(ClientRegistry::new()),
             web_client_registry: Arc::new(WebClientRegistry::new()),
             env_service: EnvService::new(Arc::clone(&db)),
-            p2p_broker: Arc::new(crate::broker::ConnectionBroker::new(300)),
             image_manager,
             db,
         }
@@ -77,7 +100,6 @@ impl TestDeps {
                 env_service: Arc::clone(&self.env_service),
                 image_manager: Arc::clone(&self.image_manager),
                 db: Arc::clone(&self.db),
-                p2p_broker: Arc::clone(&self.p2p_broker),
             },
             ConnectionHandlerConfig {
                 server_auth_token: auth_token.to_string(),
@@ -179,6 +201,7 @@ async fn register_agent_id(
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: manifest,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 0,
         })
@@ -1099,6 +1122,70 @@ async fn register_agent_connection(h: &mut ConnectionHandler, agent_id: &str) {
     assert_eq!(reply["payload"]["status"], "accepted");
 }
 
+/// Register `agent_id` through the wire, synchronizing `agent_token` (#3440).
+async fn register_with_agent_token(
+    h: &mut ConnectionHandler,
+    agent_id: &str,
+    agent_token: &str,
+) -> serde_json::Value {
+    parse_reply(
+        h.handle_message(proto_msg(
+            "server.agent.register",
+            json!({
+                "agent_id": agent_id,
+                "hostname": "host",
+                "ip_address": "1.2.3.4",
+                "port": 19091,
+                "auth_token": "",
+                "agent_token": agent_token,
+                "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+                "addresses": [],
+                "connect_url": null,
+                "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+            }),
+        ))
+        .await
+        .unwrap(),
+    )
+}
+
+/// The Agent Token cache is part of the registration generation, not a
+/// last-writer-wins field (#3440).
+///
+/// An older connection's registration can arrive late, after a newer
+/// connection has taken the agent over. It must be refused as stale by the
+/// same gate that protects the rest of the agent record — otherwise the
+/// refused frame would still replace the token attach and relay hand out,
+/// and every dial would present a credential the Agent no longer accepts.
+#[tokio::test]
+async fn a_superseded_registration_cannot_overwrite_the_agents_token() {
+    let (mut c1, mut c2) = connections_on_one_server().await;
+
+    // The newer connection registers first and synchronizes its token.
+    let reply = register_with_agent_token(&mut c2, "a1", "new-agent-token").await;
+    assert_eq!(
+        reply["payload"]["status"], "accepted",
+        "the newer connection registers: {reply}"
+    );
+
+    // The older connection's late registration is stale, whatever it carries.
+    let reply = register_with_agent_token(&mut c1, "a1", "stale-agent-token").await;
+    assert_eq!(
+        reply["payload"]["status"], "rejected",
+        "a superseded registration must not be applied: {reply}"
+    );
+
+    let agent = c2.agent_registry.get("a1").await.expect("a1 is registered");
+    assert_eq!(
+        agent
+            .agent_token
+            .as_ref()
+            .map(nession_protocol::SecretString::as_str),
+        Some("new-agent-token"),
+        "the stale registration must not replace the synchronized token"
+    );
+}
+
 /// A connection registered as `a1` must not move `a2`'s heartbeat state,
 /// whatever id its payload carries. Heartbeats are what keeps an agent
 /// online and carry its session counts, so a cross-agent write here is one
@@ -1732,6 +1819,7 @@ mod server_env_delete_v1;
 mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
+mod server_image_build_lifecycle_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;
 mod server_project_get_v1;
@@ -1751,3 +1839,4 @@ mod server_session_metadata_v1;
 mod server_session_processes_v1;
 mod server_session_project_v1;
 mod server_session_sandbox_v1;
+mod server_workspace_v1;

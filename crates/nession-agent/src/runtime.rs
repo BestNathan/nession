@@ -57,7 +57,11 @@ use crate::tmux::manager::SessionManager;
 /// `ready` is how a daemon parent is told the child got this far. This return
 /// value cannot serve that purpose: `run` does not return until shutdown, so a
 /// parent would learn "started" only when it stopped (#1016).
-pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
+pub async fn run(
+    config: AgentConfig,
+    config_path: std::path::PathBuf,
+    ready: Readiness,
+) -> Result<()> {
     // The environment wins over the file for the release-selected terminal
     // width (#2487), and an invalid value fails before any subsystem starts.
     // Both entrypoints reach this function, so the rule has one owner.
@@ -122,62 +126,25 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // is going to send, so the lane keeps one of them per session instead of
     // every intermediate one a busy pane produces (#961-D). See
     // `crate::server::resize`.
-    // What this agent will honour on its P2P listener (#1013). Created here,
-    // once, because two things need the same store: the Server connection,
-    // which is where grants arrive, and the P2P listener, which is where they
-    // are checked. #1014 put the composition in this file for exactly this
-    // reason — a second construction site is a second, emptier store.
-    let p2p_credentials = Arc::new(crate::p2p_credentials::P2pCredentials::new());
+    // The durable inbound Agent Token (#3440): operator override, else the
+    // token persisted beside this config file, else a generated one. Resolved
+    // before the listener exists, so there is no window in which an inbound
+    // connection reaches an Agent that has no verifier.
+    let agent_token = crate::token::resolve_agent_token(&config_path, &config.agent_token)?;
+    let p2p_auth = Arc::new(crate::p2p_auth::P2pAuth::new(agent_token.as_str()));
     // The process's one mutation lane (#1021): the peer-to-peer listener and the
     // central connection both mutate the same tmux sessions and the same file
     // sandbox, so they must queue in the same lane or ordering holds on each path
     // and not between them.
     let mutation_lane = crate::execution::mutation_scheduler();
-
-    // A standalone agent has no Server to mint a credential for it and no
-    // outbound channel to receive one on, so `agent_token` is the one secret in
-    // the picture — see `CredentialScope::for_standalone`, which grants it every
-    // session on this node rather than one.
-    //
-    // **Refused rather than defaulted, and here rather than later.** The two
-    // alternatives both start successfully and then fail at the far end with
-    // nothing to go on: an empty store refuses every connection (a socket that
-    // looks like a network fault), and a permissive default is the anonymous
-    // socket #1013 exists to close. It is done before the listener is built so
-    // there is no window in which a connection arrives ahead of the grant.
-    if config.server_url.trim().is_empty() {
-        if config.agent_token.trim().is_empty() {
-            anyhow::bail!(
-                "standalone mode (server_url is empty) needs `agent_token`: it is the only \
-                 credential this agent can honour, since a Server is what mints and pushes one \
-                 otherwise. Fix: set `agent_token` in the agent config to the token clients \
-                 will present, or set `server_url` to join a server — which mints a credential \
-                 per attach, scoped to the one session it answers for."
-            );
-        }
-        p2p_credentials
-            .grant_configured(
-                &agent_id,
-                &config.agent_token,
-                nession_protocol::contracts::p2p::v1::CredentialScope::for_standalone(),
-            )
-            .map_err(|refusal| {
-                anyhow::anyhow!(
-                    "`agent_token` was refused by this agent's own store ({refusal:?}); this is \
-                     a bug, not a configuration problem"
-                )
-            })?;
-        info!("standalone mode: honouring `agent_token` as this agent's P2P credential");
-    } else if !config.agent_token.trim().is_empty() {
-        // Said out loud rather than ignored. A configured token that silently
-        // does nothing is the kind of field someone sets, tests, and concludes
-        // is honoured.
-        warn!(
-            "`agent_token` is set but `server_url` is too, so it is **not** used: this agent \
-             takes the credential the Server mints for each attach. Clear `agent_token` or \
-             empty `server_url` if that is not what you meant."
-        );
-    }
+    info!(
+        inbound_auth = if p2p_auth.is_enabled() {
+            "agent token"
+        } else {
+            "disabled (bug)"
+        },
+        "inbound Agent token resolved"
+    );
 
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
     // The Agent's durable EROFS cache (#3062): opened once for Managed
@@ -201,7 +168,9 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         }
     };
     let tmux_for_client = {
-        let mut mgr = SessionManager::new().with_server_url(config.server_url.clone());
+        let mut mgr = SessionManager::new()
+            .with_server_url(config.server_url.clone())
+            .with_server_auth_token(config.auth_token.clone());
         // Binding state has to outlive this process: a tmux Session does, and
         // the Agent must still know a managed key's base value after a
         // restart. The directory is created here, where the Agent's state
@@ -227,6 +196,30 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             erofs_cache.clone(),
         );
         mgr = mgr.with_sandbox(Arc::clone(&sandbox));
+        // Agent-owned reusable Workspaces (#3407). The registry lives under
+        // the Agent's durable data directory; if that directory is
+        // unavailable, the API reports unavailable rather than falling back
+        // to an ephemeral location.
+        match nession_common::paths::agent_dir() {
+            Ok(agent_dir) => {
+                match crate::workspace_manager::WorkspaceManager::open(agent_dir.join("workspaces"))
+                {
+                    Ok(manager) => {
+                        mgr = mgr.with_workspaces(Arc::new(manager));
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "Agent Workspace registry unavailable; the inventory API is disabled: {error:#}"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "Agent Workspace registry path is unresolved; the inventory API is disabled: {error:#}"
+                );
+            }
+        }
         Arc::new(mgr)
     };
 
@@ -268,7 +261,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         config.attach_mode.clone(),
         crate::server::websocket::AgentServerContext {
             resize,
-            credentials: Arc::clone(&p2p_credentials),
+            auth: Arc::clone(&p2p_auth),
             // Built here, once, because this is where the resources its keys
             // name are built — one tmux server, one file sandbox — and handed
             // to *both* mutating paths below (#1021).
@@ -286,7 +279,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
     // fail-closed configuration error stops the start here, before `ready`.
     agent_server
-        .mount_mcp(&config)
+        .mount_mcp(&config, agent_token.as_str())
         .context("failed to mount the MCP endpoint")?;
     let (server_handle, listen_addr) = agent_server
         .start()
@@ -363,7 +356,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             Arc::clone(&tmux_for_client),
             config.default_working_dir.clone(),
             Some(ext_registry),
-            Arc::clone(&p2p_credentials),
+            agent_token.clone(),
             Arc::clone(&mutation_lane),
         )
         .with_session_metadata(session_metadata);

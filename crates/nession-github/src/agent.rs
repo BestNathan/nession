@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(response["resolution"], "resolved");
         assert_eq!(response["repository"]["owner"], "acme");
         assert_eq!(response["repository"]["repo"], "repo");
-        assert_eq!(response["repository"]["remoteName"], "origin");
+        assert_eq!(response["repository"]["remote_name"], "origin");
         assert_eq!(response["branch"], "feature/x");
         assert_eq!(response["authenticated"], false);
     }

@@ -45,6 +45,8 @@ impl TestServer {
             auth_token: auth_token.to_string(),
             heartbeat_interval_secs: 10,
             heartbeat_timeout_secs: 30,
+            image_blob_dir: format!("{db_path}.images/blobs"),
+            image_build_dir: format!("{db_path}.images/build"),
             db_path: db_path.clone(),
             ..Default::default()
         };
@@ -1314,18 +1316,21 @@ async fn test_client_session_attach_session_not_found() {
         .contains("not found"));
 }
 
+/// The durable Agent Token the registering Agent synchronizes (#3440).
+const AGENT_TOKEN: &str = "full-stack-agent-token";
+
 #[tokio::test]
 async fn test_client_session_attach_p2p_mode() {
     let server = TestServer::start("tok").await.unwrap();
 
-    // Register agent with a connect_url.
+    // Register agent with a connect_url and its durable Agent Token.
     let mut agent_ws = server.connect().await.unwrap();
     send_text(
         &mut agent_ws,
         serde_json::json!({
             "msg_type":"server.agent.register","id":"r","timestamp":current_timestamp(),
             "payload":{"agent_id":"p2p-agent","hostname":"h","ip_address":"10.0.0.80",
-            "port":9090,"auth_token":"tok",
+            "port":9090,"auth_token":"tok","agent_token":AGENT_TOKEN,
             "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
             "connect_url":"ws://agent.example.com/ws",
             "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
@@ -1374,42 +1379,6 @@ async fn test_client_session_attach_p2p_mode() {
     .await
     .unwrap();
 
-    // The Server hands the credential to the agent that will verify it
-    // **before** it answers the client (#1013), so the attach cannot complete
-    // until this is answered. That the grant has to be read first is the
-    // property under test as much as the token is: without the ordering, a
-    // client could dial the agent before the verifier held the record, and be
-    // refused for a reason it could do nothing about.
-    let grant_raw = recv_text(&mut agent_ws).await;
-    let grant: serde_json::Value = serde_json::from_str(&grant_raw).unwrap();
-    assert_eq!(
-        grant["msg_type"].as_str(),
-        Some("agent.p2p.grant"),
-        "the credential must reach the agent before the client is answered"
-    );
-    assert!(
-        grant["payload"]["credential"]
-            .as_str()
-            .is_some_and(|token| !token.is_empty()),
-        "the grant carries the credential the client will present: {grant}"
-    );
-    assert_eq!(
-        grant["payload"]["scope"]["terminal"].as_str(),
-        Some("p2p-sess"),
-        "and it is bound to the session it was minted for"
-    );
-    let grant_request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
-    send_text(
-        &mut agent_ws,
-        serde_json::json!({
-            "msg_type":"server.agent.command-response","id":"grant-ack","timestamp":current_timestamp(),
-            "payload":{"request_id":grant_request_id,"command":"p2p.grant","success":true}
-        })
-        .to_string(),
-    )
-    .await
-    .unwrap();
-
     // Skip any broadcast messages that arrive before the attach response.
     let attach_resp = loop {
         let raw = recv_text(&mut client).await;
@@ -1424,22 +1393,91 @@ async fn test_client_session_attach_p2p_mode() {
         attach_resp["payload"]["agent_address"],
         "ws://agent.example.com/ws"
     );
-    let issued = attach_resp["payload"]["connection_token"]
-        .as_str()
-        .expect("the client is given the credential");
-    assert_eq!(
-        Some(issued),
-        grant["payload"]["credential"].as_str(),
-        "the client must be given the credential the agent was already granted"
-    );
-    let expires_at = attach_resp["payload"]["connection_token_expires_at"]
-        .as_str()
-        .expect("the client is told when the credential stops being accepted");
-    let deadline = chrono::DateTime::parse_from_rfc3339(expires_at)
-        .expect("the stated credential deadline is RFC 3339");
+    // The client is handed the token the Agent itself registered. There is no
+    // grant round-trip and no expiry: attach reads the registration cache.
+    assert_eq!(attach_resp["payload"]["agent_token"], AGENT_TOKEN);
     assert!(
-        deadline > chrono::Utc::now(),
-        "the issued credential is not already expired"
+        attach_resp["payload"].get("connection_token").is_none(),
+        "there is no per-attach credential any more: {attach_resp}"
+    );
+    assert!(
+        attach_resp["payload"]
+            .get("connection_token_expires_at")
+            .is_none(),
+        "and therefore no expiry to state: {attach_resp}"
+    );
+}
+
+/// Attach refuses when the registered Agent never synchronized a token.
+#[tokio::test]
+async fn test_client_session_attach_p2p_refuses_without_an_agent_token() {
+    let server = TestServer::start("tok").await.unwrap();
+
+    let mut agent_ws = server.connect().await.unwrap();
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"server.agent.register","id":"r","timestamp":current_timestamp(),
+            "payload":{"agent_id":"no-token-agent","hostname":"h","ip_address":"10.0.0.81",
+            "port":9091,"auth_token":"tok",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+            "metadata":{"tmux_version":"3.3","os_version":"Linux","nession_version":"0.1"}}
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+    let _ = recv_text(&mut agent_ws).await;
+    send_text(
+        &mut agent_ws,
+        serde_json::json!({
+            "msg_type":"server.agent.session-update","id":"su","timestamp":current_timestamp(),
+            "payload":{"agent_id":"no-token-agent","session_name":"dev","status":"active",
+            "window_count":1,"attached_clients":0}
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+
+    let mut client = server.connect().await.unwrap();
+    send_text(
+        &mut client,
+        serde_json::json!({
+            "msg_type":"server.auth","id":"auth","timestamp":current_timestamp(),
+            "payload":{"auth_token":"tok"}
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+    let _ = recv_text(&mut client).await;
+    send_text(
+        &mut client,
+        serde_json::json!({
+            "msg_type":"server.session.attach","id":"att-no-token","timestamp":current_timestamp(),
+            "payload":{"session_id":"no-token-agent:dev","preferred_mode":"p2p"}
+        })
+        .to_string(),
+    )
+    .await
+    .unwrap();
+
+    // Skip asynchronous broadcasts that can overtake the reply.
+    let resp = loop {
+        let raw = recv_text(&mut client).await;
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        if value["msg_type"].as_str() == Some("server.session.attach") {
+            break value;
+        }
+    };
+    assert_eq!(resp["payload"]["status"], "error");
+    assert!(
+        resp["payload"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("has not synchronized its Agent Token"),
+        "the refusal must be actionable: {resp}"
     );
 }
 

@@ -20,6 +20,27 @@ const IMAGE = {
   updated_at: 2,
 };
 
+const BUILD = {
+  build_id: 'build-123e4567-e89b-42d3-a456-426614174000',
+  image_id: 'image-123e4567-e89b-42d3-a456-426614174000',
+  attempt: 1,
+  source: { kind: 'github' as const, repository_url: 'https://github.com/BestNathan/nession', ref: 'main' },
+  packaging: {
+    compression: 'none',
+    block_size: 4096,
+    fixed_timestamp: 0,
+    fixed_uuid: '11111111-1111-4111-8111-111111111111',
+  },
+  status: 'running' as const,
+  stage: 'packaging' as const,
+  progress: { files: 12, bytes: 4096, elapsed_ms: 1200 },
+  size_bytes: 0,
+  deduplicated: false,
+  alias: 'latest',
+  created_at: 1,
+  updated_at: 2,
+};
+
 describe('ImagesPlugin', () => {
   let plugin: ImagesPlugin;
   let surface: MockPluginSurface;
@@ -88,54 +109,71 @@ describe('ImagesPlugin', () => {
     await expect(pending).resolves.toEqual(IMAGE);
   });
 
-  it('obtains a Project-scoped grant through server.image.access', async () => {
+  it('submits the asynchronous durable build unit', async () => {
     plugin.install(surface);
-    const pending = plugin.accessImage({
-      projectId: 'project-123e4567-e89b-42d3-a456-426614174000',
-      digest: DIGEST,
-    });
-    expect(surface.requests[0].type).toBe('server.image.access');
+    const pending = plugin.submitBuild(
+      { kind: 'github', repository_url: 'https://github.com/BestNathan/nession', ref: 'main' },
+      { alias: 'latest', clientRequestId: 'project-build-1' },
+    );
+    expect(surface.requests[0].type).toBe('server.image.build.submit');
     expect(surface.requests[0].payload).toEqual({
-      project_id: 'project-123e4567-e89b-42d3-a456-426614174000',
-      digest: DIGEST,
+      source: {
+        kind: 'github',
+        repository_url: 'https://github.com/BestNathan/nession',
+        ref: 'main',
+      },
+      alias: 'latest',
+      client_request_id: 'project-build-1',
     });
-    surface.resolveNext('server.image.access', {
-      success: true,
-      token: 'token',
-      expires_at: 100,
-      path: `/images/blobs/${DIGEST}`,
-    });
-    await expect(pending).resolves.toEqual({
-      token: 'token',
-      expires_at: 100,
-      path: `/images/blobs/${DIGEST}`,
-    });
+    surface.resolveNext('server.image.build.submit', { success: true, build: BUILD });
+    await expect(pending).resolves.toEqual(BUILD);
   });
 
-  it('obtains a Session-scoped grant for an allowed digest', async () => {
+  it('reads, cancels and retries durable build records', async () => {
     plugin.install(surface);
-    const pending = plugin.accessImage({ sessionId: 'a1:s1', digest: DIGEST });
-    expect(surface.requests[0].payload).toEqual({ session_id: 'a1:s1', digest: DIGEST });
-    surface.resolveNext('server.image.access', {
+    const read = plugin.getBuild(BUILD.build_id);
+    expect(surface.requests[0].type).toBe('server.image.build.get');
+    expect(surface.requests[0].payload).toEqual({ build_id: BUILD.build_id });
+    surface.resolveNext('server.image.build.get', { success: true, build: BUILD });
+    await expect(read).resolves.toEqual(BUILD);
+
+    const page = plugin.listBuilds({ offset: 0, limit: 10 });
+    expect(surface.requests[0].type).toBe('server.image.build.list');
+    surface.resolveNext('server.image.build.list', { builds: [BUILD], total: 1 });
+    await expect(page).resolves.toEqual({ builds: [BUILD], total: 1, next_offset: undefined });
+
+    const canceled = plugin.cancelBuild(BUILD.build_id);
+    expect(surface.requests[0].type).toBe('server.image.build.cancel');
+    surface.resolveNext('server.image.build.cancel', {
       success: true,
-      token: 'session-token',
-      expires_at: 100,
-      path: `/images/blobs/${DIGEST}`,
+      build: { ...BUILD, status: 'canceled', stage: null },
     });
-    await expect(pending).resolves.toMatchObject({ token: 'session-token' });
+    await expect(canceled).resolves.toMatchObject({ status: 'canceled' });
+
+    const retried = plugin.retryBuild(BUILD.build_id);
+    expect(surface.requests[0].type).toBe('server.image.build.retry');
+    surface.resolveNext('server.image.build.retry', {
+      success: true,
+      build: { ...BUILD, attempt: 2 },
+    });
+    await expect(retried).resolves.toMatchObject({ attempt: 2 });
   });
 
-  it('surfaces a foreign-Project grant refusal', async () => {
+  it('delivers pushed build transitions and connection state', () => {
     plugin.install(surface);
-    const pending = plugin.accessImage({
-      projectId: 'project-123e4567-e89b-42d3-a456-426614174000',
-      digest: DIGEST,
-    });
-    surface.resolveNext('server.image.access', {
-      success: false,
-      error: 'Project does not reference this image',
-      error_kind: 'forbidden',
-    });
-    await expect(pending).rejects.toThrow('Project does not reference this image');
+    const builds: string[] = [];
+    const states: string[] = [];
+    const offBuild = plugin.onBuildChanged((build) => builds.push(build.build_id));
+    const offState = plugin.onConnectionStateChange((state) => states.push(state));
+    surface.pushMessage('server.image.build.updated', { build: BUILD });
+    surface.setConnectionState('reconnecting');
+    surface.setConnectionState('connected');
+    expect(builds).toEqual([BUILD.build_id]);
+    expect(states).toEqual(['connected', 'reconnecting', 'connected']);
+    offBuild();
+    offState();
+    surface.pushMessage('server.image.build.updated', { build: BUILD });
+    expect(builds).toEqual([BUILD.build_id]);
   });
+
 });

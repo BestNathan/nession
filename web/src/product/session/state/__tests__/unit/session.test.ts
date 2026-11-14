@@ -26,7 +26,7 @@ function makeSession(): Session {
 function makeChoice(session: Session): AttachChoice {
   return {
     mode: 'auto',
-    attachInfo: { mode: 'p2p', session_id: session.session_id, connection_token: 'tok',
+    attachInfo: { mode: 'p2p', session_id: session.session_id, agent_token: 'tok',
       addresses: [{ url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' }],
     },
     orderedUrls: ['ws://a/ws'], latencies: [], selectedUrl: null,
@@ -74,7 +74,7 @@ describe('action atoms', () => {
     store.set(attachToSessionAtom, { session: makeSession(), choice: makeChoice(makeSession()), navigate });
     expect(store.get(sessionIdAtom)).toBe('agent:sess');
     expect(store.get(sessionNameAtom)).toBe('sess');
-    expect(store.get(attachInfoAtom)?.connection_token).toBe('tok');
+    expect(store.get(attachInfoAtom)?.agent_token).toBe('tok');
     expect(store.get(orderedUrlsAtom)).toEqual(['ws://a/ws']);
     expect(store.get(rendererAtom)).toBe('webgl');
     expect(store.get(attachDialogSessionAtom)).toBeNull();
@@ -94,10 +94,10 @@ describe('action atoms', () => {
     expect(epochAfterFirst).toBe(0);
 
     const second = makeChoice(session);
-    second.attachInfo.connection_token = 'tok2'; // fresh token per dialog confirm
+    second.attachInfo.agent_token = 'tok2'; // fresh token per dialog confirm
     store.set(attachToSessionAtom, { session, choice: second, navigate });
     expect(store.get(routeIntentEpochAtom)).toBe(epochAfterFirst + 1);
-    expect(store.get(attachInfoAtom)?.connection_token).toBe('tok2');
+    expect(store.get(attachInfoAtom)?.agent_token).toBe('tok2');
   });
 
   it('attachToSessionAtom does not bump the route intent when attaching a different session', () => {

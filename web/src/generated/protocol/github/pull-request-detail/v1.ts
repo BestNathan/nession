@@ -27,8 +27,8 @@ export type PullRequestDetailRequestV1 = { number: number, session: string,
  * re-resolves it on every request; it can never name a host/owner/repo.
  */
 remote_name?: string | null, };
-export type PullRequestDetailOkV1 = { repository: GithubRepositoryRefV1, pullRequest: GithubPullRequestDetailV1, };
-export type GithubPullRequestDetailV1 = { number: number, title: string, state: string, draft: boolean, merged: boolean, mergedAt?: string | null, author: GithubUserV1, head: GithubHeadRefV1, headRefName: string, base: GithubBaseRefV1, baseRefName: string, createdAt: string, updatedAt: string, url: string, body: string, };
+export type PullRequestDetailOkV1 = { repository: GithubRepositoryRefV1, pull_request: GithubPullRequestDetailV1, };
+export type GithubPullRequestDetailV1 = { number: number, title: string, state: string, draft: boolean, merged: boolean, merged_at?: string | null, author: GithubUserV1, head: GithubHeadRefV1, head_ref_name: string, base: GithubBaseRefV1, base_ref_name: string, created_at: string, updated_at: string, url: string, body: string, };
 export type GithubHeadRefV1 = { 
 /**
  * The head repository's owner; empty when the fork was deleted.
@@ -36,11 +36,11 @@ export type GithubHeadRefV1 = {
 owner: string, repo: string, ref: string, sha: string, };
 export type GithubBaseRefV1 = { ref: string, sha: string, };
 export type GithubUserV1 = { login: string, };
-export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remoteName: string, 
+export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remote_name: string, 
 /**
  * The canonical browser source of this repository, never a credential URL.
  */
-sourceUrl: string, };
+source_url: string, };
 export type SessionTargetV1 = { session: string, 
 /**
  * A remote name discovered by the Agent for this Session. The provider
@@ -60,5 +60,5 @@ export type PullRequestDetailRequest = { number: number, session: string,
 remote_name?: string | null, };
 
 /** The payload the provider answers with. */
-export type PullRequestDetailResponse = { "state": "ok", repository: GithubRepositoryRefV1, pullRequest: GithubPullRequestDetailV1, } | { "state": "error", code: GithubErrorCodeV1, message: string, retryAfterSeconds?: number | null, };
+export type PullRequestDetailResponse = { "state": "ok", repository: GithubRepositoryRefV1, pull_request: GithubPullRequestDetailV1, } | { "state": "error", code: GithubErrorCodeV1, message: string, retry_after_seconds?: number | null, };
 

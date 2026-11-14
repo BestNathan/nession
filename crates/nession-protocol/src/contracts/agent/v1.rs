@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::default_image_tag;
-use crate::ProtocolManifest;
+use crate::{ProtocolManifest, RedactedToken};
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
@@ -11,7 +11,21 @@ pub struct AgentRegisterPayload {
     pub hostname: String,
     pub ip_address: String,
     pub port: u16,
-    pub auth_token: String,
+    /// The Server Token: this Agent's outbound control-plane credential.
+    #[cfg_attr(feature = "codegen", ts(type = "string"))]
+    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    pub auth_token: RedactedToken,
+    /// The durable inbound Agent Token (#3440).
+    ///
+    /// Sent only over the authenticated Server control connection. The Server
+    /// caches it in memory under this registration's authoritative generation
+    /// and hands it to an authenticated session attach for this Agent only.
+    /// Older Agents omit it; such an Agent registers but has no P2P token until
+    /// it re-registers with the field, and attach refuses P2P clearly.
+    #[serde(default)]
+    #[cfg_attr(feature = "codegen", ts(type = "string"))]
+    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    pub agent_token: RedactedToken,
     pub metadata: AgentMetadata,
     /// Human-readable display name (set via agent config or Web UI rename).
     /// When absent the UI falls back to hostname.

@@ -10,7 +10,10 @@
 //!   by an independent implementation rather than by the server's own tests.
 
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -24,7 +27,7 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{ClientLifecycleMode, ClientServiceExt};
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 
 const TOKEN: &str = "mcp-test-token";
@@ -461,6 +464,32 @@ async fn invalid_and_unknown_tool_calls_are_tool_errors_not_transport_errors() {
 }
 
 #[tokio::test]
+async fn a_retired_camel_case_tool_argument_is_refused_by_its_contract_name() {
+    let harness = start(Arc::default()).await;
+    let refused = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_agent_list_sessions",
+            json!({ "agentId": "agent-1" }),
+        ),
+        Some("nession_agent_list_sessions"),
+    )
+    .await;
+    assert_eq!(refused.status, 200, "{}", refused.body);
+    let result = &refused.json()["result"];
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().expect("text content");
+    // #3371: Nession's own argument spelling is `agent_id`; the typed Tool
+    // contract refuses the retired camelCase form instead of ignoring it.
+    assert!(
+        text.contains("agent_id"),
+        "the refusal must name the argument: {text}"
+    );
+    assert!(harness.recorder.calls().is_empty());
+}
+
+#[tokio::test]
 async fn a_modern_request_without_standard_headers_is_a_header_mismatch() {
     let harness = start(Arc::default()).await;
     let body = json!({
@@ -705,6 +734,225 @@ async fn a_slow_tool_call_times_out_as_a_tool_error() {
     let result = &response.json()["result"];
     assert_eq!(result["isError"], true);
     assert!(text_of(result)["error"]["kind"] == "timeout", "{}", result);
+}
+
+/// A valid request whose head and body must survive replay byte for byte.
+const REPLAY_REQUEST: &[u8] = b"POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\nhello world";
+
+/// A valid WebSocket upgrade that must survive replay byte for byte.
+const REPLAY_UPGRADE: &[u8] = b"GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+
+/// Serves `script` in fixed-size chunks and then stays pending forever.
+///
+/// A parser that waits for a newline or EOF is observably stuck; the shared
+/// counter records how many bytes it pulled from the transport, so a test can
+/// assert that the oversized line was not drained.
+struct ScriptedReader {
+    script: Vec<u8>,
+    served: usize,
+    chunk: usize,
+    pulled: Arc<AtomicUsize>,
+}
+
+impl ScriptedReader {
+    fn new(script: Vec<u8>, chunk: usize) -> (Self, Arc<AtomicUsize>) {
+        let pulled = Arc::new(AtomicUsize::new(0));
+        (
+            Self {
+                script,
+                served: 0,
+                chunk,
+                pulled: Arc::clone(&pulled),
+            },
+            pulled,
+        )
+    }
+}
+
+impl AsyncRead for ScriptedReader {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if self.served >= self.script.len() {
+            return Poll::Pending;
+        }
+        let end = self
+            .served
+            .saturating_add(self.chunk)
+            .min(self.script.len());
+        let available = self.script.get(self.served..end).unwrap_or(&[]);
+        let take = available.len().min(buf.remaining());
+        let chunk = available.get(..take).unwrap_or(&[]);
+        buf.put_slice(chunk);
+        self.served = self.served.saturating_add(take);
+        self.pulled.store(self.served, Ordering::SeqCst);
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn an_unterminated_request_line_is_refused_within_the_head_budget() {
+    const CHUNK: usize = 512;
+    let budget = http::MAX_HEADER_BYTES;
+    let (reader, pulled) = ScriptedReader::new(vec![b'G'; budget * 4], CHUNK);
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(2),
+        http::sniff(reader, Duration::from_secs(60)),
+    )
+    .await
+    .expect("an oversized unterminated line must not wait for LF or EOF");
+
+    assert!(
+        matches!(outcome, Err(http::HttpError::HeaderTooLarge)),
+        "the unterminated request line must be refused as too large"
+    );
+    let pulled = pulled.load(Ordering::SeqCst);
+    assert!(
+        pulled <= budget + CHUNK,
+        "the parser pulled {pulled} bytes for a {budget}-byte head budget"
+    );
+}
+
+#[tokio::test]
+async fn an_unterminated_header_line_is_refused_within_the_head_budget() {
+    const CHUNK: usize = 512;
+    let budget = http::MAX_HEADER_BYTES;
+    let mut script = b"GET /ws HTTP/1.1\r\nHost: localhost\r\nX-Fill: ".to_vec();
+    script.resize(script.len() + budget * 2, b'x');
+    let (reader, pulled) = ScriptedReader::new(script, CHUNK);
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(2),
+        http::sniff(reader, Duration::from_secs(60)),
+    )
+    .await
+    .expect("an oversized unterminated line must not wait for LF or EOF");
+
+    assert!(
+        matches!(outcome, Err(http::HttpError::HeaderTooLarge)),
+        "the unterminated header line must be refused as too large"
+    );
+    let pulled = pulled.load(Ordering::SeqCst);
+    assert!(
+        pulled <= budget + CHUNK,
+        "the parser pulled {pulled} bytes for a {budget}-byte head budget"
+    );
+}
+
+#[tokio::test]
+async fn a_head_exactly_at_the_budget_is_accepted() {
+    let budget = http::MAX_HEADER_BYTES;
+    let prefix = b"GET /ws HTTP/1.1\r\nHost: localhost\r\nX-Pad: ";
+    let suffix = b"\r\n\r\n";
+    let pad = budget - prefix.len() - suffix.len();
+    let mut request = prefix.to_vec();
+    request.resize(request.len() + pad, b'p');
+    request.extend_from_slice(suffix);
+    assert_eq!(request.len(), budget);
+
+    let (mut writer, reader) = tokio::io::duplex(budget * 2);
+    writer
+        .write_all(&request)
+        .await
+        .expect("write an at-the-limit request");
+    let sniffed = http::sniff(reader, http::DEFAULT_IO_TIMEOUT)
+        .await
+        .expect("a head exactly at the budget is valid");
+    drop(writer);
+
+    let Sniffed::Http { mut stream, .. } = sniffed else {
+        panic!("expected an HTTP request");
+    };
+    let mut replay = Vec::new();
+    stream.read_to_end(&mut replay).await.expect("read replay");
+    assert_eq!(replay, request);
+}
+
+#[tokio::test]
+async fn a_malformed_header_fails_closed() {
+    let (mut writer, reader) = tokio::io::duplex(128);
+    writer
+        .write_all(b"GET /ws HTTP/1.1\r\nHost: localhost\r\nMissing-Colon\r\n\r\n")
+        .await
+        .expect("write a malformed request");
+    drop(writer);
+
+    let outcome = http::sniff(reader, http::DEFAULT_IO_TIMEOUT).await;
+    assert!(
+        matches!(outcome, Err(http::HttpError::BadRequest(_))),
+        "a header line without a colon must be refused"
+    );
+}
+
+#[tokio::test]
+async fn a_fragmented_request_replays_every_byte() {
+    let (mut writer, reader) = tokio::io::duplex(64);
+    let writer_task = tokio::spawn(async move {
+        for fragment in REPLAY_REQUEST.chunks(5) {
+            writer.write_all(fragment).await.expect("write fragment");
+            tokio::task::yield_now().await;
+        }
+    });
+
+    let sniffed = http::sniff(reader, http::DEFAULT_IO_TIMEOUT)
+        .await
+        .expect("a valid request must classify");
+    let Sniffed::Http { head, mut stream } = sniffed else {
+        panic!("expected an HTTP request");
+    };
+    assert_eq!(head.method, "POST");
+    assert_eq!(head.path(), "/mcp");
+    assert_eq!(head.header("content-length"), Some("11"));
+
+    let mut replay = Vec::new();
+    stream.read_to_end(&mut replay).await.expect("read replay");
+    assert_eq!(replay, REPLAY_REQUEST);
+    writer_task.await.expect("writer task");
+}
+
+#[tokio::test]
+async fn a_request_buffered_with_its_body_replays_every_byte() {
+    let (mut writer, reader) = tokio::io::duplex(256);
+    writer
+        .write_all(REPLAY_REQUEST)
+        .await
+        .expect("write the request and body together");
+    let sniffed = http::sniff(reader, http::DEFAULT_IO_TIMEOUT)
+        .await
+        .expect("a valid request must classify");
+    drop(writer);
+
+    let Sniffed::Http { mut stream, .. } = sniffed else {
+        panic!("expected an HTTP request");
+    };
+    let mut replay = Vec::new();
+    stream.read_to_end(&mut replay).await.expect("read replay");
+    assert_eq!(replay, REPLAY_REQUEST);
+}
+
+#[tokio::test]
+async fn a_fragmented_websocket_upgrade_replays_every_byte() {
+    let (mut writer, reader) = tokio::io::duplex(64);
+    let writer_task = tokio::spawn(async move {
+        for fragment in REPLAY_UPGRADE.chunks(7) {
+            writer.write_all(fragment).await.expect("write fragment");
+            tokio::task::yield_now().await;
+        }
+    });
+
+    let sniffed = http::sniff(reader, http::DEFAULT_IO_TIMEOUT)
+        .await
+        .expect("a valid upgrade must classify");
+    let Sniffed::WebSocket { mut stream } = sniffed else {
+        panic!("expected a WebSocket upgrade");
+    };
+    let mut replay = Vec::new();
+    stream.read_to_end(&mut replay).await.expect("read replay");
+    assert_eq!(replay, REPLAY_UPGRADE);
+    writer_task.await.expect("writer task");
 }
 
 fn client_config(addr: SocketAddr) -> StreamableHttpClientTransportConfig {

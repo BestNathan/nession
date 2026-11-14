@@ -35,6 +35,16 @@ async fn start_server(auth_token: &str) -> TestResult<(tempfile::TempDir, String
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
         auth_token: auth_token.to_string(),
+        image_blob_dir: std::env::temp_dir()
+            .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
+            .join("blobs")
+            .to_string_lossy()
+            .into_owned(),
+        image_build_dir: std::env::temp_dir()
+            .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
+            .join("build")
+            .to_string_lossy()
+            .into_owned(),
         db_path: dir.path().join("server.db").to_string_lossy().into_owned(),
         ..Default::default()
     };

@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import type {
   SandboxActionResult,
   SandboxCurrentContext,
-  SandboxImageSelection,
   SandboxPolicyDraft,
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
@@ -50,11 +49,10 @@ export interface SandboxTransitionsState {
  */
 export function useSandboxTransitions(options: {
   sessionId: string | null;
-  images: readonly SandboxImageSelection[];
   workingDir: string;
   applyContext: (context: SandboxCurrentContext | null) => void;
 }): SandboxTransitionsState {
-  const { sessionId, images, workingDir, applyContext } = options;
+  const { sessionId, workingDir, applyContext } = options;
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<SandboxActionError | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -100,7 +98,6 @@ export function useSandboxTransitions(options: {
           probeGeneration: preflight.result.catalog.probe_generation,
           enterId: newEnterId(),
           policy: draft,
-          images,
           workingDir,
         })
         .then((result) => {
@@ -128,7 +125,7 @@ export function useSandboxTransitions(options: {
         })
         .finally(() => setBusy(false));
     },
-    [sessionId, images, workingDir, applyContext],
+    [sessionId, workingDir, applyContext],
   );
 
   const requestEnter = useCallback(() => {

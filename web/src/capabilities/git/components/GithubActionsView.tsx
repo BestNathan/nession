@@ -12,10 +12,10 @@ function statusText(workflow: GithubWorkflow): string {
   if (workflow.state === 'disabled') {
     return 'Disabled';
   }
-  if (!workflow.latestRun) {
+  if (!workflow.latest_run) {
     return 'No runs yet';
   }
-  const run = workflow.latestRun;
+  const run = workflow.latest_run;
   if (run.status === 'completed') {
     return run.conclusion ? `Completed · ${run.conclusion}` : 'Completed';
   }
@@ -57,7 +57,7 @@ export function GithubActionsView({
       if (response.state === 'error') {
         throw asGithubError(response) ?? response;
       }
-      return { items: response.workflows, nextCursor: response.nextCursor ?? null };
+      return { items: response.workflows, nextCursor: response.next_cursor ?? null };
     },
     [scope],
   );
@@ -187,12 +187,12 @@ function WorkflowRow({ workflow }: { workflow: GithubWorkflow }) {
         data-testid={`github-workflow-status-${workflow.id}`}
       >
         {statusText(workflow)}
-        {workflow.latestRun?.branch ? ` · ${workflow.latestRun.branch}` : ''}
-        {workflow.latestRun?.sha ? ` · ${workflow.latestRun.sha.slice(0, 7)}` : ''}
+        {workflow.latest_run?.branch ? ` · ${workflow.latest_run.branch}` : ''}
+        {workflow.latest_run?.sha ? ` · ${workflow.latest_run.sha.slice(0, 7)}` : ''}
       </span>
-      {workflow.latestRun ? (
+      {workflow.latest_run ? (
         <a
-          href={workflow.latestRun.url}
+          href={workflow.latest_run.url}
           target="_blank"
           rel="noopener noreferrer"
           className={cn('text-primary underline-offset-4 hover:underline', chromeSansRole('metadata'))}

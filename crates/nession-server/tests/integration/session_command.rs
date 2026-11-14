@@ -17,6 +17,16 @@ async fn start_server() -> anyhow::Result<(std::net::SocketAddr, tokio::task::Jo
         heartbeat_timeout_secs: 60,
         tls_cert_path: String::new(),
         tls_key_path: String::new(),
+        image_blob_dir: std::env::temp_dir()
+            .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
+            .join("blobs")
+            .to_string_lossy()
+            .into_owned(),
+        image_build_dir: std::env::temp_dir()
+            .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
+            .join("build")
+            .to_string_lossy()
+            .into_owned(),
         db_path: String::new(),
         ..Default::default()
     };

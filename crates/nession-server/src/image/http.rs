@@ -1,17 +1,24 @@
 //! Authorized HTTP(S) blob streaming for the Image Manager (#3022).
 //!
-//! The Server's existing listener already sniffs one HTTP request head. This
-//! service takes only `/images/blobs/<digest>` and answers with digest-bound
-//! bytes: `Range`/`ETag`/`Accept-Ranges`, explicit 403/404/416, and a scoped
-//! bearer grant that is rechecked against the exact digest.
+//! The Server's Axum router maps `/images/blobs/<digest>` here. The handler
+//! answers with digest-bound bytes: `Range`/`ETag`/`Accept-Ranges`, explicit
+//! 403/404/416, and a scoped bearer grant that is rechecked against the exact
+//! digest. The response body is a streaming Axum body over the blob file; no
+//! raw HTTP head is written by this module.
 
 use std::io;
 use std::sync::Arc;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
+use axum::body::Body;
+use axum::http::header::{self, HeaderMap};
+use axum::http::{Method, StatusCode};
+use axum::response::Response;
+use futures_util::StreamExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use nession_mcp::http::{PrefixedStream, RequestHead};
 use nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX;
+
+use nession_protocol::TokenVerifier;
 
 use super::{ImageError, ImageManager};
 
@@ -19,134 +26,146 @@ use super::{ImageError, ImageManager};
 #[derive(Clone)]
 pub struct ImageHttpService {
     manager: Arc<ImageManager>,
+    /// The Server Token this route accepts (#3440). Empty means the Server's
+    /// own WebSocket authentication is disabled too, and the route is
+    /// unauthenticated for the same reason.
+    auth: TokenVerifier,
 }
 
 impl ImageHttpService {
-    pub fn new(manager: Arc<ImageManager>) -> Self {
-        Self { manager }
+    pub fn new(manager: Arc<ImageManager>, auth: TokenVerifier) -> Self {
+        Self { manager, auth }
     }
 
-    /// Serve one HTTP request. The connection is closed after the response.
-    pub async fn serve<S>(&self, head: RequestHead, mut stream: PrefixedStream<S>) -> io::Result<()>
-    where
-        S: AsyncRead + AsyncWrite + Unpin,
-    {
-        let Some(raw_digest) = head.path().strip_prefix(IMAGE_BLOB_PATH_PREFIX) else {
-            return write_status(&mut stream, 404, "Not Found", &[]).await;
-        };
+    /// Answer one blob request.
+    ///
+    /// Routing and method selection have already happened in the Axum router
+    /// (`GET`/`HEAD` are the only registered methods); the checks here are the
+    /// authorization and byte-range semantics the route promises.
+    pub async fn respond(
+        &self,
+        method: &Method,
+        raw_digest: &str,
+        headers: &HeaderMap,
+    ) -> Response {
         if raw_digest.is_empty() || raw_digest.contains('/') {
-            return write_status(&mut stream, 404, "Not Found", &[]).await;
+            return status(StatusCode::NOT_FOUND, &[]);
         }
-        if head.method != "GET" && head.method != "HEAD" {
-            return write_status(
-                &mut stream,
-                405,
-                "Method Not Allowed",
-                &[("Allow", "GET, HEAD")],
-            )
-            .await;
+        if method != Method::GET && method != Method::HEAD {
+            return status(StatusCode::METHOD_NOT_ALLOWED, &[("Allow", "GET, HEAD")]);
+        }
+        // Authentication first: an unauthenticated caller must not learn whether
+        // a digest exists from the status code.
+        if self.auth.is_enabled() {
+            let Some(token) = bearer_token(headers) else {
+                return status(StatusCode::FORBIDDEN, &[("WWW-Authenticate", "Bearer")]);
+            };
+            if !self.auth.verify(token.trim()) {
+                return status(StatusCode::FORBIDDEN, &[("WWW-Authenticate", "Bearer")]);
+            }
         }
         let size = match self.manager.ready_blob(raw_digest).await {
             Ok(size) => size,
-            Err(ImageError::NotFound(_)) => {
-                return write_status(&mut stream, 404, "Not Found", &[]).await;
-            }
-            Err(_) => return write_status(&mut stream, 503, "Service Unavailable", &[]).await,
+            Err(ImageError::NotFound(_)) => return status(StatusCode::NOT_FOUND, &[]),
+            Err(_) => return status(StatusCode::SERVICE_UNAVAILABLE, &[]),
         };
-        let token = head
-            .header("authorization")
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .or_else(|| {
-                head.header("authorization")
-                    .and_then(|value| value.strip_prefix("bearer "))
-            });
-        let Some(token) = token else {
-            return write_status(
-                &mut stream,
-                403,
-                "Forbidden",
-                &[("WWW-Authenticate", "Bearer")],
-            )
-            .await;
-        };
-        if self.manager.authorize(token, raw_digest).await.is_err() {
-            return write_status(
-                &mut stream,
-                403,
-                "Forbidden",
-                &[("WWW-Authenticate", "Bearer")],
-            )
-            .await;
-        }
         let etag = format!("\"{raw_digest}\"");
-        if head
-            .header("if-none-match")
+        if headers
+            .get(header::IF_NONE_MATCH)
+            .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.trim() == etag)
         {
-            return write_status(
-                &mut stream,
-                304,
-                "Not Modified",
+            return status(
+                StatusCode::NOT_MODIFIED,
                 &[("ETag", etag.as_str()), ("Accept-Ranges", "bytes")],
-            )
-            .await;
+            );
         }
-        let range = match parse_range(head.header("range"), size) {
+        let range = match parse_range(range_header(headers), size) {
             Ok(range) => range,
             Err(()) => {
                 let content_range = format!("bytes */{size}");
-                return write_status(
-                    &mut stream,
-                    416,
-                    "Range Not Satisfiable",
+                return status(
+                    StatusCode::RANGE_NOT_SATISFIABLE,
                     &[
                         ("Content-Range", content_range.as_str()),
                         ("Accept-Ranges", "bytes"),
                     ],
-                )
-                .await;
+                );
             }
         };
         let (start, length) = match range {
             Some((start, end)) => (start, end - start + 1),
             None => (0, size),
         };
-        let _guard = self.manager.begin_transfer(raw_digest);
-        let status = if start == 0 && length == size {
-            "200 OK"
-        } else {
-            "206 Partial Content"
-        };
+        let partial = !(start == 0 && length == size);
         let content_length = length.to_string();
-        let mut head_bytes = format!(
-            "HTTP/1.1 {status}\r\nContent-Length: {content_length}\r\nContent-Type: application/octet-stream\r\nAccept-Ranges: bytes\r\nETag: {etag}\r\nX-Nession-Image-Digest: {raw_digest}\r\nConnection: close\r\n"
-        );
-        if status == "206 Partial Content" {
-            head_bytes.push_str(&format!(
-                "Content-Range: bytes {}-{}/{size}\r\n",
-                start,
-                start + length - 1
-            ));
+        let content_range =
+            partial.then(|| format!("bytes {}-{}/{size}", start, start + length - 1));
+        let mut response = Response::builder()
+            .status(if partial {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            })
+            .header(header::CONTENT_LENGTH, content_length)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::ETAG, etag.as_str())
+            .header("X-Nession-Image-Digest", raw_digest);
+        if let Some(content_range) = content_range.as_deref() {
+            response = response.header(header::CONTENT_RANGE, content_range);
         }
-        head_bytes.push_str("\r\n");
-        stream.write_all(head_bytes.as_bytes()).await?;
-        if head.method == "HEAD" || length == 0 {
-            stream.flush().await?;
-            return Ok(());
+
+        if method == Method::HEAD || length == 0 {
+            return response
+                .body(Body::empty())
+                .unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR, &[]));
         }
-        let file = self
-            .manager
-            .open_blob(raw_digest)
-            .map_err(|error| io::Error::other(format!("blob open failed: {error:#}")))?;
+
+        // The transfer guard lives as long as the body stream, so GC cannot
+        // reclaim a digest that is still being read.
+        let guard = self.manager.begin_transfer(raw_digest);
+        let file = match self.manager.open_blob(raw_digest) {
+            Ok(file) => file,
+            Err(_) => return status(StatusCode::SERVICE_UNAVAILABLE, &[]),
+        };
         let mut file = tokio::fs::File::from_std(file);
-        if start > 0 {
-            file.seek(io::SeekFrom::Start(start)).await?;
+        if start > 0 && file.seek(io::SeekFrom::Start(start)).await.is_err() {
+            return status(StatusCode::SERVICE_UNAVAILABLE, &[]);
         }
-        let mut limited = file.take(length);
-        tokio::io::copy(&mut limited, &mut stream).await?;
-        stream.flush().await?;
-        Ok(())
+        let limited = file.take(length);
+        let stream = tokio_util::io::ReaderStream::new(limited).map(move |chunk| {
+            let _guard = &guard;
+            chunk
+        });
+        response
+            .body(Body::from_stream(stream))
+            .unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR, &[]))
     }
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
+}
+
+fn range_header(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+}
+
+/// A bodyless response with the given headers.
+fn status(code: StatusCode, headers: &[(&str, &str)]) -> Response {
+    let mut response = Response::builder().status(code);
+    for (name, value) in headers {
+        response = response.header(*name, *value);
+    }
+    response
+        .body(Body::empty())
+        .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
 /// `None` means the whole entity; `Some((start, end))` is inclusive.
@@ -184,21 +203,7 @@ fn parse_range(header: Option<&str>, size: u64) -> Result<Option<(u64, u64)>, ()
     Ok(Some((start, end)))
 }
 
-async fn write_status<S>(
-    stream: &mut PrefixedStream<S>,
-    code: u16,
-    reason: &str,
-    extra_headers: &[(&str, &str)],
-) -> io::Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let mut head =
-        format!("HTTP/1.1 {code} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n");
-    for (name, value) in extra_headers {
-        head.push_str(&format!("{name}: {value}\r\n"));
-    }
-    head.push_str("\r\n");
-    stream.write_all(head.as_bytes()).await?;
-    stream.flush().await
+/// The route pattern the Server mounts for authorized blob reads.
+pub fn blob_route() -> String {
+    format!("{IMAGE_BLOB_PATH_PREFIX}{{digest}}")
 }

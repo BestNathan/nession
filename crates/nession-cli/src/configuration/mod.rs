@@ -504,10 +504,6 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::UsizeNonZero,
     },
     FieldSpec {
-        key: "image_access_token_expiry_secs",
-        kind: FieldKind::U64,
-    },
-    FieldSpec {
         key: "image_gc_interval_secs",
         kind: FieldKind::U64,
     },
@@ -516,16 +512,24 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::UsizeNonZero,
     },
     FieldSpec {
+        key: "image_build_stage_timeout_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "image_build_log_max_bytes",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "image_build_retention_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
         key: "terminal_stall_grace_secs",
         kind: FieldKind::U64,
     },
     FieldSpec {
         key: "query_concurrency_per_connection",
         kind: FieldKind::UsizeNonZero,
-    },
-    FieldSpec {
-        key: "p2p_token_expiry_secs",
-        kind: FieldKind::U64,
     },
     FieldSpec {
         key: "terminal_cols",
@@ -1492,7 +1496,6 @@ mod tests {
             ("db_path", "/tmp/server.db"),
             ("terminal_stall_grace_secs", "33"),
             ("query_concurrency_per_connection", "4"),
-            ("p2p_token_expiry_secs", "44"),
             ("terminal_cols", "120"),
             ("terminal_web_font_size", "13.5"),
             ("logging.level", "warn"),
@@ -1514,7 +1517,6 @@ mod tests {
         assert_eq!(config.db_path, "/tmp/server.db");
         assert_eq!(config.terminal_stall_grace_secs, 33);
         assert_eq!(config.query_concurrency_per_connection, 4);
-        assert_eq!(config.p2p_token_expiry_secs, 44);
         assert_eq!(config.terminal_cols, 120);
         assert_eq!(config.terminal_web_font_size, 13.5);
         assert_eq!(config.logging.level, "warn");

@@ -28,7 +28,12 @@ export function joinTerminalFileReference(cwd: string, path: string): string {
     return reference;
   }
   const base = normalizeTerminalFilePath(cwd);
-  if (base === '' || base === '/') {
+  // `''` is the source-relative root and `'/'` is the host filesystem's root;
+  // they are different sources, not two spellings of one (#3414). Only the
+  // empty base leaves the reference relative — a `/` base must keep the join
+  // absolute, or the reference is resolved inside the source root instead of
+  // at the directory the Session actually sits in.
+  if (base === '') {
     return reference;
   }
   return normalizeTerminalFilePath(`${base}/${reference}`);

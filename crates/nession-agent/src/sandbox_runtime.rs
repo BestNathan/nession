@@ -31,6 +31,7 @@ use nession_sandbox::{
 };
 
 use crate::tmux::ops::TmuxDep;
+use crate::workspace_manager::WorkspaceLease;
 
 const REAPER_INTERVAL: Duration = Duration::from_millis(500);
 const REAPER_IDLE_INTERVAL: Duration = Duration::from_secs(2);
@@ -78,6 +79,10 @@ pub struct SandboxRuntime {
     /// The Agent's durable EROFS cache (#3062). Managed creation downloads
     /// its pinned images here; a runtime without one refuses Managed creates.
     erofs_cache: Mutex<Option<Arc<crate::erofs_cache::ErofsCache>>>,
+    /// RW attachments to managed Workspaces, keyed by execution id. Released
+    /// when that execution is cleaned up; a restart clears them (the durable
+    /// execution record is the attachment authority for the follow-up).
+    workspace_leases: Mutex<HashMap<String, WorkspaceLease>>,
 }
 
 impl SandboxRuntime {
@@ -91,6 +96,7 @@ impl SandboxRuntime {
             reaper_started: AtomicBool::new(false),
             tmux: Mutex::new(None),
             erofs_cache: Mutex::new(None),
+            workspace_leases: Mutex::new(HashMap::new()),
         })
     }
 
@@ -148,10 +154,15 @@ impl SandboxRuntime {
         if let Some(seconds) = config.sandbox.launch_timeout_secs {
             settings.launch_timeout = Duration::from_secs(seconds);
         }
-        if let Some(agent_dir) = agent_dir {
+        if let Some(agent_dir) = &agent_dir {
             // Identity, env files and metadata live here. A sandbox must not
             // see them even when no filesystem policy was requested.
-            settings.private_directories.push(agent_dir);
+            settings.private_directories.push(agent_dir.clone());
+            // The durable Agent Workspace registry is the second authorized
+            // writable root (#3407). Its child directories may be bound as the
+            // composition `/workspace`; nothing else under the Agent data
+            // directory becomes an Agent-owned workspace.
+            settings.agent_workspaces_root = Some(agent_dir.join("workspaces"));
         }
         // One shared EROFS mount manager per Agent identity/mount namespace
         // (#3449). Its authorized root is exactly the verified image root; a
@@ -250,13 +261,30 @@ impl SandboxRuntime {
         self.spawn_reaper();
     }
 
-    /// Track a verified execution under the Pane it owns.
-    pub fn register(self: &Arc<Self>, handle: SandboxExecutionHandle) {
+    /// Track a verified execution under the Pane it owns, together with any
+    /// managed Workspace lease the execution keeps alive.
+    pub fn register(
+        self: &Arc<Self>,
+        handle: SandboxExecutionHandle,
+        workspace_lease: Option<WorkspaceLease>,
+    ) {
         let key = execution_key(handle.record());
+        let execution_id = handle.record().execution_id.clone();
         if let Ok(mut executions) = self.executions.lock() {
             executions.insert(key, TrackedExecution::Live(Box::new(handle)));
         }
+        if let Some(lease) = workspace_lease {
+            if let Ok(mut leases) = self.workspace_leases.lock() {
+                leases.insert(execution_id, lease);
+            }
+        }
         self.spawn_reaper();
+    }
+
+    fn release_workspace_lease(&self, execution_id: &str) {
+        if let Ok(mut leases) = self.workspace_leases.lock() {
+            leases.remove(execution_id);
+        }
     }
 
     /// Whether any execution of this Session is tracked.
@@ -377,7 +405,10 @@ impl SandboxRuntime {
             TrackedExecution::Live(handle) => {
                 let record = handle.record().clone();
                 match handle.cleanup() {
-                    Ok(report) => Ok(Some(report)),
+                    Ok(report) => {
+                        self.release_workspace_lease(&record.execution_id);
+                        Ok(Some(report))
+                    }
                     Err(error) => {
                         // Keep the record retryable: reconciliation and the
                         // reaper must not forget resources they still own.
@@ -398,6 +429,7 @@ impl SandboxRuntime {
                 };
                 cleanup_record(&self.settings, &record, &mut report)
                     .map_err(anyhow::Error::from)?;
+                self.release_workspace_lease(&record.execution_id);
                 Ok(Some(report))
             }
         }
@@ -575,6 +607,7 @@ pub fn launch_and_verify(
     mut prepared: PreparedSandbox,
     pane: PaneLaunchTarget,
     session_name: &str,
+    workspace_lease: Option<WorkspaceLease>,
 ) -> Result<nession_protocol::contracts::sandbox::v1::SandboxExecutionReport> {
     prepared.set_pane_identity(pane.pane_id.as_deref(), pane.window_id.as_deref());
     if let Err(error) = prepared.verify(pane.pane_pid) {
@@ -589,7 +622,7 @@ pub fn launch_and_verify(
     }
     let report = prepared.report().clone();
     let handle = prepared.into_handle();
-    runtime.register(handle);
+    runtime.register(handle, workspace_lease);
     runtime.forget_catalog();
     let _ = session_name;
     Ok(report)

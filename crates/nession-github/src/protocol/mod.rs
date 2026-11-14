@@ -37,7 +37,6 @@ pub struct SessionTargetV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubRepositoryRefV1 {
     pub host: String,
     pub owner: String,
@@ -51,7 +50,6 @@ pub struct GithubRepositoryRefV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
 pub struct GithubRemoteChoiceV1 {
     pub remote_name: String,
     pub host: String,
@@ -109,11 +107,7 @@ pub enum GithubResponseV1<T> {
     Error {
         code: GithubErrorCodeV1,
         message: String,
-        #[serde(
-            rename = "retryAfterSeconds",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_after_seconds: Option<u64>,
     },
 }

@@ -144,7 +144,9 @@ Copy and edit `agent-config.toml`:
 ```toml
 agent_id = "agent-local"
 server_url = "ws://127.0.0.1:19090/ws"
-auth_token = "your-secret-token"
+auth_token = "your-secret-token"  # outbound Server credential
+# agent_token = "..."              # optional inbound override; generated beside
+#                                  # this config (mode 0600) when omitted
 listen_address = "0.0.0.0:8080"   # internal WS server for P2P
 heartbeat_interval_secs = 10
 session_poll_interval_secs = 5
@@ -191,6 +193,11 @@ validation; dotted keys address nested values (`logging.level`,
 JSON array of URLs. Unknown keys and invalid values are rejected without
 writing, and edits preserve comments and unrelated keys. `show` masks
 `auth_token`/`agent_token`, and written files are private (0600 on Unix).
+`auth_token` and `agent_token` are different endpoint secrets: the first is the
+Agent → Server credential (and the Server's inbound token), the second is the
+Agent's own durable inbound token for P2P and embedded MCP. Leave `agent_token`
+unset and the Agent provisions one beside its config on first start; it is
+reused across restarts and never placed in a URL or log.
 
 A fresh `nession config server init` is deliberately a **local no-auth** file:
 `listen_address` is the loopback fallback (`127.0.0.1:8080`) and `auth_token`

@@ -92,14 +92,19 @@ authorized EROFS cache (#3023); `nession-sandbox` re-verifies the exact bytes
 before mounting anything.
 
 - **Input.** `base` (read-only at `/`), optional `workspace.image`
-  (read-only Project source) plus `workspace.write` (Agent-owned bounded
-  writable directory), and zero or more `toolchains` whose targets are exactly
-  `/opt/<lowercase name>`. Every image carries its `sha256:<64 hex>` digest and
-  an absolute source path. Sources must be regular files, not symlinks, and
-  must canonicalize beneath the Agent-authorized EROFS image root. Compile
-  rejects malformed digests, unnormalized/relative paths, duplicate toolchain
-  targets, non-`/opt` targets, and combining `composition` with
-  `filesystem.access` (one owner for the root).
+  (read-only Project source) plus `workspace.write` (the writable directory)
+  and `workspace.ownership` (`agent` or `project_location`), and zero or more
+  `toolchains` whose targets are exactly `/opt/<lowercase name>`. Every image
+  carries its `sha256:<64 hex>` digest and an absolute source path. Sources
+  must be regular files, not symlinks, and must canonicalize beneath the
+  Agent-authorized EROFS image root. Compile rejects malformed digests,
+  unnormalized/relative paths, duplicate toolchain targets, non-`/opt`
+  targets, combining `composition` with `filesystem.access` (one owner for the
+  root), and a Project Location workspace carrying a Project EROFS lower. An
+  `agent`-owned write directory must stay under the sandbox state directory or
+  the Agent Workspace root; a `project_location` is an external declared
+  directory the Agent validated, never created or deleted, and must be a real
+  canonical directory.
 - **Mount mechanics.** The Linux backend mounts each image read-only with the
   unprivileged `erofsfuse` helper (a usable `/dev/fuse` is required). The probe,
   bounded helper invocation, mountpoint readiness identity check and strict
@@ -154,6 +159,28 @@ before mounting anything.
 - **macOS.** EROFS composition is rejected with an explicit
   `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
   equivalence is claimed.
+
+## Managed Workspace resources (#3407)
+
+The Agent Workspace Manager owns named, durable, reusable managed Workspace
+directories, their stable `ws_<uuid>` identities, inventory and deletion. A
+Project Existing Location remains a Project-owned reference and is never
+stored or deleted by that manager. See
+[Agent-owned managed Workspaces](agent-workspaces.md).
+
+The current managed-session and existing-Session paths still allocate a
+per-execution writable directory
+(`<sandbox state>/managed/<uuid>/workspace` or
+`<sandbox state>/sandbox-workspaces/workspace-<uuid>`). A Filesystem
+declaration that selects a managed Workspace binds that Agent-owned durable
+directory at `/workspace` and holds its RW lease until execution cleanup; the
+directory is not deleted. The Server resolves the Session Project's matching
+Existing Location for `project_location` and `auto`, and adds the Project
+source image as the managed Workspace's pinned EROFS lower; the durable
+`upper/work` lives under the managed directory, so later Enters see the same
+upper. The Agent records the lower digest in the Workspace registry and
+refuses a changed or missing lower. A Project Location is bound directly and
+cannot carry a lower. See [#3407](https://github.com/BestNathan/nession/issues/3407).
 
 ## Managed EROFS Session creation (#3062)
 

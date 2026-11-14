@@ -2,14 +2,20 @@ use anyhow::Context;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
-use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
+
+use axum::extract::{FromRequestParts, Path, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get};
+use axum::Router;
+use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 
 use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
-use crate::image::{ImageHttpService, ImageManager};
+use crate::image::{ImageHttpService, ImageManager, ImageManagerOptions};
 use crate::registry::{AgentRegistry, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
@@ -21,11 +27,9 @@ use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
-use nession_mcp::http::Sniffed;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
 use nession_runtime::lane::KeyedLane;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -40,12 +44,6 @@ pub struct WebSocketServer {
     /// Built here because the resources its keys name — the registries and the
     /// env store — are built here. See `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
-    /// The P2P credential ledger (#1013).
-    ///
-    /// Held here because a credential outlives the attach that minted it, and
-    /// because the process that checks it is an *Agent* rather than this one —
-    /// so this side is only the issuer's record, kept for expiry.
-    p2p_broker: Arc<crate::broker::ConnectionBroker>,
     /// The MCP endpoint (`#565`), when `[mcp] enabled = true`. It shares this
     /// listener and the Server's business services.
     mcp: Option<Arc<nession_mcp::McpService>>,
@@ -91,13 +89,6 @@ impl WebSocketServer {
             }
         }
 
-        // The ledger's expiry is the revocation window (#1013): how long a
-        // credential the Server has already forgotten stays useful to whoever
-        // is holding it.
-        let p2p_broker = Arc::new(crate::broker::ConnectionBroker::new(
-            config.p2p_token_expiry_secs,
-        ));
-
         // The global image manager (#3022): one content-addressed blob store,
         // one bounded build worker, one owner of image metadata.
         let blob_store = nession_erofs::BlobStore::new(&config.image_blob_dir)
@@ -113,10 +104,37 @@ impl WebSocketServer {
             Arc::clone(&db),
             Arc::new(image_builder),
             blob_store,
-            config.image_max_concurrent_builds,
-            config.image_access_token_expiry_secs,
+            ImageManagerOptions {
+                max_concurrent_builds: config.image_max_concurrent_builds,
+                build_root: std::path::PathBuf::from(&config.image_build_dir),
+                build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
+                    .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),
+                build_log_max_bytes: config.image_build_log_max_bytes,
+                build_retention_secs: config.image_build_retention_secs,
+            },
+        )?);
+        let image_http = Arc::new(ImageHttpService::new(
+            Arc::clone(&image_manager),
+            nession_protocol::TokenVerifier::new(config.auth_token.clone()),
         ));
-        let image_http = Arc::new(ImageHttpService::new(Arc::clone(&image_manager)));
+        // Build transitions are pushed with the authoritative descriptor read
+        // from the durable build directory. A client that missed a push asks
+        // `server.image.build.get|list` after reconnecting.
+        {
+            let registry = Arc::clone(&web_client_registry);
+            image_manager.set_build_notifier(Arc::new(move |build| {
+                registry.broadcast_image_build_changed(build);
+            }));
+        }
+        // The exclusive build-root lock held by the manager proves the previous
+        // owner is gone, so every `running` record is an orphan to reconcile
+        // now. A verified snapshot resumes at packaging; an unpinned Git source
+        // is fetched again; a local source without a trustworthy snapshot fails
+        // explicitly. A recovery scan/storage failure stops the start.
+        image_manager
+            .recover_builds()
+            .await
+            .context("failed to recover durable image builds")?;
 
         // Mount MCP on this listener when configured. Building it here (rather
         // than on first request) means a fail-closed configuration error stops
@@ -135,14 +153,12 @@ impl WebSocketServer {
                 env_service: Arc::clone(&env_service),
                 image_manager: Arc::clone(&image_manager),
                 db: Arc::clone(&db),
-                p2p_broker: Arc::clone(&p2p_broker),
             },
             Arc::clone(&mutations),
         )?;
 
         Ok(Self {
             config,
-            p2p_broker,
             agent_registry,
             session_registry,
             command_broker,
@@ -205,10 +221,22 @@ impl WebSocketServer {
                             reclaimed_bytes = report.reclaimed_bytes,
                             deferred_by_limit = report.deferred_by_limit,
                             skipped_active_transfers = report.skipped_active_transfers,
+                            skipped_active_builds = report.skipped_active_builds,
                             "bounded image GC sweep completed"
                         ),
                         Err(error) => {
                             warn!("bounded image GC sweep failed and will retry: {error:#}")
+                        }
+                    }
+                    match image_manager.cleanup_builds().await {
+                        Ok(report) => info!(
+                            expired_builds = report.expired_builds,
+                            expired_rejected = report.expired_rejected,
+                            deferred_active = report.deferred_active,
+                            "bounded image build cleanup completed"
+                        ),
+                        Err(error) => {
+                            warn!("bounded image build cleanup failed and will retry: {error:#}")
                         }
                     }
                 }
@@ -321,39 +349,78 @@ impl WebSocketServer {
         // reachability, letting clients skip dead endpoints.
         crate::probe::spawn_probe_task(Arc::clone(&self.agent_registry));
 
+        // The pre-authentication admission budget (#3439). One slot per
+        // accepted socket that has not yet completed an HTTP request; an
+        // accepted socket beyond the bound is closed before any task is
+        // spawned for it. This is the Server's answer to the Agent's #2653
+        // bound, and it exists for the same reason: a peer that sends nothing
+        // must not cost a task and a socket indefinitely.
+        let handshake_slots = Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_PENDING_HANDSHAKES));
+        let mut connections = tokio::task::JoinSet::new();
+
         loop {
-            let (tcp_stream, addr) = listener.accept().await?;
-            info!("New connection from: {}", addr);
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let (tcp_stream, addr) = accepted?;
+                    info!("New connection from: {}", addr);
 
-            let ctx = ServerContext {
-                agent_registry: Arc::clone(&self.agent_registry),
-                session_registry: Arc::clone(&self.session_registry),
-                command_broker: Arc::clone(&self.command_broker),
-                client_registry: Arc::clone(&self.client_registry),
-                web_client_registry: Arc::clone(&self.web_client_registry),
-                env_service: Arc::clone(&self.env_service),
-                db: Arc::clone(&self.db),
-                mutations: Arc::clone(&self.mutations),
-                p2p_broker: Arc::clone(&self.p2p_broker),
-                mcp: self.mcp.clone(),
-                image_manager: Arc::clone(&self.image_manager),
-                image_http: Arc::clone(&self.image_http),
-                auth_token: self.config.auth_token.clone(),
-                heartbeat_interval_secs,
-                terminal_cols: self.config.terminal_cols,
-                terminal_web_font_size: self.config.terminal_web_font_size,
-                terminal_stall_grace: std::time::Duration::from_secs(
-                    self.config.terminal_stall_grace_secs,
-                ),
-                query_concurrency: self.config.query_concurrency_per_connection,
-            };
-            let tls_acceptor = tls_acceptor.clone();
+                    let Ok(slot) = Arc::clone(&handshake_slots).try_acquire_owned() else {
+                        // Debug, not warn: this fires once per offered socket,
+                        // and under the flood the bound exists for the log
+                        // backend would become the next bottleneck.
+                        debug!(
+                            %addr,
+                            pending = DEFAULT_MAX_PENDING_HANDSHAKES,
+                            "refusing a connection: every handshake slot is occupied"
+                        );
+                        drop(tcp_stream);
+                        continue;
+                    };
 
-            tokio::spawn(async move {
-                if let Err(e) = handle_connection(tcp_stream, tls_acceptor, ctx).await {
-                    error!("Connection error: {}", e);
+                    let ctx = ServerContext {
+                        agent_registry: Arc::clone(&self.agent_registry),
+                        session_registry: Arc::clone(&self.session_registry),
+                        command_broker: Arc::clone(&self.command_broker),
+                        client_registry: Arc::clone(&self.client_registry),
+                        web_client_registry: Arc::clone(&self.web_client_registry),
+                        env_service: Arc::clone(&self.env_service),
+                        db: Arc::clone(&self.db),
+                        mutations: Arc::clone(&self.mutations),
+                        mcp: self.mcp.clone(),
+                        image_manager: Arc::clone(&self.image_manager),
+                        image_http: Arc::clone(&self.image_http),
+                        auth_token: self.config.auth_token.clone(),
+                        heartbeat_interval_secs,
+                        terminal_cols: self.config.terminal_cols,
+                        terminal_web_font_size: self.config.terminal_web_font_size,
+                        terminal_stall_grace: std::time::Duration::from_secs(
+                            self.config.terminal_stall_grace_secs,
+                        ),
+                        query_concurrency: self.config.query_concurrency_per_connection,
+                    };
+                    let tls_acceptor = tls_acceptor.clone();
+
+                    connections.spawn(async move {
+                        if let Err(e) = handle_connection(
+                            tcp_stream,
+                            tls_acceptor,
+                            ctx,
+                            AdmissionSlot::new(slot),
+                        )
+                        .await
+                        {
+                            error!("Connection error: {}", e);
+                        }
+                    });
                 }
-            });
+                // Reap finished connections so a long-lived Server does not
+                // accumulate one completed entry per socket.
+                Some(result) = connections.join_next(), if !connections.is_empty() => {
+                    if let Err(e) = result {
+                        error!("Connection task failed: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -405,7 +472,6 @@ struct ServerContext {
     /// Server's rather than any one connection's. See
     /// `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
-    p2p_broker: Arc<crate::broker::ConnectionBroker>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
     /// Global EROFS image manager and its authorized HTTP route (#3022).
@@ -424,66 +490,149 @@ struct ServerContext {
     query_concurrency: usize,
 }
 
+/// How many accepted Server connections may be mid-HTTP-request at once
+/// (#3439).
+///
+/// The Server's equivalent of the Agent's #2653 budget. One slot per accepted
+/// socket that has not yet completed an HTTP request; an accepted socket
+/// beyond the bound is dropped before any task is spawned for it. This bounds
+/// pending work, not Sessions or attached clients.
+pub const DEFAULT_MAX_PENDING_HANDSHAKES: usize = 64;
+
+/// How long one Server connection may take to complete an HTTP request
+/// (#3439).
+///
+/// Covers the optional TLS handshake and the request head. It ends when the
+/// request reaches the router and releases its admission slot, so a
+/// long-lived WebSocket or MCP stream is never cut short by this bound.
+pub const DEFAULT_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The frame limits the listener has always enforced. Stated explicitly rather
+/// than left to a default: `#3439` moved the transport, not the bounds.
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+/// Router state for one accepted connection.
+#[derive(Clone)]
+struct HttpState {
+    ctx: ServerContext,
+    /// This connection's pre-authentication claim (#3439).
+    slot: AdmissionSlot,
+}
+
+/// Serve one accepted socket through the Server's Axum router.
 async fn handle_connection(
     tcp_stream: tokio::net::TcpStream,
     tls_acceptor: Option<TlsAcceptor>,
     ctx: ServerContext,
+    slot: AdmissionSlot,
 ) -> anyhow::Result<()> {
-    if let Some(acceptor) = tls_acceptor {
-        let tls_stream = acceptor.accept(tcp_stream).await?;
-        route_connection(tls_stream, ctx).await
-    } else {
-        route_connection(tcp_stream, ctx).await
-    }
+    let router = http_router(ctx, slot.clone());
+    ingress::serve(
+        move || ingress::TcpOrTls::accept(tcp_stream, tls_acceptor),
+        router,
+        slot,
+        DEFAULT_HANDSHAKE_TIMEOUT,
+    )
+    .await?;
+    Ok(())
 }
 
-/// Dispatch one accepted connection to MCP or the WebSocket handler.
+/// Build the explicit route table for one accepted connection.
 ///
-/// Without MCP this is exactly the old path. With MCP the request head is read
-/// once: a WebSocket upgrade replays those bytes into tungstenite, and an HTTP
-/// request is answered by the MCP service on the same listener. There is no
-/// second port, and `/ws` keeps its existing handshake and authentication.
-async fn route_connection<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
-        Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
-        Ok(Sniffed::Http { head, stream }) => {
-            let is_image = head
-                .path()
-                .starts_with(nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX);
-            if is_image {
-                return ctx
-                    .image_http
-                    .serve(head, stream)
-                    .await
-                    .map_err(|error| anyhow::anyhow!("image blob response failed: {error}"));
-            }
-            if let Some(mcp) = ctx.mcp.clone() {
-                mcp.serve(stream)
-                    .await
-                    .map_err(|error| anyhow::anyhow!("MCP response failed: {error}"))
-            } else {
-                // No service owns this route. The connection closes without a
-                // body; the client sees the closed connection, not a hang.
-                Ok(())
-            }
-        }
-        Err(error) => {
-            // A non-WebSocket, non-HTTP peer (a scanner or a health check that
-            // sent garbage). The stream is gone with the parser, so this is a
-            // log and a close rather than a status code.
-            warn!(%error, "refusing a connection that is neither WebSocket nor HTTP");
-            Ok(())
-        }
+/// Axum owns the HTTP grammar and the Upgrade; the routes name the existing
+/// owners: `/ws` for the protocol WebSocket, the Image Manager's authorized
+/// blob route, and the MCP endpoint when `[mcp] enabled = true`. There is no
+/// protocol sniff and no hand-written HTTP response on this listener.
+///
+/// The fallback keeps two pre-existing behaviors: the Server has always
+/// accepted a WebSocket upgrade at the authority root (`ws://host:port`) as
+/// well as at `/ws`, and anything that is not an upgrade gets a plain 404.
+fn http_router(ctx: ServerContext, slot: AdmissionSlot) -> Router {
+    let mcp_path = ctx.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    let state = HttpState {
+        ctx,
+        slot: slot.clone(),
+    };
+    let mut router = Router::new()
+        .route("/ws", get(ws_upgrade))
+        .route(&crate::image::http::blob_route(), get(image_blob));
+    if let Some(path) = mcp_path.as_deref() {
+        router = router.route(path, any(mcp_http));
+    }
+    router
+        .fallback(websocket_or_not_found)
+        .layer(axum::middleware::from_fn_with_state(
+            slot,
+            ingress::release_after_response,
+        ))
+        .with_state(state)
+}
+
+/// The `/ws` route: a valid upgrade is accepted, anything else is the
+/// extractor's own rejection (405 for a non-GET, 400 for a malformed upgrade).
+async fn ws_upgrade(State(state): State<HttpState>, ws: WebSocketUpgrade) -> Response {
+    finish_ws_upgrade(state, ws)
+}
+
+/// Accept a WebSocket upgrade on an otherwise unmatched path.
+///
+/// The registry advertises `/ws`, but the Server has always also accepted
+/// `ws://host:port` and a configured `connect_url` with any path. The fallback
+/// keeps that contract while still answering every non-upgrade request with
+/// 404 rather than an implicit upgrade.
+async fn websocket_or_not_found(
+    State(state): State<HttpState>,
+    request: axum::extract::Request,
+) -> Response {
+    if !ingress::looks_like_websocket_upgrade(request.method(), request.headers()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (mut parts, _body) = request.into_parts();
+    match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+        Ok(ws) => finish_ws_upgrade(state, ws),
+        Err(rejection) => rejection.into_response(),
     }
 }
 
-async fn handle_ws_stream<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()>
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
-{
+fn finish_ws_upgrade(state: HttpState, ws: WebSocketUpgrade) -> Response {
+    // The upgrade request is the end of the unauthenticated admission window.
+    state.slot.release();
+    let ctx = state.ctx;
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .on_upgrade(move |socket| async move {
+            if let Err(error) = handle_ws_stream(AxumWebSocket::new(socket), ctx).await {
+                error!("Connection error: {error:#}");
+            }
+        })
+}
+
+/// The Image Manager's authorized blob route.
+async fn image_blob(
+    State(state): State<HttpState>,
+    Path(digest): Path<String>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    state.slot.release();
+    state
+        .ctx
+        .image_http
+        .respond(&method, &digest, &headers)
+        .await
+}
+
+/// The MCP endpoint, mounted only when configured.
+async fn mcp_http(State(state): State<HttpState>, request: axum::extract::Request) -> Response {
+    state.slot.release();
+    match state.ctx.mcp.as_ref() {
+        Some(mcp) => mcp.handle(request).await.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyhow::Result<()> {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
 
@@ -502,13 +651,11 @@ where
         terminal_web_font_size,
         terminal_stall_grace,
         query_concurrency,
-        p2p_broker,
         image_manager,
         mcp: _,
         image_http: _,
     } = ctx;
 
-    let ws_stream = accept_async(stream).await?;
     let (mut write, mut read) = ws_stream.split();
 
     // Create the outgoing-message queue BEFORE the handler so the handler can
@@ -517,6 +664,7 @@ where
     // connection: see `server::outbound`.
     let (sender, mut rx) = WsMessageSender::with_terminal_grace(terminal_stall_grace);
 
+    let token_registry = Arc::clone(&agent_registry);
     let mut handler = ConnectionHandler::new(
         crate::server::handler::ConnectionHandlerDeps {
             agent_registry,
@@ -527,7 +675,6 @@ where
             env_service,
             image_manager,
             db,
-            p2p_broker,
         },
         crate::server::handler::ConnectionHandlerConfig {
             server_auth_token: auth_token,
@@ -599,6 +746,10 @@ where
         super::execution::LANE_LABEL,
     );
 
+    // A bounded, credential-free classification of *why* this connection ends.
+    // It is logged once below and is what makes a browser's close event
+    // correlatable with the Server's own view (#3358 SC-05).
+    let mut close_reason = "peer-closed";
     while let Some(frame) = read.next().await {
         let frame = frame?;
 
@@ -609,6 +760,7 @@ where
         // still in flight is ended with the connection, further down.
         let Message::Text(text) = frame else {
             if let HandlerAction::Close = handler.handle_message(frame).await? {
+                close_reason = "client-close";
                 break;
             }
             claim_agent_channel(&handler, &command_broker, &sender).await;
@@ -682,6 +834,7 @@ where
                 // exit so the cleanup below still runs, instead of returning
                 // through `?` and skipping it.
                 if sender.send_reply(response).await.is_err() {
+                    close_reason = "outbound-closed";
                     break;
                 }
             }
@@ -694,6 +847,7 @@ where
                 session_name,
                 relay_request_id,
                 client_id,
+                agent_token,
                 browser_client_id,
                 env_snapshots,
                 cols,
@@ -716,6 +870,7 @@ where
                         agent_ws_urls: &agent_ws_urls,
                         session_name: &session_name,
                         relay_request_id: &relay_request_id,
+                        agent_token: &agent_token,
                         // The browser's own id wherever it has one: the Agent's
                         // control bookkeeping names clients, and the client is
                         // the only party that can recognise its own name
@@ -753,11 +908,21 @@ where
                         // history bootstrap. A client that asked to stop, or one
                         // whose socket already ended, takes `Ended` instead.
                         warn!(
+                            session = %session_name,
+                            close_reason = "relay-agent-ended",
                             "Relay for session '{}' ended: the Agent's terminal stream ended \
                              while the client was still attached; closing the connection so it \
                              re-attaches",
                             session_name
                         );
+                        close_reason = "relay-agent-ended";
+                        // Deliberately no Close frame here. A clean close frame
+                        // lets the browser reconnect before the re-registering
+                        // Agent has republished its Sessions, so the client can
+                        // observe a transiently empty Session list while it is
+                        // rebuilding the relay. Dropping the socket keeps the
+                        // pre-existing reconnect timing; the reason is recorded
+                        // above and in the connection-end log for correlation.
                         break;
                     }
                     Ok(RelayEnd::ClientStalled) => {
@@ -775,20 +940,30 @@ where
                         // the one that never gets written. Breaking here drops
                         // the socket, which is the same fact without the wait.
                         warn!(
+                            session = %session_name,
+                            close_reason = "relay-client-stalled",
                             "Relay for session '{}' ended: the client stopped draining its \
                              terminal; closing the connection",
                             session_name
                         );
+                        // Deliberately no Close frame: the queue this client is
+                        // not draining is exactly where it would wait. The
+                        // browser observes 1006; this log is the Server-side
+                        // reason it correlates with (#3358 SC-05).
+                        close_reason = "relay-client-stalled";
                         break;
                     }
                     Err(e) => return Err(e),
                 }
             }
             HandlerAction::Close => {
+                close_reason = "client-close";
                 break;
             }
         }
     }
+
+    info!(close_reason, "WebSocket connection ended");
 
     // End the work still in flight, before anything below waits on a writer it
     // may be parked in.
@@ -824,9 +999,14 @@ where
     // superseded leaves the agent alone — its replacement is serving it — and
     // an agent that really did drop still fails its in-flight commands here.
     if let Some(agent_id) = handler.registered_agent_id() {
-        command_broker
+        if command_broker
             .release_agent(agent_id, handler.connection_generation())
-            .await;
+            .await
+        {
+            // The registration generation that vouched for the cached token is
+            // gone; attach must refuse until the Agent registers again (#3440).
+            token_registry.clear_agent_token(agent_id).await;
+        }
     }
 
     // Clean up: unregister client from ClientRegistry on disconnect
@@ -928,6 +1108,9 @@ struct RelayRequest<'a> {
     /// Original browser begin request id; this is request correlation, not
     /// a credential and not a verified parser baseline (#2089).
     relay_request_id: &'a str,
+    /// The target Agent's durable token, presented as the first `client.auth`
+    /// frame on the dial (#3440).
+    agent_token: &'a str,
     /// The identity this relay presents to the Agent (#1429): the browser's
     /// stable client id when it sent one, and the Server's per-attach id
     /// otherwise. It is written as `client.auth` on the relay's own connection
@@ -1259,6 +1442,7 @@ where
         agent_ws_urls,
         session_name,
         relay_request_id,
+        agent_token,
         client_id,
         authenticated_browser_id,
         env_snapshots,
@@ -1340,9 +1524,9 @@ where
     // wait is what turns a refusal into a failed relay instead of a session
     // that quietly belongs to nobody.
     //
-    // The token is left empty on purpose: the Agent ignores it (it shares one
-    // payload type with the Server), and this socket's credential was the
-    // Agent's own connection token, presented at the upgrade.
+    // The Agent Token is the relay leg's real authentication (#3440): the
+    // Server holds it from the Agent's registration and presents it here, not
+    // in the URL.
     let auth_id = uuid::Uuid::new_v4().to_string();
     let auth_msg = serde_json::json!({
         "msg_type": "client.auth",
@@ -1351,7 +1535,7 @@ where
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
-        "payload": { "auth_token": "", "client_id": client_id },
+        "payload": { "auth_token": agent_token, "client_id": client_id },
     });
     agent_write
         .send(tokio_tungstenite::tungstenite::Message::Text(
@@ -1621,26 +1805,77 @@ where
     // to the same URL that worked for the attach.
     if let Some(ref url) = connected_url {
         if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(url).await {
-            let detach_msg = serde_json::json!({
-                "msg_type": "agent.detach",
-                "id": uuid::Uuid::new_v4().to_string(),
+            // The detach is a **second dial**, so it authenticates like the
+            // first: the Agent Token as the first frame, never a URL parameter
+            // (#3440). Sending detach on an unauthenticated socket would be the
+            // silent second path this design exists to remove.
+            let auth_id = uuid::Uuid::new_v4().to_string();
+            let auth_msg = serde_json::json!({
+                "msg_type": "client.auth",
+                "id": auth_id.clone(),
                 "timestamp": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                "payload": {
-                    "session_name": session_name,
-                }
+                "payload": { "auth_token": agent_token, "client_id": client_id },
             });
-            let _ = detach_ws
+            let mut authenticated = false;
+            if detach_ws
                 .send(tokio_tungstenite::tungstenite::Message::Text(
-                    detach_msg.to_string(),
+                    auth_msg.to_string(),
                 ))
-                .await;
-            info!(
-                "Sent client.detach for session '{}' (best-effort)",
-                session_name
-            );
+                .await
+                .is_ok()
+            {
+                loop {
+                    match tokio::time::timeout(std::time::Duration::from_secs(10), detach_ws.next())
+                        .await
+                    {
+                        Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                            let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                                continue;
+                            };
+                            if value.get("id").and_then(|id| id.as_str()) == Some(auth_id.as_str())
+                            {
+                                authenticated = value
+                                    .pointer("/payload/status")
+                                    .and_then(|status| status.as_str())
+                                    == Some("success");
+                                break;
+                            }
+                        }
+                        Ok(Some(Ok(_))) => continue,
+                        _ => break,
+                    }
+                }
+            }
+            if authenticated {
+                let detach_msg = serde_json::json!({
+                    "msg_type": "agent.detach",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    "payload": {
+                        "session_name": session_name,
+                    }
+                });
+                let _ = detach_ws
+                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                        detach_msg.to_string(),
+                    ))
+                    .await;
+                info!(
+                    "Sent client.detach for session '{}' (best-effort)",
+                    session_name
+                );
+            } else {
+                warn!(
+                    "Agent refused the detach connection's authentication for session '{}'",
+                    session_name
+                );
+            }
         } else {
             warn!(
                 "Could not connect to agent for client.detach for session '{}'",

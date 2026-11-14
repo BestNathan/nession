@@ -42,6 +42,7 @@ async fn test_agent_registration() {
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     };
@@ -77,6 +78,7 @@ async fn test_agent_heartbeat_update() {
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     };
@@ -120,6 +122,7 @@ async fn test_heartbeat_status_transition_is_meaningful() {
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     };
@@ -157,6 +160,7 @@ async fn test_agent_list_all() {
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: None,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 0,
         })
@@ -182,6 +186,7 @@ async fn test_agent_list_all() {
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: None,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 0,
         })
@@ -215,6 +220,7 @@ async fn test_agent_unregister() {
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: None,
+            agent_token: None,
             probe_generation: 0,
             offline_generation: 0,
         })
@@ -249,6 +255,7 @@ async fn test_agent_check_offline() {
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     };
@@ -290,6 +297,7 @@ async fn test_agent_check_offline_skips_already_offline() {
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     };

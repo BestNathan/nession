@@ -56,7 +56,7 @@ run(async () => {
     return pass(
       'A commit retried with the same request id returned the first oid and left exactly one new commit in history.',
       [
-        { type: 'protocol', value: 'git.create-commit requestId=case-845-sc09-commit replayed oid=' + firstOid },
+        { type: 'protocol', value: 'git.create-commit request_id=case-845-sc09-commit replayed oid=' + firstOid },
         { type: 'runtime', value: 'git rev-list --count HEAD = 2 after the retry (initial + one commit)' },
         { type: 'runtime', value: 'target_sha=' + stack.runtime.target_sha + ' repo=' + dir },
       ],
