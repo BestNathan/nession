@@ -280,7 +280,7 @@
         {
           "workflow": ".github/workflows/store-agent-development-ingest.yml",
           "mode": "encrypted_checkpoint_ingest",
-          "event": "main_workflow_run_or_owner_comment",
+          "event": "main_workflow_run_or_owner_comment_or_authenticated_bot_dispatch",
           "source": "scoped GitHub App installation token",
           "credential_boundary": "main-owned privileged job; no model-provided writer token",
           "app_id_variable": "RUN_STORE_WRITER_APP_ID",

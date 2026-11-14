@@ -73,19 +73,28 @@ function artifactFor(artifacts,run,name,max){
   return matched[0];
 }
 export function assertQwenPublisherRunAuthority(env,event,ingester,receipt){
+  const natural=env?.GITHUB_EVENT_NAME==='workflow_run'&&
+    event?.action==='completed'&&
+    event.workflow_run?.id===ingester?.id&&
+    event.workflow_run?.head_sha===ingester?.head_sha&&
+    event.workflow_run?.conclusion==='success'&&
+    ['workflow_run','issue_comment'].includes(ingester?.event);
+  const botWake=env?.GITHUB_EVENT_NAME==='workflow_dispatch'&&
+    env.GITHUB_ACTOR==='github-actions[bot]'&&
+    event?.repository?.full_name===REPO&&
+    event?.sender?.login==='github-actions[bot]'&&
+    /^[1-9][0-9]{0,14}$/.test(String(event?.inputs?.source_ingest_run_id??''))&&
+    Number(event.inputs.source_ingest_run_id)===ingester?.id&&
+    ingester?.event==='workflow_dispatch'&&
+    ingester?.actor?.login==='github-actions[bot]';
   if(env?.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
       env.GITHUB_REF!=='refs/heads/main'||
-      env.GITHUB_EVENT_NAME!=='workflow_run'||
+      (!natural&&!botWake)||
       env.GITHUB_WORKFLOW!=='Store / Qwen Publisher'||
       env.GITHUB_RUN_ATTEMPT!=='1'||
       !positive(Number(env.GITHUB_RUN_ID))||
       !SHA.test(env.GITHUB_SHA??'')||
-      event?.action!=='completed'||
-      event.workflow_run?.id!==ingester?.id||
-      event.workflow_run?.head_sha!==ingester.head_sha||
-      event.workflow_run?.conclusion!=='success'||
       ingester.status!=='completed'||ingester.conclusion!=='success'||
-      !['workflow_run','issue_comment'].includes(ingester.event)||
       ingester.run_attempt!==1||
       ingester.path!=='.github/workflows/store-agent-development-ingest.yml'||
       ingester.name!=='Store / Agent Development Ingest'||
