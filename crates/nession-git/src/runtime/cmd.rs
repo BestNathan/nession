@@ -789,7 +789,10 @@ mod tests {
         );
         running.abort();
         let cancelled = running.await.expect_err("the task should be cancelled");
-        assert!(cancelled.is_cancelled(), "unexpected task failure: {cancelled}");
+        assert!(
+            cancelled.is_cancelled(),
+            "unexpected task failure: {cancelled}"
+        );
         assert!(
             wait_for_exit(pid).await,
             "cancellation left the direct git child {pid} alive"
