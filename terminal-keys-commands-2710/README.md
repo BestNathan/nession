@@ -6,6 +6,22 @@ Can Nession make real modifier chords and saved command actions reachable on mob
 ## Scenario
 Open capabilities using the lower + control; select Terminal Keys. A single tap on Ctrl+C emits a simulated atomic chord event. Tap Ctrl then X in the one-shot alphabet selector, Cancel the selected modifier, tap arrows repeatedly, switch to Commands and choose Insert (fills the lower composer) versus Run (adds a simulated execution event). Tap the composer to return to native typing without moving it. Opening +, Keys or Commands **does not automatically move the Terminal content**. Instead the mock creates enough additional scrollroom: swipe upward on the Terminal to reveal the newest prompt above the expanded panel, and downward again to recover the original first visible line. Once the panel is open, swipe/drag vertically inside the **visible Terminal area** to scroll earlier and later output. The panel must not trap that gesture, nor may a pending auto-follow callback snap the output back. In history mode, manually scroll older output; changing the panel must preserve that viewing position. Scroll back to live bottom to resume following.
 
+
+## Mode-aware clearance revision (2026-11-14; #3492)
+
+**Question:** when an upper Peek opens over a full-screen/mouse-owning TUI, can the same Capsule reserve real visible rows instead of panning a screen the application owns, while the normal shell keeps #2710's reversible scroll clearance and an observer never resizes the Session?
+
+**This revision updates the same owning prototype** rather than creating a second Capsule:
+- External harness adds **Mock terminal mode** (Normal shell / Alt-screen TUI / Mouse TUI) and a **Controller / Observer** authority toggle. These review controls stay outside the product viewport.
+- **Normal shell** keeps the existing reversible DOM scrollroom: panel opening does not move the top anchor, and the user reveals the live bottom manually.
+- **Alt-screen / Mouse TUI** selects `viewport-reserve`: the mock shows a TUI screen whose bottom/status/input rows stay above the panel; the terminal's visible bottom is reduced by the measured panel height instead of translating its content. The policy label outside the product states that only an authorized controller requests the real Session resize.
+- **Observer** selects the controlled fallback: the TUI cannot be resized by this client, so the Peek becomes a bounded **Compact/Expand** surface rather than silently covering the bottom rows.
+- The mode/authority selection is a mock of the production policy source (`buffer.active.type` + `mouseTrackingMode`), not process-name heuristics. No xterm, PTY or tmux size is used here.
+
+**Fidelity / limits:** still plain DOM, not xterm; the reserve is a CSS height reduction, not the production `TerminalGeometry` row computation or an authorized tmux resize. Real xterm hit testing, selection, cursor coordinates, multi-client ControlLease generations and PTY fan-out belong to the production implementation and its Acceptance Cases.
+
+**Verification for this revision:** JavaScript parses; policy and fallback controls assert their visible state via `aria-pressed`; source writes the model described above. A fresh published Pages manifest SHA and real-browser desktop/narrow read-back remain required before this preview is described as current. Old browser receipts and #2710 acceptance do not prove this revision.
+
 ## Fidelity
 - **Mock**: terminal output, command inventory, connection status, key serialization/readout and actions. No PTY, shell execution, xterm instance, network or persisted configuration is used.
 - **Interaction modeling**: common chord one-tap, one-shot Ctrl/Alt/Shift, A–Z selection, cancel, repeated arrows, command Insert versus Run, panel switching/closing and composer focus. The **external mock event log** records expected byte hints for common Ctrl chords; real mode-dependent encoding belongs to TerminalInteractionController and must be proved independently.

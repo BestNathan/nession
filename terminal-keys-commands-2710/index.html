@@ -225,6 +225,21 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   background:#0969da;
   vertical-align:-1px;
 }
+
+/* #3492 mode-aware clearance: the normal shell keeps the reversible scroll
+   range; a full-screen TUI reserves real height instead, and an observer/no-
+   authority host gets a bounded compact panel. */
+.phone[data-clearance="reserve"] .terminal{bottom:var(--mock-panel-clearance,0px);padding-bottom:0}
+.phone[data-clearance="reserve"] .terminal>.entry,.phone[data-clearance="compact"] .terminal>.entry{display:none}
+.phone[data-clearance="reserve"] .tui,.phone[data-clearance="compact"] .tui{display:flex}
+.tui{display:none;flex-direction:column;height:100%;min-height:0;gap:0}
+.tui-head{padding:2px 0 6px;font-weight:600;color:var(--nession-foreground)}
+.tui-body{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;border:1px dashed color-mix(in srgb,var(--nession-foreground) 18%,transparent);border-radius:8px;opacity:.85}
+.tui-status{margin-top:auto;display:flex;gap:12px;padding:5px 0;border-top:1px solid color-mix(in srgb,var(--nession-foreground) 14%,transparent);font-size:90%}
+.tui-input{padding:3px 0 0;display:flex;gap:6px;align-items:center}
+.panel[data-compact="true"]{max-height:min(220px,32dvh)!important}
+.panel-head [data-act="compact"]{margin-left:auto;margin-right:6px;font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--nession-foreground) 22%,transparent);background:transparent;color:inherit}
+.np-mode-group{display:flex;gap:2px}
 </style>
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 </head>
@@ -233,14 +248,15 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 <header class="np-overview">
   <nav class="np-breadcrumb" aria-label="Prototype navigation">
     <a data-nession-gallery-link href="../../#/prototypes" aria-label="Back to Nession prototype gallery">← Nession / Prototypes</a>
-    <span>·</span><span>App / Terminal</span><span>·</span><span>Requirement #2710</span>
+    <span>·</span><span>App / Terminal</span><span>·</span><span>Requirements #2710 / #3492</span>
   </nav>
   <span class="np-eyebrow">INTERACTIVE DESIGN / MOBILE TERMINAL</span>
   <div class="np-header-main">
-    <div><h1 class="np-title">Terminal Keys &amp; Quick Commands</h1>
-    <p class="np-subtitle">让移动端能够可靠发送 Ctrl 组合键、复用 Session 快捷命令，同时让展开的 Capsule 不遮住终端历史与最新输出。</p></div>
+    <div><h1 class="np-title">Terminal Keys &amp; Quick Commands · mode-aware clearance</h1>
+    <p class="np-subtitle">让移动端能够可靠发送 Ctrl 组合键、复用 Session 快捷命令；普通 shell 保留可逆滚动，全屏 / 鼠标 TUI 预留真实行数，观察者使用 Compact 回退。</p></div>
     <div class="np-links">
       <a href="https://github.com/BestNathan/nession/issues/2710" target="_blank" rel="noopener noreferrer">Requirement #2710</a>
+      <a href="https://github.com/BestNathan/nession/issues/3492" target="_blank" rel="noopener noreferrer">Requirement #3492</a>
       <a href="https://github.com/BestNathan/nession/issues/2758" target="_blank" rel="noopener noreferrer">Design system #2758</a>
       <a data-nession-source-link class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a>
     </div>
@@ -256,12 +272,24 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
       <button type="button" data-np-size="390" aria-pressed="true">390</button>
       <button type="button" data-np-size="430" aria-pressed="false">430</button>
       <button type="button" data-np-reset>Reset</button>
+      <span class="np-mode-group" role="group" aria-label="Mock terminal mode">
+        <button type="button" data-np-mode="normal" aria-pressed="true">Normal shell</button>
+        <button type="button" data-np-mode="alt" aria-pressed="false">Alt-screen TUI</button>
+        <button type="button" data-np-mode="mouse" aria-pressed="false">Mouse TUI</button>
+      </span>
+      <button type="button" data-np-authority aria-pressed="false">Observer</button>
     </div>
   </div>
   <div class="np-stage">
 <div class="phone np-device" data-np-device data-experience="app" style="--np-device-height:844px">
   <header class="topbar"><button class="back" id="sessions" type="button" aria-label="Sessions" aria-expanded="false">☰</button><div class="sess"><strong>dev-session</strong></div><div class="session-header-status" aria-hidden="true"></div><button id="workspace" class="workspace-nav" type="button" aria-label="Workspace" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg></button></header>
   <div class="terminal" id="terminal" role="region" aria-label="Terminal">
+    <div class="tui" id="tui" aria-hidden="true">
+      <div class="tui-head">mock full-screen TUI · mode-aware clearance</div>
+      <div class="tui-body">This screen owns its rows. The open Peek reserves height above the composer instead of panning the grid.</div>
+      <div class="tui-status"><span>F1 Help</span><span>F5 Refresh</span><span>F10 Quit</span></div>
+      <div class="tui-input"><span>:</span><span class="cursor"></span></div>
+    </div>
     <div class="entry faint">Last login: Tue Nov 3 23:47:02 on ttys001</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› git status</span></div><div class="entry">On branch feature/mobile-capsule</div><div class="entry">nothing to commit, working tree clean</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› cargo test</span></div><div class="entry">running 38 tests</div><div class="entry">test result: ok. 38 passed; 0 failed</div><div class="entry blank"></div>
@@ -280,6 +308,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 </div>
   </div>
   <p class="np-stage-label" data-np-current-size>390 CSS px · 1:1</p>
+  <p class="np-policy" data-np-policy aria-live="polite">scroll-clearance · normal shell keeps its exact rows; the panel adds reversible scroll range.</p>
 </section>
 <section class="np-details" aria-label="Prototype functional specification">
 <h2>功能设计与交互说明</h2>
@@ -290,7 +319,8 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
       <li>Terminal Keys：直接发送 Esc、Tab、Enter、方向键和快捷组合键。</li>
       <li>Ctrl / Alt / Shift 是一次性修饰键；选择字母后发送一个组合事件并清除状态。</li>
       <li>Quick Commands：区分 Insert（插入文本）和 Run（提交并执行）。</li>
-      <li>Capsule 的展开只增加可逆滚动空间，不自动推走已有终端内容。</li>
+      <li>普通 shell：Capsule 的展开只增加可逆滚动空间，不自动推走已有终端内容。</li>
+      <li>全屏 / 鼠标 TUI：Peek 预留真实可见高度（viewport-reserve），由应用重绘底部行；观察者无控制权时使用 Compact 回退。</li>
     </ol>
   </article>
   <article class="np-detail"><h3>手动验收路径</h3>
@@ -299,7 +329,8 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
       <li>选择 Ctrl → X；再次进入并 Cancel。</li>
       <li>切换 Commands，分别尝试 Insert 与 Run。</li>
       <li>保持 Keys / Commands 展开，在 Terminal 上滚动至最新输出，再恢复到最初行。</li>
-      <li>用 375 / 390 / 430 宽度重试，不改变终端行数。</li>
+      <li>用 375 / 390 / 430 宽度重试，普通 shell 不改变终端行数。</li>
+      <li>用外部 Mock terminal mode 切换 Normal / Alt-screen / Mouse；切换 Controller / Observer，观察预留、Compact/Expand 与策略说明。</li>
     </ol>
   </article>
   <article class="np-detail"><h3>视觉基线与已知差异</h3>
@@ -316,7 +347,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 </div>
 </section>
 </main>
-<footer class="np-footer">Nession Interactive Prototype · #2710 · Static public design mock, not trusted production Acceptance.</footer>
+<footer class="np-footer">Nession Interactive Prototype · #2710 / #3492 · Static public design mock, not trusted production Acceptance.</footer>
 </div>
 <script>
 (function(){
@@ -367,13 +398,55 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
     following=!userDragActive && isAtBottom();
     term.dataset.scrollMode=following?"following":"history";
   },{passive:true});
+  let terminalMode="normal"; // normal | alt | mouse
+  let observer=false;
+  let panelCompact=false;
+  function clearancePolicy(){return terminalMode==="normal"?"scroll-clearance":"viewport-reserve";}
+  function syncPolicyLabel(reservedPx,fallback){
+    const label=document.querySelector("[data-np-policy]");
+    if(!label)return;
+    if(clearancePolicy()==="scroll-clearance"){
+      label.textContent="scroll-clearance · normal shell keeps its exact rows; the panel adds reversible scroll range.";
+    }else if(fallback){
+      label.textContent="viewport-reserve · compact fallback (no ControlLease authority); the Peek is bounded instead of silently covering the TUI.";
+    }else{
+      label.textContent="viewport-reserve · "+reservedPx+"px reserved as real rows; only the authorized controller requests the Session resize.";
+    }
+  }
+  function updatePanelMeta(){
+    const panel=upper.querySelector(".panel");
+    if(panel){panel.dataset.compact=String(observer&&panelCompact);}
+  }
   function syncTerminalScrollClearance(){
     // Dock is bottom anchored; its top is the uppermost opened layer's top,
     // or the composer top if the expanded layer is closed.
     // Do not read the animated panel transform, which can be in flight.
     const phoneBox=phone.getBoundingClientRect();
     const dockBox=dock.getBoundingClientRect();
+    const shellBox=document.getElementById("composer").getBoundingClientRect();
     const newInset=Math.ceil(Math.max(0,phoneBox.bottom-dockBox.top+SCROLL_CLEARANCE_GAP));
+    if(clearancePolicy()==="viewport-reserve"){
+      // The TUI cannot be panned. Reserve the Peek's height above the composer
+      // as real visible space; an observer has no authority, so it gets the
+      // bounded compact panel and no geometry change.
+      const panelHeight=Math.max(0,Math.ceil(shellBox.top-dockBox.top));
+      // The TUI must end above the panel, and the panel sits above the
+      // composer: the visible loss is the whole dock clearance, not just the
+      // panel's own height.
+      const reserved=Math.ceil(Math.max(0,phoneBox.bottom-dockBox.top+SCROLL_CLEARANCE_GAP));
+      term.style.paddingBottom="0px";
+      term.dataset.clearancePx=String(reserved);
+      phone.style.setProperty("--mock-panel-clearance",observer?"0px":reserved+"px");
+      phone.dataset.clearance=observer?"compact":"reserve";
+      phone.dataset.policy=clearancePolicy();
+      updatePanelMeta();
+      syncPolicyLabel(panelHeight,observer);
+      return;
+    }
+    phone.dataset.clearance="scroll";
+    phone.dataset.policy=clearancePolicy();
+    phone.style.setProperty("--mock-panel-clearance","0px");
+    syncPolicyLabel(0,false);
     if(newInset<=0 || newInset===activeClearancePx)return;
     // Update once for *real* panel-height changes only, never per scroll frame.
     // A stray ResizeObserver notification must never reset touch momentum.
@@ -542,9 +615,33 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
        '</div></div>';
     }
     upper.innerHTML='<section class="surface panel" role="region" aria-label="Terminal '+(view==="keys"?"Keys":"Quick Commands")+'">'+
-      '<div class="panel-head"><div class="switch" role="tablist" aria-label="Terminal tools"><button role="tab" aria-selected="'+(view==="keys")+'" class="'+(view==="keys"?"sel":"")+'" data-act="keys">Keys</button><button role="tab" aria-selected="'+(view==="commands")+'" class="'+(view==="commands"?"sel":"")+'" data-act="commands">Commands</button></div><button class="close" aria-label="Close" data-act="close">×</button></div>'+body+'</section>';
+      '<div class="panel-head"><div class="switch" role="tablist" aria-label="Terminal tools"><button role="tab" aria-selected="'+(view==="keys")+'" class="'+(view==="keys"?"sel":"")+'" data-act="keys">Keys</button><button role="tab" aria-selected="'+(view==="commands")+'" class="'+(view==="commands"?"sel":"")+'" data-act="commands">Commands</button></div>'+(observer?'<button type="button" data-act="compact" aria-expanded="'+(!panelCompact)+'">'+(panelCompact?"Expand":"Compact")+'</button>':'')+'<button class="close" aria-label="Close" data-act="close">×</button></div>'+body+'</section>';
+    updatePanelMeta();
     scheduleClearance();
   }
+  function setTerminalMode(next){
+    terminalMode=next;
+    activeClearancePx=-1;
+    phone.dataset.mode=next;
+    document.getElementById("tui").setAttribute("aria-hidden",String(next==="normal"));
+    document.querySelectorAll("[data-np-mode]").forEach((button)=>{
+      button.setAttribute("aria-pressed",String(button.dataset.npMode===next));
+    });
+    syncTerminalScrollClearance();
+  }
+  document.querySelectorAll("[data-np-mode]").forEach((button)=>{
+    button.addEventListener("click",()=>setTerminalMode(button.dataset.npMode));
+  });
+  document.querySelector("[data-np-authority]").addEventListener("click",(event)=>{
+    observer=!observer;
+    activeClearancePx=-1;
+    if(observer)panelCompact=true;
+    event.currentTarget.setAttribute("aria-pressed",String(observer));
+    event.currentTarget.textContent=observer?"Observer":"Controller";
+    if(view)render();
+    updatePanelMeta();
+    syncTerminalScrollClearance();
+  });
   plus.addEventListener("click",()=>open(view?"":"menu"));
   document.getElementById("send").addEventListener("click",()=>{const v=intent.value.trim();if(v){recordMockEvent("Send: "+v);append("$ "+v);intent.value="";}open("");});
   intent.addEventListener("focus",()=>{if(view)open("");});
@@ -553,7 +650,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
     const el=e.target.closest("button,[data-insert]");
     if(!el||!upper.contains(el))return;
     const a=el.dataset.act;
-    if(a){if(a==="cancel"){modifier="";render();}else if(a==="close"){open("");}else open(a);return;}
+    if(a){if(a==="compact"){panelCompact=!panelCompact;render();syncTerminalScrollClearance();}else if(a==="cancel"){modifier="";render();}else if(a==="close"){open("");}else open(a);return;}
     if(el.dataset.mod){modifier=modifier===el.dataset.mod?"":el.dataset.mod;render();return;}
     if(el.dataset.chord){sendKey(el.dataset.chord,keyEncoding(el.dataset.chord));return;}
     if(el.dataset.letter){chord(el.dataset.letter);return;}
