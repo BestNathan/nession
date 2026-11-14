@@ -128,7 +128,7 @@ jobs:
     environment: cursor
     timeout-minutes: 15
     env:
-      SOURCE_RUN_ID: ${{ inputs.source_run_id || github.event.workflow_run.id || 39288961865 }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id || github.event.workflow_run.id || '39288961865' }}
       SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt || 1 }}
     steps:
       - name: Checkout only authenticated main ingestion SHA
