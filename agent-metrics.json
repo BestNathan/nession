@@ -1,33 +1,33 @@
 {
   "schema_version": 1,
   "kind": "agent_metrics_aggregate",
-  "generated_at": "2026-11-14T01:22:29.456Z",
+  "generated_at": "2026-11-14T02:57:37.994Z",
   "windows": {
     "7d": {
       "runs": {
-        "total": 683,
+        "total": 676,
         "by_workflow": {
           "agent-develop": 10,
           "agent-provider-smoke": 84,
           "agent-review": 9,
-          "issue-audit": 74,
-          "requirement-acceptance": 506
+          "issue-audit": 66,
+          "requirement-acceptance": 507
         },
         "by_provider": {
-          "claude-code": 681,
+          "claude-code": 674,
           "cursor": 1,
           "deepseek": 1
         },
         "by_role": {
-          "acceptor": 536,
-          "auditor": 74,
+          "acceptor": 537,
+          "auditor": 66,
           "developer": 36,
           "reviewer": 37
         },
         "by_agent_id": {
-          "audit-qwen-01": 74,
+          "audit-qwen-01": 66,
           "dev-qwen-01": 36,
-          "legacy-acceptance-claude-code": 534,
+          "legacy-acceptance-claude-code": 535,
           "legacy-acceptance-cursor": 1,
           "legacy-acceptance-deepseek": 1,
           "review-qwen-01": 37
@@ -54,10 +54,9 @@
           "2869": 3,
           "2873": 2,
           "2874": 1,
-          "2875": 4,
-          "2876": 6,
+          "2876": 3,
           "2877": 8,
-          "2878": 5,
+          "2878": 4,
           "2879": 5,
           "2889": 3,
           "2902": 5,
@@ -167,7 +166,7 @@
           "3439": 2,
           "3442": 1,
           "3445": 4,
-          "3449": 5
+          "3449": 6
         },
         "by_pr": {
           "2176": 28,
@@ -180,13 +179,13 @@
         },
         "by_harness": {},
         "by_result": {
-          "agent-error": 58,
+          "agent-error": 53,
           "canary-error": 3,
           "canary-pass": 51,
-          "completed": 525,
+          "completed": 526,
           "error": 1,
           "proposed_not_published": 9,
-          "repaired": 27,
+          "repaired": 24,
           "review-approved": 4,
           "review-changes-requested": 5
         }
@@ -200,13 +199,23 @@
           {
             "id": "legacy-acceptance-claude-code",
             "role": "acceptor",
-            "total": 534,
-            "success": 524,
+            "total": 535,
+            "success": 525,
             "failure": 10,
             "cancelled": 0,
             "timed_out": 0,
             "unknown": 0,
             "recent": [
+              {
+                "run_id": 43548841329,
+                "attempt": 1,
+                "workflow": "requirement-acceptance",
+                "issue": 3449,
+                "outcome": "success",
+                "provider": "claude-code",
+                "observed_at": "2026-11-14T02:56:38.779Z",
+                "duration_ms": 76213
+              },
               {
                 "run_id": 43498372800,
                 "attempt": 1,
@@ -276,25 +285,15 @@
                 "provider": "claude-code",
                 "observed_at": "2026-11-13T17:57:12.124Z",
                 "duration_ms": 24795
-              },
-              {
-                "run_id": 43477348467,
-                "attempt": 1,
-                "workflow": "requirement-acceptance",
-                "issue": 3445,
-                "outcome": "success",
-                "provider": "claude-code",
-                "observed_at": "2026-11-13T17:57:08.165Z",
-                "duration_ms": 134028
               }
             ]
           },
           {
             "id": "audit-qwen-01",
             "role": "auditor",
-            "total": 74,
-            "success": 27,
-            "failure": 47,
+            "total": 66,
+            "success": 24,
+            "failure": 42,
             "cancelled": 0,
             "timed_out": 0,
             "unknown": 0,
@@ -612,16 +611,16 @@
         ]
       },
       "turns": {
-        "observed_runs": 683,
-        "total": 6612,
-        "avg": 9.68081991215227,
+        "observed_runs": 676,
+        "total": 6591,
+        "avg": 9.75,
         "p50": 5,
         "p95": 31
       },
       "model_requests": {
-        "observed_runs": 75,
-        "total": 124,
-        "avg": 1.6533333333333333,
+        "observed_runs": 67,
+        "total": 112,
+        "avg": 1.671641791044776,
         "p50": 2,
         "p95": 2
       },
@@ -639,35 +638,35 @@
       },
       "tokens": {
         "input": {
-          "observed_runs": 682,
-          "total": 316728
+          "observed_runs": 675,
+          "total": 316650
         },
         "output": {
-          "observed_runs": 682,
-          "total": 2520039
+          "observed_runs": 675,
+          "total": 2469127
         },
         "cache_read": {
-          "observed_runs": 682,
-          "total": 108833370
+          "observed_runs": 675,
+          "total": 108827536
         },
         "cache_write": {
-          "observed_runs": 682,
-          "total": 19141656
+          "observed_runs": 675,
+          "total": 19003169
         },
         "reasoning": {
           "observed_runs": 0,
           "total": null
         },
         "total": {
-          "observed_runs": 682,
-          "total": 130811793
+          "observed_runs": 675,
+          "total": 130616482
         }
       },
       "duration_ms": {
-        "observed_runs": 674,
-        "total": 51838485,
-        "avg": 76911.69881305638,
-        "p50": 70400,
+        "observed_runs": 667,
+        "total": 51171496,
+        "avg": 76718.88455772113,
+        "p50": 70023,
         "p95": 186953
       },
       "cost_usd": {
@@ -687,26 +686,26 @@
     },
     "30d": {
       "runs": {
-        "total": 3246,
+        "total": 3239,
         "by_workflow": {
           "agent-claude-resume-seed": 10,
           "agent-claude-resume-verify": 10,
           "agent-cursor-resume-seed": 1,
           "agent-cursor-resume-verify": 1,
           "agent-develop": 13,
-          "agent-provider-smoke": 539,
+          "agent-provider-smoke": 535,
           "agent-review": 11,
           "agent-staging-developer-canary": 14,
           "issue-audit": 904,
-          "requirement-acceptance": 1743
+          "requirement-acceptance": 1740
         },
         "by_provider": {
-          "claude-code": 1844,
-          "cursor": 1225,
-          "deepseek": 177
+          "claude-code": 1843,
+          "cursor": 1220,
+          "deepseek": 176
         },
         "by_role": {
-          "acceptor": 2056,
+          "acceptor": 2049,
           "auditor": 312,
           "developer": 155,
           "reviewer": 109
@@ -717,9 +716,9 @@
           "cursor-resume-fixture": 2,
           "dev-cursor-01": 3,
           "dev-qwen-01": 152,
-          "legacy-acceptance-claude-code": 1251,
-          "legacy-acceptance-cursor": 628,
-          "legacy-acceptance-deepseek": 177,
+          "legacy-acceptance-claude-code": 1250,
+          "legacy-acceptance-cursor": 623,
+          "legacy-acceptance-deepseek": 176,
           "review-qwen-01": 109
         },
         "by_issue": {
@@ -732,15 +731,14 @@
           "1015": 1,
           "1016": 1,
           "1290": 18,
-          "1556": 313,
+          "1556": 309,
           "1616": 11,
           "1645": 13,
           "1664": 213,
           "1690": 115,
           "1719": 5,
           "1725": 5,
-          "1728": 5,
-          "1742": 1,
+          "1728": 2,
           "1749": 12,
           "1772": 4,
           "1782": 9,
@@ -1141,7 +1139,7 @@
           "3439": 2,
           "3442": 1,
           "3445": 4,
-          "3449": 5
+          "3449": 6
         },
         "by_pr": {
           "2176": 100,
@@ -1159,7 +1157,7 @@
           "agent-error": 750,
           "canary-error": 13,
           "canary-pass": 213,
-          "completed": 1995,
+          "completed": 1988,
           "contract-fail": 14,
           "error": 1,
           "native-checkpoint-proposed": 1,
@@ -1183,13 +1181,23 @@
           {
             "id": "legacy-acceptance-claude-code",
             "role": "acceptor",
-            "total": 1251,
-            "success": 1226,
+            "total": 1250,
+            "success": 1225,
             "failure": 25,
             "cancelled": 0,
             "timed_out": 0,
             "unknown": 0,
             "recent": [
+              {
+                "run_id": 43548841329,
+                "attempt": 1,
+                "workflow": "requirement-acceptance",
+                "issue": 3449,
+                "outcome": "success",
+                "provider": "claude-code",
+                "observed_at": "2026-11-14T02:56:38.779Z",
+                "duration_ms": 76213
+              },
               {
                 "run_id": 43498372800,
                 "attempt": 1,
@@ -1259,24 +1267,14 @@
                 "provider": "claude-code",
                 "observed_at": "2026-11-13T17:57:12.124Z",
                 "duration_ms": 24795
-              },
-              {
-                "run_id": 43477348467,
-                "attempt": 1,
-                "workflow": "requirement-acceptance",
-                "issue": 3445,
-                "outcome": "success",
-                "provider": "claude-code",
-                "observed_at": "2026-11-13T17:57:08.165Z",
-                "duration_ms": 134028
               }
             ]
           },
           {
             "id": "legacy-acceptance-cursor",
             "role": "acceptor",
-            "total": 628,
-            "success": 596,
+            "total": 623,
+            "success": 591,
             "failure": 32,
             "cancelled": 0,
             "timed_out": 0,
@@ -1459,8 +1457,8 @@
           {
             "id": "legacy-acceptance-deepseek",
             "role": "acceptor",
-            "total": 177,
-            "success": 173,
+            "total": 176,
+            "success": 172,
             "failure": 4,
             "cancelled": 0,
             "timed_out": 0,
@@ -1901,29 +1899,29 @@
         ]
       },
       "turns": {
-        "observed_runs": 3227,
-        "total": 18761,
-        "avg": 5.813758909203595,
+        "observed_runs": 3220,
+        "total": 18764,
+        "avg": 5.827329192546584,
         "p50": 1,
         "p95": 28
       },
       "model_requests": {
-        "observed_runs": 1530,
-        "total": 1097,
-        "avg": 0.7169934640522876,
+        "observed_runs": 1525,
+        "total": 1092,
+        "avg": 0.7160655737704918,
         "p50": 1,
         "p95": 1
       },
       "tools": {
-        "observed_runs": 1473,
-        "total": 22564,
-        "avg": 15.318397827562798,
+        "observed_runs": 1468,
+        "total": 22508,
+        "avg": 15.33242506811989,
         "p50": 2,
         "p95": 82,
         "by_name": {
-          "read": 18408,
-          "glob": 1939,
-          "grep": 1305,
+          "read": 18374,
+          "glob": 1930,
+          "grep": 1292,
           "Read": 324,
           "mcp": 322,
           "Edit": 151,
@@ -1933,36 +1931,36 @@
       },
       "tokens": {
         "input": {
-          "observed_runs": 2731,
-          "total": 353937336
+          "observed_runs": 2724,
+          "total": 353552654
         },
         "output": {
-          "observed_runs": 2731,
-          "total": 10944850
+          "observed_runs": 2724,
+          "total": 10929153
         },
         "cache_read": {
-          "observed_runs": 2731,
-          "total": 666719374
+          "observed_runs": 2724,
+          "total": 666605723
         },
         "cache_write": {
-          "observed_runs": 2731,
-          "total": 42830751
+          "observed_runs": 2724,
+          "total": 42854084
         },
         "reasoning": {
           "observed_runs": 0,
           "total": null
         },
         "total": {
-          "observed_runs": 3198,
-          "total": 1074432311
+          "observed_runs": 3191,
+          "total": 1073941614
         }
       },
       "duration_ms": {
-        "observed_runs": 3224,
-        "total": 177486247,
-        "avg": 55051.56544665012,
-        "p50": 29537,
-        "p95": 179567
+        "observed_runs": 3217,
+        "total": 177371736,
+        "avg": 55135.75878147342,
+        "p50": 29571,
+        "p95": 179628
       },
       "cost_usd": {
         "raw": {
@@ -1981,7 +1979,7 @@
     },
     "all_time": {
       "runs": {
-        "total": 3600,
+        "total": 3601,
         "by_workflow": {
           "agent-claude-resume-seed": 10,
           "agent-claude-resume-verify": 10,
@@ -1992,15 +1990,15 @@
           "agent-review": 11,
           "agent-staging-developer-canary": 14,
           "issue-audit": 948,
-          "requirement-acceptance": 2002
+          "requirement-acceptance": 2003
         },
         "by_provider": {
-          "claude-code": 1866,
+          "claude-code": 1867,
           "cursor": 1542,
           "deepseek": 192
         },
         "by_role": {
-          "acceptor": 2198,
+          "acceptor": 2199,
           "auditor": 312,
           "developer": 165,
           "reviewer": 109
@@ -2011,7 +2009,7 @@
           "cursor-resume-fixture": 2,
           "dev-cursor-01": 3,
           "dev-qwen-01": 162,
-          "legacy-acceptance-claude-code": 1263,
+          "legacy-acceptance-claude-code": 1264,
           "legacy-acceptance-cursor": 746,
           "legacy-acceptance-deepseek": 189,
           "review-qwen-01": 109
@@ -2494,7 +2492,7 @@
           "3439": 2,
           "3442": 1,
           "3445": 4,
-          "3449": 5
+          "3449": 6
         },
         "by_pr": {
           "2176": 100,
@@ -2512,7 +2510,7 @@
           "agent-error": 751,
           "canary-error": 13,
           "canary-pass": 223,
-          "completed": 2294,
+          "completed": 2295,
           "contract-fail": 19,
           "error": 1,
           "native-checkpoint-proposed": 1,
@@ -2536,13 +2534,23 @@
           {
             "id": "legacy-acceptance-claude-code",
             "role": "acceptor",
-            "total": 1263,
-            "success": 1238,
+            "total": 1264,
+            "success": 1239,
             "failure": 25,
             "cancelled": 0,
             "timed_out": 0,
             "unknown": 0,
             "recent": [
+              {
+                "run_id": 43548841329,
+                "attempt": 1,
+                "workflow": "requirement-acceptance",
+                "issue": 3449,
+                "outcome": "success",
+                "provider": "claude-code",
+                "observed_at": "2026-11-14T02:56:38.779Z",
+                "duration_ms": 76213
+              },
               {
                 "run_id": 43498372800,
                 "attempt": 1,
@@ -2612,16 +2620,6 @@
                 "provider": "claude-code",
                 "observed_at": "2026-11-13T17:57:12.124Z",
                 "duration_ms": 24795
-              },
-              {
-                "run_id": 43477348467,
-                "attempt": 1,
-                "workflow": "requirement-acceptance",
-                "issue": 3445,
-                "outcome": "success",
-                "provider": "claude-code",
-                "observed_at": "2026-11-13T17:57:08.165Z",
-                "duration_ms": 134028
               }
             ]
           },
@@ -3254,9 +3252,9 @@
         ]
       },
       "turns": {
-        "observed_runs": 3580,
-        "total": 19137,
-        "avg": 5.3455307262569836,
+        "observed_runs": 3581,
+        "total": 19148,
+        "avg": 5.347109745881038,
         "p50": 1,
         "p95": 26
       },
@@ -3286,34 +3284,34 @@
       },
       "tokens": {
         "input": {
-          "observed_runs": 3084,
-          "total": 450158176
+          "observed_runs": 3085,
+          "total": 450158206
         },
         "output": {
-          "observed_runs": 3084,
-          "total": 12287272
+          "observed_runs": 3085,
+          "total": 12291298
         },
         "cache_read": {
-          "observed_runs": 3084,
-          "total": 747582772
+          "observed_runs": 3085,
+          "total": 747701527
         },
         "cache_write": {
-          "observed_runs": 3084,
-          "total": 43032043
+          "observed_runs": 3085,
+          "total": 43074790
         },
         "reasoning": {
           "observed_runs": 0,
           "total": null
         },
         "total": {
-          "observed_runs": 3551,
-          "total": 1253060263
+          "observed_runs": 3552,
+          "total": 1253225821
         }
       },
       "duration_ms": {
-        "observed_runs": 3577,
-        "total": 192946005,
-        "avg": 53940.73385518591,
+        "observed_runs": 3578,
+        "total": 193022218,
+        "avg": 53946.95863610956,
         "p50": 29876,
         "p95": 176129
       },
