@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1258f812dee974a18378e75c1a0a376608ac390c6b162b6e4145232c02e82872",
+  "run_id": 43650118903,
+  "run_attempt": 1,
+  "issue": 3499,
+  "criterion": "SC-04",
+  "criterion_text": "A trusted staging Server–Agent/Session acceptance Case proves scoped image-grant access, resolved Manifest pinning, shared physical EROFS cache/mount and cleanup across at least two consumers and an Agent restart.",
+  "stage": "staging",
+  "target_sha": "c481c226f12dd9d55021ecec4b7344d44a15ff79",
+  "contract_sha256": "6ed85b7492f73fd5ef7e0207cc0e8e4b790f5f24ea6254ae88c204fa05b19462",
+  "case_revision": "c481c226f12dd9d55021ecec4b7344d44a15ff79",
+  "case_tree_sha": "6b86febb5c6811bec9ae3f019f33463357621c77",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T22:52:07.908Z",
+  "finished_at": "2026-11-14T22:53:30.948Z",
+  "duration_ms": 83040,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify-resolution.cjs",
+      "result": "Pass",
+      "summary": "Tag/Index resolution pins one verified platform Manifest and fails closed before mount",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c481c226f12dd9d55021ecec4b7344d44a15ff79: a Tag/Index resolved to one pinned platform Manifest with verified Config/EROFS descriptors; incompatible, ambiguous, stale and missing selections failed closed before a mount attempt"
+        }
+      ],
+      "duration_ms": 3117,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-cache.cjs",
+      "result": "Pass",
+      "summary": "Shared, resumed and restarted transfers yield one verified payload while pins protect it",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c481c226f12dd9d55021ecec4b7344d44a15ff79: an interrupted Range transfer kept a resumable partial and never published, a restart adopted only re-hashed bytes, two Manifests shared one payload download and one physical cache file, pins blocked eviction, and two identities on one volume never shared Ready or partial files"
+        }
+      ],
+      "duration_ms": 4406,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-mount.cjs",
+      "result": "Pass",
+      "summary": "Two configs of one EROFS layer share one physical mount with independent release",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c481c226f12dd9d55021ecec4b7344d44a15ff79: two consumers of one EROFS layer acquired the same physical mount, the remaining consumer kept it after one release, and the last release removed it"
+        }
+      ],
+      "duration_ms": 3175,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-server.cjs",
+      "result": "Pass",
+      "summary": "Server grants stay Manifest-scoped and reachability-checked while layers are shared",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c481c226f12dd9d55021ecec4b7344d44a15ff79: two authorized consumers shared one EROFS layer without sharing authorization, a Session binding recorded and released its resolved Manifest pin, catalog bytes were served only after digest/size verification, and a Manifest create minted reachable-object grants"
+        }
+      ],
+      "duration_ms": 39300,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-agent.cjs",
+      "result": "Pass",
+      "summary": "A manifest grant mounts the layer identity and shares one payload",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c481c226f12dd9d55021ecec4b7344d44a15ff79: the Agent consumed a Manifest grant through the existing authorized blob route, mounted by EROFS layer identity and shared one payload"
+        }
+      ],
+      "duration_ms": 27343,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43650118903,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "d767f3073449e622e8232b3c090f319766b9e1f6",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "c481c226f12dd9d55021ecec4b7344d44a15ff79",
+        "stage": "staging",
+        "issue": 3499,
+        "criterion": "SC-04",
+        "job_id": 132616489265,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43650118903",
+    "record_path": "runs/2026-11-14/43650118903-1/3499/SC-04.json",
+    "source_result_sha256": "4e0a9d55f041ba3d87f24ec366173c0aee153691d32b93023bb865cc7839ba2f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43650118903-1",
+    "sha256": "4e0a9d55f041ba3d87f24ec366173c0aee153691d32b93023bb865cc7839ba2f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43650118903",
+    "durability": "time-limited; object archival not configured"
+  }
+}
