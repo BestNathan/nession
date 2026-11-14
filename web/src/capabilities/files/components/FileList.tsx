@@ -45,7 +45,6 @@ export function FileList({
   onToggleSelect,
 }: FileListProps) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
-  const [counts, setCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -62,19 +61,9 @@ export function FileList({
         }
         setEntries(listed);
         onEntriesChange?.(listed);
-        for (const entry of listed) {
-          if (!entry.is_dir) {
-            continue;
-          }
-          void fileOps.listDir(entry.path).then(
-            ({ entries: children }) => {
-              if (!cancelled) {
-                setCounts((prev) => ({ ...prev, [entry.path]: children.length }));
-              }
-            },
-            () => {},
-          );
-        }
+        // #3451: counts are optional metadata, never enumerate every child
+        // directory solely to populate a subtitle. Only navigating into a
+        // folder may issue its own listDir request.
       },
       (cause: unknown) => {
         if (!cancelled) {
@@ -134,7 +123,7 @@ export function FileList({
       ) : (
         <FileListEntryRows
           entries={entries}
-          counts={counts}
+          counts={{}}
           onEnterDirectory={onEnterDirectory}
           onFileClick={onFileClick}
           captureScroll={() => onScrollSnapshot?.(listRef.current?.scrollTop ?? 0)}
