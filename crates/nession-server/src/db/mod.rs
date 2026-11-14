@@ -184,6 +184,13 @@ pub struct ProjectRow {
 }
 
 impl Database {
+    /// The Server's single SQLite connection. Adapters that own schema inside
+    /// `nession-erofs` (the image catalog, #3496) run through this connection
+    /// rather than opening a second database.
+    pub fn connection(&self) -> &DatabaseConnection {
+        &self.conn
+    }
+
     /// Open (or create) the SQLite database at `db_path`, enable WAL, and run
     /// all pending migrations.  Accepts a plain filesystem path or a
     /// `sqlite:`-prefixed URL; `:memory:` maps to an in-memory DB.
@@ -211,6 +218,9 @@ impl Database {
         Migrator::up(&conn, None)
             .await
             .context("failed to run database migrations")?;
+        nession_erofs::catalog::migrate(&conn)
+            .await
+            .context("failed to run image catalog migrations")?;
 
         Ok(Self { conn })
     }
