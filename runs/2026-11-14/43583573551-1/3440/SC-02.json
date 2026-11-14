@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b1b4c61d91d4c92e10fc93e9f75121a0076357c3c541844b4596f5ad66d9bb4d",
+  "run_id": 43583573551,
+  "run_attempt": 1,
+  "issue": 3440,
+  "criterion": "SC-02",
+  "criterion_text": "Agent connects and registers over its Server Token channel, synchronizing its durable Agent Token to Server's **correct current registration identity**; authenticated `server.session.attach` returns only the resolved Agent's token and addresses; direct Agent attach/re-attach and Server→Agent Relay both work using that same Agent Token with no P2P ticket/grant mint or refresh. A stale Agent registration/token cannot overwrite the current generation.",
+  "stage": "staging",
+  "target_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "contract_sha256": "fcb64e9af779c3c3fa8e302e36a1d253cb2ba2f716c7846cdcb895c2e681eb4f",
+  "case_revision": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "case_tree_sha": "e1e03c2efd3318577f2349ae03419ec09add714c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T10:08:41.631Z",
+  "finished_at": "2026-11-14T10:08:59.298Z",
+  "duration_ms": 17667,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The Agent Token synchronizes with its registration generation and is handed off only to the resolved Agent; direct attach and Relay authenticate with it and re-attach never mints",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact target SHA stack: registration cached the newest of two same-identity Agents; attach returned only that Agent token and its addresses; re-attach returned the same value (no mint); direct attach and Server-dialled Relay both authenticated with it; restarting with a new token made it the current generation and the old token was refused"
+        },
+        {
+          "type": "protocol",
+          "value": "AgentRegisterPayload carries agent_token; server.session.attach returns agent_token; no agent.p2p.grant, mint, grant ACK or connection_token_expires_at exists on this path"
+        }
+      ],
+      "duration_ms": 11602,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43583573551,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "record_path": "runs/2026-11-14/43583573551-1/3440/SC-02.json",
+    "source_result_sha256": "d92ba93c319ad04370a8274a39417e801143f56a293b22e831cdc4037fbeee0f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43583573551-1",
+    "sha256": "d92ba93c319ad04370a8274a39417e801143f56a293b22e831cdc4037fbeee0f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "durability": "time-limited; object archival not configured"
+  }
+}

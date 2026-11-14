@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "fc4cd071171ad37faafbe389d50ce4623227aac99060f0a859e793f35883f8a8",
+  "run_id": 43583573551,
+  "run_attempt": 1,
+  "issue": 3440,
+  "criterion": "SC-05",
+  "criterion_text": "Standalone and Server-connected Agents accept their own `agent_token` for inbound WS and embedded MCP, including Agent restart persistence and explicit operator override; Agent `auth_token` remains outbound Server credential only, empty/malformed secrets fail closed and rotation cannot keep authorizing a newly connected peer using the old value.",
+  "stage": "staging",
+  "target_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "contract_sha256": "fcb64e9af779c3c3fa8e302e36a1d253cb2ba2f716c7846cdcb895c2e681eb4f",
+  "case_revision": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "case_tree_sha": "d1782b0f050647e16a2d55ede034d58a6020b67e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T10:09:12.692Z",
+  "finished_at": "2026-11-14T10:09:24.045Z",
+  "duration_ms": 11353,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Standalone and connected Agents use their own durable token for inbound WS and MCP; provisioning persists, rotation is a restart, and malformed values fail closed",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact target SHA stack: standalone WS and MCP accepted the Agent Token and refused the Server Token; rotation accepted the new value and refused the old; an unset token was generated at mode 0600 and reused after restart; a malformed value failed the start"
+        },
+        {
+          "type": "source",
+          "value": "crates/nession-agent/src/token.rs owns provisioning/persistence; crates/nession-agent/src/p2p_auth.rs and server/mcp.rs verify the same endpoint token"
+        }
+      ],
+      "duration_ms": 5487,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43583573551,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "record_path": "runs/2026-11-14/43583573551-1/3440/SC-05.json",
+    "source_result_sha256": "8983823a6084d69e1b7df10eedaaeebeb5217701e74efd6166383ed3d81dd5e0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43583573551-1",
+    "sha256": "8983823a6084d69e1b7df10eedaaeebeb5217701e74efd6166383ed3d81dd5e0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "durability": "time-limited; object archival not configured"
+  }
+}

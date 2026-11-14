@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a45bddeef49b4d557330e2c6bec457757f3302abdc5f5bf951bb4d45295b84b1",
+  "run_id": 43583573551,
+  "run_attempt": 1,
+  "issue": 3440,
+  "criterion": "SC-06",
+  "criterion_text": "Agent MCP accepts Agent Token but refuses Server/other-Agent Tokens; Server MCP and authenticated Image GET/HEAD accept Server Token but refuse Agent Tokens, preserving HTTP method/status, Streamable HTTP tool and image digest/stream behavior.",
+  "stage": "staging",
+  "target_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "contract_sha256": "fcb64e9af779c3c3fa8e302e36a1d253cb2ba2f716c7846cdcb895c2e681eb4f",
+  "case_revision": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "case_tree_sha": "e76a3a1e5f09ec317affadb52471f015a7913744",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T10:09:24.045Z",
+  "finished_at": "2026-11-14T10:09:35.436Z",
+  "duration_ms": 11391,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Agent MCP verifies the Agent Token; Server MCP and image HTTP verify the Server Token; cross-endpoint tokens are refused and HTTP method/status semantics are preserved",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact target SHA stack: Server MCP accepted S and refused A and no-bearer; Agent MCPs accepted only their own token and refused S and the sibling Agent token; image GET/HEAD with S returned 404 for a well-formed unknown digest, A and no-bearer returned 403, and POST with S returned 405"
+        },
+        {
+          "type": "source",
+          "value": "Server and Agent MCP hosts construct one shared TokenVerifier from their own endpoint secret; the image HTTP route verifies the Server Token and keeps digest/method semantics"
+        }
+      ],
+      "duration_ms": 5525,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43583573551,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "record_path": "runs/2026-11-14/43583573551-1/3440/SC-06.json",
+    "source_result_sha256": "0c3b49b87d8c48c1ecdb7a65aa8606b1aed05f814f381fd380800f0f014e69d7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43583573551-1",
+    "sha256": "0c3b49b87d8c48c1ecdb7a65aa8606b1aed05f814f381fd380800f0f014e69d7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "durability": "time-limited; object archival not configured"
+  }
+}

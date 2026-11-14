@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f71d4455ae5d09f7d395433e76f6c3ba9e543d59832cddce1c01f1e89361b8be",
+  "run_id": 43583573551,
+  "run_attempt": 1,
+  "issue": 3440,
+  "criterion": "SC-01",
+  "criterion_text": "With Server Token `S` and two different Agent Tokens `A`/`B`, Web/CLI authenticate Server with `S` and each Agent with its own token; `S` does not grant direct Agent P2P access, `A` cannot authenticate to B or Server, and invalid/empty/late/repeated authentication or premature business frames fail closed without changing connection identity.",
+  "stage": "staging",
+  "target_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "contract_sha256": "fcb64e9af779c3c3fa8e302e36a1d253cb2ba2f716c7846cdcb895c2e681eb4f",
+  "case_revision": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "case_tree_sha": "bd204084f9a1834d9d36fd171b4292558589b6d2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T10:08:20.275Z",
+  "finished_at": "2026-11-14T10:08:41.630Z",
+  "duration_ms": 21354,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Server Token and per-Agent Tokens authenticate only their owning endpoint; invalid, empty, late, repeated and premature authentication fail closed",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact target SHA stack: Server accepted S and refused A; Agent A accepted A and refused S, B and empty; Agent B accepted B and refused A; S could not open either Agent; premature, repeated and late authentication each failed closed and granted no authority"
+        },
+        {
+          "type": "source",
+          "value": "crates/nession-agent/src/server/websocket.rs: client.auth is verified before any business frame; crates/nession-server/src/server/handler/server_auth_v1.rs and server_agent_register_v1.rs compare each endpoint's own token"
+        }
+      ],
+      "duration_ms": 15446,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43583573551,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "record_path": "runs/2026-11-14/43583573551-1/3440/SC-01.json",
+    "source_result_sha256": "fe2d0696d4b1d19ec85c496bc72453977d54800a5d2bb91c4451bdee81798fd3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43583573551-1",
+    "sha256": "fe2d0696d4b1d19ec85c496bc72453977d54800a5d2bb91c4451bdee81798fd3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "durability": "time-limited; object archival not configured"
+  }
+}

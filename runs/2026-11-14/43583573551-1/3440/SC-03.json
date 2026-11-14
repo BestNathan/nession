@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ed5327822320295df9c9efc9281675b0f12b8949faf4ad36c0931cdfd52e0497",
+  "run_id": 43583573551,
+  "run_attempt": 1,
+  "issue": 3440,
+  "criterion": "SC-03",
+  "criterion_text": "Direct P2P remains reconnectable while Server is down if a valid Agent Token is cached, and preserves existing Session stream/output cursor, controller lease and connection generation; token rejection/rotation follows bounded retry and clean re-fetch behavior without waiting for a P2P credential issuer, without a stale callback reopening closed sockets.",
+  "stage": "staging",
+  "target_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "contract_sha256": "fcb64e9af779c3c3fa8e302e36a1d253cb2ba2f716c7846cdcb895c2e681eb4f",
+  "case_revision": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+  "case_tree_sha": "28ec75c32108701cada4c6bba59b01f4053a781a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T10:08:59.298Z",
+  "finished_at": "2026-11-14T10:09:12.691Z",
+  "duration_ms": 13393,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Direct P2P reconnects with the cached Agent Token while the Server is down, preserving stream and controller generation; rotation is refused cleanly and the current token is refetched after the Server returns",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact target SHA stack: with the Server stopped, a direct re-dial using the cached Agent Token re-served the Session with the same control generation; after a rotation the old token was refused and gained no authority; once the Server returned, one authenticated attach returned the rotated token and it authenticated the Agent"
+        },
+        {
+          "type": "source",
+          "value": "web/src/platform/session-runtime/SessionRuntime.ts keeps the Agent token in memory and refetches only through an authenticated attach after rejection or Server recovery"
+        }
+      ],
+      "duration_ms": 7529,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43583573551,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2909dcbb0ad65c9e9bff4c874a36f2a8de29918f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "record_path": "runs/2026-11-14/43583573551-1/3440/SC-03.json",
+    "source_result_sha256": "4bc3d2ba6339113f382585bd3e8a4a0965d00f5522890de44842e3008d3fdb62"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43583573551-1",
+    "sha256": "4bc3d2ba6339113f382585bd3e8a4a0965d00f5522890de44842e3008d3fdb62",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43583573551",
+    "durability": "time-limited; object archival not configured"
+  }
+}
