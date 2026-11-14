@@ -10,7 +10,6 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {planBatch} from './staging-convergence-batch.mjs';
 import {catalogFromPaths,planDigest} from './issue-e2e-plan.mjs';
-import {BROWSER_DESIGN_IDS} from '../design/scripts/browser-design-catalog.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
@@ -76,11 +75,10 @@ export function isNativePromotionPr(pr){
   return pr.body.includes('- Direction: staging -> main');
 }
 
-// A promotion has no disposable Requirement Issue. Run a real, source-pinned
-// scoped browser plan: the canonical Browser Design contract plus runnable
-// browser IDs changed between the exact main/lane commits. The independent
-// Main postmerge Full regression and promotion source/Issue/Deploy gates remain
-// mandatory. Never turn an unknown or missing test into Not Required.
+// A promotion has no disposable Requirement Issue. Select only E2E IDs
+// actually modified in the exact main..staging delta. Unchanged Browser Design
+// IDs are not a universal merge gate; periodic Main Full covers regression
+// discovery independently (#3465). Deleted runnable tests remain fail-closed.
 export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
   const originallyPinnedMain=pr?.body?.match(/^- Planned main SHA: ([a-f0-9]{40})$/m)?.[1];
   const originallyPinnedLane=pr?.body?.match(/^- Planned lane SHA: ([a-f0-9]{40})$/m)?.[1];
@@ -99,9 +97,9 @@ export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sh
   const current=git(repoRoot,'ls-tree','-r','--name-only',targetSha,'--','e2e/tests')
     .split('\n').filter(Boolean);
   const liveIds=new Set(catalogFromPaths(current));
-  const ids=[...new Set([...BROWSER_DESIGN_IDS,...catalogFromPaths(touched)])].sort();
-  if(ids.length===0||ids.some(id=>!liveIds.has(id)))
-    throw Error('promotion Browser Design or touched E2E ID absent from exact target');
+  const ids=[...new Set(catalogFromPaths(touched))].sort();
+  if(ids.some(id=>!liveIds.has(id)))
+    throw Error('promotion touched E2E ID absent from exact target');
   const identity={
     type:'promotion',source_head_sha:targetSha,main_sha:baseSha,
     lane_sha:targetSha,risk:'staging-to-main',
@@ -130,7 +128,8 @@ export function convergenceE2EPlan({baseSha,targetSha,ids,convergence}) {
 export function promotionE2EPlan({baseSha,targetSha,ids,convergence}) {
   const plan={schema_version:1,kind:'issue_e2e_selection',
     base_sha:baseSha,target_sha:targetSha,issues:[],
-    selected:ids.map(id=>({id,owners:[]})),mode:'selected',
+    selected:ids.map(id=>({id,owners:[]})),
+    mode:ids.length?'selected':'not-required',
     convergence};
   return {...plan,plan_digest:planDigest(plan)};
 }
@@ -204,10 +203,9 @@ export function convergenceApprovalCommand(batch){
   return '/approve-staging-convergence '+batch.integration_head+' '+
     convergenceBatchDigest(batch);
 }
-// A fully verified independent Full E2E source run replaces per-batch
-// human approval for risk-bearing known source changes. Missing/failed source
-// evidence never becomes a policy Pass, and unknown or removed test scope
-// cannot be rubber-stamped by either an Owner comment or a model verdict.
+// Historical Full receipts may still be inspected for diagnostics, but Full is
+// never authorization for merging either convergence direction (#3465).
+// Exact-head scoped PR checks and authentic source ancestry own admission.
 export function fullRegressionTitle(batch){
   convergenceBatchDigest(batch); // validate immutable source/plan identity
   return 'Convergence Full '+integrationBranch(batch.branch,
@@ -261,22 +259,15 @@ export function attestConvergenceFull(batch,run,jobs=[]){
     batch_digest:convergenceBatchDigest(batch),
     run_id:run.id,run_attempt:run.run_attempt};
 }
-export function convergenceApproval(batch,fullReceipt=null){
-  const digest=convergenceBatchDigest(batch);
+export function convergenceApproval(batch){
+  convergenceBatchDigest(batch); // authenticate full immutable source scope
   if(batch.impact.category==='unknown')
     return {approved:false,reason:'UNCLASSIFIED_BATCH_SCOPE'};
   if(batch.removed.length>0)
     return {approved:false,reason:'REMOVED_E2E_TESTS_REQUIRE_SOURCE_REPAIR'};
-  if(batch.impact.category==='tooling-only' &&
-      batch.newIds.length===0&&batch.regressionIds.length===0)
-    return {approved:true,reason:'AUTOMATED_TOOLING_SOURCE_POLICY'};
-  if(!fullReceipt?.verified||fullReceipt.source_head_sha!==batch.integration_head||
-      fullReceipt.batch_digest!==digest||
-      !Number.isSafeInteger(fullReceipt.run_id)||fullReceipt.run_id<=0)
-    return {approved:false,reason:'AWAITING_EXACT_HEAD_FULL_E2E',
-      full_run_title:fullRegressionTitle(batch)};
-  return {approved:true,reason:'AUTOMATED_VERIFIED_FULL_E2E',
-    full_run_id:fullReceipt.run_id};
+  // Applicable Quality/Case/selected E2E and GitHub mergeability are verified
+  // separately by the trusted readiness owner, never inferred from this policy.
+  return {approved:true,reason:'AUTOMATED_SCOPED_SOURCE_POLICY'};
 }
 export function selfTest(){
   const a='a'.repeat(40),b='b'.repeat(40),c='c'.repeat(40);
@@ -289,7 +280,9 @@ export function selfTest(){
   assert.notEqual(convergenceBatchDigest({...batch,changedPaths:['scripts/b.mjs']}),digest);
   assert.notEqual(convergenceBatchDigest({...batch,impact:{category:'tooling-only'}}),digest);
   assert.throws(()=>convergenceBatchDigest({...batch,impact:{category:'tooling'}}),/invalid/);
-  assert.equal(convergenceApproval(batch).reason,'AWAITING_EXACT_HEAD_FULL_E2E');
+  assert.equal(convergenceApproval(batch).reason,'AUTOMATED_SCOPED_SOURCE_POLICY');
+  assert.equal(convergenceApproval(batch).approved,true,
+    'mixed-risk source with scoped green checks does not wait for Full');
   assert.equal(convergenceApproval(batch,{verified:true,source_head_sha:c,
     batch_digest:digest,run_id:777}).approved,true);
   assert.equal(convergenceApproval({...batch,impact:{category:'tooling-only'}}).approved,true);
@@ -333,7 +326,8 @@ export function selfTest(){
   assert.equal(attestConvergenceFull(batch,run,[{...fullJob,run_attempt:1}]),null);
   assert.equal(attestConvergenceFull(batch,run,[{...fullJob,steps:fullJob.steps.slice(1)}]),null);
   assert.equal(attestConvergenceFull(batch,run,[{...fullJob,conclusion:'skipped'}]),null);
-  assert.equal(convergenceApproval(batch,{...fullReceipt,source_head_sha:a}).approved,false);
+  assert.equal(convergenceApproval(batch,{...fullReceipt,source_head_sha:a}).approved,true,
+    'unrelated/stale Full receipts cannot block scoped convergence');
   assert.throws(()=>convergenceBatchDigest({...batch,branch:'bad..branch'}),/invalid/);
   // Real Git object graph: test source-scope reconstruction, historical
   // changed-browser-ID selection, later Main advance and merged-push proof.
@@ -437,11 +431,15 @@ export function selfTest(){
     const promoter=promotionE2ESelection(promotion,root,main);
     assert.equal(promoter.mode,'selected');
     assert.deepEqual(promoter.issues,[]);
-    assert.ok(BROWSER_DESIGN_IDS.every(id=>promoter.selected.some(x=>x.id===id)));
+    assert.deepEqual(promoter.selected.map(x=>x.id),['promotion-delta'],
+      'promotion selects only the modified browser ID');
     assert.ok(promoter.selected.some(x=>x.id==='promotion-delta'),
       'changed browser ID from exact Main..Staging source must be selected');
     assert.ok(!promoter.selected.some(x=>['login','new-browser'].includes(x.id)),
       'unchanged Main-owned browser IDs must not be over-selected');
+    assert.equal(promotionE2EPlan({baseSha:main,targetSha:promoteSha,ids:[],
+      convergence:{}}).mode,'not-required',
+      'a no-browser-delta promotion must not run universal browser cases');
     assert.equal(promoter.plan_digest,planDigest(promoter),
       '#3311 promotion plan digest covers the canonical obligation fields');
     assert.notEqual(promoter.plan_digest,sha256(promoter),
