@@ -147,6 +147,12 @@ jobs:
           node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
           node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
+          # #3488: actual command/Artifact/Store negative fixtures must pass
+          # on the PR HEAD before activating the trusted main entrypoint.
+          node scripts/github-comment-command.mjs self-test
+          node scripts/lib/agent/orchestration/bug-develop-comment.mjs self-test
+          node scripts/lib/agent/orchestration/controller-request-selftest.mjs
+          node scripts/lib/agent/orchestration/controller-bug-dispatch-selftest.mjs
   rust-check:
     needs: scope
     if: needs.scope.outputs.rust == 'true'
