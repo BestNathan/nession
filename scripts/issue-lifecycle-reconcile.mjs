@@ -286,6 +286,20 @@ async function selfTest() {
   const pr = { number: 21, title: 'fix (#19)', body: 'Fixes #19', head: { sha },
     base: { ref: 'staging' }, merged_at: '2026-11-11T01:00:00Z', merge_commit_sha: sha };
   assert.equal(decideIssueClosure(issue, [pr]).action, 'close');
+  // Regression #3491: a main merge with unchecked/unevaluated main-stage SC
+  // must remain open for the merged-SHA Acceptance selector to discover it.
+  const mainPendingBody = body.replace('- [x] SC-01', '- [ ] SC-01')
+    .replace('when: pr\n', 'when: merged\n    branch: main\n')
+    .replace('| SC-01 | Pass |', '| SC-01 | Pending |');
+  assert.equal(decideIssueClosure(
+    { ...issue, body: mainPendingBody }, [{ ...pr, base: { ref: 'main' } }]
+  ).action, 'pending');
+  assert.equal(decideIssueClosure(
+    { ...issue, body: mainPendingBody
+      .replace('- [ ] SC-01', '- [x] SC-01')
+      .replace('| SC-01 | Pending |', '| SC-01 | Pass |') },
+    [{ ...pr, base: { ref: 'main' } }]
+  ).action, 'close');
   assert.equal(decideIssueClosure({ ...issue, labels: [{ name: 'requirement' }] }, [pr]).action, 'close');
   assert.equal(decideIssueClosure(issue, [pr], { manualReopened: true }).action, 'pending');
   assert.equal(decideIssueClosure(issue, [pr], {

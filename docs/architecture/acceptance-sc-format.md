@@ -91,25 +91,28 @@ Current runner timing is **derived**, never copied into the new Report: `pr → 
 
 The canonical lifecycle ordering is executable in `scripts/acceptance-lifecycle.mjs` (Gate `acceptance-lifecycle-selftest`). It never skips a state:
 
-1. **Development Complete** — every applicable SC passed in one eligible Staging lane at the exact tested revision. An ordinary Issue may close here; Main promotion and Full Regression are **not** prerequisites.
+1. **Development Complete** — staging-specific evidence passed in one eligible Staging lane at the exact tested revision. This is a release-pipeline milestone, **not** automatic Issue completion: any Issue SC scheduled for a later boundary remains mandatory.
 2. **Main Promoted** — a batch promotion merge explicitly includes the accepted source SHA. A Main merge without the Staging proof is not Main Promoted.
 3. **Regression Qualified** — Full Regression passed for the exact promoted Main merge SHA. A green run for any other SHA never qualifies a newer Main.
 4. **Released** — the release admitted the same SHA with the required approvals.
 
-A failure after Development Complete opens a Main/integration incident and blocks release; it does not retroactively invalidate the Issue's Staging proof or reopen completed feature Issues.
+A failure in a later release stage does not retroactively erase a previously accepted SC. Independent Full Regression and Release approvals belong to their own gates, rather than being silently added to every Issue.
 
-Executable consequence: `scripts/requirement-acceptance.mjs` requires `Pass`/`N/A` at closure only for `pr` and `merged/staging` criteria. A `merged/main` or `deployed` criterion is release qualification — its truthful `Pending`/`Fail` row blocks release, but it does not reopen or block the Issue at Development Complete. `scripts/acceptance-lifecycle.mjs` (Gate `acceptance-lifecycle-selftest`) owns the state ordering. Test and docs-only promotions that cannot affect runtime use an explicit authenticated `Not Required`, never a fabricated Full Pass.
+Executable consequence: `scripts/requirement-acceptance.mjs` requires every declared SC to be checked and have an evidenced `Pass` or justified `N/A` at **Issue closure**, including `merged/main` and `deployed` SCs. The `when` selector schedules proof; it never exempts a criterion. A PR may merge with an explicitly deferred merged-SHA/deployment SC, but the Issue remains Open and its merge/deployment trigger must advance that acceptance. `scripts/acceptance-lifecycle.mjs` orders independent release milestones; only `scripts/issue-lifecycle-reconcile.mjs` and the canonical SC validator authorize Issue closure. A tooling-only release may use independently authenticated `Not Required` without pretending runtime verification ran.
 
 ### Event-driven Issue close and explicit recovery
 
-Once an Issue's applicable SCs are accepted, an associated implementation PR
+Once **all declared SCs** have accepted evidence and checked projection, an associated implementation PR
 has merged to `staging` or `main`, and no explicit blocker/manual-reopen hold
 remains, `scripts/issue-lifecycle-reconcile.mjs` may close the Issue. This
 reconciliation is invoked from trusted Agent Acceptance and Case Ingest
 projection paths as well as PR merge events; it is not a new SC evaluator.
-The existing Issue-close guard remains authoritative and reopens invalid
-closures. A closed PR or a GitHub `Fixes #N` keyword is never an Acceptance
-Pass. Bug and Requirement use the same decision. Duplicate events are no-ops.
+The existing Issue-close guard reopens invalid external closures; automated
+reconciliation must reject incomplete SCs *before* writing Closed, because
+`GITHUB_TOKEN` events may not re-trigger the guard. A closed PR or a GitHub
+`Fixes #N` keyword is never an Acceptance Pass. The merged-SHA Acceptance
+planner must still see the Issue Open until its remaining SCs are evaluated.
+Bug and Requirement use the same decision. Duplicate events are no-ops.
 
 An exact `/accept` comment on an open native Issue from an authorized GitHub
 user is an optional recovery trigger, not part of the normal required path.
