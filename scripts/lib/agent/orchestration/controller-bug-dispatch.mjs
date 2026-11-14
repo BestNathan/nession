@@ -62,7 +62,7 @@ export async function dispatchAuthenticatedBug({source,root,event,sourceRun,remo
 async function main() {
   const env=process.env;
   if(env.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
-      env.GITHUB_EVENT_NAME!=='workflow_run'||
+      !['workflow_run','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
       env.GITHUB_WORKFLOW!=='Store / Agent Controller Ingest'||
       env.GITHUB_REF!=='refs/heads/main'||!positive(Number(env.GITHUB_RUN_ID))||
       Number(env.GITHUB_RUN_ATTEMPT)!==1)
