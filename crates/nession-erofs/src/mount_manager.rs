@@ -290,7 +290,7 @@ impl MountManager {
     /// Read-only lookup by digest. Never creates a mount or a consumer.
     pub fn lookup(&self, digest: &str) -> Option<MountStatus> {
         let entry = self.entry(digest)?;
-        Some(status_of(&entry))
+        Some(status_of(&entry, &self.inner.settings.mountinfo_path))
     }
 
     /// Read-only lookup by canonical physical mountpoint. An unknown path is
@@ -305,7 +305,7 @@ impl MountManager {
                 .find(|entry| entry.mountpoint == canonical || entry.mountpoint == mountpoint)
                 .cloned()
         }?;
-        Some(status_of(&entry))
+        Some(status_of(&entry, &self.inner.settings.mountinfo_path))
     }
 
     /// Acquire one consumer-scoped lease for a verified image.
@@ -327,7 +327,10 @@ impl MountManager {
                         state.phase = MountState::Unmounted;
                         continue;
                     };
-                    if !mount::is_erofs_mount(&entry.mountpoint) {
+                    if !mount::is_erofs_mount_at(
+                        &entry.mountpoint,
+                        &self.inner.settings.mountinfo_path,
+                    ) {
                         let failure = format!(
                             "the shared EROFS mount {} for {} disappeared",
                             entry.mountpoint.display(),
@@ -399,8 +402,11 @@ impl MountManager {
                     // cannot leave two mounts aliased.
                     state.phase = MountState::Unmounting;
                     drop(state);
-                    let reclaim =
-                        mount::unmount_shared(&self.inner.settings.fusermount, &entry.mountpoint);
+                    let reclaim = mount::unmount_shared_at(
+                        &self.inner.settings.fusermount,
+                        &entry.mountpoint,
+                        &self.inner.settings.mountinfo_path,
+                    );
                     let mut state = lock(&entry.state);
                     match reclaim {
                         Ok(()) => {
@@ -544,7 +550,7 @@ impl MountManager {
                 ));
                 continue;
             }
-            if !mount::is_erofs_mount(&entry.mountpoint) {
+            if !mount::is_erofs_mount_at(&entry.mountpoint, &self.inner.settings.mountinfo_path) {
                 report.unavailable.push((
                     consumer.digest.clone(),
                     "the physical EROFS mount is no longer present".to_string(),
@@ -655,7 +661,7 @@ impl MountManager {
             if in_use {
                 continue;
             }
-            if !mount::is_erofs_mount(&entry.mountpoint) {
+            if !mount::is_erofs_mount_at(&entry.mountpoint, &self.inner.settings.mountinfo_path) {
                 let mut state = lock(&entry.state);
                 state.phase = MountState::Unmounted;
                 state.generation = None;
@@ -668,7 +674,11 @@ impl MountManager {
             }
             let mut state = lock(&entry.state);
             state.phase = MountState::Unmounting;
-            match mount::unmount_shared(&self.inner.settings.fusermount, &entry.mountpoint) {
+            match mount::unmount_shared_at(
+                &self.inner.settings.fusermount,
+                &entry.mountpoint,
+                &self.inner.settings.mountinfo_path,
+            ) {
                 Ok(()) => {
                     state.phase = MountState::Unmounted;
                     state.generation = None;
@@ -707,7 +717,9 @@ impl MountManager {
                     .entry(&digest)
                     .map(|entry| entry.identity_path.exists())
                     .unwrap_or(false);
-                if known_identity || !mount::is_erofs_mount(&path) {
+                if known_identity
+                    || !mount::is_erofs_mount_at(&path, &self.inner.settings.mountinfo_path)
+                {
                     continue;
                 }
                 let entry = self.entry_or_create(&digest);
@@ -716,7 +728,11 @@ impl MountManager {
                     continue;
                 }
                 state.phase = MountState::Unmounting;
-                match mount::unmount_shared(&self.inner.settings.fusermount, &path) {
+                match mount::unmount_shared_at(
+                    &self.inner.settings.fusermount,
+                    &path,
+                    &self.inner.settings.mountinfo_path,
+                ) {
                     Ok(()) => {
                         state.phase = MountState::Unmounted;
                         state.generation = None;
@@ -810,8 +826,11 @@ impl MountManager {
         };
         mount::mount_shared(source, &entry.mountpoint, &self.inner.settings)?;
         if let Err(error) = write_identity(&entry.identity_path, &identity) {
-            let rollback =
-                mount::unmount_shared(&self.inner.settings.fusermount, &entry.mountpoint);
+            let rollback = mount::unmount_shared_at(
+                &self.inner.settings.fusermount,
+                &entry.mountpoint,
+                &self.inner.settings.mountinfo_path,
+            );
             return match rollback {
                 Ok(()) => Err(error),
                 Err(rollback) => Err(error.context(format!(
@@ -923,7 +942,11 @@ fn reclaim_if_unused(
         return Ok(());
     }
     state.phase = MountState::Unmounting;
-    match mount::unmount_shared(&inner.settings.fusermount, &entry.mountpoint) {
+    match mount::unmount_shared_at(
+        &inner.settings.fusermount,
+        &entry.mountpoint,
+        &inner.settings.mountinfo_path,
+    ) {
         Ok(()) => {
             state.phase = MountState::Unmounted;
             state.generation = None;
@@ -958,9 +981,9 @@ fn adopt_token(state: &mut EntryState, execution_id: &str, generation: &str) -> 
     token
 }
 
-fn status_of(entry: &MountEntry) -> MountStatus {
+fn status_of(entry: &MountEntry, mountinfo_path: &Path) -> MountStatus {
     let state = lock(&entry.state);
-    let mounted = mount::is_erofs_mount(&entry.mountpoint);
+    let mounted = mount::is_erofs_mount_at(&entry.mountpoint, mountinfo_path);
     let phase = if state.phase == MountState::Mounted && state.consumers.is_empty() {
         MountState::Idle
     } else {
@@ -1069,6 +1092,41 @@ mod tests {
         (path, digest_of_bytes(bytes))
     }
 
+    /// A manager whose fake helper records its mount in a private mount table.
+    ///
+    /// The production probe reads `/proc/self/mountinfo`; a fake helper can
+    /// never create a real FUSE mount, so the test injects the observation
+    /// path instead of asserting against the host mount namespace.
+    fn mounted_manager(root: &Path) -> Arc<MountManager> {
+        let mountinfo = root.join("mountinfo");
+        std::fs::write(&mountinfo, "").unwrap();
+        let helper = root.join("erofsfuse");
+        executable(
+            &helper,
+            &format!(
+                "#!/bin/sh\nprintf '1 0 0:1 / %s rw - fuse.erofsfuse erofsfuse rw\\n' \"$2\" >> '{}'\n",
+                mountinfo.display()
+            ),
+        );
+        let fusermount = root.join("fusermount3");
+        executable(
+            &fusermount,
+            &format!(
+                "#!/bin/sh\nif [ \"$1\" = \"-u\" ]; then \
+                 grep -v -F \" $2 \" '{path}' > '{path}.tmp' || true; \
+                 mv '{path}.tmp' '{path}' 2>/dev/null || true; fi\nexit 0\n",
+                path = mountinfo.display()
+            ),
+        );
+        MountManager::open(MountManagerConfig {
+            root: root.join("mounts-root"),
+            settings: MountSettings::new(helper, fusermount).with_mountinfo_path(&mountinfo),
+            authorized_roots: vec![root.join("images")],
+            pinner: None,
+        })
+        .unwrap()
+    }
+
     #[test]
     fn lookup_is_read_only_and_unknown_digests_have_no_status() {
         let root = tempfile::tempdir().unwrap();
@@ -1113,11 +1171,7 @@ mod tests {
     fn two_consumers_of_one_layer_share_one_physical_mount() {
         let root = tempfile::tempdir().unwrap();
         let (source, digest) = image(root.path(), b"one shared physical layer");
-        let manager = manager(
-            root.path(),
-            "#!/bin/sh\nexit 0\n",
-            vec![root.path().join("images")],
-        );
+        let manager = mounted_manager(root.path());
         let verified = VerifiedImage::new(digest.clone(), source).unwrap();
         let first = manager.acquire(&verified, "exec-a").unwrap();
         let second = manager.acquire(&verified, "exec-b").unwrap();
