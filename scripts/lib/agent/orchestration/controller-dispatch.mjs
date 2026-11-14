@@ -67,8 +67,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     publisherWakeProof?.action_id===actionId&&
     publisherWakeProof?.source_publisher_run_id===
       Number(event?.inputs?.source_publisher_run_id)&&
-    event?.inputs?.recovery_run_id!==undefined&&
-    String(event.inputs.recovery_run_id)==='0';
+    [undefined,'0',0].includes(event?.inputs?.recovery_run_id);
   const commanded=environment.GITHUB_EVENT_NAME==='issue_comment';
   const qwenV2Comment=commanded&&event?.action==='created'&&
     event?.issue?.number===3001&&event.issue.state==='open'&&
