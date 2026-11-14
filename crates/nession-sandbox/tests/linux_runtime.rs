@@ -112,14 +112,46 @@ mod helpers {
     }
 
     pub(super) fn launch(settings: &SandboxSettings, request: LaunchRequest) -> Running {
+        launch_with_overlay(settings, request, &[])
+    }
+
+    /// Apply the prepared image environment the way the Agent's Session create
+    /// does: bounded image defaults first, the composed PATH below an explicit
+    /// session PATH, explicit Session ENV last (below the runtime-owned
+    /// `NESSON_SANDBOX_*` facts).
+    pub(super) fn agent_session_environment(
+        prepared: &PreparedSandbox,
+        overlay: &[(String, String)],
+    ) -> Vec<(String, String)> {
+        let image = prepared.image_environment();
+        let mut envs = image.defaults.clone();
+        if !overlay.iter().any(|(key, _)| key == "PATH") {
+            if let Some(path) = nession_sandbox::compose_path_prepend(
+                &image.path_prepend,
+                std::env::var("PATH").ok().as_deref(),
+            ) {
+                envs.push(("PATH".to_string(), path));
+            }
+        }
+        envs.extend(overlay.iter().cloned());
+        envs.extend(prepared.env().iter().cloned());
+        envs
+    }
+
+    pub(super) fn launch_with_overlay(
+        settings: &SandboxSettings,
+        request: LaunchRequest,
+        overlay: &[(String, String)],
+    ) -> Running {
         let prepared = prepare(&request, settings).expect("prepare an execution");
+        let environment = agent_session_environment(&prepared, overlay);
         let program = prepared
             .command()
             .first()
             .expect("the launcher has a program");
         let mut command = Command::new(program); // not-tmux: spawns the sandbox trusted launcher
         command.args(prepared.command().get(1..).unwrap_or_default());
-        for (key, value) in prepared.env() {
+        for (key, value) in &environment {
             command.env(key, value);
         }
         let child = command
@@ -355,6 +387,7 @@ mod helpers {
         }
         for directory in [
             "workspace",
+            "opt/go",
             "opt/node",
             "opt/rust",
             "home",
@@ -419,6 +452,9 @@ mod helpers {
         );
         std::fs::write(project_source.join("project.txt"), "project\n").expect("project file");
         std::fs::write(toolchain_source.join("marker"), "toolchain\n").expect("tool file");
+        std::fs::create_dir_all(toolchain_source.join("bin")).expect("toolchain bin");
+        std::fs::write(toolchain_source.join("bin/go-tool"), "#!/bin/sh\nexit 0\n")
+            .expect("toolchain executable");
         let base = images.join("base.erofs");
         let project = images.join("project.erofs");
         let toolchain = images.join("toolchain.erofs");
@@ -470,6 +506,43 @@ mod helpers {
         toolchain_image: &Path,
         toolchain_digest: &str,
     ) -> SandboxPolicy {
+        composition_policy_with_runtime(
+            base_image,
+            base_digest,
+            workspace_image,
+            workspace_digest,
+            workspace_write,
+            toolchain_image,
+            toolchain_digest,
+            "/opt/node",
+            &[],
+            &[],
+            None,
+        )
+    }
+
+    /// A composition whose toolchain target, Config Env defaults and advisory
+    /// `path.prepend` are explicit (#3500).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn composition_policy_with_runtime(
+        base_image: &Path,
+        base_digest: &str,
+        workspace_image: &Path,
+        workspace_digest: &str,
+        workspace_write: &Path,
+        toolchain_image: &Path,
+        toolchain_digest: &str,
+        toolchain_target: &str,
+        base_env: &[(&str, &str)],
+        toolchain_env: &[(&str, &str)],
+        path_prepend: Option<&str>,
+    ) -> SandboxPolicy {
+        let env = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+                .collect::<Vec<_>>()
+        };
         serde_json::from_value(serde_json::json!({
             "version": 1,
             "enabled": true,
@@ -487,11 +560,14 @@ mod helpers {
                         },
                         "write": workspace_write.to_string_lossy()
                     },
+                    "base_env": env(base_env),
                     "toolchains": [
                         {
                             "digest": format!("sha256:{toolchain_digest}"),
                             "source": toolchain_image.to_string_lossy(),
-                            "target": "/opt/node"
+                            "target": toolchain_target,
+                            "env": env(toolchain_env),
+                            "path_prepend": path_prepend
                         }
                     ]
                 }
@@ -1563,6 +1639,510 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
         "first_mounts_released": first_record.mounts.len() + first_record.shared_mounts.len(),
         "second_mounts_released": second_record.mounts.len() + second_record.shared_mounts.len(),
         "shared_mounts": first_record.shared_mounts.len(),
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// #3500 image Config Env and mount annotations
+// ---------------------------------------------------------------------------
+
+#[test]
+fn image_config_defaults_and_the_resolved_prepend_reach_the_sandboxed_process() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let write = settings.state_dir.join("workspaces").join("image-env");
+    std::fs::create_dir_all(&write).expect("workspace");
+
+    let policy = composition_policy_with_runtime(
+        &images.base,
+        &images.base_digest,
+        &images.project,
+        &images.project_digest,
+        &write,
+        &images.toolchain,
+        &images.toolchain_digest,
+        "/opt/go",
+        &[("IMAGE_LANGUAGE", "base"), ("SHARED", "base")],
+        &[("GO_TOOLCHAIN", "image"), ("SHARED", "tool")],
+        Some("bin"),
+    );
+    let request = || LaunchRequest {
+        policy: policy.clone(),
+        session_name: "image-env".to_string(),
+        instance_id: "instance-image-env".to_string(),
+        working_dir: "/workspace".to_string(),
+        inner_command: vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "printf 'PATH=%s\\n' \"$PATH\"; \
+             printf 'GO=%s\\n' \"$GO_TOOLCHAIN\"; \
+             printf 'IMAGE=%s\\n' \"$IMAGE_LANGUAGE\"; \
+             printf 'SHARED=%s\\n' \"$SHARED\""
+                .to_string(),
+        ],
+        tmux_socket: None,
+    };
+
+    let mut first = launch_with_overlay(&settings, request(), &[]);
+    verify_or_report(
+        &mut first,
+        "the image environment barrier must verify before the shell runs",
+    );
+    let (status, stdout, stderr) = wait_for_exit(&mut first);
+    assert!(
+        status.success(),
+        "the sandboxed shell must exit successfully: stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("PATH=/opt/go/bin:"),
+        "the resolved prepend must lead PATH: {stdout}"
+    );
+    assert!(
+        stdout.contains("GO=image"),
+        "the toolchain Config Env must reach the process: {stdout}"
+    );
+    assert!(
+        stdout.contains("IMAGE=base"),
+        "the Base Runtime Config Env must reach the process: {stdout}"
+    );
+    assert!(
+        stdout.contains("SHARED=tool"),
+        "a tool default must sit above a base default: {stdout}"
+    );
+
+    // An explicit Session/Sandbox ENV deterministically overrides every image
+    // default in the same create; the mounted prepend still leads PATH unless
+    // the same create sets PATH itself.
+    let mut second = launch_with_overlay(
+        &settings,
+        request(),
+        &[
+            ("GO_TOOLCHAIN".to_string(), "session".to_string()),
+            ("IMAGE_LANGUAGE".to_string(), "session".to_string()),
+            ("SHARED".to_string(), "session".to_string()),
+        ],
+    );
+    verify_or_report(
+        &mut second,
+        "the explicit-Session-ENV barrier must verify before the shell runs",
+    );
+    let (status, stdout, stderr) = wait_for_exit(&mut second);
+    assert!(
+        status.success(),
+        "the second sandboxed shell must exit successfully: stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("GO=session")
+            && stdout.contains("IMAGE=session")
+            && stdout.contains("SHARED=session"),
+        "explicit Session ENV must win over image defaults: {stdout}"
+    );
+    assert!(
+        stdout.contains("PATH=/opt/go/bin:"),
+        "the mounted executable directory remains on PATH: {stdout}"
+    );
+
+    // An explicit PATH in the same create wins over the image prepend.
+    let mut third = launch_with_overlay(
+        &settings,
+        request(),
+        &[("PATH".to_string(), "/session/bin:/usr/bin:/bin".to_string())],
+    );
+    verify_or_report(&mut third, "the explicit-PATH barrier must verify");
+    let (status, stdout, _) = wait_for_exit(&mut third);
+    assert!(status.success());
+    assert!(
+        stdout.contains("PATH=/session/bin:/usr/bin:/bin"),
+        "an explicit Session PATH wins over the image prepend: {stdout}"
+    );
+
+    print_evidence(&serde_json::json!({
+        "prepend_on_path": "/opt/go/bin",
+        "base_default": "base",
+        "tool_default_over_base": "tool",
+        "explicit_session_env_over_image": true,
+        "explicit_path_wins": true,
+    }));
+}
+
+#[test]
+fn a_missing_prepend_directory_fails_before_any_process_launches() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    // A toolchain image without the declared executable directory.
+    let source = dir.path().join("toolchain-no-bin-source");
+    std::fs::create_dir_all(source.join("lib")).expect("toolchain source");
+    std::fs::write(source.join("lib/only.txt"), "no bin\n").expect("toolchain file");
+    let toolchain_no_bin = dir.path().join("images/toolchain-no-bin.erofs");
+    mkfs_erofs(&source, &toolchain_no_bin);
+    let toolchain_no_bin_digest = sha256_file(&toolchain_no_bin);
+
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let write = settings.state_dir.join("workspaces").join("missing-bin");
+    std::fs::create_dir_all(&write).expect("workspace");
+    let policy = composition_policy_with_runtime(
+        &images.base,
+        &images.base_digest,
+        &images.project,
+        &images.project_digest,
+        &write,
+        &toolchain_no_bin,
+        &toolchain_no_bin_digest,
+        "/opt/go",
+        &[],
+        &[],
+        Some("bin"),
+    );
+    let request = LaunchRequest {
+        policy,
+        session_name: "missing-bin".to_string(),
+        instance_id: "instance-missing-bin".to_string(),
+        working_dir: "/workspace".to_string(),
+        inner_command: vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "exit 0".to_string(),
+        ],
+        tmux_socket: None,
+    };
+    let error = match prepare(&request, &settings) {
+        Ok(_) => panic!("a missing executable directory must fail before launch"),
+        Err(error) => error,
+    };
+    let text = format!("{error:#}");
+    assert!(
+        text.contains("path.prepend") && text.contains("bin"),
+        "the refusal must be actionable: {text}"
+    );
+    // No execution record, process or overlay survives the refused prepare.
+    let records = std::fs::read_dir(&settings.state_dir)
+        .map(|entries| {
+            entries
+                .filter_map(std::result::Result::ok)
+                .filter(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    assert_eq!(records, 0, "a refused prepare must not write a record");
+    print_evidence(&serde_json::json!({
+        "missing_prepend_refused": true,
+        "record_written": false,
+    }));
+}
+
+#[test]
+fn one_layer_in_two_sessions_keeps_distinct_targets_and_environment_without_premature_unmount() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let first_write = settings.state_dir.join("workspaces").join("node");
+    let second_write = settings.state_dir.join("workspaces").join("rust");
+    std::fs::create_dir_all(&first_write).expect("first workspace");
+    std::fs::create_dir_all(&second_write).expect("second workspace");
+
+    // The same physical EROFS layer is mounted for both Sessions, under two
+    // distinct targets with two distinct bounded environments.
+    let first_policy = composition_policy_with_runtime(
+        &images.base,
+        &images.base_digest,
+        &images.project,
+        &images.project_digest,
+        &first_write,
+        &images.toolchain,
+        &images.toolchain_digest,
+        "/opt/node",
+        &[("SESSION_FLAVOR", "node")],
+        &[("TOOL_FLAVOR", "node")],
+        Some("bin"),
+    );
+    let second_policy = composition_policy_with_runtime(
+        &images.base,
+        &images.base_digest,
+        &images.project,
+        &images.project_digest,
+        &second_write,
+        &images.toolchain,
+        &images.toolchain_digest,
+        "/opt/rust",
+        &[("SESSION_FLAVOR", "rust")],
+        &[("TOOL_FLAVOR", "rust")],
+        Some("bin"),
+    );
+    let launch_policy = |policy: SandboxPolicy, name: &str| {
+        launch(
+            &settings,
+            LaunchRequest {
+                policy,
+                session_name: name.to_string(),
+                instance_id: format!("instance-{name}"),
+                working_dir: "/workspace".to_string(),
+                inner_command: vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo READY; sleep 5".to_string(),
+                ],
+                tmux_socket: None,
+            },
+        )
+    };
+    let mut first = launch_policy(first_policy, "layer-first");
+    let mut second = launch_policy(second_policy, "layer-second");
+    verify_or_report(&mut first, "the first layer Session must verify");
+    verify_or_report(&mut second, "the second layer Session must verify");
+    let first_record = first.prepared.record().clone();
+    let second_record = second.prepared.record().clone();
+    let targets = |record: &nession_sandbox::ExecutionRecord| {
+        record
+            .effective_policy
+            .as_ref()
+            .and_then(|policy| policy.filesystem.as_ref())
+            .and_then(|filesystem| filesystem.composition.as_ref())
+            .map(|composition| {
+                composition
+                    .toolchains
+                    .iter()
+                    .map(|toolchain| toolchain.target.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(targets(&first_record), vec!["/opt/node"]);
+    assert_eq!(targets(&second_record), vec!["/opt/rust"]);
+    let defaults = |record: &nession_sandbox::ExecutionRecord| {
+        record
+            .effective_policy
+            .as_ref()
+            .and_then(|policy| policy.filesystem.as_ref())
+            .and_then(|filesystem| filesystem.composition.as_ref())
+            .map(|composition| {
+                (
+                    composition
+                        .base_env
+                        .iter()
+                        .map(|entry| (entry.name.clone(), entry.value.clone()))
+                        .collect::<Vec<_>>(),
+                    composition.toolchains[0]
+                        .env
+                        .iter()
+                        .map(|entry| (entry.name.clone(), entry.value.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        defaults(&first_record),
+        (
+            vec![("SESSION_FLAVOR".to_string(), "node".to_string())],
+            vec![("TOOL_FLAVOR".to_string(), "node".to_string())],
+        )
+    );
+    assert_eq!(
+        defaults(&second_record),
+        (
+            vec![("SESSION_FLAVOR".to_string(), "rust".to_string())],
+            vec![("TOOL_FLAVOR".to_string(), "rust".to_string())],
+        )
+    );
+    // One verified layer -> exactly one physical mount shared by both.
+    assert_eq!(first_record.shared_mounts.len(), 3);
+    let mut first_shared: Vec<&str> = first_record
+        .shared_mounts
+        .iter()
+        .map(|shared| shared.mountpoint.as_str())
+        .collect();
+    let mut second_shared: Vec<&str> = second_record
+        .shared_mounts
+        .iter()
+        .map(|shared| shared.mountpoint.as_str())
+        .collect();
+    first_shared.sort_unstable();
+    second_shared.sort_unstable();
+    assert_eq!(first_shared, second_shared);
+    for shared in &first_record.shared_mounts {
+        assert!(nession_sandbox::linux::erofs::is_mounted(Path::new(
+            &shared.mountpoint
+        )));
+        assert_eq!(
+            settings
+                .mount_manager
+                .as_ref()
+                .expect("mount manager")
+                .lookup(&shared.digest)
+                .expect("known digest")
+                .consumers,
+            2
+        );
+    }
+
+    let _ = first.child.kill();
+    let _ = first.child.wait();
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the first Session");
+    for shared in &first_record.shared_mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(&shared.mountpoint)),
+            "releasing one Session must not unmount the shared layer"
+        );
+    }
+
+    let _ = second.child.kill();
+    let _ = second.child.wait();
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the second Session");
+    for shared in &second_record.shared_mounts {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(&shared.mountpoint)),
+            "the last consumer must unmount the shared layer"
+        );
+    }
+    print_evidence(&serde_json::json!({
+        "targets": ["/opt/node", "/opt/rust"],
+        "distinct_environment": true,
+        "shared_layer_mounts": first_record.shared_mounts.len(),
+        "premature_unmount": false,
+    }));
+}
+
+#[test]
+fn an_already_running_pane_keeps_its_image_environment_after_a_new_binding() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let first_write = settings.state_dir.join("workspaces").join("running-first");
+    let second_write = settings.state_dir.join("workspaces").join("running-second");
+    std::fs::create_dir_all(&first_write).expect("first workspace");
+    std::fs::create_dir_all(&second_write).expect("second workspace");
+    let first_policy = composition_policy_with_runtime(
+        &images.base,
+        &images.base_digest,
+        &images.project,
+        &images.project_digest,
+        &first_write,
+        &images.toolchain,
+        &images.toolchain_digest,
+        "/opt/node",
+        &[("SESSION_FLAVOR", "first")],
+        &[("TOOL_FLAVOR", "first")],
+        Some("bin"),
+    );
+    let mut first = launch_with_overlay(
+        &settings,
+        LaunchRequest {
+            policy: first_policy,
+            session_name: "running-first".to_string(),
+            instance_id: "instance-running-first".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "sleep 30".to_string(),
+            ],
+            tmux_socket: None,
+        },
+        &[],
+    );
+    verify_or_report(&mut first, "the first Pane must verify");
+    let read_environment = || {
+        std::fs::read(format!("/proc/{}/environ", first.pane_pid))
+            .map(|bytes| {
+                bytes
+                    .split(|byte| *byte == 0)
+                    .map(|entry| String::from_utf8_lossy(entry).into_owned())
+                    .collect::<Vec<_>>()
+            })
+            .expect("read the running Pane environment")
+    };
+    let before = read_environment();
+    assert!(
+        before.iter().any(|entry| entry == "TOOL_FLAVOR=first"),
+        "the first Pane started with its image default: {before:?}"
+    );
+    assert!(
+        before
+            .iter()
+            .any(|entry| entry.starts_with("PATH=/opt/node/bin:")),
+        "the first Pane started with its resolved prepend: {before:?}"
+    );
+
+    // A second image binding is prepared while the first Pane keeps running.
+    let second_policy = composition_policy_with_runtime(
+        &images.base,
+        &images.base_digest,
+        &images.project,
+        &images.project_digest,
+        &second_write,
+        &images.toolchain,
+        &images.toolchain_digest,
+        "/opt/rust",
+        &[("SESSION_FLAVOR", "second")],
+        &[("TOOL_FLAVOR", "second")],
+        Some("bin"),
+    );
+    let second = prepare(
+        &LaunchRequest {
+            policy: second_policy,
+            session_name: "running-second".to_string(),
+            instance_id: "instance-running-second".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "exit 0".to_string(),
+            ],
+            tmux_socket: None,
+        },
+        &settings,
+    )
+    .expect("the second composition prepares while the first Pane runs");
+
+    let after = read_environment();
+    assert_eq!(
+        before, after,
+        "an already running Pane must not receive a retroactive PATH or environment change"
+    );
+
+    second
+        .abort()
+        .expect("release the unstarted second composition");
+    let _ = first.child.kill();
+    let _ = first.child.wait();
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the running Pane");
+    print_evidence(&serde_json::json!({
+        "running_environment_unchanged": true,
+        "adopting_a_new_binding_requires_reentry": true,
     }));
 }
 

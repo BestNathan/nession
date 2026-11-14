@@ -168,6 +168,47 @@ pub struct VerifiedControls {
     pub filesystem_probes: usize,
 }
 
+/// Bounded image runtime suggestions the prepared Sandbox resolved (#3500).
+///
+/// The Agent applies `defaults` below an explicit Session/Sandbox ENV and
+/// composes `PATH` with [`compose_path_prepend`]. This is data, not a grant:
+/// the mount and target were already validated by `prepare`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImageRuntimeEnvironment {
+    /// Standard Config Env defaults: Base Runtime first, then enabled
+    /// toolchains sorted by target.
+    pub defaults: Vec<(String, String)>,
+    /// Absolute sandbox executable directories from `io.nession.path.prepend`,
+    /// resolved against each actual mount target.
+    pub path_prepend: Vec<String>,
+}
+
+/// Compose `PATH` from resolved image prepend directories and the effective
+/// base `PATH`.
+///
+/// This is the only Sandbox-sanctioned PATH contribution from an image: the
+/// prepend directories are exactly the mounted executable directories below
+/// validated mount targets. An explicit Session/Sandbox `PATH` supplied in the
+/// same create wins by not calling this helper. `None` means "leave the base
+/// environment's PATH unchanged".
+pub fn compose_path_prepend(prepend: &[String], base: Option<&str>) -> Option<String> {
+    if prepend.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<&str> = prepend
+        .iter()
+        .map(String::as_str)
+        .filter(|part| part.starts_with('/'))
+        .collect();
+    if let Some(base) = base.filter(|base| !base.is_empty()) {
+        parts.push(base);
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join(":"))
+}
+
 /// A prepared but not yet verified launch.
 pub struct PreparedSandbox {
     pub compiled: CompiledSandboxPolicy,
@@ -237,8 +278,25 @@ impl PreparedSandbox {
     }
 
     /// Extra Session environment delivered by the create.
+    ///
+    /// These are the runtime-owned `NESSON_SANDBOX_*` facts only; they are
+    /// appended after every caller value and cannot be overridden by an image.
     pub fn env(&self) -> &[(String, String)] {
         &self.extra_env
+    }
+
+    /// The bounded standard Config Env defaults and resolved PATH prepend
+    /// directories of the prepared composition (#3500).
+    ///
+    /// Mounts were prepared before this value exists, so the Agent applies it
+    /// while constructing the final process environment and before the Coding
+    /// Agent starts.
+    pub fn image_environment(&self) -> ImageRuntimeEnvironment {
+        self.compiled
+            .filesystem
+            .as_ref()
+            .map(crate::policy::CompiledFilesystem::image_environment)
+            .unwrap_or_default()
     }
 
     /// The verified execution report carried by the create response.
@@ -1405,5 +1463,26 @@ mod tests {
         cleanup_record(&settings, &evil, &mut report).expect("cleanup");
         // The record is removed, but the unowned directory is not.
         assert!(!evil.record_path(&settings).exists());
+    }
+
+    #[test]
+    fn image_path_prepend_is_composed_before_the_effective_base_path() {
+        assert_eq!(
+            compose_path_prepend(&["/opt/go/bin".to_string()], Some("/usr/bin:/bin")),
+            Some("/opt/go/bin:/usr/bin:/bin".to_string())
+        );
+        assert_eq!(
+            compose_path_prepend(
+                &["/opt/go/bin".to_string(), "/opt/rust/bin".to_string()],
+                None
+            ),
+            Some("/opt/go/bin:/opt/rust/bin".to_string())
+        );
+        assert_eq!(compose_path_prepend(&[], Some("/usr/bin")), None);
+        // A non-absolute entry can never enter PATH.
+        assert_eq!(
+            compose_path_prepend(&["relative/bin".to_string()], Some("/bin")),
+            Some("/bin".to_string())
+        );
     }
 }

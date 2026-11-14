@@ -11,9 +11,10 @@ use std::path::{Component, Path, PathBuf};
 
 use nession_protocol::contracts::sandbox::v1::{
     SandboxCgroupV2Policy, SandboxEnforcement, SandboxFilesystemComposition,
-    SandboxFilesystemPolicy, SandboxFilesystemRoot, SandboxFilesystemWorkspace, SandboxImageRef,
-    SandboxLinuxNamespaces, SandboxMountSource, SandboxNetworkMode, SandboxPolicy,
-    SandboxToolchainImage, SandboxWorkspace, SandboxWorkspaceOwnership, SANDBOX_POLICY_VERSION,
+    SandboxFilesystemPolicy, SandboxFilesystemRoot, SandboxFilesystemWorkspace,
+    SandboxImageEnvDefault, SandboxImageRef, SandboxLinuxNamespaces, SandboxMountSource,
+    SandboxNetworkMode, SandboxPolicy, SandboxToolchainImage, SandboxWorkspace,
+    SandboxWorkspaceOwnership, SANDBOX_POLICY_VERSION,
 };
 use nession_protocol::contracts::workspace::v1::{is_valid_workspace_id, validate_workspace_name};
 use sha2::{Digest, Sha256};
@@ -52,11 +53,18 @@ pub struct CompiledFilesystem {
 }
 
 /// One verified local EROFS image and its sandbox mount target.
+///
+/// `env` and `path_prepend` are the prepared image's standard Config
+/// suggestions (#3500). They are validated here and applied by `prepare`;
+/// they never authorize a mount.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledImage {
     pub digest: String,
     pub source: PathBuf,
     pub target: PathBuf,
+    pub env: Vec<(String, String)>,
+    /// Relative executable directory below `target`, already normalized.
+    pub path_prepend: Option<PathBuf>,
 }
 
 /// The compiled `/workspace` view.
@@ -122,6 +130,71 @@ impl CompiledComposition {
     /// The path the composition must make visible for a working workspace.
     pub fn workspace_probe(&self) -> PathBuf {
         PathBuf::from("/workspace")
+    }
+
+    /// The bounded standard Config `Env` defaults in deterministic precedence
+    /// order: Base Runtime first, then enabled toolchains sorted by target.
+    ///
+    /// Base defaults sit below tool defaults; a tool key replaces a base key
+    /// in place. Equal-precedence tool conflicts were already refused by
+    /// `compile`, so the result here has one value per key.
+    pub fn image_env_defaults(&self) -> Vec<(String, String)> {
+        let mut merged: Vec<(String, String)> = Vec::new();
+        let mut positions: BTreeMap<String, usize> = BTreeMap::new();
+        for (name, value) in self
+            .base
+            .env
+            .iter()
+            .chain(self.toolchains.iter().flat_map(|image| image.env.iter()))
+        {
+            match positions.get(name) {
+                Some(&position) => {
+                    if let Some(slot) = merged.get_mut(position) {
+                        slot.1 = value.clone();
+                    }
+                }
+                None => {
+                    positions.insert(name.clone(), merged.len());
+                    merged.push((name.clone(), value.clone()));
+                }
+            }
+        }
+        merged
+    }
+
+    /// Absolute in-sandbox executable directories contributed by enabled
+    /// toolchains, sorted by mount target.
+    ///
+    /// The advisory `path.prepend` is resolved against the *actual* mount
+    /// target, never against the annotation's proposal.
+    pub fn path_prepend_dirs(&self) -> Vec<PathBuf> {
+        self.toolchains
+            .iter()
+            .filter_map(|image| {
+                image
+                    .path_prepend
+                    .as_ref()
+                    .map(|prepend| image.target.join(prepend))
+            })
+            .collect()
+    }
+}
+
+impl CompiledFilesystem {
+    /// The bounded image environment suggestions for this filesystem, when it
+    /// carries a prepared composition.
+    pub fn image_environment(&self) -> crate::exec::ImageRuntimeEnvironment {
+        match &self.composition {
+            Some(composition) => crate::exec::ImageRuntimeEnvironment {
+                defaults: composition.image_env_defaults(),
+                path_prepend: composition
+                    .path_prepend_dirs()
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+            },
+            None => crate::exec::ImageRuntimeEnvironment::default(),
+        }
     }
 }
 
@@ -571,7 +644,8 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
 }
 
 fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<CompiledComposition> {
-    let base = compile_image(&composition.base, Path::new("/"))?;
+    let base_env = validate_image_env(&composition.base_env, "filesystem.composition.base_env")?;
+    let base = compile_image(&composition.base, Path::new("/"), base_env)?;
     let Some(workspace_config) = composition.workspace.as_ref() else {
         return Err(SandboxError::InvalidPolicy(
             "filesystem.composition requires workspace.write so the user has a writable tree"
@@ -581,7 +655,7 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
     let image = workspace_config
         .image
         .as_ref()
-        .map(|image| compile_image(image, Path::new("/workspace")))
+        .map(|image| compile_image(image, Path::new("/workspace"), Vec::new()))
         .transpose()?;
     let write = validate_path(&workspace_config.write)?;
     if write == Path::new("/") {
@@ -607,15 +681,30 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
     let mut toolchains = composition
         .toolchains
         .iter()
-        .map(|toolchain| {
+        .enumerate()
+        .map(|(index, toolchain)| {
             let target = validate_toolchain_target(&toolchain.target)?;
+            let env = validate_image_env(
+                &toolchain.env,
+                &format!("filesystem.composition.toolchains[{index}].env"),
+            )?;
+            let path_prepend = toolchain
+                .path_prepend
+                .as_deref()
+                .map(validate_path_prepend)
+                .transpose()?;
             compile_image(
                 &SandboxImageRef {
                     digest: toolchain.digest.clone(),
                     source: toolchain.source.clone(),
                 },
                 &target,
+                env,
             )
+            .map(|mut image| {
+                image.path_prepend = path_prepend;
+                image
+            })
         })
         .collect::<Result<Vec<_>>>()?;
     toolchains.sort_by(|left, right| left.target.cmp(&right.target));
@@ -629,6 +718,7 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
             }
         }
     }
+    validate_tool_env_precedence(&toolchains)?;
     Ok(CompiledComposition {
         base,
         workspace,
@@ -636,14 +726,230 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
     })
 }
 
-fn compile_image(image: &SandboxImageRef, target: &Path) -> Result<CompiledImage> {
+fn compile_image(
+    image: &SandboxImageRef,
+    target: &Path,
+    env: Vec<(String, String)>,
+) -> Result<CompiledImage> {
     validate_image_digest(&image.digest)?;
     let source = validate_path(&image.source)?;
     Ok(CompiledImage {
         digest: image.digest.clone(),
         source,
         target: target.to_path_buf(),
+        env,
+        path_prepend: None,
     })
+}
+
+/// Bound on the number of Config Env defaults accepted from one image.
+///
+/// This mirrors `nession_erofs::oci::usage`'s bounded input: the Agent
+/// parses the Config, and the Sandbox independently re-validates the prepared
+/// policy as a trust boundary.
+const MAX_IMAGE_ENV_ENTRIES: usize = 128;
+const MAX_IMAGE_ENV_KEY_BYTES: usize = 255;
+const MAX_IMAGE_ENV_VALUE_BYTES: usize = 16 * 1024;
+const MAX_IMAGE_ENV_TOTAL_BYTES: usize = 64 * 1024;
+
+/// Validate one image's standard Config `Env` defaults.
+///
+/// Invalid names, NUL/control characters, over-budget input and a dangerous
+/// reserved variable fail closed. Variables the execution itself owns
+/// (`TERM`, locale, `HOME`, `PWD`, `TMPDIR`) are dropped deterministically:
+/// the Sandbox value wins and the image never supplies it. Duplicate names
+/// within one image are last-wins (standard container semantics).
+fn validate_image_env(
+    defaults: &[SandboxImageEnvDefault],
+    field: &str,
+) -> Result<Vec<(String, String)>> {
+    if defaults.len() > MAX_IMAGE_ENV_ENTRIES {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "{field} has {} entries, above the bounded maximum {MAX_IMAGE_ENV_ENTRIES}",
+            defaults.len()
+        )));
+    }
+    let mut merged: Vec<(String, String)> = Vec::new();
+    let mut positions: BTreeMap<String, usize> = BTreeMap::new();
+    let mut total_bytes = 0usize;
+    for (index, entry) in defaults.iter().enumerate() {
+        validate_env_name(&entry.name).map_err(|reason| {
+            SandboxError::InvalidPolicy(format!("{field}[{index}].name: {reason}"))
+        })?;
+        if entry.value.contains('\0') || entry.value.chars().any(char::is_control) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "{field}[{index}].value for {} must not contain NUL or control characters",
+                entry.name
+            )));
+        }
+        if entry.name.len() > MAX_IMAGE_ENV_KEY_BYTES {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "{field}[{index}].name is longer than {MAX_IMAGE_ENV_KEY_BYTES} bytes"
+            )));
+        }
+        if entry.value.len() > MAX_IMAGE_ENV_VALUE_BYTES {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "{field}[{index}].value for {} is longer than {MAX_IMAGE_ENV_VALUE_BYTES} bytes",
+                entry.name
+            )));
+        }
+        total_bytes = total_bytes
+            .saturating_add(entry.name.len())
+            .saturating_add(entry.value.len());
+        if total_bytes > MAX_IMAGE_ENV_TOTAL_BYTES {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "{field} exceeds the bounded total of {MAX_IMAGE_ENV_TOTAL_BYTES} bytes"
+            )));
+        }
+        if let Some(reason) = forbidden_image_env_reason(&entry.name) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "{field}[{index}].name: {} is reserved by the Sandbox ({reason}); \
+                 an image Config cannot set it",
+                entry.name
+            )));
+        }
+        if execution_owned_image_env(&entry.name) {
+            // The execution owns this variable; the image value is ignored,
+            // never applied as a default.
+            continue;
+        }
+        match positions.get(&entry.name) {
+            Some(&position) => {
+                if let Some(slot) = merged.get_mut(position) {
+                    slot.1 = entry.value.clone();
+                }
+            }
+            None => {
+                positions.insert(entry.name.clone(), merged.len());
+                merged.push((entry.name.clone(), entry.value.clone()));
+            }
+        }
+    }
+    Ok(merged)
+}
+
+/// A dangerous variable that an image Config Env may never set.
+///
+/// The image is untrusted input for environment purposes: it is never an
+/// authorization capability. `PATH` is deliberately included because this
+/// phase's only PATH contribution is a toolchain's `path.prepend` relative to
+/// a validated mount target; a Config `PATH` would search outside the mounts.
+fn forbidden_image_env_reason(key: &str) -> Option<&'static str> {
+    match key {
+        "PATH" => Some("PATH is composed from mounted executable directories"),
+        "LD_PRELOAD" | "LD_LIBRARY_PATH" | "LD_AUDIT" | "LD_DEBUG" => {
+            Some("the dynamic loader is owned by the native root")
+        }
+        "BASH_ENV" | "ENV" | "ZDOTDIR" | "SHELL" | "IFS" => {
+            Some("shell startup and parsing are owned by the Session")
+        }
+        "PROMPT_COMMAND" | "PS1" => Some("the Session shell adapter owns the prompt"),
+        "TMUX" | "TMUX_PANE" | "TMUX_TMPDIR" => {
+            Some("the terminal and tmux control surface are owned by Nession")
+        }
+        "SSH_AUTH_SOCK"
+        | "SSH_AGENT_PID"
+        | "GPG_AGENT_INFO"
+        | "DBUS_SESSION_BUS_ADDRESS"
+        | "XDG_RUNTIME_DIR" => Some("host control sockets are masked by the Sandbox"),
+        "HTTP_PROXY" | "HTTPS_PROXY" | "ALL_PROXY" | "NO_PROXY" | "http_proxy" | "https_proxy"
+        | "all_proxy" | "no_proxy" => Some("network egress policy is owned by the Sandbox"),
+        "HOSTALIASES" | "RESOLV_HOST_CONF" => Some("resolver policy is owned by the Sandbox"),
+        _ if key.starts_with("NESSON_") => Some("Nession runtime variables are owned by Nession"),
+        _ if key.starts_with("LD_") => Some("the dynamic loader is owned by the native root"),
+        _ if key.ends_with("_PROXY") || key.ends_with("_proxy") => {
+            Some("network egress policy is owned by the Sandbox")
+        }
+        _ => None,
+    }
+}
+
+/// A runtime variable the execution itself owns.
+///
+/// These are not dangerous, but an image must not decide them: the private
+/// runtime directories, terminal and locale are execution facts. The image
+/// value is dropped so the Sandbox/backend value is the only one.
+fn execution_owned_image_env(key: &str) -> bool {
+    matches!(
+        key,
+        "HOME" | "PWD" | "OLDPWD" | "TMPDIR" | "TERM" | "LANG" | "LC_ALL" | "LC_CTYPE"
+    ) || key.starts_with("LC_")
+}
+
+fn validate_env_name(name: &str) -> std::result::Result<(), String> {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return Err("the variable name must not be empty".to_string());
+    };
+    if !(first.is_ascii_alphabetic() || first == b'_') {
+        return Err(format!(
+            "environment variable name {name:?} must start with a letter or `_`"
+        ));
+    }
+    if !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+        return Err(format!(
+            "environment variable name {name:?} may contain only ASCII letters, digits and `_`"
+        ));
+    }
+    Ok(())
+}
+
+/// Resolve an advisory relative executable directory, refusing every escape.
+fn validate_path_prepend(raw: &str) -> Result<PathBuf> {
+    if raw.is_empty() {
+        return Err(SandboxError::InvalidPolicy(
+            "filesystem.composition toolchain path_prepend must not be empty".to_string(),
+        ));
+    }
+    if raw.starts_with('/') || raw.ends_with('/') {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "filesystem.composition toolchain path_prepend `{raw}` must be relative without a trailing '/'"
+        )));
+    }
+    if raw.contains('\0') || raw.chars().any(char::is_control) {
+        return Err(SandboxError::InvalidPolicy(
+            "filesystem.composition toolchain path_prepend must not contain NUL or control characters"
+                .to_string(),
+        ));
+    }
+    if raw
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "filesystem.composition toolchain path_prepend `{raw}` must be a normalized relative path"
+        )));
+    }
+    Ok(PathBuf::from(raw))
+}
+
+/// Refuse conflicting equal-precedence tool defaults.
+///
+/// Base defaults sit below tool defaults. Two tool images are equal
+/// precedence, so a shared key with the same value is deduplicated and a
+/// shared key with different values is refused with both mount targets named;
+/// the outcome must never depend on mount order.
+fn validate_tool_env_precedence(toolchains: &[CompiledImage]) -> Result<()> {
+    let mut seen: BTreeMap<&str, (&str, &Path)> = BTreeMap::new();
+    for image in toolchains {
+        for (name, value) in &image.env {
+            match seen.get(name.as_str()) {
+                Some((existing_value, target)) if *existing_value != value => {
+                    return Err(SandboxError::InvalidPolicy(format!(
+                        "toolchain images {} and {} both set {name} to different values; \
+                         equal-precedence tool defaults must agree",
+                        target.display(),
+                        image.target.display()
+                    )));
+                }
+                Some(_) => {}
+                None => {
+                    seen.insert(name.as_str(), (value.as_str(), image.target.as_path()));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_image_digest(digest: &str) -> Result<()> {
@@ -713,9 +1019,24 @@ fn normalize_composition(composition: &CompiledComposition) -> SandboxFilesystem
                 digest: image.digest.clone(),
                 source: image.source.to_string_lossy().into_owned(),
                 target: image.target.to_string_lossy().into_owned(),
+                env: normalized_env(&image.env),
+                path_prepend: image
+                    .path_prepend
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
             })
             .collect(),
+        base_env: normalized_env(&composition.base.env),
     }
+}
+
+fn normalized_env(env: &[(String, String)]) -> Vec<SandboxImageEnvDefault> {
+    env.iter()
+        .map(|(name, value)| SandboxImageEnvDefault {
+            name: name.clone(),
+            value: value.clone(),
+        })
+        .collect()
 }
 
 fn normalized_image(image: &CompiledImage) -> SandboxImageRef {
@@ -1244,6 +1565,170 @@ mod tests {
             serde_json::json!("/opt/rust");
         let error = compile(&policy(value)).expect_err("ambiguous mount target");
         assert!(matches!(error, SandboxError::InvalidPolicy(_)));
+    }
+
+    #[test]
+    fn base_defaults_sit_below_tool_defaults_and_prepend_is_relative_to_the_target() {
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["base_env"] = serde_json::json!([
+            { "name": "SHARED", "value": "base" },
+            { "name": "LANGUAGE", "value": "base" }
+        ]);
+        value["filesystem"]["composition"]["toolchains"][0]["env"] = serde_json::json!([
+            { "name": "SHARED", "value": "tool" },
+            { "name": "GOFLAGS", "value": "-mod=readonly" }
+        ]);
+        value["filesystem"]["composition"]["toolchains"][0]["path_prepend"] =
+            serde_json::json!("bin");
+        let compiled = compile(&policy(value)).expect("valid composition");
+        let composition = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition");
+        // Tool targets are sorted, so the tool environment order is
+        // deterministic and independent of mount order: /opt/node first.
+        assert_eq!(
+            composition.image_env_defaults(),
+            vec![
+                ("SHARED".to_string(), "tool".to_string()),
+                ("LANGUAGE".to_string(), "base".to_string()),
+                ("GOFLAGS".to_string(), "-mod=readonly".to_string()),
+            ]
+        );
+        assert_eq!(
+            composition.path_prepend_dirs(),
+            vec![PathBuf::from("/opt/rust/bin")]
+        );
+    }
+
+    #[test]
+    fn equal_precedence_tool_defaults_must_agree_and_resolve_deterministically() {
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["toolchains"][0]["env"] = serde_json::json!([
+            { "name": "TOOLCHAIN", "value": "node" }
+        ]);
+        value["filesystem"]["composition"]["toolchains"][1]["env"] = serde_json::json!([
+            { "name": "TOOLCHAIN", "value": "node" }
+        ]);
+        let compiled = compile(&policy(value)).expect("identical tool defaults are compatible");
+        let composition = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition");
+        assert_eq!(
+            composition.image_env_defaults(),
+            vec![("TOOLCHAIN".to_string(), "node".to_string())]
+        );
+
+        let mut conflict = composition_policy();
+        conflict["filesystem"]["composition"]["toolchains"][0]["env"] = serde_json::json!([
+            { "name": "TOOLCHAIN", "value": "node" }
+        ]);
+        conflict["filesystem"]["composition"]["toolchains"][1]["env"] = serde_json::json!([
+            { "name": "TOOLCHAIN", "value": "rust" }
+        ]);
+        let error = compile(&policy(conflict)).expect_err("conflicting tool defaults");
+        let text = error.to_string();
+        assert!(
+            text.contains("/opt/node") && text.contains("/opt/rust") && text.contains("TOOLCHAIN"),
+            "the refusal must name the key and both equal-precedence targets: {text}"
+        );
+    }
+
+    #[test]
+    fn dangerous_image_environment_variables_fail_closed() {
+        for (name, value) in [
+            ("PATH", "/tools/bin"),
+            ("LD_PRELOAD", "/opt/x/lib.so"),
+            ("LD_LIBRARY_PATH", "/opt/x"),
+            ("BASH_ENV", "/opt/x/env"),
+            ("SHELL", "/opt/x/sh"),
+            ("NESSON_SANDBOX_POLICY_DIGEST", "forged"),
+            ("HTTPS_PROXY", "http://127.0.0.1:1"),
+            ("SSH_AUTH_SOCK", "/run/agent.sock"),
+        ] {
+            let mut policy_value = composition_policy();
+            policy_value["filesystem"]["composition"]["base_env"] =
+                serde_json::json!([{ "name": name, "value": value }]);
+            let error = compile(&policy(policy_value))
+                .expect_err("a dangerous image variable must fail closed");
+            assert!(
+                error.to_string().contains(name),
+                "{name} must be named in the refusal: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn execution_owned_image_variables_are_dropped_not_applied() {
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["base_env"] = serde_json::json!([
+            { "name": "TERM", "value": "screen" },
+            { "name": "LANG", "value": "fr_FR.UTF-8" },
+            { "name": "LC_ALL", "value": "fr_FR.UTF-8" },
+            { "name": "HOME", "value": "/opt/home" },
+            { "name": "PWD", "value": "/opt" },
+            { "name": "TMPDIR", "value": "/opt/tmp" },
+            { "name": "KEPT", "value": "yes" }
+        ]);
+        let compiled = compile(&policy(value)).expect("execution-owned values are dropped");
+        let composition = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition");
+        assert_eq!(
+            composition.image_env_defaults(),
+            vec![("KEPT".to_string(), "yes".to_string())],
+            "the image cannot decide terminal, locale or runtime directories"
+        );
+    }
+
+    #[test]
+    fn malformed_image_environment_defaults_fail_closed() {
+        for (pointer, bad) in [
+            (
+                "/filesystem/composition/base_env/0/name",
+                serde_json::json!("1BAD"),
+            ),
+            (
+                "/filesystem/composition/base_env/0/value",
+                serde_json::json!("line\nbreak"),
+            ),
+            (
+                "/filesystem/composition/toolchains/0/env/0/name",
+                serde_json::json!("BAD-NAME"),
+            ),
+        ] {
+            let mut value = composition_policy();
+            value["filesystem"]["composition"]["base_env"] =
+                serde_json::json!([{ "name": "OK", "value": "v" }]);
+            value["filesystem"]["composition"]["toolchains"][0]["env"] =
+                serde_json::json!([{ "name": "OK", "value": "v" }]);
+            *value.pointer_mut(pointer).expect("fixture path") = bad;
+            let error = compile(&policy(value)).expect_err("must fail closed");
+            assert!(matches!(error, SandboxError::InvalidPolicy(_)), "{error}");
+        }
+    }
+
+    #[test]
+    fn unsafe_path_prepends_and_untrusted_targets_fail_closed() {
+        for prepend in ["/bin", "../bin", "bin/", "bin//x", "./bin", "bin/../.."] {
+            let mut value = composition_policy();
+            value["filesystem"]["composition"]["toolchains"][0]["path_prepend"] =
+                serde_json::json!(prepend);
+            let error = compile(&policy(value)).expect_err("unsafe prepend");
+            assert!(matches!(error, SandboxError::InvalidPolicy(_)), "{error}");
+        }
+        for target in ["/tools/go", "/opt/../etc", "/opt/go/bin", "/", "opt/go"] {
+            let mut value = composition_policy();
+            value["filesystem"]["composition"]["toolchains"][0]["target"] =
+                serde_json::json!(target);
+            let error = compile(&policy(value)).expect_err("untrusted target");
+            assert!(matches!(error, SandboxError::InvalidPolicy(_)), "{error}");
+        }
     }
 
     #[test]

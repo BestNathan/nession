@@ -703,11 +703,14 @@ fn a_client_managed_create_round_trips_its_pinned_artifacts() {
     assert_eq!(managed.base_digest, DIGEST_A);
     assert_eq!(managed.toolchains.len(), 1);
     assert_eq!(managed.toolchains[0].digest, DIGEST_B);
-    assert_eq!(managed.toolchains[0].target, "/opt/rust");
+    assert_eq!(managed.toolchains[0].target.as_deref(), Some("/opt/rust"));
 
     let encoded = serde_json::to_value(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_value(encoded).unwrap();
-    assert_eq!(decoded.managed.unwrap().toolchains[0].target, "/opt/rust");
+    assert_eq!(
+        decoded.managed.unwrap().toolchains[0].target.as_deref(),
+        Some("/opt/rust")
+    );
 }
 
 #[test]

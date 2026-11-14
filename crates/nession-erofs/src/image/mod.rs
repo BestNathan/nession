@@ -3,6 +3,7 @@
 pub mod inspect;
 pub mod publish;
 pub mod resolve;
+pub mod usage;
 
 pub use inspect::{inspect_index, inspect_manifest, IndexInspection, ManifestInspection};
 pub use publish::{
@@ -12,6 +13,11 @@ pub use publish::{
 pub use resolve::{
     resolve_digest, resolve_for_platform, resolve_legacy_digest, resolve_root,
     resolve_root_for_platform, resolve_tag, ResolvedImage, ResolvedRoot, ResolvedTarget,
+};
+pub use usage::{
+    parse_config_env, resolve_path_prepend, validate_env_name, ImageEnvDefault, ImageRuntimeUsage,
+    MAX_IMAGE_ENV_ENTRIES, MAX_IMAGE_ENV_KEY_BYTES, MAX_IMAGE_ENV_TOTAL_BYTES,
+    MAX_IMAGE_ENV_VALUE_BYTES,
 };
 
 use anyhow::Result;
