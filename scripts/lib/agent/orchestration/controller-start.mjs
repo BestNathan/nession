@@ -112,7 +112,7 @@ function validatedAttestedRequest(filename){
   if(process.env.GITHUB_ACTIONS!=='true'||
       process.env.GITHUB_REPOSITORY!==REPO||
       process.env.GITHUB_REF!=='refs/heads/main'||
-      process.env.GITHUB_EVENT_NAME!=='workflow_run'||
+      !['workflow_run','workflow_dispatch'].includes(process.env.GITHUB_EVENT_NAME)||
       process.env.GITHUB_WORKFLOW!=='Store / Agent Controller Ingest'||
       !SHA.test(process.env.GITHUB_SHA??'')) {
     fail('trusted main-only Store Ingest required');
@@ -127,7 +127,30 @@ function validatedAttestedRequest(filename){
     if(e.message?.startsWith('Agent Controller start:'))throw e;
     fail('authenticated Controller request unavailable');
   }
-  const source=event?.workflow_run;
+  // GITHUB_TOKEN dispatch suppresses workflow_run; the bot-only explicit
+  // workflow_dispatch wake carries a source Run ID, never an authority claim.
+  // The source Run JSON is fetched from GitHub REST and independently checked
+  // by controller-request.mjs verify-source before the Store App was minted.
+  const direct=process.env.GITHUB_EVENT_NAME==='workflow_dispatch';
+  let source;
+  if(direct){
+    if(event?.inputs?.source_run_id==null||
+       !/^[1-9][0-9]*$/.test(String(event.inputs.source_run_id))||
+       !process.env.CONTROLLER_SOURCE_RUN_FILE||
+       process.env.GITHUB_ACTOR!=='github-actions[bot]')
+      fail('invalid bot-only Controller Store wake');
+    try {
+      const stat=fs.lstatSync(process.env.CONTROLLER_SOURCE_RUN_FILE);
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size>64*1024)
+        fail('unsafe trusted Controller source Run');
+      source=JSON.parse(fs.readFileSync(process.env.CONTROLLER_SOURCE_RUN_FILE,'utf8'));
+    }catch(e){
+      if(e.message?.startsWith('Agent Controller start:'))throw e;
+      fail('verified Controller source Run unavailable');
+    }
+    if(source?.id!==Number(event.inputs.source_run_id))
+      fail('Controller wake/source Run identity mismatch');
+  }else source=event?.workflow_run;
   const run=document?.run;
   const botBug=run?.event==='workflow_dispatch' &&
     run.actor==='github-actions[bot]' &&
@@ -155,7 +178,8 @@ function validatedAttestedRequest(filename){
       source?.head_sha!==run.head_sha||
       source?.head_repository?.full_name!==REPO||
       source?.repository?.full_name!==REPO||
-      source?.head_branch!=='main'||source?.conclusion!=='success') {
+      source?.head_branch!=='main'||source?.conclusion!=='success'||
+      (direct&&!botBug)) {
     fail('untrusted Controller source Run/Attempt/Issue context');
   }
   const input=document.request;
