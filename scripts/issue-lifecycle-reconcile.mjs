@@ -294,6 +294,28 @@ async function selfTest() {
   assert.equal(decideIssueClosure(
     { ...issue, body: mainPendingBody }, [{ ...pr, base: { ref: 'main' } }]
   ).action, 'pending');
+  // Mirror #3491's two main-only SCs and the merged implementation PR.
+  // Both must remain pending for the post-merge runner; merge is not proof.
+  const twoPendingMainScs = [
+    '## Success Criteria',
+    '- [ ] SC-01 verify source-bound Worker Store Ingest',
+    '- [ ] SC-02 verify Publisher PR and immutable checkpoint',
+    '', '## Acceptance Plan', '```yaml', 'acceptance:',
+    '  SC-01:', '    when: merged', '    branch: main', '    method: agent',
+    '  SC-02:', '    when: merged', '    branch: main', '    method: agent',
+    '```', '', '## Acceptance Report', '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-01 | Pending | waiting for signed Worker run readback |',
+    '| SC-02 | Pending | waiting for Publisher source PR |',
+  ].join('\n');
+  const pendingVerdict = decideIssueClosure(
+    { ...issue, number: 3491, body: twoPendingMainScs },
+    [{ ...pr, base: { ref: 'main' }, number: 3513 }],
+  );
+  assert.equal(pendingVerdict.action, 'pending');
+  assert.match(pendingVerdict.reason, /SC-01 is not checked/);
+  assert.match(pendingVerdict.reason, /SC-02 is not checked/);
+
   assert.equal(decideIssueClosure(
     { ...issue, body: mainPendingBody
       .replace('- [ ] SC-01', '- [x] SC-01')
