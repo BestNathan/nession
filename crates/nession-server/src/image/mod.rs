@@ -164,7 +164,7 @@ pub struct BuildListPage {
     pub next_offset: Option<u32>,
 }
 
-/// The single consumer context a grant is scoped to.
+/// The single consumer context a path grant is scoped to.
 enum GrantConsumer<'a> {
     Project(&'a str),
     Session(&'a str),
@@ -1495,60 +1495,60 @@ impl ImageManager {
         self.descriptor_with_aliases(&row, used_alias).await
     }
 
-    /// Mint a scoped read grant for one Project's referenced digest.
+    /// Resolve one Project's referenced digest to its authorized blob route.
+    ///
+    /// The Project-reference rule still decides whether this Project may name
+    /// the digest; authorization to read the bytes is the Server Token on the
+    /// blob route (#3440).
     pub async fn grant_access(
         &self,
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Project(project_id), digest, true, false)
+        self.resolve_access_grant(GrantConsumer::Project(project_id), digest, true, false)
             .await
     }
 
-    /// Mint a scoped read grant for a Server-resolved Managed Session artifact
-    /// (#3062).
+    /// Resolve a Server-resolved Managed Session artifact (#3062).
     ///
     /// Managed creation is orchestrated by the Server: the Project pins the
     /// source image and the request pins the Base Runtime/toolchain artifacts,
-    /// so the Server authorizes every one of them for the Session. This is
-    /// deliberately separate from the client-facing `server.image.access`
-    /// unit, which keeps the "Project references this digest" rule.
+    /// so the Server resolves every one of them for the Session.
     pub async fn grant_managed_access(
         &self,
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Project(project_id), digest, false, false)
+        self.resolve_access_grant(GrantConsumer::Project(project_id), digest, false, false)
             .await
     }
 
-    /// Mint a Session-scoped grant for a digest the Session's Managed context
-    /// already resolved. Knowing a digest or another Session's identity is not
-    /// authorization.
+    /// Resolve a digest the Session's Managed context already named. Knowing a
+    /// digest or another Session's identity is not scope.
     pub async fn grant_session_access(
         &self,
         session_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Session(session_id), digest, false, true)
+        self.resolve_access_grant(GrantConsumer::Session(session_id), digest, false, true)
             .await
     }
 
-    /// Mint a Session-scoped grant for an explicit Sandbox composition image.
+    /// Resolve an explicit Sandbox composition image for one Session.
     ///
-    /// The caller has already resolved the authenticated Session and Agent; the
-    /// grant is still bound to one `(session_id, digest)` so a token cannot be
-    /// replayed for another digest or claimed by another consumer.
+    /// The caller has already resolved the authenticated Session and Agent;
+    /// the scope is still `(session_id, digest)` so one consumer's route
+    /// cannot be claimed by another.
     pub async fn grant_sandbox_access(
         &self,
         session_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Session(session_id), digest, false, false)
+        self.resolve_access_grant(GrantConsumer::Session(session_id), digest, false, false)
             .await
     }
 
-    async fn mint_access_grant(
+    async fn resolve_access_grant(
         &self,
         consumer: GrantConsumer<'_>,
         digest: &str,
