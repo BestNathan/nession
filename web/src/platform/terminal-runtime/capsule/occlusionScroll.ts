@@ -381,7 +381,10 @@ export class CapsuleOcclusionScroll {
 
   handleWheel(event: WheelEvent): boolean {
     if (!this.shouldScrollLocally()) {
-      return true;
+      // `false` lets xterm continue its own wheel path. A mouse-reporting TUI
+      // then receives the wheel as an application mouse report (#1096/#3492);
+      // returning `true` here silently swallowed it.
+      return false;
     }
     const lines = this.wheelLines(event.deltaY, event.deltaMode);
     if (lines === 0) {
@@ -390,7 +393,7 @@ export class CapsuleOcclusionScroll {
     event.preventDefault();
     event.stopPropagation();
     this.scrollLines(lines);
-    return false;
+    return true;
   }
 
   scrollPages(pages: number): void {

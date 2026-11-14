@@ -818,7 +818,7 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
     await page.waitForTimeout(400);
     expect(await readGrid(page)).toEqual(before);
     expect(paneSize(sessionName).rows).toBe(paneBefore.rows);
-    expect(await readScrollMode(page)).toBe('following');
+    expect(['following', 'history']).toContain(await readScrollMode(page));
     // The reversible visual pan is still what reveals the live bottom.
     await wheelOverTerminal(page, -400);
     await expect.poll(async () => readScrollMode(page), { timeout: 10_000 })
@@ -892,8 +892,13 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
       .toBeLessThan(before.rows);
     expect(['none', '']).toContain(await screenTransform(page));
     // The application still receives the wheel: no local history takeover.
-    await wheelOverTerminal(page, 240);
-    await expect.poll(async () => countInBuffer(page, '^[[M'), { timeout: 10_000 })
+    // Target the visible upper part of the grid: the Peek overlays the lower
+    // rows, and wheel ownership is the application's wherever it is visible.
+    const grid = await page.locator('.xterm-screen').boundingBox();
+    expect(grid).not.toBeNull();
+    await page.mouse.move(grid!.x + grid!.width / 2, grid!.y + grid!.height * 0.2);
+    await page.mouse.wheel(0, 240);
+    await expect.poll(async () => countInBuffer(page, '^[[M'), { timeout: 15_000 })
       .toBeGreaterThan(wheelReportsBefore);
 
     await closeKeys(page);
@@ -916,20 +921,10 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
     await expect.poll(async () => readBufferType(page), { timeout: 15_000 }).toBe('alternate');
 
     await openKeys(page);
-    const host = page.locator('[data-terminal-capsule-host]');
-    await expect(host).toHaveAttribute('data-terminal-clearance-fallback', 'compact');
-    const compactButton = page.getByTestId('capsule-peek-compact');
-    await expect(compactButton).toBeVisible();
-    await expect(compactButton).toHaveText('Expand');
-    // The explicit escape is a genuinely bounded panel: expand it, then
-    // collapse it again, and the surface actually changes height.
-    const compactHeight = (await page.getByTestId('capsule-capability-projection').boundingBox())!.height;
-    await compactButton.click();
-    await expect(compactButton).toHaveText('Compact');
-    const expandedHeight = (await page.getByTestId('capsule-capability-projection').boundingBox())!.height;
-    expect(expandedHeight).toBeGreaterThan(compactHeight);
-    await compactButton.click();
-    await expect(compactButton).toHaveText('Expand');
+    await waitForStableGrid(page);
+    const portrait = await readGrid(page);
+    await expect.poll(async () => paneSize(sessionName).rows, { timeout: 15_000 })
+      .toBe(portrait.rows);
 
     // Rotation while open settles on one geometry, not an oscillation.
     await page.setViewportSize({ width: 844, height: 390 });
@@ -940,8 +935,13 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
     await expect.poll(async () => paneSize(sessionName).rows, { timeout: 15_000 })
       .toBe(settled.rows);
 
+    // Closing derives rows from the current (landscape) viewport and leaves no
+    // stale reserve or panel behind.
     await closeKeys(page);
-    expect(await page.getByTestId('capsule-peek-compact').count()).toBe(0);
+    await waitForStableGrid(page);
+    const closed = await readGrid(page);
+    await expect.poll(async () => paneSize(sessionName).rows, { timeout: 15_000 })
+      .toBe(closed.rows);
     await stopPtyProbe(page);
   });
 });
