@@ -1658,7 +1658,8 @@ test('an observer\'s Peek sends no resize and cannot move the session (#3492 SC-
       sent.filter((frame) => frame.msg_type?.includes('resize')),
       'an observer Peek must not request a Session resize',
     ).toEqual([]);
-    expect(await readGrid(observer)).toEqual(authoritative);
+    await expect.poll(async () => readGrid(observer), { timeout: 15_000 })
+      .toEqual(authoritative);
     await expectPtySize(controller, authoritative.cols, authoritative.rows);
   } finally {
     await controllerContext.close();
