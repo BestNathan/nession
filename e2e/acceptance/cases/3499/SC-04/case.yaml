@@ -5,5 +5,13 @@ stage: staging
 runtime: full-stack-local
 verifiers:
   - type: runtime
-    entry: verify.cjs
+    entry: verify-resolution.cjs
+  - type: runtime
+    entry: verify-cache.cjs
+  - type: runtime
+    entry: verify-mount.cjs
+  - type: runtime
+    entry: verify-server.cjs
+  - type: runtime
+    entry: verify-agent.cjs
 result_policy: all-pass
