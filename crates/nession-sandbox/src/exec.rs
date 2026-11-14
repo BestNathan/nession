@@ -747,6 +747,25 @@ pub(crate) fn validate_composition_workspace(
                     canonical_write.display()
                 )));
             }
+            // A Project Location is external. It must never overlap a root the
+            // Agent owns: execution cleanup removes owned scratch directories,
+            // and a declared location inside one could otherwise be deleted.
+            let canonical_state = std::fs::canonicalize(&settings.state_dir)
+                .unwrap_or_else(|_| settings.state_dir.clone());
+            let durable_root = settings
+                .agent_workspaces_root
+                .as_ref()
+                .map(|root| std::fs::canonicalize(root).unwrap_or_else(|_| root.clone()));
+            if canonical_write.starts_with(&canonical_state)
+                || durable_root
+                    .as_ref()
+                    .is_some_and(|root| canonical_write.starts_with(root))
+            {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "Project Location workspace {} is inside an Agent-owned root; declare an external directory",
+                    canonical_write.display()
+                )));
+            }
         }
     }
     Ok(canonical_write)
@@ -1249,6 +1268,23 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("does not exist"));
+
+        // A declared location inside an Agent-owned root would be eligible for
+        // execution cleanup; it is refused as non-external.
+        let owned = settings
+            .state_dir
+            .join("sandbox-workspaces")
+            .join("workspace-00000000-0000-4000-8000-000000000000");
+        std::fs::create_dir_all(&owned).expect("owned workspace");
+        let inside = crate::policy::CompiledWorkspace {
+            image: None,
+            write: std::fs::canonicalize(&owned).unwrap(),
+            ownership: SandboxWorkspaceOwnership::ProjectLocation,
+        };
+        assert!(validate_composition_workspace(&inside, &settings)
+            .unwrap_err()
+            .to_string()
+            .contains("inside an Agent-owned root"));
 
         #[cfg(unix)]
         {
