@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "2735e80f8e025198ec19a6fa5caa5bc95581ce2c",
+  "run_id": 43635315632,
+  "run_attempt": 1,
+  "plan_digest": "71431e48e05e1d721d26dc3df0e0a2c4ead3e2ba5e2523a83e211ca2c5858d9f",
+  "artifact_digest": "sha256:71f9b74e6e64a4ea85cbfe680f8ebf2d8e6da4fdd6c4e10c4c375701922b1c09",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 221
+    },
+    {
+      "id": "fixture-visual-app-landscape",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 5
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 640
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 35,
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 1129
+    }
+  ]
+}
