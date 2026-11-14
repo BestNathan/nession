@@ -11,10 +11,9 @@
 //!   standalone Agent's operator token, and Server-embedded MCP needs an
 //!   Agent's own truth rather than the Server registry.
 //!
-//! The credential is the Agent's configured operator token
-//! (`CredentialScope::for_standalone`), never a token this client invents and
-//! never a Server P2P credential. It goes into the URL through the same
-//! canonical `agent_url_with_credential` helper every Agent dial uses.
+//! The credential is the Agent's durable Agent Token, presented as the first
+//! `client.auth` frame — never a token this client invents and never the
+//! Server Token. The same verifier guards the terminal data path.
 //!
 //! Every method correlates by request id and raises the Agent's own refusal as
 //! [`ClientError::AgentRefused`]; a refusal is a delivered answer, not a
@@ -22,7 +21,6 @@
 
 use std::time::Duration;
 
-use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::session::v1::{
     AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionKillPayload,
     SessionKillResponse, SessionListResponse,
@@ -30,7 +28,9 @@ use nession_protocol::contracts::session::v1::{
 use nession_protocol::Message;
 use serde_json::Value;
 
-use crate::connection::{open_ws, request_envelope, WsStream, DEFAULT_REQUEST_TIMEOUT};
+use crate::connection::{
+    authenticate_agent, open_ws, request_envelope, WsStream, DEFAULT_REQUEST_TIMEOUT,
+};
 use crate::error::ClientError;
 use crate::unit::proto_msg;
 use crate::wire;
@@ -45,13 +45,12 @@ pub struct AgentConnection {
 }
 
 impl AgentConnection {
-    /// Dial an Agent's management socket with its operator credential.
-    pub async fn connect(endpoint: &str, credential: &str) -> Result<Self, ClientError> {
-        let url = agent_url_with_credential(endpoint, credential);
-        Ok(Self {
-            ws: open_ws(&url).await?,
-            seq: 0,
-        })
+    /// Dial an Agent's management socket with its durable Agent Token.
+    pub async fn connect(endpoint: &str, agent_token: &str) -> Result<Self, ClientError> {
+        let mut ws = open_ws(endpoint).await?;
+        let mut seq = 0;
+        authenticate_agent(&mut ws, &mut seq, agent_token, None).await?;
+        Ok(Self { ws, seq })
     }
 
     /// Send one unit and return its delivered payload.

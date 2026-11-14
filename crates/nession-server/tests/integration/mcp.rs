@@ -346,7 +346,7 @@ async fn http_routes_are_explicit_and_methods_are_bounded() {
     );
 
     let unknown_digest = format!("sha256:{}", "e".repeat(64));
-    let unknown_blob = send(
+    let unauthenticated_blob = send(
         addr,
         "GET",
         &format!("/images/blobs/{unknown_digest}"),
@@ -356,7 +356,25 @@ async fn http_routes_are_explicit_and_methods_are_bounded() {
     )
     .await
     .expect("answer");
-    assert_eq!(unknown_blob.status, 404, "the blob route owns this path");
+    assert_eq!(
+        unauthenticated_blob.status, 403,
+        "the blob route authenticates before it reads a digest"
+    );
+
+    let unknown_blob = send(
+        addr,
+        "GET",
+        &format!("/images/blobs/{unknown_digest}"),
+        Some(TOKEN),
+        None,
+        "",
+    )
+    .await
+    .expect("answer");
+    assert_eq!(
+        unknown_blob.status, 404,
+        "an authenticated unknown digest is a not-found, not an authorization failure"
+    );
 
     let blob_wrong_method = send(
         addr,

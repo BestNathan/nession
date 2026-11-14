@@ -4,7 +4,6 @@ export {
   IMAGE_BUILD_UPDATED_WIRE,
   imagesApi,
   ImagesPlugin,
-  type ImageAccessGrant,
   type ImageBuildDescriptor,
   type ImageBuildPage,
   type ImageDescriptor,

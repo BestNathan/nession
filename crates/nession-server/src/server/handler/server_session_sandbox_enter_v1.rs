@@ -237,7 +237,6 @@ fn managed_grant(
         role,
         digest: selection.digest.clone(),
         path: grant.path,
-        token: grant.token,
         target,
     }
 }

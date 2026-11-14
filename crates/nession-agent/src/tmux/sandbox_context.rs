@@ -51,6 +51,7 @@ pub struct SandboxEnterInput<'a> {
     /// Location; an explicit managed selection ignores it.
     pub project_location: Option<&'a str>,
     pub server_url: &'a str,
+    pub server_auth_token: &'a str,
     pub working_dir: &'a str,
 }
 
@@ -434,6 +435,7 @@ impl SessionManager {
             images,
             project_location,
             server_url,
+            server_auth_token,
             working_dir,
         } = input;
         let Some(runtime) = self.sandbox_runtime().cloned() else {
@@ -674,6 +676,7 @@ impl SessionManager {
                 &cache,
                 images,
                 server_url,
+                server_auth_token,
                 &runtime.settings().state_dir,
                 workspace_override,
             )

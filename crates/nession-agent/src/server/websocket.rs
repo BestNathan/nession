@@ -26,7 +26,7 @@
 
 use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
-use crate::p2p_credentials::{ConnectionAuthority, P2pCredentials, WireScope};
+use crate::p2p_auth::{AuthContext, P2pAccess, P2pAuth};
 use crate::protocol::p2p_routes;
 use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
@@ -52,7 +52,7 @@ use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use axum::extract::{FromRequestParts, State, WebSocketUpgrade};
-use axum::http::{header, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::Router;
@@ -850,6 +850,13 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 /// under a flood of connections that never speak.
 pub const DEFAULT_P2P_MAX_PENDING_HANDSHAKES: usize = 64;
 
+/// How long an accepted socket may stay unauthenticated.
+///
+/// The upgrade no longer carries a credential (#3440): authentication is the
+/// first protocol frame. This is that frame's deadline, so a silent peer cannot
+/// hold a connection that has already spent its admission slot.
+pub const P2P_AUTH_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// How long one P2P connection may take to complete TLS and the WebSocket
 /// upgrade (#2653).
 ///
@@ -910,8 +917,8 @@ impl Default for P2pHandshakePolicy {
 pub struct AgentServerContext {
     /// The lane resize events are published to for the central server (relay).
     pub resize: ResizeReporter,
-    /// The credentials this agent will honour on its P2P listener (#1013).
-    pub credentials: Arc<P2pCredentials>,
+    /// The Agent Token verifier this listener honours (#3440).
+    pub auth: Arc<P2pAuth>,
     /// The **process's** mutation lane (`#1021`).
     ///
     /// Built once by the runtime and handed to the central connection as well
@@ -979,14 +986,10 @@ pub struct AgentServer {
     /// for why a level-valued signal gets a coalescing lane rather than a
     /// queue.
     resize: ResizeReporter,
-    /// What this agent will honour on its P2P listener (#1013).
-    ///
-    /// **The same store the Server connection writes grants into**, not a copy:
-    /// the connection is where a grant arrives and this is where it is checked,
-    /// and two stores would mean a credential that is issued and never honoured
-    /// with nothing to show for it. `runtime.rs` constructs it once for that
-    /// reason.
-    credentials: Arc<P2pCredentials>,
+    /// The endpoint-owned verifier for inbound connections (#3440). Built once
+    /// by `runtime.rs` from the durable Agent Token; there is no grant store to
+    /// keep in sync.
+    auth: Arc<P2pAuth>,
     /// How unauthenticated connections are admitted and how long one may take
     /// to complete its request (#2653). Enforced by [`Self::start`]'s accept
     /// loop and the shared [`nession_runtime::ingress::serve`] deadline; the
@@ -1168,8 +1171,8 @@ struct P2pHttpState {
     slot: AdmissionSlot,
     addr: SocketAddr,
     ingress: AgentIngress,
-    /// What this Agent will honour at the upgrade (#1013).
-    credentials: Arc<P2pCredentials>,
+    /// This Agent's own inbound token verifier (#3440).
+    auth: Arc<P2pAuth>,
     /// The optional MCP endpoint mounted on the same listener (`#565`).
     mcp: Option<Arc<McpService>>,
     /// The pre-authentication deadline for this connection (#2653).
@@ -1203,8 +1206,8 @@ fn p2p_router(state: P2pHttpState) -> Router {
 ///
 /// A request that is not an upgrade is an ordinary unmatched request (404);
 /// one that is upgrade-shaped but malformed gets Axum's own rejection. The
-/// credential check happens here, before `on_upgrade`, so a caller with no
-/// credential never has a WebSocket or a connection (#1013).
+/// upgrade grants no authority by itself: authentication is the first protocol
+/// frame, so an accepted socket that never authenticates holds nothing (#3440).
 async fn p2p_upgrade_or_not_found(
     State(state): State<P2pHttpState>,
     request: axum::extract::Request,
@@ -1213,40 +1216,17 @@ async fn p2p_upgrade_or_not_found(
         return StatusCode::NOT_FOUND.into_response();
     }
     let (mut parts, _body) = request.into_parts();
-    let uri = parts.uri.clone();
     let ws = match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
         Ok(ws) => ws,
         Err(rejection) => return rejection.into_response(),
     };
 
-    let presented = uri
-        .query()
-        .and_then(nession_protocol::contracts::p2p::credential_from_query);
-    let authority = match presented
-        .as_deref()
-        .map(|token| state.credentials.authorize(token))
-    {
-        Some(Ok(found)) => found,
-        refusal => {
-            // The slot is returned as soon as the peer is refused, not at the
-            // deadline. See `refusal_response` for why the reasons collapse.
-            state.slot.release();
-            warn!(
-                addr = %state.addr,
-                reason = ?refusal,
-                "refusing a peer-to-peer connection: no valid credential"
-            );
-            return refusal_response();
-        }
-    };
-
-    // The peer is authenticated: this connection no longer occupies the
-    // pre-auth budget, however long its Session lives.
+    // The upgrade itself is not authentication. The socket has no business
+    // frame until `client.auth` succeeds; that gate lives on the reader task,
+    // where it settles once, in arrival order, before any lane (#3440).
     state.slot.release();
-    info!(
-        "WebSocket connection from {} (credential {}, session {})",
-        state.addr, authority.credential_id, authority.session_id
-    );
+    info!("WebSocket upgrade accepted from {}", state.addr);
+    let auth = Arc::clone(&state.auth);
     let addr = state.addr;
     let ingress_context = state.ingress;
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
@@ -1254,7 +1234,7 @@ async fn p2p_upgrade_or_not_found(
         .on_upgrade(move |socket| async move {
             if let Err(e) = AgentServer::serve_connection(
                 AxumWebSocket::new(socket),
-                authority,
+                auth,
                 addr,
                 ingress_context,
             )
@@ -1365,30 +1345,71 @@ struct Connection {
     attach_mode: AttachMode,
     resize: ResizeReporter,
     addr: SocketAddr,
-    /// What this connection proved about itself at the upgrade (#1013).
-    ///
-    /// Immutable for the connection's life, and the thing every later
-    /// authorization question is answered from — the shape the Server already
-    /// uses for `registered_agent_id`: a per-connection fact established once
-    /// and consulted by every gate, rather than re-derived per handler.
-    authority: ConnectionAuthority,
+    /// This Agent's inbound token verifier. Endpoint-owned, shared by every
+    /// connection, and never consulted before the authentication frame.
+    auth: Arc<P2pAuth>,
+    /// What this connection proved, set exactly once by the first successful
+    /// `client.auth`. `None` is "the upgrade happened, the peer is not a peer
+    /// yet" — every business frame is refused in that state.
+    authority: Arc<StdMutex<Option<AuthContext>>>,
 }
 
-/// The refusal an uncredentialed peer gets, and **the only one they get**.
-///
-/// One status, one body, whatever the reason — no credential, an unknown one, an
-/// expired one, one issued for a different agent. They are separated in
-/// `P2pCredentials::Refusal` for the log and collapsed here, because a body that
-/// distinguished them would tell a caller which of its guesses was closest. The
-/// wording says nothing about credentials at all; a peer that reached the agent
-/// port by accident gets no vocabulary from this to aim at.
-fn refusal_response() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::CONTENT_TYPE, "text/plain")],
-        "connection not authorized",
-    )
-        .into_response()
+impl Connection {
+    fn is_authenticated(&self) -> bool {
+        self.authority
+            .lock()
+            .map(|authority| authority.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Verify `client.auth` and claim the connection's identity.
+    ///
+    /// Called on the reader task, so it is synchronous by construction. A
+    /// repeated authentication is refused rather than allowed to mutate the
+    /// identity a live connection already proved.
+    fn authenticate(&self, id: &str, payload: &serde_json::Value) -> Result<AuthContext, String> {
+        if self.is_authenticated() {
+            return Err(serde_json::to_string(&make_error(
+                id,
+                "already_authenticated",
+                "this connection has already authenticated; a new identity requires a new connection",
+            ))
+            .unwrap_or_default());
+        }
+        let payload: nession_protocol::contracts::client::v1::ClientAuthPayload =
+            serde_json::from_value(payload.clone()).map_err(|error| {
+                serde_json::to_string(&make_error(
+                    id,
+                    "invalid_payload",
+                    &format!("invalid client.auth payload: {error}"),
+                ))
+                .unwrap_or_default()
+            })?;
+        if !self.auth.verify(payload.auth_token.as_str()) {
+            warn!(addr = %self.addr, "refusing a peer-to-peer connection: invalid Agent token");
+            // A refusal is still an answer to the handshake. It carries the
+            // shared `AuthResponsePayload` (as `server.auth` does) rather than
+            // an `error` frame: the Browser's P2P handshake classifies a
+            // non-success status as a token rejection, clears the cached value
+            // and refetches through the authenticated attach (#3440). A
+            // generic error frame would instead read as a transport failure.
+            return Err(serde_json::to_string(&make_response(
+                id,
+                msg_types::OK,
+                nession_protocol::contracts::client::v1::AuthResponsePayload {
+                    status: "failed".to_string(),
+                    message: "authentication failed".to_string(),
+                    client_id: None,
+                },
+            ))
+            .unwrap_or_default());
+        }
+        let client_id = payload
+            .client_id
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        info!(addr = %self.addr, client = %client_id, "peer-to-peer connection authenticated");
+        Ok(AuthContext { client_id })
+    }
 }
 
 /// One text frame, parsed as far as routing needs, and the connection it came
@@ -1411,6 +1432,14 @@ enum Routed {
     Silent,
     /// A control wire with an answer to write.
     Answer(String),
+    /// A successful authentication: the reply to write, and the identity the
+    /// reader claims before it reads the next frame.
+    Authenticated { reply: String, context: AuthContext },
+    /// Answer a refused frame and leave the connection unauthenticated (or, for
+    /// a repeated authentication, keep the identity it already proved). The
+    /// reply is delivered before anything else happens to the socket; a peer
+    /// that never authenticates is closed by the authentication deadline.
+    Reject(String),
 }
 
 impl Frame {
@@ -1471,7 +1500,54 @@ impl Frame {
     /// but the id of the ping is carried on the pong, because the envelope
     /// belongs to the sender and no router derives a pairing from it.
     fn route(&self) -> Routed {
+        // Authentication is the first question, asked before any lane handoff
+        // and before control wires: an unauthenticated socket has no business
+        // with this Agent's operations or its liveness protocol. `client.auth`
+        // is the one frame allowed in that state, and a second one is refused
+        // rather than allowed to rewrite the connection's identity.
+        if !self.connection.is_authenticated() {
+            if self.msg_type != msg_types::CLIENT_AUTH {
+                warn!(
+                    addr = %self.connection.addr,
+                    wire = %self.msg_type,
+                    "closing a peer-to-peer connection used before authentication"
+                );
+                return Routed::Reject(
+                    serde_json::to_string(&make_error(
+                        &self.id,
+                        "unauthorized",
+                        "authenticate with client.auth before any other frame",
+                    ))
+                    .unwrap_or_default(),
+                );
+            }
+            return match self.connection.authenticate(&self.id, &self.payload) {
+                Ok(context) => Routed::Authenticated {
+                    reply: serde_json::to_string(&make_response(
+                        &self.id,
+                        msg_types::OK,
+                        nession_protocol::contracts::client::v1::AuthResponsePayload {
+                            status: "success".to_string(),
+                            message: "ok".to_string(),
+                            client_id: Some(context.client_id.clone()),
+                        },
+                    ))
+                    .unwrap_or_default(),
+                    context,
+                },
+                Err(reply) => Routed::Reject(reply),
+            };
+        }
+
         match self.msg_type.as_str() {
+            msg_types::CLIENT_AUTH => Routed::Reject(
+                serde_json::to_string(&make_error(
+                    &self.id,
+                    "already_authenticated",
+                    "this connection has already authenticated; a new identity requires a new connection",
+                ))
+                .unwrap_or_default(),
+            ),
             msg_types::CONTROL_PING => Routed::Answer(
                 serde_json::to_string(&make_response(&self.id, msg_types::CONTROL_PONG, ()))
                     .unwrap_or_default(),
@@ -1487,63 +1563,20 @@ impl Frame {
                 debug!("control.heartbeat received");
                 Routed::Silent
             }
-            // A one-way progress report (#2877). It is **not** an operation:
-            // nothing answers it, so it has no arm in `p2p_routes!` and no
-            // manifest entry. It still needs the same credential scope as the
-            // terminal it reports on, and a frame outside that scope fails
-            // closed — a refused notification is dropped, never answered.
-            msg_types::TERMINAL_OUTPUT_PROGRESS => {
-                if !self
-                    .connection
-                    .authority
-                    .covers(&terminal_scope(&self.payload))
-                {
-                    warn!(
-                        wire = %self.msg_type,
-                        credential = %self.connection.authority.credential_id,
-                        session = %self.connection.authority.session_id,
-                        "dropping a peer-to-peer notification outside the credential's scope"
-                    );
-                    Routed::Silent
-                } else {
-                    Routed::Notification
-                }
-            }
-            // The scope gate (#1013), and this is the only place it can go.
-            //
-            // It runs on the reader task, before any lane handoff and before
-            // `p2p_policy` is consulted, so the decision is made once, per frame,
-            // in the order the frames arrived — which is what makes "this
-            // credential was valid" stop implying "every later operation on this
-            // connection is allowed". Putting it in `serve` would run it on a
-            // lane task, concurrently with sibling frames and after the policy
-            // had already picked a lane for a frame that turns out to be
-            // forbidden; putting it in the arms is the ~30 scattered inline
-            // checks the Server has and that #879 died of.
-            //
-            // A refusal **answers and keeps the connection**: a caller that
-            // strayed outside its scope has made an ordinary mistake, and
-            // tearing the socket down would turn it into a reattach storm. The
-            // reply names the wire and says nothing about the credential — the
-            // reason goes to the log, where the operator can see it and a
-            // guessing peer cannot.
+            // A one-way progress report (#2877). A refused notification is
+            // dropped, never answered; after authentication the Agent's static
+            // token carries the whole trusted surface, so the only refusal left
+            // is the pre-authentication gate above.
+            msg_types::TERMINAL_OUTPUT_PROGRESS => Routed::Notification,
             _ => match p2p_scope(&self.msg_type, &self.payload) {
-                Some(required) if !self.connection.authority.covers(&required) => {
-                    warn!(
-                        wire = %self.msg_type,
-                        credential = %self.connection.authority.credential_id,
-                        session = %self.connection.authority.session_id,
-                        "refusing a peer-to-peer wire outside the credential's scope"
-                    );
-                    Routed::Answer(
-                        serde_json::to_string(&make_error(
-                            &self.id,
-                            "forbidden",
-                            &format!("not permitted for this credential: {}", self.msg_type),
-                        ))
-                        .unwrap_or_default(),
-                    )
-                }
+                Some(P2pAccess::PreAuth) => Routed::Reject(
+                    serde_json::to_string(&make_error(
+                        &self.id,
+                        "forbidden",
+                        &format!("not permitted after authentication: {}", self.msg_type),
+                    ))
+                    .unwrap_or_default(),
+                ),
                 _ => Routed::Operation,
             },
         }
@@ -1735,26 +1768,6 @@ fn session_named(payload_value: &serde_json::Value) -> ResourceKey {
 /// The terminal scope a frame needs: the session it names as `session_name`.
 ///
 /// The scope column's counterpart to [`session_named`], and deliberately not
-/// derived from it. They read the same field and answer different questions —
-/// which lane orders this frame, and which session's PTY it may touch — and the
-/// two coincide here only by current convention. Deriving one from the other
-/// would make the day they diverge (`client.session.attach` already differs: it
-/// resolves a session rather than binding to it) a silent mis-scoping.
-///
-/// A frame that names no session yields `Session("")`, which no credential
-/// covers: [`ConnectionAuthority::covers`] refuses an unnamed session rather
-/// than treating it as "any". Failing closed is the only reading that cannot be
-/// turned into a way around the check.
-fn terminal_scope(payload_value: &serde_json::Value) -> WireScope {
-    WireScope::Session(
-        payload_value
-            .get("session_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string(),
-    )
-}
-
 /// One successful metadata answer, on either operation.
 fn metadata_ok_reply(id: &str, metadata: SessionMetadata) -> String {
     serde_json::to_string(&make_response(
@@ -1827,7 +1840,7 @@ fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
 // connection's reader hands this unit to a lane. The key helpers above are what
 // the `Key` policies are written in terms of.
 p2p_routes! { ctx, msg_type, payload_value;
-            "agent.session.list" => "agent.session.list" => 1 => WireScope::Sessions => Query => { match ctx.tmux.list_sessions().await {
+            "agent.session.list" => "agent.session.list" => 1 => P2pAccess::Authenticated => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let payload = SessionListResponse {
                         sessions: sessions_list,
@@ -1840,7 +1853,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "agent.session.create" => "agent.session.create" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+            "agent.session.create" => "agent.session.create" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
                 let payload: SessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1903,6 +1916,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &cache,
                             &images.images,
                             ctx.tmux.server_url(),
+                            ctx.tmux.server_auth_token(),
                             runtime.settings().state_dir.as_path(),
                         )
                         .await
@@ -1967,7 +1981,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.session.kill" => "agent.session.kill" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+            "agent.session.kill" => "agent.session.kill" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
                 let payload: SessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -1989,7 +2003,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("kill_failed", &e.to_string()),
                 }
             }
-            "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+            "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
                 let payload: SessionMetadataGetPayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
@@ -2000,7 +2014,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
-            "agent.session.metadata.update" => "agent.session.metadata.update" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+            "agent.session.metadata.update" => "agent.session.metadata.update" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
                 let payload: SessionMetadataUpdatePayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
@@ -2021,7 +2035,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
-            "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => terminal_scope(payload_value) => Query => {
+            "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => P2pAccess::Authenticated => Query => {
                 info!(
                     "agent: received session.capture_preview request id={}",
                     ctx.id
@@ -2087,7 +2101,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.attach" => "agent.attach" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.attach" => "agent.attach" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2610,7 +2624,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.detach" => "agent.detach" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.detach" => "agent.detach" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2647,7 +2661,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "agent.terminal.control.acquire" => "agent.terminal.control.acquire" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.terminal.control.acquire" => "agent.terminal.control.acquire" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: TerminalControlAcquirePayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
@@ -2671,7 +2685,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: TerminalStreamResumePayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
@@ -2686,7 +2700,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "agent.terminal.output.applied" => "agent.terminal.output.applied" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.terminal.output.applied" => "agent.terminal.output.applied" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: TerminalOutputAppliedPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2704,7 +2718,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(reason) => ctx.err("output_ack_rejected", reason),
                 }
             }
-            "agent.terminal.input" => "agent.terminal.input" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.terminal.input" => "agent.terminal.input" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2747,7 +2761,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.resize" => "agent.terminal.resize" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+            "agent.terminal.resize" => "agent.terminal.resize" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2822,46 +2836,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
             }
 
-            // --- Web UI compatibility handlers ---
-            "client.auth" => "client.auth" => 1 => WireScope::Connection => Ordered => {
-                let payload: ClientAuthPayload = match serde_json::from_value(payload_value) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!("Invalid client.auth payload: {e}");
-                        let resp = AuthResponsePayload {
-                            status: "error".to_string(),
-                            message: format!("invalid payload: {e}"),
-                            // There is no client id to report — this branch
-                            // rejected the payload before one was assigned. It
-                            // used to send `String::new()`, which is "absent"
-                            // written in the only dialect a required field
-                            // allows; with the field relaxed it says so.
-                            client_id: None,
-                        };
-                        return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                            .unwrap_or_default();
-                    }
-                };
-
-                // Use provided client_id or generate a new one
-                let assigned_client_id = payload
-                    .client_id
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-                // Store the client_id for this connection
-                {
-                    let mut cid = ctx.client_id.lock().await;
-                    *cid = Some(assigned_client_id.clone());
-                }
-
-                let resp = AuthResponsePayload {
-                    status: "success".to_string(),
-                    message: "ok".to_string(),
-                    client_id: Some(assigned_client_id),
-                };
-                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp)).unwrap_or_default()
-            }
-            "client.sessions.list" => "client.sessions.list" => 1 => WireScope::Sessions => Query => { match ctx.tmux.list_sessions().await {
+            "client.sessions.list" => "client.sessions.list" => 1 => P2pAccess::Authenticated => Query => { match ctx.tmux.list_sessions().await {
                 Ok(sessions_list) => {
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
@@ -2901,7 +2876,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
                 Err(e) => ctx.err("list_failed", &e.to_string()),
             } }
-            "client.session.attach" => "client.session.attach" => 1 => WireScope::Sessions => Inline => {
+            "client.session.attach" => "client.session.attach" => 1 => P2pAccess::Authenticated => Inline => {
                 let payload: WebSessionAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2916,7 +2891,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "client.session.create" => "client.session.create" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+            "client.session.create" => "client.session.create" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
                 let payload: WebSessionCreatePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -2986,7 +2961,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "client.session.kill" => "client.session.kill" => 1 => WireScope::Sessions => Key(session_by_id(payload_value)) => {
+            "client.session.kill" => "client.session.kill" => 1 => P2pAccess::Authenticated => Key(session_by_id(payload_value)) => {
                 let payload: WebSessionKillPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => {
@@ -3026,7 +3001,7 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             // --- File operations ---
-            "agent.file.list" => "agent.file.list" => 1 => WireScope::Files => Query => {
+            "agent.file.list" => "agent.file.list" => 1 => P2pAccess::Authenticated => Query => {
                 let payload: FileListPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3040,7 +3015,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("list_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.read" => "agent.file.read" => 1 => WireScope::Files => Query => {
+            "agent.file.read" => "agent.file.read" => 1 => P2pAccess::Authenticated => Query => {
                 let payload: FileReadPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3066,7 +3041,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.write" => "agent.file.write" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
+            "agent.file.write" => "agent.file.write" => 1 => P2pAccess::Authenticated => Key(ResourceKey::Filesystem) => {
                 let payload: FileWritePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3104,7 +3079,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.delete" => "agent.file.delete" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
+            "agent.file.delete" => "agent.file.delete" => 1 => P2pAccess::Authenticated => Key(ResourceKey::Filesystem) => {
                 let payload: FileDeletePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3122,7 +3097,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("delete_failed", &format_error_chain(&e)),
                 }
             }
-            "agent.file.create-dir" => "agent.file.create-dir" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
+            "agent.file.create-dir" => "agent.file.create-dir" => 1 => P2pAccess::Authenticated => Key(ResourceKey::Filesystem) => {
                 let payload: FileCreateDirPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3152,7 +3127,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.rename" => "agent.file.rename" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
+            "agent.file.rename" => "agent.file.rename" => 1 => P2pAccess::Authenticated => Key(ResourceKey::Filesystem) => {
                 let payload: FileRenamePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3184,7 +3159,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.file.cwd" => "agent.file.cwd" => 1 => WireScope::Files => Query => {
+            "agent.file.cwd" => "agent.file.cwd" => 1 => P2pAccess::Authenticated => Query => {
                 let payload: FileCwdPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3266,7 +3241,7 @@ impl AgentServer {
             terminal_cols: context.terminal_cols,
             attach_mode,
             resize: context.resize,
-            credentials: context.credentials,
+            auth: context.auth,
             handshake_policy: context.handshake_policy,
             mcp: None,
         })
@@ -3279,14 +3254,21 @@ impl AgentServer {
     /// a second path to tmux. The cluster backend reuses the Server this Agent
     /// reports to, or reports a structured "no Server" error in standalone
     /// mode.
-    pub fn mount_mcp(&mut self, config: &crate::config::AgentConfig) -> Result<()> {
+    pub fn mount_mcp(
+        &mut self,
+        config: &crate::config::AgentConfig,
+        agent_token: &str,
+    ) -> Result<()> {
         self.mcp = crate::server::mcp::build(
-            config,
-            &self.agent_id,
+            crate::server::mcp::McpHost {
+                config,
+                agent_token,
+                agent_id: &self.agent_id,
+                default_working_dir: &self.default_working_dir,
+                terminal_cols: self.terminal_cols,
+            },
             Arc::clone(&self.tmux_manager),
             Arc::clone(&self.sessions),
-            &self.default_working_dir,
-            self.terminal_cols,
             Arc::clone(&self.mutations),
         )?;
         Ok(())
@@ -3343,7 +3325,7 @@ impl AgentServer {
             resize: self.resize.clone(),
         };
         let tls_acceptor = self.tls_acceptor;
-        let credentials = Arc::clone(&self.credentials);
+        let auth = Arc::clone(&self.auth);
         let mcp = self.mcp.clone();
         let handshake_policy = self.handshake_policy;
         // Used by the accept loop itself: the log line and the shutdown path's
@@ -3398,7 +3380,7 @@ impl AgentServer {
                                     slot: AdmissionSlot::new(slot),
                                     addr,
                                     ingress: ingress_context.clone(),
-                                    credentials: Arc::clone(&credentials),
+                                    auth: Arc::clone(&auth),
                                     mcp: mcp.clone(),
                                     deadline: handshake_policy.timeout,
                                 };
@@ -3491,7 +3473,7 @@ impl AgentServer {
     /// here: that budget is for becoming a peer, not for being one.
     async fn serve_connection(
         ws: AxumWebSocket,
-        authority: ConnectionAuthority,
+        auth: Arc<P2pAuth>,
         addr: SocketAddr,
         context: AgentIngress,
     ) -> Result<()> {
@@ -3543,7 +3525,8 @@ impl AgentServer {
             attach_mode,
             resize,
             addr,
-            authority,
+            auth,
+            authority: Arc::new(StdMutex::new(None)),
         });
 
         let result = Self::run_message_loop(ws_stream, connection, mutations).await;
@@ -3627,7 +3610,28 @@ impl AgentServer {
         );
 
         loop {
-            let next = Self::next_frame_or_closed(&mut ws_stream, &connection.outbound).await;
+            // Before authentication the connection has one job, and a peer that
+            // never sends `client.auth` must not hold a socket indefinitely.
+            // Once authenticated this branch is the ordinary read.
+            let next = if connection.is_authenticated() {
+                Self::next_frame_or_closed(&mut ws_stream, &connection.outbound).await
+            } else {
+                match tokio::time::timeout(
+                    P2P_AUTH_FRAME_TIMEOUT,
+                    Self::next_frame_or_closed(&mut ws_stream, &connection.outbound),
+                )
+                .await
+                {
+                    Ok(next) => next,
+                    Err(_) => {
+                        warn!(
+                            addr = %addr,
+                            "closing a peer-to-peer connection that did not authenticate in time"
+                        );
+                        break;
+                    }
+                }
+            };
             let msg = match next {
                 Some(Ok(m)) => m,
                 Some(Err(e)) => {
@@ -3663,6 +3667,26 @@ impl AgentServer {
                             if !write_frame(&connection, Some(reply)).await {
                                 break;
                             }
+                        }
+                        Routed::Authenticated { reply, context } => {
+                            {
+                                let mut client_id = connection.client_id.lock().await;
+                                *client_id = Some(context.client_id.clone());
+                            }
+                            if let Ok(mut authority) = connection.authority.lock() {
+                                *authority = Some(context);
+                            }
+                            if !write_frame(&connection, Some(reply)).await {
+                                break;
+                            }
+                        }
+                        Routed::Reject(reply) => {
+                            // Deliver the refusal, then keep the socket until the
+                            // peer authenticates or the deadline closes it. A
+                            // refused frame must not cost the peer the reply that
+                            // says why, and an unauthenticated connection holds
+                            // no authority in the meantime.
+                            let _ = write_frame(&connection, Some(reply)).await;
                         }
                         // A control wire with nothing to answer: handled, and
                         // deliberately silent.
@@ -4968,8 +4992,6 @@ mod tests {
     use crate::test_support::TestSession;
     use base64::Engine;
     use futures_util::SinkExt;
-    use nession_protocol::contracts::p2p::agent_url_with_credential;
-    use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_tungstenite::connect_async;
@@ -4989,91 +5011,53 @@ mod tests {
         >,
     >;
 
-    /// The credential every dial through [`connect_client`] presents.
+    /// The durable Agent Token every test server is configured with and every
+    /// dial through [`connect_client`] presents (#3440).
     ///
-    /// A fixed value, not a fresh UUID: each test's server has its own store, so
+    /// A fixed value, not a fresh UUID: each test's server owns its verifier, so
     /// a per-test token would be unique in a place where nothing else is shared
     /// — and the alternative is threading a returned token through thirty-odd
     /// call sites, which is a large mechanical diff for no property.
-    const TEST_CREDENTIAL: &str = "test-credential";
+    const TEST_AGENT_TOKEN: &str = "test-agent-token-000000";
 
-    /// The session [`TEST_CREDENTIAL`]'s terminal binding names.
-    ///
-    /// A placeholder, and deliberately one **no frame in this module carries**:
-    /// the scope gate compares the name in the frame against the name in the
-    /// credential, so a credential bound here reaches no session at all. That is
-    /// what makes it the right credential for the thirty-odd tests that touch no
-    /// terminal wire, and it is why a test that sends one of the five
-    /// session-scoped wires waits until it knows its session's name and dials
-    /// through [`connect_client_for`] instead.
-    const PLACEHOLDER_SESSION: &str = "test";
+    /// A different, equally well-formed token: one Agent's token must not open
+    /// another Agent's listener.
+    const OTHER_AGENT_TOKEN: &str = "other-agent-token-111111";
 
-    /// A valid credential that is deliberately narrow: terminal for one session,
-    /// no session management, no file sandbox. Minted by the same helper, so a
-    /// test can tell "the credential was refused" apart from "the credential was
-    /// not valid" — the two are the same 401 and would be one test otherwise.
-    const NARROW_CREDENTIAL: &str = "narrow-credential";
-
-    /// Grant a credential into a test server's store (#1013).
-    ///
-    /// Goes through [`P2pCredentials::grant`], the method the Server's
-    /// `agent.p2p.grant` calls, so the handshake and the scope gate these tests
-    /// exercise are the production ones — only *delivery* differs. There is no
-    /// `AgentServer` helper for this because the only one possible would sit
-    /// behind a cargo feature, and `scripts/filtered-test.sh` runs
-    /// `cargo test --workspace` with no features at all: a minter that does not
-    /// exist in the gate's build tests nothing on the day the gate runs.
-    fn grant_credential(credentials: &P2pCredentials, credential: &str, scope: CredentialScope) {
-        credentials
-            .grant(
-                "test-agent",
-                &P2pGrantPayload {
-                    request_id: "test-grant".to_string(),
-                    credential: credential.to_string(),
-                    agent_id: "test-agent".to_string(),
-                    session_id: "test-agent:test".to_string(),
-                    scope,
-                    expires_at: (chrono::Utc::now() + chrono::Duration::seconds(300)).to_rfc3339(),
-                },
-            )
-            .expect("the agent accepts a credential it minted for itself");
-    }
-
-    async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle, Arc<P2pCredentials>) {
+    async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle, Arc<P2pAuth>) {
         start_test_server_with(None, P2pHandshakePolicy::default()).await
     }
 
-    /// Start a test server with an explicit TLS identity and admission policy
-    /// (#2653).
-    ///
-    /// The policy is the whole point of the pre-authentication tests: a small
-    /// `max_pending` makes saturation observable with a handful of sockets, and
-    /// a short `timeout` proves the deadline without waiting ten seconds.
     async fn start_test_server_with(
         tls: Option<(
             Vec<rustls::pki_types::CertificateDer<'static>>,
             rustls::pki_types::PrivateKeyDer<'static>,
         )>,
         handshake_policy: P2pHandshakePolicy,
-    ) -> (SocketAddr, ServerHandle, Arc<P2pCredentials>) {
+    ) -> (SocketAddr, ServerHandle, Arc<P2pAuth>) {
+        start_test_server_with_token(tls, handshake_policy, TEST_AGENT_TOKEN).await
+    }
+
+    /// Start a test server with an explicit TLS identity, admission policy and
+    /// Agent Token (#2653, #3440).
+    ///
+    /// The policy is the whole point of the pre-authentication tests: a small
+    /// `max_pending` makes saturation observable with a handful of sockets, and
+    /// a short `timeout` proves the deadline without waiting ten seconds.
+    async fn start_test_server_with_token(
+        tls: Option<(
+            Vec<rustls::pki_types::CertificateDer<'static>>,
+            rustls::pki_types::PrivateKeyDer<'static>,
+        )>,
+        handshake_policy: P2pHandshakePolicy,
+        token: &str,
+    ) -> (SocketAddr, ServerHandle, Arc<P2pAuth>) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (resize, _resize_updates) = ResizeReporter::new();
-        // Granted **before** `start`, which consumes the server: the store is an
-        // `Arc` shared with the running listener, so a credential granted here
-        // is the one the listener checks.
-        let credentials = Arc::new(P2pCredentials::new());
-        grant_credential(
-            &credentials,
-            TEST_CREDENTIAL,
-            CredentialScope::for_attach(PLACEHOLDER_SESSION),
-        );
-        // And one that deliberately lacks the two management scopes, so the
-        // gate can be tested against a credential that is valid but narrow.
-        grant_credential(
-            &credentials,
-            NARROW_CREDENTIAL,
-            CredentialScope::for_relay(PLACEHOLDER_SESSION),
-        );
+        // Built before `start`, which consumes the server: the verifier is an
+        // `Arc` shared with the running listener, so this is the token the
+        // listener checks.
+        let auth = Arc::new(P2pAuth::new(token));
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
@@ -5083,7 +5067,7 @@ mod tests {
             AttachMode::Plain,
             AgentServerContext {
                 resize,
-                credentials: Arc::clone(&credentials),
+                auth: Arc::clone(&auth),
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
                 session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(
@@ -5097,7 +5081,7 @@ mod tests {
         // Leak the TempDir so the sandbox root persists for the server lifetime.
         Box::leak(Box::new(tmp));
         let (handle, addr) = server.start().await.expect("start should succeed");
-        (addr, handle, credentials)
+        (addr, handle, auth)
     }
 
     /// A fresh test CA and server leaf for the TLS half of the admission tests
@@ -5139,8 +5123,8 @@ mod tests {
         (vec![leaf_der, ca_der.clone()], key, ca_der)
     }
 
-    /// Dial a TLS test server presenting [`TEST_CREDENTIAL`], trusting the
-    /// test's own certificate instead of any system root.
+    /// Dial a TLS test server and authenticate as [`TEST_AGENT_TOKEN`],
+    /// trusting the test's own certificate instead of any system root.
     async fn connect_tls_client(
         addr: SocketAddr,
         trusted: rustls::pki_types::CertificateDer<'static>,
@@ -5152,16 +5136,17 @@ mod tests {
         let client = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
-        let url = agent_url_with_credential(&format!("wss://{addr}"), TEST_CREDENTIAL);
         let (ws, _response) = tokio_tungstenite::connect_async_tls_with_config(
-            url.as_str(),
+            format!("wss://{addr}").as_str(),
             None,
             false,
             Some(tokio_tungstenite::Connector::Rustls(Arc::new(client))),
         )
         .await
-        .expect("a TLS client with a valid credential connects");
-        ws.split()
+        .expect("the TLS upgrade succeeds; authentication follows as a frame");
+        let (mut sink, mut stream) = ws.split();
+        authenticate_connection(&mut sink, &mut stream, TEST_AGENT_TOKEN, None).await;
+        (sink, stream)
     }
 
     /// Wait until the listener closed `peer`, or report that it is still
@@ -5202,60 +5187,101 @@ mod tests {
         drop(slot);
     }
 
-    /// Dial `addr`, presenting `credential`.
+    /// Complete the upgrade without authenticating.
     ///
-    /// The store is asked first, so a dial presenting something it never minted
-    /// fails here with that sentence rather than as the opaque refused upgrade
-    /// this socket gives a peer — one 401 with nothing in it about which end
-    /// said no.
-    async fn dial_presenting(
-        credentials: &P2pCredentials,
-        addr: SocketAddr,
-        credential: &str,
-    ) -> (WsSink, WsStream) {
-        assert!(
-            credentials.authorize(credential).is_ok(),
-            "the credential a test dial presents must be one its server's store honours"
-        );
-        let url = agent_url_with_credential(&format!("ws://{addr}"), credential);
-        let (ws_stream, _response) = connect_async(&url).await.expect("connect should succeed");
+    /// The upgrade is not authentication (#3440): it succeeds for any peer, and
+    /// the socket carries nothing until `client.auth` is the first frame. Refusal
+    /// tests start here, and so does a test that has to send its own
+    /// authentication frame.
+    async fn dial_plain(addr: SocketAddr) -> (WsSink, WsStream) {
+        let (ws_stream, _response) = connect_async(format!("ws://{addr}"))
+            .await
+            .expect("the upgrade succeeds");
         ws_stream.split()
     }
 
-    /// Connect a WebSocket client to a test server.
+    /// Send `client.auth` as the connection's first frame and assert it is
+    /// accepted.
     ///
-    /// Presents [`TEST_CREDENTIAL`], the credential `start_test_server_on`
-    /// granted, and so reaches every wire **except** the five the scope gate
-    /// binds to a session name (#1013). A test that sends one of those says which
-    /// session it means through [`connect_client_for`].
-    async fn connect_client(credentials: &P2pCredentials, addr: SocketAddr) -> (WsSink, WsStream) {
-        dial_presenting(credentials, addr, TEST_CREDENTIAL).await
+    /// One frame, one answer: the Agent claims the identity before it reads the
+    /// next frame, so a caller that reached this line holds an authenticated
+    /// socket.
+    async fn authenticate_connection(
+        sink: &mut WsSink,
+        stream: &mut WsStream,
+        token: &str,
+        client_id: Option<&str>,
+    ) {
+        let request = new_message(
+            msg_types::CLIENT_AUTH,
+            ClientAuthPayload {
+                auth_token: token.into(),
+                client_id: client_id.map(str::to_string),
+            },
+        );
+        let response: Message<AuthResponsePayload> = send_and_receive(sink, stream, &request).await;
+        assert_eq!(response.msg_type, msg_types::OK);
+        assert_eq!(response.payload.status, "success");
+        if let Some(client_id) = client_id {
+            assert_eq!(response.payload.client_id.as_deref(), Some(client_id));
+        }
     }
 
-    /// Connect presenting a credential bound to `session`.
+    /// Dial and authenticate as [`TEST_AGENT_TOKEN`].
     ///
-    /// Mints into the server's own store, so the credential these tests present
-    /// is one the production `grant` path accepted — and mints it *here* rather
-    /// than at `start_test_server_on`, because the session names these tests
-    /// attach to are generated per run and do not exist yet when the server
-    /// starts.
-    ///
-    /// The credential string is derived from the session name: the store is per
-    /// server and the servers are per test, so uniqueness only has to hold within
-    /// one test, and a second dial for the same session re-grants the same value
-    /// instead of needing a counter.
-    async fn connect_client_for(
-        credentials: &P2pCredentials,
-        addr: SocketAddr,
-        session: &str,
-    ) -> (WsSink, WsStream) {
-        let credential = format!("credential-for-{session}");
-        grant_credential(
-            credentials,
-            &credential,
-            CredentialScope::for_attach(session),
+    /// A plain URL, then `client.auth`: there is no token in the URL and no
+    /// per-session grant. The token is the Agent's whole trusted surface
+    /// (#3440), so one dial reaches every wire this module sends.
+    async fn connect_client(auth: &P2pAuth, addr: SocketAddr) -> (WsSink, WsStream) {
+        assert!(
+            auth.verify(TEST_AGENT_TOKEN),
+            "the token a test dial presents must be the one its server verifies"
         );
-        dial_presenting(credentials, addr, &credential).await
+        let (mut sink, mut stream) = dial_plain(addr).await;
+        authenticate_connection(&mut sink, &mut stream, TEST_AGENT_TOKEN, None).await;
+        (sink, stream)
+    }
+
+    /// Dial, present `token` in `client.auth`, and assert the refusal.
+    ///
+    /// A refusal is an answer to the handshake, on the shared `ok` wire with
+    /// `status: "failed"` — the Browser classifies that as a token rejection
+    /// and refetches an attach (#3440). The refusal does not close the socket:
+    /// the connection stays unauthenticated, holding no authority, until the
+    /// authentication deadline ends it.
+    async fn assert_authentication_refused(addr: SocketAddr, token: &str) {
+        let (mut sink, mut stream) = dial_plain(addr).await;
+        let request = new_message(
+            msg_types::CLIENT_AUTH,
+            ClientAuthPayload {
+                auth_token: token.into(),
+                client_id: None,
+            },
+        );
+        let response: Message<AuthResponsePayload> =
+            send_and_receive(&mut sink, &mut stream, &request).await;
+        assert_eq!(response.msg_type, msg_types::OK);
+        assert_eq!(response.payload.status, "failed");
+        assert_eq!(response.payload.message, "authentication failed");
+        assert_eq!(response.payload.client_id, None);
+        assert!(
+            !response.payload.message.contains(token),
+            "the refusal must not echo the token: {}",
+            response.payload.message
+        );
+
+        // The refusal grants no authority: a business frame on the same still
+        // open connection is refused too.
+        let business: Message<serde_json::Value> = Message {
+            msg_type: msg_types::SESSION_LIST.to_string(),
+            id: "after-refusal".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let refused: Message<ErrorPayload> =
+            send_and_receive(&mut sink, &mut stream, &business).await;
+        assert_eq!(refused.msg_type, msg_types::ERROR);
+        assert_eq!(refused.payload.code, "unauthorized");
     }
 
     /// Send a JSON request and receive the matching JSON response.
@@ -5305,7 +5331,7 @@ mod tests {
             AttachMode::Plain,
             AgentServerContext {
                 resize,
-                credentials: Arc::new(P2pCredentials::new()),
+                auth: Arc::new(P2pAuth::new(TEST_AGENT_TOKEN)),
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
                 session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(
@@ -5730,8 +5756,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_list_request() {
-        let (addr, handle, credentials) = start_test_server_on(18081).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18081).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
         let resp: Message<serde_json::Value> = send_and_receive(&mut sink, &mut stream, &req).await;
@@ -5746,8 +5772,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_create_and_kill() {
-        let (addr, handle, credentials) = start_test_server_on(18082).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18082).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let session = TestSession::new("srv-create-kill");
         let session_name = session.name().to_string();
@@ -5792,7 +5818,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_attach_detach() {
-        let (addr, handle, credentials) = start_test_server_on(18083).await;
+        let (addr, handle, auth) = start_test_server_on(18083).await;
 
         // Create a real tmux session first so attach has something to
         // connect to.
@@ -5808,7 +5834,7 @@ mod tests {
 
         // The dial comes after the session does: the credential it presents is
         // bound to `session_name`, which is generated per run.
-        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // Attach via WebSocket.
         let attach_payload = ClientAttachPayload {
@@ -5848,7 +5874,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_io_flow() {
-        let (addr, handle, credentials) = start_test_server_on(18084).await;
+        let (addr, handle, auth) = start_test_server_on(18084).await;
 
         let tmux = SessionManager::new();
         let session = TestSession::new("srv-io");
@@ -5860,7 +5886,7 @@ mod tests {
 
         // The dial comes after the session does: the credential it presents is
         // bound to `session_name`, which is generated per run.
-        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // Attach.
         let attach_payload = ClientAttachPayload {
@@ -5945,8 +5971,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_unknown_message_type_returns_error() {
-        let (addr, handle, credentials) = start_test_server_on(18085).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18085).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req: Message<serde_json::Value> = Message {
             msg_type: "unknown.type".to_string(),
@@ -5965,8 +5991,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_lines_zero_rejected() {
-        let (addr, handle, credentials) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client_for(&credentials, addr, "any").await;
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: "any".to_string(),
@@ -5983,8 +6009,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_lines_too_large_rejected() {
-        let (addr, handle, credentials) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client_for(&credentials, addr, "any").await;
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: "any".to_string(),
@@ -6001,9 +6027,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_unknown_session_returns_error() {
-        let (addr, handle, credentials) = start_test_server_on(0).await;
-        let (mut sink, mut stream) =
-            connect_client_for(&credentials, addr, "nession-test-does-not-exist-xyz").await;
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: "nession-test-does-not-exist-xyz".to_string(),
@@ -6020,7 +6045,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_preview_valid_request_returns_base64() {
-        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let (addr, handle, auth) = start_test_server_on(0).await;
 
         let tmux = SessionManager::new();
         let session = TestSession::new("srv-preview");
@@ -6038,7 +6063,7 @@ mod tests {
 
         // The dial comes after the session does: the credential it presents is
         // bound to `session_name`, which is generated per run.
-        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let payload = SessionCapturePreviewPayload {
             session_name: session_name.clone(),
@@ -6071,8 +6096,8 @@ mod tests {
     /// id echoed by the sender, not a correlation the receiver derives.
     #[tokio::test]
     async fn a_control_ping_is_met_with_a_control_pong() {
-        let (addr, handle, credentials) = start_test_server_on(18092).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18092).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
@@ -6099,8 +6124,8 @@ mod tests {
         // The argument is vestigial — `start_test_server_on` ignores it and
         // binds `127.0.0.1:0` — so it is `0` rather than a number that reads
         // like a real port.
-        let (addr, handle, credentials) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         for wire in [msg_types::CONTROL_PONG, msg_types::CONTROL_HEARTBEAT] {
             let req: Message<serde_json::Value> = Message {
@@ -6145,8 +6170,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_json_returns_error() {
-        let (addr, handle, credentials) = start_test_server_on(18086).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18086).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         sink.send(WsMessage::Text("not valid json".to_string()))
             .await
@@ -6167,8 +6192,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_list_root() {
-        let (addr, handle, credentials) = start_test_server_on(18087).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18087).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req = new_message(
             msg_types::FILE_LIST,
@@ -6185,8 +6210,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_write_and_read_roundtrip() {
-        let (addr, handle, credentials) = start_test_server_on(18088).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18088).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let content = b"nession file test";
         let b64 = base64::engine::general_purpose::STANDARD.encode(content);
@@ -6225,8 +6250,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_list_then_read_roundtrip() {
-        let (addr, handle, credentials) = start_test_server_on(18091).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18091).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // 1. Write a file.
         let content = b"roundtrip via list_dir path";
@@ -6321,8 +6346,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_delete() {
-        let (addr, handle, credentials) = start_test_server_on(18089).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18089).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"to delete");
         let write_req = new_message(
@@ -6370,8 +6395,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_permission_denied_on_escape() {
-        let (addr, handle, credentials) = start_test_server_on(18090).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18090).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req = new_message(
             msg_types::FILE_READ,
@@ -6390,8 +6415,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_create_dir() {
-        let (addr, handle, credentials) = start_test_server_on(18093).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18093).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // Create a nested directory
         let create_req = new_message(
@@ -6445,8 +6470,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_rename() {
-        let (addr, handle, credentials) = start_test_server_on(18094).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18094).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // Write a file
         let content = b"rename test";
@@ -6513,7 +6538,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_input_invalid_base64() {
-        let (addr, handle, credentials) = start_test_server_on(18095).await;
+        let (addr, handle, auth) = start_test_server_on(18095).await;
 
         let tmux = SessionManager::new();
         let session = TestSession::new("srv-invalid-b64");
@@ -6525,7 +6550,7 @@ mod tests {
 
         // The dial comes after the session does: the credential it presents is
         // bound to `session_name`, which is generated per run.
-        let (mut sink, mut stream) = connect_client_for(&credentials, addr, &session_name).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // Attach first
         let attach_payload = ClientAttachPayload {
@@ -6747,11 +6772,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_client_auth() {
-        let (addr, handle, credentials) = start_test_server_on(18096).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, _auth) = start_test_server_on(18096).await;
+        // Raw dial: this test is the handshake itself, so it must send the
+        // first frame rather than start from an already-authenticated socket.
+        let (mut sink, mut stream) = dial_plain(addr).await;
 
         let auth_payload = ClientAuthPayload {
-            auth_token: "test-token".to_string(),
+            auth_token: TEST_AGENT_TOKEN.into(),
             client_id: Some("my-client-id".to_string()),
         };
         let req = new_message(msg_types::CLIENT_AUTH, auth_payload);
@@ -6767,11 +6794,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_client_auth_generates_id() {
-        let (addr, handle, credentials) = start_test_server_on(18097).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, _auth) = start_test_server_on(18097).await;
+        let (mut sink, mut stream) = dial_plain(addr).await;
 
         let auth_payload = ClientAuthPayload {
-            auth_token: "test-token".to_string(),
+            auth_token: TEST_AGENT_TOKEN.into(),
             client_id: None, // server should generate one
         };
         let req = new_message(msg_types::CLIENT_AUTH, auth_payload);
@@ -6793,8 +6820,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_sessions_list() {
-        let (addr, handle, credentials) = start_test_server_on(18099).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18099).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req = new_message(msg_types::CLIENT_SESSIONS_LIST, serde_json::json!({}));
         let resp: Message<WebSessionsListResponse> =
@@ -6809,8 +6836,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_attach() {
-        let (addr, handle, credentials) = start_test_server_on(18100).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18100).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let payload = WebSessionAttachPayload {
             session_id: "test-agent:my-session".to_string(),
@@ -6829,8 +6856,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_create_and_kill() {
-        let (addr, handle, credentials) = start_test_server_on(18101).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18101).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let session = TestSession::new("web-create-kill");
         let session_name = session.name().to_string();
@@ -6875,8 +6902,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_kill_nonexistent() {
-        let (addr, handle, credentials) = start_test_server_on(18102).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18102).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let kill_payload = WebSessionKillPayload {
             session_id: "agent:nonexistent-session-xyz".to_string(),
@@ -6894,8 +6921,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_web_ui_session_create_invalid_payload() {
-        let (addr, handle, credentials) = start_test_server_on(18103).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let (addr, handle, auth) = start_test_server_on(18103).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         // Send a completely invalid payload (missing name field)
         let req = new_message(
@@ -6914,9 +6941,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_detach_not_attached() {
-        let (addr, handle, credentials) = start_test_server_on(18104).await;
-        let (mut sink, mut stream) =
-            connect_client_for(&credentials, addr, "never-attached-session").await;
+        let (addr, handle, auth) = start_test_server_on(18104).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let detach_payload = ClientDetachPayload {
             session_name: "never-attached-session".to_string(),
@@ -6932,9 +6958,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_input_not_attached() {
-        let (addr, handle, credentials) = start_test_server_on(18105).await;
-        let (mut sink, mut stream) =
-            connect_client_for(&credentials, addr, "no-such-session").await;
+        let (addr, handle, auth) = start_test_server_on(18105).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         use base64::Engine;
         let input_payload = TerminalInputPayload {
@@ -6956,9 +6981,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_terminal_resize_not_attached() {
-        let (addr, handle, credentials) = start_test_server_on(18106).await;
-        let (mut sink, mut stream) =
-            connect_client_for(&credentials, addr, "no-such-session").await;
+        let (addr, handle, auth) = start_test_server_on(18106).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let resize_payload = TerminalResizePayload {
             session_name: "no-such-session".to_string(),
@@ -7217,10 +7241,11 @@ mod tests {
     /// The response types in `msg_types` — `ok`, `error`, `terminal.output` —
     /// are deliberately absent: they are what an answer looks like, not
     /// something a peer asks for, and a manifest that offered them would be
-    /// claiming a call that does not exist. `control.ping` and `control.pong`
-    /// are absent for a different reason: they are not units at all, they are
-    /// handled ahead of the route table, and their symmetry is checked by
-    /// `scripts/protocol-gate.mjs` rather than by a descriptor.
+    /// claiming a call that does not exist. `control.ping`, `control.pong` and
+    /// `client.auth` are absent for a different reason: they are not units at
+    /// all, they are handled ahead of the route table, and their behaviour is
+    /// checked by `scripts/protocol-gate.mjs` and the authentication tests
+    /// rather than by a descriptor.
     const REQUEST_WIRES: &[&str] = &[
         msg_types::SESSION_LIST,
         msg_types::SESSION_CREATE,
@@ -7235,7 +7260,6 @@ mod tests {
         msg_types::TERMINAL_CONTROL_ACQUIRE,
         msg_types::TERMINAL_STREAM_RESUME,
         msg_types::TERMINAL_OUTPUT_APPLIED,
-        msg_types::CLIENT_AUTH,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,
         msg_types::CLIENT_SESSION_CREATE,
@@ -7302,66 +7326,77 @@ mod tests {
         );
     }
 
-    // ── The P2P credential (#1013) ──────────────────────────────────────────
+    // ── Static Agent-token authentication (#3440) ───────────────────────────
     //
-    // Two layers, one test each, because they answer different questions and a
-    // suite that tested only one would pass with the other absent: the
-    // **upgrade** asks whether there is a credential at all, and the **gate in
-    // `Frame::route`** asks whether this credential covers this wire.
+    // The upgrade is not authentication and there is no per-attach grant: a
+    // socket becomes a peer only when `client.auth` presents this Agent's
+    // durable token as the first frame, and from then on it holds the whole
+    // trusted surface. These tests pin that gate from both sides — what is
+    // refused before the frame, and what one token reaches afterwards.
 
-    /// A dial with no credential is refused at the upgrade.
+    /// A business frame before `client.auth` is refused and carries no
+    /// authority.
     ///
-    /// Refused *before* a WebSocket exists, which is the property worth having:
-    /// there is no connection to leave in a half-authenticated state, and no
-    /// later handler that has to remember to check. `connect_async` failing here
-    /// is the whole assertion — if the upgrade had succeeded, this call would
-    /// have returned a socket.
+    /// The upgrade itself succeeds — a WebSocket exists — which is exactly why
+    /// the gate sits on the reader task: an accepted socket with no token holds
+    /// nothing, and the peer is told so before any frame is dispatched. The
+    /// refusal does not close the socket: the same connection can still become
+    /// a peer by authenticating, until the authentication deadline.
     #[tokio::test]
-    async fn a_connection_with_no_credential_is_refused() {
+    async fn a_business_frame_before_client_auth_is_refused_without_authority() {
         let (addr, handle, _) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = dial_plain(addr).await;
 
-        let refused = connect_async(format!("ws://{addr}")).await;
+        let req: Message<serde_json::Value> = Message {
+            msg_type: msg_types::SESSION_LIST.to_string(),
+            id: "pre-auth-1".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let refused: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+        assert_eq!(refused.msg_type, msg_types::ERROR);
+        assert_eq!(refused.payload.code, "unauthorized");
 
-        assert!(
-            refused.is_err(),
-            "a peer that presented nothing must not get a WebSocket"
-        );
+        // Still unauthenticated, and still able to authenticate: refusing the
+        // frame cost the peer neither the socket nor its chance to prove itself.
+        authenticate_connection(&mut sink, &mut stream, TEST_AGENT_TOKEN, None).await;
 
         handle.shutdown().await.ok();
     }
 
-    /// A credential nobody issued is refused, and refused the same way.
+    /// A `client.auth` with a token this Agent was not configured with is
+    /// refused on the shared `ok` wire with `status: "failed"`, without a hint
+    /// about why, and the connection stays unauthenticated.
     ///
-    /// The second half is the one worth stating: the peer is told nothing about
-    /// *why*, so "unknown", "expired" and "issued for another agent" are
-    /// indistinguishable from out here. A message that distinguished them would
-    /// tell a caller which of its guesses was closest.
+    /// A guess, an older design's credential and another Agent's token are
+    /// indistinguishable out here: the peer is told only that authentication
+    /// failed. The `failed` status is what lets the Browser classify this as a
+    /// token rejection rather than a transport fault (#3440).
     #[tokio::test]
-    async fn a_credential_nobody_issued_is_refused() {
+    async fn an_unknown_token_is_refused() {
         let (addr, handle, _) = start_test_server_on(0).await;
 
-        let url = agent_url_with_credential(&format!("ws://{addr}"), "a-guess");
-        let refused = connect_async(&url).await;
-
-        assert!(refused.is_err(), "an invented credential must not connect");
+        assert_authentication_refused(addr, "a-guess").await;
 
         handle.shutdown().await.ok();
     }
 
-    /// The credential the server minted is accepted — the other direction.
+    /// The token the listener was configured with is accepted — the other
+    /// direction.
     ///
     /// Without this, both tests above pass for a listener that refuses
     /// everything, which is a different bug with the same green.
     #[tokio::test]
-    async fn the_minted_credential_is_accepted() {
-        let (addr, handle, credentials) = start_test_server_on(0).await;
+    async fn the_configured_token_is_accepted() {
+        let (addr, handle, auth) = start_test_server_on(0).await;
 
-        // `connect_client` presents `TEST_CREDENTIAL`, which
-        // `start_test_server_on` minted; reaching the next line is the assertion.
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        // `connect_client` presents `TEST_AGENT_TOKEN`, which
+        // `start_test_server_on` configured; reaching the next line is the
+        // assertion.
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
         let req: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
-            id: "cred-ok".to_string(),
+            id: "token-ok".to_string(),
             timestamp: now_timestamp(),
             payload: serde_json::json!({}),
         };
@@ -7372,77 +7407,101 @@ mod tests {
         handle.shutdown().await.ok();
     }
 
-    /// A scope refusal answers the frame and **keeps the connection**.
+    /// One authenticated token reaches the whole trusted surface (#3440).
     ///
-    /// The wire is refused, the reason is not the peer's, and the socket still
-    /// works for the next frame — which is what separates a scope check from a
-    /// hangup. A caller that strayed outside its credential has made an ordinary
-    /// mistake, and closing the connection would turn it into a reattach storm
-    /// that reports nothing about the cause.
+    /// The per-session scope gate is gone: the explicit 0.x tradeoff is that
+    /// whoever holds the Agent Token holds the Agent. Session management and the
+    /// file sandbox answer the same connection, which is the replacement for the
+    /// narrow-credential refusal this test suite used to assert.
     #[tokio::test]
-    async fn a_frame_outside_the_scope_is_refused_and_the_connection_survives() {
-        let (addr, handle, _) = start_test_server_on(0).await;
+    async fn one_token_reaches_session_management_and_the_file_sandbox() {
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
-        // A relay credential: terminal for one session, and neither session
-        // management nor the file sandbox. Presented directly rather than
-        // through `connect_client`, which mints the broad one — the point here
-        // is the narrow credential.
-        let url = agent_url_with_credential(&format!("ws://{addr}"), NARROW_CREDENTIAL);
-        let (ws, _response) = connect_async(&url)
-            .await
-            .expect("a granted credential connects");
-        let (mut sink, mut stream) = ws.split();
+        let list: Message<serde_json::Value> = Message {
+            msg_type: msg_types::SESSION_LIST.to_string(),
+            id: "token-1".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let listed: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &list).await;
+        assert_eq!(listed.msg_type, msg_types::OK);
 
-        // `agent.file.list` needs the file sandbox, which this credential does
-        // not have — and which is a real boundary rather than a precaution,
-        // because the relay leg never touches a file.
-        let req: Message<serde_json::Value> = Message {
+        let files: Message<serde_json::Value> = Message {
             msg_type: msg_types::FILE_LIST.to_string(),
-            id: "scope-1".to_string(),
+            id: "token-2".to_string(),
             timestamp: now_timestamp(),
             payload: serde_json::json!({ "path": "." }),
         };
-        let resp: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
-
-        assert_eq!(resp.msg_type, msg_types::ERROR);
-        assert_eq!(resp.id, "scope-1");
-        assert_eq!(resp.payload.code, "forbidden");
-        assert!(
-            !resp.payload.message.contains("token"),
-            "the reply must not hand the peer vocabulary about credentials: {}",
-            resp.payload.message
+        let listed_files: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &files).await;
+        assert_eq!(
+            listed_files.msg_type,
+            msg_types::OK,
+            "the static token covers the file sandbox as well: {:?}",
+            listed_files.payload
         );
 
-        // Still usable.
+        // And the connection is still usable afterwards.
         let ping: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
-            id: "scope-2".to_string(),
+            id: "token-3".to_string(),
             timestamp: now_timestamp(),
             payload: serde_json::json!({}),
         };
         let pong: Message<serde_json::Value> =
             send_and_receive(&mut sink, &mut stream, &ping).await;
-        assert_eq!(
-            pong.msg_type,
-            msg_types::CONTROL_PONG,
-            "a scope refusal must leave the connection usable"
-        );
+        assert_eq!(pong.msg_type, msg_types::CONTROL_PONG);
 
         handle.shutdown().await.ok();
     }
 
-    /// A wire this socket does not carry is still reported as unknown, not
-    /// forbidden.
+    /// A second `client.auth` is refused and keeps the identity already proved.
     ///
-    /// The two answers mean different things and the gate has to keep them
-    /// apart: `p2p_scope` returns `None` for a name no arm carries, and routing
-    /// that as a permission failure would be a false statement about why the
-    /// call failed — it would send a caller to look at its credential when the
-    /// problem is the wire name.
+    /// A connection has one identity for its life; rerunning the handshake could
+    /// otherwise rewrite the client id that the lease and output-ACK bindings
+    /// already name. The refusal answers the frame and leaves the authenticated
+    /// connection usable.
     #[tokio::test]
-    async fn an_unknown_wire_is_not_reported_as_a_scope_refusal() {
-        let (addr, handle, credentials) = start_test_server_on(0).await;
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+    async fn a_second_client_auth_is_refused_and_keeps_the_identity() {
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
+
+        let req = new_message(
+            msg_types::CLIENT_AUTH,
+            ClientAuthPayload {
+                auth_token: TEST_AGENT_TOKEN.into(),
+                client_id: Some("a-new-identity".to_string()),
+            },
+        );
+        let refused: Message<ErrorPayload> = send_and_receive(&mut sink, &mut stream, &req).await;
+        assert_eq!(refused.msg_type, msg_types::ERROR);
+        assert_eq!(refused.payload.code, "already_authenticated");
+
+        // The connection keeps serving under the identity it already proved.
+        let ping: Message<serde_json::Value> = Message {
+            msg_type: msg_types::CONTROL_PING.to_string(),
+            id: "after-second-auth".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let pong: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &ping).await;
+        assert_eq!(pong.msg_type, msg_types::CONTROL_PONG);
+
+        handle.shutdown().await.ok();
+    }
+
+    /// A wire this socket does not carry is reported as unknown, not as an
+    /// authentication failure.
+    ///
+    /// The two answers mean different things: an unknown name must not send a
+    /// caller to look at its token when the problem is the wire name.
+    #[tokio::test]
+    async fn an_unknown_wire_is_reported_as_unknown() {
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
 
         let req: Message<serde_json::Value> = Message {
             msg_type: "agent.nothing.here".to_string(),
@@ -7457,29 +7516,24 @@ mod tests {
         handle.shutdown().await.ok();
     }
 
-    /// A credential for one agent is refused by another.
+    /// One Agent's token is refused by another.
     ///
-    /// The credential is well formed, unexpired, and minted through the same
-    /// production `grant` — it simply names someone else. Two agents, two
-    /// stores, and the second has never heard of this token.
+    /// Both values are well formed and both Agents verify *a* token; what
+    /// differs is which one each Agent was configured with. Two servers, two
+    /// tokens: B's listener refuses A's token, and A's own still works.
     #[tokio::test]
-    async fn one_agents_credential_is_refused_by_another() {
-        let (addr_a, handle_a, credentials_a) = start_test_server_on(0).await;
-        let (addr_b, handle_b, _) = start_test_server_on(0).await;
+    async fn one_agents_token_is_refused_by_another() {
+        let (addr_a, handle_a, auth_a) =
+            start_test_server_with_token(None, P2pHandshakePolicy::default(), TEST_AGENT_TOKEN)
+                .await;
+        let (addr_b, handle_b, _) =
+            start_test_server_with_token(None, P2pHandshakePolicy::default(), OTHER_AGENT_TOKEN)
+                .await;
 
-        // Both servers mint `TEST_CREDENTIAL` for their own `test-agent` id, so
-        // the tokens are equal strings in two stores — which is exactly why the
-        // refusal has to come from the *store*, not from the string. Presenting
-        // b's address with the credential a minted must fail.
-        let url =
-            agent_url_with_credential(&format!("ws://{addr_b}"), "a-credential-b-never-issued");
-        assert!(
-            connect_async(&url).await.is_err(),
-            "an agent must refuse a credential it never issued"
-        );
-        // And a's own credential still works, so the refusal above is about the
-        // credential rather than about the server.
-        let _ok = connect_client(&credentials_a, addr_a).await;
+        assert_authentication_refused(addr_b, TEST_AGENT_TOKEN).await;
+        // And a's own token still works, so the refusal above is about the
+        // token rather than about the server.
+        let _ok = connect_client(&auth_a, addr_a).await;
 
         handle_a.shutdown().await.ok();
         handle_b.shutdown().await.ok();
@@ -7487,9 +7541,9 @@ mod tests {
 
     // ── Pre-authentication admission and handshake deadline (#2653) ────────
     //
-    // The credential tests above prove *who* may connect. These prove that a
-    // peer which never gets that far — silent, or halfway through TLS or an
-    // HTTP request — occupies a bounded amount of the listener and gives it
+    // The authentication tests above prove *who* may become a peer. These prove
+    // that a peer which never gets that far — silent, or halfway through TLS or
+    // an HTTP request — occupies a bounded amount of the listener and gives it
     // back. The bound is app-level, before any task is spawned for the peer;
     // the deadline is one clock over both TLS and the WebSocket upgrade.
 
@@ -7506,7 +7560,7 @@ mod tests {
             max_pending: 1,
             timeout: Duration::from_secs(60),
         };
-        let (addr, handle, _credentials) = start_test_server_with(None, policy).await;
+        let (addr, handle, _auth) = start_test_server_with(None, policy).await;
 
         let mut peers = Vec::new();
         for _ in 0..8 {
@@ -7559,7 +7613,7 @@ mod tests {
 
     /// SC-02/SC-03 on the plain path: the WebSocket upgrade has one finite
     /// deadline covering a partial request and a silent peer, and the capacity
-    /// it returns admits a real credential-bearing connection.
+    /// it returns admits a real authenticated connection.
     #[tokio::test]
     async fn plain_incomplete_handshakes_time_out_and_capacity_recovers() {
         let policy = P2pHandshakePolicy {
@@ -7568,7 +7622,7 @@ mod tests {
             // *valid* recovery dial below inside the same deadline.
             timeout: Duration::from_millis(500),
         };
-        let (addr, handle, credentials) = start_test_server_with(None, policy).await;
+        let (addr, handle, auth) = start_test_server_with(None, policy).await;
 
         // Past the TCP accept, short of a complete HTTP upgrade: the credential
         // callback has not run, so this is exactly the pre-auth window.
@@ -7600,8 +7654,8 @@ mod tests {
 
         await_free_slot(&handle).await;
 
-        // The same listener still serves a credential-bearing connection.
-        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        // The same listener still serves a connection with a valid token.
+        let (mut sink, mut stream) = connect_client(&auth, addr).await;
         // An authenticated connection must not retain the pre-auth slot, however
         // long it lives: the budget is free while this Session is still open.
         await_free_slot(&handle).await;
@@ -7619,11 +7673,10 @@ mod tests {
             "a valid client is served after incomplete handshakes expire"
         );
 
-        // Recovery does not weaken the #1013 boundary.
-        assert!(
-            connect_async(format!("ws://{addr}")).await.is_err(),
-            "a connection presenting no credential is still refused"
-        );
+        // Recovery does not weaken the authentication gate: an upgrade still
+        // succeeds, but a client.auth with the wrong token is refused and the
+        // connection ends.
+        assert_authentication_refused(addr, "not-the-agent-token").await;
 
         handle.shutdown().await.ok();
     }
@@ -7640,7 +7693,7 @@ mod tests {
             // *valid* TLS dial below inside the same deadline.
             timeout: Duration::from_millis(500),
         };
-        let (addr, handle, _credentials) = start_test_server_with(Some((certs, key)), policy).await;
+        let (addr, handle, _auth) = start_test_server_with(Some((certs, key)), policy).await;
 
         // Enough TLS to enter rustls (a handshake record announcing 64 bytes),
         // not enough to finish one.
@@ -7688,30 +7741,29 @@ mod tests {
         handle.shutdown().await.ok();
     }
 
-    /// SC-02's refusal path: a handshake that completes but presents an unknown
-    /// credential returns its slot immediately, not at the deadline.
+    /// An upgrade releases its admission slot immediately, before any
+    /// authentication frame.
     ///
-    /// The 60-second deadline is the assertion: with one slot and a refused
-    /// upgrade, a slot that was held until timeout would leave the listener
-    /// saturated for the whole test.
+    /// The 60-second deadline is the assertion: with one slot, a socket whose
+    /// upgrade completed but which never authenticated must not hold the
+    /// pre-authentication budget until the deadline. Becoming a peer is what
+    /// the budget is for; being an unauthenticated socket is not.
     #[tokio::test]
-    async fn a_refused_upgrade_releases_its_handshake_slot() {
+    async fn an_upgrade_releases_its_handshake_slot_before_authentication() {
         let policy = P2pHandshakePolicy {
             max_pending: 1,
             timeout: Duration::from_secs(60),
         };
-        let (addr, handle, credentials) = start_test_server_with(None, policy).await;
+        let (addr, handle, auth) = start_test_server_with(None, policy).await;
 
-        let url = agent_url_with_credential(&format!("ws://{addr}"), "not-a-minted-credential");
-        assert!(
-            connect_async(&url).await.is_err(),
-            "an unknown credential must not upgrade"
-        );
+        // The upgrade completes and the socket stays unauthenticated.
+        let (_sink, _stream) = dial_plain(addr).await;
 
+        // The slot is free without waiting for a `client.auth` or the deadline.
         await_free_slot(&handle).await;
 
-        // And the recovered budget admits the credential the agent minted.
-        let (_sink, _stream) = connect_client(&credentials, addr).await;
+        // And the recovered budget admits a connection that does authenticate.
+        let (_sink, _stream) = connect_client(&auth, addr).await;
 
         handle.shutdown().await.ok();
     }
@@ -7729,9 +7781,9 @@ mod tests {
                 max_pending,
                 timeout: Duration::from_secs(5),
             };
-            let (addr, handle, credentials) = start_test_server_with(None, policy).await;
+            let (addr, handle, auth) = start_test_server_with(None, policy).await;
 
-            let (_sink, _stream) = connect_client(&credentials, addr).await;
+            let (_sink, _stream) = connect_client(&auth, addr).await;
 
             handle.shutdown().await.ok();
         }

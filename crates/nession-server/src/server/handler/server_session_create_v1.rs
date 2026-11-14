@@ -586,14 +586,12 @@ impl ConnectionHandler {
                 role: ManagedImageRole::Base,
                 digest: base_digest.clone(),
                 path: base.path,
-                token: base.token,
                 target: None,
             },
             ManagedImageGrant {
                 role: ManagedImageRole::Workspace,
                 digest: workspace_digest.clone(),
                 path: workspace_grant.path,
-                token: workspace_grant.token,
                 target: None,
             },
         ];
@@ -609,7 +607,6 @@ impl ConnectionHandler {
                 role: ManagedImageRole::Toolchain,
                 digest,
                 path: grant.path,
-                token: grant.token,
                 target: Some(toolchain.target.clone()),
             });
         }

@@ -224,7 +224,6 @@ fn server_config_commands_edit_the_selected_file_with_typed_values() {
     for (key, value) in [
         ("terminal_stall_grace_secs", "31"),
         ("query_concurrency_per_connection", "4"),
-        ("p2p_token_expiry_secs", "120"),
         ("terminal_web_font_size", "13.5"),
         ("logging.rotation", "hourly"),
     ] {
@@ -242,7 +241,6 @@ fn server_config_commands_edit_the_selected_file_with_typed_values() {
         toml::from_str(&content).expect("typed server config");
     assert_eq!(config.terminal_stall_grace_secs, 31);
     assert_eq!(config.query_concurrency_per_connection, 4);
-    assert_eq!(config.p2p_token_expiry_secs, 120);
     assert!((config.terminal_web_font_size - 13.5).abs() < f64::EPSILON);
     assert_eq!(config.logging.rotation, "hourly");
 }

@@ -25,7 +25,6 @@ use nession_server::image::{
 fn options(dir: &std::path::Path) -> ImageManagerOptions {
     ImageManagerOptions {
         max_concurrent_builds: 1,
-        access_token_ttl_secs: 60,
         build_root: dir.join("builds"),
         build_stage_timeout: Some(Duration::from_secs(120)),
         build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,

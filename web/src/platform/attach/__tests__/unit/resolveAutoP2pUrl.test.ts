@@ -5,7 +5,7 @@ import type { AttachInfo } from '@/types';
 const p2pInfo: AttachInfo = {
   mode: 'p2p',
   session_id: 'a:s',
-  connection_token: 'tok',
+  agent_token: 'tok',
   agent_address: 'ws://agent/ws',
   addresses: [{ url: 'ws://first/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' }],
 };
@@ -27,6 +27,6 @@ describe('resolveAutoP2pUrl', () => {
 
   it('returns null for relay or missing attach info', () => {
     expect(resolveAutoP2pUrl([], [], null)).toBeNull();
-    expect(resolveAutoP2pUrl([], [], { mode: 'relay', session_id: 'a:s', connection_token: 'tok' })).toBeNull();
+    expect(resolveAutoP2pUrl([], [], { mode: 'relay', session_id: 'a:s', agent_token: 'tok' })).toBeNull();
   });
 });

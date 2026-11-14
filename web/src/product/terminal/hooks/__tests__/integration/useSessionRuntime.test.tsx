@@ -127,7 +127,7 @@ function makeAttachInfo(sessionId: string, token: string): AttachInfo {
     mode: 'p2p',
     session_id: sessionId,
     agent_address: 'ws://shared-agent/ws',
-    connection_token: token,
+    agent_token: token,
     addresses: [
       { url: 'ws://shared-agent/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
     ],
@@ -281,7 +281,7 @@ describe('useSessionRuntime integration', () => {
 
     expect(aUpdateSpy).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        attachInfo: expect.objectContaining({ connection_token: 'token-b' }),
+        attachInfo: expect.objectContaining({ agent_token: 'token-b' }),
       }),
     );
     expect(result.current.runtime).not.toBe(runtimeA);

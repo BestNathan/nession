@@ -1,4 +1,4 @@
-export { WebSocketService, buildAgentWsUrl } from './WebSocketService';
+export { WebSocketService } from './WebSocketService';
 export { RequestTimeoutError } from './MessageRouter';
 export type {
   TransportDiagnostic,

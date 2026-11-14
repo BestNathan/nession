@@ -432,7 +432,17 @@ async fn enter_authorizes_each_image_and_forwards_scoped_grants() {
     assert_eq!(images[0]["role"], "base");
     assert_eq!(images[1]["role"], "toolchain");
     assert_eq!(images[1]["target"], "/opt/tool");
-    assert!(images[0]["token"].as_str().unwrap().len() == 64);
+    // The Agent authenticates its fetch with its own durable token (#3440);
+    // the forwarded selection carries only the authorized route.
+    assert!(
+        images[0].get("token").is_none(),
+        "a Sandbox image selection carries no minted credential: {}",
+        images[0]
+    );
+    assert_eq!(
+        images[0]["path"],
+        format!("/images/blobs/{}", base_digest())
+    );
     assert_eq!(
         images[1]["path"],
         format!("/images/blobs/{}", tool_digest())
@@ -963,7 +973,7 @@ async fn enter_grants_the_project_source_image_for_a_managed_workspace() {
     assert_eq!(grants[1]["role"], "workspace");
     assert_eq!(grants[1]["digest"], source_digest());
     assert!(grants[1]["target"].is_null());
-    assert!(grants[1]["token"].as_str().is_some());
+    assert!(grants[1].get("token").is_none());
 }
 
 #[tokio::test]

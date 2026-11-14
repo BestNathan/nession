@@ -67,6 +67,7 @@ fn agent_with_urls(agent_id: &str, urls: Vec<String>) -> AgentInfo {
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     }

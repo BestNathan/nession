@@ -8,7 +8,7 @@ fn an_absent_token_is_an_empty_string_not_a_missing_field() {
     // and "your message was malformed" the same event at the far end, and only
     // one of those is worth retrying.
     let msg: ClientAuthPayload = serde_json::from_value(serde_json::json!({})).unwrap();
-    assert_eq!(msg.auth_token, "");
+    assert_eq!(msg.auth_token.as_str(), "");
     assert!(msg.client_id.is_none());
 }
 

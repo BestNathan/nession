@@ -15,7 +15,8 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
             hostname: "h1".to_string(),
             ip_address: "1.2.3.4".to_string(),
             port: 8080,
-            auth_token: "tok".to_string(),
+            auth_token: "tok".into(),
+            agent_token: "agent-token".into(),
             metadata: AgentMetadata {
                 tmux_version: "3.3".to_string(),
                 os_version: "Linux".to_string(),
@@ -87,7 +88,8 @@ fn test_agent_register_payload_serde() {
         hostname: "host".to_string(),
         ip_address: "127.0.0.1".to_string(),
         port: 8080,
-        auth_token: "token".to_string(),
+        auth_token: "token".into(),
+        agent_token: "agent-token".into(),
         metadata: AgentMetadata {
             tmux_version: "3.4".to_string(),
             os_version: "linux".to_string(),
@@ -141,7 +143,8 @@ fn test_agent_register_payload_serialization() {
         hostname: "server1".to_string(),
         ip_address: "10.0.0.1".to_string(),
         port: 9090,
-        auth_token: "secret".to_string(),
+        auth_token: "secret".into(),
+        agent_token: "agent-token".into(),
         metadata: AgentMetadata {
             tmux_version: "3.3a".to_string(),
             os_version: "Linux".to_string(),
@@ -207,7 +210,8 @@ fn an_absent_manifest_is_omitted_from_the_wire_rather_than_null() {
         hostname: "h".to_string(),
         ip_address: "1.2.3.4".to_string(),
         port: 8080,
-        auth_token: "t".to_string(),
+        auth_token: "t".into(),
+        agent_token: "agent-token".into(),
         metadata: AgentMetadata {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
@@ -240,7 +244,8 @@ fn a_manifest_rides_along_in_the_register_payload() {
         hostname: "h".to_string(),
         ip_address: "1.2.3.4".to_string(),
         port: 8080,
-        auth_token: "t".to_string(),
+        auth_token: "t".into(),
+        agent_token: "agent-token".into(),
         metadata: AgentMetadata {
             tmux_version: "3.3".to_string(),
             os_version: "Linux".to_string(),
@@ -274,7 +279,8 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
         hostname: "node1".to_string(),
         ip_address: "192.168.1.5".to_string(),
         port: 8080,
-        auth_token: "secret".to_string(),
+        auth_token: "secret".into(),
+        agent_token: "agent-token".into(),
         metadata: AgentMetadata {
             tmux_version: "3.3a".to_string(),
             os_version: "Linux".to_string(),
@@ -353,7 +359,8 @@ fn test_agent_register_payload_without_connect_url() {
         hostname: "server2".to_string(),
         ip_address: "10.0.0.2".to_string(),
         port: 8080,
-        auth_token: "".to_string(),
+        auth_token: "".into(),
+        agent_token: "agent-token".into(),
         metadata: AgentMetadata {
             tmux_version: "3.2".to_string(),
             os_version: "macOS".to_string(),

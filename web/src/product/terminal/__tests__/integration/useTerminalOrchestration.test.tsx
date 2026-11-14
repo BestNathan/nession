@@ -103,7 +103,7 @@ function makeAttachInfo(): AttachInfo {
     mode: 'p2p',
     session_id: 'agent:s1',
     agent_address: 'ws://a/ws',
-    connection_token: 'tok',
+    agent_token: 'tok',
     addresses: [
       { url: 'ws://a/ws', label: 'A', network_type: 'lan', priority: 10, status: 'reachable' },
     ],

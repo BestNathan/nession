@@ -309,10 +309,6 @@ digest: string,
  */
 path: string, 
 /**
- * Scoped bearer grant for exactly this digest.
- */
-token: string, 
-/**
  * `/opt/<name>` for a toolchain image; absent otherwise.
  */
 target?: string | null, };

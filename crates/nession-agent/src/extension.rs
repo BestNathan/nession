@@ -1074,9 +1074,13 @@ mod tests {
         // Up by three for #3407: the managed Workspace inventory, idempotent
         // create and explicit delete are Agent-owned resources the Server asks
         // this Agent about; the registry remains the Agent's authority.
+        // Down by two for #3440: `agent.p2p.grant` left with the per-attach
+        // credential model, and `server.image.access` left with it — image
+        // blobs are read with the Server Token as a bearer credential rather
+        // than through an access-grant wire.
         assert_eq!(
             manifest.protocols.len(),
-            42,
+            40,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

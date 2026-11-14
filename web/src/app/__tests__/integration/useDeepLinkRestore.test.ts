@@ -80,7 +80,7 @@ describe('useDeepLinkRestore', () => {
     const session = makeSession();
     const choice = {
       mode: 'auto' as const,
-      attachInfo: { mode: 'p2p' as const, session_id: session.session_id, connection_token: 'tok' },
+      attachInfo: { mode: 'p2p' as const, session_id: session.session_id, agent_token: 'tok' },
       orderedUrls: ['ws://a/ws'],
       latencies: [],
       selectedUrl: null,
@@ -129,7 +129,7 @@ describe('useDeepLinkRestore', () => {
     const attached: AttachedSession = {
       sessionId: 'agent-1:s1',
       sessionName: 's1',
-      attachInfo: { mode: 'relay', session_id: 'agent-1:s1', agent_address: '', connection_token: '' },
+      attachInfo: { mode: 'relay', session_id: 'agent-1:s1', agent_address: '', agent_token: '' },
     };
     renderHook(() => useDeepLinkRestore({
       pendingSessionId: 'agent-1:s1',
@@ -152,7 +152,7 @@ describe('useDeepLinkRestore', () => {
     const profile = makeProfile(session);
     const choice = {
       mode: 'auto' as const,
-      attachInfo: { mode: 'p2p' as const, session_id: session.session_id, connection_token: 'tok' },
+      attachInfo: { mode: 'p2p' as const, session_id: session.session_id, agent_token: 'tok' },
       orderedUrls: ['ws://a/ws'],
       latencies: [],
       selectedUrl: null,

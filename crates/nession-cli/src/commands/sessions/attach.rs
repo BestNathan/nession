@@ -193,18 +193,22 @@ pub async fn resolve_attach_route(
         }
     }
 
-    let p2p_failure = match attach.connection_token.as_deref() {
-        // Required rather than defaulted: the Server mints one on this path and
-        // hands it to the Agent before answering, so a P2P reply without one is
-        // a disagreement worth naming rather than a connection to attempt.
+    let p2p_failure = match attach
+        .agent_token
+        .as_ref()
+        .map(nession_protocol::RedactedToken::as_str)
+    {
+        // Required rather than defaulted: the Server resolved this Agent's
+        // durable token, so a P2P reply without one is a disagreement worth
+        // naming rather than a connection to attempt.
         None => Some(
-            "the server's P2P attach reply carried no connection credential, so no Agent was dialled"
+            "the server's P2P attach reply carried no Agent token, so no Agent was dialled"
                 .to_string(),
         ),
         Some(_) if candidates.is_empty() => {
             Some("the server's P2P attach reply named no agent address to connect to".to_string())
         }
-        Some(credential) => {
+        Some(agent_token) => {
             let mut failures = Vec::new();
             for url in &candidates {
                 println!("Connecting to agent at {url} (P2P mode)...");
@@ -214,7 +218,7 @@ pub async fn resolve_attach_route(
                 // search for every place a socket was opened.
                 match tokio::time::timeout(
                     P2P_CONNECT_TIMEOUT,
-                    nession_client::P2pConnection::connect(url, credential),
+                    nession_client::P2pConnection::connect(url, agent_token),
                 )
                 .await
                 {
@@ -234,8 +238,7 @@ pub async fn resolve_attach_route(
                         failures.push(format!("{url}: {reason}"));
                     }
                     Err(_) => {
-                        let reason =
-                            format!("timed out after {}s", P2P_CONNECT_TIMEOUT.as_secs());
+                        let reason = format!("timed out after {}s", P2P_CONNECT_TIMEOUT.as_secs());
                         println!("  ...failed: {reason}");
                         failures.push(format!("{url}: {reason}"));
                     }

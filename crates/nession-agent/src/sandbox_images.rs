@@ -109,6 +109,7 @@ pub async fn prepare(
     cache: &ErofsCache,
     grants: &[ManagedImageGrant],
     server_url: &str,
+    server_auth_token: &str,
     state_dir: &Path,
     workspace_override: Option<SandboxWorkspaceOverride>,
 ) -> Result<PreparedSandboxImages> {
@@ -167,7 +168,7 @@ pub async fn prepare(
     };
 
     let mut images = Vec::with_capacity(grants.len());
-    let base_ref = match fetch_image(cache, base, &origin).await {
+    let base_ref = match fetch_image(cache, base, &origin, server_auth_token).await {
         Ok((digest, path)) => {
             images.push((ManagedImageRole::Base, digest.clone(), path.clone()));
             SandboxImageRef {
@@ -182,7 +183,7 @@ pub async fn prepare(
         }
     };
     let workspace_ref = match workspace {
-        Some(grant) => match fetch_image(cache, grant, &origin).await {
+        Some(grant) => match fetch_image(cache, grant, &origin, server_auth_token).await {
             Ok((digest, path)) => {
                 images.push((ManagedImageRole::Workspace, digest.clone(), path.clone()));
                 Some(SandboxImageRef {
@@ -205,7 +206,7 @@ pub async fn prepare(
             remove_owned_workspace(&guard.root, &guard.path);
             anyhow::bail!("toolchain image {} has no /opt/<name> target", grant.digest);
         };
-        let (digest, path) = match fetch_image(cache, grant, &origin).await {
+        let (digest, path) = match fetch_image(cache, grant, &origin, server_auth_token).await {
             Ok(value) => value,
             Err(error) => {
                 guard.disarm();
@@ -356,6 +357,7 @@ async fn fetch_image(
     cache: &ErofsCache,
     grant: &ManagedImageGrant,
     origin: &str,
+    server_auth_token: &str,
 ) -> Result<(String, PathBuf)> {
     if !grant.path.starts_with("/images/blobs/") {
         anyhow::bail!(
@@ -365,7 +367,7 @@ async fn fetch_image(
     }
     let download = DownloadGrant {
         url: format!("{origin}{}", grant.path),
-        token: grant.token.clone(),
+        token: server_auth_token.to_string(),
     };
     let cached = cache
         .get_or_fetch(&grant.digest, &download)
@@ -389,6 +391,10 @@ mod tests {
         format!("sha256:{:x}", hasher.finalize())
     }
 
+    /// The Server Token the Agent presents on the image-blob route (#3440).
+    /// The blob origin in these tests is `httptest`, which does not check it.
+    const SERVER_AUTH_TOKEN: &str = "server-auth-token";
+
     struct DurableProbe;
     impl StorageProbe for DurableProbe {
         fn mount_type(&self, _path: &Path) -> anyhow::Result<String> {
@@ -411,7 +417,6 @@ mod tests {
             role,
             digest: digest.to_string(),
             path: format!("/images/blobs/{digest}"),
-            token: "scoped-token".to_string(),
             target: target.map(str::to_string),
         }
     }
@@ -451,6 +456,7 @@ mod tests {
                 grant(ManagedImageRole::Toolchain, &toolchain, Some("/opt/rust")),
             ],
             &ws_url(&server),
+            SERVER_AUTH_TOKEN,
             state_dir.path(),
             None,
         )
@@ -589,6 +595,10 @@ mod workspace_override_tests {
         format!("sha256:{:x}", hasher.finalize())
     }
 
+    /// The Server Token the Agent presents on the image-blob route (#3440).
+    /// The blob origin in these tests is `httptest`, which does not check it.
+    const SERVER_AUTH_TOKEN: &str = "server-auth-token";
+
     async fn cache(root: &Path) -> ErofsCache {
         ErofsCache::open_with_probe(root, "workspace-override-test", true, &DurableProbe)
             .await
@@ -600,7 +610,6 @@ mod workspace_override_tests {
             role,
             digest: digest.to_string(),
             path: format!("/images/blobs/{digest}"),
-            token: "scoped-token".to_string(),
             target: target.map(str::to_string),
         }
     }
@@ -635,6 +644,7 @@ mod workspace_override_tests {
             &cache,
             &[grant(ManagedImageRole::Base, &base, None)],
             &server.url("/").to_string().replacen("http://", "ws://", 1),
+            SERVER_AUTH_TOKEN,
             state_dir.path(),
             Some(SandboxWorkspaceOverride::Managed {
                 path: path.clone(),
@@ -706,6 +716,7 @@ mod workspace_override_tests {
                 grant(ManagedImageRole::Workspace, &workspace_digest, None),
             ],
             &server.url("/").to_string().replacen("http://", "ws://", 1),
+            SERVER_AUTH_TOKEN,
             state_dir.path(),
             Some(SandboxWorkspaceOverride::Managed { path, lease }),
         )
@@ -747,6 +758,7 @@ mod workspace_override_tests {
             &cache,
             &[grant(ManagedImageRole::Base, &base, None)],
             &server.url("/").to_string().replacen("http://", "ws://", 1),
+            SERVER_AUTH_TOKEN,
             state_dir.path(),
             Some(SandboxWorkspaceOverride::ProjectLocation { path: path.clone() }),
         )
@@ -772,6 +784,7 @@ mod workspace_override_tests {
                 grant(ManagedImageRole::Workspace, &workspace_digest, None),
             ],
             &server.url("/").to_string().replacen("http://", "ws://", 1),
+            SERVER_AUTH_TOKEN,
             state_dir.path(),
             Some(SandboxWorkspaceOverride::ProjectLocation { path }),
         )

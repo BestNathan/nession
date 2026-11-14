@@ -15,7 +15,7 @@ EROFS is a **global immutable resource**, not a `ProjectEnvironment`.
 | Thing | Owner |
 |---|---|
 | Portable EROFS mechanics: byte digest/verify, content-addressed atomic store, deterministic builder, optional cache and FUSE mount primitives | `nession-erofs` |
-| Image metadata, digest, published bytes, aliases, leases, access grants | Server Image Manager (`crates/nession-server/src/image`) |
+| Image metadata, digest, published bytes, aliases, leases | Server Image Manager (`crates/nession-server/src/image`) |
 | Durable build execution state (one directory per build) | Server Image Manager; `state.json` is the execution-state authority |
 | Stage mechanics, snapshot checkpoint, bounded subprocess lifecycle | `nession-erofs` (`build`) |
 | `image_digest` reference on a Project | Project declaration (`projects.image_digest`) |
@@ -235,7 +235,6 @@ sweep over registry rows.
 |---|---|---|
 | `server.image.list` | Query | Complete inventory, newest first, paginated and searchable |
 | `server.image.get` | Query | Exactly one of `digest` or `alias` |
-| `server.image.access` | Inline | Mint a Project- or Session-scoped, expiring bearer grant for one digest |
 
 All require an authenticated client. The contract types and validation live in
 `nession-protocol::contracts::image::v1`.
@@ -251,24 +250,24 @@ silent truncation.
 
 `server.session.create`'s Managed path (#3062) is a Server-originated image
 consumer: after resolving the Project's pinned Source image and the requested
-Base Runtime/toolchain digests, the Server mints scoped grants with
-`ImageManager::grant_managed_access`. It keeps the same Ready and digest rules
-but does not require the Project to reference a global Base Runtime/toolchain
-artifact; the client-facing Project access path keeps that reference rule.
+Base Runtime/toolchain digests, the Server resolves each to its authorized blob
+route with `ImageManager::grant_managed_access`. It keeps the same Ready and
+digest rules but does not require the Project to reference a global Base
+Runtime/toolchain artifact; the client-facing Project access path keeps that
+reference rule.
 
 Sandbox Enter (#3181) is a second Server-originated consumer. The client sends
 Web-safe `SandboxImageSelection` values (role, digest, target, mode), never a
 native source path. The Server validates the selection shape, requires each
-digest to be Ready, and mints one `grant_sandbox_access(session_id, digest)`
-bearer per selected image. The Agent prepares those grants in its own durable
-cache and builds the canonical `filesystem.composition`. The token remains
-bound to one `(session_id, digest)`.
+digest to be Ready, and returns one path-only `ManagedImageGrant` per selected
+image. The Agent fetches those paths with the Server Token in its own durable
+cache and builds the canonical `filesystem.composition`.
 
-`server.image.access` names exactly one consumer. A Project consumer must
-durably reference the digest in `projects.image_digest`. A Session consumer
-must name a digest already resolved by that Session's ready Managed context.
-Unrelated Sessions and guessed digests are refused; a Project-scoped request
-remains compatible.
+The retired `server.image.access` unit had named exactly one consumer (a
+Project that durably references the digest, or a Session whose ready Managed
+context resolved it). #3440 removes it: there is no per-digest bearer to mint,
+so blob authorization is endpoint-level (see below), while the Project/Session
+scope rules above still gate which *route* the Server resolves.
 
 Per-digest transfer and verification progress is deliberately **not** a Server
 image status. The Agent owns the versioned `ImageCacheObservation` (#3412) and
@@ -284,17 +283,21 @@ The Server's Axum router maps `/images/blobs/<digest>` to the image service
 The service accepts `GET`/`HEAD` and requires:
 
 ```http
-Authorization: Bearer <grant token>
+Authorization: Bearer <Server Token>
 ```
 
-The token is random, stored only as SHA-256, expires (default five minutes),
-and is bound to one consumer (`project_id` or `session_id`) and one digest.
-`server.image.access` mints a Project token only when the named Project durably
-references that digest, and a Session token only when that Session's ready
-Managed context resolved it. Knowing another consumer's digest therefore does
-not authorize its bytes. Access grants are ephemeral capabilities, not durable
-bookmarks: the m009 migration may rebuild their table and a client simply
-requests a new grant.
+The bearer is the **Server Token**, compared in constant time with the
+configured value **before any digest lookup** (#3440). A missing or wrong
+bearer is `403` whether or not the digest exists, so the route does not reveal
+inventory. There is no per-digest, per-Project or per-Session token: the
+control-plane credential authorizes the blob route, and the Project/Session
+scope rules above decide which path the Server hands out in an attach or
+managed-create reply.
+
+This is a trusted-endpoint boundary: an Agent holding the Server Token can read
+any blob it can name. It is not a per-resource capability model, and the
+retired ephemeral access-grant table is neither written nor read for
+authorization.
 
 Responses are digest-bound:
 
@@ -303,8 +306,8 @@ Responses are digest-bound:
 - `206 Partial Content` with `Content-Range: bytes start-end/size` for one
   `Range` request (suffix ranges supported);
 - `416 Range Not Satisfiable` with `Content-Range: bytes */size`;
-- `403 Forbidden` for a missing, expired, foreign-project or wrong-digest grant;
-- `404 Not Found` for an unknown digest;
+- `403 Forbidden` for a missing or wrong Server Token;
+- `404 Not Found` for an authenticated request naming an unknown digest;
 - `304 Not Modified` for a matching `If-None-Match`.
 
 The service holds an in-process transfer guard while streaming.
@@ -325,7 +328,8 @@ GC removes:
   no alias points at it, no unexpired lease exists, and no in-process transfer
   is active.
 
-Expired access grants and leases are pruned on GC. Restarting the Server keeps
+Expired leases are pruned on GC; the retired access-grant rows are swept by the
+same legacy cleanup and never authorize a read. Restarting the Server keeps
 image metadata, aliases and Project references because all of it is in SQLite;
 blob bytes are already on disk under their digest.
 
@@ -370,7 +374,6 @@ cache consumption.
 image_blob_dir = "~/.nession/server/images/blobs"
 image_build_dir = "~/.nession/server/images/build"
 image_max_concurrent_builds = 2
-image_access_token_expiry_secs = 300
 image_gc_interval_secs = 21600   # 0 disables scheduled GC
 image_gc_max_candidates = 64
 image_build_stage_timeout_secs = 1800  # 0 disables the subprocess bound
@@ -378,8 +381,8 @@ image_build_log_max_bytes = 1048576
 image_build_retention_secs = 604800   # terminal build directories
 ```
 
-Bounds: `image_max_concurrent_builds` in `[1, 8]`, grant expiry in
-`[30, 3600]` seconds, `image_gc_interval_secs` either `0` or in `[60, 604800]`,
+Bounds: `image_max_concurrent_builds` in `[1, 8]`,
+`image_gc_interval_secs` either `0` or in `[60, 604800]`,
 `image_gc_max_candidates` in `[1, 1024]`,
 `image_build_stage_timeout_secs` either `0` or in `[30, 86400]`,
 `image_build_log_max_bytes` in `[4096, 16777216]`, and
@@ -432,7 +435,7 @@ only; Project authorization is always checked independently.
   snapshot, credential refusal, symlink escape refusal, fixed `mkfs` argv,
   deterministic fake builds, atomic/deduplicating store.
 - `cargo test -p nession-server --lib image` — dedupe, alias revision, failed
-  build state, Project/digest grant isolation, GC refs/leases/transfers,
+  build state, Project/digest scope isolation, GC refs/leases/transfers,
   bounded/resumable GC with a byte budget, storage diagnostics, restart
   persistence, HTTP 200/206/403/404/416.
 - `scripts/gitops-storage-contract.mjs` (Gate `gitops-storage-contract`)

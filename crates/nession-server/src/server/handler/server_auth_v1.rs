@@ -21,13 +21,13 @@ impl ConnectionHandler {
         // behaviour for a malformed handshake.
         let payload: ClientAuthPayload =
             serde_json::from_value(msg.payload).unwrap_or(ClientAuthPayload {
-                auth_token: String::new(),
+                auth_token: String::new().into(),
                 client_id: None,
             });
 
         // Empty server auth_token means no-auth mode: accept any client
         let auth_ok = self.config.server_auth_token.is_empty()
-            || payload.auth_token == self.config.server_auth_token;
+            || payload.auth_token.as_str() == self.config.server_auth_token;
 
         if auth_ok {
             self.authenticated_client = true;

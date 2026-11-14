@@ -38,6 +38,7 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::extension::ExtensionUnitPolicy;
+use nession_common::SecretString;
 use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
     AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
@@ -79,12 +80,10 @@ use nession_runtime::lane::Work;
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
-use crate::p2p_credentials::P2pCredentials;
 use crate::protocol::core_routes;
 use crate::session::metadata::{error_kind_and_detail, SessionMetadataStore};
 use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{SessionBindingInput, SessionManager};
-use nession_protocol::contracts::p2p::v1::P2pGrantPayload;
 use nession_runtime::lane::KeyedLane;
 
 /// Type alias for the WebSocket stream.
@@ -191,12 +190,10 @@ pub struct ServerClient {
     default_working_dir: String,
     /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
-    /// The P2P credentials this agent honours (#1013).
-    ///
-    /// Shared with the P2P listener, which is where they are *checked*; this
-    /// side is where they *arrive*, because the channel that delivers them is
-    /// the one this client dialled out.
-    p2p_credentials: Arc<P2pCredentials>,
+    /// The Agent's durable inbound token (#3440). Sent to the Server on every
+    /// registration so attach can hand it to an authenticated client; never
+    /// put in a URL, log or public view.
+    agent_token: SecretString,
     /// Agent metadata.
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
@@ -534,7 +531,7 @@ impl ServerClient {
         tmux: Arc<SessionManager>,
         default_working_dir: String,
         extension_registry: Option<Arc<ExtensionRegistry>>,
-        p2p_credentials: Arc<P2pCredentials>,
+        agent_token: SecretString,
         mutations: Arc<KeyedLane<ResourceKey>>,
     ) -> Self {
         let env_root = nession_common::paths::agent_envs_dir()
@@ -554,7 +551,7 @@ impl ServerClient {
             metadata,
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::clone(&tmux))),
             tmux,
-            p2p_credentials,
+            agent_token,
             mutations,
             env_store: EnvStore::new(env_root),
             session_publish: Arc::new(Mutex::new(None)),
@@ -759,7 +756,8 @@ impl ServerClient {
             hostname: self.hostname.clone(),
             ip_address: self.ip_address.clone(),
             port: self.port,
-            auth_token: self.auth_token.clone(),
+            auth_token: self.auth_token.clone().into(),
+            agent_token: self.agent_token.as_str().into(),
             metadata: self.metadata.clone(),
             display_name: self.display_name.clone(),
             connect_url: self.connect_url.clone(),
@@ -1393,7 +1391,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1410,6 +1408,10 @@ mod tests {
         assert_eq!(parsed["payload"]["agent_id"], "test-agent-1");
         assert_eq!(parsed["payload"]["hostname"], "test-host");
         assert_eq!(parsed["payload"]["port"], 8080);
+        // The durable Agent Token (#3440) is carried on registration, separate
+        // from the Server Token that authenticates the central connection.
+        assert_eq!(parsed["payload"]["agent_token"], "test-agent-token-000000");
+        assert_eq!(parsed["payload"]["auth_token"], "test-token");
 
         handle.shutdown().await.ok();
         server_handle.abort();
@@ -1441,7 +1443,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1498,7 +1500,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1591,7 +1593,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1670,7 +1672,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -1788,7 +1790,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -1927,7 +1929,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2030,7 +2032,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2160,7 +2162,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             Some(registry),
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         client.connect_and_run().await.expect("connect failed").0
@@ -2307,7 +2309,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             Some(registry),
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         )
     }
@@ -2559,7 +2561,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2653,7 +2655,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2746,7 +2748,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2859,7 +2861,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -2911,7 +2913,7 @@ mod tests {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
 
@@ -3108,7 +3110,7 @@ mod tests {
             tmux,
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -3186,7 +3188,7 @@ mod tests {
             tmux,
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
@@ -3546,7 +3548,7 @@ esac"#,
             tmux,
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         );
         client.connect_and_run().await.expect("connect failed").0
@@ -3928,57 +3930,6 @@ fn is_control(wire: &str) -> bool {
 }
 
 core_routes!(agent, msg, responses;
-    "agent.p2p.grant" => "agent.p2p.grant" => 1 => Key(ResourceKey::Authority) => {
-                    let grant: P2pGrantPayload =
-                        match serde_json::from_value(msg.payload.clone()) {
-                            Ok(grant) => grant,
-                            Err(e) => {
-                                warn!("Invalid agent.p2p.grant payload: {e}");
-                                return Ok(());
-                            }
-                        };
-                    let request_id = grant.request_id.clone();
-
-                    // Stored, not enforced. The Server is waiting on this
-                    // acknowledgement before it hands the token to a client, so
-                    // the reply has to say whether the credential was taken —
-                    // and a refusal here fails the client's attach, which is the
-                    // only honest outcome: an attach that proceeds with a
-                    // credential this agent will not honour fails later, in the
-                    // browser, with less to go on.
-                    let (success, error) = match agent.p2p_credentials.grant(&agent.agent_id, &grant)
-                    {
-                        Ok(credential_id) => {
-                            info!(
-                                credential = %credential_id,
-                                session_id = %grant.session_id,
-                                "Granted a P2P credential"
-                            );
-                            (true, None)
-                        }
-                        Err(refusal) => {
-                            warn!(
-                                ?refusal,
-                                session_id = %grant.session_id,
-                                "Refused a P2P grant"
-                            );
-                            (false, Some(format!("{refusal:?}")))
-                        }
-                    };
-
-                    let response = serde_json::json!({
-                        "msg_type": "server.agent.command-response",
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                        "payload": {
-                            "request_id": request_id,
-                            "command": "p2p.grant",
-                            "success": success,
-                            "error": error,
-                        }
-                    });
-                    responses.send(WsMessage::Text(response.to_string())).await?;
-    }
     "agent.session.list" => "agent.session.list" => 1 => Query => {
                     // The Server's MCP node tools route through here (#565):
                     // `nession_agent_list_sessions` is Agent truth, not the
@@ -4911,6 +4862,7 @@ core_routes!(agent, msg, responses;
                             images: &payload.images,
                             project_location: payload.project_location.as_deref(),
                             server_url: &agent.server_url,
+                            server_auth_token: &agent.auth_token,
                             working_dir: &payload.working_dir,
                         })
                         .await;
@@ -5134,7 +5086,7 @@ mod versioned_routing {
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),
             None,
-            Arc::new(P2pCredentials::new()),
+            SecretString::new("test-agent-token-000000"),
             crate::execution::mutation_scheduler(),
         )
     }

@@ -61,7 +61,6 @@ async fn main() -> Result<()> {
         blobs,
         ImageManagerOptions {
             max_concurrent_builds: config.image_max_concurrent_builds,
-            access_token_ttl_secs: config.image_access_token_expiry_secs,
             build_root: std::path::PathBuf::from(&config.image_build_dir),
             build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
                 .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),

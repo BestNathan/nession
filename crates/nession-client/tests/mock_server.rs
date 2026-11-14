@@ -119,6 +119,42 @@ async fn handshake(ws: &mut ServerSocket) -> TestResult<Value> {
     Ok(auth)
 }
 
+/// Answer `client.auth` the way the **Agent** does.
+///
+/// The Agent's handshake is the one place its envelope does not echo the
+/// request's wire: success is `ok` and refusal is `error` (#3440), while the
+/// Server's `server.auth` replies under its own name. A mock that echoed here
+/// would be exercising an envelope the Agent never sends.
+async fn answer_agent_auth(
+    ws: &mut ServerSocket,
+    request: &Value,
+    status: &str,
+    message: &str,
+) -> TestResult<()> {
+    let (wire, payload) = if status == "success" {
+        (
+            "ok",
+            json!({ "status": status, "message": message, "client_id": "mock-client" }),
+        )
+    } else {
+        (
+            "error",
+            json!({ "code": "invalid_token", "message": message }),
+        )
+    };
+    let reply = Message::new(wire, request["id"].as_str().unwrap_or_default(), 0, payload);
+    ws.send(WsMessage::Text(serde_json::to_string(&reply)?))
+        .await?;
+    Ok(())
+}
+
+/// Complete the Agent handshake so [`P2pConnection::connect`] returns.
+async fn agent_handshake(ws: &mut ServerSocket) -> TestResult<Value> {
+    let auth = next_request(ws).await?;
+    answer_agent_auth(ws, &auth, "success", "ok").await?;
+    Ok(auth)
+}
+
 /// Hand the socket back only once the client has had a chance to read what was
 /// just written: dropping it sends a close, and the point of most tests here is
 /// what arrived *before* that.
@@ -579,21 +615,21 @@ async fn the_socket_can_be_handed_over() {
     server.unwrap();
 }
 
-/// The one agent-socket constructor hands back a socket that works.
+/// The one agent-socket constructor authenticates and hands back a socket.
 ///
-/// `P2pConnection::connect` wraps one call today, and this is what says so out
-/// loud: it is the seam #1013 changed to carry a server-issued credential, so
-/// the thing worth pinning is that a caller reaching an agent goes through it
-/// and gets a socket it can write an attach on.
-///
-/// The credential is passed as one of the two things a caller now hands it — a
-/// caller with no credential is the deleted direct-dial helper, not this path.
+/// `P2pConnection::connect` is the seam #3440 changed to carry the resolved
+/// Agent Token, so the thing worth pinning is that a caller reaching an Agent
+/// gets a socket it can write an attach on — and that the token was presented
+/// as `client.auth` before the attach, not presumed by the transport.
 #[tokio::test]
 async fn the_p2p_constructor_hands_back_a_usable_socket() {
     let (listener, url) = bind().await.unwrap();
 
     let server = async {
         let mut ws = accept(&listener).await?;
+        let auth = agent_handshake(&mut ws).await?;
+        assert_eq!(auth["msg_type"], "client.auth");
+        assert_eq!(auth["payload"]["auth_token"], "agent-token-abc");
         let frame = next_request(&mut ws).await?;
         assert_eq!(frame["msg_type"], "agent.attach");
         assert_eq!(frame["payload"]["session_name"], "work");
@@ -608,7 +644,7 @@ async fn the_p2p_constructor_hands_back_a_usable_socket() {
     };
 
     let (server, ()) = tokio::join!(server, async {
-        let mut socket = P2pConnection::connect(&url, "credential-abc")
+        let mut socket = P2pConnection::connect(&url, "agent-token-abc")
             .await
             .expect("the agent socket opens")
             .into_stream();
@@ -623,36 +659,69 @@ async fn the_p2p_constructor_hands_back_a_usable_socket() {
     server.unwrap();
 }
 
-/// The credential a caller hands the constructor is the one that arrives.
+/// The Agent Token travels in the first frame, never in the URL.
 ///
-/// Separate from the test above because it catches a different mistake, and the
-/// one the signature change made possible: `connect` could take a credential,
-/// document it, and never put it on the URL — and every test above would still
-/// pass, because none of them looks at the *request*. The mock can only see it
-/// at the handshake, so the handshake is where this reads it.
+/// Separate from the test above because it catches a different mistake:
+/// `connect` could take a token, document it, and never present it — every
+/// other test would still pass, because none of them looks at the *request*.
+/// The mock sees both the upgrade URI and the first frame, so this pins both
+/// halves of #3440's rule: the durable secret is presented on the authenticated
+/// channel and never placed where an access log would capture it.
 #[tokio::test]
-async fn the_p2p_constructor_puts_the_credential_on_the_url() {
+async fn the_p2p_constructor_presents_the_agent_token_on_the_auth_frame() {
     let (listener, url) = bind().await.unwrap();
 
     let server = async {
-        let (_ws, seen) = accept_capturing_uri(&listener).await?;
+        let (mut ws, seen) = accept_capturing_uri(&listener).await?;
+        let auth = next_request(&mut ws).await?;
+        assert_eq!(auth["msg_type"], "client.auth");
+        assert_eq!(auth["payload"]["auth_token"], "agent-token-abc");
         // `unwrap_or_default` rather than an unwrap: an empty string fails the
         // assertion below with the message saying the request never arrived,
         // which is more use than a panic from inside the helper.
         let uri = seen.get().cloned().unwrap_or_default();
         assert!(
-            uri.contains("token=credential-abc"),
-            "the credential must reach the agent's handshake; the request was {uri:?}"
+            !uri.contains("agent-token-abc") && !uri.contains("token="),
+            "the durable Agent Token must never ride the URL; the request was {uri:?}"
         );
+        answer_agent_auth(&mut ws, &auth, "success", "ok").await?;
         linger().await;
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
     };
 
     let (server, ()) = tokio::join!(server, async {
-        let _socket = P2pConnection::connect(&url, "credential-abc")
+        let _socket = P2pConnection::connect(&url, "agent-token-abc")
             .await
             .expect("the agent socket opens");
         linger().await;
+    });
+
+    server.unwrap();
+}
+
+/// A refused Agent Token is an auth error, not a transport failure.
+#[tokio::test]
+async fn the_p2p_constructor_reports_a_refused_agent_token() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        let auth = next_request(&mut ws).await?;
+        assert_eq!(auth["msg_type"], "client.auth");
+        answer_agent_auth(&mut ws, &auth, "error", "invalid token").await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let error = match P2pConnection::connect(&url, "wrong-agent-token").await {
+            Ok(_) => panic!("a refused Agent Token must not produce a connection"),
+            Err(error) => error,
+        };
+        match error {
+            ClientError::Auth { message } => assert_eq!(message, "invalid token"),
+            other => panic!("expected an auth error, got {other:?}"),
+        }
     });
 
     server.unwrap();

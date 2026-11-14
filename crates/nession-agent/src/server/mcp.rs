@@ -35,23 +35,38 @@ use nession_runtime::lane::KeyedLane;
 /// the endpoint is not mistaken for a peer-to-peer frame's.
 const MCP_LANE_LABEL: &str = "mcp ";
 
+/// The borrowed host facts an MCP mount is built from.
+///
+/// Bundled so the mount signature stays a state description plus the services
+/// it reuses, rather than accumulating one scalar per Host capability.
+pub(crate) struct McpHost<'a> {
+    pub config: &'a AgentConfig,
+    /// The resolved durable Agent Token this endpoint verifies (#3440).
+    pub agent_token: &'a str,
+    pub agent_id: &'a str,
+    pub default_working_dir: &'a str,
+    pub terminal_cols: u16,
+}
+
 /// Build the Agent-hosted MCP service when `[mcp] enabled = true`.
 pub(crate) fn build(
-    config: &AgentConfig,
-    agent_id: &str,
+    host: McpHost<'_>,
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionRegistry>,
-    default_working_dir: &str,
-    terminal_cols: u16,
     mutations: Arc<KeyedLane<ResourceKey>>,
 ) -> anyhow::Result<Option<Arc<McpService>>> {
+    let McpHost {
+        config,
+        agent_token,
+        agent_id,
+        default_working_dir,
+        terminal_cols,
+    } = host;
     if !config.mcp.enabled {
         return Ok(None);
     }
     // Fail closed for a directly constructed config too.
-    config
-        .mcp
-        .validate_for_host(&config.agent_token, "agent_token")?;
+    config.mcp.validate_for_host(agent_token, "agent_token")?;
 
     let cluster: Arc<dyn ClusterBackend> = if config.server_url.trim().is_empty() {
         Arc::new(UnavailableClusterBackend::new(
@@ -80,7 +95,7 @@ pub(crate) fn build(
         });
     let service_config = ServiceConfig {
         path: config.mcp.path.clone(),
-        auth_token: config.agent_token.clone(),
+        auth_token: nession_protocol::TokenVerifier::new(agent_token),
         tool_timeout: std::time::Duration::from_secs(config.mcp.tool_timeout_secs),
         max_concurrent_calls: config.mcp.max_concurrent_calls,
         allowed_origins: config.mcp.allowed_origins.clone(),

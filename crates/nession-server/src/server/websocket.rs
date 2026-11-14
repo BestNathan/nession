@@ -44,12 +44,6 @@ pub struct WebSocketServer {
     /// Built here because the resources its keys name — the registries and the
     /// env store — are built here. See `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
-    /// The P2P credential ledger (#1013).
-    ///
-    /// Held here because a credential outlives the attach that minted it, and
-    /// because the process that checks it is an *Agent* rather than this one —
-    /// so this side is only the issuer's record, kept for expiry.
-    p2p_broker: Arc<crate::broker::ConnectionBroker>,
     /// The MCP endpoint (`#565`), when `[mcp] enabled = true`. It shares this
     /// listener and the Server's business services.
     mcp: Option<Arc<nession_mcp::McpService>>,
@@ -95,13 +89,6 @@ impl WebSocketServer {
             }
         }
 
-        // The ledger's expiry is the revocation window (#1013): how long a
-        // credential the Server has already forgotten stays useful to whoever
-        // is holding it.
-        let p2p_broker = Arc::new(crate::broker::ConnectionBroker::new(
-            config.p2p_token_expiry_secs,
-        ));
-
         // The global image manager (#3022): one content-addressed blob store,
         // one bounded build worker, one owner of image metadata.
         let blob_store = nession_erofs::BlobStore::new(&config.image_blob_dir)
@@ -119,7 +106,6 @@ impl WebSocketServer {
             blob_store,
             ImageManagerOptions {
                 max_concurrent_builds: config.image_max_concurrent_builds,
-                access_token_ttl_secs: config.image_access_token_expiry_secs,
                 build_root: std::path::PathBuf::from(&config.image_build_dir),
                 build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
                     .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),
@@ -127,7 +113,10 @@ impl WebSocketServer {
                 build_retention_secs: config.image_build_retention_secs,
             },
         )?);
-        let image_http = Arc::new(ImageHttpService::new(Arc::clone(&image_manager)));
+        let image_http = Arc::new(ImageHttpService::new(
+            Arc::clone(&image_manager),
+            nession_protocol::TokenVerifier::new(config.auth_token.clone()),
+        ));
         // Build transitions are pushed with the authoritative descriptor read
         // from the durable build directory. A client that missed a push asks
         // `server.image.build.get|list` after reconnecting.
@@ -164,14 +153,12 @@ impl WebSocketServer {
                 env_service: Arc::clone(&env_service),
                 image_manager: Arc::clone(&image_manager),
                 db: Arc::clone(&db),
-                p2p_broker: Arc::clone(&p2p_broker),
             },
             Arc::clone(&mutations),
         )?;
 
         Ok(Self {
             config,
-            p2p_broker,
             agent_registry,
             session_registry,
             command_broker,
@@ -399,7 +386,6 @@ impl WebSocketServer {
                         env_service: Arc::clone(&self.env_service),
                         db: Arc::clone(&self.db),
                         mutations: Arc::clone(&self.mutations),
-                        p2p_broker: Arc::clone(&self.p2p_broker),
                         mcp: self.mcp.clone(),
                         image_manager: Arc::clone(&self.image_manager),
                         image_http: Arc::clone(&self.image_http),
@@ -486,7 +472,6 @@ struct ServerContext {
     /// Server's rather than any one connection's. See
     /// `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
-    p2p_broker: Arc<crate::broker::ConnectionBroker>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
     /// Global EROFS image manager and its authorized HTTP route (#3022).
@@ -666,7 +651,6 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
         terminal_web_font_size,
         terminal_stall_grace,
         query_concurrency,
-        p2p_broker,
         image_manager,
         mcp: _,
         image_http: _,
@@ -680,6 +664,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // connection: see `server::outbound`.
     let (sender, mut rx) = WsMessageSender::with_terminal_grace(terminal_stall_grace);
 
+    let token_registry = Arc::clone(&agent_registry);
     let mut handler = ConnectionHandler::new(
         crate::server::handler::ConnectionHandlerDeps {
             agent_registry,
@@ -690,7 +675,6 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
             env_service,
             image_manager,
             db,
-            p2p_broker,
         },
         crate::server::handler::ConnectionHandlerConfig {
             server_auth_token: auth_token,
@@ -863,6 +847,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
                 session_name,
                 relay_request_id,
                 client_id,
+                agent_token,
                 browser_client_id,
                 env_snapshots,
                 cols,
@@ -885,6 +870,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
                         agent_ws_urls: &agent_ws_urls,
                         session_name: &session_name,
                         relay_request_id: &relay_request_id,
+                        agent_token: &agent_token,
                         // The browser's own id wherever it has one: the Agent's
                         // control bookkeeping names clients, and the client is
                         // the only party that can recognise its own name
@@ -1013,9 +999,14 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // superseded leaves the agent alone — its replacement is serving it — and
     // an agent that really did drop still fails its in-flight commands here.
     if let Some(agent_id) = handler.registered_agent_id() {
-        command_broker
+        if command_broker
             .release_agent(agent_id, handler.connection_generation())
-            .await;
+            .await
+        {
+            // The registration generation that vouched for the cached token is
+            // gone; attach must refuse until the Agent registers again (#3440).
+            token_registry.clear_agent_token(agent_id).await;
+        }
     }
 
     // Clean up: unregister client from ClientRegistry on disconnect
@@ -1117,6 +1108,9 @@ struct RelayRequest<'a> {
     /// Original browser begin request id; this is request correlation, not
     /// a credential and not a verified parser baseline (#2089).
     relay_request_id: &'a str,
+    /// The target Agent's durable token, presented as the first `client.auth`
+    /// frame on the dial (#3440).
+    agent_token: &'a str,
     /// The identity this relay presents to the Agent (#1429): the browser's
     /// stable client id when it sent one, and the Server's per-attach id
     /// otherwise. It is written as `client.auth` on the relay's own connection
@@ -1448,6 +1442,7 @@ where
         agent_ws_urls,
         session_name,
         relay_request_id,
+        agent_token,
         client_id,
         authenticated_browser_id,
         env_snapshots,
@@ -1529,9 +1524,9 @@ where
     // wait is what turns a refusal into a failed relay instead of a session
     // that quietly belongs to nobody.
     //
-    // The token is left empty on purpose: the Agent ignores it (it shares one
-    // payload type with the Server), and this socket's credential was the
-    // Agent's own connection token, presented at the upgrade.
+    // The Agent Token is the relay leg's real authentication (#3440): the
+    // Server holds it from the Agent's registration and presents it here, not
+    // in the URL.
     let auth_id = uuid::Uuid::new_v4().to_string();
     let auth_msg = serde_json::json!({
         "msg_type": "client.auth",
@@ -1540,7 +1535,7 @@ where
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
-        "payload": { "auth_token": "", "client_id": client_id },
+        "payload": { "auth_token": agent_token, "client_id": client_id },
     });
     agent_write
         .send(tokio_tungstenite::tungstenite::Message::Text(
@@ -1810,26 +1805,77 @@ where
     // to the same URL that worked for the attach.
     if let Some(ref url) = connected_url {
         if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(url).await {
-            let detach_msg = serde_json::json!({
-                "msg_type": "agent.detach",
-                "id": uuid::Uuid::new_v4().to_string(),
+            // The detach is a **second dial**, so it authenticates like the
+            // first: the Agent Token as the first frame, never a URL parameter
+            // (#3440). Sending detach on an unauthenticated socket would be the
+            // silent second path this design exists to remove.
+            let auth_id = uuid::Uuid::new_v4().to_string();
+            let auth_msg = serde_json::json!({
+                "msg_type": "client.auth",
+                "id": auth_id.clone(),
                 "timestamp": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                "payload": {
-                    "session_name": session_name,
-                }
+                "payload": { "auth_token": agent_token, "client_id": client_id },
             });
-            let _ = detach_ws
+            let mut authenticated = false;
+            if detach_ws
                 .send(tokio_tungstenite::tungstenite::Message::Text(
-                    detach_msg.to_string(),
+                    auth_msg.to_string(),
                 ))
-                .await;
-            info!(
-                "Sent client.detach for session '{}' (best-effort)",
-                session_name
-            );
+                .await
+                .is_ok()
+            {
+                loop {
+                    match tokio::time::timeout(std::time::Duration::from_secs(10), detach_ws.next())
+                        .await
+                    {
+                        Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                            let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                                continue;
+                            };
+                            if value.get("id").and_then(|id| id.as_str()) == Some(auth_id.as_str())
+                            {
+                                authenticated = value
+                                    .pointer("/payload/status")
+                                    .and_then(|status| status.as_str())
+                                    == Some("success");
+                                break;
+                            }
+                        }
+                        Ok(Some(Ok(_))) => continue,
+                        _ => break,
+                    }
+                }
+            }
+            if authenticated {
+                let detach_msg = serde_json::json!({
+                    "msg_type": "agent.detach",
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "timestamp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    "payload": {
+                        "session_name": session_name,
+                    }
+                });
+                let _ = detach_ws
+                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                        detach_msg.to_string(),
+                    ))
+                    .await;
+                info!(
+                    "Sent client.detach for session '{}' (best-effort)",
+                    session_name
+                );
+            } else {
+                warn!(
+                    "Agent refused the detach connection's authentication for session '{}'",
+                    session_name
+                );
+            }
         } else {
             warn!(
                 "Could not connect to agent for client.detach for session '{}'",

@@ -109,8 +109,8 @@ arguments and executes the business operation through the injected
 The Agent owns Session lifecycle and live state even when a caller reaches it
 through the Server. The Server owns Agent discovery, authorization and routing.
 There is no Server-local tmux fallback and no alternate management plane. The
-inbound MCP token is never forwarded to a backend, and P2P credentials are
-neither widened nor exposed.
+inbound MCP token is verified by the hosting endpoint and never forwarded to a
+backend; no Tool mints or returns a P2P credential.
 
 ## Protocol versions
 
@@ -219,8 +219,8 @@ enabled = true
 The Server mounts `/mcp` on its existing listener (no second port). Server-owned
 discovery dispatches through the same `server_routes!` table a Web/CLI
 connection uses; Agent-owned Session Tools route to the named Agent through the
-existing command broker. The inbound token is the Server's `auth_token`;
-enabling MCP with an empty token refuses to start (fail closed).
+existing command broker. The inbound token is the Server's `auth_token`; an Agent Token is
+refused. Enabling MCP with an empty token refuses to start (fail closed).
 
 ### Agent embedded
 
@@ -233,10 +233,11 @@ enabled = true
 
 The Agent mounts `/mcp` on its P2P listener. Its local Tools use the Agent's own
 `SessionManager`; Server-owned discovery reuses the Server the Agent reports to
-(`server_url`/`auth_token`). The inbound token is `agent_token` — the same
-configured token a standalone Agent already uses for its P2P socket. This does
-**not** widen P2P authorization: the MCP bearer check is independent, and a
-Server-connected Agent's P2P credentials are still Server-minted.
+(`server_url`/`auth_token`). The inbound token is the Agent's durable
+`agent_token` (#3440) — the same endpoint-owned secret the P2P listener
+verifies, so MCP and direct P2P share one authentication contract. The Server
+Token is refused here, and the Agent Token is refused by the Server's MCP
+endpoint.
 
 In standalone mode (`server_url` empty) the Server-owned Tool remains listed and
 returns a structured "standalone Agent has no Server backend" error. Local Tools
