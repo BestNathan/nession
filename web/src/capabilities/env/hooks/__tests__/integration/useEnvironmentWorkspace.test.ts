@@ -31,6 +31,13 @@ function info(name: string, overrides: Partial<EnvFileInfo> = {}): EnvFileInfo {
 }
 
 const A_REF = { name: 'a.env', source: 'server' as const };
+const B_REF = { name: 'b.env', source: 'server' as const };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 function bindingResponse(
   overrides: {
@@ -284,4 +291,146 @@ describe('useEnvironmentWorkspace', () => {
     });
     expect(reapply).toHaveBeenCalledTimes(1);
   });
+  it('preserves Session B dirty draft when Session A binding Apply finishes late (#3444)', async () => {
+    const delayed = deferred<ReturnType<typeof bindingResponse>>();
+    const replace = vi.fn(() => delayed.promise);
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false,
+      pending: false,
+      refresh: vi.fn(),
+      replace,
+      reapply: vi.fn(async () => bindingResponse()),
+    });
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) => useEnvironmentWorkspace(sessionId),
+      { initialProps: { sessionId: 'session-a' as string | null } },
+    );
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    act(() => {
+      result.current.startBindingDraft();
+      result.current.screen.setDraftRefs([B_REF]);
+    });
+
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.applyBinding([B_REF]); });
+    expect(replace).toHaveBeenCalledWith([B_REF]);
+    rerender({ sessionId: 'session-b' });
+    act(() => {
+      result.current.startBindingDraft();
+      result.current.screen.setDraftRefs([B_REF]);
+    });
+    expect(result.current.screen.view).toBe('draft');
+    expect(result.current.screen.dirty).toBe(true);
+
+    let accepted = true;
+    await act(async () => {
+      delayed.resolve({ ...bindingResponse(), warnings: ['A-only late warning'] });
+      accepted = await pending;
+    });
+    expect(accepted).toBe(false);
+    expect(result.current.screen.view).toBe('draft');
+    expect(result.current.screen.draft).toEqual([B_REF]);
+    expect(result.current.screen.dirty).toBe(true);
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('does not apply Session A late save/delete feedback or navigation to B (#3444)', async () => {
+    const oldSave = deferred<EnvWriteResponse>();
+    envApi.writeEnvFile.mockReturnValueOnce(oldSave.promise);
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) => useEnvironmentWorkspace(sessionId),
+      { initialProps: { sessionId: 'session-a' as string | null } },
+    );
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    act(() => result.current.screen.startNew());
+    let saving!: Promise<EnvWriteResponse>;
+    act(() => {
+      saving = result.current.save({
+        ref: { name: 'a.env', source: 'server' },
+        content: 'A=1\\n', overwrite: true, force: false,
+      });
+    });
+    rerender({ sessionId: 'session-b' });
+    act(() => {
+      result.current.startBindingDraft();
+      result.current.screen.setDraftRefs([B_REF]);
+    });
+    await act(async () => {
+      oldSave.resolve({ success: true });
+      await saving;
+    });
+    expect(result.current.screen.view).toBe('draft');
+    expect(result.current.screen.dirty).toBe(true);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(envApi.listEnvFiles).toHaveBeenCalledTimes(1);
+
+    const oldDelete = deferred<{ success: boolean; error?: string }>();
+    envApi.deleteEnvFile.mockReturnValueOnce(oldDelete.promise);
+    let deleting!: Promise<void>;
+    act(() => { deleting = result.current.deleteProfile(info('a.env')); });
+    rerender({ sessionId: 'session-c' });
+    act(() => {
+      result.current.startBindingDraft();
+      result.current.screen.setDraftRefs([B_REF]);
+    });
+    await act(async () => {
+      oldDelete.resolve({ success: false, error: 'A-only failure' });
+      await deleting;
+    });
+    expect(result.current.screen.view).toBe('draft');
+    expect(result.current.screen.dirty).toBe(true);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('ignores the stale import list completion when B has an editor (#3444)', async () => {
+    const delayed = deferred<{ files: EnvFileInfo[] }>();
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) => useEnvironmentWorkspace(sessionId),
+      { initialProps: { sessionId: 'session-a' as string | null } },
+    );
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    envApi.listEnvFiles.mockReturnValueOnce(delayed.promise);
+    act(() => result.current.onImported(A_REF));
+    rerender({ sessionId: 'session-b' });
+    act(() => result.current.screen.startNew());
+    await act(async () => {
+      delayed.resolve({ files: [info('a.env'), info('b.env')] });
+      await Promise.resolve();
+    });
+    expect(result.current.screen.editor).toEqual({ kind: 'new' });
+    expect(result.current.screen.selectedKey).toBeNull();
+  });
+
+  it('suppresses stale Session A reapply feedback without blocking B', async () => {
+    const delayed = deferred<ReturnType<typeof bindingResponse>>();
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false, pending: false,
+      refresh: vi.fn(),
+      replace: vi.fn(async () => bindingResponse()),
+      reapply: vi.fn(() => delayed.promise),
+    });
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) => useEnvironmentWorkspace(sessionId),
+      { initialProps: { sessionId: 'session-a' as string | null } },
+    );
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.reapplyBinding(); });
+    rerender({ sessionId: 'session-b' });
+    act(() => result.current.screen.startNew());
+    let accepted = true;
+    await act(async () => {
+      delayed.resolve({ ...bindingResponse({success: false, error: 'A failure'}),
+        warnings: ['A-only warning'] });
+      accepted = await pending;
+    });
+    expect(accepted).toBe(false);
+    expect(result.current.screen.editor).toEqual({ kind: 'new' });
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
 });
