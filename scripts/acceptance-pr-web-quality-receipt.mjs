@@ -28,7 +28,7 @@ export function validWebQualityReceipt(receipt, sha) {
   return Boolean(receipt && SHA.test(String(sha)) &&
     receipt.kind === 'pr_web_quality_execution_v1' &&
     receipt.repository === REPO && receipt.workflow === WORKFLOW &&
-    receipt.head_sha === sha &&
+    receipt.head_sha === sha && receipt.result === 'success' &&
     positiveInteger(receipt.run_id) && positiveInteger(receipt.run_attempt) &&
     positiveInteger(receipt.web_tests_job_id) &&
     positiveInteger(receipt.web_check_job_id) &&
@@ -102,6 +102,7 @@ export function attestPrWebQuality(sha, runsPayload, jobsPayload) {
       repository: REPO,
       workflow: WORKFLOW,
       head_sha: sha,
+      result: 'success',
       run_id: run.id,
       run_attempt: run.run_attempt,
       web_tests_job_id: web.id,
