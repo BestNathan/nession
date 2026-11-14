@@ -145,7 +145,7 @@ function fixture() {
   const receipt = {
     kind: 'pr_web_quality_execution_v1', repository: 'BestNathan/nession',
     workflow: '.github/workflows/ci-quality.yml', head_sha: sha,
-    run_id: 50, run_attempt: 2, web_tests_job_id: 51,
+    result: 'success', run_id: 50, run_attempt: 2, web_tests_job_id: 51,
     web_check_job_id: 52, web_gate_step: 'Verify Web and design Gates',
     web_check_step: 'Enforce applicable Quality results at the stable check name',
   };
