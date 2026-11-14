@@ -95,8 +95,13 @@ pub struct ManagedSessionImages {
 pub struct ManagedToolchainRequest {
     /// `sha256:<64 lowercase hex>` of a ready Image Manager artifact.
     pub digest: String,
-    /// `/opt/<lowercase name>`; the Sandbox owns the target rule.
-    pub target: String,
+    /// Optional user/Session override for the actual mount target.
+    ///
+    /// When absent, the resolved Manifest's advisory
+    /// `io.nession.mount.default` proposes the target; when neither exists the
+    /// create fails closed. The Sandbox owns the final target rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// Client request for a Managed EROFS-backed Session (#3062).

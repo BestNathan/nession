@@ -105,6 +105,21 @@ before mounting anything.
   the Agent Workspace root; a `project_location` is an external declared
   directory the Agent validated, never created or deleted, and must be a real
   canonical directory.
+- **Image defaults (#3500).** `base_env` and each toolchain's `env` carry the
+  Agent-resolved standard OCI Config `Env` as bounded defaults; a toolchain's
+  `path_prepend` is the advisory executable directory *relative to its actual
+  target*. Compile re-validates names, bounds and reserved keys, refuses
+  unsafe prepends, and requires equal-precedence tool defaults with different
+  values to fail closed (identical values dedupe). `PATH`, loader,
+  shell-startup, proxy, host-control-socket and `NESSON_*` keys fail closed;
+  terminal/locale/home values are dropped because the execution owns them.
+  Precedence is inherited environment < Base defaults < enabled tool defaults
+  (target-sorted) < explicit Session/Sandbox ENV. `PATH` is never taken from a
+  Config: the Sandbox composes it from the resolved prepend directories and
+  the effective base `PATH`, and an explicit Session `PATH` wins. Mounts
+  happen in `prepare`, so the resulting environment is established before the
+  launch; an already-running process never receives a retroactive mount or
+  PATH change.
 - **Mount mechanics.** The Linux backend mounts each image read-only with the
   unprivileged `erofsfuse` helper (a usable `/dev/fuse` is required). The probe,
   bounded helper invocation, mountpoint readiness identity check and strict

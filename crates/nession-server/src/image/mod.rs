@@ -2747,7 +2747,7 @@ mod tests {
             toolchains: vec![
                 nession_protocol::contracts::session::v1::ManagedToolchainRequest {
                     digest: tool_digest.clone(),
-                    target: "/opt/tool".to_string(),
+                    target: Some("/opt/tool".to_string()),
                 },
             ],
             source_sha: None,

@@ -712,7 +712,7 @@ impl ConnectionHandler {
                 role: ManagedImageRole::Toolchain,
                 digest: grant.digest,
                 path: grant.path,
-                target: Some(toolchain.target.clone()),
+                target: toolchain.target.clone(),
                 objects: grant.objects,
             });
             resolved_images.push(binding);

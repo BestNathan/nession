@@ -22,9 +22,69 @@ use nession_protocol::contracts::sandbox::v1::{
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 use uuid::Uuid;
 
-use crate::erofs_cache::{resolve_grant_image, ErofsCache, ResolvedManifestBinding};
+use crate::erofs_cache::{
+    resolve_grant_image, ErofsCache, ResolvedGrantImage, ResolvedManifestBinding,
+};
 use crate::managed_session::blob_origin;
 use crate::workspace_manager::WorkspaceLease;
+
+/// Resolve the actual toolchain mount target (#3500).
+///
+/// An explicit grant/request target is the user/Session override and wins.
+/// Otherwise the Manifest's advisory `io.nession.mount.default` proposes it.
+/// A missing override and proposal fails closed with an actionable error; the
+/// Sandbox remains the authority that validates the chosen target.
+pub(crate) fn toolchain_target(
+    requested: Option<&str>,
+    resolved: &ResolvedGrantImage,
+) -> Result<String> {
+    if let Some(target) = requested.filter(|target| !target.is_empty()) {
+        return Ok(target.to_string());
+    }
+    if let Some(target) = resolved
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.mount_default.clone())
+    {
+        return Ok(target);
+    }
+    anyhow::bail!(
+        "toolchain image {} declares no target and no io.nession.mount.default; \
+         choose an /opt/<name> target",
+        resolved.layer_digest
+    )
+}
+
+/// Map the bounded standard Config Env suggestions into the prepared
+/// composition. A legacy digest-addressed image has no Config to read.
+pub(crate) fn image_env_defaults(
+    resolved: &ResolvedGrantImage,
+) -> Vec<nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault> {
+    resolved
+        .usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .environment
+                .iter()
+                .map(
+                    |entry| nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault {
+                        name: entry.name.clone(),
+                        value: entry.value.clone(),
+                    },
+                )
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The advisory relative executable directory of a resolved image.
+pub(crate) fn image_path_prepend(resolved: &ResolvedGrantImage) -> Option<String> {
+    resolved
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.path_prepend.clone())
+}
 
 /// The validated `/workspace` selection an Agent resolved before preparing a
 /// composition (#3407).
@@ -182,22 +242,27 @@ pub async fn prepare(
         }
         ((role, resolved.layer_digest, resolved.layer_path), binding)
     };
-    let base_ref = match resolve_grant_image(cache, base, &origin, server_auth_token).await {
-        Ok(resolved) => {
-            let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
-            manifests.extend(binding);
-            images.push((role, digest.clone(), path.clone()));
-            SandboxImageRef {
-                digest,
-                source: path.display().to_string(),
+    let (base_ref, base_env) =
+        match resolve_grant_image(cache, base, &origin, server_auth_token).await {
+            Ok(resolved) => {
+                let base_env = image_env_defaults(&resolved);
+                let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
+                manifests.extend(binding);
+                images.push((role, digest.clone(), path.clone()));
+                (
+                    SandboxImageRef {
+                        digest,
+                        source: path.display().to_string(),
+                    },
+                    base_env,
+                )
             }
-        }
-        Err(error) => {
-            guard.disarm();
-            remove_owned_workspace(&guard.root, &guard.path);
-            return Err(error);
-        }
-    };
+            Err(error) => {
+                guard.disarm();
+                remove_owned_workspace(&guard.root, &guard.path);
+                return Err(error);
+            }
+        };
     let workspace_ref = match workspace {
         Some(grant) => match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
             Ok(resolved) => {
@@ -219,11 +284,6 @@ pub async fn prepare(
     };
     let mut toolchain_refs = Vec::with_capacity(toolchains.len());
     for grant in toolchains {
-        let Some(target) = grant.target.clone().filter(|target| !target.is_empty()) else {
-            guard.disarm();
-            remove_owned_workspace(&guard.root, &guard.path);
-            anyhow::bail!("toolchain image {} has no /opt/<name> target", grant.digest);
-        };
         let resolved = match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
             Ok(value) => value,
             Err(error) => {
@@ -232,6 +292,16 @@ pub async fn prepare(
                 return Err(error);
             }
         };
+        let target = match toolchain_target(grant.target.as_deref(), &resolved) {
+            Ok(target) => target,
+            Err(error) => {
+                guard.disarm();
+                remove_owned_workspace(&guard.root, &guard.path);
+                return Err(error);
+            }
+        };
+        let env = image_env_defaults(&resolved);
+        let path_prepend = image_path_prepend(&resolved);
         let ((role, digest, path), binding) = record(ManagedImageRole::Toolchain, resolved);
         manifests.extend(binding);
         images.push((role, digest.clone(), path.clone()));
@@ -239,6 +309,8 @@ pub async fn prepare(
             digest,
             source: path.display().to_string(),
             target,
+            env,
+            path_prepend,
         });
     }
 
@@ -250,6 +322,7 @@ pub async fn prepare(
             ownership: SandboxWorkspaceOwnership::Agent,
         }),
         toolchains: toolchain_refs,
+        base_env,
     };
     let mut workspace_lease = None;
     if let Some(workspace_override) = workspace_override {
@@ -342,6 +415,10 @@ pub fn preflight_composition(
                     digest: image.digest,
                     source: image.source,
                     target,
+                    // Preflight reads no image bytes; Enter resolves the
+                    // Config Env and advisory prepend from the verified cache.
+                    env: Vec::new(),
+                    path_prepend: None,
                 });
             }
         }
@@ -371,6 +448,7 @@ pub fn preflight_composition(
             ownership,
         }),
         toolchains,
+        base_env: Vec::new(),
     })
 }
 
