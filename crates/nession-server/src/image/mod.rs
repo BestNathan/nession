@@ -198,6 +198,9 @@ pub struct GcReport {
     pub skipped_active_transfers: u64,
     /// `building` rows protected by a live durable build directory (#3334).
     pub skipped_active_builds: u64,
+    /// Legacy rows protected because a catalog Tag/pin reaches their EROFS
+    /// digest through Manifest descriptor edges (#3496).
+    pub skipped_catalog_references: u64,
     /// Candidates left for a later sweep by `max_candidates` or
     /// `max_deleted_bytes`. A bounded sweep is resumable: the next call
     /// re-evaluates these from the database, not from in-memory state.
@@ -1694,6 +1697,13 @@ impl ImageManager {
     /// failed unlink leaves the row for the next attempt.
     pub async fn gc_bounded(&self, limits: GcLimits) -> Result<GcReport> {
         let now = now_i64();
+        // A migrated EROFS Blob is still physical data for a catalog Manifest.
+        // The legacy registry GC must never reclaim it while a Tag or live pin
+        // reaches it through descriptor edges (#3496).
+        let catalog_protected =
+            nession_erofs::catalog::protected_digests(self.db.connection(), now)
+                .await
+                .unwrap_or_default();
         let _ = self.db.delete_expired_image_access_grants(now).await;
         let _ = self.db.delete_expired_image_leases(now).await;
         let candidates = self
@@ -1725,6 +1735,10 @@ impl ImageManager {
                 continue;
             }
             if let Some(digest) = &row.digest {
+                if catalog_protected.contains(digest) {
+                    report.skipped_catalog_references += 1;
+                    continue;
+                }
                 let active = self
                     .transfers
                     .lock()
@@ -1970,6 +1984,11 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    use nession_erofs::catalog::reference::{
+        record_object, record_reference, ObjectKind, StoredObject,
+    };
+    use nession_erofs::catalog::tag::{set_tag, TagExpectation};
+    use nession_erofs::oci::MEDIA_TYPE_MANIFEST;
     use nession_protocol::contracts::image::v1::{
         ImageSource, NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX,
     };
@@ -2393,6 +2412,53 @@ mod tests {
         drop(guard);
         let report = manager.gc().await.unwrap();
         assert_eq!(report.removed_images, 1);
+    }
+
+    /// #3496: the legacy registry GC must not reclaim an EROFS Blob that a
+    /// catalog Tag reaches through a Manifest descriptor edge.
+    #[tokio::test]
+    async fn gc_keeps_a_blob_referenced_from_the_catalog_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/catalog", b"catalog-referenced");
+        let built = manager
+            .build(&local("/source/catalog"), None)
+            .await
+            .unwrap();
+        let digest = built.digest.clone().unwrap();
+        let now = now_i64();
+        let manifest_digest = format!("sha256:{}", "b".repeat(64));
+        record_object(
+            db.connection(),
+            &StoredObject {
+                digest: manifest_digest.clone(),
+                media_type: MEDIA_TYPE_MANIFEST.to_string(),
+                size_bytes: 1,
+                kind: ObjectKind::Manifest,
+            },
+            now,
+        )
+        .await
+        .unwrap();
+        record_reference(db.connection(), &manifest_digest, &digest, "layer", now)
+            .await
+            .unwrap();
+        set_tag(
+            db.connection(),
+            "nession/catalog",
+            "v1",
+            &manifest_digest,
+            &TagExpectation::Absent,
+            now,
+        )
+        .await
+        .unwrap();
+
+        let report = manager.gc().await.unwrap();
+        assert_eq!(report.skipped_catalog_references, 1);
+        assert_eq!(report.removed_images, 0);
+        assert!(manager.get(Some(&digest), None).await.is_ok());
+        assert!(manager.blob_store().contains(&digest).unwrap());
     }
 
     /// #3180 SC-02: one sweep deletes at most the configured candidate count;

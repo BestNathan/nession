@@ -4,6 +4,11 @@
 > Upstream: [Global EROFS Image Manager](erofs-image-manager.md),
 > [Project declaration](project.md), [Sandbox policy](sandbox-policy-and-execution.md) and the
 > Agent runtime instructions in `crates/nession-agent/AGENTS.md`.
+>
+> The target Manifest-pinned identity, per-object cache rules and physical
+> Blob reuse are owned by
+> [OCI/EROFS image infrastructure](oci-erofs-image-infrastructure.md) (#3494);
+> this document describes the current digest-only cache until phase E lands.
 
 ## Ownership
 
