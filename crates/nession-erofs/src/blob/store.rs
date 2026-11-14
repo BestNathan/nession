@@ -87,6 +87,88 @@ impl BlobStore {
         File::open(&path).with_context(|| format!("blob for {digest} is not readable"))
     }
 
+    /// Read a stored blob completely.
+    pub fn read(&self, digest: &str) -> Result<Vec<u8>> {
+        let path = self.path_for(digest)?;
+        fs::read(&path).with_context(|| format!("blob for {digest} is not readable"))
+    }
+
+    /// Publish exact bytes atomically.
+    ///
+    /// This is the entry point for Index/Manifest/Config JSON produced or
+    /// imported as exact bytes (#3496). The digest is computed from the bytes;
+    /// a preexisting object is re-hashed and size-checked before it is reused.
+    pub fn put_bytes(&self, bytes: &[u8]) -> Result<BlobDigest> {
+        let digest = crate::digest::digest_of_bytes(bytes);
+        let size_bytes = u64::try_from(bytes.len()).context("blob size does not fit in u64")?;
+        let destination = self.path_for(&digest)?;
+        if destination.exists() {
+            self.verify_named_size(&digest, size_bytes)?;
+            return Ok(BlobDigest {
+                digest,
+                size_bytes,
+                path: destination,
+            });
+        }
+        let temp = self
+            .root
+            .join(".tmp")
+            .join(format!("blob-{}", uuid::Uuid::new_v4()));
+        let mut writer = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)
+            .with_context(|| format!("failed to create blob temp file {}", temp.display()))?;
+        writer.write_all(bytes).context("failed to write blob")?;
+        writer.sync_all().context("failed to fsync blob")?;
+        drop(writer);
+        fs::rename(&temp, &destination).with_context(|| {
+            format!(
+                "failed to publish blob {} as {}",
+                temp.display(),
+                destination.display()
+            )
+        })?;
+        sync_directory(&self.root.join("sha256"))?;
+        Ok(BlobDigest {
+            digest,
+            size_bytes,
+            path: destination,
+        })
+    }
+
+    /// Remove one ready blob.
+    ///
+    /// A missing file is not an error; the caller is reclaiming an object that
+    /// may already have been removed by an interrupted earlier sweep.
+    pub fn remove(&self, digest: &str) -> Result<bool> {
+        let path = self.path_for(digest)?;
+        match fs::remove_file(&path) {
+            Ok(()) => {
+                sync_directory(&self.root.join("sha256"))?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to remove blob {}", path.display()))
+            }
+        }
+    }
+
+    /// Verify that a blob exists with the claimed size and recomputed digest.
+    pub fn verify_named_size(&self, digest: &str, expected_size: u64) -> Result<()> {
+        let path = self.path_for(digest)?;
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("blob for {digest} is not readable: {}", path.display()))?;
+        if metadata.len() != expected_size {
+            anyhow::bail!(
+                "blob for {digest} has size {}, expected {expected_size}",
+                metadata.len()
+            );
+        }
+        verify_file(&path, digest)
+    }
+
     /// Publish `source` atomically.
     ///
     /// The returned digest is computed from the bytes actually stored, not from
@@ -130,13 +212,9 @@ impl BlobStore {
         let digest = format!("{DIGEST_PREFIX}{hex}");
         let destination = self.path_for(&digest)?;
         if destination.exists() {
-            let existing = fs::metadata(&destination)
-                .with_context(|| format!("failed to stat {}", destination.display()))?;
-            if existing.len() != size {
-                let _ = fs::remove_file(&temp);
-                anyhow::bail!("existing blob for {digest} has a different size");
-            }
+            let verification = self.verify_named_size(&digest, size);
             let _ = fs::remove_file(&temp);
+            verification?;
         } else {
             fs::rename(&temp, &destination).with_context(|| {
                 format!(
@@ -145,6 +223,7 @@ impl BlobStore {
                     destination.display()
                 )
             })?;
+            sync_directory(&self.root.join("sha256"))?;
         }
         Ok(BlobDigest {
             digest,
@@ -175,6 +254,21 @@ impl BlobStore {
             temp_bytes,
         })
     }
+}
+
+/// Make a rename/unlink durable by syncing the containing directory.
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<()> {
+    let directory = File::open(path)
+        .with_context(|| format!("failed to open directory for fsync: {}", path.display()))?;
+    directory
+        .sync_all()
+        .with_context(|| format!("failed to fsync directory {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 /// Count regular files and bytes in a directory this store owns.
@@ -279,5 +373,39 @@ mod tests {
         assert_eq!(usage.blob_bytes, stored.size_bytes);
         assert_eq!(usage.temp_files, 1);
         assert_eq!(usage.temp_bytes, b"temporary".len() as u64);
+    }
+
+    /// #3496: Index/Manifest/Config JSON is published as exact bytes under the
+    /// same content-addressed rule, and a preexisting object is re-hashed.
+    #[test]
+    fn put_bytes_publishes_exact_bytes_and_rehashes_preexisting_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let first = store.put_bytes(br#"{"schemaVersion":2}"#).unwrap();
+        let second = store.put_bytes(br#"{"schemaVersion":2}"#).unwrap();
+        assert_eq!(first.digest, second.digest);
+        assert_eq!(
+            store.read(&first.digest).unwrap(),
+            br#"{"schemaVersion":2}"#
+        );
+        assert_eq!(
+            fs::read_dir(dir.path().join("store/sha256"))
+                .unwrap()
+                .count(),
+            1
+        );
+
+        fs::write(&first.path, b"corrupted").unwrap();
+        assert!(store.put_bytes(br#"{"schemaVersion":2}"#).is_err());
+    }
+
+    #[test]
+    fn remove_reclaims_one_blob_and_tolerates_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let stored = store.put_bytes(b"reclaim me").unwrap();
+        assert!(store.remove(&stored.digest).unwrap());
+        assert!(!store.contains(&stored.digest).unwrap());
+        assert!(!store.remove(&stored.digest).unwrap());
     }
 }

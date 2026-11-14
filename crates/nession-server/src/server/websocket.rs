@@ -93,6 +93,30 @@ impl WebSocketServer {
         // one bounded build worker, one owner of image metadata.
         let blob_store = nession_erofs::BlobStore::new(&config.image_blob_dir)
             .context("failed to open the image blob store")?;
+        // Historical digest-addressed rows remain readable while the catalog
+        // gains one deterministic Manifest identity per ready Blob. The
+        // migration is additive and byte-preserving; a failure leaves the
+        // legacy registry authoritative instead of blocking startup.
+        match nession_erofs::catalog::migrate_legacy_images(
+            db.connection(),
+            &blob_store,
+            &nession_erofs::catalog::LegacyPlatform::host(),
+            chrono::Utc::now().timestamp(),
+        )
+        .await
+        {
+            Ok(report) if report.ready_images > 0 => info!(
+                ready = report.ready_images,
+                migrated = report.migrated_images,
+                already = report.already_migrated,
+                alias_tags = report.created_alias_tags,
+                "Migrated legacy EROFS image identities into the Manifest catalog"
+            ),
+            Ok(_) => {}
+            Err(error) => warn!(
+                "Legacy image catalog migration failed; legacy rows remain authoritative: {error:#}"
+            ),
+        }
         let image_builder = nession_erofs::ErofsBuilder::new(
             Arc::new(nession_erofs::ProcessGitRunner::default()),
             Arc::new(nession_erofs::ProcessMkfsRunner::default()),
