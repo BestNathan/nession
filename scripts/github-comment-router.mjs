@@ -5,6 +5,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { commandPlan, parseCommand, workflowTitle, dispatchInputs } from './github-comment-command.mjs';
 import { resolveCaseTarget } from './github-comment-case-request.mjs';
+import { verifyLiveBugDevelopSource } from './lib/agent/orchestration/bug-develop-comment.mjs';
 
 const REPO = 'BestNathan/nession';
 const API = 'https://api.github.com';
@@ -50,6 +51,11 @@ export async function resolve(event, read = api) {
         encodeURIComponent(event.comment.user.login) + '/permission')).permission;
   }
   const plan = commandPlan(event, comment, issue, pr, permission);
+  if (plan?.handler === 'develop') {
+    // The same source verifier runs again inside Store Ingest. This is a
+    // read-only, early rejection; it grants no Developer/Store authority.
+    await verifyLiveBugDevelopSource(number, id, read);
+  }
   return plan?.handler === 'case' ? resolveCaseTarget(plan, issue, read) : plan;
 }
 function outputs(plan) {
@@ -95,7 +101,7 @@ async function acknowledge(read, plan, link) {
       (plan.handler === 'case' ? ' / ' + plan.criterion + ' at ' + plan.target_sha : '');
   const body = 'Comment command ' + String.fromCharCode(96) + plan.command +
     String.fromCharCode(96) + ' accepted for ' + target +
-    '. [Actions run](' + link + '). This request is not an Acceptance Pass.\n\n' + marker(plan);
+    '. [Actions run](' + link + '). This request is not an Acceptance Pass or proof that a Developer has started.\n\n' + marker(plan);
   await read('/repos/' + REPO + '/issues/' + plan.issue_number + '/comments',
     { method: 'POST', body: { body } });
 }
