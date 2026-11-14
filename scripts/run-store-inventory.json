@@ -260,7 +260,7 @@
         {
           "workflow": ".github/workflows/store-agent-controller-ingest.yml",
           "mode": "controller_initialization",
-          "event": "main_workflow_run",
+          "event": "main_workflow_run_or_authenticated_bot_dispatch",
           "source": "scoped GitHub App installation token",
           "credential_boundary": "main-owned privileged job; no model-provided writer token",
           "app_id_variable": "RUN_STORE_WRITER_APP_ID",

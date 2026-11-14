@@ -146,7 +146,16 @@ export function checkInventory(manifest,workflows){
         fail('Controller manual request must be unprivileged owner/main-only');
       if(!/^name: Store \/ Agent Controller Ingest$/m.test(writer)||
          !/^  workflow_run:$/m.test(writer)||
-         /^  (workflow_dispatch|repository_dispatch):$/m.test(writer)||
+         /^  repository_dispatch:$/m.test(writer)||
+         // #3488: the one bot-only wake is deliberately NOT an arbitrary
+         // manual/privileged Store dispatch. Run/Artifact and original human
+         // Comment are re-attested before the scoped App token is minted.
+         (/^  workflow_dispatch:$/m.test(writer) &&
+           (!writer.includes('      source_run_id:')||
+            !writer.includes("github.actor == 'github-actions[bot]'")||
+            !writer.includes("github.ref == 'refs/heads/main'")||
+            !writer.includes('bug-develop-comment.mjs verify')||
+            !writer.includes('controller-request.mjs verify-source')))||
          !writer.includes('workflows: ["Acceptance / Agent Controller"]')||
          !writer.includes('    branches: [main]')||
          !writer.includes("github.event.workflow_run.actor.login == 'BestNathan'")||
@@ -169,7 +178,7 @@ export function checkInventory(manifest,workflows){
       // bootstrap and reconciliation. It MUST NOT be mislabeled server-enforced.
       const approved=new Map([
         ['.github/workflows/store-agent-bootstrap.yml',['bootstrap','main_push_only']],
-        ['.github/workflows/store-agent-controller-ingest.yml',['controller_initialization','main_workflow_run']],
+        ['.github/workflows/store-agent-controller-ingest.yml',['controller_initialization','main_workflow_run_or_authenticated_bot_dispatch']],
         ['.github/workflows/agent-controller-dispatch.yml',['controller_dispatch','owner_main_dispatch_or_issue_comment']],
         ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment']],
         ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_reconcile','main_workflow_run']],
@@ -202,6 +211,14 @@ export function checkInventory(manifest,workflows){
               (!/^  push:\s*$/m.test(triggers)||/^  workflow_dispatch:\s*$/m.test(triggers)))||
            (needs==='main_workflow_run'&&
               (!/^  workflow_run:\s*$/m.test(triggers)||/^  workflow_dispatch:\s*$/m.test(triggers)))||
+           (needs==='main_workflow_run_or_authenticated_bot_dispatch'&&
+              (!/^  workflow_run:\s*$/m.test(triggers)||
+               !/^  workflow_dispatch:\s*$/m.test(triggers)||
+               !body.includes('      source_run_id:')||
+               !body.includes("github.actor == 'github-actions[bot]'")||
+               !body.includes("github.ref == 'refs/heads/main'")||
+               !body.includes('controller-request.mjs verify-source')||
+               !body.includes('bug-develop-comment.mjs verify')))||
            (needs==='owner_main_dispatch_or_issue_comment'&&
               (!/^  issue_comment:\s*$/m.test(triggers)||!/^  workflow_dispatch:\s*$/m.test(triggers)))||
            (needs==='main_workflow_run_or_owner_comment'&&
@@ -552,7 +569,7 @@ function selfTest(){
     /Controller manual request must be unprivileged/);
   const unsafeControllerActor=new Map(sources);
   unsafeControllerActor.set(controllerRequest,unsafeControllerActor.get(controllerRequest)
-    .replace("github.actor == 'BestNathan'","github.actor == 'anyone'"));
+    .replaceAll("github.actor == 'BestNathan'","github.actor == 'anyone'"));
   assert.throws(()=>checkInventory(manifest,unsafeControllerActor),
     /Controller manual request must be unprivileged/);
   const unsafeControllerWriter=new Map(sources);
@@ -560,7 +577,12 @@ function selfTest(){
     .replace(/^  workflow_run:$/m,'  workflow_dispatch:'));
   assert.throws(()=>checkInventory(manifest,unsafeControllerWriter),
     /Controller Store ingester is not authenticated/);
-  const unsafeControllerCheckout=new Map(sources);
+  const unsafeBotWake=new Map(sources);
+  unsafeBotWake.set(controllerWriter,unsafeBotWake.get(controllerWriter)
+    .replace("github.actor == 'github-actions[bot]'","github.actor == 'anyone'"));
+  assert.throws(()=>checkInventory(manifest,unsafeBotWake),
+    /Controller Store ingester is not authenticated/);
+    const unsafeControllerCheckout=new Map(sources);
   unsafeControllerCheckout.set(controllerWriter,unsafeControllerCheckout.get(controllerWriter)
     .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
   assert.throws(()=>checkInventory(manifest,unsafeControllerCheckout),
