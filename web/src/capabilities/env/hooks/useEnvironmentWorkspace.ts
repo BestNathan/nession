@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { EnvFileInfo, EnvFileRef, EnvWriteResponse } from '@/types';
 import { envApi } from '@/capabilities/env';
@@ -64,10 +64,14 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
   const screen = useEnvironmentScreen();
   const [importOpen, setImportOpen] = useState(false);
 
-  // A Session switch abandons the old Session's selection and any edit/draft
-  // in flight — they name that Session's context and must not reappear.
+  // #3444: UI side effects belong to the Session/epoch that started an async
+  // mutation. The binding hook already fences its own data writes, but returns
+  // stale answers to callers. Never let their late completion close another
+  // Session's draft, change its editor or show misleading toasts.
+  const sessionEpoch = useRef(0);
   const reset = screen.reset;
-  useEffect(() => {
+  useLayoutEffect(() => {
+    sessionEpoch.current += 1;
     reset();
   }, [reset, sessionId]);
 
@@ -95,7 +99,11 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   const applyBinding = useCallback(
     async (refs: EnvFileRef[]): Promise<boolean> => {
+      const epoch = sessionEpoch.current;
       const resp = await binding.replace(refs);
+      if (epoch !== sessionEpoch.current) {
+        return false;
+      }
       resp.warnings.forEach((warning) => toast.warning(warning));
       if (!resp.success) {
         toast.error(resp.error ?? 'Failed to update the Session binding');
@@ -112,7 +120,11 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
   );
 
   const reapplyBinding = useCallback(async (): Promise<boolean> => {
+    const epoch = sessionEpoch.current;
     const resp = await binding.reapply();
+    if (epoch !== sessionEpoch.current) {
+      return false;
+    }
     resp.warnings.forEach((warning) => toast.warning(warning));
     if (!resp.success) {
       toast.error(resp.error ?? 'Failed to reapply the Session binding');
@@ -127,20 +139,23 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   const save = useCallback(
     async (input: EnvProfileSaveInput): Promise<EnvWriteResponse> => {
+      const epoch = sessionEpoch.current;
       const resp = await envApi.writeEnvFile(
         input.ref,
         input.content,
         input.overwrite,
         input.force,
       );
-      if (!resp.success) {
+      if (epoch !== sessionEpoch.current || !resp.success) {
         return resp;
       }
       toast.success(`Saved ${input.ref.name}`);
       resp.warnings?.forEach((w) => toast.warning(w));
       resp.re_source_errors?.forEach((e) => toast.warning(e));
       await Promise.all([profiles.refresh(), refreshBinding()]);
-      screen.finishEdit(refKey(input.ref));
+      if (epoch === sessionEpoch.current) {
+        screen.finishEdit(refKey(input.ref));
+      }
       return resp;
     },
     [profiles, refreshBinding, screen],
@@ -148,7 +163,11 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   const deleteProfile = useCallback(
     async (profile: EnvFileInfo): Promise<void> => {
+      const epoch = sessionEpoch.current;
       const resp = await envApi.deleteEnvFile(toRef(profile));
+      if (epoch !== sessionEpoch.current) {
+        return;
+      }
       if (!resp.success) {
         toast.error(resp.error ?? `Failed to delete ${profile.name}`);
         return;
@@ -162,9 +181,12 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   const onImported = useCallback(
     (ref: EnvFileRef) => {
+      const epoch = sessionEpoch.current;
       toast.success(`Imported ${ref.name}`);
       void profiles.refresh().then(() => {
-        screen.finishEdit(refKey(ref));
+        if (epoch === sessionEpoch.current) {
+          screen.finishEdit(refKey(ref));
+        }
       });
     },
     [profiles, screen],
