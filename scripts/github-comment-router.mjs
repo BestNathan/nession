@@ -177,9 +177,20 @@ export async function wakeQwenResult(plan,read=api) {
     r.display_title===wakeName&&r.event==='workflow_dispatch'&&
     r.actor?.login==='github-actions[bot]'&&r.head_branch==='main'&&
     r.repository?.full_name===REPO);
-  if(existing.length>1)throw Error('ambiguous Qwen Store Ingest wake');
-  if(existing.length===1)return {state:'already-woken',source_run_id:id,
+  if(existing.length>2)throw Error('ambiguous Qwen Store Ingest wake');
+  if(existing.length===2)return {state:'already-woken',source_run_id:id,
     url:existing[0].html_url};
+  if(existing.length===1){
+    const prior=existing[0];
+    if(prior.status!=='completed'||prior.conclusion!=='failure'||
+       prior.run_attempt!==1||
+       prior.path!=='.github/workflows/store-agent-development-ingest.yml'||
+       !/^[a-f0-9]{40}$/.test(prior.head_sha??'')) {
+      return {state:'already-woken',source_run_id:id,url:prior.html_url};
+    }
+    // One verified failed Store Ingest may request one fresh bot/main replay.
+    // The immutable Worker never runs again. Existing checkpoint is CAS-fenced.
+  }
   if(data.workflow_runs.length===100&&
      !(Date.parse(data.workflow_runs.at(-1)?.created_at)<Date.parse(run.created_at)))
     throw Error('unbounded Store wake inventory; no blind redispatch');
@@ -428,7 +439,8 @@ async function selfTest() {
     const resultPlan={...dev,handler:'develop-result',
       workflow:'store-agent-development-ingest.yml',issue_number:issueNo};
     let resultWakes=0;
-    function reader({failed=false,badHead=false,existing=false}={}){
+    function reader({failed=false,badHead=false,existing=false,
+      failedIngest=false,retried=false}={}){
       return async(path,opts={})=>{
         if(opts.method==='POST'){
           assert.equal(path,'/repos/'+REPO+
@@ -446,10 +458,21 @@ async function selfTest() {
         if(path.endsWith('/actions/runs/'+workerId+'/artifacts?per_page=100'))
           return artifacts;
         if(path.includes('/store-agent-development-ingest.yml/runs?'))
-          return {workflow_runs:existing?[{id:999,
-            display_title:'Qwen Developer Ingest worker:'+workerId,
-            event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
-            head_branch:'main',repository:repo,html_url:'https://example.com/run/999'}]:[]};
+          return {workflow_runs:(existing||failedIngest||retried)?[
+            {id:999,display_title:'Qwen Developer Ingest worker:'+workerId,
+              event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
+              head_branch:'main',head_sha:'b'.repeat(40),
+              status:'completed',conclusion:failedIngest?'failure':'success',
+              run_attempt:1,path:'.github/workflows/store-agent-development-ingest.yml',
+              repository:repo,html_url:'https://example.com/run/999'},
+            ...(retried?[{id:1000,
+              display_title:'Qwen Developer Ingest worker:'+workerId,
+              event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
+              head_branch:'main',head_sha:'b'.repeat(40),
+              status:'completed',conclusion:'failure',
+              run_attempt:1,path:'.github/workflows/store-agent-development-ingest.yml',
+              repository:repo,html_url:'https://example.com/run/1000'}]:[]),
+          ]:[]};
         throw Error('unexpected replay API '+path);
       };
     }
@@ -463,6 +486,12 @@ async function selfTest() {
     assert.equal((await wakeQwenResult(resultPlan,reader({existing:true}))).state,
       'already-woken');
     assert.equal(resultWakes,1,'replay and invalid source may not redispatch');
+    assert.equal((await wakeQwenResult(resultPlan,reader({failedIngest:true}))).state,
+      'store-ingest-requested');
+    assert.equal(resultWakes,2,'one failed authenticated Store wake may replay once');
+    assert.equal((await wakeQwenResult(resultPlan,reader({retried:true}))).state,
+      'already-woken');
+    assert.equal(resultWakes,2,'two prior wakes never authorize a third');
 
         console.log('github-comment-router: source checks, context, replay guards passed');
   } finally {
