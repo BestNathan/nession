@@ -50,13 +50,14 @@ export interface EnvironmentWorkspace {
   onImported: (ref: EnvFileRef) => void;
 }
 
-function useSessionScreenEpoch(sessionId: string | null, reset: () => void) {
-  const epoch = useRef(0);
+function useCurrentSession(sessionId: string | null, reset: () => void) {
+  const token = useMemo(() => ({ sessionId }), [sessionId]);
+  const current = useRef(token);
   useLayoutEffect(() => {
-    epoch.current += 1;
+    current.current = token;
     reset();
-  }, [reset, sessionId]);
-  return epoch;
+  }, [reset, token]);
+  return useCallback(() => current.current === token, [token]);
 }
 
 function notifyBindingResult(
@@ -94,7 +95,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
   // mutation. The binding hook already fences its own data writes, but returns
   // stale answers to callers. Never let their late completion close another
   // Session's draft, change its editor or show misleading toasts.
-  const sessionEpoch = useSessionScreenEpoch(sessionId, screen.reset);
+  const isCurrentSession = useCurrentSession(sessionId, screen.reset);
 
   const selectedProfile =
     profiles.profiles.find((p) => refKey(p) === screen.selectedKey) ?? null;
@@ -120,9 +121,8 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   const applyBinding = useCallback(
     async (refs: EnvFileRef[]): Promise<boolean> => {
-      const epoch = sessionEpoch.current;
       const resp = await binding.replace(refs);
-      if (epoch !== sessionEpoch.current) {
+      if (!isCurrentSession()) {
         return false;
       }
       notifyBindingResult(resp, 'Failed to update the Session binding');
@@ -134,50 +134,47 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       }
       return resp.success;
     },
-    [binding, screen],
+    [binding, screen, isCurrentSession],
   );
 
   const reapplyBinding = useCallback(async (): Promise<boolean> => {
-    const epoch = sessionEpoch.current;
     const resp = await binding.reapply();
-    if (epoch !== sessionEpoch.current) {
+    if (!isCurrentSession()) {
       return false;
     }
     notifyBindingResult(resp, 'Failed to reapply the Session binding');
     return resp.success;
-  }, [binding]);
+  }, [binding, isCurrentSession]);
 
   const showSession = useSessionNavigation(screen, refreshBinding);
 
   const save = useCallback(
     async (input: EnvProfileSaveInput): Promise<EnvWriteResponse> => {
-      const epoch = sessionEpoch.current;
       const resp = await envApi.writeEnvFile(
         input.ref,
         input.content,
         input.overwrite,
         input.force,
       );
-      if (epoch !== sessionEpoch.current || !resp.success) {
+      if (!isCurrentSession() || !resp.success) {
         return resp;
       }
       toast.success(`Saved ${input.ref.name}`);
       resp.warnings?.forEach((w) => toast.warning(w));
       resp.re_source_errors?.forEach((e) => toast.warning(e));
       await Promise.all([profiles.refresh(), refreshBinding()]);
-      if (epoch === sessionEpoch.current) {
+      if (isCurrentSession()) {
         screen.finishEdit(refKey(input.ref));
       }
       return resp;
     },
-    [profiles, refreshBinding, screen],
+    [profiles, refreshBinding, screen, isCurrentSession],
   );
 
   const deleteProfile = useCallback(
     async (profile: EnvFileInfo): Promise<void> => {
-      const epoch = sessionEpoch.current;
       const resp = await envApi.deleteEnvFile(toRef(profile));
-      if (epoch !== sessionEpoch.current) {
+      if (!isCurrentSession()) {
         return;
       }
       if (!resp.success) {
@@ -188,20 +185,22 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       screen.finishEdit(null);
       await Promise.all([profiles.refresh(), refreshBinding()]);
     },
-    [profiles, refreshBinding, screen],
+    [profiles, refreshBinding, screen, isCurrentSession],
   );
 
   const onImported = useCallback(
     (ref: EnvFileRef) => {
-      const epoch = sessionEpoch.current;
+      if (!isCurrentSession()) {
+        return;
+      }
       toast.success(`Imported ${ref.name}`);
       void profiles.refresh().then(() => {
-        if (epoch === sessionEpoch.current) {
+        if (isCurrentSession()) {
           screen.finishEdit(refKey(ref));
         }
       });
     },
-    [profiles, screen],
+    [profiles, screen, isCurrentSession],
   );
 
   return {
