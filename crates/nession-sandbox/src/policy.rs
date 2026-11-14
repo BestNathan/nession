@@ -13,7 +13,7 @@ use nession_protocol::contracts::sandbox::v1::{
     SandboxCgroupV2Policy, SandboxEnforcement, SandboxFilesystemComposition,
     SandboxFilesystemPolicy, SandboxFilesystemRoot, SandboxFilesystemWorkspace, SandboxImageRef,
     SandboxLinuxNamespaces, SandboxMountSource, SandboxNetworkMode, SandboxPolicy,
-    SandboxToolchainImage, SandboxWorkspace, SANDBOX_POLICY_VERSION,
+    SandboxToolchainImage, SandboxWorkspace, SandboxWorkspaceOwnership, SANDBOX_POLICY_VERSION,
 };
 use nession_protocol::contracts::workspace::v1::{is_valid_workspace_id, validate_workspace_name};
 use sha2::{Digest, Sha256};
@@ -64,6 +64,7 @@ pub struct CompiledImage {
 pub struct CompiledWorkspace {
     pub image: Option<CompiledImage>,
     pub write: PathBuf,
+    pub ownership: SandboxWorkspaceOwnership,
 }
 
 /// The compiled minimal composable root.
@@ -590,7 +591,18 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
                 .to_string(),
         ));
     }
-    let workspace = Some(CompiledWorkspace { image, write });
+    if workspace_config.ownership == SandboxWorkspaceOwnership::ProjectLocation && image.is_some() {
+        return Err(SandboxError::InvalidPolicy(
+            "filesystem.composition.workspace cannot combine a Project Location with a \
+             Project EROFS lower; the writable upper of a Project Location is user-owned"
+                .to_string(),
+        ));
+    }
+    let workspace = Some(CompiledWorkspace {
+        image,
+        write,
+        ownership: workspace_config.ownership,
+    });
 
     let mut toolchains = composition
         .toolchains
@@ -692,6 +704,7 @@ fn normalize_composition(composition: &CompiledComposition) -> SandboxFilesystem
             .map(|workspace| SandboxWorkspace {
                 image: workspace.image.as_ref().map(normalized_image),
                 write: workspace.write.to_string_lossy().into_owned(),
+                ownership: workspace.ownership,
             }),
         toolchains: composition
             .toolchains
@@ -1023,6 +1036,39 @@ mod tests {
         value["filesystem"]["access"]["read"] = serde_json::json!(["/usr"]);
         let error = compile(&policy(value)).expect_err("two filesystem owners");
         assert!(matches!(error, SandboxError::InvalidPolicy(_)));
+    }
+
+    #[test]
+    fn a_project_location_workspace_cannot_carry_a_project_lower() {
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["workspace"]["ownership"] =
+            serde_json::json!("project_location");
+        let error = compile(&policy(value)).expect_err("external location with a lower");
+        assert!(
+            error.to_string().contains("Project Location"),
+            "the refusal must name the incompatible Project Location: {error}"
+        );
+
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["workspace"]["ownership"] =
+            serde_json::json!("project_location");
+        value["filesystem"]["composition"]["workspace"]
+            .as_object_mut()
+            .unwrap()
+            .remove("image");
+        let compiled = compile(&policy(value)).expect("an external location without a lower");
+        let workspace = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition")
+            .workspace
+            .expect("workspace");
+        assert_eq!(
+            workspace.ownership,
+            SandboxWorkspaceOwnership::ProjectLocation
+        );
+        assert!(workspace.image.is_none());
     }
 
     fn declaration_policy() -> serde_json::Value {

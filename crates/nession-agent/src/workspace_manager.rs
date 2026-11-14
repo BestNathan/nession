@@ -26,6 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
+use nession_protocol::contracts::image::v1::is_valid_image_digest;
 use nession_protocol::contracts::workspace::v1::{
     is_valid_workspace_id, normalize_workspace_name, validate_workspace_name,
     validate_workspace_namespace, DEFAULT_WORKSPACE_NAMESPACE, WORKSPACE_ID_PREFIX,
@@ -86,6 +87,10 @@ struct WorkspaceRecord {
     auto_created: bool,
     created_at: u64,
     last_used_at: u64,
+    /// The immutable Project EROFS lower this Workspace's durable upper was
+    /// prepared against (#3407 SC-04). Absent means a plain directory bind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lower_digest: Option<String>,
 }
 
 /// The Agent's durable named Workspace registry.
@@ -388,6 +393,7 @@ impl WorkspaceManager {
             auto_created,
             created_at: now,
             last_used_at: now,
+            lower_digest: None,
         });
         if let Err(error) = self.write_registry(&registry) {
             let _ = std::fs::remove_dir_all(&directory);
@@ -441,6 +447,46 @@ impl WorkspaceManager {
         }
         registry.workspaces.remove(index);
         self.write_registry(&registry)
+    }
+
+    /// Pin the Project EROFS lower this Workspace's durable upper belongs to.
+    ///
+    /// The first attachment with a lower records its digest. Every later
+    /// attachment must present the same lower; a changed or missing lower is
+    /// refused rather than silently merging a different Project image into the
+    /// same durable upper (#3407 SC-04).
+    pub async fn pin_lower_digest(&self, workspace_id: &str, digest: Option<&str>) -> Result<()> {
+        if !is_valid_workspace_id(workspace_id) {
+            anyhow::bail!("workspace id is not a valid managed workspace identity");
+        }
+        if let Some(digest) = digest {
+            if !is_valid_image_digest(digest) {
+                anyhow::bail!("workspace lower digest `{digest}` is not sha256:<64 lowercase hex>");
+            }
+        }
+        let _guard = self.registry.lock().await;
+        let mut registry = self.read_registry()?;
+        let Some(record) = registry
+            .workspaces
+            .iter_mut()
+            .find(|record| record.workspace_id == workspace_id)
+        else {
+            anyhow::bail!("workspace not found");
+        };
+        match (record.lower_digest.as_deref(), digest) {
+            (Some(current), Some(digest)) if current == digest => Ok(()),
+            (Some(current), Some(digest)) => anyhow::bail!(
+                "workspace is pinned to Project EROFS lower {current}; refusing a different lower {digest}"
+            ),
+            (Some(current), None) => anyhow::bail!(
+                "workspace was prepared with Project EROFS lower {current}; re-enter with the same lower"
+            ),
+            (None, Some(digest)) => {
+                record.lower_digest = Some(digest.to_string());
+                self.write_registry(&registry)
+            }
+            (None, None) => Ok(()),
+        }
     }
 
     /// Acquire an exclusive RW attachment. The lease is in-memory and must be
@@ -505,6 +551,16 @@ impl RegistryFile {
                 );
             }
             protocol_validation(validate_workspace_namespace(&record.namespace))?;
+            if record
+                .lower_digest
+                .as_deref()
+                .is_some_and(|digest| !is_valid_image_digest(digest))
+            {
+                anyhow::bail!(
+                    "workspace registry contains an invalid lower digest for `{}`",
+                    record.workspace_id
+                );
+            }
             if ids.insert(record.workspace_id.clone(), ()).is_some() {
                 anyhow::bail!(
                     "workspace registry contains duplicate id `{}`",
@@ -612,6 +668,42 @@ mod tests {
             .unwrap(),
             b"durable work"
         );
+    }
+
+    #[tokio::test]
+    async fn a_lower_digest_is_pinned_for_the_durable_upper() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = format!("sha256:{}", "a".repeat(64));
+        let second_digest = format!("sha256:{}", "b".repeat(64));
+        let workspace = {
+            let manager = manager(dir.path()).await;
+            let workspace = manager.get_or_create(None, "pinned", true).await.unwrap();
+            manager
+                .pin_lower_digest(&workspace.workspace_id, Some(&first))
+                .await
+                .unwrap();
+            // Repeating the same lower is idempotent.
+            manager
+                .pin_lower_digest(&workspace.workspace_id, Some(&first))
+                .await
+                .unwrap();
+            workspace
+        };
+        let reopened = manager(dir.path()).await;
+        let changed = reopened
+            .pin_lower_digest(&workspace.workspace_id, Some(&second_digest))
+            .await
+            .unwrap_err();
+        assert!(format!("{changed:#}").contains("refusing a different lower"));
+        let missing = reopened
+            .pin_lower_digest(&workspace.workspace_id, None)
+            .await
+            .unwrap_err();
+        assert!(format!("{missing:#}").contains("re-enter with the same lower"));
+        reopened
+            .pin_lower_digest(&workspace.workspace_id, Some(&first))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

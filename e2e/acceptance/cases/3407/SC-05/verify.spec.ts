@@ -10,7 +10,7 @@ const FIXTURE_WORKSPACE = 'ws_00000000-0000-4000-8000-000000000001';
 test('SC-05: Workspace inventory, safe actions and Filesystem selection (Web/App)', async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(90_000);
   const sha = String(process.env.NESSION_ACCEPTANCE_TARGET_SHA ?? '');
   expect(sha).toMatch(/^[0-9a-f]{40}$/);
   await page.setViewportSize({ width: 1180, height: 900 });
@@ -69,6 +69,9 @@ test('SC-05: Workspace inventory, safe actions and Filesystem selection (Web/App
   // ── App: one host header, compact sections, same inventory ──
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/fixture/app');
+  // A hash-only navigation does not remount the fixture route; reload so the
+  // App experience (and its host header) is the canonical one.
+  await page.reload();
   await page.getByTestId('app-header-workspace').click();
   await page.getByTestId('workspace-tool-sandbox').click();
   await expect(page.getByTestId('sandbox-workspace')).toBeVisible();

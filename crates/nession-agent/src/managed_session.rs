@@ -199,6 +199,8 @@ pub async fn prepare(
                 workspace: Some(SandboxWorkspace {
                     image: Some(workspace_ref),
                     write: workspace_dir.display().to_string(),
+                    ownership:
+                        nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
                 }),
                 toolchains: toolchain_refs,
             }),

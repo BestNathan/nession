@@ -1909,6 +1909,11 @@ pub struct ServerSessionSandboxPreflightPayload {
     /// leaves cache preparation to Enter.
     #[serde(default)]
     pub images: Vec<SandboxImageSelection>,
+    /// The Project Existing Location the Server resolved for this Session on
+    /// this Agent (#3407). Only the effective `project_location`/`auto`
+    /// branch sends it; an explicit managed selection ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_location: Option<String>,
     #[serde(default)]
     pub working_dir: String,
 }
@@ -1952,6 +1957,11 @@ pub struct ServerSessionSandboxEnterPayload {
     /// a native cache path.
     #[serde(default)]
     pub images: Vec<ManagedImageGrant>,
+    /// The Project Existing Location the Server resolved for this Session on
+    /// this Agent (#3407), when the effective Workspace selection is the
+    /// Project Location. The Agent re-validates the path at use time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_location: Option<String>,
     #[serde(default)]
     pub working_dir: String,
 }

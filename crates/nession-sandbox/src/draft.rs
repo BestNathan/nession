@@ -363,6 +363,8 @@ mod tests {
             workspace: Some(nession_protocol::contracts::sandbox::v1::SandboxWorkspace {
                 image: None,
                 write: "/state/workspace".to_string(),
+                ownership:
+                    nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
             }),
             toolchains: Vec::new(),
         };

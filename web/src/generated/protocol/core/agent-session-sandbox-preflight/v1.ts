@@ -27,7 +27,13 @@ export type ServerSessionSandboxPreflightPayload = { request_id: string, session
  * the role/target/digest shape to validate the composition request and
  * leaves cache preparation to Enter.
  */
-images: Array<SandboxImageSelection>, working_dir: string, };
+images: Array<SandboxImageSelection>, 
+/**
+ * The Project Existing Location the Server resolved for this Session on
+ * this Agent (#3407). Only the effective `project_location`/`auto`
+ * branch sends it; an explicit managed selection ignores it.
+ */
+project_location?: string | null, working_dir: string, };
 export type SandboxContextStatus = "inside" | "outside" | "unknown";
 export type SandboxPaneScope = { session_name: string, 
 /**
@@ -313,7 +319,13 @@ export type ServerSessionSandboxPreflightCall = { request_id: string, session_na
  * the role/target/digest shape to validate the composition request and
  * leaves cache preparation to Enter.
  */
-images: Array<SandboxImageSelection>, working_dir: string, };
+images: Array<SandboxImageSelection>, 
+/**
+ * The Project Existing Location the Server resolved for this Session on
+ * this Agent (#3407). Only the effective `project_location`/`auto`
+ * branch sends it; an explicit managed selection ignores it.
+ */
+project_location?: string | null, working_dir: string, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

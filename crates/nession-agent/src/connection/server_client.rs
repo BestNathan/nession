@@ -4805,12 +4805,15 @@ core_routes!(agent, msg, responses;
                     let result = agent
                         .tmux
                         .sandbox_preflight(
-                            &payload.session_name,
-                            &payload.generation,
-                            &payload.probe_generation,
-                            &payload.policy,
-                            &payload.images,
-                            &payload.working_dir,
+                            crate::tmux::sandbox_context::SandboxPreflightInput {
+                                session_name: &payload.session_name,
+                                generation: &payload.generation,
+                                probe_generation: &payload.probe_generation,
+                                draft: &payload.policy,
+                                images: &payload.images,
+                                project_location: payload.project_location.as_deref(),
+                                working_dir: &payload.working_dir,
+                            },
                         )
                         .await;
                     let response = serde_json::json!({
@@ -4857,6 +4860,7 @@ core_routes!(agent, msg, responses;
                             enter_id: &payload.enter_id,
                             draft: &payload.policy,
                             images: &payload.images,
+                            project_location: payload.project_location.as_deref(),
                             server_url: &agent.server_url,
                             server_auth_token: &agent.auth_token,
                             working_dir: &payload.working_dir,

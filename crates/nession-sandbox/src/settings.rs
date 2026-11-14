@@ -41,6 +41,10 @@ pub struct SandboxSettings {
     /// Agent-authorized root containing prepared EROFS images. A composition
     /// may mount only files beneath this directory.
     pub erofs_image_root: Option<PathBuf>,
+    /// Agent-owned durable Workspace root (#3407). A prepared composition may
+    /// bind a writable Workspace directory from here as well as from
+    /// `state_dir`; nothing outside these roots is treated as Agent-owned.
+    pub agent_workspaces_root: Option<PathBuf>,
     /// The Agent-owned shared EROFS mount manager (#3449). The Agent creates
     /// one per identity/mount namespace; a composition without it fails
     /// closed rather than mounting physical images per execution.
@@ -78,6 +82,7 @@ impl SandboxSettings {
             bridge_subcommand: "__nession-sandbox-bridge".to_string(),
             launcher_shell: PathBuf::from("/bin/sh"),
             erofs_image_root: None,
+            agent_workspaces_root: None,
             #[cfg(target_os = "linux")]
             mount_manager: None,
             erofsfuse_path: PathBuf::from("erofsfuse"),
