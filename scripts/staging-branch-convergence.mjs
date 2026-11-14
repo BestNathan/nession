@@ -656,22 +656,12 @@ function selfTest() {
   assert.ok(jobIf, 'staging convergence must retain the guarded job expression');
   assert.doesNotMatch(jobIf[1], /^\s*#/m,
     'YAML comment is embedded in GitHub job-if folded expression');
-  // #3205: production workflow_run guard must allow both the historical
-  // static workflow name and GitHub's observed dynamic run-name (equal to
-  // display_title) for exact-source Convergence Full dispatches. The actual
-  // Full verifier separately attests pinned PR/Run/Job/Steps.
-  assert.match(jobIf[1],
-    /github\.event\.workflow_run\.name == 'E2E \/ Full Regression'/);
-  assert.match(jobIf[1],
-    /github\.event\.workflow_run\.name == github\.event\.workflow_run\.display_title/);
-  assert.match(jobIf[1],
-    /github\.event\.workflow_run\.path == '\.github\/workflows\/e2e-full-regression\.yml'/);
-  assert.match(jobIf[1],
-    /github\.event\.workflow_run\.event == 'workflow_dispatch'/);
-  assert.match(jobIf[1],
-    /github\.event\.workflow_run\.head_branch == 'main'/);
-  assert.match(jobIf[1],
-    /startsWith\(github\.event\.workflow_run\.display_title, 'Convergence Full chore\/staging-sync-'\)/);
+  // #3465: Full Regression is deliberately independent from convergence.
+  // A Full success or failure must not wake, veto or authorize this controller.
+  assert.doesNotMatch(workflow,
+    /workflows: \[[^\n]*E2E \/ Full Regression/);
+  assert.doesNotMatch(jobIf[1],
+    /e2e-full-regression\.yml|Convergence Full/);
   assert.match(jobIf[1],
     /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(jobIf[1],
