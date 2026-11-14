@@ -157,3 +157,25 @@ exact event/Run/Artifact/Gate parity.
 The thin workflow and stable script contract are checked by the existing
 `workflow-conventions` Gate. Changes to a command's context or privilege
 require positive/negative fixtures and a fresh GitHub Run/Job/Step review.
+
+
+## Source-bound Qwen Worker result recovery (#3491)
+
+The signed Developer Ticket is issued by the independently privileged
+`Store / Agent Controller Ingest` Run, not by the original
+`Acceptance / Agent Controller` request Run. Trusted reconciliation checks
+both bot/Main GitHub Run identities against the signed Issue, worker SHA,
+first attempt, and authenticated original Owner Bug command before any Store
+checkpoint is written. The historical Owner Controller Ticket path remains
+supported. A forged/mismatched Run, comment/Issue, SHA or signed Ticket fails
+closed.
+
+The Owner's `/develop result` recovers the *single* Store-bound successful
+Qwen Worker without rerunning the model. One previously failed main-owned
+Store Ingest wake authorizes at most one new first-attempt Ingest Run, guarded
+by the original Worker Artifacts and Store CAS replay; successful, running or
+two-wake histories never re-dispatch. The bot-origin first-attempt Qwen Ingest
+uploads its source-bound receipt and wakes the existing Publisher. The
+Publisher authenticates the `Qwen Developer Ingest worker:<run_id>` Run name
+against the exact receipt before PR publication; no Worker/model credentials
+are extended.
