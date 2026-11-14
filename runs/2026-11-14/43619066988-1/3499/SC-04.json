@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6b2f8d4cd19c701b06f1ca6ec552febd032c60f3cc8008c7d5eeb6dd9577b058",
+  "run_id": 43619066988,
+  "run_attempt": 1,
+  "issue": 3499,
+  "criterion": "SC-04",
+  "criterion_text": "A trusted staging Server–Agent/Session acceptance Case proves scoped image-grant access, resolved Manifest pinning, shared physical EROFS cache/mount and cleanup across at least two consumers and an Agent restart.",
+  "stage": "staging",
+  "target_sha": "eaf415138056ab26a0efd417f88b3b88b75747e6",
+  "contract_sha256": "6ed85b7492f73fd5ef7e0207cc0e8e4b790f5f24ea6254ae88c204fa05b19462",
+  "case_revision": "eaf415138056ab26a0efd417f88b3b88b75747e6",
+  "case_tree_sha": "c81b95be5e5229876da525e568290e64c956ab0a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T17:06:33.566Z",
+  "finished_at": "2026-11-14T17:06:59.585Z",
+  "duration_ms": 26019,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo test -p nession-erofs --features mount mount_manager::tests::two_consumers_of_one_layer_share_one_physical_mount -- --nocapture failed (exit 101): \u001b[1m\u001b[92m   Compiling\u001b[0m nession-erofs v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-erofs)\n\u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 2.94s\n\u001b[1m\u001b[92m     Running\u001b[0m unittests src/lib.rs (target/debug/deps/nession_erofs-30c315a6d618077b)\n\nthread 'mount_manager::tests::two_consumers_of_one_layer_share_one_physical_mount' (4044) panicked at crates/nession-erofs/src/mount_manager.rs:1122:58:\ncalled `Result::unwrap()` on an `Err` value: /tmp/.tmpgVtqJs/mounts-root/mounts/b4e6b4195a53f716f8b916e35be4a817ba9cbe43d1462bb1ab69e415ce4a9a8c did not become an EROFS FUSE mount within 10s\n\nStack backtrace:\n   0: anyhow::error::<impl anyhow::Error>::msg\n   1: nession_erofs::mount::mount_shared\n   2: nession_erofs::mount_manager::MountManager::mount_entry\n   3: nession_erofs::mount_manager::MountManager::acquire\n   4: nession_erofs::mount_manager::tests::two_consumers_of_one_layer_share_one_physical_mount\n   5: nession_erofs::mount_manager::tests::two_consumers_of_one_layer_share_one_physical_mount::{{closure}}\n   6: core::ops::function::FnOnce::call_once\n   7: test::__rust_begin_short_backtrace::<core::result::Result<(), alloc::string::String>, fn() -> core::result::Result<(), alloc::string::String>>\n   8: test::run_test::{closure#0}\n   9: std::sys::backtrace::__rust_begin_short_backtrace::<test::run_test::{closure#1}, ()>\n  10: <std::thread::lifecycle::spawn_unchecked<test::run_test::{closure#1}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}\n  11: <std::sys::thread::unix::Thread>::new::thread_start\n  12: <unknown>\n  13: <unknown>\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n   1: core::panicking::panic_fmt\n   2: core::result::unwrap_failed\n   3: nession_erofs::mount_manager::tests::two_consumers_of_one_layer_share_one_physical_mount\n   4: nession_erofs::mount_manager::tests::two_consumers_of_one_layer_share_one_physical_mount::{{closure}}\n   5: core::ops::function::FnOnce::call_once\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-erofs --lib`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 20330,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43619066988,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "a542ae40135cafff772e2005cea7d465fc4d644b",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "eaf415138056ab26a0efd417f88b3b88b75747e6",
+        "stage": "staging",
+        "issue": 3499,
+        "criterion": "SC-04",
+        "job_id": 132520416005,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43619066988",
+    "record_path": "runs/2026-11-14/43619066988-1/3499/SC-04.json",
+    "source_result_sha256": "90511ddbfdb77ef1dd3bc28ab753521b78c91dc3610915e50e591fb8694338d6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43619066988-1",
+    "sha256": "90511ddbfdb77ef1dd3bc28ab753521b78c91dc3610915e50e591fb8694338d6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43619066988",
+    "durability": "time-limited; object archival not configured"
+  }
+}
