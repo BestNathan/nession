@@ -9,6 +9,7 @@ run(({ evidence }) => {
   assertRan(agent, [
     'tmux::sandbox_context::tests::a_project_location_must_be_a_real_canonical_directory',
     'tmux::sandbox_context::tests::a_symlinked_project_location_is_refused',
+    'tmux::sandbox_context::tests::an_unknown_explicit_managed_workspace_is_refused',
     'tmux::sandbox_context::tests::a_managed_workspace_pins_its_project_lower_across_resolution',
   ]);
   evidence.push({

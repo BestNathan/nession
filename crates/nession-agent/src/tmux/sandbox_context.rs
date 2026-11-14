@@ -1500,6 +1500,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unknown_explicit_managed_workspace_is_refused() {
+        let state = tempfile::tempdir().unwrap();
+        let manager = std::sync::Arc::new(
+            crate::workspace_manager::WorkspaceManager::open(state.path().join("workspaces"))
+                .unwrap(),
+        );
+        let unknown = format!("ws_{}", uuid::Uuid::new_v4());
+        let error = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: Some(&unknown),
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("workspace not found"));
+        // An unauthorized identity form is refused before any lookup.
+        let error = resolve_managed_workspace(
+            &manager,
+            ManagedWorkspaceRequest {
+                workspace_id: Some("../escape"),
+                name: None,
+                session_name: "fix-terminal",
+                lower_digest: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("not a valid managed workspace identity"));
+    }
+
+    #[tokio::test]
     async fn a_managed_workspace_pins_its_project_lower_across_resolution() {
         let state = tempfile::tempdir().unwrap();
         let manager = std::sync::Arc::new(
