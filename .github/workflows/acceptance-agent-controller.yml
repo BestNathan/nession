@@ -1,4 +1,5 @@
 name: Acceptance / Agent Controller
+run-name: ${{ inputs.source_comment_id != '' && format('Comment Develop #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) || format('Controller request #{0}', inputs.issue_number || github.event.issue.number) }}
 
 # Unprivileged owner/main request. A single native owner-authenticated #3001
 # comment may use the same trust-separated ingress when manual workflow
