@@ -89,14 +89,18 @@ pub struct ResolvedManifestBinding {
 
 /// One grant resolved to the physical EROFS identity the mount layer uses.
 ///
-/// A Manifest-aware grant carries the immutable Manifest digest; a legacy
-/// digest-addressed grant has none. `layer_path` is a verified cache file, not
-/// a guessed path.
+/// A Manifest-aware grant carries the immutable Manifest digest and the
+/// standard Config/advisory annotation suggestions (#3500); a legacy
+/// digest-addressed grant has neither. `layer_path` is a verified cache file,
+/// not a guessed path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedGrantImage {
     pub manifest_digest: Option<String>,
     pub layer_digest: String,
     pub layer_path: PathBuf,
+    /// Typed read-only Config/annotation suggestions. Present only for a
+    /// Manifest-aware grant whose Config bytes were verified.
+    pub usage: Option<nession_erofs::image::ImageRuntimeUsage>,
 }
 
 /// Fetch one Server grant into this Agent's verified cache (#3499).
@@ -132,6 +136,7 @@ pub async fn resolve_grant_image(
             manifest_digest: None,
             layer_digest: grant.digest.clone(),
             layer_path: cached.path,
+            usage: None,
         });
     }
 
@@ -186,10 +191,16 @@ pub async fn resolve_grant_image(
     )
     .await
     .with_context(|| format!("cannot prepare Manifest image {}", grant.digest))?;
+    let usage = nession_erofs::image::ImageRuntimeUsage::from_manifest_and_config(
+        &fetched.manifest,
+        &fetched.config,
+    )
+    .with_context(|| format!("cannot read the runtime usage of Manifest {}", grant.digest))?;
     Ok(ResolvedGrantImage {
         manifest_digest: Some(fetched.manifest_digest.clone()),
         layer_digest: fetched.layer.digest.clone(),
         layer_path: fetched.layer_path,
+        usage: Some(usage),
     })
 }
 

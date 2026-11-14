@@ -104,22 +104,23 @@ pub async fn prepare(
         base.ok_or_else(|| anyhow::anyhow!("a Managed Session requires a Base Runtime image"))?;
     let workspace = workspace
         .ok_or_else(|| anyhow::anyhow!("a Managed Session requires the Project Source image"))?;
-    for toolchain in &toolchains {
-        if toolchain.target.as_deref().is_none_or(str::is_empty) {
-            anyhow::bail!(
-                "toolchain image {} has no /opt/<name> target",
-                toolchain.digest
-            );
-        }
-    }
+    // A toolchain's target may be omitted: the resolved Manifest's
+    // io.nession.mount.default proposes it, and an explicit request target is
+    // the user/Session override (#3500). It is resolved after the Config is
+    // fetched, so the default is not guessed here.
 
     let mut resolved = Vec::with_capacity(images.len());
     let mut manifests = Vec::new();
     // The target travels with the grant it was validated on: two toolchain
     // grants may legitimately share a digest, so a later digest lookup could
     // attach the wrong `/opt/<name>`.
-    let mut image_refs: Vec<(ManagedImageRole, Option<String>, SandboxImageRef)> =
-        Vec::with_capacity(images.len());
+    let mut image_refs: Vec<(
+        ManagedImageRole,
+        Option<String>,
+        SandboxImageRef,
+        Vec<nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault>,
+        Option<String>,
+    )> = Vec::with_capacity(images.len());
     for image in [base, workspace]
         .into_iter()
         .chain(toolchains.iter().copied())
@@ -134,6 +135,19 @@ pub async fn prepare(
                 layer_digest: resolved_image.layer_digest.clone(),
             });
         }
+        let target = match image.role {
+            ManagedImageRole::Toolchain => Some(
+                crate::sandbox_images::toolchain_target(image.target.as_deref(), &resolved_image)
+                    .with_context(|| format!("cannot resolve the {:?} image target", image.role))?,
+            ),
+            ManagedImageRole::Base | ManagedImageRole::Workspace => None,
+        };
+        let env = crate::sandbox_images::image_env_defaults(&resolved_image);
+        let path_prepend = if image.role == ManagedImageRole::Toolchain {
+            crate::sandbox_images::image_path_prepend(&resolved_image)
+        } else {
+            None
+        };
         resolved.push((
             image.role,
             resolved_image.layer_digest.clone(),
@@ -141,25 +155,29 @@ pub async fn prepare(
         ));
         image_refs.push((
             image.role,
-            image.target.clone(),
+            target,
             SandboxImageRef {
                 // The composition carries the physical EROFS identity so the
                 // mount manager shares one mount across Manifests.
                 digest: resolved_image.layer_digest,
                 source: resolved_image.layer_path.display().to_string(),
             },
+            env,
+            path_prepend,
         ));
     }
 
-    // Group the fetched images by role. The target was validated above, so a
-    // toolchain without one can only be a programming error in this function's
-    // own contract, and it fails before any host resource exists.
+    // Group the fetched images by role.
     let mut base_ref = None;
+    let mut base_env = Vec::new();
     let mut workspace_ref = None;
     let mut toolchain_refs = Vec::new();
-    for (role, target, image) in image_refs {
+    for (role, target, image, env, path_prepend) in image_refs {
         match role {
-            ManagedImageRole::Base => base_ref = Some(image),
+            ManagedImageRole::Base => {
+                base_env = env;
+                base_ref = Some(image);
+            }
             ManagedImageRole::Workspace => workspace_ref = Some(image),
             ManagedImageRole::Toolchain => {
                 let Some(target) = target else {
@@ -169,6 +187,8 @@ pub async fn prepare(
                     digest: image.digest,
                     source: image.source,
                     target,
+                    env,
+                    path_prepend,
                 });
             }
         }
@@ -210,6 +230,7 @@ pub async fn prepare(
                         nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
                 }),
                 toolchains: toolchain_refs,
+                base_env,
             }),
         }),
         network: None,
@@ -507,6 +528,14 @@ mod tests {
     }
 
     fn manifest_fixture(payload: &[u8], env: &str) -> ManifestFixture {
+        manifest_fixture_with(payload, env, None)
+    }
+
+    fn manifest_fixture_with(
+        payload: &[u8],
+        env: &str,
+        annotations: Option<std::collections::BTreeMap<String, String>>,
+    ) -> ManifestFixture {
         use nession_erofs::oci::annotation::{
             MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
         };
@@ -567,7 +596,7 @@ mod tests {
             }],
             subject: None,
             artifact_type: None,
-            annotations: None,
+            annotations,
             extra: Map::new(),
         };
         ManifestFixture {
@@ -718,5 +747,283 @@ mod tests {
             .unwrap();
         assert_eq!(cache.bytes_transferred(), transfers);
         assert_eq!(cache.fetch_count(), fetches);
+    }
+
+    fn expect_object(server: &Server, bytes: &[u8]) {
+        let digest = digest_for(bytes);
+        server.expect(
+            Expectation::matching(request::method_path(
+                "GET",
+                format!("/images/blobs/{digest}"),
+            ))
+            .times(1)
+            .respond_with(
+                httptest::http::Response::builder()
+                    .status(200)
+                    .body(bytes.to_vec())
+                    .unwrap(),
+            ),
+        );
+    }
+
+    fn tool_annotations(
+        mount_default: &str,
+        prepend: &str,
+    ) -> std::collections::BTreeMap<String, String> {
+        [
+            (
+                nession_erofs::oci::ANNOTATION_KIND.to_string(),
+                "tool".to_string(),
+            ),
+            (
+                nession_erofs::oci::ANNOTATION_MOUNT_DEFAULT.to_string(),
+                mount_default.to_string(),
+            ),
+            (
+                nession_erofs::oci::ANNOTATION_PATH_PREPEND.to_string(),
+                prepend.to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[tokio::test]
+    async fn mount_default_and_override_rebase_the_toolchain_prepend_and_reach_the_composition() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_fixture = manifest_fixture(b"base payload", "base");
+        let workspace_fixture = manifest_fixture(b"workspace payload", "workspace");
+        // Two distinct Manifests over one EROFS layer: different Config Env and
+        // different advisory targets, one physical payload identity.
+        let shared_layer = b"one shared toolchain payload";
+        let default_fixture = manifest_fixture_with(
+            shared_layer,
+            "default-tool",
+            Some(tool_annotations("/opt/go", "bin")),
+        );
+        let override_fixture = manifest_fixture_with(
+            shared_layer,
+            "override-tool",
+            Some(tool_annotations("/opt/go-tools", "bin")),
+        );
+        assert_ne!(
+            digest_for(&default_fixture.manifest),
+            digest_for(&override_fixture.manifest)
+        );
+        let server = Server::run();
+        for fixture in [
+            &base_fixture,
+            &workspace_fixture,
+            &default_fixture,
+            &override_fixture,
+        ] {
+            expect_object(&server, &fixture.manifest);
+            expect_object(&server, &fixture.config);
+        }
+        expect_object(&server, &base_fixture.layer);
+        expect_object(&server, &workspace_fixture.layer);
+        expect_object(&server, shared_layer);
+        let cache = cache(&dir.path().join("cache")).await;
+        let state = dir.path().join("sandbox-state");
+        std::fs::create_dir_all(&state).unwrap();
+        let base_images = vec![
+            manifest_grant(ManagedImageRole::Base, &base_fixture, None),
+            manifest_grant(ManagedImageRole::Workspace, &workspace_fixture, None),
+        ];
+
+        let mut default_images = base_images.clone();
+        default_images.push(manifest_grant(
+            ManagedImageRole::Toolchain,
+            &default_fixture,
+            None,
+        ));
+        let prepared = prepare(
+            &cache,
+            &default_images,
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            &state,
+        )
+        .await
+        .unwrap();
+        let composition = prepared
+            .policy
+            .filesystem
+            .as_ref()
+            .unwrap()
+            .composition
+            .as_ref()
+            .unwrap();
+        let toolchain = &composition.toolchains[0];
+        assert_eq!(toolchain.target, "/opt/go", "mount.default proposes");
+        assert_eq!(toolchain.path_prepend.as_deref(), Some("bin"));
+        assert_eq!(toolchain.digest, digest_for(shared_layer));
+        assert_eq!(
+            toolchain.env,
+            vec![
+                nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault {
+                    name: "K".to_string(),
+                    value: "default-tool".to_string(),
+                }
+            ],
+            "the Manifest's own Config Env is carried, not the other Manifest's"
+        );
+        assert_eq!(
+            composition.base_env,
+            vec![
+                nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault {
+                    name: "K".to_string(),
+                    value: "base".to_string(),
+                }
+            ]
+        );
+        // The Sandbox resolves the relative prepend against the actual target.
+        let compiled = nession_sandbox::compile(&prepared.policy).unwrap();
+        let environment = compiled.filesystem.expect("filesystem").image_environment();
+        assert_eq!(environment.path_prepend, vec!["/opt/go/bin".to_string()]);
+        assert_eq!(
+            environment.defaults,
+            vec![("K".to_string(), "default-tool".to_string())],
+            "the tool default sits below the base default's key"
+        );
+
+        let mut override_images = base_images;
+        override_images.push(manifest_grant(
+            ManagedImageRole::Toolchain,
+            &override_fixture,
+            Some("/opt/go-tools"),
+        ));
+        let overridden = prepare(
+            &cache,
+            &override_images,
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            &state,
+        )
+        .await
+        .unwrap();
+        let composition = overridden
+            .policy
+            .filesystem
+            .as_ref()
+            .unwrap()
+            .composition
+            .as_ref()
+            .unwrap();
+        let toolchain = &composition.toolchains[0];
+        assert_eq!(
+            toolchain.target, "/opt/go-tools",
+            "an explicit target overrides the proposal"
+        );
+        assert_eq!(toolchain.digest, digest_for(shared_layer));
+        assert_eq!(
+            overridden.manifests[2].manifest_digest,
+            digest_for(&override_fixture.manifest)
+        );
+        let compiled = nession_sandbox::compile(&overridden.policy).unwrap();
+        let environment = compiled.filesystem.expect("filesystem").image_environment();
+        assert_eq!(
+            environment.path_prepend,
+            vec!["/opt/go-tools/bin".to_string()],
+            "path.prepend follows the actual target, not the annotation proposal"
+        );
+        // The EROFS identity and its one physical cache file are unchanged.
+        assert_eq!(
+            toolchain.digest,
+            digest_for(&default_fixture.layer),
+            "both Manifests share one EROFS Blob identity"
+        );
+        assert_eq!(
+            cache.fetch_count(),
+            11,
+            "4 Manifests, 4 Configs and 3 distinct payloads"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_toolchain_without_a_target_or_mount_default_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_fixture = manifest_fixture(b"base payload", "base");
+        let workspace_fixture = manifest_fixture(b"workspace payload", "workspace");
+        let tool_fixture = manifest_fixture(b"tool payload", "tool");
+        let server = Server::run();
+        for fixture in [&base_fixture, &workspace_fixture, &tool_fixture] {
+            expect_object(&server, &fixture.manifest);
+            expect_object(&server, &fixture.config);
+        }
+        expect_object(&server, &base_fixture.layer);
+        expect_object(&server, &workspace_fixture.layer);
+        expect_object(&server, &tool_fixture.layer);
+        let cache = cache(&dir.path().join("cache")).await;
+        let state = dir.path().join("sandbox-state");
+        std::fs::create_dir_all(&state).unwrap();
+        let images = vec![
+            manifest_grant(ManagedImageRole::Base, &base_fixture, None),
+            manifest_grant(ManagedImageRole::Workspace, &workspace_fixture, None),
+            manifest_grant(ManagedImageRole::Toolchain, &tool_fixture, None),
+        ];
+        let error = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("io.nession.mount.default"),
+            "the refusal must name the missing proposal: {error:#}"
+        );
+        assert!(
+            !state.join("managed").exists(),
+            "no workspace may be allocated for a refused target"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_protected_image_environment_variable_fails_before_any_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_fixture = manifest_fixture(b"base payload", "base");
+        let workspace_fixture = manifest_fixture(b"workspace payload", "workspace");
+        // Config Env must never set PATH; the mounted executable directory is
+        // the only sanctioned image PATH contribution.
+        let tool_fixture = manifest_fixture_with(
+            b"tool payload",
+            "x",
+            Some(tool_annotations("/opt/go", "bin")),
+        );
+        let mut tool_fixture = tool_fixture;
+        // Rewrite the Config with PATH while keeping the same layer.
+        let mut config: nession_erofs::oci::ImageConfig =
+            serde_json::from_slice(&tool_fixture.config).unwrap();
+        config.config.env = Some(vec!["PATH=/tools/bin".to_string()]);
+        tool_fixture.config = serde_json::to_vec(&config).unwrap();
+        // Rebuild the Manifest because the Config digest changed.
+        let mut manifest: nession_erofs::oci::Manifest =
+            serde_json::from_slice(&tool_fixture.manifest).unwrap();
+        let config_document =
+            nession_erofs::oci::RawDocument::from_bytes(tool_fixture.config.clone());
+        manifest.config.digest = config_document.digest().to_string();
+        manifest.config.size = config_document.size().unwrap();
+        tool_fixture.manifest = nession_erofs::oci::to_bytes(&manifest).unwrap();
+
+        let server = Server::run();
+        for fixture in [&base_fixture, &workspace_fixture, &tool_fixture] {
+            expect_object(&server, &fixture.manifest);
+            expect_object(&server, &fixture.config);
+        }
+        expect_object(&server, &base_fixture.layer);
+        expect_object(&server, &workspace_fixture.layer);
+        expect_object(&server, &tool_fixture.layer);
+        let cache = cache(&dir.path().join("cache")).await;
+        let state = dir.path().join("sandbox-state");
+        std::fs::create_dir_all(&state).unwrap();
+        let images = vec![
+            manifest_grant(ManagedImageRole::Base, &base_fixture, None),
+            manifest_grant(ManagedImageRole::Workspace, &workspace_fixture, None),
+            manifest_grant(ManagedImageRole::Toolchain, &tool_fixture, None),
+        ];
+        let error = prepare(&cache, &images, &ws_url(&server), SERVER_AUTH_TOKEN, &state)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("PATH"),
+            "the refusal must name the protected variable: {error}"
+        );
     }
 }

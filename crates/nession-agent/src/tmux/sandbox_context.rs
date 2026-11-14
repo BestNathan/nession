@@ -774,12 +774,45 @@ impl SessionManager {
         prepared.set_native_pane(&window_id, &pane_id);
 
         let ops = self.tmux_dep().ops();
+        // The isolated Pane is a new process: it receives the mounted image's
+        // bounded Config Env defaults and the resolved executable directories
+        // below the actual mount targets (#3500). No already-running Pane is
+        // mutated; adopting a new binding still requires a new Enter.
+        let image_environment = prepared.image_environment();
+        let mut window_env = image_environment.defaults.clone();
+        if !image_environment.path_prepend.is_empty() {
+            let session_path = match ops.show_environment(session_name, "PATH").await {
+                Ok(path) => path,
+                Err(error) => {
+                    let abort = prepared.abort();
+                    runtime.forget_catalog();
+                    return refusal(
+                        SandboxActionErrorKind::Failed,
+                        format!(
+                            "the Session PATH could not be read for the image path.prepend: {error:#}{}",
+                            abort
+                                .err()
+                                .map(|abort| format!("; cleanup also failed: {abort}"))
+                                .unwrap_or_default()
+                        ),
+                        None,
+                    );
+                }
+            };
+            if let Some(path) = nession_sandbox::compose_path_prepend(
+                &image_environment.path_prepend,
+                session_path.as_deref(),
+            ) {
+                window_env.push(("PATH".to_string(), path));
+            }
+        }
+        window_env.extend(prepared.env().iter().cloned());
         let created = ops
             .new_window(&nession_tmux::NewWindow {
                 session_name: session_name.to_string(),
                 name: "sandbox".to_string(),
                 working_dir: prepared.record().working_dir.clone(),
-                env: prepared.env().to_vec(),
+                env: window_env,
                 command: prepared.command().to_vec(),
             })
             .await;
