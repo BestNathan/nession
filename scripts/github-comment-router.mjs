@@ -119,7 +119,7 @@ export async function wakeQwenResult(plan,read=api) {
     if(data?.type!=='file'||data.encoding!=='base64'||
        typeof data.content!=='string'||data.content.length>400000)
       throw Error('unsafe immutable Store content');
-    const bytes=Buffer.from(data.content.replace(/\\s/g,''),'base64');
+    const bytes=Buffer.from(data.content.replace(/\s/g,''),'base64');
     return {bytes,json:JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes))};
   }
   const head=(await storeJson(root+'/head.json')).json;
@@ -401,6 +401,69 @@ async function selfTest() {
     assert.equal(existing.state,'already-woken');
     assert.equal(existing.ingest_run_id,456);
     assert.equal(wakes,1,'readback prevents a second Store wake');
+    // #3491: replay exactly one previously completed Qwen Worker from
+    // immutable Store; comment ID never supplies a worker Run or Action.
+    const issueNo=3433,workerId=43578706212;
+    const stateDoc={schema_version:1,issue:issueNo,version:3,
+      outbox:[{id:'a'.repeat(64),task:{type:'dispatch',role:'developer',
+        task:'implement',agent_id:'dev-qwen-01',sha:'b'.repeat(40)},
+        status:'dispatched',attempts:1,receipt:{status:'verified',
+          dispatch_id:'a'.repeat(64),source_run_id:workerId}}]};
+    const stateBytes=Buffer.from(JSON.stringify(stateDoc)+'\\n');
+    const headDoc={version:3,
+      path:'workflows/issues/3433/states/00000003.json',
+      sha256:createHash('sha256').update(stateBytes).digest('hex')};
+    const wrap=obj=>({type:'file',encoding:'base64',
+      content:Buffer.from(JSON.stringify(obj)+'\\n').toString('base64')});
+    const worker={id:workerId,run_attempt:1,status:'completed',
+      conclusion:'success',path:'.github/workflows/agent-develop.yml',
+      name:'Agent / Development',event:'workflow_dispatch',
+      actor:{login:'github-actions[bot]'},head_branch:'main',
+      head_sha:'b'.repeat(40),repository:repo,head_repository:repo,
+      created_at:'2026-11-14T09:06:00Z'};
+    const artifacts={artifacts:['development-worker-claim','development-worker']
+      .map((prefix,i)=>({id:i+1,name:prefix+'-'+workerId+'-1',
+        expired:false,size_in_bytes:100,digest:'sha256:'+'c'.repeat(64),
+        workflow_run:{id:workerId,head_sha:worker.head_sha}})),total_count:2};
+    const resultPlan={...dev,handler:'develop-result',
+      workflow:'store-agent-development-ingest.yml',issue_number:issueNo};
+    let resultWakes=0;
+    function reader({failed=false,badHead=false,existing=false}={}){
+      return async(path,opts={})=>{
+        if(opts.method==='POST'){
+          assert.equal(path,'/repos/'+REPO+
+            '/actions/workflows/store-agent-development-ingest.yml/dispatches');
+          assert.deepEqual(opts.body,{ref:'main',
+            inputs:{source_run_id:String(workerId)}});
+          resultWakes++;return {};
+        }
+        if(path.endsWith('/head.json?ref=agent-store'))
+          return wrap({...headDoc,...(badHead?{sha256:'0'.repeat(64)}:{})});
+        if(path.endsWith('/00000003.json?ref=agent-store'))
+          return {type:'file',encoding:'base64',content:stateBytes.toString('base64')};
+        if(path.endsWith('/actions/runs/'+workerId))
+          return {...worker,...(failed?{conclusion:'failure'}:{})};
+        if(path.endsWith('/actions/runs/'+workerId+'/artifacts?per_page=100'))
+          return artifacts;
+        if(path.includes('/store-agent-development-ingest.yml/runs?'))
+          return {workflow_runs:existing?[{id:999,
+            display_title:'Qwen Developer Ingest worker:'+workerId,
+            event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
+            head_branch:'main',repository:repo,html_url:'https://example.com/run/999'}]:[]};
+        throw Error('unexpected replay API '+path);
+      };
+    }
+    assert.equal((await wakeQwenResult(resultPlan,reader())).state,
+      'store-ingest-requested');
+    assert.equal(resultWakes,1);
+    await assert.rejects(wakeQwenResult(resultPlan,reader({failed:true})),
+      /successful exact-sha/);
+    await assert.rejects(wakeQwenResult(resultPlan,reader({badHead:true})),
+      /Store state digest/);
+    assert.equal((await wakeQwenResult(resultPlan,reader({existing:true}))).state,
+      'already-woken');
+    assert.equal(resultWakes,1,'replay and invalid source may not redispatch');
+
         console.log('github-comment-router: source checks, context, replay guards passed');
   } finally {
     for (const [key, value] of Object.entries(saved))
