@@ -82,6 +82,8 @@ function isRuntime(file) {
 
 function isTooling(file) {
   if (file.endsWith('.md') || file.startsWith('docs/')) return true;
+  // Repository ignore/attribute metadata configures tooling, never a runtime.
+  if (file === '.gitignore' || file === '.gitattributes') return true;
   if (file.startsWith('gates/')) return true; // executor/suite paths handled first
   if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
   if (file.startsWith('scripts/')) return true; // e2e/ci paths handled first
@@ -266,6 +268,9 @@ function selfTest() {
   // fixture/catalog, mixed and unknown. Every risk-bearing category stays
   // applicable; only an all-tooling change is Not Required.
   assert.deepEqual(classifyChangedPaths(['web/AGENTS.md', 'docs/a.md']).category, 'tooling-only');
+  assert.equal(classifyChangedPaths(['.gitignore']).category, 'tooling-only',
+    'repository ignore metadata is tooling, not an unknown runtime path');
+  assert.equal(classifyChangedPaths(['.gitattributes']).category, 'tooling-only');
   assert.equal(classifyChangedPaths(['e2e/tests/browser/login.spec.ts']).category, 'e2e-runner');
   assert.equal(classifyChangedPaths(['web/src/App.tsx']).category, 'app-runtime');
   assert.equal(classifyChangedPaths(['e2e/fixtures/server.js']).category, 'e2e-fixture-catalog');
