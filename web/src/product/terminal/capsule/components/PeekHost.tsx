@@ -12,6 +12,7 @@ import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual'
 import {
   capsuleDetailDialogClass,
   capsuleProjectionClass,
+  capsuleProjectionCompactStyle,
   capsuleProjectionDockClass,
   capsuleProjectionScrollClass,
   capsuleUpperCloseButtonClass,
@@ -58,6 +59,7 @@ export function PeekHost({
   runCommand,
   disabled,
   triggerRef,
+  reserveFallback = false,
   focusFromContext,
   onFocusFromContextHandled,
 }: {
@@ -77,12 +79,20 @@ export function PeekHost({
   disabled: boolean;
   /** Stable lower-Capsule trigger that owns focus when this upper layer closes. */
   triggerRef: React.RefObject<HTMLButtonElement | null>;
+  /**
+   * The terminal could not reserve rows for this Peek (#3492): keep a bounded
+   * compact body so the TUI's bottom rows remain reachable, with an explicit
+   * Compact/Expand control in the header.
+   */
+  reserveFallback?: boolean;
   /** Only explicit Context-row deepening should move focus out of the composer. */
   focusFromContext: boolean;
   /** Clears the one-shot Context focus intent after the host consumes it. */
   onFocusFromContextHandled: () => void;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
+  const [compact, setCompact] = useState(true);
+  const compactFallback = reserveFallback && compact;
   const surfaceRef = useRef<HTMLDivElement>(null);
   // The approved child overlay (#1120). Held here rather than by the capability
   // so that placement, dismissal and the accessible name stay the host's — a
@@ -121,8 +131,14 @@ export function PeekHost({
         // unaffected: the Dialog portals to the body, outside this subtree.
         'contain-paint',
       ].join(' ')}
+      style={compactFallback ? capsuleProjectionCompactStyle : undefined}
     >
-      <PeekHeader projection={projection} />
+      <PeekHeader
+        projection={projection}
+        fallback={reserveFallback}
+        compact={compact}
+        onToggleCompact={() => setCompact((value) => !value)}
+      />
 
       {projection.body(focus, setFocus, {
         sendText,
@@ -214,7 +230,17 @@ export function PeekHost({
  * switch/title choice has a single owner; the close control is still the one
  * dismissal action either way (#2710).
  */
-function PeekHeader({ projection }: { projection: CapsuleCapabilityProjection }) {
+function PeekHeader({
+  projection,
+  fallback,
+  compact,
+  onToggleCompact,
+}: {
+  projection: CapsuleCapabilityProjection;
+  fallback: boolean;
+  compact: boolean;
+  onToggleCompact: () => void;
+}) {
   return (
     <div className={capsuleUpperHeaderClass}>
       {projection.viewSwitch ? (
@@ -227,6 +253,17 @@ function PeekHeader({ projection }: { projection: CapsuleCapabilityProjection })
           {projection.title}
         </h2>
       )}
+      {fallback ? (
+        <button
+          type="button"
+          data-testid="capsule-peek-compact"
+          aria-expanded={!compact}
+          onClick={onToggleCompact}
+          className={capsuleUpperSwitchOptionClass(compact)}
+        >
+          {compact ? 'Expand' : 'Compact'}
+        </button>
+      ) : null}
       <button
         type="button"
         data-testid="capsule-capability-dismiss"

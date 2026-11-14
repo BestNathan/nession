@@ -113,6 +113,10 @@ export class XtermEmulator implements TerminalEmulator {
    */
   private writeOrigin: TerminalWriteOrigin = { source: 'live' };
   private clipboardDisposable: TerminalDisposable | null = null;
+  /** Mouse/alternate mode changes, for the upper-panel clearance policy (#3492). */
+  private readonly modeListeners = new Set<() => void>();
+  private modeDisposables: TerminalDisposable[] = [];
+  private modeSignature: string;
   /**
    * Product matchers, kept beside the xterm link providers (#3187). xterm's
    * linkifier only listens to mouse events, so a touch tap never reaches it;
@@ -163,6 +167,32 @@ export class XtermEmulator implements TerminalEmulator {
       () => this.fontSizeCallback('zoom'),
       initialFontSize,
     );
+    this.modeSignature = this.currentModeSignature();
+    // A mode change is a parsed write fact: DECSET/DECRST is applied while the
+    // write is parsed, and the alternate buffer switch is its own event. Both
+    // feed the same deduplicated listener so the clearance owner can re-reserve
+    // rows without a second mode parser.
+    this.modeDisposables = [
+      this.terminal.onWriteParsed(() => this.notifyModeChange()),
+      this.terminal.buffer.onBufferChange(() => this.notifyModeChange()),
+    ];
+  }
+
+  private currentModeSignature(): string {
+    const modes = this.readModes();
+    const buffer = this.readBuffer();
+    return `${modes.mouseTrackingMode}|${modes.alternateBuffer}|${buffer.type}`;
+  }
+
+  private notifyModeChange(): void {
+    const next = this.currentModeSignature();
+    if (next === this.modeSignature) {
+      return;
+    }
+    this.modeSignature = next;
+    for (const listener of this.modeListeners) {
+      listener();
+    }
   }
 
   set onCellSizeChange(cb: (reason: CellSizeChangeReason) => void) {
@@ -280,6 +310,11 @@ export class XtermEmulator implements TerminalEmulator {
     this.linkTouchDisposable?.dispose();
     this.linkTouchDisposable = null;
     this.linkMatchers.clear();
+    this.modeListeners.clear();
+    for (const disposable of this.modeDisposables) {
+      disposable.dispose();
+    }
+    this.modeDisposables = [];
     this.renderer.dispose();
     // xterm's own addon manager disposes every registered addon exactly once.
     this.terminal.dispose();
@@ -344,6 +379,15 @@ export class XtermEmulator implements TerminalEmulator {
 
   onBufferChange(listener: () => void): TerminalDisposable {
     return this.terminal.buffer.onBufferChange(() => listener());
+  }
+
+  onModesChange(listener: () => void): TerminalDisposable {
+    this.modeListeners.add(listener);
+    return {
+      dispose: () => {
+        this.modeListeners.delete(listener);
+      },
+    };
   }
 
   onResize(listener: () => void): TerminalDisposable {

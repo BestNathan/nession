@@ -11,6 +11,7 @@ import {
   readBufferType,
   wheelOverTerminal,
   readScrollMode,
+  readPane,
   readViewport,
   readGrid,
   waitForStableGrid,
@@ -26,7 +27,6 @@ import {
   ptyProbeInstaller,
   startPtyProbe,
   stopPtyProbe,
-  readPane,
   repaintFixtureInstaller,
   lastNonEmptyLine,
   tapCapsuleArrowUp
@@ -770,6 +770,176 @@ test.describe('Terminal I/O', () => {
  * bytes injected here take the same path live output does. The browser
  * clipboard is real: these tests grant the permissions and read the value back.
  */
+test.describe('Mode-aware upper-panel clearance (#3492)', () => {
+  const paneSize = (sessionName: string): { cols: number; rows: number } => {
+    const out = execFileSync(
+      'tmux',
+      [
+        '-S', E2E_TMUX_SOCKET, 'display-message', '-p',
+        '-t', `=${sessionName}:`, '#{pane_width}x#{pane_height}',
+      ],
+      { encoding: 'utf8' },
+    ).trim();
+    const [cols, rows] = out.split('x').map(Number);
+    return { cols, rows };
+  };
+
+  const openKeys = async (page: import('@playwright/test').Page): Promise<void> => {
+    await openCapsuleCapability(page, 'terminal-keys');
+    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
+  };
+
+  const closeKeys = async (page: import('@playwright/test').Page): Promise<void> => {
+    await page.getByTestId('capsule-capability-dismiss').click();
+    await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
+  };
+
+  const screenTransform = (page: import('@playwright/test').Page): Promise<string> =>
+    page.locator('.xterm-screen').evaluate((node) => getComputedStyle(node).transform);
+
+  test('normal shell keeps scroll clearance and its exact rows (#3492 SC-01)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    const sessionName = `e2e-clearance-normal-${testInfo.retry}-${Date.now()}`;
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await waitForStableGrid(page);
+    const before = await readGrid(page);
+    const paneBefore = paneSize(sessionName);
+
+    await openKeys(page);
+    // #2710's contract is unchanged for the normal buffer: no row/PTY change.
+    await page.waitForTimeout(400);
+    expect(await readGrid(page)).toEqual(before);
+    expect(paneSize(sessionName).rows).toBe(paneBefore.rows);
+    expect(await readScrollMode(page)).toBe('following');
+    // The reversible visual pan is still what reveals the live bottom.
+    await wheelOverTerminal(page, -400);
+    await expect.poll(async () => readScrollMode(page), { timeout: 10_000 })
+      .toBe('history');
+    await wheelOverTerminal(page, 1200);
+    await expect.poll(async () => readScrollMode(page), { timeout: 10_000 })
+      .toBe('following');
+
+    await closeKeys(page);
+    expect(await readGrid(page)).toEqual(before);
+    expect(paneSize(sessionName).rows).toBe(paneBefore.rows);
+  });
+
+  test('alternate-screen TUI reserves visible and authoritative rows (#3492 SC-02)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(120_000);
+    const sessionName = `e2e-clearance-alt-${testInfo.retry}-${Date.now()}`;
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'altscreen');
+    await expect.poll(async () => readBufferType(page), { timeout: 15_000 }).toBe('alternate');
+    await waitForStableGrid(page);
+    const before = await readGrid(page);
+    expect(paneSize(sessionName).rows).toBe(before.rows);
+
+    await openKeys(page);
+    await expect.poll(async () => (await readGrid(page)).rows, { timeout: 15_000 })
+      .toBeLessThan(before.rows);
+    const during = await readGrid(page);
+    expect(during.cols).toBe(before.cols);
+    // The authoritative tmux pane follows the reserved rows.
+    await expect.poll(async () => paneSize(sessionName).rows, { timeout: 15_000 })
+      .toBe(during.rows);
+    // The grid was reserved, not translated.
+    expect(['none', '']).toContain(await screenTransform(page));
+    const panel = await page.getByTestId('capsule-capability-projection').boundingBox();
+    const grid = await page.locator('.xterm-screen').boundingBox();
+    expect(grid).not.toBeNull();
+    expect(panel).not.toBeNull();
+    expect(grid!.y + grid!.height).toBeLessThanOrEqual(panel!.y + 20);
+
+    await closeKeys(page);
+    // Restoring is derived from current geometry, not a remembered size.
+    await expect.poll(async () => (await readGrid(page)).rows, { timeout: 15_000 })
+      .toBe(before.rows);
+    await expect.poll(async () => paneSize(sessionName).rows, { timeout: 15_000 })
+      .toBe(before.rows);
+    await stopPtyProbe(page);
+  });
+
+  test('mouse-owning TUI keeps wheel ownership and reserves rows (#3492 SC-03)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(120_000);
+    const sessionName = `e2e-clearance-mouse-${testInfo.retry}-${Date.now()}`;
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'mouse-vt200');
+    expect(await readBufferType(page)).toBe('normal');
+    await waitForStableGrid(page);
+    const before = await readGrid(page);
+    const wheelReportsBefore = await countInBuffer(page, '^[[M');
+
+    await openKeys(page);
+    await expect.poll(async () => (await readGrid(page)).rows, { timeout: 15_000 })
+      .toBeLessThan(before.rows);
+    expect(['none', '']).toContain(await screenTransform(page));
+    // The application still receives the wheel: no local history takeover.
+    await wheelOverTerminal(page, 240);
+    await expect.poll(async () => countInBuffer(page, '^[[M'), { timeout: 10_000 })
+      .toBeGreaterThan(wheelReportsBefore);
+
+    await closeKeys(page);
+    await expect.poll(async () => (await readGrid(page)).rows, { timeout: 15_000 })
+      .toBe(before.rows);
+    await stopPtyProbe(page);
+  });
+
+  test('short viewport offers an explicit compact escape (#3492 SC-05)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(120_000);
+    const sessionName = `e2e-clearance-short-${testInfo.retry}-${Date.now()}`;
+    await page.setViewportSize({ width: 390, height: 480 });
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'altscreen');
+    await expect.poll(async () => readBufferType(page), { timeout: 15_000 }).toBe('alternate');
+
+    await openKeys(page);
+    const host = page.locator('[data-terminal-capsule-host]');
+    await expect(host).toHaveAttribute('data-terminal-clearance-fallback', 'compact');
+    const compactButton = page.getByTestId('capsule-peek-compact');
+    await expect(compactButton).toBeVisible();
+    await expect(compactButton).toHaveText('Expand');
+    // The explicit escape is a genuinely bounded panel: expand it, then
+    // collapse it again, and the surface actually changes height.
+    const compactHeight = (await page.getByTestId('capsule-capability-projection').boundingBox())!.height;
+    await compactButton.click();
+    await expect(compactButton).toHaveText('Compact');
+    const expandedHeight = (await page.getByTestId('capsule-capability-projection').boundingBox())!.height;
+    expect(expandedHeight).toBeGreaterThan(compactHeight);
+    await compactButton.click();
+    await expect(compactButton).toHaveText('Expand');
+
+    // Rotation while open settles on one geometry, not an oscillation.
+    await page.setViewportSize({ width: 844, height: 390 });
+    await waitForStableGrid(page);
+    const settled = await readGrid(page);
+    await page.waitForTimeout(400);
+    expect(await readGrid(page)).toEqual(settled);
+    await expect.poll(async () => paneSize(sessionName).rows, { timeout: 15_000 })
+      .toBe(settled.rows);
+
+    await closeKeys(page);
+    expect(await page.getByTestId('capsule-peek-compact').count()).toBe(0);
+    await stopPtyProbe(page);
+  });
+});
+
 test.describe('Terminal clipboard protocols', () => {
   test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openCapsuleCapability } from '../../helpers/capsule';
 import { waitForShell } from '../../helpers/shell';
 import { restartAgent } from '../../helpers/runtimeControl';
 import {
@@ -1596,3 +1597,67 @@ for (const mode of ['Relay', 'P2P'] as const) {
     expect(missingTail, 'an ANSI-wrapped tail line never reached the parser').toEqual([]);
   });
 }
+
+// #3492 SC-04: an observer's local Peek is not session geometry authority.
+test('an observer\'s Peek sends no resize and cannot move the session (#3492 SC-04)', async ({ browser }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(240_000);
+
+  const sessionName = `e2e-clearance-observer-${testInfo.retry}-${Date.now()}`;
+  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
+  const controllerContext = await browser.newContext();
+  const observerContext = await browser.newContext();
+  const controller = await controllerContext.newPage();
+  const observer = await observerContext.newPage();
+  try {
+    await controller.goto(url);
+    await waitForShell(controller);
+    await createSession(controller, sessionName);
+    await attachToSession(controller, sessionName, 'Relay');
+    await waitForInteractiveShell(controller);
+
+    await observer.goto(url);
+    await waitForShell(observer);
+    const row = observer.locator('[data-testid="session-item-row"]', { hasText: sessionName });
+    await expect(async () => {
+      const refresh = observer.getByRole('button', { name: 'Refresh sessions' });
+      if (await refresh.isVisible().catch(() => false)) { await refresh.click(); }
+      await expect(row).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+    await attachToSession(observer, sessionName, 'Relay');
+    await waitForInteractiveShell(observer);
+
+    // The second attach takes the lease; hand it back so the first page is the
+    // authorized controller and the second is a passive observer.
+    await controller.getByTestId('terminal-notices-trigger').click();
+    await controller.getByRole('button', { name: 'Take control' }).click();
+    await expect(controller.locator('[data-terminal-notices~="observer"]')).toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.locator('[data-terminal-notices~="observer"]')).toHaveCount(1, { timeout: 10_000 });
+    await waitForStableGrid(controller);
+    const authoritative = await readGrid(controller);
+    await expectPtySize(controller, authoritative.cols, authoritative.rows);
+
+    // Record only what the observer sends after its layout has settled.
+    const sent: WireFrame[] = [];
+    observer.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') { sent.push(parseFrame(frame.payload)); }
+      });
+    });
+    sent.length = 0;
+
+    await openCapsuleCapability(observer, 'terminal-keys');
+    await expect(observer.getByTestId('capsule-capability-projection')).toBeVisible();
+    await observer.waitForTimeout(800);
+
+    expect(
+      sent.filter((frame) => frame.msg_type?.includes('resize')),
+      'an observer Peek must not request a Session resize',
+    ).toEqual([]);
+    expect(await readGrid(observer)).toEqual(authoritative);
+    await expectPtySize(controller, authoritative.cols, authoritative.rows);
+  } finally {
+    await controllerContext.close();
+    await observerContext.close();
+  }
+});

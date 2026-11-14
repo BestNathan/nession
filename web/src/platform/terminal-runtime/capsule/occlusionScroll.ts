@@ -4,6 +4,7 @@ import type {
   TerminalDisposable,
   TerminalModeSnapshot,
 } from '../emulator';
+import { terminalClearancePolicyFor } from './clearancePolicy';
 
 export const TERMINAL_CAPSULE_OCCLUSION_EVENT = 'terminal-capsule-occlusion';
 
@@ -546,10 +547,13 @@ export class CapsuleOcclusionScroll {
   }
 
   private canShiftScreen(): boolean {
-    if (this.terminal.readModes().mouseTrackingMode !== 'none') {
-      return false;
-    }
-    return this.terminal.readBuffer().type === 'normal';
+    // One owner decides the policy (#3492); this class only spends the
+    // scroll-clearance half. A full-screen/mouse-owning application gets real
+    // rows from `TerminalGeometry` instead of a transform.
+    return terminalClearancePolicyFor(
+      this.terminal.readModes(),
+      this.terminal.readBuffer(),
+    ) === 'scroll-clearance';
   }
 
   /**
