@@ -119,6 +119,10 @@ function SelectedManaged({
   inventory: AgentWorkspacesState;
   onChange: (workspace: SandboxFilesystemWorkspace | undefined) => void;
 }) {
+  const selected =
+    workspace.kind === 'managed' && workspace.workspace_id
+      ? inventory.workspaces.find((item) => item.workspace_id === workspace.workspace_id)
+      : undefined;
   return (
     <div
       className="flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-surface)] border border-border px-3 py-2"
@@ -126,13 +130,13 @@ function SelectedManaged({
     >
       <p className={chromeSansRole('primary')}>{workspaceLabel(workspace)}</p>
       <p className="text-muted-foreground" data-testid="sandbox-workspace-managed-status">
-        {workspace.kind === 'managed' && workspace.workspace_id
-          ? (inventory.workspaces.find(
-              (item) => item.workspace_id === workspace.workspace_id,
-            )?.status ?? 'The Agent will verify this Workspace when it prepares Enter.')
-          : workspace.kind === 'managed'
-            ? 'Created or reused by name when the Agent prepares Enter.'
-            : 'The Agent resolves this selection when it prepares Enter.'}
+        {selected
+          ? `${selected.name} · ${selected.status}`
+          : workspace.kind === 'managed' && workspace.workspace_id
+            ? 'The Agent will verify this Workspace when it prepares Enter.'
+            : workspace.kind === 'managed'
+              ? 'Created or reused by name when the Agent prepares Enter.'
+              : 'The Agent resolves this selection when it prepares Enter.'}
       </p>
       <div>
         <Button
