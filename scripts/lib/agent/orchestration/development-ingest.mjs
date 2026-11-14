@@ -337,6 +337,7 @@ async function main(){
       run.head_repository?.full_name!==REPO))
     fail('Qwen Ingest source is not an authenticated successful Worker Run');
   if(!authority.source && !authority.continuation && !authority.qwen_recovery&&
+     !authority.bot_qwen_wake&&
       (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
        run.conclusion!=='success'||run.status!=='completed'))
