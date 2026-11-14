@@ -95,7 +95,14 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
        Number(event?.inputs?.issue_number)===issue&&
        event?.inputs?.action_id===actionId&&
        (()=>{
-         const keys=Object.keys(event?.inputs??{}).sort().join(',');
+         // GitHub includes declared default inputs on new workflow_dispatch
+         // runs; the legacy Owner command retains its two/three-input schema.
+         // An Owner can never provide a nonzero bot Publisher locator.
+         const inputs=event?.inputs??{};
+         if(inputs.source_publisher_run_id!==undefined&&
+            String(inputs.source_publisher_run_id)!=='0')return false;
+         const keys=Object.keys(inputs).filter(k=>k!=='source_publisher_run_id')
+           .sort().join(',');
          const requested=event?.inputs?.recovery_run_id;
          if(requested===undefined)
            return keys==='action_id,issue_number';
