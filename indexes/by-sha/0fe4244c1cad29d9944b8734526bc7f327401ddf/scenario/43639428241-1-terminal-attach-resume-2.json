@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43639428241,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3523-app-viewport-keyboard-avoidance",
+    "target_sha": "0fe4244c1cad29d9944b8734526bc7f327401ddf",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43639428241",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "1788f1ea34c63ff36e472e24a5d471ddbcd1f1723a54ac4ff511ee1fbd4b9046"
+  },
+  "record": "runs/2026-11-14/43639428241-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "63140d1bd40047d86fabaa9a4b2b6dd332792934e6530c8b096f1ebe0e931fd2"
+}

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "0fe4244c1cad29d9944b8734526bc7f327401ddf",
+  "scenario_revision": "0fe4244c1cad29d9944b8734526bc7f327401ddf",
+  "run_id": 43639428241,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-14T20:50:26.592Z",
+  "finished_at": "2026-11-14T20:50:35.892Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-14T20:50:35.084Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "9e87e52c88bff5a58824aa0959732ab2af27eedcbddd43b7ce657b51b62003d7",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-14T20:50:35.327Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "9e87e52c88bff5a58824aa0959732ab2af27eedcbddd43b7ce657b51b62003d7",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-14T20:50:35.829Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "9e87e52c88bff5a58824aa0959732ab2af27eedcbddd43b7ce657b51b62003d7",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43639428241,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3523-app-viewport-keyboard-avoidance",
+    "target_sha": "0fe4244c1cad29d9944b8734526bc7f327401ddf",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43639428241",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "798661b724f18822e28eb6c54fab730c49b70c95cc2e67c4b4ce21366146ff12"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-43639428241-1",
+    "sha256": "798661b724f18822e28eb6c54fab730c49b70c95cc2e67c4b4ce21366146ff12",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43639428241",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "c5057feba628032ae557e20ea553726a584b334fe2ae388875b765ce6eee5833"
+}
