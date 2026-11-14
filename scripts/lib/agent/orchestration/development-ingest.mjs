@@ -235,6 +235,19 @@ export function resolveTrustedIngestSource({environment,event}){
       environment.GITHUB_WORKFLOW!=='Store / Agent Development Ingest'||
       !HEX40.test(environment.GITHUB_SHA??''))
     fail('invalid main-owned trusted Ingest authority');
+  if(environment.GITHUB_EVENT_NAME==='workflow_dispatch'){
+    // Only a trusted-main GitHub Actions bot may locate one original Worker.
+    // No Issue, Action, SHA or Artifact bytes are accepted from dispatch input.
+    const id=String(event?.inputs?.source_run_id??'');
+    if(environment.GITHUB_ACTOR!=='github-actions[bot]'||
+       environment.GITHUB_RUN_ATTEMPT!=='1'||
+       event?.repository?.full_name!==REPO||
+       event?.sender?.login!=='github-actions[bot]'||
+       !/^[1-9][0-9]{0,14}$/.test(id)||
+       !Number.isSafeInteger(Number(id)))
+      fail('bot/main post-Worker wake requires exact source Run identity');
+    return {run_id:Number(id),source:null,bot_qwen_wake:true,attempt:1};
+  }
   if(environment.GITHUB_EVENT_NAME==='workflow_run'){
     const source=event?.workflow_run;
     if(event.action!=='completed'||source?.conclusion!=='success'||
@@ -314,7 +327,7 @@ async function main(){
       run.run_attempt!==authority.source.run_attempt||
       run.head_sha!==authority.source.head_sha))
     fail('GitHub webhook/source Run mismatch');
-  if(authority.qwen_recovery &&
+  if((authority.qwen_recovery||authority.bot_qwen_wake) &&
      (run.id!==authority.run_id||run.run_attempt!==authority.attempt||
       run.path!=='.github/workflows/agent-develop.yml'||
       run.name!=='Agent / Development'||run.event!=='workflow_dispatch'||
@@ -322,7 +335,7 @@ async function main(){
       run.head_branch!=='main'||run.actor?.login!=='github-actions[bot]'||
       run.repository?.full_name!==REPO||
       run.head_repository?.full_name!==REPO))
-    fail('manual Qwen Ingest source is not an authenticated successful Worker Run');
+    fail('Qwen Ingest source is not an authenticated successful Worker Run');
   if(!authority.source && !authority.continuation && !authority.qwen_recovery&&
       (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
@@ -354,6 +367,11 @@ async function main(){
   if(authority.qwen_recovery&&
      Number(claim.inputs?.issue_number)!==authority.issue)
     fail('owner Qwen recovery Issue does not match original signed Worker claim');
+  if(authority.bot_qwen_wake &&
+     (claim.inputs?.agent_id!=='dev-qwen-01'||
+      claim.inputs?.task!=='implement'||
+      run.head_sha!==claim.inputs?.input_sha))
+    fail('bot wake is not a signed exact-SHA Qwen implementation');
   const resultZip=fs.readFileSync(process.argv[4]);
   if(matching[0].digest!=='sha256:'+hash(resultZip))
     fail('encrypted Worker Artifact ZIP digest mismatch');
@@ -369,7 +387,7 @@ async function main(){
     // lane is the recovery for a suppressed delivery; resolveTrustedIngestSource
     // has already authenticated the comment and the live Worker Run/artifacts
     // are re-read above. Both paths still require the dedicated native key.
-    if(!['workflow_run','issue_comment'].includes(env.GITHUB_EVENT_NAME)||
+    if(!['workflow_run','issue_comment','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
         !env.QWEN_RESUME_PRIVATE_KEY_B64)
       fail('Qwen requires natural main Worker source and dedicated native key');
     const rootKey=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
