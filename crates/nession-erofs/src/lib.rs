@@ -39,6 +39,9 @@ pub mod git;
 #[cfg(feature = "cache")]
 pub mod cache;
 
+#[cfg(feature = "registry")]
+pub mod registry;
+
 #[cfg(all(feature = "mount", target_os = "linux"))]
 pub mod mount;
 #[cfg(all(feature = "mount", target_os = "linux"))]

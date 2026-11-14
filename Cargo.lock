@@ -2161,6 +2161,8 @@ name = "nession-erofs"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "axum",
+ "base64 0.21.7",
  "futures-util",
  "httptest",
  "libc",
@@ -2170,6 +2172,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
