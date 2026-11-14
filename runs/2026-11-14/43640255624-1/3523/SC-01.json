@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7f6333f57494e682f4c188f3336c83e0a7b73cf786cd5c031ca7612ca0db89db",
+  "run_id": 43640255624,
+  "run_attempt": 1,
+  "issue": 3523,
+  "criterion": "SC-01",
+  "criterion_text": "App experience publishes consistent, observable layout-vs-visible geometry across controlled `visualViewport.resize/scroll`, window resize, orientation and nonzero safe-area fixtures; simulated toolbar/zoom or missing API does not falsely change Shell/Terminal layout or invent a keyboard-only scroll state.",
+  "stage": "staging",
+  "target_sha": "6371694e77f74880c8e5f71f5b37640e5c49b0db",
+  "contract_sha256": "1134895392ccbd8e969881d2dbeae38e01b10b95c834441167594af85355124e",
+  "case_revision": "6371694e77f74880c8e5f71f5b37640e5c49b0db",
+  "case_tree_sha": "160d1d2a9b80a113ea84e855e5608b6940c08668",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T21:01:38.649Z",
+  "finished_at": "2026-11-14T21:01:46.904Z",
+  "duration_ms": 8254,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (2 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=34"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 34
+      },
+      "duration_ms": 2344,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43640255624,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6371694e77f74880c8e5f71f5b37640e5c49b0db",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43640255624",
+    "record_path": "runs/2026-11-14/43640255624-1/3523/SC-01.json",
+    "source_result_sha256": "b855c14ec104513a34db7cd6009e1000fafc2fcc624a4f2b07369db299affe1c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43640255624-1",
+    "sha256": "b855c14ec104513a34db7cd6009e1000fafc2fcc624a4f2b07369db299affe1c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43640255624",
+    "durability": "time-limited; object archival not configured"
+  }
+}
