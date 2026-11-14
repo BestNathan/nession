@@ -13,8 +13,14 @@ on:
         required: true
         type: number
       input_sha:
-        description: 'Exact main-ancestor development SHA'
-        required: true
+        description: 'Exact main-ancestor SHA for manual Owner starts; Bug comments bind to trusted main SHA'
+        required: false
+        default: ''
+        type: string
+      source_comment_id:
+        description: 'Original Owner /develop comment ID, supplied only by the trusted Comment Router'
+        required: false
+        default: ''
         type: string
       developer:
         description: 'Optional registered Developer override (Qwen awaits #2274)'
@@ -41,11 +47,18 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
       github.run_attempt == 1 &&
       (
-        github.event_name == 'workflow_dispatch' ||
+        (github.actor == 'BestNathan' && github.event_name == 'workflow_dispatch') ||
+        (github.actor == 'github-actions[bot]' &&
+         github.event_name == 'workflow_dispatch' &&
+         inputs.source_comment_id != '' &&
+         inputs.input_sha == '' &&
+         inputs.developer == '' &&
+         inputs.reviewer == '' &&
+         inputs.acceptor == '') ||
         (
+          github.actor == 'BestNathan' &&
           github.event_name == 'issue_comment' &&
           github.event.action == 'created' &&
           github.event.issue.number == 3001 &&
@@ -72,11 +85,20 @@ jobs:
           set -euo pipefail
           node scripts/lib/agent/orchestration/controller-start-selftest.mjs
           node scripts/lib/agent/orchestration/controller-request-selftest.mjs
+          node scripts/lib/agent/orchestration/bug-develop-comment.mjs self-test
+      - name: Revalidate original Owner Bug comment for bot-origin requests
+        if: github.actor == 'github-actions[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          SOURCE_COMMENT_ID: ${{ inputs.source_comment_id }}
+        run: node scripts/lib/agent/orchestration/bug-develop-comment.mjs verify "$ISSUE_NUMBER" "$SOURCE_COMMENT_ID"
+
       - name: Confirm exact SHA and open native Issue
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event_name == 'issue_comment' && '3001' || inputs.issue_number }}
-          INPUT_SHA: ${{ github.event_name == 'issue_comment' && github.sha || inputs.input_sha }}
+          INPUT_SHA: ${{ github.actor == 'github-actions[bot]' && github.sha || (github.event_name == 'issue_comment' && github.sha || inputs.input_sha) }}
         shell: bash
         run: |
           set -euo pipefail
