@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a24f006868de40741f17c679a3c69c7204944c9d81fee9f8e5a14cac1532e9fa",
+  "run_id": 43599356314,
+  "run_attempt": 1,
+  "issue": 3496,
+  "criterion": "SC-03",
+  "criterion_text": "GC retains all objects reachable from Tags, Project/Session pins, build/transfer grants and mount leases through descriptor edges and safely reclaims only unreachable objects after bounded grace/recheck, including crash/restart and concurrency injection.",
+  "stage": "staging",
+  "target_sha": "cd31156d2015bfc57a2e4d38a30cfb4e28022546",
+  "contract_sha256": "95f815d020a60d39112b98779bfe2b2f815b1b390541be31f2c9f4bc8e3727e1",
+  "case_revision": "cd31156d2015bfc57a2e4d38a30cfb4e28022546",
+  "case_tree_sha": "10f55518e9fcc61c1a7562e4e89c9b57dbfbe19a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T13:24:19.899Z",
+  "finished_at": "2026-11-14T13:24:28.532Z",
+  "duration_ms": 8632,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "GC retains descriptor-reachable objects and reclaims only unreachable ones after a durable, bounded grace/recheck sweep",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA cd31156d2015bfc57a2e4d38a30cfb4e28022546: a tagged Manifest and each of its Config/EROFS descriptor children stayed reachable while an untagged graph was marked first, then reclaimed only after the grace window; a Session pin and a new Tag reprieved a marked graph; durable marks survived closing and reopening the SQLite catalog; bounded sweeps deleted one object per pass and reported the deferred remainder; concurrent publish + GC completed with one writer lock"
+        }
+      ],
+      "duration_ms": 2708,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43599356314,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "b9f36e96ee583b23f75c7a5ae27711c075abc0f2",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "cd31156d2015bfc57a2e4d38a30cfb4e28022546",
+        "stage": "staging",
+        "issue": 3496,
+        "criterion": "SC-03",
+        "job_id": 132460580352,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43599356314",
+    "record_path": "runs/2026-11-14/43599356314-1/3496/SC-03.json",
+    "source_result_sha256": "431683efd1cb1fd60153c29adb2b6d40b1c8683208041425f85d28c505c4c357"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43599356314-1",
+    "sha256": "431683efd1cb1fd60153c29adb2b6d40b1c8683208041425f85d28c505c4c357",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43599356314",
+    "durability": "time-limited; object archival not configured"
+  }
+}
