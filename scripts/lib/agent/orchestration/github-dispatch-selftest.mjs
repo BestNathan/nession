@@ -3,7 +3,8 @@ import {readFileSync} from 'node:fs';
 import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox,bindVerifiedRepairCheckpoint,validateDevelopmentState,acceptAttestedQwenPublication} from './outbox.mjs';
 import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,prepareGitHubDispatch,
   createGitHubRunReader,createGitHubDispatchClient,attestAgentOutcome,
-  reviewerPublishedPrBinding,planControlledReviewerRecovery,verifyPersistedDispatchIntent} from './github-dispatch.mjs';
+  reviewerPublishedPrBinding,planControlledReviewerRecovery,verifyPersistedDispatchIntent,
+  authenticatedTicketIssuer} from './github-dispatch.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 const a='a'.repeat(40), b='b'.repeat(40), main='f'.repeat(40);
@@ -334,4 +335,25 @@ await assert.rejects(()=>api200({...qPlan,
   /signed Outbox ticket/);
 assert.equal(recoveredPlan.inputs.issue_number,undefined);
 
+// A signed bot Reviewer ticket must be admitted from the exact main-owned
+// Controller, never from a generic bot or a bot Developer request.
+const botIssuer={id:4567,run_attempt:1,head_branch:'main',
+  head_sha:main,repository:{full_name:'BestNathan/nession'},
+  head_repository:{full_name:'BestNathan/nession'},
+  path:'.github/workflows/agent-controller-dispatch.yml',
+  name:'Agent / Controller Dispatch',event:'workflow_dispatch',
+  actor:{login:'github-actions[bot]'}};
+const issuerReader={getRun:async()=>{throw Error('unexpected legacy issuer lookup');}};
+assert.equal(await authenticatedTicketIssuer(botIssuer,main,issuerReader,
+  {role:'reviewer',issue:3550}),true);
+for(const [bad,opts] of [
+  [{...botIssuer,path:'.github/workflows/store-qwen-publisher.yml'},{}],
+  [{...botIssuer,actor:{login:'external-bot'}},{}],
+  [{...botIssuer,run_attempt:2},{}],
+  [{...botIssuer,event:'issue_comment'},{}],
+  [{...botIssuer,head_sha:a},{}],
+  [botIssuer,{role:'developer'}],
+  [botIssuer,{role:'reviewer',issue:0}],
+])assert.equal(await authenticatedTicketIssuer(bad,main,issuerReader,
+    {role:'reviewer',issue:3550,...opts}),false);
 console.log('Agent signed dispatch, GitHub REST attestation and spoof/replay fixtures passed');
