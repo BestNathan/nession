@@ -8,14 +8,17 @@ import { expect, test, type Page } from '@playwright/test';
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 /**
- * Issues #3124, #3143 and #3408: the Sandbox capability is a Session-context
- * surface with four sections and five policy entries.
+ * Issues #3124, #3143, #3408 and #3435: the Sandbox capability is a
+ * Session-context surface with four sections and five policy entries.
  *
  * The fixture routes name what the Agent answered (`?sandbox=…`), never a
  * rendering. These assertions cover the explicit outside draft, the empty-first
  * native editors, per-implementation support, preflight invalidation, the one
  * confirmation, the inside effective projection, and the truthful no-Enter
  * states — on Web and App at the Issues' viewport pairs.
+ *
+ * The managed Workspace attachment itself is proven by the exact-Agent-test
+ * staging Case at `e2e/acceptance/cases/3435/SC-03/`, not by this fixture.
  */
 
 async function openWebSandbox(page: Page, query = ''): Promise<void> {
