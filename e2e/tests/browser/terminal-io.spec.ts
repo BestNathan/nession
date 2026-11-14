@@ -771,6 +771,11 @@ test.describe('Terminal I/O', () => {
  * clipboard is real: these tests grant the permissions and read the value back.
  */
 test.describe('Mode-aware upper-panel clearance (#3492)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await waitForShell(page);
+  });
+
   const paneSize = (sessionName: string): { cols: number; rows: number } => {
     const out = execFileSync(
       'tmux',
@@ -901,10 +906,11 @@ test.describe('Mode-aware upper-panel clearance (#3492)', () => {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(120_000);
     const sessionName = `e2e-clearance-short-${testInfo.retry}-${Date.now()}`;
-    await page.setViewportSize({ width: 390, height: 480 });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await createSession(page, sessionName);
     await attachToSession(page, sessionName, 'Relay');
     await waitForInteractiveShell(page);
+    await page.setViewportSize({ width: 390, height: 480 });
     await submitTerminalCommand(page, ptyProbeInstaller());
     await startPtyProbe(page, 'altscreen');
     await expect.poll(async () => readBufferType(page), { timeout: 15_000 }).toBe('alternate');
