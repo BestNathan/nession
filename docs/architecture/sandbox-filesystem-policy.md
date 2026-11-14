@@ -376,3 +376,5 @@ a second image registry or a second Workspace registry.
   current executable architecture.
 - [Global EROFS Image Manager](erofs-image-manager.md) and
   [Agent EROFS cache](agent-erofs-cache.md) — image bytes and cache ownership.
+- [OCI/EROFS image infrastructure](oci-erofs-image-infrastructure.md) — image
+  identity, format, storage and runtime-default target contract (#3494).

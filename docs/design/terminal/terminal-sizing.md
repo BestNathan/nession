@@ -71,6 +71,14 @@ load re-fits the grid and recomputes rows before the first authoritative report.
   the Session's grid, not a divergent one. An Agent predating the
   `terminal_cols` reply field is still safe: it ignores client columns too, and
   the client keeps its own build value as the initial grid.
+- **Upper-panel exception (#3492):** for an alternate-screen or mouse-reporting
+  TUI, the measured upper-panel clearance reduces the usable height used by
+  `rowsForHeight`, and the resulting row change travels through the same
+  authorized resize path above. The reservation is capped so the TUI keeps a
+  minimum visible row count; when the panel asks for more, or the client has no
+  ControlLease authority, the Capsule offers a compact Peek instead of an
+  unauthorized resize. The normal-buffer/no-mouse policy keeps #2710's
+  no-resize scroll clearance. Columns never change.
 - Changing a release default or a GitHub Variable changes **newly built
   artifacts and new Sessions**. It does not rewrite a running Session; a
   deployment does not silently reflow live panes. Reconfiguring an existing

@@ -220,13 +220,20 @@ Those modes are implementation tools beneath the product interaction model. They
 > surface states why an action is unavailable instead of producing a local echo. Insert and Run are not
 > a new command registry.
 >
-> **Clearance is scroll, not fit.** Opening + or another upper surface must not push the
-> Terminal upward or hide its first rows. The composer-only occlusion owns xterm rows and PTY size;
-> the upper surface adds a separate **two-way scroll range**. Scrolling toward the live bottom
-> reveals the newest prompt above the panel; reversing the gesture first restores the original
-> top rows and only then enters normal xterm history. Both limits must remain reachable even when
-> there is no scrollback. Closing the panel restores composer-only clearance. See
-> [interaction-semantics.md](../../terminal/interaction-semantics.md#upper-panel-scroll-clearance-2710).
+> **Clearance is mode-aware (#2710, #3492).** For a normal shell without mouse tracking,
+> opening + or another upper surface must not push the Terminal upward or hide its first
+> rows: the panel adds a separate **two-way scroll range**. Scrolling toward the live bottom
+> reveals the newest prompt above the panel; reversing the gesture first restores the
+> original top rows and only then enters normal xterm history. Both limits remain reachable
+> even when there is no scrollback. For an alternate-screen or mouse-reporting TUI, which
+> cannot be safely panned, the same measured panel height instead **reserves real rows**:
+> xterm and the authorized PTY/tmux rows follow the reduced usable height, enabling the
+> application to redraw its own bottom/status/input rows above the panel. Only the
+> authorized ControlLease holder may request that resize; an observer's panel never moves
+> the Session. When authority or usable height cannot support a reserve, the panel becomes
+> a bounded **compact** surface with an explicit Compact/Expand control. Closing or switching
+> a panel derives rows from the current viewport. See
+> [interaction-semantics.md](../../terminal/interaction-semantics.md#upper-panel-clearance-2710-3492).
 >
 > **Prototype (#2710).** The interaction was reviewed from the live preview
 > `https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html`. Its
