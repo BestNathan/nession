@@ -27,9 +27,13 @@ function renderHosting(scenario = '') {
 describe('GithubHostingView', () => {
   it('resolves the repository identity and renders the Issues list', async () => {
     renderHosting();
-    expect(await screen.findByTestId('github-repository')).toHaveTextContent(
-      'GitHub · github.com/fixture-owner/nession',
-    );
+    // The header exists on the first render with text "GitHub"; wait for
+    // the async repository identity, not merely for the element to mount.
+    await waitFor(() => {
+      expect(screen.getByTestId('github-repository')).toHaveTextContent(
+        'GitHub · github.com/fixture-owner/nession',
+      );
+    });
     expect(await screen.findByTestId('github-issue-list')).toBeInTheDocument();
     expect(await screen.findByTestId('github-issue-row-1290')).toBeInTheDocument();
   });
