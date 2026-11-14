@@ -6,7 +6,7 @@ import {execFileSync} from 'node:child_process';
 import {parsePreMergeIssueNumbers,parseClosingIssueNumbers,validateRequirementBody,isAcceptanceIssue}
   from './requirement-acceptance.mjs';
 import {isNativeConvergencePr,isNativePromotionPr,verifiedConvergenceBatch,convergenceApproval,
-  convergenceBatchDigest,latestConvergenceFull,attestConvergenceFull}
+  convergenceBatchDigest}
   from './staging-convergence-pr.mjs';
 
 const SHA=/^[0-9a-f]{40}$/;
@@ -208,8 +208,7 @@ function nativeSourceCheckDenial(pr,mergeSha,headSha,source,sourceRuns){
 }
 
 export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
-  branch='staging',sourceRuns=[],fullReceipt=null,
-  promotionHead=null,promotionFull=null}){
+  branch='staging',sourceRuns=[]}){
   if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
      pr.merge_commit_sha!==mergeSha||pr.base?.ref!==branch||
      pr.base?.repo?.full_name!==REPO)
@@ -235,27 +234,11 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
   }catch(error){
     return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);
   }
-  const approval=convergenceApproval(batch,fullReceipt);
-  // #3431: an independently completed Full on the exact final promotion
-  // candidate can supersede *regression* evidence from a merged native batch.
-  // It never supersedes a bad Git source, removed E2E, unknown risk, or the
-  // original exact-head PR checks. This path is promotion-only.
-  let superseded=false;
-  if(!approval.approved &&
-     approval.reason==='AWAITING_EXACT_HEAD_FULL_E2E' &&
-     SHA.test(promotionHead??'') &&
-     promotionFull?.verified===true &&
-     promotionFull.source_head_sha===promotionHead &&
-     Number.isSafeInteger(promotionFull.run_id) &&
-     Date.parse(promotionFull.executed_at??'')>Date.parse(pr.merged_at)) {
-    try {
-      execFileSync('git',['merge-base','--is-ancestor',
-        batch.integration_head,promotionHead],{cwd:repoRoot,
-        stdio:'ignore'});
-      superseded=true;
-    } catch { /* No ancestry proof means the historic Full remains required. */ }
-  }
-  if(!approval.approved&&!superseded)
+  // Every historical native merge is certified by its immutable parents,
+  // source marker and original scoped PR checks. Full is only an independent
+  // periodic Main regression; it cannot supersede or veto this proof (#3465).
+  const approval=convergenceApproval(batch);
+  if(!approval.approved)
     return fail('NATIVE_'+approval.reason+':'+batch.integration_head);
   const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns,pr);
   if(!source.ready){
@@ -266,35 +249,12 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
     return fail(denial.reason);
   }
   return okay({integrationHead:batch.integration_head,
-    sourceBatchDigest:convergenceBatchDigest(batch),
-    ...(superseded?{superseding_full_run_id:promotionFull.run_id}: {})});
+    sourceBatchDigest:convergenceBatchDigest(batch)});
 }
 
-// Independently re-attest the complete Full E2E source before Main
-// promotion. A PR marker and a prior Staging merge do not prove Full success.
-function nativeFullReceipt(batch,pr){
-  if(convergenceApproval(batch).approved)return null;
-  const since=String(pr.created_at??'').slice(0,10);
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(since))
-    throw Error('native PR missing trustworthy creation fence');
-  const inventory=read('actions/workflows/e2e-full-regression.yml/runs?'+
-    'event=workflow_dispatch&created=>='+since+'&per_page=100');
-  if(!Array.isArray(inventory.workflow_runs)||inventory.workflow_runs.length>=100)
-    throw Error('unbounded native Full inventory during promotion');
-  const run=latestConvergenceFull(batch,inventory.workflow_runs);
-  if(!run||run.status!=='completed'||run.conclusion!=='success')return null;
-  const jobs=read('actions/runs/'+run.id+'/attempts/'+
-    run.run_attempt+'/jobs?per_page=100');
-  if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
-    throw Error('unbounded native Full job inventory during promotion');
-  return attestConvergenceFull(batch,run,jobs.jobs);
-}
-
-
-// A later Full is an alternative regression proof, not a historical source
-// Full Pass. The trusted comment router checks the original OWNER comment,
-// exact PR HEAD/ref, and workflow_dispatch inputs. Independently verify its
-// job/attempt and mandatory execution steps before using its result.
+// Optional owner-triggered Full evidence remains independently authenticated
+// for diagnostics and historical consumers. It never authorizes or blocks a
+// source-sync or promotion merge (#3465).
 export function attestPromotionCandidateFull({pr,laneSha,run,jobs=[],comment,botReceipt}){
   const title='Comment E2E #'+pr?.number+' comment:'+comment?.id;
   if(!isNativePromotionPr(pr)||pr.state!=='open'||
@@ -364,36 +324,6 @@ export function latestPromotionCandidateFull(pr,runs=[]){
     r.repository?.full_name===REPO&&r.head_repository?.full_name===REPO)
     .sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
       (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0]??null;
-}
-
-function promotionCandidateFullReceipt(pr,laneSha){
-  if(!isNativePromotionPr(pr)||pr.head.sha!==laneSha)return null;
-  const since=String(pr.created_at??'').slice(0,10);
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(since))
-    throw Error('promotion PR missing trustworthy creation fence');
-  const inventory=read('actions/workflows/e2e-full-regression.yml/runs?'+
-    'event=workflow_dispatch&created=>='+since+'&per_page=100');
-  if(!Array.isArray(inventory.workflow_runs)||
-     inventory.workflow_runs.length>=100)
-    throw Error('unbounded promotion Full inventory');
-  const run=latestPromotionCandidateFull(pr,inventory.workflow_runs);
-  if(!run||run.status!=='completed'||run.conclusion!=='success')return null;
-  const commentId=Number(run.display_title.split(' comment:')[1]);
-  if(!Number.isSafeInteger(commentId)||commentId<=0)return null;
-  const jobs=read('actions/runs/'+run.id+'/attempts/'+
-    run.run_attempt+'/jobs?per_page=100');
-  if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
-    throw Error('unbounded promotion Full job inventory');
-  const comment=read('issues/comments/'+commentId);
-  const comments=read('issues/'+pr.number+'/comments?per_page=100');
-  if(!Array.isArray(comments)||comments.length>=100)
-    throw Error('unbounded promotion source comment inventory');
-  const matching=comments.filter(c=>c.user?.id===41898282&&
-    c.body?.includes('<!-- nession-command-comment:'+commentId+' -->')&&
-    c.body?.includes('/actions/runs/'+run.id+')'));
-  if(matching.length!==1)return null;
-  return attestPromotionCandidateFull({pr,laneSha,run,jobs:jobs.jobs,
-    comment,botReceipt:matching[0]});
 }
 
 export function qualify({action,prNumber,mainSha,laneSha,branch,
@@ -472,33 +402,16 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
   }
   const issues=[...numberSet].map(n=>read('issues/'+n));
   const authenticatedNative=[];
-  let promotionFullLoaded=false,promotionFull=null;
   for(let i=0;i<commits.length;i++){
     const matches=associations[i].filter(pr=>pr.merge_commit_sha===commits[i]&&
       pr.merged_at&&pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1||!isNativeConvergencePr(matches[0]))continue;
     const nativePr=matches[0];
     const runs=getRuns('head_sha='+nativePr.head.sha+'&event=pull_request');
-    const sourceBatchSha=nativePr.head.sha;
-    let fullReceipt=null;
-    // Rebuild the pinned source *before* reading any Full Run. This reuses
-    // the sole canonical Git/plan owner and rejects altered PR declarations.
-    const parents=git(['rev-list','--parents','-n','1',commits[i]]).split(/\s+/);
-    if(parents.length!==3||parents[2]!==sourceBatchSha)
-      return fail('NATIVE_MERGE_PARENTS_MISMATCH');
-    let batch;
-    try{batch=verifiedConvergenceBatch(nativePr,process.cwd(),
-      parents[1],commits[i],{requireCheckout:false});}
-    catch(error){return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);}
-    fullReceipt=nativeFullReceipt(batch,nativePr);
-    if(convergenceApproval(batch,fullReceipt).reason==='AWAITING_EXACT_HEAD_FULL_E2E' &&
-       !promotionFullLoaded){
-      promotionFull=promotionCandidateFullReceipt(pr,laneSha);
-      promotionFullLoaded=true;
-    }
+    // The original immutable Git source, exact-head Quality/Case/E2E and
+    // merge-commit parents are independently checked here, regardless of Full.
     const proof=certifyNativeMerge({pr:nativePr,mergeSha:commits[i],
-      branch,sourceRuns:runs,fullReceipt,promotionHead:laneSha,
-      promotionFull});
+      branch,sourceRuns:runs});
     if(!proof.ready)return proof;
     authenticatedNative.push(commits[i]);
   }
@@ -704,8 +617,8 @@ function selfTest(){
   assert.throws(()=>workflowRunsRoute('actions/workflows/../runs?head_sha='+b),
     /invalid bounded workflow run route/);
 
-  // #3431: only an authenticated exact final-candidate Full can replace
-  // historical regression evidence, not source identity or source checks.
+  // #3431 historical optional Full proof tests remain as diagnostics only;
+// neither successful nor failed Full is consulted for merge authorization.
   const candidatePr={number:3341,state:'open',
     title:'release: promote staging to main',
     user:{login:'nession-publisher[bot]'},
@@ -775,7 +688,7 @@ function selfTest(){
     'newer failed Full must not inherit previous success');
   assert.equal(requiredSourceRuns(3176,syncHead,
     orphanRuns.map(r=>({...r,conclusion:'failure'})),nativePrFixture).ready,false,
-    'final candidate Full never waives historical native source PR checks');
+    'optional Full evidence never waives historical native source PR checks');
   console.log('staging convergence readiness self-test: PASS');
 }
 if(process.argv[1]?.endsWith('/staging-convergence-readiness.mjs')){
