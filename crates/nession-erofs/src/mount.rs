@@ -32,10 +32,6 @@ const STDERR_COLLECT_TIMEOUT: Duration = Duration::from_millis(500);
 pub struct MountSettings {
     pub erofsfuse: PathBuf,
     pub fusermount: PathBuf,
-    /// The mount table this process observes. Production always uses
-    /// `/proc/self/mountinfo`; tests inject a private fixture so a fake helper
-    /// can be observed deterministically without a real FUSE mount.
-    pub mountinfo_path: PathBuf,
 }
 
 impl MountSettings {
@@ -43,15 +39,7 @@ impl MountSettings {
         Self {
             erofsfuse: erofsfuse.into(),
             fusermount: fusermount.into(),
-            mountinfo_path: PathBuf::from("/proc/self/mountinfo"),
         }
-    }
-
-    /// Observe a different mount table. Only mount readiness/identity checks
-    /// use it; mount/unmount still drive the real helpers.
-    pub fn with_mountinfo_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.mountinfo_path = path.into();
-        self
     }
 }
 
@@ -171,27 +159,19 @@ pub fn mount_shared(image: &Path, mountpoint: &Path, settings: &MountSettings) -
     let label = format!("{} {}", settings.erofsfuse.display(), image.display());
     let outcome = match run_bounded_helper(command, &label, PROBE_TIMEOUT) {
         Ok(outcome) => outcome,
-        Err(error) => {
-            return finalize_mount_failure(
-                &settings.fusermount,
-                mountpoint,
-                &settings.mountinfo_path,
-                error,
-            )
-        }
+        Err(error) => return finalize_mount_failure(&settings.fusermount, mountpoint, error),
     };
     if !outcome.status.success() {
         let detail = stderr_detail(&outcome);
         return finalize_mount_failure(
             &settings.fusermount,
             mountpoint,
-            &settings.mountinfo_path,
             anyhow::anyhow!("{label} failed for {}: {detail}", mountpoint.display()),
         );
     }
     let deadline = Instant::now() + MOUNT_READY_TIMEOUT;
     while Instant::now() < deadline {
-        if is_erofs_mount_at(mountpoint, &settings.mountinfo_path) {
+        if is_erofs_mount(mountpoint) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -199,7 +179,6 @@ pub fn mount_shared(image: &Path, mountpoint: &Path, settings: &MountSettings) -
     finalize_mount_failure(
         &settings.fusermount,
         mountpoint,
-        &settings.mountinfo_path,
         anyhow::anyhow!(
             "{} did not become an EROFS FUSE mount within {:?}",
             mountpoint.display(),
@@ -224,10 +203,9 @@ fn create_mountpoint(mountpoint: &Path) -> Result<()> {
 fn finalize_mount_failure(
     fusermount: &Path,
     mountpoint: &Path,
-    mountinfo_path: &Path,
     error: anyhow::Error,
 ) -> Result<()> {
-    match unmount_shared_at(fusermount, mountpoint, mountinfo_path) {
+    match unmount_shared(fusermount, mountpoint) {
         Ok(()) => Err(error),
         Err(rollback) => Err(error.context(format!(
             "verified rollback also failed; the mount remains orphaned: {rollback:#}"
@@ -270,16 +248,7 @@ pub fn unmount_one(fusermount: &Path, mountpoint: &Path) -> Result<()> {
 /// Strict shared unmount: bounded, no lazy escape hatch, and it succeeds only
 /// after the mountpoint is observed gone.
 pub fn unmount_shared(fusermount: &Path, mountpoint: &Path) -> Result<()> {
-    unmount_shared_at(fusermount, mountpoint, Path::new("/proc/self/mountinfo"))
-}
-
-/// Strict shared unmount observed through one mount table.
-pub fn unmount_shared_at(
-    fusermount: &Path,
-    mountpoint: &Path,
-    mountinfo_path: &Path,
-) -> Result<()> {
-    if !is_mounted_at(mountpoint, mountinfo_path) {
+    if !is_mounted(mountpoint) {
         return Ok(());
     }
     let mut command = Command::new(fusermount); // not-tmux: FUSE unmount helper
@@ -289,7 +258,7 @@ pub fn unmount_shared_at(
     if !outcome.status.success() {
         anyhow::bail!("{label} failed: {}", stderr_detail(&outcome));
     }
-    if is_mounted_at(mountpoint, mountinfo_path) {
+    if is_mounted(mountpoint) {
         anyhow::bail!("{label} reported success but the mount remains");
     }
     Ok(())
@@ -307,12 +276,7 @@ pub struct MountEntry {
 
 /// The mountinfo record for exactly `path`, if it is a mountpoint.
 pub fn mount_entry(path: &Path) -> Option<MountEntry> {
-    mount_entry_at(path, Path::new("/proc/self/mountinfo"))
-}
-
-/// The mountinfo record for exactly `path`, read from one mount table.
-pub fn mount_entry_at(path: &Path, mountinfo_path: &Path) -> Option<MountEntry> {
-    let text = std::fs::read_to_string(mountinfo_path).ok()?;
+    let text = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     text.lines()
         .find_map(|line| parse_mountinfo(line, &canonical))
@@ -335,12 +299,7 @@ fn parse_mountinfo(line: &str, canonical: &Path) -> Option<MountEntry> {
 
 /// Whether `path` is a live EROFS FUSE mount, as observed by mountinfo.
 pub fn is_erofs_mount(path: &Path) -> bool {
-    is_erofs_mount_at(path, Path::new("/proc/self/mountinfo"))
-}
-
-/// Whether `path` is a live EROFS FUSE mount in one mount table.
-pub fn is_erofs_mount_at(path: &Path, mountinfo_path: &Path) -> bool {
-    mount_entry_at(path, mountinfo_path).is_some_and(|entry| {
+    mount_entry(path).is_some_and(|entry| {
         entry.fs_type.to_ascii_lowercase().contains("erofs")
             || entry.source.to_ascii_lowercase().contains("erofs")
     })
@@ -348,12 +307,7 @@ pub fn is_erofs_mount_at(path: &Path, mountinfo_path: &Path) -> bool {
 
 /// Whether `path` currently appears as a mountpoint in this process's view.
 pub fn is_mounted(path: &Path) -> bool {
-    is_mounted_at(path, Path::new("/proc/self/mountinfo"))
-}
-
-/// Whether `path` appears as a mountpoint in one mount table.
-pub fn is_mounted_at(path: &Path, mountinfo_path: &Path) -> bool {
-    mount_entry_at(path, mountinfo_path).is_some()
+    mount_entry(path).is_some()
 }
 
 struct BoundedOutcome {
