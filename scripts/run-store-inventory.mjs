@@ -146,7 +146,16 @@ export function checkInventory(manifest,workflows){
         fail('Controller manual request must be unprivileged owner/main-only');
       if(!/^name: Store \/ Agent Controller Ingest$/m.test(writer)||
          !/^  workflow_run:$/m.test(writer)||
-         /^  (workflow_dispatch|repository_dispatch):$/m.test(writer)||
+         /^  repository_dispatch:$/m.test(writer)||
+         // #3488: the one bot-only wake is deliberately NOT an arbitrary
+         // manual/privileged Store dispatch. Run/Artifact and original human
+         // Comment are re-attested before the scoped App token is minted.
+         (/^  workflow_dispatch:$/m.test(writer) &&
+           (!writer.includes('      source_run_id:')||
+            !writer.includes("github.actor == 'github-actions[bot]'")||
+            !writer.includes("github.ref == 'refs/heads/main'")||
+            !writer.includes('bug-develop-comment.mjs verify')||
+            !writer.includes('controller-request.mjs verify-source')))||
          !writer.includes('workflows: ["Acceptance / Agent Controller"]')||
          !writer.includes('    branches: [main]')||
          !writer.includes("github.event.workflow_run.actor.login == 'BestNathan'")||
@@ -560,7 +569,12 @@ function selfTest(){
     .replace(/^  workflow_run:$/m,'  workflow_dispatch:'));
   assert.throws(()=>checkInventory(manifest,unsafeControllerWriter),
     /Controller Store ingester is not authenticated/);
-  const unsafeControllerCheckout=new Map(sources);
+  const unsafeBotWake=new Map(sources);
+  unsafeBotWake.set(controllerWriter,unsafeBotWake.get(controllerWriter)
+    .replace("github.actor == 'github-actions[bot]'","github.actor == 'anyone'"));
+  assert.throws(()=>checkInventory(manifest,unsafeBotWake),
+    /Controller Store ingester is not authenticated/);
+    const unsafeControllerCheckout=new Map(sources);
   unsafeControllerCheckout.set(controllerWriter,unsafeControllerCheckout.get(controllerWriter)
     .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
   assert.throws(()=>checkInventory(manifest,unsafeControllerCheckout),
