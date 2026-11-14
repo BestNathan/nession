@@ -482,6 +482,9 @@ impl ServerClientHandle {
                     os_version: String::new(),
                     nession_version: String::new(),
                     image_tag: String::new(),
+                    architecture: String::new(),
+                    os: String::new(),
+                    variant: None,
                 },
                 sync_intent,
                 connected: Arc::new(AtomicBool::new(connected)),
@@ -1375,6 +1378,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -1427,6 +1433,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -1484,6 +1493,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -1578,6 +1590,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
         let client = ServerClient::new(
             format!("ws://{addr}"),
@@ -1657,6 +1672,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
         let client = ServerClient::new(
             format!("ws://{addr}"),
@@ -1774,6 +1792,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -1913,6 +1934,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -2016,6 +2040,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -2545,6 +2572,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -2639,6 +2669,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -2732,6 +2765,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -2845,6 +2881,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -2897,6 +2936,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         };
 
         let client = ServerClient::new(
@@ -3004,6 +3046,9 @@ mod tests {
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         }
     }
 
@@ -5082,6 +5127,9 @@ mod versioned_routing {
                 os_version: "Linux".to_string(),
                 nession_version: "0.1.0".to_string(),
                 image_tag: "test".to_string(),
+                architecture: String::new(),
+                os: String::new(),
+                variant: None,
             },
             Arc::new(SessionManager::new()),
             "/tmp".to_string(),

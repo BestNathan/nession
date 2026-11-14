@@ -106,6 +106,9 @@ async fn integration_connection_to_mock_server() {
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
@@ -145,6 +148,9 @@ async fn integration_registration_message_format() {
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
@@ -269,6 +275,9 @@ async fn integration_heartbeat_message_format() {
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
@@ -343,6 +352,9 @@ async fn integration_session_update_message_format() {
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
@@ -420,6 +432,9 @@ async fn integration_reconnection_logic() {
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
@@ -496,6 +511,9 @@ fn metadata() -> AgentMetadata {
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     }
 }
 

@@ -39,6 +39,9 @@ pub mod git;
 #[cfg(feature = "cache")]
 pub mod cache;
 
+#[cfg(feature = "distribution")]
+pub mod distribution;
+
 #[cfg(feature = "registry")]
 pub mod registry;
 

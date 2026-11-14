@@ -24,11 +24,36 @@ pub enum ManagedImageRole {
     Toolchain,
 }
 
+/// One OCI object reachable from a resolved Manifest (#3499).
+///
+/// The Server mints one of these per reachable descriptor; the Agent fetches
+/// exactly this set. A route is authorization for that object only, not for an
+/// arbitrary digest the caller happens to know.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedImageObjectGrant {
+    /// `sha256:<64 lowercase hex>` of the exact object bytes.
+    pub digest: String,
+    /// The standard OCI media type of those bytes.
+    pub media_type: String,
+    /// Exact byte count, verified by both sides.
+    pub size_bytes: u64,
+    /// Authorized route, `/images/blobs/<digest>`.
+    pub path: String,
+}
+
 /// One image the Agent must make ready in its authorized EROFS cache.
 ///
 /// `path` is the Server's authorized blob route for this digest. The Agent
 /// derives the absolute URL from its own configured Server address; the Server
 /// never guesses its public hostname.
+///
+/// A Manifest-aware grant sets `digest`/`path` to the resolved Manifest and
+/// fills `objects` with the Manifest, Config and EROFS descriptors it is
+/// allowed to fetch. A legacy grant leaves `objects` empty and its `digest` is
+/// the raw EROFS blob identity.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +67,10 @@ pub struct ManagedImageGrant {
     /// `/opt/<name>` for a toolchain image; absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Reachable OCI objects of a resolved Manifest; empty for a legacy
+    /// digest-addressed EROFS grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<ManagedImageObjectGrant>,
 }
 
 /// The Server→Agent Managed creation input.
