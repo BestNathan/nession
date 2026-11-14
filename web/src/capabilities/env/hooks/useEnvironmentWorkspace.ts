@@ -60,7 +60,7 @@ function useSessionScreenEpoch(sessionId: string | null, reset: () => void) {
 }
 
 function notifyBindingResult(
-  resp: { success: boolean; warnings: string[]; error?: string },
+  resp: { success: boolean; warnings: string[]; error?: string | null },
   failureMessage: string,
 ): void {
   resp.warnings.forEach((warning) => toast.warning(warning));
