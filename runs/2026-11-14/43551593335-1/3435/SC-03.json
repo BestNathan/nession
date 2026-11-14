@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c0d966535191d6cd8df402910aa056f3271335c070d53cd347093756c31ad88f",
+  "run_id": 43551593335,
+  "run_attempt": 1,
+  "issue": 3435,
+  "criterion": "SC-03",
+  "criterion_text": "On a supported Linux Agent, Enter with a managed Workspace selection resolves/creates exactly one stable Workspace, acquires its RW lease, binds that durable directory at `/workspace`, and reports the effective policy; execution cleanup releases the lease, leaves the bytes intact, and a second attachment observes the same content. A missing directory, a lease conflict, an unsupported Project Location/lower combination, or an unavailable registry refuses preparation with no Native fallback.",
+  "stage": "staging",
+  "target_sha": "37bf8612f61f53a91067c7798da1e9ca579cde35",
+  "contract_sha256": "facb61dadf1fd3e6e98f7a455fbdd9938fca8b64738205ab892757a155d71c40",
+  "case_revision": "37bf8612f61f53a91067c7798da1e9ca579cde35",
+  "case_tree_sha": "9d436ad717809c381ba1de92a07cfe55b97244b2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-14T03:30:06.446Z",
+  "finished_at": "2026-11-14T03:31:17.927Z",
+  "duration_ms": 71481,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One stable managed Workspace is prepared and leased for /workspace; unsupported combinations fail closed and durable bytes survive while deletion requires no attachment",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 37bf8612f61f53a91067c7798da1e9ca579cde35: concurrent get-or-create returned one stable id; a manager restart reused the same id and bytes; a missing directory stayed missing; delete was refused while leased and removed only an unleased workspace; a symlinked path was refused; the selected managed directory replaced the execution scratch write target and the unsupported Project-lower combination was refused"
+        }
+      ],
+      "duration_ms": 65525,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43551593335,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "37bf8612f61f53a91067c7798da1e9ca579cde35",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43551593335",
+    "record_path": "runs/2026-11-14/43551593335-1/3435/SC-03.json",
+    "source_result_sha256": "bf4f26bf1d12a1d9ef452da13b0a539da543a64737b7bd83a5ba05c34450d912"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43551593335-1",
+    "sha256": "bf4f26bf1d12a1d9ef452da13b0a539da543a64737b7bd83a5ba05c34450d912",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43551593335",
+    "durability": "time-limited; object archival not configured"
+  }
+}
