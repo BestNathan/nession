@@ -176,9 +176,10 @@ try {
   assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
 
   // #3461: preserve BOTH historical #3386/#3433 red Issue Audit scenarios.
-  // The original workflow ran but its model supplied an explicitly blank
-  // title/body alongside a valid labels repair, causing an untyped Error.
-  // These deterministic fake-gh fixtures MUST fail on the original source.
+  // Both live runs reached the same empty-field pre-write exception. Raw
+  // model proposals were not logged, so the exact offending field is unknown.
+  // These minimal candidate fixtures exercise both causes of that exception
+  // and MUST fail on the original untyped-rejection source.
   assert.deepEqual(
     Object.keys(issueAuditProposalSchemaForIssue(unlabelled).properties),
     ['labels','comment','verification_tier','tier_reason'],
