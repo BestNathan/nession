@@ -367,6 +367,19 @@ normal-buffer/no-mouse keeps reversible scroll clearance; alternate-screen or
 mouse-reporting TUIs keep the bounded authorized row reserve. A simultaneous
 keyboard must not add another reserve or a second resize.
 
+| Context | Expected visible/scroll behavior | May change xterm/PTY rows? |
+|---|---|---|
+| Capsule focus opens IME | Composer above the visible bottom; shell/layout intact; real bounded outer scroll | No |
+| Tap Terminal + cursor-tethered IME | Caret/control revealable; no clipped dead end | No |
+| IME hide, or candidate/toolbar height changes | Extent reconciles; no remount, no resize storm | No |
+| Browser toolbar / visual-viewport scroll / zoom without editable focus | Stable layout; no keyboard reserve, no scroll jump | No |
+| Composer 1 → multi → 1 lines | Existing composer-only measured fit changes | Only if integer rows change |
+| Open/close Peek in a normal shell | Reversible local scroll clearance; history anchor preserved | No |
+| Open/close Peek in alternate-screen/mouse TUI | Bounded authorized row reserve, or compact fallback | Only current Controller, by #3492 |
+| Keyboard + Peek in normal shell or TUI | No double-spend of keyboard and panel pixels; one owner | Panel policy only |
+| Sessions/Workspace navigation while keyboard visible | One active scroll owner; covered focus released; Terminal mounted | No |
+| Portrait/landscape + nonzero safe area | Correct mapping; focused control and controls reachable | Only true layout/orientation change |
+
 Interaction rules (touch arbitration, header visibility, layer switching) are
 in [interaction/app.md](interaction/app.md); the fixed-column terminal sizing
 boundary is in [terminal/terminal-sizing.md](terminal/terminal-sizing.md).
