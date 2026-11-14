@@ -69,7 +69,7 @@ function bindingResponse(
         managed_keys: ['A'],
       },
     },
-    warnings: [],
+    warnings: [] as string[],
     error: overrides.error,
   };
 }
