@@ -109,8 +109,8 @@ arguments and executes the business operation through the injected
 The Agent owns Session lifecycle and live state even when a caller reaches it
 through the Server. The Server owns Agent discovery, authorization and routing.
 There is no Server-local tmux fallback and no alternate management plane. The
-inbound MCP token is never forwarded to a backend, and P2P credentials are
-neither widened nor exposed.
+inbound MCP token is verified by the hosting endpoint and never forwarded to a
+backend; no Tool mints or returns a P2P credential.
 
 ## Protocol versions
 

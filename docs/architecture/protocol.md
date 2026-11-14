@@ -1197,9 +1197,11 @@ frame:
 | May this wire run? | the same gate: only `client.auth` before authentication |
 
 An empty or wrong token, a repeated `client.auth` after success, or any business
-frame before authentication fails closed and ends the connection. A socket that
-never authenticates is closed after a fixed deadline, so an admitted but silent
-peer cannot hold a connection indefinitely. The immutable `AuthContext` is
+frame before authentication is refused without granting authority: the refusal
+is answered on the connection's own wire, and the socket stays unauthenticated
+until it authenticates or the fixed deadline closes it. A socket that never
+authenticates is closed after that deadline, so an admitted but silent peer
+cannot hold a connection indefinitely. The immutable `AuthContext` is
 established once; later frames never re-derive it and a second authentication
 cannot rewrite it.
 
@@ -1215,11 +1217,15 @@ active Session/control lease, stream identity and operation preconditions.
 A reconnect presents the cached token; there is no lease to renew and no issuer
 to wait for. While the Server is down, a client that still holds a valid Agent
 Token can reconnect its Session directly and keeps its stream cursor, controller
-lease and connection generation. An explicit Agent rejection clears the cached
-token and stops ordinary retries: after the Server connection is authenticated
-again, one authenticated attach fetches the rotated token and rebuilds the
-transport. Logout, Agent change and runtime disposal discard the cached token;
-it is memory-only, never browser storage, a URL, a log or an error message.
+lease and connection generation. An explicit Agent rejection is the shared auth
+answer with `status: failed`, not a transport error: the runtime clears the
+cached token, refetches once through an authenticated attach when the Server is
+available and rebuilds the transport with the current value. If the Server has
+not yet observed the Agent's rotation, that one refetch can still return the
+previous value, and the Session's recovery degrades to the Server Relay instead
+of retrying indefinitely. Logout, Agent change and runtime disposal discard the
+cached token; it is memory-only, never browser storage, a URL, a log or an
+error message.
 
 ### The Relay target is Server-owned
 
