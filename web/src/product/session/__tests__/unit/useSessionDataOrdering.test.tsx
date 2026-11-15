@@ -16,8 +16,12 @@ const fake = vi.hoisted(() => ({
   fetch: vi.fn(),
   listeners: new Set<(sessions: Session[]) => void>(),
 }));
+const incarnations = vi.hoisted(() => ({ observe: vi.fn() }));
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), warning: vi.fn() },
+}));
+vi.mock('@/product/session/state/metadata', () => ({
+  observeSessionIncarnations: incarnations.observe,
 }));
 vi.mock('@/product/session', () => ({
   sessionsApi: {
@@ -115,5 +119,23 @@ describe('#1900 SessionItem live report/list ordering (real DOM)', () => {
     expect(screen.getByTestId('session-item-workload')).toHaveTextContent('unknown');
     push([]);
     expect(screen.queryByTestId('session-item-workload')).toBeNull();
+  });
+});
+
+// #3424 — the metadata incarnation owner must see every authoritative list,
+// whether it arrived as a push or as a correlated `server.session.list` reply.
+describe('#3424 Session list ingestion notifies the metadata owner', () => {
+  it('observes the instance identity carried by pushes and list replies', async () => {
+    const listed = { ...row('bash'), instance_id: 'instance-listed' };
+    const pushed = { ...row('bash'), instance_id: 'instance-pushed' };
+    fake.fetch.mockResolvedValue({ sessions: [listed], stale_agents: [] });
+
+    render(<SessionScreen />);
+    await act(async () => { await current.fetchSessions(); });
+    expect(incarnations.observe).toHaveBeenCalledWith([listed]);
+
+    incarnations.observe.mockClear();
+    push([pushed]);
+    expect(incarnations.observe).toHaveBeenCalledWith([pushed]);
   });
 });

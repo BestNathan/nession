@@ -11,6 +11,7 @@ import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { TerminalWell } from '@/app/TerminalWell';
+import { AppKeyboardAvoidanceScrollport } from '@/app/experiences/app/AppKeyboardAvoidanceScrollport';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -81,6 +82,13 @@ export interface ShellMainProps {
   onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   /** Focused Session's Project context and actions (#3082). */
   sessionProject?: SessionProjectContext;
+  /**
+   * Whether this App Terminal layer is the one the user is currently in
+   * (#3523). The Experience's keyboard-avoidance scrollport releases a focused
+   * control when the layer becomes inactive, so a covered layer cannot keep
+   * owning the visible keyboard.
+   */
+  keyboardAvoidanceActive?: boolean;
 }
 
 /**
@@ -280,6 +288,7 @@ function ShellTerminal({
   sessionContextAction,
   onOpenWorkspaceFile,
   workContext,
+  keyboardAvoidanceActive,
 }: {
   surface: Surface;
   selectedSession: Session | null;
@@ -291,8 +300,9 @@ function ShellTerminal({
   sessionContextAction?: ReactNode;
   onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   workContext?: ResolvedWorkContext;
+  keyboardAvoidanceActive: boolean;
 }) {
-  return (
+  const well = (
     <TerminalWell
       className={cn('min-h-0', (surface !== 'terminal' || !selectedSession) && 'hidden')}
     >
@@ -317,6 +327,18 @@ function ShellTerminal({
       )}
     </TerminalWell>
   );
+  // App only (#3523): the Terminal layer is the one App surface with no scroll
+  // ancestor of its own. The scrollport wraps the well, not the Session
+  // header, so a soft keyboard lifts the work while the shell's only App
+  // header stays put — and the well's measured height never changes.
+  if (experience === 'app') {
+    return (
+      <AppKeyboardAvoidanceScrollport active={keyboardAvoidanceActive}>
+        {well}
+      </AppKeyboardAvoidanceScrollport>
+    );
+  }
+  return well;
 }
 
 /**
@@ -435,6 +457,7 @@ export function ShellMain({
   onIncomingFocusApplied,
   onOpenWorkspaceFile,
   sessionProject,
+  keyboardAvoidanceActive = true,
 }: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
   const { focus, setFocus, consumeFocus } = useIncomingCapabilityFocus(incomingFocus, onIncomingFocusApplied);
@@ -506,6 +529,7 @@ export function ShellMain({
                 sessionContextAction={sessionContextAction}
                 onOpenWorkspaceFile={onOpenWorkspaceFile}
                 workContext={workContext}
+                keyboardAvoidanceActive={keyboardAvoidanceActive}
               />
             ) : null}
             {showWorkspace && hasSession ? (

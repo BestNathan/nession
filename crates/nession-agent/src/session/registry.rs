@@ -18,8 +18,8 @@ use nession_protocol::contracts::terminal::v1::{
     TerminalOutputAppliedPayload, TerminalOutputProgressPayload, TerminalStreamResumePayload,
     TerminalStreamResumeResponse,
 };
+use nession_runtime::frame::WsFrame;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::outbound::P2pOutbound;
@@ -318,7 +318,7 @@ impl SessionRegistry {
                 // stalled client's recovery notice.
                 let sent = tokio::time::timeout(
                     std::time::Duration::from_millis(500),
-                    peer.outbound.send_terminal(WsMessage::Text(json.clone())),
+                    peer.outbound.send_terminal(WsFrame::Text(json.clone())),
                 )
                 .await;
                 if !matches!(sent, Ok(Ok(()))) {
@@ -916,7 +916,7 @@ async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayloa
     for peer in peers {
         let _ = peer
             .outbound
-            .send_terminal(WsMessage::Text(json.clone()))
+            .send_terminal(WsFrame::Text(json.clone()))
             .await;
     }
 }
@@ -929,7 +929,7 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
     for peer in peers {
         let _ = peer
             .outbound
-            .send_terminal(WsMessage::Text(json.clone()))
+            .send_terminal(WsFrame::Text(json.clone()))
             .await;
     }
 }

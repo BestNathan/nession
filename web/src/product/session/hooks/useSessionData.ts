@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import type { Session } from '@/types';
 import { sessionsApi } from '@/product/session';
+import { observeSessionIncarnations } from '@/product/session/state/metadata';
 
 /** Options for {@link useSessionData}'s `fetchSessions`. */
 export interface FetchSessionsOptions {
@@ -52,6 +53,10 @@ export function useSessionData() {
   const visibleSessions = useRef<Session[]>([]);
   const applyRealtimeSessions = useCallback((incoming: Session[]) => {
     realtimeRevision.current += 1;
+    // A push is an authoritative list: the same public id may now name a new
+    // tmux incarnation. Tell the metadata owner before any row renders it
+    // (#3424).
+    observeSessionIncarnations(incoming);
     visibleSessions.current = incoming;
     setSessions(incoming);
   }, []);
@@ -80,6 +85,10 @@ export function useSessionData() {
           }
           return;
         }
+        // A correlated list reply is authoritative in the same way a push is:
+        // invalidate a name-keyed metadata entry when the instance changed
+        // (#3424).
+        observeSessionIncarnations(response.sessions);
         visibleSessions.current = response.sessions;
         setSessions(response.sessions);
         const stale = response.stale_agents ?? [];

@@ -55,6 +55,40 @@ async function dirtyTheEditor(page: Page): Promise<void> {
 test.describe('Web 1440×900', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
+  test('late Session A binding answer cannot discard a dirty Session B draft (#3444)', async ({ page }) => {
+    // Both the switch control and deferred Server reply are fixture-only;
+    // production WorkspaceShell, Environment hooks and DOM stay unchanged.
+    await page.goto('/#/fixture/workspace?capability=env&env=deferred-binding&git=selection-overlap');
+    await page.getByTestId('env-profile-list').waitFor();
+    await expectSessionOverview(page);
+
+    await page.getByTestId('env-manage-binding').click();
+    await page.getByTestId(`env-draft-add-${PROD_KEY}`).click();
+    await page.getByTestId('env-draft-apply').click();
+    await expect.poll(() => page.evaluate(() =>
+      (window as Window & { fixtureEnvBinding?: { isHeld: () => boolean } })
+        .fixtureEnvBinding?.isHeld() ?? false,
+    )).toBe(true);
+
+    await page.evaluate(() =>
+      (window as Window & { fixtureGitSelectSession?: (id: string) => void })
+        .fixtureGitSelectSession?.('devbox-01:design-system'),
+    );
+    await expect(page.getByTestId('env-binding-draft')).toHaveCount(0);
+
+    await page.getByTestId('env-manage-binding').click();
+    await page.getByTestId(`env-draft-add-${PROD_KEY}`).click();
+    await expect(page.getByTestId('env-draft-apply')).toBeEnabled();
+
+    await page.evaluate(() =>
+      (window as Window & { fixtureEnvBinding?: { releaseBinding: () => void } })
+        .fixtureEnvBinding?.releaseBinding(),
+    );
+    await expect(page.getByTestId('env-binding-draft')).toBeVisible();
+    await expect(page.getByTestId('env-draft-apply')).toBeEnabled();
+    await expect(page.getByText('A-only late warning')).toHaveCount(0);
+  });
+
   test('the Session is the default surface and the navigator is its profile index', async ({
     page,
   }) => {

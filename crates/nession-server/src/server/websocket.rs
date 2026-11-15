@@ -1,8 +1,8 @@
 use anyhow::Context;
+use nession_runtime::frame::WsFrame;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
 use axum::extract::{FromRequestParts, Path, State, WebSocketUpgrade};
@@ -380,6 +380,13 @@ impl WebSocketServer {
         // bound, and it exists for the same reason: a peer that sends nothing
         // must not cost a task and a socket indefinitely.
         let handshake_slots = Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_PENDING_HANDSHAKES));
+        // A separate budget for upgraded WebSockets that have not authenticated
+        // yet (#3439 W2): the handshake slot above is returned when the upgrade
+        // is answered, so this is what bounds an upgraded socket's task, queue
+        // and writer before it proves a credential.
+        let pending_auth_slots = Arc::new(tokio::sync::Semaphore::new(
+            self.config.max_pending_ws_auth.max(1),
+        ));
         let mut connections = tokio::task::JoinSet::new();
 
         loop {
@@ -411,6 +418,8 @@ impl WebSocketServer {
                         db: Arc::clone(&self.db),
                         mutations: Arc::clone(&self.mutations),
                         mcp: self.mcp.clone(),
+                        mcp_enabled: self.config.mcp.enabled,
+                        mcp_path: self.config.mcp.path.clone(),
                         image_manager: Arc::clone(&self.image_manager),
                         image_http: Arc::clone(&self.image_http),
                         auth_token: self.config.auth_token.clone(),
@@ -421,8 +430,12 @@ impl WebSocketServer {
                             self.config.terminal_stall_grace_secs,
                         ),
                         query_concurrency: self.config.query_concurrency_per_connection,
+                        ws_auth_timeout: std::time::Duration::from_secs(
+                            self.config.ws_auth_timeout_secs,
+                        ),
                     };
                     let tls_acceptor = tls_acceptor.clone();
+                    let pending_auth = Arc::clone(&pending_auth_slots);
 
                     connections.spawn(async move {
                         if let Err(e) = handle_connection(
@@ -430,6 +443,7 @@ impl WebSocketServer {
                             tls_acceptor,
                             ctx,
                             AdmissionSlot::new(slot),
+                            pending_auth,
                         )
                         .await
                         {
@@ -498,6 +512,12 @@ struct ServerContext {
     mutations: Arc<KeyedLane<ResourceKey>>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// Whether `[mcp] enabled = true` (#3600). Stated separately from the
+    /// mounted service so the protocol answer is the configuration that was
+    /// actually applied at startup.
+    mcp_enabled: bool,
+    /// The configured MCP path (#3600).
+    mcp_path: String,
     /// Global EROFS image manager and its authorized HTTP route (#3022).
     image_manager: Arc<ImageManager>,
     image_http: Arc<ImageHttpService>,
@@ -512,6 +532,9 @@ struct ServerContext {
     /// here rather than read per frame so a connection's lane is fixed for its
     /// lifetime: see `nession_runtime::lane::QueryLane`.
     query_concurrency: usize,
+    /// The absolute deadline for an upgraded connection's first authentication
+    /// (`#3439` W2), fixed for the listener rather than read per frame.
+    ws_auth_timeout: std::time::Duration,
 }
 
 /// How many accepted Server connections may be mid-HTTP-request at once
@@ -542,6 +565,9 @@ struct HttpState {
     ctx: ServerContext,
     /// This connection's pre-authentication claim (#3439).
     slot: AdmissionSlot,
+    /// The listener's budget for upgraded-but-unauthenticated sockets
+    /// (#3439 W2), acquired before an upgrade is answered.
+    pending_auth: Arc<tokio::sync::Semaphore>,
 }
 
 /// Serve one accepted socket through the Server's Axum router.
@@ -550,13 +576,15 @@ async fn handle_connection(
     tls_acceptor: Option<TlsAcceptor>,
     ctx: ServerContext,
     slot: AdmissionSlot,
+    pending_auth: Arc<tokio::sync::Semaphore>,
 ) -> anyhow::Result<()> {
-    let router = http_router(ctx, slot.clone());
+    let router = http_router(ctx, slot.clone(), pending_auth);
     ingress::serve(
         move || ingress::TcpOrTls::accept(tcp_stream, tls_acceptor),
         router,
         slot,
         DEFAULT_HANDSHAKE_TIMEOUT,
+        ingress::HTTP_HEADER_READ_TIMEOUT,
     )
     .await?;
     Ok(())
@@ -572,11 +600,16 @@ async fn handle_connection(
 /// The fallback keeps two pre-existing behaviors: the Server has always
 /// accepted a WebSocket upgrade at the authority root (`ws://host:port`) as
 /// well as at `/ws`, and anything that is not an upgrade gets a plain 404.
-fn http_router(ctx: ServerContext, slot: AdmissionSlot) -> Router {
+fn http_router(
+    ctx: ServerContext,
+    slot: AdmissionSlot,
+    pending_auth: Arc<tokio::sync::Semaphore>,
+) -> Router {
     let mcp_path = ctx.mcp.as_ref().map(|mcp| mcp.path().to_string());
     let state = HttpState {
         ctx,
         slot: slot.clone(),
+        pending_auth,
     };
     let mut router = Router::new()
         .route("/ws", get(ws_upgrade))
@@ -620,13 +653,23 @@ async fn websocket_or_not_found(
 }
 
 fn finish_ws_upgrade(state: HttpState, ws: WebSocketUpgrade) -> Response {
-    // The upgrade request is the end of the unauthenticated admission window.
+    // The upgrade request is the end of the pre-authentication admission
+    // window, but not of the upgrade's *unauthenticated* window: until
+    // `server.auth` or an authenticated Agent registration, the socket holds
+    // the listener's pending-auth budget (#3439 W2). Refusing here means a
+    // peer beyond the budget costs an HTTP response, not a connection task.
+    let Ok(pending_auth) = Arc::clone(&state.pending_auth).try_acquire_owned() else {
+        debug!("refusing a WebSocket upgrade: every pending-authentication slot is occupied");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     state.slot.release();
     let ctx = state.ctx;
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
         .on_upgrade(move |socket| async move {
-            if let Err(error) = handle_ws_stream(AxumWebSocket::new(socket), ctx).await {
+            if let Err(error) =
+                handle_ws_stream(AxumWebSocket::new(socket), ctx, pending_auth).await
+            {
                 error!("Connection error: {error:#}");
             }
         })
@@ -656,7 +699,11 @@ async fn mcp_http(State(state): State<HttpState>, request: axum::extract::Reques
     }
 }
 
-async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyhow::Result<()> {
+async fn handle_ws_stream(
+    ws_stream: AxumWebSocket,
+    ctx: ServerContext,
+    pending_auth: tokio::sync::OwnedSemaphorePermit,
+) -> anyhow::Result<()> {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
 
@@ -675,8 +722,11 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
         terminal_web_font_size,
         terminal_stall_grace,
         query_concurrency,
+        ws_auth_timeout,
         image_manager,
         mcp: _,
+        mcp_enabled,
+        mcp_path,
         image_http: _,
     } = ctx;
 
@@ -705,6 +755,8 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
             heartbeat_interval_secs,
             terminal_cols,
             terminal_web_font_size,
+            mcp_enabled,
+            mcp_path,
         },
     );
     handler.set_client_sender(sender.clone());
@@ -723,7 +775,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // keepalive. `select!` polls both arms regardless of whether the other is
     // parked, so a stalled business frame never delays a ping.
     let ping_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
-    let mut relay_task = tokio::spawn(async move {
+    let mut relay_writer = RelayWriterGuard(tokio::spawn(async move {
         let mut ping_ticker = tokio::time::interval(ping_period);
         ping_ticker.tick().await; // consume the immediate first tick
         loop {
@@ -746,14 +798,14 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
                     }
                 }
                 _ = ping_ticker.tick() => {
-                    if write.send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new())).await.is_err() {
+                    if write.send(WsFrame::Ping(Vec::new())).await.is_err() {
                         // Connection closed — expected during shutdown, no need to log.
                         break;
                     }
                 }
             }
         }
-    });
+    }));
 
     // The work this connection has in flight (#961-C, #961-E). Read-only units
     // run on the query lane — this connection's own, since it is admission — and
@@ -774,218 +826,282 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // It is logged once below and is what makes a browser's close event
     // correlatable with the Server's own view (#3358 SC-05).
     let mut close_reason = "peer-closed";
-    while let Some(frame) = read.next().await {
-        let frame = frame?;
 
-        // Not a protocol message: a close, a ping, a pong, a binary frame.
-        // Connection lifecycle, handled where it stands *and ahead of the
-        // barrier below*, because a slow operation must not hold the connection
-        // open — the requirement names ping and close explicitly. The work
-        // still in flight is ended with the connection, further down.
-        let Message::Text(text) = frame else {
-            if let HandlerAction::Close = handler.handle_message(frame).await? {
-                close_reason = "client-close";
-                break;
+    // Read and dispatch to completion, and **capture** the outcome rather than
+    // returning through the function. Teardown below must run for every way the
+    // read loop ends — a normal close, a transport error, a malformed frame, a
+    // handler failure, a failed relay — and a `?` in the loop used to return
+    // past the lane shutdown, the generation-fenced broker release, the client
+    // retirement and the writer wait (#3547). The block is all of the fallible
+    // work and nothing else: when it ends, its borrows of `read`, `handler`,
+    // `lanes` and `sender` are released and the teardown owns them again.
+    // The upgraded socket's pending-auth budget, and the one absolute deadline
+    // for its first authentication (#3439 W2). The deadline is deliberately
+    // not re-armed: a Ping, malformed JSON, a refused `server.auth` or a
+    // business frame must not extend the unauthenticated window. Once
+    // authenticated — a client auth or an authenticated Agent registration —
+    // neither applies any more.
+    let mut pending_auth = Some(pending_auth);
+    let auth_deadline = tokio::time::Instant::now() + ws_auth_timeout;
+    let reader_result: anyhow::Result<()> = async {
+        loop {
+            if handler.is_authenticated() {
+                pending_auth.take();
             }
-            claim_agent_channel(&handler, &command_broker, &sender).await;
-            continue;
-        };
+            let next = if handler.is_authenticated() {
+                read.next().await
+            } else {
+                match tokio::time::timeout_at(auth_deadline, read.next()).await {
+                    Ok(next) => next,
+                    Err(_) => {
+                        close_reason = "auth-timeout";
+                        break;
+                    }
+                }
+            };
+            let Some(frame) = next else { break };
+            let frame = match frame {
+                Ok(frame) => frame,
+                Err(error) => {
+                    close_reason = "read-error";
+                    return Err(error.into());
+                }
+            };
 
-        // Decoded once, here: the policy is read from the envelope's own
-        // `msg_type` — and, for a mutation, from its payload — and the message
-        // that is dispatched below is the one this decode produced. A frame
-        // whose envelope cannot be read ends the connection — which is what it
-        // did when the handler did the decoding inside the loop, and the reason
-        // it is still done inside the loop instead of inside the task that will
-        // run it.
-        let msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)?;
-        let policy = policy_for_wire(&msg.msg_type, &msg.payload);
-
-        match policy {
-            ExecutionPolicy::Query => {
-                // The claim comes first: it is what binds this connection as the
-                // agent's control channel, and a query may reach for the broker
-                // as soon as its task is scheduled.
+            // Not a protocol message: a close, a ping, a pong, a binary frame.
+            // Connection lifecycle, handled where it stands *and ahead of the
+            // barrier below*, because a slow operation must not hold the connection
+            // open — the requirement names ping and close explicitly. The work
+            // still in flight is ended with the connection, further down.
+            let WsFrame::Text(text) = frame else {
+                match handler.handle_message(frame).await {
+                    Ok(HandlerAction::Close) => {
+                        close_reason = "client-close";
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        close_reason = "handler-error";
+                        return Err(error);
+                    }
+                }
                 claim_agent_channel(&handler, &command_broker, &sender).await;
-                // `query` waits here when the connection's lane is
-                // full. That wait is the bound the requirement asks for: the
-                // frame that would exceed the lane is not *read* until there is
-                // room for it, so a connection cannot grow tasks with its
-                // message count.
-                lanes
-                    .query(answer(handler.clone(), msg, sender.clone(), "a query"))
-                    .await;
                 continue;
+            };
+
+            // Decoded once, here: the policy is read from the envelope's own
+            // `msg_type` — and, for a mutation, from its payload — and the message
+            // that is dispatched below is the one this decode produced. A frame
+            // whose envelope cannot be read ends the connection — which is what it
+            // did when the handler did the decoding inside the loop, and the reason
+            // it is still done inside the loop instead of inside the task that will
+            // run it.
+            let msg: ProtocolMessage<serde_json::Value> = match serde_json::from_str(&text) {
+                Ok(msg) => msg,
+                Err(error) => {
+                    close_reason = "malformed-frame";
+                    return Err(error.into());
+                }
+            };
+            let policy = policy_for_wire(&msg.msg_type, &msg.payload);
+
+            match policy {
+                ExecutionPolicy::Query => {
+                    // The claim comes first: it is what binds this connection as the
+                    // agent's control channel, and a query may reach for the broker
+                    // as soon as its task is scheduled.
+                    claim_agent_channel(&handler, &command_broker, &sender).await;
+                    // `query` waits here when the connection's lane is
+                    // full. That wait is the bound the requirement asks for: the
+                    // frame that would exceed the lane is not *read* until there is
+                    // room for it, so a connection cannot grow tasks with its
+                    // message count.
+                    lanes
+                        .query(answer(handler.clone(), msg, sender.clone(), "a query"))
+                        .await;
+                    continue;
+                }
+                ExecutionPolicy::Key(key) => {
+                    // Claimed here for the same reason as a query's: the mutation
+                    // reaches for the broker as soon as its key's worker runs it,
+                    // and the claim is about *this* connection rather than about the
+                    // frame that prompted it.
+                    claim_agent_channel(&handler, &command_broker, &sender).await;
+                    // Waits only when that resource's own queue is at its depth. The
+                    // wait parks the reader, which is the backpressure — see
+                    // `server::execution`. A mutation for another resource is not
+                    // behind it.
+                    lanes
+                        .key(
+                            key,
+                            Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+                        )
+                        .await;
+                    continue;
+                }
+                ExecutionPolicy::Ordered => {
+                    // Authentication, agent registration, the relay mode
+                    // transitions — applied, and answered, after everything read
+                    // before them, which is what their determinism is made of on a
+                    // connection that is no longer serial. The barrier covers both
+                    // lanes: an `attach` must not be applied while the `create` it
+                    // is about is still queued. See `ExecutionPolicy::Ordered`.
+                    lanes.drain().await;
+                }
+                ExecutionPolicy::Inline => {}
             }
-            ExecutionPolicy::Key(key) => {
-                // Claimed here for the same reason as a query's: the mutation
-                // reaches for the broker as soon as its key's worker runs it,
-                // and the claim is about *this* connection rather than about the
-                // frame that prompted it.
-                claim_agent_channel(&handler, &command_broker, &sender).await;
-                // Waits only when that resource's own queue is at its depth. The
-                // wait parks the reader, which is the backpressure — see
-                // `server::execution`. A mutation for another resource is not
-                // behind it.
-                lanes
-                    .key(
-                        key,
-                        Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+
+            let action = match handler.handle_protocol_message(msg).await {
+                Ok(action) => action,
+                Err(error) => {
+                    close_reason = "handler-error";
+                    return Err(error);
+                }
+            };
+            claim_agent_channel(&handler, &command_broker, &sender).await;
+
+            match action {
+                HandlerAction::Reply(Some(response)) => {
+                    // A reply is not droppable, so it waits for room rather than
+                    // failing. The only error left is the queue being closed, which
+                    // means this connection is over: leave the loop by the normal
+                    // exit so the cleanup below still runs, instead of returning
+                    // through `?` and skipping it.
+                    if sender.send_reply(response).await.is_err() {
+                        close_reason = "outbound-closed";
+                        break;
+                    }
+                }
+                HandlerAction::Reply(None) => {
+                    // No response needed, continue
+                }
+                HandlerAction::Relay {
+                    agent_ws_urls,
+                    session_id,
+                    session_name,
+                    relay_request_id,
+                    client_id,
+                    agent_token,
+                    browser_client_id,
+                    env_snapshots,
+                    cols,
+                    rows,
+                    size_known,
+                    needs_bootstrap,
+                    subscription_id,
+                } => {
+                    let mut dispatch = RelayDispatch {
+                        handler: &handler,
+                        lanes: &mut lanes,
+                        command_broker: &command_broker,
+                        sender: &sender,
+                    };
+                    let outcome = relay_bidirectional_via_channel(
+                        &mut read,
+                        sender.clone(),
+                        &mut dispatch,
+                        RelayRequest {
+                            agent_ws_urls: &agent_ws_urls,
+                            session_name: &session_name,
+                            relay_request_id: &relay_request_id,
+                            agent_token: &agent_token,
+                            // The browser's own id wherever it has one: the Agent's
+                            // control bookkeeping names clients, and the client is
+                            // the only party that can recognise its own name
+                            // (#1429).
+                            client_id: browser_client_id.as_deref().unwrap_or(&client_id),
+                            // A pre-ID legacy browser receives no route proof:
+                            // its Server-generated fallback is not its own identity.
+                            authenticated_browser_id: browser_client_id.as_deref(),
+                            env_snapshots: &env_snapshots,
+                            cols,
+                            rows,
+                            size_known,
+                            needs_bootstrap,
+                            subscription_id: subscription_id.as_deref(),
+                        },
                     )
                     .await;
-                continue;
-            }
-            ExecutionPolicy::Ordered => {
-                // Authentication, agent registration, the relay mode
-                // transitions — applied, and answered, after everything read
-                // before them, which is what their determinism is made of on a
-                // connection that is no longer serial. The barrier covers both
-                // lanes: an `attach` must not be applied while the `create` it
-                // is about is still queued. See `ExecutionPolicy::Ordered`.
-                lanes.drain().await;
-            }
-            ExecutionPolicy::Inline => {}
-        }
-
-        let action = handler.handle_protocol_message(msg).await?;
-        claim_agent_channel(&handler, &command_broker, &sender).await;
-
-        match action {
-            HandlerAction::Reply(Some(response)) => {
-                // A reply is not droppable, so it waits for room rather than
-                // failing. The only error left is the queue being closed, which
-                // means this connection is over: leave the loop by the normal
-                // exit so the cleanup below still runs, instead of returning
-                // through `?` and skipping it.
-                if sender.send_reply(response).await.is_err() {
-                    close_reason = "outbound-closed";
+                    // Relay ended — clean up the client registration so the
+                    // cleanup block below (WS-close path) doesn't double-free.
+                    client_registry.unregister(&session_id, &client_id).await;
+                    match outcome {
+                        Ok(RelayEnd::Ended) => {
+                            // Don't break — the WebSocket stays open for dashboard
+                            // use.
+                            continue;
+                        }
+                        Ok(RelayEnd::AgentEnded) => {
+                            // The Agent's terminal stream ended while this browser
+                            // still had the relay live. Nothing will arrive again,
+                            // and the browser cannot see its own healthy socket and
+                            // the dead tunnel apart — that silence *is* the frozen
+                            // terminal #2179 reports. Closing the connection is what
+                            // makes the client's own reconnect path run: it records
+                            // the truncation and re-begins the relay with a fresh
+                            // history bootstrap. A client that asked to stop, or one
+                            // whose socket already ended, takes `Ended` instead.
+                            warn!(
+                                session = %session_name,
+                                close_reason = "relay-agent-ended",
+                                "Relay for session '{}' ended: the Agent's terminal stream ended \
+                                 while the client was still attached; closing the connection so it \
+                                 re-attaches",
+                                session_name
+                            );
+                            close_reason = "relay-agent-ended";
+                            // Deliberately no Close frame here. A clean close frame
+                            // lets the browser reconnect before the re-registering
+                            // Agent has republished its Sessions, so the client can
+                            // observe a transiently empty Session list while it is
+                            // rebuilding the relay. Dropping the socket keeps the
+                            // pre-existing reconnect timing; the reason is recorded
+                            // above and in the connection-end log for correlation.
+                            break;
+                        }
+                        Ok(RelayEnd::ClientStalled) => {
+                            // The client stopped draining its terminal (#961). Every
+                            // remaining answer for it is one it is not reading, and
+                            // the screen it is showing is no longer the session's —
+                            // so the connection ends here rather than sitting open
+                            // on a terminal that has stopped moving. The client
+                            // re-attaches, and is handed a redrawn screen.
+                            //
+                            // The close is the socket's rather than a frame's: a
+                            // `Close` sent through the queue would have to wait for
+                            // room in exactly the queue this client is not draining,
+                            // so the frame that says "you are not reading" would be
+                            // the one that never gets written. Breaking here drops
+                            // the socket, which is the same fact without the wait.
+                            warn!(
+                                session = %session_name,
+                                close_reason = "relay-client-stalled",
+                                "Relay for session '{}' ended: the client stopped draining its \
+                                 terminal; closing the connection",
+                                session_name
+                            );
+                            // Deliberately no Close frame: the queue this client is
+                            // not draining is exactly where it would wait. The
+                            // browser observes 1006; this log is the Server-side
+                            // reason it correlates with (#3358 SC-05).
+                            close_reason = "relay-client-stalled";
+                            break;
+                        }
+                        Err(e) => {
+                            close_reason = "relay-error";
+                            return Err(e);
+                        }
+                    }
+                }
+                HandlerAction::Close => {
+                    close_reason = "client-close";
                     break;
                 }
             }
-            HandlerAction::Reply(None) => {
-                // No response needed, continue
-            }
-            HandlerAction::Relay {
-                agent_ws_urls,
-                session_id,
-                session_name,
-                relay_request_id,
-                client_id,
-                agent_token,
-                browser_client_id,
-                env_snapshots,
-                cols,
-                rows,
-                size_known,
-                needs_bootstrap,
-                subscription_id,
-            } => {
-                let mut dispatch = RelayDispatch {
-                    handler: &handler,
-                    lanes: &mut lanes,
-                    command_broker: &command_broker,
-                    sender: &sender,
-                };
-                let outcome = relay_bidirectional_via_channel(
-                    &mut read,
-                    sender.clone(),
-                    &mut dispatch,
-                    RelayRequest {
-                        agent_ws_urls: &agent_ws_urls,
-                        session_name: &session_name,
-                        relay_request_id: &relay_request_id,
-                        agent_token: &agent_token,
-                        // The browser's own id wherever it has one: the Agent's
-                        // control bookkeeping names clients, and the client is
-                        // the only party that can recognise its own name
-                        // (#1429).
-                        client_id: browser_client_id.as_deref().unwrap_or(&client_id),
-                        // A pre-ID legacy browser receives no route proof:
-                        // its Server-generated fallback is not its own identity.
-                        authenticated_browser_id: browser_client_id.as_deref(),
-                        env_snapshots: &env_snapshots,
-                        cols,
-                        rows,
-                        size_known,
-                        needs_bootstrap,
-                        subscription_id: subscription_id.as_deref(),
-                    },
-                )
-                .await;
-                // Relay ended — clean up the client registration so the
-                // cleanup block below (WS-close path) doesn't double-free.
-                client_registry.unregister(&session_id, &client_id).await;
-                match outcome {
-                    Ok(RelayEnd::Ended) => {
-                        // Don't break — the WebSocket stays open for dashboard
-                        // use.
-                        continue;
-                    }
-                    Ok(RelayEnd::AgentEnded) => {
-                        // The Agent's terminal stream ended while this browser
-                        // still had the relay live. Nothing will arrive again,
-                        // and the browser cannot see its own healthy socket and
-                        // the dead tunnel apart — that silence *is* the frozen
-                        // terminal #2179 reports. Closing the connection is what
-                        // makes the client's own reconnect path run: it records
-                        // the truncation and re-begins the relay with a fresh
-                        // history bootstrap. A client that asked to stop, or one
-                        // whose socket already ended, takes `Ended` instead.
-                        warn!(
-                            session = %session_name,
-                            close_reason = "relay-agent-ended",
-                            "Relay for session '{}' ended: the Agent's terminal stream ended \
-                             while the client was still attached; closing the connection so it \
-                             re-attaches",
-                            session_name
-                        );
-                        close_reason = "relay-agent-ended";
-                        // Deliberately no Close frame here. A clean close frame
-                        // lets the browser reconnect before the re-registering
-                        // Agent has republished its Sessions, so the client can
-                        // observe a transiently empty Session list while it is
-                        // rebuilding the relay. Dropping the socket keeps the
-                        // pre-existing reconnect timing; the reason is recorded
-                        // above and in the connection-end log for correlation.
-                        break;
-                    }
-                    Ok(RelayEnd::ClientStalled) => {
-                        // The client stopped draining its terminal (#961). Every
-                        // remaining answer for it is one it is not reading, and
-                        // the screen it is showing is no longer the session's —
-                        // so the connection ends here rather than sitting open
-                        // on a terminal that has stopped moving. The client
-                        // re-attaches, and is handed a redrawn screen.
-                        //
-                        // The close is the socket's rather than a frame's: a
-                        // `Close` sent through the queue would have to wait for
-                        // room in exactly the queue this client is not draining,
-                        // so the frame that says "you are not reading" would be
-                        // the one that never gets written. Breaking here drops
-                        // the socket, which is the same fact without the wait.
-                        warn!(
-                            session = %session_name,
-                            close_reason = "relay-client-stalled",
-                            "Relay for session '{}' ended: the client stopped draining its \
-                             terminal; closing the connection",
-                            session_name
-                        );
-                        // Deliberately no Close frame: the queue this client is
-                        // not draining is exactly where it would wait. The
-                        // browser observes 1006; this log is the Server-side
-                        // reason it correlates with (#3358 SC-05).
-                        close_reason = "relay-client-stalled";
-                        break;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-            HandlerAction::Close => {
-                close_reason = "client-close";
-                break;
-            }
         }
+        Ok(())
     }
+    .await;
 
     info!(close_reason, "WebSocket connection ended");
 
@@ -1051,8 +1167,16 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // same unbounded wait this stage exists to remove, one level down. The grace
     // here is the terminal stall grace: "how long may a frame wait to be handed
     // over before we stop waiting" is the same question, asked at shutdown.
+    //
+    // The handler holds a sender of its own, so it has to go too: teardown is
+    // the last thing this connection will ever ask of it, and leaving the clone
+    // alive is what would turn the wait below into the grace, every time. A
+    // verified web client's registry subscriber also holds one — that clone is
+    // not this connection's to drop — which is what the bounded wait and abort
+    // are still for.
+    drop(handler);
     drop(sender);
-    if tokio::time::timeout(terminal_stall_grace, &mut relay_task)
+    if tokio::time::timeout(terminal_stall_grace, &mut relay_writer.0)
         .await
         .is_err()
     {
@@ -1061,10 +1185,30 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
              aborting it so the connection can close",
             terminal_stall_grace
         );
-        relay_task.abort();
+        relay_writer.0.abort();
     }
 
-    Ok(())
+    // The reader's error is still the connection's outcome; the teardown above
+    // ran either way, so returning it here no longer skips anything.
+    reader_result
+}
+
+/// The connection's writer task, aborted if the connection future is dropped
+/// before the teardown reaches it.
+///
+/// A bare `JoinHandle` is not an owner: dropping it detaches the task instead of
+/// ending it, and this task owns the socket's write half. A panic unwinding
+/// through the connection drops its future — and runtime cancellation drops it
+/// too — before the ordinary teardown runs, so the task has to be held by
+/// something whose `Drop` ends it. The normal path still waits for the task and
+/// aborts it only after the bounded grace; this guard is what keeps a dropped
+/// future from leaving the writer, and the peer's socket, alive indefinitely.
+struct RelayWriterGuard(tokio::task::JoinHandle<()>);
+
+impl Drop for RelayWriterGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Point the agent's control channel at this connection.
@@ -1180,19 +1324,15 @@ struct RelayRequest<'a> {
 ///
 /// Generic over the read half so a test can drive it without a socket, the same
 /// shape [`forward_client_to_agent`] has. The caller owns the deadline.
-async fn await_agent_reply<RS>(
+async fn await_agent_reply<RS, E>(
     agent_read: &mut RS,
     sender: &crate::server::outbound::WsMessageSender,
     request_id: &str,
     waiting_for: &str,
 ) -> Result<serde_json::Value, String>
 where
-    RS: futures_util::Stream<
-            Item = Result<
-                tokio_tungstenite::tungstenite::Message,
-                tokio_tungstenite::tungstenite::Error,
-            >,
-        > + Unpin,
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
 {
     use futures_util::StreamExt;
 
@@ -1267,7 +1407,7 @@ fn validate_relay_client_auth_reply(
 /// on both the pre-attach and established forwarding paths (#2089).
 pub const RELAY_SUBSCRIPTION_READY_WIRE: &str = "server.session.relay.ready";
 
-fn is_agent_forged_relay_ready(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+fn is_agent_forged_relay_ready(msg: &WsFrame) -> bool {
     // Reuse the header-only classifier. A full Value allocation per output
     // frame would punish 100k+ terminal bursts for a rare spoofed wire.
     msg.to_text()
@@ -1287,7 +1427,7 @@ fn agent_attached_relay_ready(
     session_name: &str,
     browser_client_id: &str,
     relay_request_id: &str,
-) -> Option<tokio_tungstenite::tungstenite::Message> {
+) -> Option<WsFrame> {
     if browser_client_id.is_empty() || relay_request_id.is_empty() {
         return None;
     }
@@ -1346,9 +1486,7 @@ fn agent_attached_relay_ready(
             out_payload["terminal_capabilities"] = capabilities.clone();
         }
     }
-    Some(tokio_tungstenite::tungstenite::Message::Text(
-        frame.to_string(),
-    ))
+    Some(WsFrame::text(frame.to_string()))
 }
 
 /// Validate that an Agent really accepted this Relay socket's attach before
@@ -1439,18 +1577,16 @@ fn relay_failure_reason(error: &tokio_tungstenite::tungstenite::Error) -> &'stat
     }
 }
 
-/// Relay mode using the connection's queued outbound path for client writes.
-/// Used when the write sink is managed by a relay task.
+/// The Agent side of a Relay, read as the transport-neutral vocabulary.
 ///
-/// Tries each URL in `request.agent_ws_urls` with a fast 2s connect timeout
-/// until one succeeds.  This avoids long hangs when the first address
-/// is unreachable (common in k8s where pod IPs are not routable).
-async fn relay_bidirectional_via_channel<RS>(
-    client_read: &mut RS,
-    sender: crate::server::outbound::WsMessageSender,
-    dispatch: &mut RelayDispatch<'_>,
-    request: RelayRequest<'_>,
-) -> anyhow::Result<RelayEnd>
+/// The Agent is dialled with `tokio-tungstenite`, and that is the adapter edge
+/// (`#3548`): the relay's own forwarding, classification and outbound lanes all
+/// speak [`WsFrame`], exactly as the browser connection does. A raw tungstenite
+/// frame is a write-side detail its readers never produce; if one appears it is
+/// refused rather than given an invented text or binary meaning.
+struct AgentRead<RS>(RS);
+
+impl<RS> futures_util::Stream for AgentRead<RS>
 where
     RS: futures_util::Stream<
             Item = Result<
@@ -1458,6 +1594,81 @@ where
                 tokio_tungstenite::tungstenite::Error,
             >,
         > + Unpin,
+{
+    type Item = Result<WsFrame, tokio_tungstenite::tungstenite::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.0).poll_next(cx).map(|ready| {
+            ready.map(|item| {
+                item.and_then(|message| {
+                    WsFrame::from_tungstenite(message).ok_or_else(|| {
+                        tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "a raw WebSocket frame cannot be read",
+                        ))
+                    })
+                })
+            })
+        })
+    }
+}
+
+/// The Agent side of a Relay, written from the transport-neutral vocabulary.
+///
+/// The conversion back to tungstenite happens in `start_send`, which is the
+/// same adapter edge as [`AgentRead`].
+struct AgentWrite<AS>(AS);
+
+impl<AS> futures_util::Sink<WsFrame> for AgentWrite<AS>
+where
+    AS: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
+{
+    type Error = AS::Error;
+
+    fn poll_ready(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.0).poll_ready(cx)
+    }
+
+    fn start_send(mut self: std::pin::Pin<&mut Self>, item: WsFrame) -> Result<(), Self::Error> {
+        std::pin::Pin::new(&mut self.0).start_send(item.into_tungstenite())
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.0).poll_flush(cx)
+    }
+
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.0).poll_close(cx)
+    }
+}
+
+/// Relay mode using the connection's queued outbound path for client writes.
+/// Used when the write sink is managed by a relay task.
+///
+/// Tries each URL in `request.agent_ws_urls` with a fast 2s connect timeout
+/// until one succeeds.  This avoids long hangs when the first address
+/// is unreachable (common in k8s where pod IPs are not routable).
+async fn relay_bidirectional_via_channel<RS, E>(
+    client_read: &mut RS,
+    sender: crate::server::outbound::WsMessageSender,
+    dispatch: &mut RelayDispatch<'_>,
+    request: RelayRequest<'_>,
+) -> anyhow::Result<RelayEnd>
+where
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
 {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
@@ -1529,7 +1740,11 @@ where
         }
     };
 
-    let (mut agent_write, mut agent_read) = agent_ws.split();
+    let (agent_write, agent_read) = agent_ws.split();
+    // From here on the Agent socket is just another frame transport: the
+    // adapters are the only code that knows it speaks tungstenite (#3548).
+    let mut agent_write = AgentWrite(agent_write);
+    let mut agent_read = AgentRead(agent_read);
 
     // ── Step 0: Bind this relay's identity on the Agent connection (#1429) ──
     //
@@ -1562,9 +1777,7 @@ where
         "payload": { "auth_token": agent_token, "client_id": client_id },
     });
     agent_write
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            auth_msg.to_string(),
-        ))
+        .send(WsFrame::Text(auth_msg.to_string()))
         .await?;
     let auth_response = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -1648,9 +1861,7 @@ where
         "payload": attach_payload,
     });
     agent_write
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            attach_msg.to_string(),
-        ))
+        .send(WsFrame::Text(attach_msg.to_string()))
         .await?;
 
     // Wait for the reply *to this request*, forwarding anything the agent says
@@ -1700,7 +1911,7 @@ where
             session_name, err_msg
         );
         // Forward error to the browser client
-        let client_error = tokio_tungstenite::tungstenite::Message::Text(
+        let client_error = WsFrame::Text(
             serde_json::json!({
                 "msg_type": "error",
                 "id": uuid::Uuid::new_v4().to_string(),
@@ -1979,7 +2190,7 @@ struct RelayEnvelope<'a> {
 /// this relay does not recognise is forwarded rather than guessed at, which is
 /// the rule everywhere else in the tree — an unknown wire is ignored, never
 /// rejected.
-fn classify_client_frame(msg: &Message) -> ClientFrame {
+fn classify_client_frame(msg: &WsFrame) -> ClientFrame {
     let Ok(text) = msg.to_text() else {
         return ClientFrame::Other;
     };
@@ -2204,7 +2415,7 @@ fn merged_range(positions: &[InputPosition]) -> MergedRange {
 /// range** ([`MergedRange::Unmergeable`]), which is the honest answer in both
 /// cases — there is nothing to merge, and the caller forwards them in order
 /// rather than guessing which ones mattered.
-fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
+fn merge_terminal_input(frames: &[WsFrame]) -> Option<WsFrame> {
     use base64::Engine as _;
     let engine = base64::engine::general_purpose::STANDARD;
 
@@ -2241,15 +2452,15 @@ fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
         payload.insert("seq_start".to_string(), serde_json::Value::from(start));
         payload.insert("seq_end".to_string(), serde_json::Value::from(end));
     }
-    Some(Message::Text(envelope.to_string()))
+    Some(WsFrame::Text(envelope.to_string()))
 }
 
 /// Forward a burst that the throttle window held, in order and losing nothing.
 ///
 /// Returns `false` when a send failed, which is how the caller learns to stop.
-async fn flush_burst<AS>(agent_write: &mut AS, burst: &mut Vec<Message>) -> bool
+async fn flush_burst<AS>(agent_write: &mut AS, burst: &mut Vec<WsFrame>) -> bool
 where
-    AS: futures_util::Sink<Message> + Unpin,
+    AS: futures_util::Sink<WsFrame> + Unpin,
     AS::Error: std::fmt::Display,
 {
     use futures_util::SinkExt as _;
@@ -2330,7 +2541,7 @@ struct RelayDispatch<'a> {
 /// A Server unit that arrived without a dispatcher is reported and dropped:
 /// forwarding it is the defect this parameter exists to remove (#1504), so the
 /// unreachable branch errs on the side of not answering the wrong runtime.
-async fn forward_client_to_agent<RS, AS>(
+async fn forward_client_to_agent<RS, AS, E>(
     client_read: &mut RS,
     agent_write: &mut AS,
     session_name: &str,
@@ -2338,8 +2549,9 @@ async fn forward_client_to_agent<RS, AS>(
     mut dispatch: Option<&mut RelayDispatch<'_>>,
 ) -> ClientToAgent
 where
-    RS: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-    AS: futures_util::Sink<Message> + Unpin,
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
+    AS: futures_util::Sink<WsFrame> + Unpin,
     AS::Error: std::fmt::Display,
 {
     use futures_util::SinkExt;
@@ -2413,7 +2625,7 @@ where
         // Every terminal-input frame the window holds, oldest first. A `Vec`
         // rather than a single `Option` because the window merges a burst
         // instead of keeping its newest — see `merge_terminal_input` (`#966`).
-        let mut burst: Vec<Message> = vec![msg];
+        let mut burst: Vec<WsFrame> = vec![msg];
         let mut end_requested = false;
 
         loop {
@@ -2685,16 +2897,14 @@ mod tests {
         ] {
             assert!(agent_attached_relay_ready(&reply, "sess", "browser-a", "begin-123").is_none());
         }
-        let spoof = tokio_tungstenite::tungstenite::Message::Text(
+        let spoof = WsFrame::Text(
             json!({"msg_type":"server.session.relay.ready", "payload":{"route_id":"forged"}})
                 .to_string(),
         );
         assert!(is_agent_forged_relay_ready(&spoof));
-        assert!(!is_agent_forged_relay_ready(
-            &tokio_tungstenite::tungstenite::Message::Text(
-                json!({"msg_type":"agent.terminal.output","data":"ordinary"}).to_string(),
-            )
-        ));
+        assert!(!is_agent_forged_relay_ready(&WsFrame::Text(
+            json!({"msg_type":"agent.terminal.output","data":"ordinary"}).to_string(),
+        )));
     }
 
     #[test]
@@ -2765,10 +2975,10 @@ mod tests {
     /// Records what the relay forwarded, in order.
     #[derive(Default)]
     struct RecordingSink {
-        sent: Vec<Message>,
+        sent: Vec<WsFrame>,
     }
 
-    impl Sink<Message> for RecordingSink {
+    impl Sink<WsFrame> for RecordingSink {
         type Error = std::convert::Infallible;
 
         fn poll_ready(
@@ -2778,7 +2988,7 @@ mod tests {
             Poll::Ready(Ok(()))
         }
 
-        fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        fn start_send(self: Pin<&mut Self>, item: WsFrame) -> Result<(), Self::Error> {
             self.get_mut().sent.push(item);
             Ok(())
         }
@@ -2799,8 +3009,8 @@ mod tests {
     }
 
     /// A frame as a client sends one.
-    fn frame_with_payload(msg_type: &str, id: &str, payload: serde_json::Value) -> Message {
-        Message::Text(
+    fn frame_with_payload(msg_type: &str, id: &str, payload: serde_json::Value) -> WsFrame {
+        WsFrame::Text(
             json!({
                 "msg_type": msg_type,
                 "id": id,
@@ -2811,7 +3021,7 @@ mod tests {
         )
     }
 
-    fn frame(msg_type: &str, id: &str) -> Message {
+    fn frame(msg_type: &str, id: &str) -> WsFrame {
         frame_with_payload(msg_type, id, json!({ "session_name": "sess" }))
     }
 
@@ -2821,7 +3031,7 @@ mod tests {
     /// its newest frame, so a test that wants to show the window was open has to
     /// say what the agent received — and `frame_data` reads it back. Deriving the
     /// bytes from the id is what makes the order visible.
-    fn terminal_input(id: &str) -> Message {
+    fn terminal_input(id: &str) -> WsFrame {
         use base64::Engine as _;
         frame_with_payload(
             TERMINAL_INPUT_WIRE,
@@ -2839,7 +3049,7 @@ mod tests {
     /// One chunk per frame, which is what `flushInputBuffer` sends: the range
     /// exists in the contract because a frame may cover several chunks, and a
     /// burst is where several frames become one.
-    fn sequenced_terminal_input(bytes: &str, epoch: u64, seq: u64) -> Message {
+    fn sequenced_terminal_input(bytes: &str, epoch: u64, seq: u64) -> WsFrame {
         use base64::Engine as _;
         frame_with_payload(
             TERMINAL_INPUT_WIRE,
@@ -2858,7 +3068,7 @@ mod tests {
     ///
     /// `None` for an unsequenced frame, which is not the same answer as zero —
     /// the whole contract keeps those apart.
-    fn frame_sequence(msg: &Message) -> (Option<u64>, Option<u64>, Option<u64>) {
+    fn frame_sequence(msg: &WsFrame) -> (Option<u64>, Option<u64>, Option<u64>) {
         let envelope: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         let payload = &envelope["payload"];
         (
@@ -2869,7 +3079,7 @@ mod tests {
     }
 
     /// The bytes a terminal-input frame carries, decoded.
-    fn frame_data(msg: &Message) -> String {
+    fn frame_data(msg: &WsFrame) -> String {
         use base64::Engine as _;
         let envelope: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         let data = envelope["payload"]["data"].as_str().unwrap();
@@ -2881,15 +3091,14 @@ mod tests {
         .unwrap()
     }
 
-    fn relay_end(id: &str) -> Message {
+    fn relay_end(id: &str) -> WsFrame {
         frame(RELAY_END_WIRE, id)
     }
 
     /// Drive the pump over frames that are already in memory and report what
     /// reached the agent, and why the loop stopped.
-    async fn drive(frames: Vec<Message>) -> (Vec<Message>, ClientToAgent) {
-        let items: Vec<Result<Message, tokio_tungstenite::tungstenite::Error>> =
-            frames.into_iter().map(Ok).collect();
+    async fn drive(frames: Vec<WsFrame>) -> (Vec<WsFrame>, ClientToAgent) {
+        let items: Vec<Result<WsFrame, std::io::Error>> = frames.into_iter().map(Ok).collect();
         let mut client_read = futures_util::stream::iter(items);
         let mut agent_write = RecordingSink::default();
 
@@ -3356,19 +3565,19 @@ mod tests {
         // Not text, not JSON, not a string `msg_type`: all `Other`, never a
         // guess.
         assert_eq!(
-            classify_client_frame(&Message::Binary(vec![1, 2, 3])),
+            classify_client_frame(&WsFrame::Binary(vec![1, 2, 3])),
             ClientFrame::Other
         );
         assert_eq!(
-            classify_client_frame(&Message::Text("{ not json".to_string())),
+            classify_client_frame(&WsFrame::Text("{ not json".to_string())),
             ClientFrame::Other
         );
         assert_eq!(
-            classify_client_frame(&Message::Text("{}".to_string())),
+            classify_client_frame(&WsFrame::Text("{}".to_string())),
             ClientFrame::Other
         );
         assert_eq!(
-            classify_client_frame(&Message::Text(r#"{"msg_type":7}"#.to_string())),
+            classify_client_frame(&WsFrame::Text(r#"{"msg_type":7}"#.to_string())),
             ClientFrame::Other
         );
     }
