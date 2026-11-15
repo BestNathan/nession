@@ -307,6 +307,8 @@ export function checkInventory(manifest,workflows){
       // This is an untrusted source Run locator until Main independently
       // verifies original GitHub Run/Attempt, pre-checkout human source, and Case tree.
       const caseIngestWake=writer.workflow==='.github/workflows/acceptance-case-ingest.yml'&&
+        (triggers.match(/^  repository_dispatch:\s*$/gm)||[]).length===1&&
+        (triggers.match(/^  workflow_run:\s*$/gm)||[]).length===1&&
         /^  repository_dispatch:\s*\n    types: \[nession-comment-case-ingest\]\s*$/m.test(triggers)&&
         /^  workflow_run:\s*\n(?:    [^\n]*\n)*?    workflows: \["Acceptance \/ Cases"\]/m.test(triggers)&&
         !/^  workflow_dispatch:\s*$/m.test(triggers)&&
