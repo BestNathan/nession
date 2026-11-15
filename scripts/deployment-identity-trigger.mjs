@@ -8,6 +8,8 @@ import fs from 'node:fs';
 const REPO = 'BestNathan/nession';
 const NAME = 'Release / Staging Artifacts';
 const PATH = '.github/workflows/release-staging.yml';
+const DEPLOY_NAME = 'Deploy / Staging ACR';
+const DEPLOY_PATH = '.github/workflows/deploy-staging-acr.yml';
 const SHA = /^[a-f0-9]{40}$/;
 
 function reject(reason) { throw Error('deployment-identity-trigger: ' + reason); }
@@ -17,7 +19,8 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
   const run = event?.workflow_run;
   if (!run || event?.action !== 'completed' ||
       event.repository?.full_name !== REPO ||
-      run.name !== NAME || String(run.path ?? '').split('@')[0] !== PATH ||
+      !((run.name === NAME && String(run.path ?? '').split('@')[0] === PATH) ||
+         (run.name === DEPLOY_NAME && String(run.path ?? '').split('@')[0] === DEPLOY_PATH)) ||
       !['push', 'workflow_dispatch'].includes(run.event) ||
       run.head_branch !== 'staging' || !SHA.test(String(run.head_sha ?? '')) ||
       run.status !== 'completed' || run.conclusion !== 'success' ||
@@ -41,10 +44,18 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
       (nativeJobs.total_count != null && nativeJobs.total_count !== jobs.length)) {
     reject('missing, truncated or ambiguous original release jobs');
   }
-  for (const [name, step] of [
+  const required = [
     ['deploy-staging-gitops', /^Run \.\/scripts\/gitops-commit\.sh staging/],
     ['provenance', /^Emit per-registry build provenance$/],
-  ]) {
+  ];
+  if (run.name === DEPLOY_NAME) {
+    required.push(['verify-source', /^Authenticate successful exact-SHA GHCR publishing run$/]);
+    for (const role of ['server', 'agent', 'ui']) {
+      required.push(['mirror-acr (' + role + ')',
+        new RegExp('^Mirror and verify multi-arch ' + role + ' image$')]);
+    }
+  }
+  for (const [name, step] of required) {
     const selected = jobs.filter(j => j.name === name &&
       j.run_id === run.id && j.run_attempt === run.run_attempt);
     if (selected.length !== 1 || selected[0].status !== 'completed' ||
@@ -118,7 +129,33 @@ export function selfTest() {
   assert.throws(() => verifyReleaseSource(event, jobs, {
     ...run, head_sha: 'b'.repeat(40),
   }), /source event and native original Run disagree/);
-  console.log('deployment identity trigger: exact native release run/attempt, GitOps and provenance step fixtures passed');
+  // Pre-cutover Release runs require the original GitOps+provenance successes.
+  // A GHCR-only release can never pass either source's deployment check.
+  const newRun = {...run, name: DEPLOY_NAME, path: DEPLOY_PATH};
+  const newEvent = {...event, workflow_run: newRun};
+  const newJobs = [...jobs.jobs, {
+    name: 'verify-source', run_id: run.id, run_attempt: 1,
+    status: 'completed', conclusion: 'success',
+    steps: [{name: 'Authenticate successful exact-SHA GHCR publishing run',
+      status: 'completed', conclusion: 'success'}],
+  }, ...['server', 'agent', 'ui'].map(role => ({
+    name: 'mirror-acr (' + role + ')', run_id: run.id, run_attempt: 1,
+    status: 'completed', conclusion: 'success',
+    steps: [{name: 'Mirror and verify multi-arch ' + role + ' image',
+      status: 'completed', conclusion: 'success'}],
+  }))];
+  const newInventory = {total_count: newJobs.length, jobs: newJobs};
+  assert.equal(verifyReleaseSource(newEvent, newInventory, newRun).source_sha, sha);
+  assert.throws(() => verifyReleaseSource(newEvent, jobs), /missing successful original release job/);
+  assert.throws(() => verifyReleaseSource(newEvent, {
+    ...newInventory, jobs: newJobs.map(job =>
+      job.name === 'mirror-acr (server)' ? {...job, conclusion: 'failure'} : job),
+  }), /missing successful original release job/);
+  assert.throws(() => verifyReleaseSource(newEvent, {
+    ...newInventory, jobs: newJobs.map(job =>
+      job.name === 'verify-source' ? {...job, steps: []} : job),
+  }), /missing successful release step/);
+  console.log('deployment identity: legacy and new ACR source, branch/SHA, all mirrors and step negatives passed');
 }
 
 async function main() {
