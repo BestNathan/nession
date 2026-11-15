@@ -24,6 +24,7 @@ const RUNS=Object.freeze({
   finalReview:[43711883444,'Agent / Review','agent-review.yml','workflow_dispatch','github-actions[bot]',FINAL_SHA,'success'],
   finalIngest:[43712269121,'Store / Agent Review Result Ingest','store-agent-review-result-ingest.yml','repository_dispatch','github-actions[bot]',FINAL_SHA,'success'],
 });
+export const QWEN_3433_RUN_SPECS=RUNS;
 function deny(message){throw Error('trusted #3433 Qwen recovery evidence: '+message);}
 function check(test,message){if(!test)deny(message);}
 function pair(state,id){return state?.outbox?.find(x=>x.id===id);}
@@ -188,7 +189,7 @@ export function attestQwen3433Recovery({issue,stage,targetSha,states,head,runs,
     next_stage:'quality',quality_outcome:'unverified',
   });
 }
-function contentObject(obj,path){
+export function decodeQwen3433StoreContent(obj,path){
   check(obj?.type==='file'&&obj.path===path&&obj.encoding==='base64'&&
     SHA.test(obj.sha??'')&&Number.isSafeInteger(obj.size)&&obj.size>0&&
     obj.size<256*1024&&typeof obj.content==='string',
@@ -211,7 +212,7 @@ export async function collectQwen3433Recovery({
   const storePath=ver=>'workflows/issues/3433/states/'+
     String(ver).padStart(8,'0')+'.json';
   const contents=path=>get(prefix+'/contents/'+path+'?ref=agent-store')
-    .then(x=>contentObject(x,path));
+    .then(x=>decodeQwen3433StoreContent(x,path));
   const jobsKeys=['firstReview','repairWorker','finalReview'];
   const pr=await get(prefix+'/pulls/3530');
   const [headFile,sourceAncestry,targetAncestry,...rest]=await Promise.all([
