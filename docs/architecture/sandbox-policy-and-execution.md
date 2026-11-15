@@ -129,13 +129,13 @@ before mounting anything.
   `nession-sandbox` keeps source-root authorization, byte verification (through
   `nession_erofs::digest`), mount ordering, the overlay composition and the
   per-execution cleanup record; neither manager nor primitive sees an image
-  role or a mount plan. A Project
-  source image is merged with the bounded write directory through
-  `fuse-overlayfs` (`lowerdir=<Project image>,upperdir=<write>/upper,workdir=<write>/work`);
-  a workspace without an image is a direct writable bind. Bubblewrap starts
-  from an empty tmpfs root, binds the Base Runtime over `/`, installs
-  `/workspace`, then the toolchains, and only then mounts `/dev`, `/proc`,
-  `/tmp`, `/home` and `/run/nession`.
+  role or a mount plan. A Project source image is merged with the durable
+  Workspace upper/work by the Agent-owned
+  `nession_erofs::overlay::OverlayMountManager` (#3582, below); a workspace
+  without an image is a direct writable bind. Bubblewrap starts from an empty
+  tmpfs root, binds the Base Runtime over `/`, installs `/workspace`, then the
+  toolchains, and only then mounts `/dev`, `/proc`, `/tmp`, `/home` and
+  `/run/nession`.
 - **Base Runtime contract.** Because the composed root is read-only, the image
   must already contain the mountpoint directories the backend installs:
   `/bin/sh` (or `/usr/bin/sh`), `/workspace`, every declared `/opt/<name>`,
@@ -165,12 +165,36 @@ before mounting anything.
   as an orphan after identity checks. Multiple digests never alias one
   mountpoint, and the manager never falls back to a lazy unmount for shared
   reclamation.
-- **Lifecycle.** Execution-owned mountpoints (the writable Overlay) and
-  temporary resources live under the execution directory (`mounts/...`), are
-  recorded in the durable execution record, and are unmounted in reverse order
-  before the directory/record are removed. Reconciliation touches only those
-  recorded paths; shared read-only mounts are released through the manager.
-  A failed unmount keeps the record for retry rather than leaking the mount.
+- **Shared writable Workspace Overlay (#3582).** One managed Workspace has one
+  durable `upper`/`work` pair and therefore **one** physical writable
+  `fuse-overlayfs` Merged View per Agent identity and mount namespace. The
+  Agent-owned `OverlayMountManager` derives the mountpoint from an authorized
+  Workspace root plus a validated relative identity (never a caller-supplied
+  path), serializes same-workspace mount/unmount transitions, and returns
+  identified consumer leases. Multiple Sandbox executions may bind that same
+  Merged View at `/workspace`; the last release unmounts it and never deletes
+  the durable upper/work. The Overlay holds its own read-only EROFS lower lease
+  for the full physical lifetime; a failed Overlay unmount retains the mount,
+  the lower pin, the durable identity and the upper for a bounded retry.
+  A durable owner lock next to the durable bytes (plus the owner/identity
+  sidecars and mountinfo) fences another process or manager root, and the
+  upper/work filesystem is probed: it must be one local filesystem with user
+  xattrs. Network/forwarded filesystems (NFS/CIFS/9p/virtiofs/FUSE) fail
+  closed, so cross-node writable upper/work use is not enabled. The Manager
+  Workspace registry keeps the effective ordered lower Blob digest set as the
+  compatibility key and initializes the durable pair on first use; a later
+  missing, partial or symlinked pair refuses instead of creating a fresh empty
+  upper.
+- **Lifecycle.** The writable Overlay is recorded as a durable manager binding
+  (`workspace root/relative, mountpoint, generation, lower digest/generation`),
+  not as an execution-scoped mountpoint. Temporary files remain under the
+  execution directory. Cleanup releases the Overlay consumer first (which
+  releases its lower), then any legacy execution-scoped mount, then the
+  independent shared image consumers. Reconciliation adopts a live record only
+  when the durable identity, generation, Agent identity, mount namespace,
+  owner lock and mountinfo agree and the lower can be re-adopted; a legacy
+  record without the binding keeps its old execution-scoped cleanup. A failed
+  unmount keeps the record for retry rather than leaking the mount.
 - **macOS.** EROFS composition is rejected with an explicit
   `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
   equivalence is claimed.
@@ -193,9 +217,15 @@ directory is not deleted. The Server resolves the Session Project's matching
 Existing Location for `project_location` and `auto`, and adds the Project
 source image as the managed Workspace's pinned EROFS lower; the durable
 `upper/work` lives under the managed directory, so later Enters see the same
-upper. The Agent records the lower digest in the Workspace registry and
-refuses a changed or missing lower. A Project Location is bound directly and
-cannot carry a lower. See [#3407](https://github.com/BestNathan/nession/issues/3407).
+upper. The Agent records the effective **ordered** lower Blob digest set in
+the Workspace registry and refuses a changed or missing set. The one physical
+Merged View is owned by the shared Overlay manager (#3582), so several
+Sessions can attach the same managed Workspace concurrently; attachment leases
+protect deletion, and deletion also consults the observed mount/consumer/owner
+state and surviving execution records. A Project Location is bound directly
+and cannot carry a lower. See
+[#3407](https://github.com/BestNathan/nession/issues/3407) and
+[#3582](https://github.com/BestNathan/nession/issues/3582).
 
 ## Managed EROFS Session creation (#3062)
 
@@ -554,6 +584,8 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Launcher argv, masking, seccomp baseline | `crates/nession-sandbox/src/linux/bwrap.rs`, `linux/seccomp.rs` |
 | EROFS composition shape and validation | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + `crates/nession-sandbox/src/policy.rs` |
 | Prepared image digest/mount/overlay and unmount | `crates/nession-sandbox/src/linux/erofs.rs` |
+| Shared writable Workspace Overlay, consumers, fencing, recovery | `crates/nession-erofs/src/overlay/` |
+| Managed Workspace durable upper/work and ordered lower binding | `crates/nession-agent/src/workspace_manager.rs` |
 | Composition mount ordering and read-only root | `crates/nession-sandbox/src/linux/bwrap.rs` |
 | Cgroup delegation, limits and cleanup | `crates/nession-sandbox/src/linux/cgroup.rs` |
 | Launch barrier and proxy identity | `crates/nession-sandbox/src/linux/channel.rs`, `src/bridge.rs` |
@@ -575,6 +607,8 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 - [#3405](https://github.com/BestNathan/nession/issues/3405) — Filesystem
   RootFS/mount/Workspace declaration and IA decision; see
   [Sandbox filesystem declaration model](sandbox-filesystem-policy.md).
+- [#3582](https://github.com/BestNathan/nession/issues/3582) — shared
+  writable Workspace Overlay with durable Upper ownership.
 - [#2469](session-tmux-sdk-ownership.md) — Session/tmux ownership.
 - [#2514](agent-process-discovery.md) — read-only process discovery.
 - [#170](session-env-binding.md) — independent Session Environment Binding.

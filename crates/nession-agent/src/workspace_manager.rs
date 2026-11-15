@@ -91,6 +91,43 @@ struct WorkspaceRecord {
     /// prepared against (#3407 SC-04). Absent means a plain directory bind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lower_digest: Option<String>,
+    /// The effective **ordered** lower Blob digest set (#3582). This is the
+    /// filesystem compatibility key of the durable upper: a different or
+    /// absent set refuses reuse even when two Manifests describe "the same"
+    /// Project. A legacy record has only `lower_digest`; it is read as a
+    /// one-element set and is never rewritten destructively.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    lower_layers: Vec<String>,
+    /// Whether the Overlay `upper`/`work` pair has been initialized by the
+    /// owning Agent. Once true, a missing or partial pair is data-loss
+    /// evidence and is never silently recreated (#3582).
+    #[serde(default)]
+    overlay_storage: bool,
+}
+
+/// One managed Workspace's durable writable Overlay storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceOverlayStorage {
+    pub workspace_id: String,
+    pub directory: PathBuf,
+    /// The durable writable layer. Never deleted by execution cleanup.
+    pub upper: PathBuf,
+    /// The Overlay work directory (same filesystem as `upper`).
+    pub work: PathBuf,
+}
+
+/// An observed-resource probe the Agent consults before deleting a managed
+/// Workspace (#3582).
+///
+/// The Workspace Manager owns the deletion policy; the probe reports actual
+/// physical mount/consumer state. A volatile process-local lease count alone
+/// cannot prove that no physical Overlay is mounted.
+pub trait WorkspaceUseGuard: Send + Sync {
+    /// A human-readable reason when the Workspace is still in use.
+    ///
+    /// `directory` is the Workspace Manager's own derived durable directory,
+    /// so an observer never has to recreate the storage layout.
+    fn workspace_in_use(&self, workspace_id: &str, directory: &Path) -> Option<String>;
 }
 
 /// The Agent's durable named Workspace registry.
@@ -98,10 +135,12 @@ pub struct WorkspaceManager {
     root: PathBuf,
     /// Serializes every registry read-modify-write and lease transition.
     registry: AsyncMutex<()>,
-    /// In-memory RW attachments. A restart clears them; execution records are
-    /// the durable attachment authority and will rebuild them in #3405's
-    /// implementation.
+    /// In-memory RW attachments. A restart clears them; the durable execution
+    /// record and the Overlay manager's observed state are the authoritative
+    /// attachment evidence.
     leases: Mutex<HashMap<String, u32>>,
+    /// Observed physical/consumer state, when the Agent has a Sandbox runtime.
+    use_guard: Option<Arc<dyn WorkspaceUseGuard>>,
 }
 
 fn protocol_validation(result: Result<(), String>) -> Result<()> {
@@ -130,6 +169,32 @@ fn normalize_namespace(namespace: Option<&str>) -> Result<String> {
     Ok(namespace.to_string())
 }
 
+/// The effective ordered lower Blob digest set of one record.
+///
+/// A legacy record carries only `lower_digest`; it is interpreted as a
+/// one-element set and never rewritten by a read.
+fn effective_lower_layers(record: &WorkspaceRecord) -> Vec<String> {
+    if !record.lower_layers.is_empty() {
+        return record.lower_layers.clone();
+    }
+    record.lower_digest.iter().cloned().collect()
+}
+
+fn validate_lower_layers(layers: &[String]) -> Result<()> {
+    if layers.is_empty() {
+        anyhow::bail!("the effective lower digest set must not be empty");
+    }
+    for (index, digest) in layers.iter().enumerate() {
+        if !is_valid_image_digest(digest) {
+            anyhow::bail!("workspace lower digest `{digest}` is not sha256:<64 lowercase hex>");
+        }
+        if layers.iter().take(index).any(|known| known == digest) {
+            anyhow::bail!("the effective lower digest set contains `{digest}` more than once");
+        }
+    }
+    Ok(())
+}
+
 impl WorkspaceManager {
     /// Open (or create) the durable registry under `root`.
     ///
@@ -137,6 +202,14 @@ impl WorkspaceManager {
     /// data directory's `workspaces/` child. An unreadable or malformed
     /// registry is an error; this manager never fabricates readiness.
     pub fn open(root: PathBuf) -> Result<Self> {
+        Self::open_with_guard(root, None)
+    }
+
+    /// Open the registry with an observed-use probe for deletion guards.
+    pub fn open_with_guard(
+        root: PathBuf,
+        use_guard: Option<Arc<dyn WorkspaceUseGuard>>,
+    ) -> Result<Self> {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("cannot create workspace root {}", root.display()))?;
         let metadata = std::fs::symlink_metadata(&root)
@@ -159,6 +232,7 @@ impl WorkspaceManager {
             root,
             registry: AsyncMutex::new(()),
             leases: Mutex::new(HashMap::new()),
+            use_guard,
         };
         manager.reconcile()?;
         Ok(manager)
@@ -272,9 +346,18 @@ impl WorkspaceManager {
             .unwrap_or(0)
     }
 
+    fn observed_use(&self, workspace_id: &str) -> Option<String> {
+        self.use_guard.as_ref().and_then(|guard| {
+            guard.workspace_in_use(workspace_id, &self.workspace_dir(workspace_id))
+        })
+    }
+
     fn status_for(&self, workspace_id: &str) -> (WorkspaceStatus, Option<String>) {
         if self.lease_count(workspace_id) > 0 {
             return (WorkspaceStatus::InUse, None);
+        }
+        if let Some(reason) = self.observed_use(workspace_id) {
+            return (WorkspaceStatus::InUse, Some(reason));
         }
         let path = self.workspace_dir(workspace_id);
         match std::fs::symlink_metadata(&path) {
@@ -394,6 +477,8 @@ impl WorkspaceManager {
             created_at: now,
             last_used_at: now,
             lower_digest: None,
+            lower_layers: Vec::new(),
+            overlay_storage: false,
         });
         if let Err(error) = self.write_registry(&registry) {
             let _ = std::fs::remove_dir_all(&directory);
@@ -416,6 +501,11 @@ impl WorkspaceManager {
         let _guard = self.registry.lock().await;
         if self.lease_count(workspace_id) > 0 {
             anyhow::bail!("workspace is in use; release every attachment before deleting it");
+        }
+        if let Some(reason) = self.observed_use(workspace_id) {
+            anyhow::bail!(
+                "workspace is in use ({reason}); release every attachment before deleting it"
+            );
         }
         let mut registry = self.read_registry()?;
         let Some(index) = registry
@@ -454,15 +544,34 @@ impl WorkspaceManager {
     /// The first attachment with a lower records its digest. Every later
     /// attachment must present the same lower; a changed or missing lower is
     /// refused rather than silently merging a different Project image into the
-    /// same durable upper (#3407 SC-04).
+    /// same durable upper (#3407 SC-04, #3582).
     pub async fn pin_lower_digest(&self, workspace_id: &str, digest: Option<&str>) -> Result<()> {
+        match digest {
+            Some(digest) => {
+                self.pin_lower_layers(workspace_id, Some(&[digest.to_string()]))
+                    .await
+            }
+            None => self.pin_lower_layers(workspace_id, None).await,
+        }
+    }
+
+    /// Pin the effective **ordered** lower Blob digest set of the durable
+    /// upper (#3582).
+    ///
+    /// The set is the filesystem compatibility key: a changed Manifest over
+    /// identical physical lower bytes is compatible here, while a different or
+    /// absent lower Blob set is refused. Environment semantics remain a
+    /// separate concern.
+    pub async fn pin_lower_layers(
+        &self,
+        workspace_id: &str,
+        layers: Option<&[String]>,
+    ) -> Result<()> {
         if !is_valid_workspace_id(workspace_id) {
             anyhow::bail!("workspace id is not a valid managed workspace identity");
         }
-        if let Some(digest) = digest {
-            if !is_valid_image_digest(digest) {
-                anyhow::bail!("workspace lower digest `{digest}` is not sha256:<64 lowercase hex>");
-            }
+        if let Some(layers) = layers {
+            validate_lower_layers(layers)?;
         }
         let _guard = self.registry.lock().await;
         let mut registry = self.read_registry()?;
@@ -473,20 +582,111 @@ impl WorkspaceManager {
         else {
             anyhow::bail!("workspace not found");
         };
-        match (record.lower_digest.as_deref(), digest) {
-            (Some(current), Some(digest)) if current == digest => Ok(()),
-            (Some(current), Some(digest)) => anyhow::bail!(
-                "workspace is pinned to Project EROFS lower {current}; refusing a different lower {digest}"
+        let current = effective_lower_layers(record);
+        match (current.is_empty(), layers) {
+            (true, None) => Ok(()),
+            (false, None) => anyhow::bail!(
+                "workspace was prepared with Project EROFS lower {}; re-enter with the same lower",
+                current.join(",")
             ),
-            (Some(current), None) => anyhow::bail!(
-                "workspace was prepared with Project EROFS lower {current}; re-enter with the same lower"
+            (false, Some(layers)) if current.as_slice() == layers => Ok(()),
+            (false, Some(layers)) => anyhow::bail!(
+                "workspace is pinned to Project EROFS lower {}; refusing a different lower {}",
+                current.join(","),
+                layers.join(",")
             ),
-            (None, Some(digest)) => {
-                record.lower_digest = Some(digest.to_string());
+            (true, Some(layers)) => {
+                let Some(first) = layers.first() else {
+                    anyhow::bail!("the effective lower digest set must not be empty");
+                };
+                record.lower_digest = Some(first.clone());
+                record.lower_layers = layers.to_vec();
                 self.write_registry(&registry)
             }
-            (None, None) => Ok(()),
         }
+    }
+
+    /// Ensure the durable Overlay `upper`/`work` storage for a lower-backed
+    /// managed Workspace (#3582).
+    ///
+    /// The Agent Workspace Manager remains the data owner: it pins the ordered
+    /// lower set, initializes the durable pair on first use and refuses to
+    /// recreate it once the record says it existed. A missing, partial or
+    /// symlinked pair is never replaced with a fresh empty upper.
+    #[cfg(target_os = "linux")]
+    pub async fn ensure_overlay_storage(
+        &self,
+        workspace_id: &str,
+        lower_layers: &[String],
+    ) -> Result<WorkspaceOverlayStorage> {
+        if !is_valid_workspace_id(workspace_id) {
+            anyhow::bail!("workspace id is not a valid managed workspace identity");
+        }
+        if lower_layers.is_empty() {
+            anyhow::bail!(
+                "the Overlay storage of `{workspace_id}` needs the effective ordered lower digest set"
+            );
+        }
+        validate_lower_layers(lower_layers)?;
+        let _guard = self.registry.lock().await;
+        let mut registry = self.read_registry()?;
+        let Some(index) = registry
+            .workspaces
+            .iter()
+            .position(|record| record.workspace_id == workspace_id)
+        else {
+            anyhow::bail!("workspace not found");
+        };
+        let Some(record) = registry.workspaces.get_mut(index) else {
+            anyhow::bail!("workspace not found");
+        };
+        let current = effective_lower_layers(record);
+        if !current.is_empty() && current.as_slice() != lower_layers {
+            anyhow::bail!(
+                "workspace is pinned to Project EROFS lower {}; refusing a different lower {}",
+                current.join(","),
+                lower_layers.join(",")
+            );
+        }
+        let directory = self.workspace_dir(workspace_id);
+        let metadata = std::fs::symlink_metadata(&directory)
+            .with_context(|| format!("workspace directory {} is missing", directory.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            anyhow::bail!(
+                "workspace directory {} must be a real directory",
+                directory.display()
+            );
+        }
+        let initialized = record.overlay_storage;
+        let storage = if initialized {
+            nession_erofs::overlay::storage::verify(&directory).with_context(|| {
+                format!(
+                    "Workspace {workspace_id} records durable Overlay storage that is missing or \
+                     unsafe; refusing to create a fresh empty upper"
+                )
+            })?
+        } else {
+            nession_erofs::overlay::storage::initialize(&directory)?
+        };
+        let mut changed = !initialized;
+        if current.is_empty() {
+            let Some(first) = lower_layers.first() else {
+                anyhow::bail!("the effective lower digest set must not be empty");
+            };
+            record.lower_digest = Some(first.clone());
+            record.lower_layers = lower_layers.to_vec();
+            changed = true;
+        }
+        if changed {
+            record.overlay_storage = true;
+            self.write_registry(&registry)?;
+        }
+        Ok(WorkspaceOverlayStorage {
+            workspace_id: workspace_id.to_string(),
+            directory: storage.directory,
+            upper: storage.upper,
+            work: storage.work,
+        })
     }
 
     /// Acquire an exclusive RW attachment. The lease is in-memory and must be
@@ -560,6 +760,37 @@ impl RegistryFile {
                     "workspace registry contains an invalid lower digest for `{}`",
                     record.workspace_id
                 );
+            }
+            for (index, digest) in record.lower_layers.iter().enumerate() {
+                if !is_valid_image_digest(digest) {
+                    anyhow::bail!(
+                        "workspace registry contains an invalid lower layer digest for `{}`",
+                        record.workspace_id
+                    );
+                }
+                if record
+                    .lower_layers
+                    .iter()
+                    .take(index)
+                    .any(|known| known == digest)
+                {
+                    anyhow::bail!(
+                        "workspace registry contains a duplicate lower layer digest for `{}`",
+                        record.workspace_id
+                    );
+                }
+            }
+            if let Some(digest) = &record.lower_digest {
+                if record
+                    .lower_layers
+                    .first()
+                    .is_some_and(|first| first != digest)
+                {
+                    anyhow::bail!(
+                        "workspace registry lower digest and ordered layer set disagree for `{}`",
+                        record.workspace_id
+                    );
+                }
             }
             if ids.insert(record.workspace_id.clone(), ()).is_some() {
                 anyhow::bail!(
@@ -809,6 +1040,171 @@ mod tests {
             .unwrap();
         assert_eq!(first.workspace_id, second.workspace_id);
         assert!(first.auto_created, "the original provenance is preserved");
+    }
+
+    /// #3582 SC-05: a registry written before the layered lower set and the
+    /// durable Overlay marker existed decodes unchanged and remains usable.
+    #[tokio::test]
+    async fn a_legacy_registry_record_remains_compatible() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("workspaces");
+        std::fs::create_dir_all(root.join("workspaces").join("ws_legacy")).unwrap();
+        std::fs::write(
+            root.join("registry.json"),
+            r#"{
+  "version": 1,
+  "workspaces": [
+    {
+      "workspace_id": "ws_00000000-0000-4000-8000-000000000001",
+      "name": "legacy",
+      "normalized_name": "legacy",
+      "namespace": "default",
+      "auto_created": false,
+      "created_at": 1,
+      "last_used_at": 2,
+      "lower_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+        let manager = Arc::new(WorkspaceManager::open(root.clone()).unwrap());
+        let listed = manager.list(None).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "legacy");
+        let lower = format!("sha256:{}", "a".repeat(64));
+        // The legacy single digest is the effective ordered set.
+        manager
+            .pin_lower_digest(&listed[0].workspace_id, Some(&lower))
+            .await
+            .unwrap();
+        let other = format!("sha256:{}", "b".repeat(64));
+        let error = manager
+            .pin_lower_digest(&listed[0].workspace_id, Some(&other))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("refusing a different lower"));
+        // The legacy record is never rewritten by a read.
+        let bytes = std::fs::read_to_string(root.join("registry.json")).unwrap();
+        assert!(!bytes.contains("lower_layers"));
+    }
+
+    #[tokio::test]
+    async fn the_ordered_lower_set_is_the_compatibility_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = manager(dir.path()).await;
+        let workspace = manager.get_or_create(None, "layered", true).await.unwrap();
+        let first = format!("sha256:{}", "1".repeat(64));
+        let second = format!("sha256:{}", "2".repeat(64));
+        let layers = vec![first.clone(), second.clone()];
+        manager
+            .pin_lower_layers(&workspace.workspace_id, Some(&layers))
+            .await
+            .unwrap();
+        manager
+            .pin_lower_layers(&workspace.workspace_id, Some(&layers))
+            .await
+            .unwrap();
+        let reversed = vec![second, first];
+        let error = manager
+            .pin_lower_layers(&workspace.workspace_id, Some(&reversed))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("refusing a different lower"));
+        let absent = manager
+            .pin_lower_layers(&workspace.workspace_id, None)
+            .await
+            .unwrap_err();
+        assert!(format!("{absent:#}").contains("re-enter with the same lower"));
+        assert!(manager
+            .pin_lower_layers(
+                &workspace.workspace_id,
+                Some(&[layers[0].clone(), layers[0].clone()])
+            )
+            .await
+            .is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn first_overlay_use_initializes_storage_and_a_later_missing_pair_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = manager(dir.path()).await;
+        let workspace = manager.get_or_create(None, "storage", true).await.unwrap();
+        let lower = format!("sha256:{}", "c".repeat(64));
+        let storage = manager
+            .ensure_overlay_storage(&workspace.workspace_id, std::slice::from_ref(&lower))
+            .await
+            .unwrap();
+        assert!(storage.upper.is_dir());
+        assert!(storage.work.is_dir());
+        std::fs::write(storage.upper.join("edit.txt"), b"durable edit").unwrap();
+        // Idempotent while the durable pair is present.
+        manager
+            .ensure_overlay_storage(&workspace.workspace_id, std::slice::from_ref(&lower))
+            .await
+            .unwrap();
+
+        // A missing pair after initialization is data-loss evidence, not a
+        // reason to create a fresh empty upper.
+        std::fs::remove_dir_all(&storage.upper).unwrap();
+        let error = manager
+            .ensure_overlay_storage(&workspace.workspace_id, std::slice::from_ref(&lower))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("refusing to create a fresh empty upper"),
+            "{error:#}"
+        );
+        assert!(!storage.upper.exists());
+        assert!(storage.work.is_dir());
+
+        // A symlinked work directory is refused without touching the upper.
+        std::fs::create_dir(&storage.upper).unwrap();
+        std::fs::write(storage.upper.join("edit.txt"), b"durable edit").unwrap();
+        std::fs::remove_dir_all(&storage.work).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), &storage.work).unwrap();
+        assert!(manager
+            .ensure_overlay_storage(&workspace.workspace_id, &[lower])
+            .await
+            .is_err());
+        assert_eq!(
+            std::fs::read_to_string(storage.upper.join("edit.txt")).unwrap(),
+            "durable edit"
+        );
+    }
+
+    const OBSERVED_WORKSPACE: &str = "ws_00000000-0000-4000-8000-000000000009";
+
+    struct InUseGuard;
+    impl WorkspaceUseGuard for InUseGuard {
+        fn workspace_in_use(&self, workspace_id: &str, _directory: &Path) -> Option<String> {
+            (workspace_id == OBSERVED_WORKSPACE)
+                .then(|| "a physical Overlay is mounted".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_consults_observed_mount_state_not_only_a_lease_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(
+            WorkspaceManager::open_with_guard(
+                dir.path().join("workspaces"),
+                Some(Arc::new(InUseGuard)),
+            )
+            .unwrap(),
+        );
+        let workspace = manager.get_or_create(None, "observed", true).await.unwrap();
+        assert!(manager.delete(&workspace.workspace_id).await.is_ok());
+        // The probe refuses a deletion even though this process holds no
+        // in-memory attachment lease; the status is InUse.
+        std::fs::create_dir(manager.workspace_dir(OBSERVED_WORKSPACE)).ok();
+        let error = manager.delete(OBSERVED_WORKSPACE).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("a physical Overlay is mounted"),
+            "{error:#}"
+        );
     }
 
     #[tokio::test]

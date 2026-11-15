@@ -26,6 +26,9 @@ function relationLabel(relation: GithubBranchRelation, number: number | null | u
   if (relation === 'ambiguous') {
     return 'Current branch · more than one matching PR';
   }
+  if (relation === 'unknown') {
+    return 'Current branch · relation unavailable';
+  }
   return 'Current branch · no matching PR';
 }
 

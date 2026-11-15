@@ -195,6 +195,55 @@ impl SandboxRuntime {
         {
             settings.mount_manager = mount_manager;
         }
+        // One shared writable Overlay owner per Agent identity/mount namespace
+        // (#3582). Its authorized roots are the Agent-owned writable workspace
+        // roots: managed Workspaces, the Enter scratch root and the Managed
+        // Session root. A composition whose writable directory is outside them
+        // fails closed.
+        #[cfg(target_os = "linux")]
+        let overlay_manager = settings.mount_manager.as_ref().and_then(|lower| {
+            let mut workspace_roots = Vec::new();
+            if let Some(root) = &settings.agent_workspaces_root {
+                workspace_roots.push(root.clone());
+            }
+            workspace_roots.push(settings.state_dir.join("sandbox-workspaces"));
+            workspace_roots.push(settings.state_dir.join("managed"));
+            for root in &workspace_roots {
+                if let Err(error) = std::fs::create_dir_all(root) {
+                    tracing::warn!(
+                        "could not create the authorized Overlay workspace root {}: {error}",
+                        root.display()
+                    );
+                    return None;
+                }
+            }
+            let lower_provider: Arc<dyn nession_erofs::overlay::LowerProvider> = lower.clone();
+            match nession_erofs::overlay::OverlayMountManager::open(
+                nession_erofs::overlay::OverlayMountManagerConfig {
+                    root: settings.state_dir.join("erofs-overlays"),
+                    workspace_roots,
+                    settings: nession_erofs::overlay::OverlaySettings::new(
+                        settings.fuse_overlayfs_path.clone(),
+                        settings.fusermount_path.clone(),
+                    ),
+                    lower: lower_provider,
+                    identity: identity.to_string(),
+                },
+            ) {
+                Ok(manager) => Some(manager),
+                Err(error) => {
+                    tracing::warn!(
+                        "could not open the shared Workspace Overlay manager; compositions with a \
+                         Project lower fail closed: {error:#}"
+                    );
+                    None
+                }
+            }
+        });
+        #[cfg(target_os = "linux")]
+        {
+            settings.overlay_manager = overlay_manager;
+        }
         let runtime = Self::new(settings);
         // `new` returns an `Arc`, so expose the cache through a one-shot
         // setter rather than rebuilding the runtime.
@@ -216,6 +265,58 @@ impl SandboxRuntime {
     /// The host settings, for diagnostics and tests.
     pub fn settings(&self) -> &SandboxSettings {
         &self.settings
+    }
+
+    /// Observed use of one managed Workspace (#3582).
+    ///
+    /// This is the Agent Workspace Manager's deletion probe: it reports an
+    /// in-memory attachment, a mounted/leased physical Overlay, a live durable
+    /// owner lock, or a failed/orphaned state. Only a complete, unmounted and
+    /// unowned durable state returns `None`.
+    pub fn workspace_in_use(
+        &self,
+        workspace_id: &str,
+        workspace_directory: &std::path::Path,
+    ) -> Option<String> {
+        if let Ok(leases) = self.workspace_leases.lock() {
+            if leases
+                .values()
+                .any(|lease| lease.workspace_id() == workspace_id)
+            {
+                return Some("an execution holds an attachment lease".to_string());
+            }
+        }
+        // A surviving execution record is authoritative attachment evidence:
+        // even when its physical Overlay could not be adopted, the Workspace
+        // it was bound to must not be deleted underneath it.
+        if let Ok(executions) = self.executions.lock() {
+            if executions
+                .values()
+                .any(|entry| record_uses_workspace(entry.record(), workspace_directory))
+            {
+                return Some("a live Sandbox execution is bound to this Workspace".to_string());
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(manager) = &self.settings.overlay_manager {
+            if let Ok(workspace) = manager.resolve_workspace(workspace_directory) {
+                if let Some(status) = manager.lookup(&workspace) {
+                    if status.mounted
+                        || status.consumers > 0
+                        || status.state != nession_erofs::overlay::OverlayState::Idle
+                    {
+                        return Some(format!(
+                            "the Workspace has observed Overlay state ({:?})",
+                            status.state
+                        ));
+                    }
+                }
+                if manager.probe_owner_held(&workspace) {
+                    return Some("a live process owns the durable Overlay".to_string());
+                }
+            }
+        }
+        None
     }
 
     /// Probe the host without creating an execution.
@@ -578,6 +679,40 @@ pub fn execution_key(record: &ExecutionRecord) -> String {
     match &record.pane_id {
         Some(pane_id) => format!("pane:{pane_id}"),
         None => format!("session:{}", record.session_name),
+    }
+}
+
+/// Whether a durable execution record was bound to one Workspace directory.
+fn record_uses_workspace(record: &ExecutionRecord, directory: &std::path::Path) -> bool {
+    let Some(write) = record
+        .effective_policy
+        .as_ref()
+        .and_then(|policy| policy.filesystem.as_ref())
+        .and_then(|filesystem| filesystem.composition.as_ref())
+        .and_then(|composition| composition.workspace.as_ref())
+        .map(|workspace| std::path::Path::new(&workspace.write))
+    else {
+        return false;
+    };
+    let directory = std::fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
+    let write = std::fs::canonicalize(write).unwrap_or_else(|_| write.to_path_buf());
+    write == directory
+}
+
+/// The Agent Workspace Manager's observed-use probe (#3582).
+pub struct SandboxWorkspaceUse {
+    runtime: Arc<SandboxRuntime>,
+}
+
+impl SandboxWorkspaceUse {
+    pub fn new(runtime: Arc<SandboxRuntime>) -> Arc<Self> {
+        Arc::new(Self { runtime })
+    }
+}
+
+impl crate::workspace_manager::WorkspaceUseGuard for SandboxWorkspaceUse {
+    fn workspace_in_use(&self, workspace_id: &str, directory: &std::path::Path) -> Option<String> {
+        self.runtime.workspace_in_use(workspace_id, directory)
     }
 }
 
