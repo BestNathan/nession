@@ -965,12 +965,38 @@ describe('ConnectionManager', () => {
         isAttached: () => attachedNow, onInputDrop,
       });
       cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
-      cm.send('dangerous-command\\r');
+      cm.send('dangerous-command\r');
       expect(harness.api.sendInput).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs + 1);
       attachedNow = true;
       cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.flushInputBuffer();
+      cm.flushInputBuffer();
+
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      expect(onInputDrop).toHaveBeenCalledTimes(1);
+      expect(onInputDrop).toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'age', chunks: 1,
+      }));
+      cm.dispose();
+    });
+
+    it('expires a quiet P2P flush even without a new attach cursor reply', () => {
+      const harness = makeAgentApi();
+      const onInputDrop = vi.fn();
+      let attachedNow = false;
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api,
+        isAttached: () => attachedNow, onInputDrop,
+      });
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.send('queued-command\r');
+
+      vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs + 1);
+      attachedNow = true;
+      // Simulate a reconnect that is already attached with the old cursor.
+      // This path must be protected by outboundFrame(), not only reconcile().
       cm.flushInputBuffer();
       cm.flushInputBuffer();
 
@@ -1801,7 +1827,7 @@ describe('ConnectionManager', () => {
           isAttached: () => attachedNow, onInputDrop,
         });
         cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
-        cm.send('dangerous-command\\r');
+        cm.send('dangerous-command\r');
         expect(ws.sendRelayInput).not.toHaveBeenCalled();
 
         vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs + 1);
