@@ -424,6 +424,13 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_env_list",
+            "nession_server_env_get",
+            "nession_server_env_write",
+            "nession_server_env_delete",
+            "nession_server_session_env_binding_get",
+            "nession_server_session_env_binding_set",
+            "nession_server_session_env_binding_reapply",
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",

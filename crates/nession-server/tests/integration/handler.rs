@@ -1,3 +1,4 @@
+use nession_runtime::frame::WsFrame;
 use nession_server::db::Database;
 use nession_server::env::EnvService;
 use nession_server::registry::{AgentRegistry, SessionRegistry};
@@ -8,7 +9,6 @@ use nession_server::server::{
     ConnectionHandler, ConnectionHandlerConfig, ConnectionHandlerDeps, HandlerAction,
 };
 use std::sync::Arc;
-use tokio_tungstenite::tungstenite::Message;
 
 async fn make_handler() -> anyhow::Result<ConnectionHandler> {
     let db = Arc::new(Database::new(":memory:").await?);
@@ -44,14 +44,14 @@ async fn make_handler() -> anyhow::Result<ConnectionHandler> {
     ))
 }
 
-fn make_text_message(msg_type: &str, payload: serde_json::Value) -> Message {
+fn make_text_message(msg_type: &str, payload: serde_json::Value) -> WsFrame {
     let msg = serde_json::json!({
         "msg_type": msg_type,
         "id": "test-123",
         "timestamp": 1234567890,
         "payload": payload
     });
-    Message::Text(msg.to_string())
+    WsFrame::Text(msg.to_string())
 }
 
 #[tokio::test]
@@ -235,7 +235,7 @@ async fn test_client_session_attach_agent_offline() {
     let result = handler.handle_message(msg).await.unwrap();
     match result {
         HandlerAction::Reply(Some(reply)) => {
-            let reply_str = reply.to_string();
+            let reply_str = reply.to_text().expect("the reply is a text frame");
             assert!(reply_str.contains("not found") || reply_str.contains("offline"));
         }
         _ => panic!("Expected error response"),
@@ -267,7 +267,7 @@ async fn test_client_session_create_agent_offline() {
     let result = handler.handle_message(msg).await.unwrap();
     match result {
         HandlerAction::Reply(Some(reply)) => {
-            let reply_str = reply.to_string();
+            let reply_str = reply.to_text().expect("the reply is a text frame");
             assert!(reply_str.contains("not found") || reply_str.contains("offline"));
         }
         _ => panic!("Expected error response"),
@@ -298,7 +298,7 @@ async fn test_client_session_kill_agent_offline() {
     let result = handler.handle_message(msg).await.unwrap();
     match result {
         HandlerAction::Reply(Some(reply)) => {
-            let reply_str = reply.to_string();
+            let reply_str = reply.to_text().expect("the reply is a text frame");
             assert!(reply_str.contains("not found") || reply_str.contains("offline"));
         }
         _ => panic!("Expected error response"),

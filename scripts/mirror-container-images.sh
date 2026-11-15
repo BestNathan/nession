@@ -27,8 +27,27 @@ esac
 # transport issue while keeping the existing authenticated Buildx transfer.
 export GODEBUG="${GODEBUG:+${GODEBUG},}http2client=0"
 
+# Only the Ubuntu GitHub Actions release lane calls this mirror. Fail explicitly
+# if its deadline primitive is missing rather than holding the serialized
+# staging deployment lane for the entire job timeout.
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "ERROR: ACR mirror requires GNU coreutils timeout (Ubuntu release runner)" >&2
+  exit 2
+fi
+
+# Three bounded uploads plus checks remain well below the workflow's 45-minute
+# job deadline. An incomplete/expired upload never becomes a release receipt.
+bounded_inspect() {
+  timeout --signal=TERM --kill-after=15s 90s docker buildx imagetools inspect --raw "$1"
+}
+bounded_create() {
+  local destination="$1" amd64="$2" arm64="$3"
+  timeout --signal=TERM --kill-after=15s 420s docker buildx imagetools create \
+    --tag "$destination" "$amd64" "$arm64"
+}
+
 platform_digests() {
-  docker buildx imagetools inspect --raw "$1" | jq -ce '
+  bounded_inspect "$1" | jq -ce '
     [.manifests[]?
      | select(.platform.os == "linux" and
               (.platform.architecture == "amd64" or .platform.architecture == "arm64"))
@@ -59,13 +78,13 @@ for tag in "${tags[@]}"; do
   echo "Mirroring two platform manifests: ${source_ref} -> ${destination_ref}"
   copied=false
   for attempt in 1 2 3; do
-    if docker buildx imagetools create --tag "${destination_ref}" \
+    if bounded_create "${destination_ref}" \
       "${source_image}@${amd64_digest}" "${source_image}@${arm64_digest}"; then
       copied=true
       break
     fi
     if (( attempt < 3 )); then
-      echo "::warning::ACR mirror ${tag} attempt ${attempt}/3 failed; retrying upload"
+      echo "::warning::ACR mirror ${tag} attempt ${attempt}/3 failed or exceeded 420s; retrying within bounded job budget"
       sleep "$((attempt * 15))"
     fi
   done

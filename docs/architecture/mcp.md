@@ -28,11 +28,18 @@ MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
 
 ## Tools
 
-The advertised catalog is exactly four Tools:
+The advertised catalog has eleven Tools:
 
 | Semantic owner | Tool | Operation |
 |---|---|---|
 | Server | `nession_server_list_agents` | `server.agent.list` (registry discovery) |
+| Server | `nession_server_env_list` | `server.env.list` (Server and online-Agent file metadata) |
+| Server | `nession_server_env_get` | `server.env.get` (read raw file content) |
+| Server | `nession_server_env_write` | `server.env.write` (create/overwrite with in-use guards) |
+| Server | `nession_server_env_delete` | `server.env.delete` (delete with in-use guards) |
+| Server | `nession_server_session_env_binding_get` | `server.session.env.binding.get` (desired + observed state) |
+| Server | `nession_server_session_env_binding_set` | `server.session.env.binding.set` (whole ordered replacement, revision CAS) |
+| Server | `nession_server_session_env_binding_reapply` | `server.session.env.binding.reapply` (re-resolve at a new revision) |
 | Agent | `nession_agent_list_sessions` | the named Agent's live Session state |
 | Agent | `nession_agent_create_session` | `agent.session.create` on the named Agent |
 | Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent |
@@ -80,6 +87,14 @@ crates/nession-mcp/src/
     ├── nession_agent_list_sessions.rs
     ├── nession_agent_create_session.rs
     └── nession_agent_kill_session.rs
+    ├── env_target.rs           # shared source/agent target and Session identity validation
+    ├── nession_server_env_list.rs
+    ├── nession_server_env_get.rs
+    ├── nession_server_env_write.rs
+    ├── nession_server_env_delete.rs
+    ├── nession_server_session_env_binding_get.rs
+    ├── nession_server_session_env_binding_set.rs
+    └── nession_server_session_env_binding_reapply.rs
 ```
 
 Every Tool is **one file named exactly like the MCP Tool**, flat under
@@ -104,12 +119,37 @@ arguments and executes the business operation through the injected
 
 ## Backend and routing contract
 
-| Hosting mode | `nession_server_list_agents` | `nession_agent_*` |
+| Hosting mode | Server-owned discovery, ENV and binding tools | `nession_agent_*` |
 |---|---|---|
 | Server embedded | Server registry via the real `server_routes!` dispatch | the unnamed target is routed to the named Agent through the Server's command broker |
 | Agent embedded | the configured Server (or an explicit "standalone Agent" unavailable error) | this Agent's local `SessionManager`, refusing any other `agent_id` |
 | Standalone, Server routing (default) | configured Server | **through the Server's canonical Agent route**, after the Server registry confirms the target is online |
 | Standalone, direct Agent (explicit) | configured Server | the one configured Agent's P2P endpoint, refusing any other `agent_id` |
+
+ENV is managed through the Server's canonical `server.env.*` routes. The
+`source` argument defaults to `server`; for `source=agent` an explicit
+`agent_id` is required. The Server's existing rules protect files bound to
+running Sessions; writes are create-only by default (`overwrite=false`),
+and forced overwrite/deletion requires `force=true`. The `get` operation
+returns raw file contents, which may contain credentials: MCP callers must
+treat them as secrets and not put them into logs or unrelated prompts.
+Agent-embedded MCP without a configured Server returns an unavailable error
+for Server-owned ENV tools; it never silently substitutes local Agent state.
+
+Session Environment Binding is its own Server-owned capability. The three
+binding Tools route through the same `server.session.env.binding.*` units the
+Web uses, never through an Agent-local tmux path. `get` reports the desired
+revision, the ordered profiles with outdated flags, the Agent-observed
+revision/status and the managed key **names** — never values or snapshots.
+`set` replaces the whole ordered selection (an empty list clears it) and
+`reapply` re-resolves the current selection at a new revision; both require
+`expected_revision`, which the Server applies as a durable compare-and-swap. A
+stale value is refused with `revision_conflict` before any durable or
+Agent-side mutation, and there is no `force`/`ignore_conflict` bypass: the
+caller re-reads with `get`. Saving an ENV file never changes a running
+Session's materialized revision; only an explicit reapply or a replacement
+does. Agent-embedded MCP without a Server fails these Tools with an
+unavailable error rather than mutating local tmux through a second path.
 
 The Agent owns Session lifecycle and live state even when a caller reaches it
 through the Server. The Server owns Agent discovery, authorization and routing.

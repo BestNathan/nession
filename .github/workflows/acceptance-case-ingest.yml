@@ -15,8 +15,12 @@ permissions:
   issues: write
   pull-requests: read
 
+# GitHub limits each concurrency group to one running and ONE pending Run:
+# a global queue silently cancels older pending source events under high PR
+# traffic. Give every authenticated source Run/Attempt its own non-cancelling
+# group; the immutable Store still uses bounded CAS with conflict readback.
 concurrency:
-  group: acceptance-results-ingest
+  group: acceptance-results-ingest-${{ github.event.workflow_run.id || github.event.client_payload.source_run_id || github.run_id }}-${{ github.event.workflow_run.run_attempt || github.run_attempt }}
   cancel-in-progress: false
 
 jobs:

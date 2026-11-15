@@ -44,11 +44,20 @@ export function useSessionEnvBinding(sessionId: string | null): SessionEnvBindin
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const request = useRef(0);
+  /**
+   * The latest binding state, readable synchronously by a mutation.
+   *
+   * A replacement/reapply sends this revision as its compare-and-swap; a null
+   * value means "not read yet", and omitting it preserves the legacy
+   * unconditional request rather than guessing revision 0.
+   */
+  const bindingRef = useRef<SessionEnvBindingState | null>(null);
 
   const refresh = useCallback(async () => {
     const id = request.current + 1;
     request.current = id;
     if (!sessionId) {
+      bindingRef.current = null;
       setBinding(null);
       setError(null);
       setLoading(false);
@@ -61,6 +70,7 @@ export function useSessionEnvBinding(sessionId: string | null): SessionEnvBindin
       if (request.current !== id) {
         return;
       }
+      bindingRef.current = resp.binding ?? null;
       if (!resp.success) {
         setBinding(resp.binding ?? null);
         setError(resp.error ?? 'Environment status unavailable');
@@ -72,6 +82,7 @@ export function useSessionEnvBinding(sessionId: string | null): SessionEnvBindin
       if (request.current !== id) {
         return;
       }
+      bindingRef.current = null;
       setBinding(null);
       setError(e instanceof Error ? e.message : 'Environment status unavailable');
     } finally {
@@ -90,6 +101,7 @@ export function useSessionEnvBinding(sessionId: string | null): SessionEnvBindin
         const resp = await run();
         if (request.current === id) {
           if (resp.binding) {
+            bindingRef.current = resp.binding;
             setBinding(resp.binding);
           }
           setError(resp.success ? (resp.error ?? null) : (resp.error ?? FAILED.error ?? null));
@@ -121,7 +133,9 @@ export function useSessionEnvBinding(sessionId: string | null): SessionEnvBindin
           error: 'No Session is selected',
         });
       }
-      return mutate(() => envApi.setSessionEnvBinding(sessionId, refs));
+      return mutate(() =>
+        envApi.setSessionEnvBinding(sessionId, refs, bindingRef.current?.desired_revision),
+      );
     },
     [mutate, sessionId],
   );
@@ -133,13 +147,16 @@ export function useSessionEnvBinding(sessionId: string | null): SessionEnvBindin
         error: 'No Session is selected',
       });
     }
-    return mutate(() => envApi.reapplySessionEnvBinding(sessionId));
+    return mutate(() =>
+      envApi.reapplySessionEnvBinding(sessionId, bindingRef.current?.desired_revision),
+    );
   }, [mutate, sessionId]);
 
   // A Session switch must not keep showing the previous Session's status, and
   // an in-flight request for that Session must not land under the new one.
   useEffect(() => {
     request.current += 1;
+    bindingRef.current = null;
     setBinding(null);
     setError(null);
     setPending(false);

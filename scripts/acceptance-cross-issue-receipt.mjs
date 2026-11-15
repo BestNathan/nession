@@ -8,6 +8,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { attestPrSmokeSource, caseIndexRecord, recordPath, sourceRunIdentity, validateCaseRecord } from './acceptance-case-ingest.mjs';
+import { buildAcceptanceContext } from './acceptance-executor.mjs';
+import { validateRunIndex } from './run-record-index-contract.mjs';
+import { extractSection, isAcceptanceIssue, parseAcceptanceReport } from './requirement-acceptance.mjs';
 
 const REPO = 'BestNathan/nession';
 const SHA = /^[0-9a-f]{40}$/;
@@ -26,6 +30,14 @@ export function pinnedCrossIssueAcceptance(body) {
       if (![issue,pr,run,attempt,e2eRun,e2eAttempt].every(Number.isSafeInteger))
         throw Error('historical Acceptance witness integer overflow');
       return {kind:'pre-merge',issue,sc:pre[2],pr,sha:pre[4],run,attempt,e2eRun,e2eAttempt};
+    }
+    // Source-aligned PR Cases use the immutable Case Store, not an Agent verdict.
+    const prCase = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); PR #([1-9]\d*) SHA ([0-9a-f]{40}); Case Run ([1-9]\d*) attempt ([1-9]\d*)$/);
+    if (prCase) {
+      const [issue,pr,run,attempt] = [prCase[1],prCase[3],prCase[5],prCase[6]].map(Number);
+      if (![issue,pr,run,attempt].every(Number.isSafeInteger))
+        throw Error('historical PR Case witness integer overflow');
+      return {kind:'pr-case',issue,sc:prCase[2],pr,sha:prCase[4],run,attempt};
     }
     // A staging witness names the historical source SHA explicitly. A later
     // staging execution must prove SHA ancestry using GitHub compare metadata;
@@ -143,6 +155,113 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
     provenance:'GitHub exact-attempt Acceptance jobs + downloaded SHA256-bound immutable result artifact + merged PR ancestry + separately re-attested exact-attempt E2E steps',
     limitation:'Historical source Issue result; not a new E2E Pass or an authorization to update this Issue',
   };
+}
+
+
+// Immutable Git Store readback: the source-selected Issue witness supplies an
+// exact SHA-index locator, never the record path or the verdict.
+async function readCaseStoreJson(repo, file, request) {
+  const pattern=/^(?:indexes\/by-sha\/[a-f0-9]{40}\/acceptance\/[0-9]+-[0-9]+-[0-9]+-SC-[0-9]+\.json|runs\/\d{4}-\d\d-\d\d\/[0-9]+-[0-9]+\/[0-9]+\/SC-[0-9]+\.json)$/;
+  if (repo!==REPO || !pattern.test(file))
+    throw Error('invalid immutable Case Store locator');
+  const response=await request('/repos/'+repo+'/contents/'+file+'?ref=acceptance-results');
+  if (response?.type!=='file' || response.encoding!=='base64' ||
+      !Number.isSafeInteger(response.size) || response.size<1 ||
+      response.size>MAX_BYTES || !/^[a-f0-9]{40}$/.test(response.sha??'') ||
+      typeof response.content!=='string')
+    throw Error('Case Store Git blob metadata unavailable');
+  const bytes=Buffer.from(response.content.replace(/\s/g,''),'base64');
+  if(bytes.length!==response.size || bytes.length>MAX_BYTES)
+    throw Error('Case Store blob size mismatch');
+  return JSON.parse(bytes.toString('utf8'));
+}
+
+/** Pure, fail-closed proof after independent GitHub Run/PR/CI re-attestation. */
+export function attestPrCaseCrossIssue(pin,index,record,certified,issue,{
+  repo=REPO,targetSha,subjectIssue,
+}={}) {
+  if (repo!==REPO || pin?.kind!=='pr-case' || !SHA.test(String(targetSha)) ||
+      !Number.isSafeInteger(subjectIssue) || subjectIssue===pin.issue ||
+      !Number.isSafeInteger(pin.pr) || !Number.isSafeInteger(pin.run) ||
+      !Number.isSafeInteger(pin.attempt) || !Number.isSafeInteger(pin.issue) ||
+      !/^SC-\d{2,}$/.test(pin.sc) || !SHA.test(pin.sha))
+    throw Error('historical PR Case witness scope unverified');
+  const item=validateCaseRecord(record);
+  const canonicalIndex=caseIndexRecord(item);
+  validateRunIndex(index);
+  assert.deepEqual(index,canonicalIndex,'immutable PR Case SHA index does not match source record');
+  if(item.stage!=='pr' || item.result!=='Pass' || item.issue!==pin.issue ||
+     item.criterion!==pin.sc || item.target_sha!==pin.sha ||
+     item.run_id!==pin.run || item.run_attempt!==pin.attempt ||
+     recordPath(item)!==index.record ||
+     item.provenance?.record_path!==index.record ||
+     item.provenance?.workflow_url!=='https://github.com/'+repo+'/actions/runs/'+pin.run ||
+     !certified || certified.source_kind!=='pr-smoke' ||
+     certified.run_id!==pin.run || certified.run_attempt!==pin.attempt ||
+     certified.head_sha!==pin.sha || certified.event!=='pull_request' ||
+     certified.pr_binding?.pr_number!==pin.pr ||
+     certified.pr_binding?.issue!==pin.issue ||
+     JSON.stringify(item.provenance?.verified_source)!==JSON.stringify(certified))
+    throw Error('historical PR Case Store/Run/PR association unverified');
+  if(!issue || issue.number!==pin.issue || issue.state!=='closed' ||
+     !isAcceptanceIssue(issue)) throw Error('historical PR Case source Issue not reconciled');
+  const context=buildAcceptanceContext(issue,'pr',{
+    method:'case',targetRef:pin.sha,runId:pin.run,
+  });
+  if(context.contract_sha256!==item.contract_sha256 ||
+     !context.criteria.some(c=>c.criterion===pin.sc && c.text===item.criterion_text))
+    throw Error('historical PR Case source Issue contract changed');
+  const parsed=parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+  const row=parsed.rows.get(pin.sc);
+  if(parsed.errors.length || !row || row.result.toLowerCase()!=='pass' ||
+     !row.evidence.includes('run '+pin.run+'; ref '+pin.sha+'; source case-runner') ||
+     !row.evidence.includes('record: '+index.record) ||
+     !row.evidence.includes('execution='+item.execution_id))
+    throw Error('historical PR Case was not accepted in the source Issue');
+  return {
+    kind:'source_issue_pr_case_acceptance_receipt',
+    subject_issue:subjectIssue,source_issue:pin.issue,source_sc:pin.sc,
+    source_pr:pin.pr,source_sha:pin.sha,target_sha:targetSha,
+    case_run:pin.run,case_attempt:pin.attempt,
+    case_job_id:certified.pr_binding.case_job_id,
+    case_artifact_id:certified.pr_binding.artifact_id,
+    quality_run_id:certified.pr_binding.quality_run_id,
+    e2e_run_id:certified.pr_binding.e2e_run_id,
+    store_record:index.record,execution_id:item.execution_id,
+    case_tree_sha:item.case_tree_sha,contract_sha256:item.contract_sha256,
+    source_sc_result:'Pass',source_issue_state:'closed',
+    provenance:'GitHub exact-head PR Run/Attempt + Case Job/Artifact/CI + immutable Store SHA index/Case bytes + reconciled source Issue',
+    limitation:'Independent historical source Issue proof; not a standalone Pass or authorization to mutate the subject Issue',
+  };
+}
+
+export async function collectPrCaseCrossIssueAcceptance(pin,{
+  repo=REPO,targetSha,subjectIssue,request,token,
+}={}) {
+  if(pin?.kind!=='pr-case' || typeof request!=='function' || !token)
+    throw Error('PR Case proof requires pinned identity and read-only GitHub');
+  const indexPath='indexes/by-sha/'+pin.sha+'/acceptance/'+
+    pin.run+'-'+pin.attempt+'-'+pin.issue+'-'+pin.sc+'.json';
+  const [index,run,issue]=await Promise.all([
+    readCaseStoreJson(repo,indexPath,request),
+    request('/repos/'+repo+'/actions/runs/'+pin.run),
+    request('/repos/'+repo+'/issues/'+pin.issue),
+  ]);
+  const indexed=validateRunIndex(index);
+  if(indexed?.mode!=='acceptance' || indexed.stage!=='pr' ||
+     indexed.issue!==pin.issue || indexed.criterion!==pin.sc ||
+     indexed.target_sha!==pin.sha ||
+     indexed.source?.run_id!==pin.run ||
+     indexed.source?.run_attempt!==pin.attempt)
+    throw Error('historical PR Case index is not bound to witness');
+  const item=await readCaseStoreJson(repo,indexed.record,request);
+  const source=sourceRunIdentity({workflow_run:{...run,name:run.name}},repo);
+  const certified=await attestPrSmokeSource(item,source,{
+    repository:repo,token,request,
+  });
+  return attestPrCaseCrossIssue(pin,index,item,certified,issue,{
+    repo,targetSha,subjectIssue,
+  });
 }
 
 // A prior staging Issue's accepted Agent verdict is a source observation,
@@ -332,6 +451,12 @@ export async function collectCrossIssueAcceptance(repo,body,targetSha,subjectIss
     throw Error('historical Acceptance source environment unavailable');
   const results=[];
   for (const pin of pins) {
+    if (pin.kind==='pr-case') {
+      results.push(await collectPrCaseCrossIssueAcceptance(pin,{
+        repo,targetSha,subjectIssue,request,token,
+      }));
+      continue;
+    }
     if (pin.kind==='staging') {
       const [run,jobs,artifacts,comparison]=await Promise.all([
         request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt),
@@ -545,7 +670,161 @@ function selfTest(){
     stagingCompare,stagingOptions).source_sc_result,'Fail');
   console.log('historical cross-Issue Acceptance proof self-test passed');
 }
+
+async function prCaseSelfTest() {
+  const sha='a'.repeat(40),target='b'.repeat(40);
+  const issueNumber=3424,subjectIssue=3611,runId=43631439180,attempt=3,prNumber=3554;
+  const pin={kind:'pr-case',issue:issueNumber,sc:'SC-01',
+    pr:prNumber,sha,run:runId,attempt};
+  const fence=String.fromCharCode(96).repeat(3);
+  const issueBody=[
+    '## Success Criteria',
+    '- [x] SC-01 Source-aligned Chromium checks complete.',
+    '## Acceptance Plan',
+    fence+'yaml','acceptance:','  SC-01:','    when: pr','    method: case',fence,
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |','|---|---|---|',
+    '| SC-01 | Pass | TEMP |',
+  ].join('\n');
+  const issue={number:issueNumber,title:'Browser source proof',state:'closed',
+    labels:[{name:'bug'}],body:issueBody};
+  const context=buildAcceptanceContext(issue,'pr',{
+    method:'case',targetRef:sha,runId,
+  });
+  const source={repository:REPO,run_id:runId,run_attempt:attempt,
+    event:'pull_request',head_sha:sha,head_branch:'fix/3424',
+    workflow_id:378248506,source_kind:'pr-smoke',pr_binding:{
+      pr_number:prNumber,issue:issueNumber,head_sha:sha,
+      case_job_id:701,artifact_id:801,quality_run_id:901,e2e_run_id:902,
+    }};
+  const record={
+    schema_version:1,kind:'acceptance_case_result',
+    execution_id:'a'.repeat(64),run_id:runId,run_attempt:attempt,
+    issue:issueNumber,criterion:'SC-01',
+    criterion_text:context.criteria[0].text,stage:'pr',
+    target_sha:sha,case_revision:sha,case_tree_sha:'c'.repeat(40),
+    contract_sha256:context.contract_sha256,
+    runtime_profile:'full-stack-local',result_policy:'all-pass',
+    result:'Pass',infrastructure_status:'ready',infrastructure_error:null,
+    started_at:'2026-11-15T00:00:00.000Z',
+    finished_at:'2026-11-15T00:00:01.000Z',duration_ms:1000,
+    verifiers:[{type:'browser',entry:'verify.spec.ts',result:'Pass',
+      summary:'Chromium passed',evidence:[{type:'browser',value:'assertions=9'}]}],
+  };
+  record.execution_id=crypto.createHash('sha256').update(JSON.stringify({
+    schema_version:1,run_id:runId,run_attempt:attempt,
+    target_sha:sha,issue:issueNumber,criterion:'SC-01',
+    contract_sha256:record.contract_sha256,case_tree_sha:record.case_tree_sha,
+  })).digest('hex');
+  record.provenance={verified_source:source,record_path:recordPath(record),
+    workflow_url:'https://github.com/'+REPO+'/actions/runs/'+runId};
+  const accepted={...issue,body:issueBody.replace('TEMP',
+    'run '+runId+'; ref '+sha+'; source case-runner; case: execution='+
+      record.execution_id+'; record: '+record.provenance.record_path)};
+  const index=caseIndexRecord(record);
+  const opts={repo:REPO,targetSha:target,subjectIssue};
+  const proof=attestPrCaseCrossIssue(pin,index,record,source,accepted,opts);
+  assert.equal(proof.source_issue_state,'closed');
+  assert.equal(proof.source_sc_result,'Pass');
+  assert.equal(proof.case_artifact_id,801);
+  assert.equal(proof.store_record,recordPath(record));
+  const witness='Historical Acceptance witness: Issue #3424 SC-01; PR #3554 SHA '+
+    sha+'; Case Run '+runId+' attempt 3';
+  const body='## Historical Acceptance Evidence\n'+witness+'\n\n## Other';
+  assert.deepEqual(pinnedCrossIssueAcceptance(body),[pin]);
+  assert.throws(()=>pinnedCrossIssueAcceptance(body.replace('attempt 3','attempt forged')),
+    /malformed historical Acceptance/);
+  for(const [name,changed] of [
+    ['PR mismatch',{certified:{...source,pr_binding:{...source.pr_binding,pr_number:999}}}],
+    ['Case attempt mismatch',{record:{...record,run_attempt:2}}],
+    ['untrusted artifact',{certified:{...source,pr_binding:{...source.pr_binding,artifact_id:0}}}],
+    ['Issue not closed',{issue:{...accepted,state:'open'}}],
+    ['Issue not accepted',{issue:{...accepted,body:issueBody}}],
+    ['wrong SC',{pin:{...pin,sc:'SC-02'}}],
+    ['wrong source SHA',{pin:{...pin,sha:'f'.repeat(40)}}],
+    ['wrong Issue contract',{record:{...record,contract_sha256:'d'.repeat(64)}}],
+    ['wrong Store index',{index:{...index,record:'runs/2026-11-15/123-1/999/SC-01.json'}}],
+    ['mutated Store Case',{record:{...record,case_tree_sha:'e'.repeat(40)}}],
+    ['self-witness',{opts:{...opts,subjectIssue:issueNumber}}],
+  ]) {
+    const invoke=()=>attestPrCaseCrossIssue(
+      changed.pin??pin,changed.index??index,changed.record??record,
+      changed.certified??source,changed.issue??accepted,changed.opts??opts);
+    assert.throws(invoke,undefined,name+' should be rejected');
+  }
+  const gitBlob=value=>{
+    const content=Buffer.from(JSON.stringify(value));
+    return {type:'file',encoding:'base64',size:content.length,sha:'d'.repeat(40),
+      content:content.toString('base64')};
+  };
+  const sourceRun={id:runId,run_attempt:attempt,name:'Acceptance / Case Smoke',
+    status:'completed',conclusion:'success',event:'pull_request',
+    workflow_id:source.workflow_id,head_sha:sha,head_branch:source.head_branch,
+    path:'.github/workflows/acceptance-case-smoke.yml',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    created_at:'2026-11-14T19:19:11Z',pull_requests:[]};
+  const sourcePr={number:prNumber,state:'closed',merged:true,body:'Refs #3424',
+    title:'fix: browser metadata',
+    head:{sha,ref:source.head_branch,repo:{full_name:REPO}},
+    base:{ref:'staging',repo:{full_name:REPO}},
+    created_at:'2026-11-14T19:00:00Z',merged_at:'2026-11-14T20:00:00Z'};
+  const jobSteps=[
+    'Validate canonical Case contracts and generic selection',
+    'Select PR-linked Case-method proofs (trusted main policy)',
+    'Run selected source-aligned Cases through one job-scoped batch',
+    'Run actions/upload-artifact@v4',
+  ];
+  const job={id:source.pr_binding.case_job_id,name:'case-smoke',
+    run_id:runId,run_attempt:attempt,head_sha:sha,
+    status:'completed',conclusion:'success',
+    steps:jobSteps.map((name,i)=>({name,number:i+1,status:'completed',conclusion:'success'}))};
+  const artifact={id:801,name:'acceptance-case-smoke-'+runId+'-'+attempt,
+    expired:false,size_in_bytes:2048,
+    workflow_run:{id:runId,head_sha:sha}};
+  const ci=['ci-quality.yml','e2e-tests.yml'].map((name,i)=>({
+    id:901+i,path:'.github/workflows/'+name,event:'pull_request',
+    head_sha:sha,head_branch:source.head_branch,
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    status:'completed',conclusion:'success',run_number:1,run_attempt:1,
+    created_at:sourceRun.created_at,
+  }));
+  const indexPath='indexes/by-sha/'+sha+'/acceptance/'+
+    runId+'-'+attempt+'-'+issueNumber+'-SC-01.json';
+  const fetch=async(requestPath)=>{
+    if(requestPath.endsWith('/contents/'+indexPath+'?ref=acceptance-results'))
+      return gitBlob(index);
+    if(requestPath.endsWith('/contents/'+index.record+'?ref=acceptance-results'))
+      return gitBlob(record);
+    if(requestPath.endsWith('/issues/'+issueNumber))return accepted;
+    if(requestPath.endsWith('/actions/runs/'+runId))return sourceRun;
+    if(requestPath.includes('/commits/'+sha+'/pulls?'))return [{number:prNumber}];
+    if(requestPath.endsWith('/pulls/'+prNumber))return sourcePr;
+    if(requestPath.endsWith('/attempts/'+attempt+'/jobs?per_page=100'))
+      return {total_count:1,jobs:[job]};
+    if(requestPath.endsWith('/runs/'+runId+'/artifacts?per_page=100'))
+      return {total_count:1,artifacts:[artifact]};
+    if(requestPath.includes('/actions/runs?head_sha='+sha))
+      return {total_count:2,workflow_runs:ci};
+    throw Error('unmocked trusted PR Case API '+requestPath);
+  };
+  const online=await collectPrCaseCrossIssueAcceptance(pin,{
+    ...opts,request:fetch,token:'offline-test',
+  });
+  assert.deepEqual(online,proof);
+  for(const changed of [
+    async p=>p.includes('/contents/'+indexPath)?gitBlob({...index,issue:999}):fetch(p),
+    async p=>p.includes('/contents/'+index.record)?gitBlob({...record,result:'Pending',
+      verifiers:[{...record.verifiers[0],result:'Pending'}]}):fetch(p),
+    async p=>p.endsWith('/issues/'+issueNumber)?{...accepted,state:'open'}:fetch(p),
+    async p=>p.endsWith('/pulls/'+prNumber)?{...sourcePr,head:{...sourcePr.head,sha:'f'.repeat(40)}}:fetch(p),
+  ]) await assert.rejects(()=>collectPrCaseCrossIssueAcceptance(pin,{
+    ...opts,request:changed,token:'offline-test',
+  }));
+  console.log('PR Case cross-Issue Store/readback: exact Run/Attempt, source PR/CI, Case bytes, closed Issue and forged/replay negatives passed');
+}
+
 if(process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
   if(process.argv[2]!=='self-test')throw Error('usage: acceptance-cross-issue-receipt.mjs self-test');
   selfTest();
+  await prCaseSelfTest();
 }

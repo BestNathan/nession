@@ -100,4 +100,10 @@ export interface SessionEnvBindingResponse {
   binding?: SessionEnvBindingState | null;
   warnings: string[];
   error?: string | null;
+  /**
+   * A refusal that happened before any durable change. `revision_conflict`
+   * means another writer advanced the binding since this tab read it; the
+   * caller re-reads and retries.
+   */
+  refusal?: 'revision_conflict' | null;
 }

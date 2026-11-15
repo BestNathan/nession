@@ -66,7 +66,10 @@ impl ConnectionHandler {
         };
         refs.extend(env_files);
 
-        match self.set_session_binding(&session_id, &refs, "attach").await {
+        match self
+            .set_session_binding(&session_id, &refs, "attach", None)
+            .await
+        {
             Ok((warnings, error, _binding)) => Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.apply",
@@ -81,7 +84,7 @@ impl ConnectionHandler {
                 "server.session.env.apply",
                 ClientSessionEnvResponsePayload {
                     success: false,
-                    error: Some(error),
+                    error: Some(error.message()),
                     warnings: Vec::new(),
                 },
             )),
