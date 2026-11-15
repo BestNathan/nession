@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2bc56c00bf5a6d6b41e6e6f8773f1b9f8bfd8864ce8d96f6a1f25cdb6728034f",
+  "run_id": 43692399843,
+  "run_attempt": 1,
+  "issue": 3581,
+  "criterion": "SC-02",
+  "criterion_text": ": Oversized, truncated, stale-SHA, mismatched PR/repository and incomplete pagination fixtures fail closed; no unauthorized Issue projection or fabricated Pass.",
+  "stage": "post-merge",
+  "target_sha": "b22222fe1107c0d61ecb228cb78cd30f24d40659",
+  "contract_sha256": "782377b225b65051ce57ccb31e704e6e0162d2b5b35de1c58aa8ddae5a4d5fd9",
+  "case_revision": "b22222fe1107c0d61ecb228cb78cd30f24d40659",
+  "case_tree_sha": "0b90f52ee342abae5cd55326ec93372fd0c78d2c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T08:03:05.536Z",
+  "finished_at": "2026-11-15T08:03:05.842Z",
+  "duration_ms": 306,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Oversized, truncated, stale, mismatched and incomplete GitHub evidence fails closed without fabricating acceptance evidence",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA b22222fe1107c0d61ecb228cb78cd30f24d40659: ENOBUFS beyond the 8388608-byte cap, invalid/truncated JSON, a missing comparison projection, a 100-entry PR page, a stale previous head and a mismatched repository are each refused as incomplete provenance; no projection or Pass is produced"
+        }
+      ],
+      "duration_ms": 275,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43692399843,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b22222fe1107c0d61ecb228cb78cd30f24d40659",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43692399843",
+    "record_path": "runs/2026-11-15/43692399843-1/3581/SC-02.json",
+    "source_result_sha256": "4c0afa7e0bea0f37e795c58c1975bb0a71e1fb818753c95bcd39bf54bebc4a7c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43692399843-1",
+    "sha256": "4c0afa7e0bea0f37e795c58c1975bb0a71e1fb818753c95bcd39bf54bebc4a7c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43692399843",
+    "durability": "time-limited; object archival not configured"
+  }
+}
