@@ -28,15 +28,15 @@ function validateSource(env, checkoutSha) {
 function validateTrustedPipeline(ingest, readback, cases) {
   assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases"\]\s*$/m,
     'native Case Ingest must remain restricted to the canonical static source');
-  assert.match(ingest, /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*source_run_id:/,
-    'comment Cases require a distinct authenticated source-run dispatch');
+  assert.match(ingest, /repository_dispatch:\s*\n\s*types: \[nession-comment-case-ingest\]/,
+    'comment Cases require a default-branch, source-run-scoped repository dispatch');
   assert.match(ingest, /acceptance-case-ingest\.mjs prepare-event/,
     'ingester must reconstruct source event from GitHub before using credentials');
   assert.match(cases, /^  wake-comment-ingest:\s*$/m,
     'a comment Case must explicitly wake its trusted ingester');
   assert.match(cases, /needs: \[execute, execute-macos\]/,
     'Case Ingest must be woken only after both platform artifact jobs settle');
-  assert.match(cases, /-f source_run_id="\$GITHUB_RUN_ID"/,
+  assert.match(cases, /-f "client_payload\[source_run_id\]=\$GITHUB_RUN_ID"/,
     'comment wake may pass only its GitHub source Run locator');
   assert.match(ingest, /ref:\s*main\s*\n\s*path:\s*trusted/,
     'ingester tooling must use trusted main');
@@ -78,6 +78,7 @@ function test() {
   const cases = fs.readFileSync(path.join(root, '.github/workflows/acceptance-cases.yml'), 'utf8');
   validateTrustedPipeline(ingest, readback, cases);
   assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Cases"', '"Other workflow"'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('nession-comment-case-ingest', 'unscoped-wake'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest, readback, cases.replace('wake-comment-ingest:', 'disabled-wake:')));
   assert.throws(() => validateTrustedPipeline(ingest.replace('ref: main', 'ref: arbitrary'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest.replace('run-store-cas-push.mjs', 'unsafe-push'), readback, cases));
