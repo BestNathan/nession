@@ -765,7 +765,7 @@ export function recordControlledReviewerRecoveryIntent(state,expectedVersion,act
     outbox:state.outbox.map(x=>x.id===actionId?{...x,
       receipt:{...x.receipt,reviewer_recovery:recovery}}:x)});
 }
-// #3574: an authenticated pre-model Reviewer failure gets one new Action ID.
+// #3578: an authenticated pre-model Reviewer failure gets one new Action ID.
 // The previous signed dispatch and its Run are immutable; no replay of the old POST.
 export function reviewerPremodelSuccessorId(issue,actionId,runId){
   const f=REVIEWER_PREMODEL_FAILURE;
