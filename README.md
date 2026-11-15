@@ -15,6 +15,8 @@
 
 ## Catalog
 
+| Claude Code MCP · local/project management, Tools and one-click Nession setup · Web/App | [#3600](https://github.com/BestNathan/nession/issues/3600) | [Interactive HTML](claude-mcp-3600/index.html) · [Fidelity notes](claude-mcp-3600/README.md) |
+
 | Historical Server Images entry (global ownership remains; independent Session-less Workspace navigation superseded by #3408) | [#3181](https://github.com/BestNathan/nession/issues/3181) · [#3408](https://github.com/BestNathan/nession/issues/3408) | [Historical interactive HTML](images-3181/index.html) · [Supersession note](images-3181/README.md) |
 
 | AI · Current Session Agent Skills/MCP, no Agent selector; project discovery stays in client extensions | [#3251](https://github.com/BestNathan/nession/issues/3251) | [Interactive HTML](ai-global-resources-3251/index.html) · [Scenario & fidelity](ai-global-resources-3251/README.md) |
