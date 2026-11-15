@@ -29,7 +29,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::Router;
 use futures_util::{Sink, Stream};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
@@ -190,19 +190,39 @@ pub fn looks_like_websocket_upgrade(
 /// hyper keeps it rather than inheriting a larger default.
 pub const MAX_REQUEST_HEAD_BYTES: usize = 16 * 1024;
 
+/// How long one HTTP request head may take to arrive, including the wait for a
+/// request on a kept-alive connection.
+///
+/// Hyper starts this deadline whenever it begins reading a request head and
+/// disarms it when the head is complete, so it bounds:
+///
+/// * a partial first request after the socket is accepted;
+/// * an idle keep-alive connection waiting for its next request;
+/// * a partial second or later request.
+///
+/// It does **not** bound a request body, a long-running handler, or a streaming
+/// response (SSE, a large image body): while those are in progress the
+/// connection is not reading a head. This is the same 10 s parity bound the
+/// standalone MCP host used before Axum owned the listener (`#3439` W1).
+pub const HTTP_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Serve one accepted socket with `router` until the connection ends.
 ///
 /// `connect` completes the optional TLS handshake. The handshake deadline
 /// covers both that and the first complete HTTP request. Once the slot is
-/// released the deadline is disarmed, so a long-lived WebSocket or MCP stream
-/// is never cut short by the pre-authentication bound; the deadline is also
-/// the only read deadline here, so it cannot race a second timer over the same
-/// window.
+/// released that deadline is disarmed, so a long-lived WebSocket or MCP stream
+/// is never cut short by the pre-authentication bound.
+///
+/// `header_read_timeout` is the per-request head bound described on
+/// [`HTTP_HEADER_READ_TIMEOUT`]. It is passed explicitly so a test can reach the
+/// policy without waiting out a production number; both hosts pass the shared
+/// constant rather than re-deriving it.
 pub async fn serve<F, Fut>(
     connect: F,
     router: Router,
     slot: AdmissionSlot,
     deadline: Duration,
+    header_read_timeout: Duration,
 ) -> io::Result<()>
 where
     F: FnOnce() -> Fut,
@@ -211,9 +231,12 @@ where
     let served = async move {
         let io = connect().await?;
         hyper::server::conn::http1::Builder::new()
-            // The pre-authentication deadline below is the read bound; hyper's
-            // own header buffer stays at the head size the old listener used.
+            // The pre-authentication deadline below bounds the first head; the
+            // header-read timer bounds every later head (and the idle wait for
+            // one) without touching a body that is still streaming.
             .max_buf_size(MAX_REQUEST_HEAD_BYTES)
+            .timer(TokioTimer::new())
+            .header_read_timeout(header_read_timeout)
             .serve_connection(TokioIo::new(io), TowerToHyperService::new(router))
             .with_upgrades()
             .await
@@ -387,11 +410,15 @@ mod tests {
         let client = client.await.expect("client task").expect("connect");
         // The client sends nothing at all.
 
+        // The header timer is deliberately longer than the admission deadline:
+        // this test asserts *which* bound ended a peer that sent no head at
+        // all, and two equal timers would race for that verdict.
         let result = serve(
             move || async move { Ok(TcpOrTls::Plain(server)) },
             router,
             slot,
             Duration::from_millis(100),
+            Duration::from_secs(5),
         )
         .await;
         assert_eq!(
@@ -451,6 +478,7 @@ mod tests {
                 router,
                 slot,
                 Duration::from_millis(100),
+                Duration::from_millis(100),
             ),
         )
         .await
@@ -471,6 +499,204 @@ mod tests {
             slots.available_permits(),
             1,
             "the admission slot is back while the connection is being served"
+        );
+    }
+
+    /// Read one complete response head (through `\r\n\r\n`) from a raw client.
+    async fn read_response_head(client: &mut tokio::net::TcpStream) -> String {
+        let mut response = Vec::new();
+        let mut byte = [0u8; 1];
+        while !response.ends_with(b"\r\n\r\n") {
+            let read = client.read(&mut byte).await.expect("read a response byte");
+            assert_ne!(read, 0, "the server closed before sending a response head");
+            response.push(byte[0]);
+        }
+        String::from_utf8_lossy(&response).into_owned()
+    }
+
+    /// Whether the peer closed (or the read errored) within `window`.
+    async fn peer_closed_within(client: &mut tokio::net::TcpStream, window: Duration) -> bool {
+        tokio::time::timeout(window, async {
+            let mut buf = [0u8; 1];
+            loop {
+                match client.read(&mut buf).await {
+                    Ok(0) | Err(_) => return true,
+                    Ok(_) => {}
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// A plain `serve` harness with a short header deadline, so the test does
+    /// not wait out the production number.
+    async fn serve_one(
+        listener: tokio::net::TcpListener,
+        router: Router,
+        slot: AdmissionSlot,
+    ) -> io::Result<()> {
+        let (server, _) = listener.accept().await.expect("accept the client");
+        serve(
+            move || async move { Ok(TcpOrTls::Plain(server)) },
+            router,
+            slot,
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+        )
+        .await
+    }
+
+    /// #3439 W1: a connection that completed one request and then goes idle on
+    /// keep-alive is bounded by the per-request header deadline. Without it the
+    /// socket (and its hyper task) would outlive the admission window forever.
+    #[tokio::test]
+    async fn an_idle_keep_alive_connection_is_closed_at_the_header_deadline() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a local listener");
+        let addr = listener.local_addr().expect("local address");
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&slots).try_acquire_owned().expect("one slot");
+        let slot = AdmissionSlot::new(permit);
+        let served_slot = slot.clone();
+        let router = Router::new().route("/", get(|| async { "ok" })).layer(
+            axum::middleware::from_fn_with_state(slot.clone(), release_after_response),
+        );
+
+        let client = tokio::spawn(async move {
+            let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+            client
+                .write_all(b"GET / HTTP/1.1\r\nHost: test\r\n\r\n")
+                .await
+                .expect("write the first request");
+            let head = read_response_head(&mut client).await;
+            // No second request: the idle wait for one is what must be bounded.
+            let closed = peer_closed_within(&mut client, Duration::from_secs(2)).await;
+            (head, closed)
+        });
+
+        let served =
+            tokio::time::timeout(Duration::from_secs(2), serve_one(listener, router, slot))
+                .await
+                .expect("the idle connection is bounded");
+        assert!(
+            served.is_err(),
+            "the header deadline, not a request, ended the connection"
+        );
+
+        let (head, closed) = client.await.expect("client task");
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+        assert!(closed, "an idle keep-alive connection must be closed");
+        assert!(
+            served_slot.is_released(),
+            "the completed request ended the pre-authentication window"
+        );
+    }
+
+    /// #3439 W1: a partial second request on an otherwise valid keep-alive
+    /// connection is bounded by the same per-request header deadline.
+    #[tokio::test]
+    async fn a_partial_next_request_is_closed_at_the_header_deadline() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a local listener");
+        let addr = listener.local_addr().expect("local address");
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&slots).try_acquire_owned().expect("one slot");
+        let slot = AdmissionSlot::new(permit);
+        let router = Router::new().route("/", get(|| async { "ok" })).layer(
+            axum::middleware::from_fn_with_state(slot.clone(), release_after_response),
+        );
+
+        let client = tokio::spawn(async move {
+            let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+            client
+                .write_all(b"GET / HTTP/1.1\r\nHost: test\r\n\r\n")
+                .await
+                .expect("write the first request");
+            let head = read_response_head(&mut client).await;
+            // Half of a second request head, then silence.
+            client
+                .write_all(b"GET / HTTP/1.1\r\nHost")
+                .await
+                .expect("write a partial head");
+            let closed = peer_closed_within(&mut client, Duration::from_secs(2)).await;
+            (head, closed)
+        });
+
+        let served =
+            tokio::time::timeout(Duration::from_secs(2), serve_one(listener, router, slot))
+                .await
+                .expect("the partial request is bounded");
+        assert!(served.is_err(), "the partial head must not be served");
+
+        let (head, closed) = client.await.expect("client task");
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+        assert!(closed, "a partial next request must be closed");
+    }
+
+    fn slow_streaming_body() -> axum::body::Body {
+        let stream = futures_util::stream::unfold(0u8, |state| async move {
+            match state {
+                0 => {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Some((
+                        Ok::<_, io::Error>(axum::body::Bytes::from_static(b"first")),
+                        1,
+                    ))
+                }
+                1 => Some((Ok(axum::body::Bytes::from_static(b"second")), 2)),
+                _ => None,
+            }
+        });
+        axum::body::Body::from_stream(stream)
+    }
+
+    /// #3439 W1 positive half: the header deadline bounds reading a *head*, not
+    /// a response that is still streaming. An SSE-style body that takes longer
+    /// than the deadline must be delivered in full.
+    #[tokio::test]
+    async fn a_streaming_response_longer_than_the_header_deadline_is_not_cut() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a local listener");
+        let addr = listener.local_addr().expect("local address");
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&slots).try_acquire_owned().expect("one slot");
+        let slot = AdmissionSlot::new(permit);
+        let router = Router::new()
+            .route("/stream", get(|| async { slow_streaming_body() }))
+            .layer(axum::middleware::from_fn_with_state(
+                slot.clone(),
+                release_after_response,
+            ));
+
+        let client = tokio::spawn(async move {
+            let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+            client
+                .write_all(b"GET /stream HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+                .await
+                .expect("write the request");
+            let mut body = Vec::new();
+            client
+                .read_to_end(&mut body)
+                .await
+                .expect("read the streamed response");
+            body
+        });
+
+        let served =
+            tokio::time::timeout(Duration::from_secs(5), serve_one(listener, router, slot))
+                .await
+                .expect("the streamed response completes");
+        served.expect("a streaming response is not a header timeout");
+
+        let body = client.await.expect("client task");
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("first") && body.contains("second"),
+            "the whole streamed body must arrive: {body}"
         );
     }
 }
