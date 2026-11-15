@@ -712,7 +712,7 @@ async function prCaseSelfTest() {
       summary:'Chromium passed',evidence:[{type:'browser',value:'assertions=9'}]}],
   };
   record.execution_id=crypto.createHash('sha256').update(JSON.stringify({
-    schema_version:1,run_id,run_attempt:attempt,
+    schema_version:1,run_id:runId,run_attempt:attempt,
     target_sha:sha,issue:issueNumber,criterion:'SC-01',
     contract_sha256:record.contract_sha256,case_tree_sha:record.case_tree_sha,
   })).digest('hex');
