@@ -1,16 +1,6 @@
 name: Acceptance / Case Ingest
 
 on:
-  workflow_dispatch:
-    inputs:
-      source_run_id:
-        description: 'Original authenticated PR Case Smoke run ID (owner-only replay)'
-        required: true
-        type: string
-      source_run_attempt:
-        description: 'Original source attempt (no implicit latest replay)'
-        required: true
-        type: string
   repository_dispatch:
     types: [nession-comment-case-ingest]
   workflow_run:
@@ -45,12 +35,7 @@ jobs:
          github.event.client_payload.source_run_id != '') ||
         (github.event_name == 'workflow_run' &&
          !startsWith(github.event.workflow_run.name, 'Comment Case #') &&
-         !startsWith(github.event.workflow_run.display_title, 'Comment Case #')) ||
-        (github.event_name == 'workflow_dispatch' &&
-         github.ref == 'refs/heads/main' &&
-         github.actor == 'BestNathan' &&
-         github.event.inputs.source_run_id != '' &&
-         github.event.inputs.source_run_attempt != '')
+         !startsWith(github.event.workflow_run.display_title, 'Comment Case #'))
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 15
