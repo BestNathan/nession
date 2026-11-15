@@ -37,6 +37,35 @@ pub const ENTER_COMMAND: &str = "agent.session.sandbox.enter";
 pub const RETURN_COMMAND: &str = "agent.session.sandbox.return-to-native";
 pub const FOCUS_COMMAND: &str = "agent.session.sandbox.focus";
 
+/// The environment an Enter `new-window` delivers below the Session's own.
+///
+/// A key the Session environment already holds is the explicit layer and wins;
+/// the image default is not sent. The image's `path.prepend` composes onto the
+/// Session's effective `PATH`, so the mounted executable directories remain
+/// usable in the new Pane without mutating the running Native Pane.
+fn enter_window_environment(
+    image: &nession_sandbox::ImageRuntimeEnvironment,
+    session: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut environment: Vec<(String, String)> = image
+        .defaults
+        .iter()
+        .filter(|(key, _)| !session.iter().any(|(session_key, _)| session_key == key))
+        .cloned()
+        .collect();
+    if !image.path_prepend.is_empty() {
+        let session_path = session
+            .iter()
+            .find(|(key, _)| key == "PATH")
+            .map(|(_, value)| value.as_str());
+        if let Some(path) = nession_sandbox::compose_path_prepend(&image.path_prepend, session_path)
+        {
+            environment.push(("PATH".to_string(), path));
+        }
+    }
+    environment
+}
+
 /// One explicit Enter request, grouped so the Agent's lifecycle call stays
 /// readable as the image composition added its grants.
 pub struct SandboxEnterInput<'a> {
@@ -774,12 +803,43 @@ impl SessionManager {
         prepared.set_native_pane(&window_id, &pane_id);
 
         let ops = self.tmux_dep().ops();
+        // The isolated Pane is a new process: it receives the mounted image's
+        // bounded Config Env defaults and the resolved executable directories
+        // below the actual mount targets (#3500). No already-running Pane is
+        // mutated; adopting a new binding still requires a new Enter.
+        let image_environment = prepared.image_environment();
+        let mut window_env = image_environment.defaults.clone();
+        if !image_environment.defaults.is_empty() || !image_environment.path_prepend.is_empty() {
+            // The Session's effective environment is the explicit layer above
+            // the image defaults. A key it already holds is not overwritten,
+            // and its PATH is the base the image prepend is composed onto.
+            let session_environment = match ops.environment(session_name).await {
+                Ok(environment) => environment,
+                Err(error) => {
+                    let abort = prepared.abort();
+                    runtime.forget_catalog();
+                    return refusal(
+                        SandboxActionErrorKind::Failed,
+                        format!(
+                            "the Session environment could not be read for the image defaults: {error:#}{}",
+                            abort
+                                .err()
+                                .map(|abort| format!("; cleanup also failed: {abort}"))
+                                .unwrap_or_default()
+                        ),
+                        None,
+                    );
+                }
+            };
+            window_env = enter_window_environment(&image_environment, &session_environment);
+        }
+        window_env.extend(prepared.env().iter().cloned());
         let created = ops
             .new_window(&nession_tmux::NewWindow {
                 session_name: session_name.to_string(),
                 name: "sandbox".to_string(),
                 working_dir: prepared.record().working_dir.clone(),
-                env: prepared.env().to_vec(),
+                env: window_env,
                 command: prepared.command().to_vec(),
             })
             .await;
@@ -1425,6 +1485,51 @@ mod tests {
             window_active: active,
             pane_active: active,
         }
+    }
+
+    #[test]
+    fn an_enter_window_takes_image_defaults_below_the_explicit_session_environment() {
+        let image = nession_sandbox::ImageRuntimeEnvironment {
+            defaults: vec![
+                ("IMAGE_DEFAULT".to_string(), "image".to_string()),
+                ("SESSION_DEFAULT".to_string(), "image".to_string()),
+            ],
+            path_prepend: vec!["/opt/go/bin".to_string()],
+        };
+        let session = vec![
+            ("SESSION_DEFAULT".to_string(), "session".to_string()),
+            ("PATH".to_string(), "/session/bin:/usr/bin".to_string()),
+        ];
+        let environment = enter_window_environment(&image, &session);
+        assert!(
+            !environment.iter().any(|(key, _)| key == "SESSION_DEFAULT"),
+            "an explicit Session value must not be overwritten by an image default"
+        );
+        assert_eq!(
+            environment
+                .iter()
+                .find(|(key, _)| key == "IMAGE_DEFAULT")
+                .map(|(_, value)| value.as_str()),
+            Some("image"),
+            "an image-only default reaches the new Pane"
+        );
+        assert_eq!(
+            environment
+                .iter()
+                .find(|(key, _)| key == "PATH")
+                .map(|(_, value)| value.as_str()),
+            Some("/opt/go/bin:/session/bin:/usr/bin"),
+            "the mounted executable directory leads the Session's effective PATH"
+        );
+    }
+
+    #[test]
+    fn an_enter_window_without_image_usage_sends_no_environment() {
+        let environment = enter_window_environment(
+            &nession_sandbox::ImageRuntimeEnvironment::default(),
+            &[("PATH".to_string(), "/bin".to_string())],
+        );
+        assert!(environment.is_empty());
     }
 
     #[test]

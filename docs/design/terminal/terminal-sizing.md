@@ -40,6 +40,16 @@ For one live Session:
   shell's 28px edge-swipe bands still reach the surface (#1081). Owned
   horizontal insets remain part of the terminal host.
 
+**Keyboard and visual-viewport movement are not layout-space inputs** (#3523).
+A soft keyboard, browser toolbar, pan/zoom or focus reveal changes the
+**visible** rectangle, not the Terminal's measured content box. Those updates
+must not change rows or issue a resize; the App Experience lifts the work
+surface with a real, bounded outer scroll instead. The pane's rows change only
+when real layout space changes (window/container size, orientation, the App
+header, or an actual composer height), and through the authorized resize path
+described below. See [composition §15](../composition.md#15-app-viewport-environment-and-keyboard-avoidance-3523)
+for the ownership split.
+
 The measured cell comes from xterm's own renderer (including DPR and the
 finally-loaded JetBrains Mono face), never from `fontSize × 0.6`. A late font
 load re-fits the grid and recomputes rows before the first authoritative report.

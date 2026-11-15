@@ -192,6 +192,11 @@ pub struct SandboxImageRef {
 /// applied after the image and therefore shadows it). Toolchain images are
 /// read-only and restricted to `/opt/<name>` so V1 has no arbitrary
 /// overlapping root ordering language.
+///
+/// `base_env` and each toolchain's `env` are the Agent-resolved standard OCI
+/// Config `Env` defaults (#3500). They are bounded defaults: the Sandbox owns
+/// their validation and precedence, and an external Config never authorizes a
+/// mount or overrides a sandbox-owned variable.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +210,25 @@ pub struct SandboxFilesystemComposition {
     /// Optional read-only toolchain images mounted at `/opt/<name>`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub toolchains: Vec<SandboxToolchainImage>,
+    /// Standard Config `Env` defaults of the Base Runtime, parsed by the
+    /// Agent. They sit below enabled toolchain defaults and explicit
+    /// Session/Sandbox ENV.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub base_env: Vec<SandboxImageEnvDefault>,
+}
+
+/// One parsed standard Config `Env` default suggested by an image.
+///
+/// This is an input to Sandbox environment composition, not a grant: the
+/// Sandbox re-validates names, bounds and protected keys before it applies
+/// any value.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxImageEnvDefault {
+    pub name: String,
+    pub value: String,
 }
 
 /// Who owns the writable directory of a prepared composition (#3407).
@@ -246,6 +270,11 @@ pub struct SandboxWorkspace {
 }
 
 /// One read-only toolchain EROFS and its `/opt/<name>` mount target.
+///
+/// `env` and `path_prepend` are the Agent-resolved, advisory image usage
+/// suggestions (#3500). `path_prepend` is relative to the *actual* `target`:
+/// the Sandbox resolves it after target validation and refuses an unsafe or
+/// missing executable directory before user code runs.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +283,13 @@ pub struct SandboxToolchainImage {
     pub digest: String,
     pub source: String,
     pub target: String,
+    /// Standard Config `Env` defaults of this toolchain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<SandboxImageEnvDefault>,
+    /// Advisory executable directory below `target`; a relative normalized
+    /// path. The Sandbox resolves it and never treats it as authorization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_prepend: Option<String>,
 }
 
 /// Authorized host path sets. Other host paths are not visible in the
@@ -1215,9 +1251,12 @@ mod tests {
                         {
                             "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                             "source": "/data/erofs/sha256/cccc",
-                            "target": "/opt/node"
+                            "target": "/opt/node",
+                            "env": [{ "name": "GOFLAGS", "value": "-mod=readonly" }],
+                            "path_prepend": "bin"
                         }
-                    ]
+                    ],
+                    "base_env": [{ "name": "IMAGE_DEFAULT", "value": "base" }]
                 }
             }
         }))
@@ -1226,6 +1265,18 @@ mod tests {
         assert_eq!(
             value["filesystem"]["composition"]["toolchains"][0]["target"],
             "/opt/node"
+        );
+        assert_eq!(
+            value["filesystem"]["composition"]["toolchains"][0]["env"][0]["name"],
+            "GOFLAGS"
+        );
+        assert_eq!(
+            value["filesystem"]["composition"]["toolchains"][0]["path_prepend"],
+            "bin"
+        );
+        assert_eq!(
+            value["filesystem"]["composition"]["base_env"][0]["value"],
+            "base"
         );
     }
 

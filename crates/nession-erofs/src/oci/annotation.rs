@@ -108,15 +108,27 @@ impl NessionUsage {
 }
 
 /// An advisory mount target must be a normalized absolute path.
+///
+/// `/` is refused: the root is owned by the RootFS mapping, never a proposed
+/// additional mount target. Empty segments, `.`, `..`, a trailing slash and
+/// control characters are refused so the suggestion is already normalized.
 pub fn validate_mount_target(value: &str) -> Result<String> {
     if !value.starts_with('/') {
         anyhow::bail!("{ANNOTATION_MOUNT_DEFAULT} must be an absolute path, got {value:?}");
     }
-    if value.len() > 1 && value.ends_with('/') {
+    if value == "/" {
+        anyhow::bail!("{ANNOTATION_MOUNT_DEFAULT} must not name the root path '/'");
+    }
+    if value.ends_with('/') {
         anyhow::bail!("{ANNOTATION_MOUNT_DEFAULT} must not end with '/', got {value:?}");
     }
-    if value.split('/').any(|segment| segment == "..") {
-        anyhow::bail!("{ANNOTATION_MOUNT_DEFAULT} must not contain '..', got {value:?}");
+    if value[1..]
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        anyhow::bail!(
+            "{ANNOTATION_MOUNT_DEFAULT} must be normalized (no empty, `.` or `..` segment), got {value:?}"
+        );
     }
     if value.chars().any(char::is_control) {
         anyhow::bail!("{ANNOTATION_MOUNT_DEFAULT} must not contain control characters");
@@ -132,8 +144,16 @@ pub fn validate_relative_prepend(value: &str) -> Result<String> {
     if value.starts_with('/') {
         anyhow::bail!("{ANNOTATION_PATH_PREPEND} must be relative, got {value:?}");
     }
-    if value.split('/').any(|segment| segment == "..") {
-        anyhow::bail!("{ANNOTATION_PATH_PREPEND} must not contain '..', got {value:?}");
+    if value.ends_with('/') {
+        anyhow::bail!("{ANNOTATION_PATH_PREPEND} must not end with '/', got {value:?}");
+    }
+    if value
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        anyhow::bail!(
+            "{ANNOTATION_PATH_PREPEND} must be a normalized relative path without `.` or `..`, got {value:?}"
+        );
     }
     if value.chars().any(char::is_control) {
         anyhow::bail!("{ANNOTATION_PATH_PREPEND} must not contain control characters");

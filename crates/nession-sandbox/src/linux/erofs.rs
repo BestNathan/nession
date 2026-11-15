@@ -297,6 +297,31 @@ pub fn mount_composition(
 
     for toolchain in &composition.toolchains {
         let path = mount_image(toolchain, &image_root, manager, execution_id, &mut mounted)?;
+        if let Some(prepend) = &toolchain.path_prepend {
+            let executable_dir = path.join(prepend);
+            let metadata = std::fs::symlink_metadata(&executable_dir).map_err(|error| {
+                SandboxError::Prepare(format!(
+                    "toolchain image {} at {} declares io.nession.path.prepend `{}`, but \
+                     {}/{} is not an executable directory: {error}",
+                    toolchain.digest,
+                    toolchain.target.display(),
+                    prepend.display(),
+                    path.display(),
+                    prepend.display()
+                ))
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(SandboxError::Prepare(format!(
+                    "toolchain image {} at {} declares io.nession.path.prepend `{}`, but \
+                     {}/{} must be a real directory",
+                    toolchain.digest,
+                    toolchain.target.display(),
+                    prepend.display(),
+                    path.display(),
+                    prepend.display()
+                )));
+            }
+        }
         mounted
             .resolved
             .toolchains
@@ -593,6 +618,8 @@ mod tests {
             digest: nession_erofs::digest::digest_of_bytes(b"different bytes"),
             source: image,
             target: PathBuf::from("/"),
+            env: Vec::new(),
+            path_prepend: None,
         };
         let error = verify_image(&compiled, &images).unwrap_err();
         assert!(
@@ -612,6 +639,8 @@ mod tests {
             digest: nession_erofs::digest::digest_of_bytes(b"bytes"),
             source: outside,
             target: PathBuf::from("/"),
+            env: Vec::new(),
+            path_prepend: None,
         };
         let error = verify_image(&compiled, &images).unwrap_err();
         assert!(

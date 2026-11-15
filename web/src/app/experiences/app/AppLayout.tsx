@@ -1,6 +1,7 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { AppLayers, type AppLayer } from './AppLayers';
 import { AppSessionsSurface } from './AppSessionsSurface';
+import { useAppViewportEnvironment } from './useAppViewportEnvironment';
 import { ShellMain } from '@/app/ShellMain';
 import type { MainProps } from '@/app/experiences/web/WebLayout';
 import type { SidebarProps } from '@/app/Sidebar';
@@ -97,6 +98,13 @@ export function AppLayout(props: {
   const [workspaceDetailPushed, setWorkspaceDetailPushed] = useState(false);
   const [incomingFileFocus, setIncomingFileFocus] = useState<CapabilityFocus | undefined>();
 
+  // One read/coordinate owner for the whole App Experience (#3523). The frame
+  // keeps its layout height; the environment publishes what the browser makes
+  // visible so the active layer can reveal a focused control without touching
+  // Terminal geometry.
+  const frameRef = useRef<HTMLDivElement>(null);
+  useAppViewportEnvironment(frameRef);
+
   const handleOpenFileFromTerminal = useCallback(
     (path: string, line?: number, column?: number) => {
       setIncomingFileFocus({ capabilityId: 'files', resourceId: path, line, column });
@@ -107,7 +115,11 @@ export function AppLayout(props: {
   );
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div
+      ref={frameRef}
+      data-app-viewport-environment=""
+      className="flex min-h-0 flex-1"
+    >
       <AppLayers
         layer={layer}
         onLayerChange={onLayerChange}
@@ -130,6 +142,7 @@ export function AppLayout(props: {
               onOpenWorkspace={() => onLayerChange('workspace')}
               onOpenWorkspaceFile={handleOpenFileFromTerminal}
               terminal={terminal}
+              keyboardAvoidanceActive={layer === 'terminal'}
             />
           </div>
         }

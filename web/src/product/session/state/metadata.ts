@@ -43,6 +43,22 @@ const listeners = new Set<() => void>();
  * starts after a save is authoritative even if its revision is lower.
  */
 const requestSequence = new Map<string, number>();
+/**
+ * The durable tmux instance each cached `session_id` last named (#3424).
+ *
+ * `session_id` is recyclable, so the cache must notice when an authoritative
+ * Session list says the same public id now names a different instance. The map
+ * keeps the previous value rather than deleting it: a Session that disappears
+ * from one list and reappears under the same name is exactly the replacement
+ * the comparison must catch.
+ */
+const incarnations = new Map<string, string>();
+
+/** The fields an authoritative Session list contributes to incarnation identity. */
+export interface SessionIncarnationRef {
+  session_id: string;
+  instance_id?: string | null;
+}
 
 function publish(sessionId: string, entry: SessionMetadataEntry): void {
   entries.set(sessionId, entry);
@@ -143,6 +159,42 @@ export async function loadSessionMetadata(
 }
 
 /**
+ * Apply the incarnation identity an authoritative Session list reports (#3424).
+ *
+ * A recyclable `agent_id:session_name` is not an incarnation. When the list
+ * reports a different durable instance for the same public id, the name-keyed
+ * entry belongs to the previous incarnation: fence any answer still in flight,
+ * publish the empty state so no row keeps showing the old context, and read the
+ * new instance's own (possibly empty) metadata.
+ *
+ * An absent `instance_id` means a legacy Agent has not reported yet, not a new
+ * incarnation, so it changes nothing.
+ */
+export function observeSessionIncarnations(
+  sessions: readonly SessionIncarnationRef[],
+): void {
+  const replaced: string[] = [];
+  for (const session of sessions) {
+    if (!session.instance_id) {
+      continue;
+    }
+    const previous = incarnations.get(session.session_id);
+    incarnations.set(session.session_id, session.instance_id);
+    if (previous !== undefined && previous !== session.instance_id) {
+      replaced.push(session.session_id);
+    }
+  }
+  for (const sessionId of replaced) {
+    advanceRequestSequence(sessionId);
+    publish(sessionId, EMPTY_ENTRY);
+    // The new instance's metadata may legitimately be empty at revision 0;
+    // ask now so a mounted row or details view does not stay on the tmux-name
+    // fallback until something else happens to reload it.
+    void loadSessionMetadata(sessionId, { force: true });
+  }
+}
+
+/**
  * Replace the user fields. On success the cache (and every subscribed row)
  * immediately reflects the Agent's answer; on refusal the last loaded
  * metadata stays put and the caller keeps its draft.
@@ -179,5 +231,6 @@ export async function saveSessionMetadata(
 export function resetSessionMetadataCache(): void {
   entries.clear();
   requestSequence.clear();
+  incarnations.clear();
   listeners.clear();
 }
