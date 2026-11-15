@@ -26,6 +26,8 @@ export interface FileListProps {
   onToggleSelect?: (entry: FileEntry) => void;
 }
 
+const NO_CHILD_COUNTS: Record<string, number> = Object.freeze({});
+
 /**
  * The App's Files view: a sectioned list, not a tree (#1140).
  */
@@ -123,7 +125,7 @@ export function FileList({
       ) : (
         <FileListEntryRows
           entries={entries}
-          counts={{}}
+          counts={NO_CHILD_COUNTS}
           onEnterDirectory={onEnterDirectory}
           onFileClick={onFileClick}
           captureScroll={() => onScrollSnapshot?.(listRef.current?.scrollTop ?? 0)}
