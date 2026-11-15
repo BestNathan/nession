@@ -7,7 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseSuccessCriteria, extractSection } from './requirement-acceptance.mjs';
-import { requiresWebIntegrationExecution, validWebQualityReceipt } from './acceptance-pr-web-quality-receipt.mjs';
+import {
+  requiresWebIntegrationExecution, requiresExactHeadRustQuality,
+  validWebQualityReceipt, validRustQualityReceipt,
+} from './acceptance-pr-web-quality-receipt.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
 const TRUSTED_WORKFLOWS = new Set([
@@ -51,6 +54,14 @@ export function proofCovers(proof, context, criterion, candidate) {
     if (context.pr_web_quality?.status !== 'pass' ||
         !validWebQualityReceipt(context.pr_web_quality.receipt, context.target_ref) ||
         !validWebQualityReceipt(result.pr_web_quality_receipt, context.target_ref)) return false;
+  }
+  // The same rule for a criterion whose own proof is exact-head Rust
+  // Quality execution (#3584 SC-02): a legacy/source-only Pass cannot be
+  // reused without the authenticated current and historical receipts.
+  if (context.stage === 'pr' && requiresExactHeadRustQuality(criterion)) {
+    if (context.pr_rust_quality?.status !== 'pass' ||
+        !validRustQualityReceipt(context.pr_rust_quality.receipt, context.target_ref) ||
+        !validRustQualityReceipt(result.pr_rust_quality_receipt, context.target_ref)) return false;
   }
   return Boolean(accepted && accepted.result === 'Pass');
 }
@@ -166,6 +177,35 @@ function fixture() {
     pr_web_quality_receipt: receipt } }, {
     ...webContext, pr_web_quality: { status: 'pending' },
   }, webCriterion, { runId: 100, source: 'agent-cursor' }), false);
+  // #3584: a criterion whose proof is exact-head Rust Quality cannot be
+  // reused from a source-only historical Pass either.
+  const rustReceipt = {
+    kind: 'pr_rust_quality_execution_v1', repository: 'BestNathan/nession',
+    workflow: '.github/workflows/ci-quality.yml', head_sha: sha,
+    result: 'success', run_id: 50, run_attempt: 2, rust_job_id: 53,
+    rust_gate_step: 'Verify Rust and Acceptance Gates',
+  };
+  const rustCriterion = { criterion: 'SC-03',
+    text: 'Exact-head Rust coverage/Quality on the repair PR completes successfully.' };
+  const rustContext = { ...context, stage: 'pr',
+    requirement_body: 'Rust Quality fixtures', criteria: [rustCriterion],
+    pr_rust_quality: { status: 'pass', receipt: rustReceipt } };
+  const rustProof = { ...proof, result: { ...proof.result,
+    stage: 'pr', selected_criteria: ['SC-03'],
+    criteria: [{ criterion: 'SC-03', result: 'Pass' }] } };
+  assert.equal(proofCovers(rustProof, rustContext, rustCriterion,
+    { runId: 100, source: 'agent-cursor' }), false,
+  'a source-only historical pass cannot satisfy exact-head Rust Quality');
+  assert.equal(proofCovers({ ...rustProof, result: { ...rustProof.result,
+    pr_rust_quality_receipt: rustReceipt } }, rustContext, rustCriterion,
+    { runId: 100, source: 'agent-cursor' }), true);
+  assert.equal(proofCovers({ ...rustProof, result: { ...rustProof.result,
+    pr_rust_quality_receipt: rustReceipt } }, {
+    ...rustContext, pr_rust_quality: { status: 'pending' },
+  }, rustCriterion, { runId: 100, source: 'agent-cursor' }), false);
+  assert.equal(proofCovers({ ...rustProof, result: { ...rustProof.result,
+    pr_rust_quality_receipt: { ...rustReceipt, head_sha: 'c'.repeat(40) } } },
+  rustContext, rustCriterion, { runId: 100, source: 'agent-cursor' }), false);
   let fetches = 0;
   const good = selectOutstanding(context, id => { fetches++; assert.equal(id, 100); return proof; });
   assert.deepEqual(good.reused, ['SC-01', 'SC-03']);

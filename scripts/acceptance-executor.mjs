@@ -12,9 +12,10 @@ import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-resu
 import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
-  collectPrWebQuality, collectPrToolingQuality,
-  enforcePrWebQuality, requiresWebIntegrationExecution,
-  requiresPrToolingEvidence, validWebQualityReceipt,
+  collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
+  enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
+  requiresPrToolingEvidence, requiresPrRustQualityEvidence,
+  requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
 export { normalizeAcceptanceResult };
@@ -441,6 +442,11 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
         !validWebQualityReceipt(normalized.pr_web_quality_receipt, normalized.target_ref)) {
       throw new Error(id + ' Pass lacks authenticated exact-head Web Quality receipt');
     }
+    if (stage === 'pr' && result.result === 'Pass' &&
+        requiresExactHeadRustQuality(contract.criteria.get(id)) &&
+        !validRustQualityReceipt(normalized.pr_rust_quality_receipt, normalized.target_ref)) {
+      throw new Error(id + ' Pass lacks authenticated exact-head Rust Quality receipt');
+    }
   }
 
   for (const [id] of resultMap) {
@@ -546,6 +552,11 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   if (requiresPrToolingEvidence(context)) {
     context.pr_tooling_quality = collectPrToolingQuality(context.target_ref);
   }
+  // Same trusted read-only readback for a criterion that explicitly makes
+  // exact-head Rust Quality execution its proof obligation (#3584 SC-02).
+  if (requiresPrRustQualityEvidence(context)) {
+    context.pr_rust_quality = collectPrRustQuality(context.target_ref);
+  }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
 }
@@ -555,7 +566,7 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
   const normalized = verifiedIssueAuditCriterion(
     context, normalizeAcceptanceResult(context, raw, source));
-  const gated = enforcePrWebQuality(context, normalized);
+  const gated = enforcePrRustQuality(context, enforcePrWebQuality(context, normalized));
   fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
 }
 
@@ -1078,6 +1089,25 @@ function selfTest() {
   const downgraded = enforcePrWebQuality(webContext, rawWebPass);
   assert.equal(downgraded.criteria[0].result, 'Pending');
   assert.match(applyAcceptanceResultToBody(webBody, downgraded),
+    /\| SC-01 \| pr \| Pending \|/);
+  // The same barrier applies to an explicit exact-head Rust Quality
+  // obligation: source review alone cannot project Pass (#3584 SC-02).
+  const rustBody = fixtureBody()
+    .replace('SC-01 deterministic update works',
+      'SC-01 Exact-head Rust coverage/Quality on the repair PR completes successfully')
+    .replace('| SC-01 | staging |', '| SC-01 | pr |');
+  const rustBodyContext = buildAcceptanceContext({ ...issue, body: rustBody }, 'pr', {
+    targetRef: 'a'.repeat(40), runId: 701, method: 'agent',
+  });
+  const rawRustPass = normalizeAcceptanceResult(rustBodyContext, {
+    criteria: [{ criterion: 'SC-01', result: 'Pass',
+      evidence: [{ type: 'text', value: 'Source inspection is not an exact-head Rust Quality receipt' }] }],
+  }, 'agent-cursor');
+  assert.throws(() => applyAcceptanceResultToBody(rustBody, rawRustPass),
+    /lacks authenticated exact-head Rust Quality receipt/);
+  const rustDowngraded = enforcePrRustQuality(rustBodyContext, rawRustPass);
+  assert.equal(rustDowngraded.criteria[0].result, 'Pending');
+  assert.match(applyAcceptanceResultToBody(rustBody, rustDowngraded),
     /\| SC-01 \| pr \| Pending \|/);
 
   // Existing acceptance-executor-selftest Gate also exercises the exact-PR
