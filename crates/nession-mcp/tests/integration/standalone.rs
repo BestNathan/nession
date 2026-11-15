@@ -814,6 +814,261 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
     server_task.abort();
 }
 
+/// ENV file CRUD through the real Server: create-only, explicit overwrite,
+/// in-use guards, Agent scoping, traversal refusal, metadata-only listing,
+/// and a save that does not advance the Session binding.
+#[tokio::test]
+async fn standalone_manages_env_files_with_canonical_guards() {
+    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (mock_agent, broker) = register_and_answer(server_addr).await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut child = spawn_standalone(&config_path);
+    let mcp_addr = await_listen_addr(&mut child.0).await;
+
+    // Authentication is the MCP endpoint's, and an ENV tool is no exception.
+    let anonymous = send(
+        mcp_addr,
+        "POST",
+        None,
+        None,
+        &json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "nession_server_env_list", "arguments": {} }
+        })
+        .to_string(),
+    )
+    .await
+    .expect("HTTP answer");
+    assert_eq!(anonymous.status, 401);
+
+    let session = initialize_with(mcp_addr, MCP_TOKEN).await;
+
+    let created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "guarded.env",
+            "content": "GUARDED_SECRET=shh-secret-value\n"
+        }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+
+    // Create-only by default: the second write is refused, and says why.
+    let refused = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "guarded.env",
+            "content": "GUARDED_SECRET=replacement\n"
+        }),
+    )
+    .await;
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert_eq!(text_of(&refused)["exists"], true);
+
+    // Listing is metadata: the file appears, its content does not.
+    let listed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_list",
+        json!({}),
+    )
+    .await;
+    assert_eq!(listed["isError"], false, "{listed}");
+    let listed_text = serde_json::to_string(&listed).expect("serialize");
+    assert!(
+        !listed_text.contains("shh-secret-value"),
+        "listing must not return ENV values: {listed_text}"
+    );
+    assert!(
+        text_of(&listed)["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .any(|file| file["name"] == "guarded.env"),
+        "the created file is missing from the metadata listing: {listed}"
+    );
+
+    // Reading is the explicit operation that returns raw content.
+    let read = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_get",
+        json!({ "name": "guarded.env" }),
+    )
+    .await;
+    assert_eq!(read["isError"], false, "{read}");
+    assert_eq!(
+        text_of(&read)["content"],
+        "GUARDED_SECRET=shh-secret-value\n"
+    );
+
+    let name = unique_name("env-guard");
+    let created_session = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": CLUSTER_AGENT, "name": name }),
+    )
+    .await;
+    assert_eq!(created_session["isError"], false, "{created_session}");
+    let session_id = format!("{CLUSTER_AGENT}:{name}");
+
+    let bound = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_set",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "profiles": [{ "name": "guarded.env" }]
+        }),
+    )
+    .await;
+    assert_eq!(bound["isError"], false, "{bound}");
+    assert_eq!(text_of(&bound)["binding"]["desired_revision"], 1);
+
+    // Bound to a live Session: an ordinary overwrite is refused.
+    let in_use_write = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "guarded.env",
+            "content": "GUARDED_SECRET=replacement\n",
+            "overwrite": true
+        }),
+    )
+    .await;
+    assert_eq!(in_use_write["isError"], true, "{in_use_write}");
+
+    // The explicit force is the only bypass, and it still does not advance the
+    // Session's materialized revision: a save is not a reapply.
+    let forced_write = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "guarded.env",
+            "content": "GUARDED_SECRET=replacement\n",
+            "overwrite": true,
+            "force": true
+        }),
+    )
+    .await;
+    assert_eq!(forced_write["isError"], false, "{forced_write}");
+    let after_save = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_get",
+        json!({ "session_id": session_id }),
+    )
+    .await;
+    assert_eq!(
+        text_of(&after_save)["binding"]["desired_revision"],
+        1,
+        "an ordinary save must not advance the Session binding"
+    );
+
+    // In-use deletion needs the same explicit force.
+    let in_use_delete = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_delete",
+        json!({ "name": "guarded.env" }),
+    )
+    .await;
+    assert_eq!(in_use_delete["isError"], true, "{in_use_delete}");
+    let deleted = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_delete",
+        json!({ "name": "guarded.env", "force": true }),
+    )
+    .await;
+    assert_eq!(deleted["isError"], false, "{deleted}");
+    let gone = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_get",
+        json!({ "name": "guarded.env" }),
+    )
+    .await;
+    assert_eq!(gone["isError"], true, "{gone}");
+
+    // A traversal-shaped name is refused by the Server's filename rules.
+    let traversal = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({ "name": "../escape.env", "content": "A=1\n" }),
+    )
+    .await;
+    assert_eq!(traversal["isError"], true, "{traversal}");
+
+    // Agent-scoped operations reach exactly the named Agent, through the
+    // Server's canonical route.
+    let agent_write = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "node.env",
+            "source": "agent",
+            "agent_id": CLUSTER_AGENT,
+            "content": "NODE=1\n"
+        }),
+    )
+    .await;
+    assert_eq!(agent_write["isError"], false, "{agent_write}");
+    assert!(
+        broker
+            .commands()
+            .iter()
+            .any(|command| command == "agent.env.write"),
+        "the Agent-scoped write never reached the named Agent: {:?}",
+        broker.commands()
+    );
+
+    let unknown_agent = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "node.env",
+            "source": "agent",
+            "agent_id": "not-registered",
+            "content": "NODE=1\n"
+        }),
+    )
+    .await;
+    assert_eq!(unknown_agent["isError"], true, "{unknown_agent}");
+
+    terminate_and_wait(&mut child.0).await;
+    mock_agent.abort();
+    server_task.abort();
+}
+
 #[tokio::test]
 async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
     let (server_addr, server_task) = start_server_with_mcp(false).await;
@@ -929,6 +1184,8 @@ async fn all_three_hosts_share_one_tool_catalog() {
     // back to local Agent state.
     let session = initialize_with(agent_addr, AGENT_TOKEN).await;
     for (tool, arguments) in [
+        ("nession_server_env_list", json!({})),
+        ("nession_server_env_get", json!({ "name": "any.env" })),
         (
             "nession_server_session_env_binding_get",
             json!({ "session_id": "any-agent:work" }),
