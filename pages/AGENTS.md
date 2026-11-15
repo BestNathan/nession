@@ -37,7 +37,16 @@ from Nession release SemVer and from the latest upstream MCP specification.
 The upstream stable revision is fetched from the official MCP repository's
 non-draft GitHub release and resolved to its exact tag commit; its changelog
 contents must match that commit's Git blob SHA. Drafts and SEPs are not
-automatically stable. The canonical semantic digest owner is
+automatically stable. The source-aware fast path is `pages/scripts/mcp-export-gate.mjs`:
+only a validated prior MCP publication, unchanged pinned official stable release,
+and a bounded authenticated GitHub comparison that proves no edits to the Rust
+MCP/protocol crates, workspace Cargo lock/toolchain inputs or MCP projection
+owner can skip the Rust exporter. A missing, divergent, truncated, or
+unverifiable comparison **rebuilds** the canonical Tool catalog; it never
+becomes a false no-op. This gate only optimizes compilation; the existing
+semantic digest and full previous snapshot validation still own publication.
+
+The canonical semantic digest owner is
 `pages/scripts/mcp-semantic.mjs` and reconciliation/last-good validation is
 `pages/scripts/mcp-reconcile.mjs`. On unchanged semantics, re-use the previous
 published MCP projection byte-for-byte (including its last-changed source SHA)
