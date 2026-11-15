@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "issue": 3591,
+  "version": 3,
+  "phase": "ready",
+  "target_sha": null,
+  "repair_attempts": 0,
+  "transitions": [],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "99484d008522278d6a1b48c22774f259a71917363143163ae4a3fcf0aca4db66",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "5ae7fbf46408c81b36f62a1705de469687a91cd3",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "99484d008522278d6a1b48c22774f259a71917363143163ae4a3fcf0aca4db66",
+        "source_run_id": 43680082888
+      }
+    }
+  ]
+}
