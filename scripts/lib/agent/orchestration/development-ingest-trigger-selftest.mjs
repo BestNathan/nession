@@ -122,6 +122,25 @@ assert.throws(()=>resolveTrustedIngestSource({environment:qwenEnv,
   event:{...qwenV2Issue,comment:{...qwenV2Issue.comment,
     body:'/nession ingest-qwen issue=3002 worker_run=42488022265'}}}),
   /exact owner\/main/);
+const recoveredRepair={...qwenV2Issue,
+  issue:{number:3433,state:'open'},
+  comment:{...qwenV2Issue.comment,
+    body:'/nession ingest-qwen issue=3433 worker_run=43677482758'}};
+assert.deepEqual(resolveTrustedIngestSource({
+  environment:qwenEnv,event:recoveredRepair}),
+  {run_id:43677482758,source:null,qwen_recovery:true,
+    issue:3433,attempt:1});
+for(const bad of [
+  {event:{...recoveredRepair,issue:{number:3434,state:'open'}}},
+  {event:{...recoveredRepair,comment:{...recoveredRepair.comment,
+    body:'/nession ingest-qwen issue=3433 worker_run=43677482759'}}},
+  {event:{...recoveredRepair,comment:{...recoveredRepair.comment,
+    body:'/nession ingest-qwen issue=3433 worker_run=43677482758 '}}},
+  {event:{...recoveredRepair,comment:{...recoveredRepair.comment,
+    user:{login:'other'}}}},
+  {environment:{...qwenEnv,GITHUB_ACTOR:'other'}},
+])assert.throws(()=>resolveTrustedIngestSource({
+  environment:qwenEnv,event:recoveredRepair,...bad}),/owner|exact|trusted|Ingest/);
 for(const bad of [
   {environment:{...qwenEnv,GITHUB_ACTOR:'fork'}},
   {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
