@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "294484a18a231850836cddb19980382503ca3ea00057c64cdbfae176c95b74d8",
+  "run_id": 43692576703,
+  "run_attempt": 1,
+  "issue": 3582,
+  "criterion": "SC-03",
+  "criterion_text": "After a Workspace is detached and an Agent is restarted, the same Workspace ID and pinned Lower reattach with its exact prior file edits intact; an altered/missing Lower, missing or symlinked upper/work, unauthorized owner, or competing independent mount refuses without creating a fresh empty upper or changing the old data.",
+  "stage": "staging",
+  "target_sha": "0676864406c0aa52b9d5ccf535088a1b7f11c7e9",
+  "contract_sha256": "c86ed68c23f3f70f0b37b83dbfacf375f8658e7ff80d704c6e6bc66a1880421e",
+  "case_revision": "0676864406c0aa52b9d5ccf535088a1b7f11c7e9",
+  "case_tree_sha": "2bec35cf192e24f6d424d8828405f9a52812b865",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T08:04:33.941Z",
+  "finished_at": "2026-11-15T08:04:54.293Z",
+  "duration_ms": 20352,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo test -p nession-sandbox --test linux_runtime a_detached_workspace_reattaches_and_unsafe_storage_is_refused -- --nocapture failed (exit 101): \u001b[1m\u001b[92m   Compiling\u001b[0m nession-sandbox v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-sandbox)\n\u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 0.80s\n\u001b[1m\u001b[92m     Running\u001b[0m tests/linux_runtime.rs (target/debug/deps/linux_runtime-161f8ef26dae58a0)\n\nthread 'a_detached_workspace_reattaches_and_unsafe_storage_is_refused' (4378) panicked at crates/nession-sandbox/tests/linux_runtime.rs:2826:10:\na competing mount must not be adopted: OverlayLease { workspace: \"/tmp/.tmpjHnFoL/agent-workspaces::ws_reattach\", mountpoint: \"/tmp/.tmpjHnFoL/erofs-overlays/mounts/ea755b6e5680a019ad83b8fbc11e3ea2292b05e7beab2e4f63f0c066a00825a5\", generation: \"c5a0cca9-c3d1-43d8-8474-5b165d46000c\", execution_id: \"exec-competing-mount\" }\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n   1: core::panicking::panic_fmt\n   2: core::result::unwrap_failed\n   3: core::result::Result<T,E>::expect_err\n   4: linux_runtime::a_detached_workspace_reattaches_and_unsafe_storage_is_refused\n   5: linux_runtime::a_detached_workspace_reattaches_and_unsafe_storage_is_refused::{{closure}}\n   6: core::ops::function::FnOnce::call_once\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-sandbox --test linux_runtime`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 14435,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43692576703,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "b22222fe1107c0d61ecb228cb78cd30f24d40659",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "0676864406c0aa52b9d5ccf535088a1b7f11c7e9",
+        "stage": "staging",
+        "issue": 3582,
+        "criterion": "SC-03",
+        "job_id": 132746127178,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43692576703",
+    "record_path": "runs/2026-11-15/43692576703-1/3582/SC-03.json",
+    "source_result_sha256": "ae031028f14fab363216bd39ed564d6aacb9fddcbd73c671888621f6f030e4e1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43692576703-1",
+    "sha256": "ae031028f14fab363216bd39ed564d6aacb9fddcbd73c671888621f6f030e4e1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43692576703",
+    "durability": "time-limited; object archival not configured"
+  }
+}
