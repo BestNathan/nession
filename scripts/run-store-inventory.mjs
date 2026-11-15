@@ -285,10 +285,11 @@ export function checkInventory(manifest,workflows){
       // Such events can run branch-selected workflow code with contents:write,
       // irrespective of whether its default-branch YAML has a guarded job.
       const triggers=body.split(/^permissions:\s*$/m)[0];
-      // The ONLY privileged repository_dispatch exception is the Metrics
-      // Writer's exact bot wake for a completed Reviewer. The webhook is
-      // untrusted until an independent REST Run/attempt/main SHA attestation
-      // and canonical artifact verification. All other writers remain denied.
+      // Trusted, default-branch-only repository_dispatch exceptions have
+      // different source-proof owners: Metrics re-attests completed Reviewer
+      // evidence; Acceptance re-attests completed comment Case Run/Attempt,
+      // original pre-checkout human authority, and canonical Case tree.
+      // An arbitrary event or ref-selected manual dispatch remains denied.
       const reviewerWake=writer.workflow==='.github/workflows/metrics-agent-telemetry.yml'&&
         /^  repository_dispatch:\s*\n    types: \[nession-agent-review-completed\]\s*$/m.test(triggers)&&
         body.includes("github.ref == 'refs/heads/main'")&&
