@@ -6,6 +6,10 @@ const SHA1='a'.repeat(40),SHA2='b'.repeat(40);
 const catalog={
   schema_version:1,
   protocol_versions:['2025-03-26','2026-07-28'],
+  upstream:{stable:{version:'2026-07-28',sha:'c'.repeat(40),changelog_blob_sha:'d'.repeat(40),changelog_sha256:'e'.repeat(64),
+    release_url:'https://github.com/modelcontextprotocol/modelcontextprotocol/releases/tag/2026-07-28',
+    source_url:'https://github.com/modelcontextprotocol/modelcontextprotocol/blob/'+'c'.repeat(40)+'/docs/specification/2026-07-28/changelog.mdx',
+    previous_version:'2025-11-25',highlights:['Stateless core']}},
   tools:[{name:'nession_server_list_agents',description:'List Agents',
     inputSchema:{type:'object',properties:{}}}],
 };
