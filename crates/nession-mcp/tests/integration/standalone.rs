@@ -418,20 +418,44 @@ async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, 
                     .map(|name| json!({ "name": name }))
                     .collect()
             };
-            let response = json!({
-                "msg_type": "server.agent.command-response",
-                "id": format!("response-{request_id}"),
-                "timestamp": 0,
-                "payload": {
+            let response = {
+                // The mock Agent reports a real convergence status for binding
+                // commands, and refuses a binding replacement for Sessions
+                // whose name says "fail" so the Server's committed-desired /
+                // failed-runtime split is exercised through MCP.
+                let is_binding = command.starts_with("agent.session.env.binding.");
+                let failing = session_name.contains("fail");
+                let success = !(is_binding && command.ends_with(".set") && failing);
+                let mut payload = json!({
                     "request_id": request_id,
                     "command": command,
-                    "success": true,
-                    "error": null,
+                    "success": success,
+                    "error": if success { Value::Null } else { json!("tmux refused the binding") },
                     "session_name": session_name,
                     "sessions": reported,
                     "warnings": []
+                });
+                if is_binding {
+                    payload["observed"] = json!({
+                        "applied_revision": if success { 1 } else { 0 },
+                        "status": "pending_shell",
+                        "profiles": [],
+                        "managed_keys": ["BINDING_SECRET"],
+                        "shell": "bash",
+                        "shell_revision": 0
+                    });
+                    if failing {
+                        payload["observed"]["status"] = json!("error");
+                        payload["observed"]["last_error"] = json!("tmux refused the binding");
+                    }
                 }
-            });
+                json!({
+                    "msg_type": "server.agent.command-response",
+                    "id": format!("response-{request_id}"),
+                    "timestamp": 0,
+                    "payload": payload
+                })
+            };
             let _ = sink.send(WsMessage::Text(response.to_string())).await;
         }
     });
@@ -698,6 +722,10 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
         "binding-profile.env"
     );
     assert_eq!(applied["binding"]["desired_profiles"][0]["outdated"], false);
+    assert_eq!(
+        applied["binding"]["observed"]["status"], "pending_shell",
+        "an Agent status is reported as-is, not collapsed into success"
+    );
 
     let binding_dispatches = |commands: &[String]| {
         commands
@@ -753,6 +781,53 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
             .len(),
         1
     );
+    assert_eq!(
+        refreshed["binding"]["desired_profiles"][0]["outdated"],
+        false
+    );
+    assert_eq!(
+        refreshed["binding"]["observed"]["status"], "pending_shell",
+        "the Agent's own status is reported, not guessed as in_sync"
+    );
+    assert_eq!(
+        refreshed["binding"]["observed"]["managed_keys"],
+        json!(["BINDING_SECRET"]),
+        "managed key names are reported; values are not"
+    );
+
+    // A save changes the file, not the Session. The next read shows the
+    // profile as outdated at the same materialized revision.
+    let save = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "binding-profile.env",
+            "content": "BINDING_SECRET=replacement-value\n",
+            "overwrite": true,
+            "force": true
+        }),
+    )
+    .await;
+    assert_eq!(save["isError"], false, "{save}");
+    let outdated = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_get",
+        json!({ "session_id": session_id }),
+    )
+    .await;
+    let outdated = text_of(&outdated);
+    assert_eq!(
+        outdated["binding"]["desired_revision"], 1,
+        "a save must not advance the Session binding"
+    );
+    assert_eq!(
+        outdated["binding"]["desired_profiles"][0]["outdated"], true,
+        "the edited profile is outdated until an explicit reapply"
+    );
 
     let reapplied = call_tool(
         mcp_addr,
@@ -768,6 +843,10 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
     assert_eq!(
         reapplied["binding"]["desired_profiles"][0]["profile"]["name"], "binding-profile.env",
         "reapply must not change the selection"
+    );
+    assert_eq!(
+        reapplied["binding"]["desired_profiles"][0]["outdated"], false,
+        "reapply materializes the current content"
     );
 
     let cleared = call_tool(
@@ -800,13 +879,84 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
     assert_eq!(missing["isError"], true, "{missing}");
     assert_eq!(text_of(&missing)["refusal"], "revision_conflict");
 
-    // No result carried the profile's raw content.
-    for result in [&applied, &refreshed, &reapplied, &cleared] {
+    // A committed desired revision with a failed Agent materialization is
+    // inspectable: the MCP result keeps the desired state, reports the failure,
+    // and does not replay the mutation. The mock refuses binding replacements
+    // for a Session whose name says "fail".
+    let failing_name = unique_name("fail");
+    let failing_created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": CLUSTER_AGENT, "name": failing_name }),
+    )
+    .await;
+    assert_eq!(failing_created["isError"], false, "{failing_created}");
+    let failing_id = format!("{CLUSTER_AGENT}:{failing_name}");
+    let failed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_set",
+        json!({
+            "session_id": failing_id,
+            "expected_revision": 0,
+            "profiles": [{ "name": "binding-profile.env" }]
+        }),
+    )
+    .await;
+    assert_eq!(failed["isError"], true, "{failed}");
+    let failed = text_of(&failed);
+    assert_eq!(
+        failed["binding"]["desired_revision"], 1,
+        "desired intent is committed even when the Agent fails"
+    );
+    assert!(
+        failed["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("tmux refused")),
+        "{failed}"
+    );
+    let failed_dispatches = broker
+        .commands()
+        .iter()
+        .filter(|command| command.as_str() == "agent.session.env.binding.set")
+        .count();
+    let observed_failure = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_get",
+        json!({ "session_id": failing_id }),
+    )
+    .await;
+    let observed_failure = text_of(&observed_failure);
+    assert_eq!(observed_failure["binding"]["desired_revision"], 1);
+    assert_eq!(
+        observed_failure["binding"]["observed"]["status"], "error",
+        "the failed runtime state is reported truthfully"
+    );
+    assert_eq!(
+        broker
+            .commands()
+            .iter()
+            .filter(|command| command.as_str() == "agent.session.env.binding.set")
+            .count(),
+        failed_dispatches,
+        "an ambiguous/failed call must not be replayed automatically"
+    );
+
+    // No result carried the profile's raw content. Managed key *names* are
+    // allowed; the value is not.
+    for result in [&applied, &refreshed, &outdated, &reapplied, &cleared] {
         let text = serde_json::to_string(result).expect("serialize");
-        assert!(
-            !text.contains("top-secret-value") && !text.contains("BINDING_SECRET"),
-            "binding results must never carry ENV values: {text}"
-        );
+        for secret in ["top-secret-value", "replacement-value"] {
+            assert!(
+                !text.contains(secret),
+                "binding results must never carry ENV values: {text}"
+            );
+        }
     }
 
     terminate_and_wait(&mut child.0).await;
