@@ -323,6 +323,8 @@ export function checkInventory(manifest,workflows){
         body.includes('node trusted/scripts/acceptance-case-ingest.mjs prepare-event')&&
         body.includes('run-id: ${{ steps.source.outputs.run_id }}')&&
         body.includes('case-source-event.json')&&
+        body.includes('group: acceptance-results-ingest-${{ github.event.workflow_run.id || github.event.client_payload.source_run_id || github.run_id }}-${{ github.event.workflow_run.run_attempt || github.run_attempt }}')&&
+        body.includes('  cancel-in-progress: false')&&
         body.includes('run-store-cas-push.mjs acceptance-results')&&
         typeof workflows.get('.github/workflows/acceptance-cases.yml')==='string'&&
         workflows.get('.github/workflows/acceptance-cases.yml').includes('  wake-comment-ingest:')&&
@@ -552,6 +554,8 @@ function selfTest(){
   for(const changed of [
     text=>text.replace('nession-comment-case-ingest','arbitrary-case-wake'),
     text=>text.replace('"Acceptance / Case Smoke"','"Untrusted / arbitrary"'),
+    text=>text.replace('group: acceptance-results-ingest-${{ github.event.workflow_run.id || github.event.client_payload.source_run_id || github.run_id }}-${{ github.event.workflow_run.run_attempt || github.run_attempt }}', 'group: acceptance-results-ingest'),
+    text=>text.replace('  cancel-in-progress: false', '  cancel-in-progress: true'),
     text=>text.replace("github.actor == 'github-actions[bot]'","github.actor != ''"),
     text=>text.replace("github.ref == 'refs/heads/main'","github.ref != ''"),
     text=>text.replace('node trusted/scripts/acceptance-case-ingest.mjs prepare-event',
