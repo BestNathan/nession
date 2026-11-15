@@ -76,10 +76,9 @@ only for the GitHub Actions bot on Main, re-reads the completed GitHub
 Run/Attempt, canonical source workflow path, actor, comment-bound Issue/SC
 name, and successful original-comment authentication Job step **before**
 accepting any Case artifact or minting Store credentials. Comment
-`workflow_run` deliveries are excluded from the ordinary subscriber to
-avoid a second ingester. The bounded `Comment Case #*` subscription stays
-as a name compatibility contract; normal static/push and human-manual Cases
-still use the existing native `workflow_run` lane.
+`workflow_run` deliveries are excluded from the ordinary, static-name
+subscriber so only the explicit trusted wake ingests comment Cases. Normal
+static/push and human-manual Cases retain the native `workflow_run` lane.
 
 On the chosen platform **before target checkout**,
 trusted Main independently reads the original GitHub human comment/Issue,
