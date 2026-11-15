@@ -103,7 +103,13 @@ async function updaterEvidence(receipt) {
     assert.equal(issue.number, ISSUE, 'the attempted Issue projection is not linked to Issue #' + ISSUE);
 
     // The fixed collector must be present in this exact merged-main checkout.
-    execFileSync('git', ['merge-base', '--is-ancestor', FIX_SHA, sha], { cwd: process.cwd() });
+    // The Acceptance checkout is shallow, so authenticate ancestry through the
+    // GitHub compare API instead of a local merge-base.
+    const ancestry = await github('/compare/' + FIX_SHA + '...' + sha);
+    assert.equal(ancestry.status, 'ahead');
+    assert.equal(ancestry.base_commit?.sha, FIX_SHA);
+    assert.equal(ancestry.merge_base_commit?.sha, FIX_SHA);
+    assert.equal(ancestry.behind_by, 0);
     const source = fs.readFileSync(path.join(process.cwd(), 'scripts/acceptance-executor.mjs'), 'utf8');
     assert.match(source, /GITHUB_EVIDENCE_MAX_BUFFER/);
     assert.match(source, /'--jq'/);
