@@ -15,8 +15,9 @@ import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
 import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
 import {createHash} from 'node:crypto';
-import {reconcileMcpPublication} from './mcp-reconcile.mjs';
+import {reconcileMcpPublication,validMcpPublication} from './mcp-reconcile.mjs';
 import {loadStableMcpRelease} from './mcp-upstream.mjs';
+import {canReusePublishedMcp} from './mcp-export-gate.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -220,15 +221,6 @@ if(!validPublicDocuments(documents))throw Error('Invalid public Documents projec
 // hand-maintained inventory or a running authenticated MCP endpoint.
 let mcp={schema_version:1,status:'unavailable',source:null,tools:[]};
 if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
-  const {stdout}=await promisify(execFile)('cargo',
-    ['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'],
-    {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
-  const parsed=JSON.parse(stdout);
-  if(parsed.schema_version!==1)throw Error('Unexpected MCP exporter schema version');
-  // Only official stable tags are considered supported upstream revisions.
-  // An unavailable or malformed source aborts publication (last good stays live).
-  const upstream={stable:await loadStableMcpRelease({api:officialMcpApi})};
-  const catalog={...parsed,upstream};
   const prevFile=process.env.PAGES_MCP_PREVIOUS_FILE;
   const publication=process.env.PAGES_MCP_RECONCILE==='1';
   if(publication&&!prevFile&&process.env.PAGES_MCP_BOOTSTRAP!=='1')
@@ -239,11 +231,39 @@ if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
     if(!stat.isFile()||stat.isSymbolicLink()||stat.size>2_000_000||stat.size<10)
       throw Error('Invalid last-good MCP publication file');
     previous=JSON.parse(await readFile(prevFile,'utf8'));
+    if(!validMcpPublication(previous))
+      throw Error('Published MCP catalog is malformed: refuse untrusted compare source');
   }
-  const reconciled=reconcileMcpPublication({catalog,mainSha,previous});
-  mcp=reconciled.document;
-  console.log('MCP document reconciliation:',reconciled.reason,mcp.semantic_sha256);
-
+  // Query a verified official stable release every time, even on a no-op.
+  // Missing upstream evidence always aborts publication, preserving last-good.
+  const upstream={stable:await loadStableMcpRelease({api:officialMcpApi})};
+  let compare=null;
+  if(previous&&previous.source?.sha!==mainSha){
+    try{
+      compare=await api('/compare/'+previous.source.sha+'...'+mainSha+'?per_page=100');
+    }catch(error){
+      // Only the optimization fails open: rebuild the authoritative Rust
+      // catalog, then reconcile against the validated last-good snapshot.
+      console.warn('MCP Git compare unavailable; exporting registered Tools:',error.message);
+    }
+  }
+  if(previous&&canReusePublishedMcp({
+    previous,stable:upstream.stable,mainSha,comparison:compare
+  })){
+    mcp=previous;
+    console.log('MCP exporter skipped: unchanged pinned code and stable upstream',mcp.semantic_sha256);
+  }else{
+    const {stdout}=await promisify(execFile)('cargo',
+      ['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'],
+      {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
+    const parsed=JSON.parse(stdout);
+    if(parsed.schema_version!==1)throw Error('Unexpected MCP exporter schema version');
+    const reconciled=reconcileMcpPublication({
+      catalog:{...parsed,upstream},mainSha,previous
+    });
+    mcp=reconciled.document;
+    console.log('MCP document reconciliation:',reconciled.reason,mcp.semantic_sha256);
+  }
 }
 
 const selectedIssueNumbers=Array.isArray(issues)?issues
