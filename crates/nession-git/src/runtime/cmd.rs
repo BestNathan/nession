@@ -650,45 +650,14 @@ mod tests {
 
     // ── wall-clock child lifecycle (#3462) ───────────────────────────────
 
-    /// Install an executable fixture **without this process writing the path it
-    /// will exec**.
-    ///
-    /// `fork` copies the whole descriptor table, so a write descriptor held
-    /// here is inherited by every child a concurrently running test forks.
-    /// `O_CLOEXEC` drops that copy only once the child reaches its own `exec`;
-    /// until then the inode's write count is positive, and an `exec` of the
-    /// same path fails with `ETXTBSY` — `Text file busy (os error 26)`, the
-    /// intermittent failure #3504 records. The content therefore goes to a path
-    /// that is never exec'd, and a child `cp` creates the one that is: this
-    /// process's descriptor table then holds no write descriptor on the
-    /// executable, so a fork has nothing to copy.
-    ///
-    /// `rename` does not give the same guarantee: it moves a directory entry,
-    /// so the inode whose write count is positive is still the one that gets
-    /// exec'd. This is the construction and the rejection measured for the
-    /// fake-tmux fixtures (#1026, `crates/nession-agent/src/test_support.rs`).
+    /// Install an executable fixture without this process writing the path it
+    /// will exec — see [`crate::runtime::testing::install_via_a_child`] for
+    /// the measured construction and the rejected `rename` alternative
+    /// (#3504).
     #[cfg(target_os = "linux")]
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join(name);
-        let staged = path.with_extension("src");
-        std::fs::write(&staged, body).expect("stage fake git");
-        let status = std::process::Command::new("cp")
-            .arg(&staged)
-            .arg(&path)
-            .status()
-            .expect("install fake git");
-        let _ = std::fs::remove_file(&staged);
-        assert!(
-            status.success(),
-            "installing the fake git: cp exited with {status}"
-        );
-        // `chmod` does not open the file, so it cannot reintroduce the window.
-        let mut permissions = std::fs::metadata(&path)
-            .expect("stat fake git")
-            .permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&path, permissions).expect("chmod fake git");
+        crate::runtime::testing::install_via_a_child(&path, body).expect("install fake git");
         path
     }
 

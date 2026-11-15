@@ -1094,13 +1094,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use super::*;
     use crate::digest::digest_of_bytes;
-    use std::os::unix::fs::PermissionsExt;
 
     fn executable(path: &Path, body: &str) {
-        std::fs::write(path, body).unwrap();
-        let mut permissions = std::fs::metadata(path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(path, permissions).unwrap();
+        crate::testing::install_via_a_child(path, body).unwrap();
     }
 
     fn manager(root: &Path, erofsfuse: &str, authorized: Vec<PathBuf>) -> Arc<MountManager> {

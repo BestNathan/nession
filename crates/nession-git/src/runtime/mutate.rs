@@ -645,18 +645,12 @@ mod tests {
         let hook = hooks.join("pre-commit");
         // The hook also mutates the index before failing: the answer must show
         // what actually happened, not "the commit failed, nothing changed".
-        fs::write(
-            &hook,
-            "#!/bin/sh\necho side > side.txt && git add side.txt\nexit 1\n",
-        )
-        .unwrap();
+        let hook_body = "#!/bin/sh\necho side > side.txt && git add side.txt\nexit 1\n";
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut permissions = fs::metadata(&hook).unwrap().permissions();
-            permissions.set_mode(0o755);
-            fs::set_permissions(&hook, permissions).unwrap();
-        }
+        crate::runtime::testing::install_via_a_child(&hook, hook_body)
+            .expect("install the fake pre-commit hook");
+        #[cfg(not(unix))]
+        fs::write(&hook, hook_body).unwrap();
 
         fs::write(fixture.dir.path().join("a.txt"), "hooked\n").unwrap();
         let reviewed = fixture.state().await;
