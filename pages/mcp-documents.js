@@ -8,8 +8,10 @@ function el(tag,text='',cls=''){
 }
 export function validMcpSnapshot(data){
   return data?.schema_version===1&&data?.status==='available'&&
+    data.source?.repository==='BestNathan/nession'&&data.source?.branch==='main'&&
     /^[a-f0-9]{40}$/.test(data.source?.sha||'')&&
     Array.isArray(data.tools)&&data.tools.length>0&&data.tools.length<=256&&
+    new Set(data.tools.map(t=>t.name)).size===data.tools.length&&
     data.tools.every(t=>/^[a-z][a-z0-9_]{1,127}$/.test(t?.name||'')&&
       typeof t.description==='string'&&t.description.length<=4000&&
       t.inputSchema?.type==='object'&&
