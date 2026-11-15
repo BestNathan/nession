@@ -22,10 +22,36 @@ use nession_server::image::{
     DEFAULT_BUILD_RETENTION_SECS,
 };
 
+/// Install `body` at `bin` with the file created by a **child** process.
+///
+/// `fork` copies the descriptor table, so writing the path a test executes can
+/// leave a concurrently forked child holding it writable until that child's
+/// own `exec`; an `exec` of the same inode then fails with `ETXTBSY`
+/// (#1026, #3504, #3612). The body goes to a path that is never exec'd and a
+/// child `cp` creates `bin`, so this process never holds a write descriptor on
+/// the executable. `chmod` does not open it, and `rename` is not equivalent
+/// (same inode).
+fn install_via_a_child(bin: &std::path::Path, body: &str) -> std::io::Result<()> {
+    let staged = bin.with_extension("src");
+    std::fs::write(&staged, body)?;
+    let status = std::process::Command::new("cp")
+        .arg(&staged)
+        .arg(bin)
+        .status();
+    let _ = std::fs::remove_file(&staged);
+    if !status?.success() {
+        return Err(std::io::Error::other(
+            "installing the executable fixture: cp exited with a failure status",
+        ));
+    }
+    let mut permissions = std::fs::metadata(bin)?.permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(bin, permissions)
+}
+
 fn options(dir: &std::path::Path) -> ImageManagerOptions {
     ImageManagerOptions {
         max_concurrent_builds: 1,
-        access_token_ttl_secs: 60,
         build_root: dir.join("builds"),
         build_stage_timeout: Some(Duration::from_secs(120)),
         build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
@@ -66,9 +92,9 @@ async fn a_restarted_server_reruns_packaging_from_the_validated_snapshot() -> an
 
     let marker = dir.path().join("packaging.attempted");
     let wrapper = dir.path().join("mkfs-wrapper");
-    std::fs::write(
+    install_via_a_child(
         &wrapper,
-        format!(
+        &format!(
             "#!/bin/sh\n\
              prev=\"\"\n\
              last=\"\"\n\
@@ -82,7 +108,6 @@ async fn a_restarted_server_reruns_packaging_from_the_validated_snapshot() -> an
             marker = marker.display()
         ),
     )?;
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
 
     // First Server: snapshot completes, packaging fails and leaves the durable
     // snapshot checkpoint behind.

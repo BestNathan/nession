@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openCapsuleCapability } from '../../helpers/capsule';
 import { waitForShell } from '../../helpers/shell';
 import { restartAgent } from '../../helpers/runtimeControl';
 import {
@@ -873,6 +874,45 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
 
   const sessionName = `e2e-consistency-route-${testInfo.retry}-${Date.now()}`;
   const sentWire: Array<{ msg_type?: string }> = [];
+  // Capture physical P2P sockets before attach. This fixture tests an Auto
+  // route switch, not the separate half-open ping mechanism (#2160). A real
+  // browser WebSocket close supplies a deterministic loss witness instead of
+  // relying on a particular input/probe timer interleaving (#3516).
+  await page.addInitScript(() => {
+    const state = window as unknown as {
+      __e2eRouteAgentSockets?: WebSocket[];
+      __e2eBlockRouteAgentReconnect?: boolean;
+      __e2eBlockedAgentConnects?: number;
+      __e2eRouteCutCount?: number;
+    };
+    state.__e2eRouteAgentSockets = [];
+    state.__e2eBlockRouteAgentReconnect = false;
+    state.__e2eBlockedAgentConnects = 0;
+    state.__e2eRouteCutCount = 0;
+    const Original = window.WebSocket;
+    const isServerSocket = (raw: string | URL): boolean => {
+      try {
+        return new URL(String(raw)).port === '19090';
+      } catch {
+        return false;
+      }
+    };
+    const Guarded = function (url: string | URL, protocols?: string | string[]) {
+      const isAgent = !isServerSocket(url);
+      if (isAgent && state.__e2eBlockRouteAgentReconnect) {
+        state.__e2eBlockedAgentConnects = (state.__e2eBlockedAgentConnects ?? 0) + 1;
+        throw new Error('e2e: route-cut Agent transport intentionally unavailable');
+      }
+      const socket = protocols === undefined ? new Original(url) : new Original(url, protocols);
+      if (isAgent) {
+        state.__e2eRouteAgentSockets?.push(socket);
+      }
+      return socket;
+    } as unknown as typeof WebSocket;
+    Guarded.prototype = Original.prototype;
+    Object.setPrototypeOf(Guarded, Original);
+    window.WebSocket = Guarded;
+  });
   page.on('websocket', (socket) => {
     socket.on('framesent', (frame) => {
       if (typeof frame.payload !== 'string') { return; }
@@ -912,83 +952,79 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   await submitTerminalCommand(page, `printf 'ROUTE-%s-BEFORE\\n' 2156`);
   await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
 
-  // Suppress the liveness probe's ping and make every P2P candidate
-  // unreachable. Typing triggers the probe (#1264); once it reports the
-  // socket unresponsive, the WebSocketService rebuilds it — and that rebuild
-  // must fail too, or it would just reconnect the same healthy URL and the
-  // route policy would never run. Only the Server socket (the Relay path) is
-  // allowed through. The counters are the witnesses that the fixture cut the
-  // stream at all: without them a green assertion would mean nothing happened.
-  await page.evaluate(() => {
-    const state = window as unknown as {
-      __e2eDroppedPings?: number;
-      __e2eBlockedAgentConnects?: number;
+  // Arm a DOM transition recorder BEFORE the cut. Polling only the current
+  // state after initiating recovery can miss a valid short-lived unavailable
+  // phase and produce a timing-dependent false failure (#3516).
+  await page.getByTestId('terminal-surface').evaluate((surface) => {
+    const state = window as unknown as { __e2eRouteStates?: string[] };
+    state.__e2eRouteStates = [];
+    const record = () => {
+      state.__e2eRouteStates?.push(
+        surface.getAttribute('data-terminal-stream-state') ?? 'missing',
+      );
     };
-    state.__e2eDroppedPings = 0;
-    state.__e2eBlockedAgentConnects = 0;
-    const Original = window.WebSocket;
-    const isServerSocket = (raw: string | URL): boolean => {
-      try {
-        return new URL(String(raw)).port === '19090';
-      } catch {
-        return false;
-      }
-    };
-    const Guarded = function (url: string | URL, protocols?: string | string[]) {
-      if (!isServerSocket(url)) {
-        state.__e2eBlockedAgentConnects = (state.__e2eBlockedAgentConnects ?? 0) + 1;
-        throw new Error('e2e: agent transport intentionally unavailable');
-      }
-      return new Original(url, protocols);
-    } as unknown as typeof WebSocket;
-    Guarded.prototype = Original.prototype;
-    Object.setPrototypeOf(Guarded, Original);
-    window.WebSocket = Guarded;
-
-    const originalSend = Original.prototype.send;
-    Original.prototype.send = function (data) {
-      if (typeof data === 'string') {
-        try {
-          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
-            state.__e2eDroppedPings = (state.__e2eDroppedPings ?? 0) + 1;
-            return;
-          }
-        } catch {
-          // Non-JSON frames pass through unchanged.
-        }
-      }
-      return originalSend.call(this, data);
-    };
+    new MutationObserver(record).observe(surface, {
+      attributes: true,
+      attributeFilter: ['data-terminal-stream-state'],
+    });
+    record();
   });
+  // The observer must start from the verified P2P baseline. Merely recording
+  // some later degraded state cannot prove a synchronized-to-loss transition.
+  const routeStatesBeforeCut = await page.evaluate(() =>
+    (window as unknown as { __e2eRouteStates?: string[] }).__e2eRouteStates ?? [],
+  );
+  expect(routeStatesBeforeCut).toEqual(['synchronized']);
 
-  // A burst that spans the cut.
+  // A burst that spans the physical route cut.
   const COUNT = 800;
   const TAIL = 200;
   await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RS-/'`);
 
-  // One input is enough: the probe deadline tears the P2P socket down, and
-  // the blocked rebuild lets AddressAttachPolicy retire its candidates and
-  // force Relay. No further typing is needed to reach the policy.
-  await sendRawToTerminal(page, ' ');
+  await page.evaluate(() => {
+    const state = window as unknown as {
+      __e2eRouteAgentSockets?: WebSocket[];
+      __e2eBlockRouteAgentReconnect?: boolean;
+      __e2eRouteCutCount?: number;
+    };
+    const sockets = (state.__e2eRouteAgentSockets ?? []).filter(
+      (socket) => socket.readyState === WebSocket.OPEN,
+    );
+    if (sockets.length !== 1) {
+      throw new Error(`e2e: expected one live P2P socket before cut, found ${sockets.length}`);
+    }
+    // Prevent the ordinary P2P retry from reconnecting the same healthy Agent.
+    // Only the Server socket (Relay) may reconnect after the physical cut.
+    state.__e2eBlockRouteAgentReconnect = true;
+    state.__e2eRouteCutCount = sockets.length;
+    sockets[0].close(4001, 'e2e: force P2P route loss');
+  });
 
-  // #1926 SC-08: the cut is the moment the tri-state must stop claiming
-  // synchronization. The runtime revokes the P2P baseline; a stale
-  // `synchronized` here would be exactly the false claim SC-03 forbids.
-  await expect.poll(streamState, { timeout: 30_000 }).not.toBe('synchronized');
+  // The surface must cease claiming its old P2P baseline at least once.
+  // Capture the *transition* rather than hoping Playwright polls during it.
+  await expect.poll(
+    () => page.evaluate(() => {
+      const state = window as unknown as { __e2eRouteStates?: string[] };
+      return (state.__e2eRouteStates ?? []).some(
+        (value) => value === 'unavailable' || value === 'degraded-live',
+      );
+    }),
+    { timeout: 30_000 },
+  ).toBe(true);
 
   await expect(async () => {
     const seen = await page.evaluate(() => {
       const state = window as unknown as {
-        __e2eDroppedPings?: number;
+        __e2eRouteCutCount?: number;
         __e2eBlockedAgentConnects?: number;
       };
       return {
-        droppedPings: state.__e2eDroppedPings ?? 0,
+        cutSockets: state.__e2eRouteCutCount ?? 0,
         blockedConnects: state.__e2eBlockedAgentConnects ?? 0,
       };
     });
-    expect(seen.droppedPings, 'the liveness probe never fired').toBeGreaterThan(0);
-    expect(seen.blockedConnects, 'no P2P transport rebuild was attempted').toBeGreaterThan(0);
+    expect(seen.cutSockets, 'no physical P2P socket was cut').toBe(1);
+    expect(seen.blockedConnects, 'no P2P reconnect candidate was attempted').toBeGreaterThan(0);
     expect(relayStarted(), 'the Auto route must reach force-relay').toBe(true);
   }).toPass({ timeout: 90_000 });
 
@@ -1596,3 +1632,68 @@ for (const mode of ['Relay', 'P2P'] as const) {
     expect(missingTail, 'an ANSI-wrapped tail line never reached the parser').toEqual([]);
   });
 }
+
+// #3492 SC-04: an observer's local Peek is not session geometry authority.
+test('an observer\'s Peek sends no resize and cannot move the session (#3492 SC-04)', async ({ browser }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(240_000);
+
+  const sessionName = `e2e-clearance-observer-${testInfo.retry}-${Date.now()}`;
+  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
+  const controllerContext = await browser.newContext();
+  const observerContext = await browser.newContext();
+  const controller = await controllerContext.newPage();
+  const observer = await observerContext.newPage();
+  try {
+    await controller.goto(url);
+    await waitForShell(controller);
+    await createSession(controller, sessionName);
+    await attachToSession(controller, sessionName, 'Relay');
+    await waitForInteractiveShell(controller);
+
+    await observer.goto(url);
+    await waitForShell(observer);
+    const row = observer.locator('[data-testid="session-item-row"]', { hasText: sessionName });
+    await expect(async () => {
+      const refresh = observer.getByRole('button', { name: 'Refresh sessions' });
+      if (await refresh.isVisible().catch(() => false)) { await refresh.click(); }
+      await expect(row).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+    await attachToSession(observer, sessionName, 'Relay');
+    await waitForInteractiveShell(observer);
+
+    // The second attach takes the lease; hand it back so the first page is the
+    // authorized controller and the second is a passive observer.
+    await controller.getByTestId('terminal-notices-trigger').click();
+    await controller.getByRole('button', { name: 'Take control' }).click();
+    await expect(controller.locator('[data-terminal-notices~="observer"]')).toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.locator('[data-terminal-notices~="observer"]')).toHaveCount(1, { timeout: 10_000 });
+    await waitForStableGrid(controller);
+    const authoritative = await readGrid(controller);
+    await expectPtySize(controller, authoritative.cols, authoritative.rows);
+
+    // Record only what the observer sends after its layout has settled.
+    const sent: WireFrame[] = [];
+    observer.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') { sent.push(parseFrame(frame.payload)); }
+      });
+    });
+    sent.length = 0;
+
+    await openCapsuleCapability(observer, 'terminal-keys');
+    await expect(observer.getByTestId('capsule-capability-projection')).toBeVisible();
+    await observer.waitForTimeout(800);
+
+    expect(
+      sent.filter((frame) => frame.msg_type?.includes('resize')),
+      'an observer Peek must not request a Session resize',
+    ).toEqual([]);
+    await expect.poll(async () => readGrid(observer), { timeout: 15_000 })
+      .toEqual(authoritative);
+    await expectPtySize(controller, authoritative.cols, authoritative.rows);
+  } finally {
+    await controllerContext.close();
+    await observerContext.close();
+  }
+});

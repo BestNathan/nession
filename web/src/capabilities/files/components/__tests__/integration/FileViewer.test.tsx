@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@codemirror/view';
 import { FileViewer } from '@/capabilities/files/components/FileViewer';
-import type { FileOps } from '@/capabilities/files';
+import { FILE_CHANGED_DURING_READ_MESSAGE, type FileOps } from '@/capabilities/files';
 
 function mockFileOps(overrides: Partial<FileOps> = {}): FileOps {
   return {
@@ -574,5 +574,82 @@ describe('FileViewer JSON / JSONL integration (#1199)', () => {
     await waitFor(() => expect(writeFile).toHaveBeenCalledTimes(2));
     expect(writeFile.mock.calls[0]?.[2]).toEqual({ expectedRevision: 'rev-1' });
     expect(writeFile.mock.calls[1]?.[2]).toEqual({});
+  });
+
+  it('shows a changed-during-read error instead of mixed content, and Retry reloads (SC-02)', async () => {
+    const path = '/test/big.txt';
+    // Two equal-length chunks from different revisions: the agent replaced the
+    // file between requests. A retry then serves one stable revision.
+    let phase: 'conflict' | 'stable' = 'conflict';
+    const readFile = vi.fn(
+      async (_path: string, options?: { offset?: number; limit?: number }) => {
+        const offset = options?.offset ?? 0;
+        if (phase === 'conflict') {
+          return offset === 0
+            ? {
+                path,
+                content: btoa('A first '),
+                mime_type: 'text/plain',
+                offset,
+                total_size: 16,
+                has_more: true,
+                revision: 'rev-a',
+              }
+            : {
+                path,
+                content: btoa('B final'),
+                mime_type: 'text/plain',
+                offset,
+                total_size: 16,
+                has_more: false,
+                revision: 'rev-b',
+              };
+        }
+        return offset === 0
+          ? {
+              path,
+              content: btoa('stable '),
+              mime_type: 'text/plain',
+              offset,
+              total_size: 14,
+              has_more: true,
+              revision: 'rev-c',
+            }
+          : {
+              path,
+              content: btoa('content'),
+              mime_type: 'text/plain',
+              offset,
+              total_size: 14,
+              has_more: false,
+              revision: 'rev-c',
+            };
+      },
+    );
+    const ops = mockFileOps({ readFile });
+
+    render(
+      <FileViewer
+        fileOps={ops}
+        path={path}
+        filename="big.txt"
+        fileSize={11 * 1024 * 1024}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(FILE_CHANGED_DURING_READ_MESSAGE)).toBeInTheDocument(),
+    );
+    expect(document.querySelector('.cm-content')).toBeNull();
+
+    phase = 'stable';
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() =>
+      expect(document.querySelector('.cm-content')?.textContent).toContain('stable content'),
+    );
+    expect(screen.queryByText(FILE_CHANGED_DURING_READ_MESSAGE)).not.toBeInTheDocument();
+    expect(document.querySelector('.cm-content')?.textContent).not.toContain('A first');
+    expect(document.querySelector('.cm-content')?.textContent).not.toContain('B final');
   });
 });

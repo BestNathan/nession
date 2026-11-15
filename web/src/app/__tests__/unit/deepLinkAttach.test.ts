@@ -54,7 +54,7 @@ describe('resolveDeepLinkAttachChoice', () => {
     const attachInfo = {
       mode: 'p2p' as const,
       session_id: session.session_id,
-      connection_token: 'secret',
+      agent_token: 'secret',
       agent_address: 'ws://agent/ws',
     };
     sessionsApiMock.requestAttach.mockResolvedValue(attachInfo);
@@ -74,7 +74,7 @@ describe('resolveDeepLinkAttachChoice', () => {
     const attachInfo = {
       mode: 'p2p' as const,
       session_id: session.session_id,
-      connection_token: 'secret',
+      agent_token: 'secret',
       addresses: [
         { url: 'ws://fast/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
         { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
@@ -118,7 +118,7 @@ function p2pProfile(): SessionAttachProfile {
     optionsFingerprint: buildOptionsFingerprint({
       mode: 'p2p',
       session_id: 'agent-1:dev',
-      connection_token: 'tok',
+      agent_token: 'tok',
       addresses: [{
         url: 'ws://a/ws', label: 'lan', network_type: 'lan',
         priority: 0, status: 'reachable',
@@ -135,7 +135,7 @@ describe('resolveTargetChoice', () => {
 
   it('builds a choice honouring a p2p target', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       addresses: [{
         url: 'ws://a/ws', label: 'lan', network_type: 'lan',
         priority: 0, status: 'reachable',
@@ -148,12 +148,12 @@ describe('resolveTargetChoice', () => {
     expect(choice).toMatchObject({
       mode: 'p2p', selectedUrl: null, renderer: 'webgl',
     });
-    expect(choice.attachInfo.connection_token).toBe('tok');
+    expect(choice.attachInfo.agent_token).toBe('tok');
   });
 
   it('requests relay info for a relay target and maps manual url to relayUrl', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'relay', session_id: 'agent-1:dev', agent_address: '', connection_token: '',
+      mode: 'relay', session_id: 'agent-1:dev', agent_address: '', agent_token: '',
       addresses: [{
         url: 'ws://relay/ws', label: 'lan', network_type: 'lan',
         priority: 0, status: 'reachable',
@@ -171,7 +171,7 @@ describe('resolveTargetChoice', () => {
 
   it('orders a cold cache by the advertisement, without a live test (#1430)', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       addresses: [
         { url: 'ws://fast/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
         { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
@@ -188,7 +188,7 @@ describe('resolveTargetChoice', () => {
 
   it('reuses the probe cache without live-testing addresses when warm', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       addresses: [
         { url: 'ws://fast/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
         { url: 'ws://slow/ws', label: 'wan', network_type: 'wan', priority: 1, status: 'reachable' },
@@ -204,7 +204,7 @@ describe('resolveTargetChoice', () => {
 
   it('falls back to agent_address when no candidate addresses are advertised', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       agent_address: 'ws://legacy/ws',
       addresses: [],
     });
@@ -223,7 +223,7 @@ describe('resolveProfileAttach', () => {
 
   it('returns a choice when the profile is still valid', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       addresses: [{
         url: 'ws://a/ws', label: 'lan', network_type: 'lan',
         priority: 0, status: 'reachable',
@@ -238,7 +238,7 @@ describe('resolveProfileAttach', () => {
 
   it('returns choice when candidates changed but intent is still auto (#1186)', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       addresses: [
         { url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' },
         { url: 'ws://new/ws', label: 'vpn', network_type: 'vpn', priority: 0, status: 'reachable' },
@@ -250,7 +250,7 @@ describe('resolveProfileAttach', () => {
 
   it('returns dialog when a saved manual url is no longer offered', async () => {
     sessionsApiMock.requestAttach.mockResolvedValue({
-      mode: 'p2p', session_id: 'agent-1:dev', connection_token: 'tok',
+      mode: 'p2p', session_id: 'agent-1:dev', agent_token: 'tok',
       addresses: [{
         url: 'ws://a/ws', label: 'lan', network_type: 'lan',
         priority: 0, status: 'reachable',

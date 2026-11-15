@@ -1,4 +1,5 @@
 name: Store / Agent Development Ingest
+run-name: "${{ github.event_name == 'workflow_dispatch' && format('Qwen Developer Ingest worker:{0}', inputs.source_run_id) || 'Store / Agent Development Ingest' }}"
 
 # #2010. Independently attest a successful Worker Run and both immutable ZIPs;
 # RSA private key and Store Writer App only exist in this main-owned job, NEVER
@@ -12,14 +13,22 @@ on:
     workflows: ["Agent / Development"]
     branches: [main]
     types: [completed]
+  # GITHUB_TOKEN-dispatched Workers suppress workflow_run. A separate
+  # post-model, no-model-credentials job requests this exact source Run.
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Authenticated completed Qwen Worker Run, bot/main only"
+        required: true
+        type: string
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   issues: read
 
 concurrency:
-  group: store-agent-development-ingest-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  group: store-agent-development-ingest-${{ github.event.workflow_run.id || inputs.source_run_id }}-${{ github.event.workflow_run.run_attempt || '1' }}
   cancel-in-progress: false
 
 jobs:
@@ -34,6 +43,11 @@ jobs:
          github.event.workflow_run.actor.login == 'github-actions[bot]' &&
          github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
          github.event.workflow_run.head_repository.full_name == 'BestNathan/nession') ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'github-actions[bot]' &&
+         github.run_attempt == 1 &&
+         inputs.source_run_id != '') ||
         (github.event_name == 'issue_comment' &&
          github.ref == 'refs/heads/main' &&
          github.actor == 'BestNathan' &&
@@ -45,6 +59,14 @@ jobs:
           github.event.comment.body == '/nession ingest issue=1997 action=6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e worker_run=39396836009' ||
           github.event.comment.body == '/nession ingest issue=1997 action=dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31 worker_run=39448549052' ||
           startsWith(github.event.comment.body, '/nession ingest-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d worker_run='))) ||
+        (github.event_name == 'issue_comment' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'BestNathan' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 3433 &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession ingest-qwen issue=3433 worker_run=43677482758') ||
         (github.event_name == 'issue_comment' &&
          github.ref == 'refs/heads/main' &&
          github.actor == 'BestNathan' &&
@@ -114,7 +136,7 @@ jobs:
     environment: cursor
     timeout-minutes: 15
     env:
-      SOURCE_RUN_ID: ${{ github.event.workflow_run.id || 39288961865 }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id || github.event.workflow_run.id || '39288961865' }}
       SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt || 1 }}
     steps:
       - name: Checkout only authenticated main ingestion SHA
@@ -131,6 +153,7 @@ jobs:
           set -euo pipefail
           node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
+          node scripts/lib/agent/orchestration/development-ingest-selftest.mjs
           node scripts/lib/agent/store/remote-selftest.mjs
           ./gates/run run-store-integrity
       - name: Resolve bounded owner/main source command before any credential use
@@ -145,10 +168,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
-            > "$RUNNER_TEMP/development-source.json"
+          # For the explicit bot wake, the source workflow can still be
+          # finishing its last read-only wake job. GET-only bounded wait.
+          for n in $(seq 1 30); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+              > "$RUNNER_TEMP/development-source.json"
+            [[ "$GITHUB_EVENT_NAME" != workflow_dispatch ]] && break
+            if jq -e '.status == "completed"' "$RUNNER_TEMP/development-source.json" >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
             > "$RUNNER_TEMP/development-artifacts.json"
+          jq -e '.total_count == (.artifacts | length) and .total_count <= 100' \
+            "$RUNNER_TEMP/development-artifacts.json" >/dev/null
           jq -e --argjson id "$SOURCE_RUN_ID" --argjson attempt "$SOURCE_ATTEMPT" '
             .id == $id and .run_attempt == $attempt and
             .path == ".github/workflows/agent-develop.yml" and
@@ -218,7 +252,7 @@ jobs:
       # downstream Publisher. Historical #1997 Cursor Ingest remains unchanged.
       - name: Select authenticated Qwen Publisher wake without credentials
         id: qwen
-        if: github.event_name == 'workflow_run' || github.event_name == 'issue_comment'
+        if: github.event_name == 'workflow_run' || github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -245,3 +279,19 @@ jobs:
           path: ${{ runner.temp }}/development-ingest-receipt.json
           if-no-files-found: error
           retention-days: 3
+
+      # GITHUB_TOKEN-started Ingest cannot emit a downstream workflow_run.
+      # Dispatch only the existing independent Publisher after the sanitized
+      # Qwen receipt has been uploaded; Publisher re-reads completed Ingest,
+      # Store, signed ticket and both original Worker Artifacts itself.
+      - name: Wake original source-bound Qwen Publisher from bot Ingest
+        if: steps.qwen.outputs.allow == 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_ACTOR" == 'github-actions[bot]' ]]
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/store-qwen-publisher.yml/dispatches" \
+            -f ref=main -f "inputs[source_ingest_run_id]=$GITHUB_RUN_ID"

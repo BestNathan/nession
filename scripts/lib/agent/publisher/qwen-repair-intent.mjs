@@ -116,6 +116,21 @@ export function planQwenRepairPublisherIntent({preflight,publisher_run_id}){
     publisher_run_id,publication:'not_yet_attested',
   });
 }
+// #3592: a PR-B may already exist after an irreversible non-force ref
+// update while Store CAS of the Reviewer handoff fails. A second Publisher
+// Run must bind the *original* immutable author/intent and use GET-only
+// readback; the new Run ID is not a second authorization to publish.
+// All evidence fields other than the executor Run ID must be identical.
+export function attestQwenRepairReconciliationIntent(prior,candidate){
+  const original=validateQwenRepairPublisherIntent(prior);
+  const request=validateQwenRepairPublisherIntent(candidate);
+  if(request.publisher_run_id<original.publisher_run_id||
+      fields.some(key=>key!=='publisher_run_id'&&
+        original[key]!==request[key]))
+    fail('conflicting immutable Repair publication replay');
+  return original;
+}
+
 export function qwenRepairPublisherIntentPath(record){
   const x=validateQwenRepairPublisherIntent(record);
   return 'workflows/issues/'+x.issue+'/results/'+x.worker_run_id+
@@ -190,12 +205,15 @@ export function commitQwenRepairPublisherIntent({
     const loc=qwenRepairPublisherIntentPath(record);
     const prior=read(store,loc);
     if(prior){
-      if(JSON.stringify(validateQwenRepairPublisherIntent(prior))!==
-          JSON.stringify(record))
-        fail('conflicting immutable Repair publication replay');
+      const original=attestQwenRepairReconciliationIntent(prior,record);
       const author=git(store,'log','-1','--format=%H','HEAD','--',loc);
       if(!SHA.test(author))fail('immutable existing Repair Intent is not committed');
-      return {status:'reconcile',may_publish:false,store_commit_sha:author,record};
+      // Preserve the ORIGINAL run identity (the one whose signed PR-B is
+      // already on GitHub); a recovery run cannot mint a fresh write fence.
+      // The separate Publisher must now perform only readBackQwenRepairPR
+      // before the existing trusted Store handoff CAS.
+      return {status:'reconcile',may_publish:false,
+        store_commit_sha:author,record:original};
     }
     confirmStore(store,record);
     verifyCommittedCheckpoint({remote,identity:{

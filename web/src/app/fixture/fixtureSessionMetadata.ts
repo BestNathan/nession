@@ -10,7 +10,10 @@ import {
   normalizeSessionMetadataDraft,
   validateSessionMetadataDraft,
 } from '@/product/session/model/sessionMetadata';
-import { loadSessionMetadata } from '@/product/session/state/metadata';
+import {
+  loadSessionMetadata,
+  observeSessionIncarnations,
+} from '@/product/session/state/metadata';
 import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
 
 /**
@@ -36,6 +39,12 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   ?sessionMetadata=late-read         → a forced read is held while a normal
  *                                        save succeeds, then released with its
  *                                        pre-save answer (#3319)
+ *   ?sessionMetadata=incarnation       → the selected Session is reported under
+ *                                        the same public id with a new durable
+ *                                        tmux instance and empty metadata
+ *                                        (#3424); the Case replaces the
+ *                                        incarnation through the production
+ *                                        metadata owner
  *
  * `legacy` is the default the canonical routes already render: the fixture's
  * Session rows keep their tmux names, so existing goldens do not move.
@@ -53,7 +62,8 @@ export type FixtureSessionMetadataScenario =
   | 'conflict'
   | 'ownership-save'
   | 'ownership-reload'
-  | 'late-read';
+  | 'late-read'
+  | 'incarnation';
 
 export function isFixtureControlledScenario(
   scenario: FixtureSessionMetadataScenario,
@@ -61,7 +71,8 @@ export function isFixtureControlledScenario(
   return (
     scenario === 'ownership-save' ||
     scenario === 'ownership-reload' ||
-    scenario === 'late-read'
+    scenario === 'late-read' ||
+    scenario === 'incarnation'
   );
 }
 
@@ -73,7 +84,8 @@ export function fixtureSessionMetadataScenario(search: string): FixtureSessionMe
     requested === 'conflict' ||
     requested === 'ownership-save' ||
     requested === 'ownership-reload' ||
-    requested === 'late-read'
+    requested === 'late-read' ||
+    requested === 'incarnation'
   ) {
     return requested;
   }
@@ -107,7 +119,7 @@ function fixtureAttachInfo(
     mode: relay ? 'relay' : 'p2p',
     session_id: sessionId,
     session_name: sessionName,
-    connection_token: relay ? undefined : 'fixture-attach-token',
+    agent_token: relay ? undefined : 'fixture-agent-token',
     terminal_cols: 96,
     addresses: [
       {
@@ -255,6 +267,14 @@ export interface FixtureSessionMetadataControls {
   /** How many `metadata.update` requests this surface was asked for. */
   saves(): number;
   heldRead(): boolean;
+  /** Report the current incarnation again: an ordinary list refresh (#3424). */
+  refresh(sessionId: string): void;
+  /**
+   * Report a new durable tmux instance for the same public id and drop the
+   * previous instance's metadata, as a kill + recreate under the same name
+   * does (#3424).
+   */
+  replaceIncarnation(sessionId: string): void;
 }
 
 export interface FixtureSessionMetadataWindow {
@@ -281,6 +301,9 @@ interface FixtureSessionMetadataTransport {
   holdRead: boolean;
   releaseHeldRead: (() => void) | null;
   readHeld: boolean;
+  /** The durable tmux instance the fixture currently reports (#3424). */
+  incarnation: string;
+  incarnationSeq: number;
   bindings: Map<string, string | null>;
   projectSetRequests: { session_id: string; project_id: string | null }[];
   onProjectSet?: (sessionId: string, projectId: string | null) => void;
@@ -483,6 +506,24 @@ function createMetadataControls(
     },
     saves: () => state.saveCount,
     heldRead: () => state.readHeld,
+    refresh: (sessionId) => {
+      observeSessionIncarnations([
+        { session_id: sessionId, instance_id: state.incarnation },
+      ]);
+    },
+    replaceIncarnation: (sessionId) => {
+      // Establish the instance the browser has been reading, then report the
+      // same public id under a new one with no inherited metadata.
+      observeSessionIncarnations([
+        { session_id: sessionId, instance_id: state.incarnation },
+      ]);
+      state.store.delete(sessionId);
+      state.incarnationSeq += 1;
+      state.incarnation = `fixture-instance-${state.incarnationSeq}`;
+      observeSessionIncarnations([
+        { session_id: sessionId, instance_id: state.incarnation },
+      ]);
+    },
   };
 }
 
@@ -512,6 +553,8 @@ export function createFixtureSessionMetadataHarness(
     holdRead: false,
     releaseHeldRead: null,
     readHeld: false,
+    incarnation: 'fixture-instance-1',
+    incarnationSeq: 1,
     bindings: new Map(Object.entries(options.initialBindings ?? {})),
     projectSetRequests: [],
     onProjectSet: options.onProjectSet,

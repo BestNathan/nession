@@ -31,6 +31,7 @@ import { fixtureConnection } from './fixtureConnection';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureSandboxSurface } from './fixtureSandbox';
+import { installWorkspaceSurface } from './fixtureWorkspaces';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureGithubSurface } from './fixtureGithub';
@@ -346,6 +347,15 @@ function fixtureAppSelection({
   return { selectedSession, selectedAgent, domain };
 }
 
+/**
+ * Bind the App fixture's Agent surfaces: the Sandbox context (#3124) and the
+ * Agent Workspace registry the Workspaces section reads (#3407).
+ */
+function useFixtureAppSurfaces(search: string): void {
+  useEffect(() => sandboxApi.install(fixtureSandboxSurface(search)), [search]);
+  useEffect(() => installWorkspaceSurface(), []);
+}
+
 export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
@@ -385,9 +395,9 @@ export function FixtureApp() {
   // wire rather than injecting a list into the component.
   useEffect(() => commandsApi.install(fixtureCommandsSurface(search)), [search]);
 
-  // The Sandbox Agent stub (#3124): the App reaches the capability from the
-  // tool strip after mount, so the binding only has to be in place by then.
-  useEffect(() => sandboxApi.install(fixtureSandboxSurface(search)), [search]);
+  // The Sandbox and Agent Workspace Agent stubs (#3124, #3407): the App
+  // reaches both capabilities through the tool strip after mount.
+  useFixtureAppSurfaces(search);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');

@@ -92,7 +92,7 @@ PR / merged push / verified deployment event / explicit manual request
 
 - PR Gate checks the SCs due before the requested merge boundary, using exact PR head evidence from a read-only Agent over authenticated CI outputs. SCs only provable after merge remain explicitly deferred, not silently Pass.
 - A merged staging SHA executes eligible merged-stage Case/Agent proofs; main may use the same execution logic against **its own** exact SHA.
-- Issue close Gate requires all applicable SCs to have acceptable, authenticated results. Document when an SC can legitimately be `N/A`.
+- Issue close Gate requires **all declared SCs**, including merged/main and deployed criteria, to be checked with acceptable, authenticated results. A deferred proof permits PR merge, never Issue closure. Document when an SC can legitimately be `N/A`.
 - Reuse staging evidence on main only under an explicit validator-approved reuse contract (source/build/runtime/environment equivalence). Never infer it from branch ancestry alone.
 - Distinguish GitHub workflow infrastructure success from SC `Pass`; a non-zero test command may produce an authenticated failure record.
 

@@ -43,6 +43,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+use tokio::time::Instant;
 
 use crate::runtime::security::MAX_LINE_BYTES;
 
@@ -110,6 +111,13 @@ const HASH_OBJECT_WRITE_FLAGS: [&str; 2] = ["-w", "--write"];
 /// repository is normally fast; this is here so a pathological repository (or a
 /// hung filesystem) returns an error instead of pinning an agent task forever.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Bounded allowance to kill and reap a child after the wall-clock deadline.
+///
+/// The deadline covers spawn, stdin, both output streams and process exit. If
+/// it expires, the manager sends a kill and waits at most this long for the
+/// direct child to disappear; it never waits on an unbounded cleanup path.
+pub const CLEANUP_ALLOWANCE: Duration = Duration::from_secs(2);
 
 /// Output ceiling for the narrowly typed mutation forms. They print status
 /// lines, not diffs, so anything larger is reported as truncation rather than
@@ -295,84 +303,113 @@ impl GitCmd {
         if stdin.is_some() {
             cmd.stdin(Stdio::piped());
         }
+        // Cancellation drops the future without running the timeout branch.
+        // `kill_on_drop` is the mechanism that still terminates and reaps the
+        // direct child in that path; the timeout branch below additionally
+        // proves the reap within a bounded allowance.
+        cmd.kill_on_drop(true);
         let display = format!("git {}", args.join(" "));
+        let deadline = Instant::now() + self.timeout;
 
         let mut child = cmd
             .spawn()
             .with_context(|| format!("failed to spawn `{display}` (is git installed?)"))?;
 
-        // Commit messages travel on stdin, never as an argument, so a message
-        // that begins with `-` or contains anything argv-hostile is data.
-        if let Some(bytes) = stdin {
-            let mut sink = child.stdin.take().context("child stdin was not piped")?;
-            sink.write_all(bytes)
-                .await
-                .with_context(|| format!("writing stdin to `{display}`"))?;
-            drop(sink);
-        }
-
-        let mut stdout = child.stdout.take().context("child stdout was not piped")?;
-        let mut stderr = child.stderr.take().context("child stderr was not piped")?;
-
-        let read_stdout = async {
-            let mut buf = Vec::new();
-            let mut chunk = [0u8; 8192];
-            let mut dropped = 0usize;
-            loop {
-                let n = stdout.read(&mut chunk).await?;
-                if n == 0 {
-                    break;
+        // One wall-clock deadline covers stdin, both output streams and process
+        // exit. Writing stdin and draining stdout/stderr happen concurrently
+        // with the wait, so neither a stalled pipe nor a child that never exits
+        // can outlive the configured bound.
+        let outcome = tokio::time::timeout_at(deadline, async {
+            // Commit messages travel on stdin, never as an argument, so a
+            // message that begins with `-` or contains anything argv-hostile is
+            // data.
+            if let Some(bytes) = stdin {
+                let mut sink = child.stdin.take().context("child stdin was not piped")?;
+                if let Err(error) = sink.write_all(bytes).await {
+                    drop(sink);
+                    terminate_and_reap(&mut child).await;
+                    return Err(error).with_context(|| format!("writing stdin to `{display}`"));
                 }
-                // `read` never reports more than the buffer holds, so `n` is in
-                // range; `get` states that rather than asserting it. `split_at`
-                // then divides the filled prefix from what the cap discards, so
-                // the count of dropped bytes stays exact even though we never
-                // hold them.
-                let Some(bytes) = chunk.get(..n) else {
-                    break;
-                };
-                let keep = cap.saturating_sub(buf.len()).min(n);
-                let (head, tail) = bytes.split_at(keep);
-                buf.extend_from_slice(head);
-                dropped += tail.len();
+                drop(sink);
             }
-            Ok::<(Vec<u8>, usize), std::io::Error>((buf, dropped))
-        };
 
-        let read_stderr = async {
-            let mut buf = Vec::new();
-            // Diagnostics are for the error message only; bound them too.
-            let _ = stderr.read_to_end(&mut buf).await;
-            buf.truncate(4096);
-            buf
-        };
+            let mut stdout = child.stdout.take().context("child stdout was not piped")?;
+            let mut stderr = child.stderr.take().context("child stderr was not piped")?;
 
-        let (collected, stderr_bytes) = tokio::time::timeout(self.timeout, async {
-            let (out, err) = tokio::join!(read_stdout, read_stderr);
-            let (stdout, dropped) = out?;
-            Ok::<(GitOutput, Vec<u8>), std::io::Error>((
-                GitOutput {
-                    stdout,
-                    truncated_bytes: dropped,
-                },
-                err,
-            ))
+            let read_stdout = async {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let mut dropped = 0usize;
+                loop {
+                    let n = stdout.read(&mut chunk).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    // `read` never reports more than the buffer holds, so `n` is
+                    // in range; `get` states that rather than asserting it.
+                    // `split_at` then divides the filled prefix from what the
+                    // cap discards, so the count of dropped bytes stays exact
+                    // even though we never hold them.
+                    let Some(bytes) = chunk.get(..n) else {
+                        break;
+                    };
+                    let keep = cap.saturating_sub(buf.len()).min(n);
+                    let (head, tail) = bytes.split_at(keep);
+                    buf.extend_from_slice(head);
+                    dropped += tail.len();
+                }
+                Ok::<(Vec<u8>, usize), std::io::Error>((buf, dropped))
+            };
+
+            let read_stderr = async {
+                let mut buf = Vec::new();
+                // Diagnostics are for the error message only; bound them too.
+                let _ = stderr.read_to_end(&mut buf).await;
+                buf.truncate(4096);
+                buf
+            };
+
+            let (out, stderr_bytes) = tokio::join!(read_stdout, read_stderr);
+            let (stdout, dropped) = match out {
+                Ok(output) => output,
+                Err(error) => {
+                    // A failed read must not leave the child running after the
+                    // caller receives the error.
+                    terminate_and_reap(&mut child).await;
+                    return Err(error)
+                        .with_context(|| format!("failed reading `{display}` output"));
+                }
+            };
+            let status = child
+                .wait()
+                .await
+                .with_context(|| format!("`{display}` did not exit"))?;
+
+            if !status.success() {
+                let stderr_text = String::from_utf8_lossy(&stderr_bytes);
+                anyhow::bail!("`{display}` failed ({}): {}", status, stderr_text.trim());
+            }
+
+            Ok::<GitOutput, anyhow::Error>(GitOutput {
+                stdout,
+                truncated_bytes: dropped,
+            })
         })
-        .await
-        .map_err(|_| anyhow::anyhow!("`{display}` timed out after {:?}", self.timeout))?
-        .with_context(|| format!("failed reading `{display}` output"))?;
+        .await;
 
-        let status = child
-            .wait()
-            .await
-            .with_context(|| format!("`{display}` did not exit"))?;
-
-        if !status.success() {
-            let stderr_text = String::from_utf8_lossy(&stderr_bytes);
-            anyhow::bail!("`{display}` failed ({}): {}", status, stderr_text.trim());
+        match outcome {
+            Ok(result) => result,
+            Err(_) => {
+                // The future is dropped here, so its borrow of `child` ends.
+                // Kill and reap the direct child within the bounded allowance;
+                // never touch an unrelated process or a grandchild by guess.
+                terminate_and_reap(&mut child).await;
+                Err(anyhow::anyhow!(
+                    "`{display}` timed out after {:?}",
+                    self.timeout
+                ))
+            }
         }
-
-        Ok(collected)
     }
 
     /// Convenience for commands whose output is a single trimmed line.
@@ -474,6 +511,16 @@ impl GitCmd {
             Err(err) => Err(err),
         }
     }
+}
+
+/// Terminate and reap the direct git child within a bounded allowance.
+///
+/// Only the child this module spawned is signalled. Git hooks are separate
+/// processes; this deliberately does not guess a process group or kill
+/// something it does not own (#3462).
+async fn terminate_and_reap(child: &mut tokio::process::Child) {
+    let _ = child.start_kill();
+    let _ = tokio::time::timeout(CLEANUP_ALLOWANCE, child.wait()).await;
 }
 
 /// The path components of a command line, for logging without shell quoting.
@@ -599,5 +646,334 @@ mod tests {
             "`git status` failed (exit status: 128): fatal: detected dubious ownership in repository"
         ));
         assert!(!is_not_a_repository(""));
+    }
+
+    // ── wall-clock child lifecycle (#3462) ───────────────────────────────
+
+    /// Install an executable fixture without this process writing the path it
+    /// will exec — see [`crate::runtime::testing::install_via_a_child`] for
+    /// the measured construction and the rejected `rename` alternative
+    /// (#3504).
+    #[cfg(target_os = "linux")]
+    fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        crate::runtime::testing::install_via_a_child(&path, body).expect("install fake git");
+        path
+    }
+
+    #[cfg(target_os = "linux")]
+    fn process_running(pid: u32) -> bool {
+        Path::new(&format!("/proc/{pid}")).exists()
+    }
+
+    /// How long a controlled child may take to reach its start barrier.
+    ///
+    /// This is not the timeout under test: the child is expected to start, and
+    /// the bound only keeps a hung fixture from hanging the suite. `llvm-cov`
+    /// instrumentation plus a loaded CI host can delay a fork/exec well past
+    /// two seconds, so the budget is deliberately generous and asserted by the
+    /// test's own deadline instead (#3462).
+    #[cfg(target_os = "linux")]
+    const CHILD_BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
+
+    #[cfg(target_os = "linux")]
+    async fn wait_for_pid(path: &Path) -> u32 {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if let Ok(pid) = text.trim().parse() {
+                    return pid;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("fake git never wrote {}", path.display());
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn wait_for_exit(pid: u32) -> bool {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
+            if !process_running(pid) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    /// Wait until `pid` holds `path` open for writing on descriptor 1.
+    ///
+    /// The holder redirects its stdout to the fixture before `exec`, so the
+    /// descriptor crosses the `exec` and stays live until the holder exits —
+    /// the kernel state the #3504 race produces when a forked child inherits a
+    /// fixture writer's descriptor.
+    #[cfg(target_os = "linux")]
+    async fn wait_for_write_descriptor(pid: u32, path: &Path) {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(target) = std::fs::read_link(format!("/proc/{pid}/fd/1")) {
+                if target.as_path() == path {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "process {pid} never held {} open for writing",
+            path.display()
+        );
+    }
+
+    /// A controlled child that closes both pipes but stays alive must not keep
+    /// the call pending past the deadline plus the bounded cleanup allowance.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_silent_child_that_never_exits_is_killed_at_the_deadline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pidfile = dir.path().join("pid");
+        let fake = script(
+            dir.path(),
+            "git-silent",
+            &format!(
+                "#!/bin/sh\necho $$ > '{}'\nexec sleep 60 >/dev/null 2>&1\n",
+                pidfile.display()
+            ),
+        );
+        let cmd = GitCmd::new(fake.to_string_lossy(), dir.path())
+            .with_timeout(Duration::from_millis(500));
+
+        let started = std::time::Instant::now();
+        let error = cmd.run(&["status"], 1024).await.unwrap_err();
+        let elapsed = started.elapsed();
+        assert!(
+            error.to_string().contains("timed out"),
+            "unexpected error: {error:#}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500) + CLEANUP_ALLOWANCE + Duration::from_secs(2),
+            "deadline plus cleanup allowance was exceeded: {elapsed:?}"
+        );
+
+        let pid = wait_for_pid(&pidfile).await;
+        assert!(
+            wait_for_exit(pid).await,
+            "the timed-out direct child {pid} was not reaped"
+        );
+    }
+
+    /// A child that keeps stdout open without producing bytes is terminated and
+    /// reaped; the timeout is an error, not a successful read.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_stalled_output_child_is_killed_and_reaped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pidfile = dir.path().join("pid");
+        let fake = script(
+            dir.path(),
+            "git-stalled",
+            &format!(
+                "#!/bin/sh\necho $$ > '{}'\nprintf 'partial'\nexec sleep 60\n",
+                pidfile.display()
+            ),
+        );
+        let cmd = GitCmd::new(fake.to_string_lossy(), dir.path())
+            .with_timeout(Duration::from_millis(500));
+
+        let error = cmd.run(&["status"], 1024).await.unwrap_err();
+        assert!(
+            error.to_string().contains("timed out"),
+            "unexpected error: {error:#}"
+        );
+        let pid = wait_for_pid(&pidfile).await;
+        assert!(
+            wait_for_exit(pid).await,
+            "the stalled direct child {pid} was not reaped"
+        );
+    }
+
+    /// Dropping the caller future must not leave the direct git child alive.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn cancellation_kills_the_git_child() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pidfile = dir.path().join("pid");
+        let fake = script(
+            dir.path(),
+            "git-cancelled",
+            &format!(
+                "#!/bin/sh\necho $$ > '{}'\nexec sleep 60 >/dev/null 2>&1\n",
+                pidfile.display()
+            ),
+        );
+        let cmd =
+            GitCmd::new(fake.to_string_lossy(), dir.path()).with_timeout(Duration::from_secs(30));
+
+        // A fixed 300 ms timeout can observe an early spawn/read error under
+        // load and incorrectly treat it as cancellation. First prove the
+        // controlled child actually started and is still running, then abort
+        // the task that owns its process. The abort drops the caller future,
+        // exercising kill_on_drop without relying on scheduler timing.
+        let running = tokio::spawn(async move { cmd.run(&["status"], 1024).await });
+        let pid = wait_for_pid(&pidfile).await;
+        assert!(
+            process_running(pid) && !running.is_finished(),
+            "the controlled git child must be alive before cancellation"
+        );
+        running.abort();
+        let cancelled = running.await.expect_err("the task should be cancelled");
+        assert!(
+            cancelled.is_cancelled(),
+            "unexpected task failure: {cancelled}"
+        );
+        assert!(
+            wait_for_exit(pid).await,
+            "cancellation left the direct git child {pid} alive"
+        );
+    }
+
+    /// A child that finishes inside the deadline still returns its exact
+    /// stdout, and a non-zero exit keeps its status and diagnostics.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_normal_child_keeps_its_exact_output_and_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let good = script(
+            dir.path(),
+            "git-good",
+            "#!/bin/sh\nprintf 'exact-output\\n'\nprintf 'diagnostic\\n' >&2\nexit 0\n",
+        );
+        let output = GitCmd::new(good.to_string_lossy(), dir.path())
+            .with_timeout(Duration::from_secs(5))
+            .run(&["status"], 1024)
+            .await
+            .expect("a fast child must succeed");
+        assert_eq!(output.stdout_string(), "exact-output\n");
+        assert!(!output.truncated());
+
+        let bad = script(
+            dir.path(),
+            "git-bad",
+            "#!/bin/sh\nprintf 'ignored\\n'\nprintf 'fatal diagnostic\\n' >&2\nexit 7\n",
+        );
+        let error = GitCmd::new(bad.to_string_lossy(), dir.path())
+            .with_timeout(Duration::from_secs(5))
+            .run(&["status"], 1024)
+            .await
+            .unwrap_err();
+        let text = format!("{error:#}");
+        assert!(text.contains("failed (exit status: 7)"), "{text}");
+        assert!(text.contains("fatal diagnostic"), "{text}");
+    }
+
+    // ── fixture installation (#3504) ─────────────────────────────────────
+
+    /// A writable descriptor on the executable's inode makes `exec` fail with
+    /// `ETXTBSY` until it closes. The old [`script`] wrote the fixture from
+    /// this process, so a child forked by a concurrent test while that write
+    /// was in flight inherited exactly such a descriptor.
+    ///
+    /// The holder reproduces that child deterministically: it redirects its
+    /// stdout to the fixture before `exec`, so the write descriptor crosses the
+    /// `exec` and stays live until the holder exits. `git-held` cannot exec
+    /// while it lives, the fixture installed by the corrected helper can, and
+    /// the held file executes again once the holder is gone — the live write
+    /// descriptor was the only difference.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_live_write_descriptor_is_what_makes_a_fixture_unexecutable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let held = script(dir.path(), "git-held", "#!/bin/sh\nexit 0\n");
+        let installed = script(
+            dir.path(),
+            "git-installed",
+            "#!/bin/sh\nprintf 'ok\\n'\nexit 0\n",
+        );
+
+        // Installing a fixture must leave no descriptor on the executable in
+        // this process, whose table every fork copies.
+        for entry in std::fs::read_dir("/proc/self/fd").expect("list descriptors") {
+            let target = std::fs::read_link(entry.expect("descriptor entry").path());
+            assert_ne!(
+                target.ok().as_deref(),
+                Some(installed.as_path()),
+                "the installed fixture is still open in this process"
+            );
+        }
+
+        let pidfile = dir.path().join("holder.pid");
+        let mut holder = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("echo $$ > \"$2\"; exec sleep 60 >> \"$1\"")
+            .arg("sh")
+            .arg(&held)
+            .arg(&pidfile)
+            .spawn()
+            .expect("spawn the write-descriptor holder");
+        let pid = wait_for_pid(&pidfile).await;
+        wait_for_write_descriptor(pid, &held).await;
+
+        // not-tmux: executes the git fixture; the variable holds a fixture path.
+        let busy = std::process::Command::new(&held)
+            .arg("status")
+            .output()
+            .expect_err("executing a write-held fixture must fail");
+        assert!(
+            busy.to_string().contains("Text file busy"),
+            "expected ETXTBSY, got: {busy}"
+        );
+
+        // not-tmux: executes the git fixture; the variable holds a fixture path.
+        let output = std::process::Command::new(&installed)
+            .arg("status")
+            .output()
+            .expect("a fixture installed via a child must execute");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"ok\n".to_vec());
+
+        holder.kill().expect("stop the write-descriptor holder");
+        holder.wait().expect("reap the write-descriptor holder");
+        assert!(
+            wait_for_exit(pid).await,
+            "the write-descriptor holder {pid} must be gone"
+        );
+        // not-tmux: executes the git fixture; the variable holds a fixture path.
+        let released = std::process::Command::new(&held)
+            .arg("status")
+            .output()
+            .expect("the fixture must execute once its write descriptor is gone");
+        assert!(released.status.success());
+    }
+
+    /// The #3504 race is between fixture installation and children forked by
+    /// sibling tests, so repeat both concurrently: every worker installs and
+    /// executes four fixtures while the rest of the suite keeps spawning.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fixture_installation_survives_repeated_parallel_spawns() {
+        let mut workers = Vec::new();
+        for worker in 0..4 {
+            workers.push(std::thread::spawn(move || {
+                for round in 0..4 {
+                    let dir = tempfile::tempdir().expect("tempdir");
+                    let fixture = script(
+                        dir.path(),
+                        &format!("git-parallel-{worker}-{round}"),
+                        "#!/bin/sh\nprintf 'ok\\n'\nexit 0\n",
+                    );
+                    // not-tmux: executes the git fixture; the variable holds a
+                    // fixture path.
+                    let output = std::process::Command::new(&fixture)
+                        .arg("status")
+                        .output()
+                        .expect("a parallel fixture must execute");
+                    assert!(output.status.success());
+                    assert_eq!(output.stdout, b"ok\n".to_vec());
+                }
+            }));
+        }
+        for worker in workers {
+            worker.join().expect("a fixture worker must not panic");
+        }
     }
 }

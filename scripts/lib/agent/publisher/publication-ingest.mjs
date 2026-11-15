@@ -369,9 +369,16 @@ export function applyQwenPublicationToRemote({remote,readback,intent,registry,
 // another PR or a model-selected SHA. Recheck immutable Store Intent before
 // projecting the canonical same-Reviewer transition at SHA B.
 export function applyQwenRepairPublisherReviewHandoff({
-  storeRoot,readback,intent,registry,
+  storeRoot,readback,intent,registry,authenticated_run_id=null,
 }){
   const record=validateQwenRepairPublisherIntent(intent?.record);
+  const publisherRunId=authenticated_run_id??record.publisher_run_id;
+  const reconciled=publisherRunId!==record.publisher_run_id;
+  if(!Number.isSafeInteger(publisherRunId)||publisherRunId<1||
+      (reconciled&&(intent?.status!=='reconcile'||
+        intent.may_publish!==false||
+        publisherRunId<=record.publisher_run_id)))
+    fail('Repair handoff lacks authenticated current Publisher Run');
   if(readback?.schema_version!==1||
       readback.kind!=='authenticated_qwen_repair_pr_receipt'||
       readback.status!=='same_pr_nonforce_update_readback_verified'||
@@ -411,17 +418,24 @@ export function applyQwenRepairPublisherReviewHandoff({
     fail('Repair Intent is not the exact committed Store author');
   const current=readIssueWorkflowState(storeRoot,record.issue);
   if(!current.state)fail('Repair source Issue State is absent');
+  // The successful current Publisher authenticates the old immutable
+  // write-ahead PR-B update, so its own Run is the Store transition issuer.
+  // Preserve the original PR writer explicitly rather than pretending its
+  // failed GitHub Run had a success conclusion.
   const event={kind:'publisher',issue:record.issue,outcome:'published',
-    run_id:record.publisher_run_id,run_attempt:1,
-    target_sha:readback.head_sha};
-  const trusted={role:'publisher',workflow_run_id:record.publisher_run_id,
+    run_id:publisherRunId,run_attempt:1,target_sha:readback.head_sha};
+  const trusted={role:'publisher',workflow_run_id:publisherRunId,
     attempt:1,issue:record.issue,source_sha:readback.head_sha,
     developer_action_id:record.action_id,
     developer_run_id:record.worker_run_id,developer_attempt:1,
     developer_source_sha:record.source_sha,
     checkpoint_commit_sha:record.checkpoint_commit_sha,
     original_publisher_run_id:record.original_publisher_run_id,
-    pr_number:readback.pull_request,pr_previous_sha:record.source_sha};
+    pr_number:readback.pull_request,pr_previous_sha:record.source_sha,
+    ...(reconciled?{
+      write_ahead_publisher_run_id:record.publisher_run_id,
+    }:{}),
+  };
   const next=acceptAttestedQwenRepairPublication(
     current.state,current.version,event,trusted,registry);
   if(next===current.state)return {changed:false,issue:record.issue,
@@ -438,6 +452,7 @@ export function applyQwenRepairPublisherReviewHandoff({
 }
 export function applyQwenRepairPublicationToRemote({
   remote,readback,intent,registry,publishStore=publish,onCandidate=null,
+  authenticated_run_id=null,
 }){
   if(typeof remote!=='string'||!remote||
       (process.env.NODE_ENV!=='test'&&
@@ -446,7 +461,7 @@ export function applyQwenRepairPublicationToRemote({
   const {temp,work}=openStoreRemote(remote);
   try{
     const applied=applyQwenRepairPublisherReviewHandoff({
-      storeRoot:work,readback,intent,registry});
+      storeRoot:work,readback,intent,registry,authenticated_run_id});
     if(!applied.changed)return {...applied,replayed:true,commit_sha:null};
     git(work,['add','-A']);
     if(auditStagedRunStore(work,STORE_REF).checked_changes!==2)

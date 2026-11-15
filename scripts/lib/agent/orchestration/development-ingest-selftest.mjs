@@ -186,4 +186,25 @@ for(const altered of [
 assert.throws(()=>resolveTrustedIngestSource({environment:{
   ...env,GITHUB_ACTOR:'evil'},event:qwenEvent}),/exact owner\/main/);
 
+// #3491: only the exact trusted-main bot Worker completion may select a
+// generic Qwen Run. The Issue/Action/source SHA come from the signed claim and
+// persisted Store receipt, never these untrusted dispatch inputs.
+const botEnv={...env,GITHUB_EVENT_NAME:'workflow_dispatch',
+  GITHUB_ACTOR:'github-actions[bot]',GITHUB_RUN_ATTEMPT:'1'};
+const botEvent={repository:{full_name:'BestNathan/nession'},
+  sender:{login:'github-actions[bot]'},inputs:{source_run_id:'43578706212'}};
+assert.deepEqual(resolveTrustedIngestSource({environment:botEnv,event:botEvent}),
+  {run_id:43578706212,source:null,bot_qwen_wake:true,attempt:1});
+for(const [environment,bad] of [
+  [env,botEvent],
+  [{...botEnv,GITHUB_REF:'refs/heads/staging'},botEvent],
+  [{...botEnv,GITHUB_ACTOR:'BestNathan'},botEvent],
+  [{...botEnv,GITHUB_RUN_ATTEMPT:'2'},botEvent],
+  [botEnv,{...botEvent,repository:{full_name:'evil/repo'}}],
+  [botEnv,{...botEvent,sender:{login:'BestNathan'}}],
+  ...['','0','-1','1.2','foo','43578706212-extra','43578706212\\n'].map(source_run_id=>
+    [botEnv,{...botEvent,inputs:{source_run_id}}]),
+])assert.throws(()=>resolveTrustedIngestSource({environment,event:bad}),
+  /trusted Ingest authority|bot\/main post-Worker wake|manual checkpoint recovery requires exact owner\/main/);
+
 console.log('Development Ingest v2: signed parent, exact Worker/Action owner fallback and forgery negatives passed');

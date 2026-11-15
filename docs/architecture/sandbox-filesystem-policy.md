@@ -270,7 +270,7 @@ fifth always-visible item is the derived **Preview**, not a Home policy.
 | Mounted image (RootFS or extra mount) | Agent prepares cache path; Sandbox mounts | Server registry + Agent cache; Sandbox owns the mount only | Unmounted; bytes remain | Bytes remain | Execution cleanup unmounts; cache owns bytes |
 | Project Location | Project declaration (external) | User/Project, never the Agent Manager | Yes | Yes | Never by Workspace management |
 | Managed Workspace | Agent Workspace Manager `get_or_create` | Agent, under its durable storage root | Yes | Yes | Explicit delete when unmounted and unreferenced; never execution cleanup |
-| Workspace Overlay upper/work | Agent for the execution or durable managed workspace | Agent Workspace Manager for managed storage | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy, never the EROFS cache |
+| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession-erofs::overlay` (#3582) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
 | Execution mounts and mountpoints | Sandbox `prepare` | Sandbox execution record | No | No | Cleanup/reconciliation, in reverse order |
 | `/home`, `/tmp`, `/run/nession` runtime paths | Backend | Execution | No | No | Execution cleanup |
 
@@ -340,7 +340,9 @@ not be weakened by this design document:
   zero or more toolchains at exactly `/opt/<lowercase-name>`.
 - The composed root is an empty tmpfs plus a read-only Base Runtime bind;
   `/workspace` is a bind or a read-only lower merged with an Agent-owned
-  writable upper/work through `fuse-overlayfs`; `/home` and `/tmp` are private
+  writable upper/work through one shared, manager-owned `fuse-overlayfs`
+  Merged View (#3582); several Sessions may bind that same view, and the
+  Sandbox creates no per-execution Overlay. `/home` and `/tmp` are private
   tmpfs.
 - Image sources are verified local files beneath the Agent-authorized EROFS
   image root. The Sandbox re-verifies every digest before mounting.
@@ -366,6 +368,8 @@ a second image registry or a second Workspace registry.
   cache mechanics.
 - [#3024](https://github.com/BestNathan/nession/issues/3024) — prepared EROFS
   root composition and native proof lane.
+- [#3582](https://github.com/BestNathan/nession/issues/3582) — one shared
+  writable Workspace Overlay with durable Upper ownership.
 - [#3062](https://github.com/BestNathan/nession/issues/3062) — Managed Session
   preparation.
 - [#3161](https://github.com/BestNathan/nession/issues/3161) — per-policy
@@ -376,3 +380,5 @@ a second image registry or a second Workspace registry.
   current executable architecture.
 - [Global EROFS Image Manager](erofs-image-manager.md) and
   [Agent EROFS cache](agent-erofs-cache.md) — image bytes and cache ownership.
+- [OCI/EROFS image infrastructure](oci-erofs-image-infrastructure.md) — image
+  identity, format, storage and runtime-default target contract (#3494).

@@ -11,3 +11,4 @@ pub mod system;
 pub mod tmux_socket;
 
 pub use error::{NessionError, Result};
+pub use nession_protocol::secret::{constant_time_eq, RedactedToken, SecretString, TokenVerifier};

@@ -29,6 +29,7 @@ use http::{Request, Response, StatusCode};
 use http_body::Body as HttpBody;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty};
+use nession_protocol::TokenVerifier;
 use rmcp::model::{
     CacheScope, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult,
     PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
@@ -60,8 +61,8 @@ type RmcpBody = BoxBody<Bytes, Infallible>;
 pub struct ServiceConfig {
     /// The endpoint path, normally `/mcp`.
     pub path: String,
-    /// The required inbound bearer token.
-    pub auth_token: String,
+    /// The required inbound bearer token, owned by this endpoint.
+    pub auth_token: TokenVerifier,
     /// Bound on one tool execution (and on waiting for a concurrency slot).
     pub tool_timeout: Duration,
     /// Maximum concurrent tool executions.
@@ -83,7 +84,7 @@ impl ServiceConfig {
     pub fn new(auth_token: impl Into<String>) -> Self {
         Self {
             path: protocol::DEFAULT_PATH.to_string(),
-            auth_token: auth_token.into(),
+            auth_token: TokenVerifier::new(auth_token),
             tool_timeout: Duration::from_secs(protocol::DEFAULT_TOOL_TIMEOUT_SECS),
             max_concurrent_calls: protocol::DEFAULT_MAX_CONCURRENT_CALLS,
             allowed_origins: Vec::new(),
@@ -93,7 +94,7 @@ impl ServiceConfig {
 
     /// Fail closed on a configuration that cannot authenticate or serve.
     pub fn validate(&self) -> Result<(), ServiceConfigError> {
-        if self.auth_token.trim().is_empty() {
+        if !self.auth_token.is_enabled() {
             return Err(ServiceConfigError::EmptyAuthToken);
         }
         if !self.path.starts_with('/') || self.path.len() < 2 {
@@ -220,7 +221,7 @@ impl McpService {
             endpoint: AuthorizedMcp {
                 inner,
                 path: Arc::from(config.path.as_str()),
-                auth_token: Arc::from(config.auth_token.as_str()),
+                auth_token: config.auth_token,
             },
         })
     }
@@ -395,7 +396,7 @@ fn tool_error_result(error: &ToolError) -> CallToolResult {
 struct AuthorizedMcp {
     inner: StreamableHttpService<RegistryServer, LocalSessionManager>,
     path: Arc<str>,
-    auth_token: Arc<str>,
+    auth_token: TokenVerifier,
 }
 
 impl AuthorizedMcp {
@@ -451,7 +452,7 @@ where
     }
 }
 
-fn authorized_by<B>(request: &Request<B>, expected: &str) -> bool {
+fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier) -> bool {
     let Some(value) = request
         .headers()
         .get(http::header::AUTHORIZATION)
@@ -467,21 +468,7 @@ fn authorized_by<B>(request: &Request<B>, expected: &str) -> bool {
     let Some(presented) = parts.next() else {
         return false;
     };
-    constant_time_eq(presented.trim(), expected)
-}
-
-/// Compare a presented token with the configured one without an early exit.
-fn constant_time_eq(presented: &str, expected: &str) -> bool {
-    let presented = presented.as_bytes();
-    let expected = expected.as_bytes();
-    let mut difference = presented.len() ^ expected.len();
-    let longest = presented.len().max(expected.len());
-    for index in 0..longest {
-        let left = presented.get(index).copied().unwrap_or(0);
-        let right = expected.get(index).copied().unwrap_or(0);
-        difference |= usize::from(left ^ right);
-    }
-    difference == 0
+    verifier.verify(presented.trim())
 }
 
 #[cfg(test)]
@@ -490,9 +477,10 @@ mod tests {
 
     #[test]
     fn tokens_compare_by_content_and_length() {
-        assert!(constant_time_eq("abc", "abc"));
-        assert!(!constant_time_eq("abc", "abd"));
-        assert!(!constant_time_eq("ab", "abc"));
-        assert!(!constant_time_eq("", "abc"));
+        let verifier = TokenVerifier::new("abc");
+        assert!(verifier.verify("abc"));
+        assert!(!verifier.verify("abd"));
+        assert!(!verifier.verify("ab"));
+        assert!(!verifier.verify(""));
     }
 }

@@ -66,8 +66,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use nession_runtime::frame::WsFrame;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
 use nession_runtime::outbound::{Limits, Outbound};
@@ -201,7 +201,7 @@ impl WsMessageSender {
     /// subscriber that stops draining (`server::websocket`), and on this
     /// connection's [`Self::send_terminal`], which ends a relay that has stopped
     /// draining.
-    pub async fn send_reply(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub async fn send_reply(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_reply(msg).await
     }
 
@@ -215,7 +215,7 @@ impl WsMessageSender {
     /// client is no longer attached in any useful sense. The caller closes the
     /// connection, and a client that was merely asleep re-attaches and is handed
     /// a redrawn screen.
-    pub async fn send_terminal(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub async fn send_terminal(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_terminal(msg).await
     }
 
@@ -231,7 +231,7 @@ impl WsMessageSender {
     /// (`CommandBroker::send_command`) revokes the pending command, which
     /// resolves its waiter *now* and answers the client with a failure instead of
     /// fifteen seconds of nothing (#960's contract, reused).
-    pub fn try_send_command(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub fn try_send_command(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.try_send(msg, Lane::Command)
     }
 
@@ -250,7 +250,7 @@ impl WsMessageSender {
     /// resize is a *level*, not an edge. A client too far behind to accept one
     /// is too far behind to render the frame it changes, and it restates its own
     /// size when its viewport moves or when it re-attaches.
-    pub fn try_send_broadcast(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub fn try_send_broadcast(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.try_send(msg, Lane::Broadcast)
     }
 
@@ -274,7 +274,7 @@ impl WsMessageSender {
     /// `Closed` passes through: it is not a statement about room, and the caller
     /// has to be able to tell "this connection is over" from "this connection is
     /// full".
-    fn try_send(&self, msg: WsMessage, lane: Lane) -> Result<(), OutboundError> {
+    fn try_send(&self, msg: WsFrame, lane: Lane) -> Result<(), OutboundError> {
         self.queue.try_send(msg).map_err(|e| match e {
             OutboundError::Saturated => self.note_no_room(lane),
             e => e,
@@ -344,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn a_state_push_is_dropped_when_the_queue_is_full() {
         let (sender, _rx) = WsMessageSender::new();
-        let frame = WsMessage::Text("y".repeat(OUTBOUND_BYTE_BUDGET));
+        let frame = WsFrame::Text("y".repeat(OUTBOUND_BYTE_BUDGET));
 
         assert_eq!(sender.try_send_broadcast(frame.clone()), Ok(()));
         assert_eq!(
@@ -368,7 +368,7 @@ mod tests {
     #[tokio::test]
     async fn a_command_with_no_room_fails_the_request() {
         let (sender, _rx) = WsMessageSender::new();
-        let frame = WsMessage::Text("z".repeat(OUTBOUND_BYTE_BUDGET));
+        let frame = WsFrame::Text("z".repeat(OUTBOUND_BYTE_BUDGET));
 
         assert_eq!(sender.try_send_command(frame.clone()), Ok(()));
         assert_eq!(
@@ -389,7 +389,7 @@ mod tests {
     #[tokio::test]
     async fn the_snapshot_names_every_policy() {
         let (sender, _rx) = WsMessageSender::with_terminal_grace(Duration::from_millis(10));
-        let frame = WsMessage::Text("s".repeat(OUTBOUND_BYTE_BUDGET));
+        let frame = WsFrame::Text("s".repeat(OUTBOUND_BYTE_BUDGET));
 
         assert_eq!(sender.send_terminal(frame.clone()).await, Ok(()));
         let _ = sender.send_terminal(frame.clone()).await;

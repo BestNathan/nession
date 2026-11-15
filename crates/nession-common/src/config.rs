@@ -114,9 +114,6 @@ pub struct ServerConfig {
     /// exhaust the host's disk or process table.
     #[serde(default = "default_image_max_concurrent_builds")]
     pub image_max_concurrent_builds: usize,
-    /// Lifetime of a Project-scoped blob access grant, in seconds.
-    #[serde(default = "default_image_access_token_expiry")]
-    pub image_access_token_expiry_secs: u64,
     /// Interval between bounded image GC sweeps (#3180). `0` disables the
     /// scheduled sweep; an operator can still run one explicit sweep.
     ///
@@ -160,21 +157,24 @@ pub struct ServerConfig {
     /// `nession_server::server::execution`.
     #[serde(default = "default_query_concurrency")]
     pub query_concurrency_per_connection: usize,
-    /// How long a P2P credential stays valid after it is minted (#1013).
+    /// Maximum upgraded Server WebSockets that have not authenticated yet
+    /// (#3439 W2).
     ///
-    /// A credential authorizes a direct Client → Agent connection, and it is
-    /// validated by the **Agent** — the Server mints and forgets, the Agent
-    /// honours it until this deadline passes. So this is the revocation
-    /// window: it bounds how long a credential that leaked (a token in a URL
-    /// reaches access logs) stays useful, and it is the only expiry the
-    /// boundary has. Shorter is safer and costs the user nothing, because a
-    /// client that needs a new one re-attaches and gets one.
+    /// Separate from the listener's pre-upgrade handshake budget: the
+    /// pre-authentication admission slot is returned when the upgrade is
+    /// answered, so upgraded-but-unauthenticated sockets need their own bound.
+    /// An upgrade beyond it receives `503` before a connection task exists.
+    #[serde(default = "default_max_pending_ws_auth")]
+    pub max_pending_ws_auth: usize,
+    /// Absolute deadline, in seconds, for an upgraded Server WebSocket's first
+    /// successful authentication (`server.auth` for a client, or an
+    /// authenticated Agent registration) (#3439 W2).
     ///
-    /// Five minutes, which is long enough for a slow first paint and for the
-    /// reconnect budget a browser uses after a dropped socket, and short enough
-    /// that a leaked token is stale by the time anyone notices it leaked.
-    #[serde(default = "default_p2p_token_expiry")]
-    pub p2p_token_expiry_secs: u64,
+    /// It starts at the upgrade and is not reset by Pings, malformed frames,
+    /// refused authentication or business frames. Once the connection is
+    /// authenticated, no such deadline applies.
+    #[serde(default = "default_ws_auth_timeout")]
+    pub ws_auth_timeout_secs: u64,
     /// The fixed column count a new Session is created at (#2487).
     ///
     /// The Server's runtime value comes from `NESSION_TERMINAL_COLS`, written by
@@ -369,9 +369,6 @@ impl ServerConfig {
         if !(60..=31_536_000).contains(&self.image_build_retention_secs) {
             anyhow::bail!("image_build_retention_secs must be in [60, 31536000]");
         }
-        if !(30..=3600).contains(&self.image_access_token_expiry_secs) {
-            anyhow::bail!("image_access_token_expiry_secs must be in [30, 3600]");
-        }
         if self.image_gc_interval_secs != 0
             && !(60..=7 * 24 * 60 * 60).contains(&self.image_gc_interval_secs)
         {
@@ -389,12 +386,6 @@ impl ServerConfig {
 /// outbound queue's own default cannot drift from the config's.
 pub const DEFAULT_TERMINAL_STALL_GRACE_SECS: u64 = 15;
 
-/// The default for [`ServerConfig::p2p_token_expiry_secs`], published so a
-/// test that needs a credential to be *expired* can derive one rather than
-/// hard-code a number that would silently stop testing expiry if the default
-/// moved.
-pub const DEFAULT_P2P_TOKEN_EXPIRY_SECS: u64 = 300;
-
 /// The default for [`ServerConfig::query_concurrency_per_connection`], published
 /// for the same reason: the query lane's own default is this number.
 ///
@@ -407,6 +398,20 @@ pub const DEFAULT_P2P_TOKEN_EXPIRY_SECS: u64 = 300;
 /// enough that a connection which never gets answered costs eight tasks and not
 /// the machine.
 pub const DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION: usize = 8;
+
+/// How many upgraded Server WebSockets may await authentication at once
+/// (#3439 W2).
+///
+/// The same policy reasoning as the pre-upgrade budget: an upgraded socket
+/// costs a task, a bounded outbound queue and a writer, and a peer that never
+/// authenticates must not grow that without bound. Sixty-four is far beyond a
+/// browser tab burst and small enough that the wait is bounded by the absolute
+/// auth deadline.
+pub const DEFAULT_MAX_PENDING_WS_AUTH: usize = 64;
+
+/// The absolute deadline, in seconds, for an upgraded Server WebSocket's first
+/// authentication (#3439 W2). Ten matches the Agent's `P2P_AUTH_FRAME_TIMEOUT`.
+pub const DEFAULT_WS_AUTH_TIMEOUT_SECS: u64 = 10;
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -421,7 +426,6 @@ impl Default for ServerConfig {
             image_blob_dir: default_image_blob_dir(),
             image_build_dir: default_image_build_dir(),
             image_max_concurrent_builds: default_image_max_concurrent_builds(),
-            image_access_token_expiry_secs: default_image_access_token_expiry(),
             image_gc_interval_secs: default_image_gc_interval(),
             image_gc_max_candidates: default_image_gc_max_candidates(),
             image_build_stage_timeout_secs: default_image_build_stage_timeout_secs(),
@@ -429,7 +433,8 @@ impl Default for ServerConfig {
             image_build_retention_secs: default_image_build_retention_secs(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
-            p2p_token_expiry_secs: default_p2p_token_expiry(),
+            max_pending_ws_auth: default_max_pending_ws_auth(),
+            ws_auth_timeout_secs: default_ws_auth_timeout(),
             terminal_cols: default_terminal_cols(),
             terminal_web_font_size: default_terminal_web_font_size(),
             logging: LoggingConfig::default(),
@@ -454,8 +459,12 @@ fn default_query_concurrency() -> usize {
     DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
 }
 
-fn default_p2p_token_expiry() -> u64 {
-    DEFAULT_P2P_TOKEN_EXPIRY_SECS
+fn default_max_pending_ws_auth() -> usize {
+    DEFAULT_MAX_PENDING_WS_AUTH
+}
+
+fn default_ws_auth_timeout() -> u64 {
+    DEFAULT_WS_AUTH_TIMEOUT_SECS
 }
 
 fn default_heartbeat_interval() -> u64 {
@@ -480,10 +489,6 @@ fn default_image_build_dir() -> String {
 
 fn default_image_max_concurrent_builds() -> usize {
     2
-}
-
-fn default_image_access_token_expiry() -> u64 {
-    300
 }
 
 fn default_image_gc_interval() -> u64 {

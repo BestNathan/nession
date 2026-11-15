@@ -1,0 +1,17 @@
+schema_version: 1
+issue: 3499
+criterion: SC-04
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify-resolution.cjs
+  - type: runtime
+    entry: verify-cache.cjs
+  - type: runtime
+    entry: verify-mount.cjs
+  - type: runtime
+    entry: verify-server.cjs
+  - type: runtime
+    entry: verify-agent.cjs
+result_policy: all-pass

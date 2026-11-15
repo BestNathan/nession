@@ -67,72 +67,20 @@ agent_address?: string | null,
  */
 addresses: Array<ProbedAddress>, 
 /**
- * The credential for the P2P connection this reply describes (#1013).
+ * The resolved target Agent's durable inbound token (#3440).
  *
- * Present when `mode` is `"p2p"`, absent for `"relay"` — the Server dials
- * in relay mode, so the browser never touches the agent and has nothing to
- * present.
+ * Present when `mode` is `"p2p"`; absent for `"relay"`, where the Server
+ * dials the Agent itself and the browser never holds the token.
  *
- * **Issuer:** the Server. It is the only thing that mints one.
- *
- * **Verifier:** the agent named in this reply, and only that one. A
- * credential is pushed to the agent over the connection *the agent itself
- * dialled out* — the one channel here that is already authenticated in the
- * direction that matters, since the agent is the client on it — and that
- * agent stores it before this reply is sent. So a client that dials the
- * instant it holds a token is correct by construction: the verifier already
- * has the record. The token is opaque to the agent, which looks it up and
- * never parses it, and that is why it is not signed — signing would mean key
- * delivery and rotation in the one crate that listens on a port.
- *
- * **Scope:** what the credential may do, carried beside it in the grant
- * (`contracts::p2p::v1::CredentialScope`). A credential for an attach is
- * bound to **one session** — its terminal wires are refused for any other —
- * and carries session management and the file sandbox; a credential for a
- * relay is bound to one session and carries neither. The agent checks the
- * scope per wire, so "the credential was valid" never implies "every
- * operation is allowed".
- *
- * **Expiry:** a deadline the Server sets (default 300s) and the agent
- * compares against its own clock. This is the real revocation: it is
- * deterministic and needs no round trip.
- *
- * **Replay:** time-bounded and **repeatable — not single-use**, and that is
- * a requirement rather than a relaxation. A browser re-presents the same
- * URL on every reconnect (its reconnect budget is ten attempts), and the
- * Server's relay leg makes two dials on one credential, attach and detach.
- * Spending the token on first use would break both, and single-use is
- * therefore a client rewrite rather than a policy choice.
- *
- * **Renewal:** the browser cannot parse the opaque token, so the Server
- * states the deadline beside it. Before a physical Agent socket is rebuilt
- * after expiry, the Session runtime re-attaches through the authenticated
- * `server.session.attach` operation and presents the fresh credential
- * (#2645). A healthy socket is never replaced just because the credential
- * expired; only a new upgrade needs one.
- *
- * **Transport:** the `token` query parameter on the agent URL
- * ([`super::super::p2p::CREDENTIAL_PARAM`]). A query parameter because a
- * browser cannot set a header on `new WebSocket()`. **It therefore reaches
- * every access log on the path** — which is why the value is opaque and
- * short-lived rather than a durable secret.
- *
- * Renaming this field would cost a codegen regeneration and every web
- * fixture for nothing a comment does not buy; the wire name and the
- * parameter name are independent, and only the latter is shared with the
- * browser.
+ * The Server hands this to an authenticated client only after resolving
+ * this reply's Session and Agent, and returns the token cached from that
+ * Agent's authoritative registration generation. It is not a per-attach
+ * grant: the Agent's own verifier accepts it for as long as it remains the
+ * Agent's current token, so reconnects need no reissue. Sending it to a
+ * client also grants that client the Agent's whole trusted surface — the
+ * explicit 0.x tradeoff in #3440, not a per-Session scope.
  */
-connection_token?: string | null, 
-/**
- * RFC 3339 deadline for [`Self::connection_token`], stated by its issuer.
- *
- * The browser cannot parse the opaque token, so this is the only way a
- * client can know a reconnect needs a *new* credential instead of the one
- * it already holds (#2645). Absent on older Servers and on the relay
- * arm; a client that sees it must still treat the Agent's refusal as
- * authoritative (fail closed).
- */
-connection_token_expires_at?: string | null, 
+agent_token?: string, 
 /**
  * The Server's release-selected fixed column count (#2487).
  *

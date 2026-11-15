@@ -291,6 +291,40 @@ describe('useEnvironmentWorkspace', () => {
     });
     expect(reapply).toHaveBeenCalledTimes(1);
   });
+  it('re-reads the binding after a revision conflict instead of retrying blindly', async () => {
+    const refresh = vi.fn(async () => bindingResponse());
+    const replace = vi.fn(async () => ({
+      success: false,
+      binding: null,
+      warnings: [],
+      error: 'revision_conflict: expected revision 1, but the Session binding is now at revision 2',
+      refusal: 'revision_conflict' as const,
+    }));
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false,
+      pending: false,
+      refresh,
+      replace,
+      reapply: vi.fn(async () => bindingResponse()),
+    });
+    const { result } = renderHook(() => useEnvironmentWorkspace('s1'));
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    act(() => result.current.startBindingDraft());
+
+    await act(async () => {
+      await result.current.applyBinding([A_REF]);
+    });
+
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('revision_conflict'),
+    );
+    // The draft stays open: the caller sees the conflict and can retry with
+    // the re-read revision.
+    expect(result.current.screen.view).toBe('draft');
+  });
   it('preserves Session B dirty draft when Session A binding Apply finishes late (#3444)', async () => {
     const delayed = deferred<ReturnType<typeof bindingResponse>>();
     const replace = vi.fn(() => delayed.promise);

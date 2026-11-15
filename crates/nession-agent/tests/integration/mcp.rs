@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nession_agent::config::{AgentConfig, AttachMode};
-use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
@@ -105,7 +105,9 @@ async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHan
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials: Arc::new(P2pCredentials::new()),
+            // The same durable Agent Token MCP mounts below: one secret gates
+            // both the P2P listener and the embedded MCP endpoint (#3440).
+            auth: Arc::new(P2pAuth::new(TOKEN)),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::clone(&tmux),
             session_metadata: Arc::new(SessionMetadataStore::with_root(
@@ -130,7 +132,7 @@ async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHan
         },
         ..Default::default()
     };
-    server.mount_mcp(&config).expect("mount MCP");
+    server.mount_mcp(&config, TOKEN).expect("mount MCP");
     let (handle, addr) = server.start().await.expect("start");
     tokio::time::sleep(Duration::from_millis(50)).await;
     (addr, handle)

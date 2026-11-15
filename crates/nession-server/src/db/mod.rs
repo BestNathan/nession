@@ -26,12 +26,14 @@ use nession_protocol::contracts::project::v1::{
     ProjectLocation, ProjectSessionDefaults, ProjectSource,
 };
 use nession_protocol::contracts::session::v1::ManagedToolchainRequest;
-use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::sea_query::{Expr, ExprTrait, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait,
-    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
+    DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 use sea_orm_migration::MigratorTrait;
+use serde::{Deserialize, Serialize};
 
 pub struct Database {
     conn: DatabaseConnection,
@@ -138,6 +140,39 @@ pub struct SessionProjectBindingRow {
     pub updated_at: i64,
 }
 
+/// The membership values an atomic set writes (#3509).
+///
+/// The database owns the next `revision`; unlike [`SessionProjectBindingRow`],
+/// a caller cannot supply one.
+#[derive(Debug, Clone)]
+pub struct SessionProjectBindingSet {
+    pub session_id: String,
+    pub agent_id: String,
+    pub project_id: String,
+    pub incarnation_id: String,
+    pub agent_created_at: i64,
+    pub updated_at: i64,
+}
+
+/// The outcome of one atomic Session Project membership set (#3509).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionProjectBindingSetOutcome {
+    /// The conditional write committed; the row is the committed value.
+    Applied(SessionProjectBindingRow),
+    /// The stored revision did not match the caller's expectation.
+    Conflict { current_revision: u64 },
+}
+
+/// The outcome of one atomic Session Project membership removal (#3509).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionProjectBindingRemoveOutcome {
+    /// The membership is absent at the caller's expected revision (or was
+    /// already absent with no expectation).
+    Removed,
+    /// The stored revision did not match the caller's expectation.
+    Conflict { current_revision: u64 },
+}
+
 /// One Managed EROFS Session creation's durable context (#3062).
 ///
 /// `attempt_id` fences concurrent attempts for the same Session name: a losing
@@ -157,6 +192,26 @@ pub struct SessionManagedContextRow {
     pub status: String,
     pub error: Option<String>,
     pub updated_at: i64,
+    /// The resolved Manifest identity of each requested image (#3499).
+    ///
+    /// A legacy digest-only binding records its EROFS digest as both the
+    /// requested and layer digest and leaves `manifest_digest` absent.
+    pub resolved_images: Vec<ResolvedImageBinding>,
+}
+
+/// One image's final runtime identity inside a Managed Session binding.
+///
+/// `requested_digest` is what the create named; `manifest_digest` is the
+/// immutable Manifest the Server resolved and authorized (absent for the
+/// legacy digest-addressed path); `layer_digest` is the physical EROFS
+/// identity the Agent's mount layer uses.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedImageBinding {
+    pub role: String,
+    pub requested_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<String>,
+    pub layer_digest: String,
 }
 
 /// A Managed create may legitimately stay `preparing` for the Server's 300 s
@@ -184,6 +239,13 @@ pub struct ProjectRow {
 }
 
 impl Database {
+    /// The Server's single SQLite connection. Adapters that own schema inside
+    /// `nession-erofs` (the image catalog, #3496) run through this connection
+    /// rather than opening a second database.
+    pub fn connection(&self) -> &DatabaseConnection {
+        &self.conn
+    }
+
     /// Open (or create) the SQLite database at `db_path`, enable WAL, and run
     /// all pending migrations.  Accepts a plain filesystem path or a
     /// `sqlite:`-prefixed URL; `:memory:` maps to an in-memory DB.
@@ -211,6 +273,9 @@ impl Database {
         Migrator::up(&conn, None)
             .await
             .context("failed to run database migrations")?;
+        nession_erofs::catalog::migrate(&conn)
+            .await
+            .context("failed to run image catalog migrations")?;
 
         Ok(Self { conn })
     }
@@ -615,14 +680,7 @@ impl Database {
 
     /// Insert or replace one Session's desired binding (replace-whole).
     pub async fn upsert_session_env_binding(&self, row: &SessionEnvBindingRow) -> Result<()> {
-        let model = session_env_bindings::ActiveModel {
-            session_id: Set(row.session_id.clone()),
-            agent_id: Set(row.agent_id.clone()),
-            desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
-            profiles_json: Set(row.profiles_json.clone()),
-            updated_at: Set(row.updated_at),
-        };
-        session_env_bindings::Entity::insert(model)
+        session_env_bindings::Entity::insert(session_env_binding_model(row))
             .on_conflict(
                 OnConflict::column(session_env_bindings::Column::SessionId)
                     .update_columns([
@@ -637,6 +695,65 @@ impl Database {
             .await
             .context("failed to upsert session env binding")?;
         Ok(())
+    }
+
+    /// Persist one Session's desired binding **only if** its stored revision is
+    /// still `expected_revision`.
+    ///
+    /// This is the durable compare-and-swap behind the binding's
+    /// version-aware mutations. Reading the revision and then writing it
+    /// unconditionally would let a caller that read revision 3 overwrite a
+    /// writer that already advanced the row to 4, so the comparison is part of
+    /// the write itself. `false` means the row was not written — the caller
+    /// lost the race — and no Agent-side mutation may follow.
+    ///
+    /// `expected_revision == 0` covers a Session whose binding has never been
+    /// persisted: the update matches nothing, and an insert guarded by its own
+    /// conflict rule decides the race instead.
+    pub async fn compare_and_swap_session_env_binding(
+        &self,
+        row: &SessionEnvBindingRow,
+        expected_revision: u64,
+    ) -> Result<bool> {
+        let expected = i64::try_from(expected_revision).unwrap_or(i64::MAX);
+        let updated = session_env_bindings::Entity::update_many()
+            .col_expr(
+                session_env_bindings::Column::AgentId,
+                Expr::value(row.agent_id.clone()),
+            )
+            .col_expr(
+                session_env_bindings::Column::DesiredRevision,
+                Expr::value(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+            )
+            .col_expr(
+                session_env_bindings::Column::ProfilesJson,
+                Expr::value(row.profiles_json.clone()),
+            )
+            .col_expr(
+                session_env_bindings::Column::UpdatedAt,
+                Expr::value(row.updated_at),
+            )
+            .filter(session_env_bindings::Column::SessionId.eq(&row.session_id))
+            .filter(session_env_bindings::Column::DesiredRevision.eq(expected))
+            .exec(&self.conn)
+            .await
+            .context("failed to compare-and-swap session env binding")?;
+        if updated.rows_affected == 1 {
+            return Ok(true);
+        }
+        if expected_revision != 0 {
+            return Ok(false);
+        }
+
+        // No row existed at revision 0. The first writer inserts; a racer that
+        // inserted first makes the guarded insert a no-op, which is a lost
+        // compare-and-swap rather than a silent overwrite.
+        let inserted = session_env_bindings::Entity::insert(session_env_binding_model(row))
+            .on_conflict_do_nothing_on([session_env_bindings::Column::SessionId])
+            .exec(&self.conn)
+            .await
+            .context("failed to insert session env binding after a compare-and-swap")?;
+        Ok(matches!(inserted, sea_orm::TryInsertResult::Inserted(_)))
     }
 
     /// Delete one Session's binding (idempotent).
@@ -814,13 +931,176 @@ impl Database {
         Ok(())
     }
 
-    /// Delete one Session's Project membership (idempotent).
-    pub async fn delete_session_project_binding(&self, session_id: &str) -> Result<()> {
-        session_project_bindings::Entity::delete_by_id(session_id.to_owned())
-            .exec(&self.conn)
+    /// Atomically compare-and-set one Session's Project membership (#3509).
+    ///
+    /// The revision comparison and the write run in one `BEGIN IMMEDIATE`
+    /// transaction, so a concurrent set or remove cannot slip between them.
+    /// `Some(revision)` commits only while the stored row still carries that
+    /// revision; revision `0` also matches an absent row (an unassociated
+    /// Session), so a first association may insert. `None` keeps the
+    /// documented last-writer-wins behavior and still advances the stored
+    /// revision monotonically.
+    ///
+    /// The returned row is read in the transaction that committed it, so its
+    /// revision is the committed value.
+    pub async fn set_session_project_binding_if_revision(
+        &self,
+        set: &SessionProjectBindingSet,
+        expected_revision: Option<u64>,
+    ) -> Result<SessionProjectBindingSetOutcome> {
+        let txn = begin_immediate_transaction(&self.conn, "session project binding set").await?;
+        let expected =
+            expected_revision.map(|revision| i64::try_from(revision).unwrap_or(i64::MAX));
+        let mut update = session_project_bindings::Entity::update_many()
+            .col_expr(
+                session_project_bindings::Column::AgentId,
+                Expr::value(set.agent_id.clone()),
+            )
+            .col_expr(
+                session_project_bindings::Column::ProjectId,
+                Expr::value(set.project_id.clone()),
+            )
+            .col_expr(
+                session_project_bindings::Column::IncarnationId,
+                Expr::value(set.incarnation_id.clone()),
+            )
+            .col_expr(
+                session_project_bindings::Column::AgentCreatedAt,
+                Expr::value(set.agent_created_at),
+            )
+            .col_expr(
+                session_project_bindings::Column::UpdatedAt,
+                Expr::value(set.updated_at),
+            )
+            .filter(session_project_bindings::Column::SessionId.eq(set.session_id.clone()));
+        update = match expected {
+            Some(expected) => update
+                .col_expr(
+                    session_project_bindings::Column::Revision,
+                    Expr::value(expected.saturating_add(1)),
+                )
+                .filter(session_project_bindings::Column::Revision.eq(expected)),
+            None => update.col_expr(
+                session_project_bindings::Column::Revision,
+                Expr::col(session_project_bindings::Column::Revision).add(1),
+            ),
+        };
+        let updated = update
+            .exec(&txn)
             .await
-            .context("failed to delete session project binding")?;
-        Ok(())
+            .context("failed to compare-and-set session project binding")?;
+
+        // An absent row is only the caller's expected state at revision 0 or
+        // when no expectation was given. Otherwise a removed row must not be
+        // resurrected at a revision the caller never observed.
+        let absent_matches = expected.is_none() || expected == Some(0);
+        if updated.rows_affected == 0 {
+            if absent_matches {
+                let model = session_project_bindings::ActiveModel {
+                    session_id: Set(set.session_id.clone()),
+                    agent_id: Set(set.agent_id.clone()),
+                    project_id: Set(set.project_id.clone()),
+                    incarnation_id: Set(set.incarnation_id.clone()),
+                    agent_created_at: Set(set.agent_created_at),
+                    revision: Set(1),
+                    updated_at: Set(set.updated_at),
+                };
+                // A row may still exist at another revision (for example a
+                // pending row when the caller expected 0). `DO NOTHING` keeps
+                // this an insert, not a second update path.
+                let inserted = session_project_bindings::Entity::insert(model)
+                    .on_conflict(
+                        OnConflict::column(session_project_bindings::Column::SessionId)
+                            .do_nothing()
+                            .to_owned(),
+                    )
+                    .exec_without_returning(&txn)
+                    .await
+                    .context("failed to insert session project binding")?;
+                if inserted == 0 {
+                    let current_revision =
+                        current_session_project_binding_revision(&txn, &set.session_id).await?;
+                    txn.commit()
+                        .await
+                        .context("failed to finish a conflicted session project binding set")?;
+                    return Ok(SessionProjectBindingSetOutcome::Conflict { current_revision });
+                }
+            } else {
+                let current_revision =
+                    current_session_project_binding_revision(&txn, &set.session_id).await?;
+                txn.commit()
+                    .await
+                    .context("failed to finish a conflicted session project binding set")?;
+                return Ok(SessionProjectBindingSetOutcome::Conflict { current_revision });
+            }
+        }
+
+        let committed = session_project_bindings::Entity::find_by_id(set.session_id.clone())
+            .one(&txn)
+            .await
+            .context("failed to read the committed session project binding")?
+            .ok_or_else(|| anyhow::anyhow!("a written session project binding disappeared"))?;
+        txn.commit()
+            .await
+            .context("failed to commit session project binding set")?;
+        Ok(SessionProjectBindingSetOutcome::Applied(
+            session_project_binding_row_from_model(committed),
+        ))
+    }
+
+    /// Atomically compare-and-remove one Session's Project membership (#3509).
+    ///
+    /// The revision predicate and the delete are one statement. `Some(revision)`
+    /// removes only a row that still carries that revision (revision `0` also
+    /// matches the absent state, so removing an unassociated Session is
+    /// idempotent); `None` removes unconditionally. A concurrent set or remove
+    /// that commits first is reported as a conflict instead of being erased.
+    pub async fn remove_session_project_binding_if_revision(
+        &self,
+        session_id: &str,
+        expected_revision: Option<u64>,
+    ) -> Result<SessionProjectBindingRemoveOutcome> {
+        let txn =
+            begin_immediate_transaction(&self.conn, "session project binding removal").await?;
+        let expected =
+            expected_revision.map(|revision| i64::try_from(revision).unwrap_or(i64::MAX));
+        let mut delete = session_project_bindings::Entity::delete_many()
+            .filter(session_project_bindings::Column::SessionId.eq(session_id.to_owned()));
+        if let Some(expected) = expected {
+            delete = delete.filter(session_project_bindings::Column::Revision.eq(expected));
+        }
+        let removed = delete
+            .exec(&txn)
+            .await
+            .context("failed to compare-and-remove session project binding")?;
+        if removed.rows_affected == 0 {
+            let current = session_project_bindings::Entity::find_by_id(session_id.to_owned())
+                .one(&txn)
+                .await
+                .context("failed to read the current session project binding")?;
+            // A stale `0` is still a conflict when a newer binding appeared.
+            // A stale non-zero expectation always is, even if the row is now
+            // gone: another writer changed the membership first.
+            let conflict = match expected_revision {
+                None => false,
+                Some(0) => current.is_some(),
+                Some(_) => true,
+            };
+            let current_revision = current
+                .map(|binding| u64::try_from(binding.revision).unwrap_or(0))
+                .unwrap_or(0);
+            txn.commit()
+                .await
+                .context("failed to finish a conflicted session project binding removal")?;
+            if conflict {
+                return Ok(SessionProjectBindingRemoveOutcome::Conflict { current_revision });
+            }
+        } else {
+            txn.commit()
+                .await
+                .context("failed to commit session project binding removal")?;
+        }
+        Ok(SessionProjectBindingRemoveOutcome::Removed)
     }
 
     /// Delete every membership owned by one Agent.
@@ -980,6 +1260,7 @@ impl Database {
             status: Set(row.status.clone()),
             error: Set(row.error.clone()),
             updated_at: Set(row.updated_at),
+            resolved_images_json: Set(serde_json::to_string(&row.resolved_images).ok()),
         };
         session_managed_context::Entity::insert(model)
             .on_conflict(
@@ -996,6 +1277,7 @@ impl Database {
                         session_managed_context::Column::Status,
                         session_managed_context::Column::Error,
                         session_managed_context::Column::UpdatedAt,
+                        session_managed_context::Column::ResolvedImagesJson,
                     ])
                     .to_owned(),
             )
@@ -1081,21 +1363,59 @@ impl Database {
 
     /// Delete one Session's Managed context (idempotent).
     pub async fn delete_session_managed_context(&self, session_id: &str) -> Result<()> {
+        let row = self.get_session_managed_context(session_id).await?;
         session_managed_context::Entity::delete_by_id(session_id.to_owned())
             .exec(&self.conn)
             .await
             .context("failed to delete session managed context")?;
+        if let Some(row) = row {
+            self.release_session_image_pins(&row).await;
+        }
         Ok(())
     }
 
     /// Delete every Managed context owned by one Agent.
     pub async fn delete_session_managed_contexts_by_agent(&self, agent_id: &str) -> Result<()> {
+        let rows = session_managed_context::Entity::find()
+            .filter(session_managed_context::Column::AgentId.eq(agent_id))
+            .all(&self.conn)
+            .await
+            .context("failed to read agent session managed contexts")?;
+        let rows: Vec<SessionManagedContextRow> = rows
+            .into_iter()
+            .map(session_managed_context_row_from_model)
+            .collect();
         session_managed_context::Entity::delete_many()
             .filter(session_managed_context::Column::AgentId.eq(agent_id))
             .exec(&self.conn)
             .await
             .context("failed to delete agent session managed contexts")?;
+        for row in &rows {
+            self.release_session_image_pins(row).await;
+        }
         Ok(())
+    }
+
+    /// Release the catalog pins a Managed Session's resolved images hold.
+    ///
+    /// Best-effort: a missing/already-expired pin does not block removing the
+    /// Session record, and a failed unpin can only keep dead bytes longer than
+    /// necessary, never make a live image disappear.
+    async fn release_session_image_pins(&self, row: &SessionManagedContextRow) {
+        for binding in &row.resolved_images {
+            let digest = binding
+                .manifest_digest
+                .as_deref()
+                .unwrap_or(&binding.requested_digest);
+            let Ok(pin_id) = nession_erofs::catalog::pin::pin_id(
+                nession_erofs::catalog::pin::ConsumerKind::Session,
+                &row.session_id,
+                digest,
+            ) else {
+                continue;
+            };
+            let _ = nession_erofs::catalog::pin::unpin(self.connection(), &pin_id).await;
+        }
     }
 
     /// Remove Managed contexts for Sessions the Agent no longer reports.
@@ -1267,7 +1587,42 @@ fn session_managed_context_row_from_model(
         status: model.status,
         error: model.error,
         updated_at: model.updated_at,
+        resolved_images: model
+            .resolved_images_json
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default(),
     }
+}
+
+/// Begin a transaction that holds SQLite's writer lock from the first
+/// statement.
+///
+/// The membership compare-and-swap reads the committed row back inside the
+/// transaction; `BEGIN IMMEDIATE` keeps that read and the conditional write in
+/// one serialized writer sequence instead of relying on a later lock upgrade.
+async fn begin_immediate_transaction(
+    conn: &DatabaseConnection,
+    what: &'static str,
+) -> Result<DatabaseTransaction> {
+    conn.begin_with_options(TransactionOptions {
+        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+        ..TransactionOptions::default()
+    })
+    .await
+    .with_context(|| format!("failed to begin {what}"))
+}
+
+async fn current_session_project_binding_revision(
+    conn: &impl ConnectionTrait,
+    session_id: &str,
+) -> Result<u64> {
+    let current = session_project_bindings::Entity::find_by_id(session_id.to_owned())
+        .one(conn)
+        .await
+        .context("failed to read the current session project binding revision")?;
+    Ok(current
+        .map(|binding| u64::try_from(binding.revision).unwrap_or(0))
+        .unwrap_or(0))
 }
 
 fn session_project_binding_row_from_model(
@@ -1427,6 +1782,16 @@ fn session_env_binding_row_from_model(m: session_env_bindings::Model) -> Session
         desired_revision: u64::try_from(m.desired_revision).unwrap_or(0),
         profiles_json: m.profiles_json,
         updated_at: m.updated_at,
+    }
+}
+
+fn session_env_binding_model(row: &SessionEnvBindingRow) -> session_env_bindings::ActiveModel {
+    session_env_bindings::ActiveModel {
+        session_id: Set(row.session_id.clone()),
+        agent_id: Set(row.agent_id.clone()),
+        desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+        profiles_json: Set(row.profiles_json.clone()),
+        updated_at: Set(row.updated_at),
     }
 }
 
@@ -2151,6 +2516,7 @@ mod tests {
             status: status.to_string(),
             error: None,
             updated_at,
+            resolved_images: Vec::new(),
         };
 
         db.begin_session_managed_context(&row("preparing", now))
@@ -2255,5 +2621,360 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    // ── Session Project Binding compare-and-swap (#3509) ─────────────
+
+    fn binding_set(
+        session_id: &str,
+        project_id: &str,
+        agent_created_at: i64,
+    ) -> SessionProjectBindingSet {
+        SessionProjectBindingSet {
+            session_id: session_id.to_owned(),
+            agent_id: "a1".to_owned(),
+            project_id: project_id.to_owned(),
+            incarnation_id: String::new(),
+            agent_created_at,
+            updated_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// A file-backed database pair: SQLite's writer lock is then real between
+    /// them, unlike two handles onto one `:memory:` database.
+    async fn file_db_pair() -> (Database, Database, String) {
+        let path = format!("/tmp/nession_test_binding_cas_{}.db", uuid::Uuid::new_v4());
+        let first = Database::new(&path).await.unwrap();
+        let second = Database::new(&path).await.unwrap();
+        (first, second, path)
+    }
+
+    fn remove_file_db(path: &str) {
+        std::fs::remove_file(path).ok();
+        std::fs::remove_file(format!("{path}-wal")).ok();
+        std::fs::remove_file(format!("{path}-shm")).ok();
+    }
+
+    #[tokio::test]
+    async fn conditional_binding_set_rejects_a_stale_revision() {
+        let db = new_db().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+
+        let first = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_a, 0), Some(0))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(committed) = first else {
+            panic!("the first association commits");
+        };
+        assert_eq!(committed.revision, 1);
+
+        let stale = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_b, 0), Some(0))
+            .await
+            .unwrap();
+        assert_eq!(
+            stale,
+            SessionProjectBindingSetOutcome::Conflict {
+                current_revision: 1
+            }
+        );
+        let stored = db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.project_id, project_a,
+            "a stale set must not overwrite the committed binding"
+        );
+        assert_eq!(stored.revision, 1);
+
+        // The revision the caller just received allows the next set.
+        let next = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_b, 0), Some(1))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(committed) = next else {
+            panic!("the current revision is accepted");
+        };
+        assert_eq!(committed.project_id, project_b);
+        assert_eq!(committed.revision, 2);
+    }
+
+    #[tokio::test]
+    async fn conditional_binding_set_accepts_a_pending_create_binding() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 0))
+            .await
+            .unwrap();
+
+        // A create-time binding is already revision 1, but its tmux identity is
+        // pending; an explicit set at the observed revision adopts it.
+        let outcome = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_id, 10), Some(1))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(committed) = outcome else {
+            panic!("a pending create-time binding is updatable");
+        };
+        assert_eq!(committed.revision, 2);
+        assert_eq!(committed.agent_created_at, 10);
+    }
+
+    #[tokio::test]
+    async fn conditional_binding_set_without_an_expectation_still_advances() {
+        let db = new_db().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_a, 10))
+            .await
+            .unwrap();
+
+        let updated = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_b, 10), None)
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(committed) = updated else {
+            panic!("a last-writer-wins set still commits");
+        };
+        assert_eq!(committed.project_id, project_b);
+        assert_eq!(
+            committed.revision, 2,
+            "the stored revision is the committed value, not the caller's guess"
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_binding_removal_never_deletes_a_newer_revision() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 10))
+            .await
+            .unwrap();
+
+        let stale = db
+            .remove_session_project_binding_if_revision("a1:s1", Some(0))
+            .await
+            .unwrap();
+        assert_eq!(
+            stale,
+            SessionProjectBindingRemoveOutcome::Conflict {
+                current_revision: 1
+            }
+        );
+        assert!(
+            db.get_session_project_binding("a1:s1")
+                .await
+                .unwrap()
+                .is_some(),
+            "a stale expected revision must not delete the newer binding"
+        );
+
+        let removed = db
+            .remove_session_project_binding_if_revision("a1:s1", Some(1))
+            .await
+            .unwrap();
+        assert_eq!(removed, SessionProjectBindingRemoveOutcome::Removed);
+        assert!(db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .is_none());
+
+        // Removing an already-unassociated Session at revision 0 is idempotent.
+        let again = db
+            .remove_session_project_binding_if_revision("a1:s1", Some(0))
+            .await
+            .unwrap();
+        assert_eq!(again, SessionProjectBindingRemoveOutcome::Removed);
+    }
+
+    #[tokio::test]
+    async fn concurrent_binding_sets_with_the_same_revision_commit_exactly_once() {
+        let (first_db, second_db, path) = file_db_pair().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+        first_db
+            .upsert_session_project_binding(&binding_row("a1:s1", project_a, 10))
+            .await
+            .unwrap();
+
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let left = async {
+            barrier.wait().await;
+            first_db
+                .set_session_project_binding_if_revision(
+                    &binding_set("a1:s1", project_a, 10),
+                    Some(1),
+                )
+                .await
+                .unwrap()
+        };
+        let right = async {
+            barrier.wait().await;
+            second_db
+                .set_session_project_binding_if_revision(
+                    &binding_set("a1:s1", project_b, 10),
+                    Some(1),
+                )
+                .await
+                .unwrap()
+        };
+        let (left, right) = tokio::join!(left, right);
+
+        let (winner, loser_revision) = match (left, right) {
+            (
+                SessionProjectBindingSetOutcome::Applied(row),
+                SessionProjectBindingSetOutcome::Conflict { current_revision },
+            )
+            | (
+                SessionProjectBindingSetOutcome::Conflict { current_revision },
+                SessionProjectBindingSetOutcome::Applied(row),
+            ) => (row, current_revision),
+            (left, right) => {
+                panic!("exactly one concurrent set commits: {left:?} / {right:?}")
+            }
+        };
+        assert_eq!(winner.revision, 2);
+        assert_eq!(
+            loser_revision, 2,
+            "the conflict reports the committed value"
+        );
+        let stored = first_db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored, winner,
+            "the stored row matches the successful write"
+        );
+
+        drop(first_db);
+        drop(second_db);
+        remove_file_db(&path);
+    }
+
+    #[tokio::test]
+    async fn concurrent_first_associations_insert_exactly_once() {
+        let (first_db, second_db, path) = file_db_pair().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let left = async {
+            barrier.wait().await;
+            first_db
+                .set_session_project_binding_if_revision(
+                    &binding_set("a1:s1", project_a, 10),
+                    Some(0),
+                )
+                .await
+                .unwrap()
+        };
+        let right = async {
+            barrier.wait().await;
+            second_db
+                .set_session_project_binding_if_revision(
+                    &binding_set("a1:s1", project_b, 10),
+                    Some(0),
+                )
+                .await
+                .unwrap()
+        };
+        let (left, right) = tokio::join!(left, right);
+
+        let (winner, loser_revision) = match (left, right) {
+            (
+                SessionProjectBindingSetOutcome::Applied(row),
+                SessionProjectBindingSetOutcome::Conflict { current_revision },
+            )
+            | (
+                SessionProjectBindingSetOutcome::Conflict { current_revision },
+                SessionProjectBindingSetOutcome::Applied(row),
+            ) => (row, current_revision),
+            (left, right) => {
+                panic!("exactly one first association commits: {left:?} / {right:?}")
+            }
+        };
+        assert_eq!(winner.revision, 1);
+        assert_eq!(loser_revision, 1);
+        let stored = first_db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored, winner);
+
+        drop(first_db);
+        drop(second_db);
+        remove_file_db(&path);
+    }
+
+    #[tokio::test]
+    async fn concurrent_binding_set_and_remove_leave_a_coherent_state() {
+        let (first_db, second_db, path) = file_db_pair().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+        first_db
+            .upsert_session_project_binding(&binding_row("a1:s1", project_a, 10))
+            .await
+            .unwrap();
+
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let set = async {
+            barrier.wait().await;
+            first_db
+                .set_session_project_binding_if_revision(
+                    &binding_set("a1:s1", project_b, 10),
+                    Some(1),
+                )
+                .await
+                .unwrap()
+        };
+        let remove = async {
+            barrier.wait().await;
+            second_db
+                .remove_session_project_binding_if_revision("a1:s1", Some(1))
+                .await
+                .unwrap()
+        };
+        let (set, remove) = tokio::join!(set, remove);
+        let stored = first_db.get_session_project_binding("a1:s1").await.unwrap();
+
+        match (set, remove) {
+            (
+                SessionProjectBindingSetOutcome::Applied(row),
+                SessionProjectBindingRemoveOutcome::Conflict { current_revision },
+            ) => {
+                assert_eq!(row.revision, 2);
+                assert_eq!(current_revision, 2, "the removal reports the set that won");
+                assert_eq!(
+                    stored.expect("the winning set is stored"),
+                    row,
+                    "the winning set is not erased by the losing removal"
+                );
+            }
+            (
+                SessionProjectBindingSetOutcome::Conflict { current_revision },
+                SessionProjectBindingRemoveOutcome::Removed,
+            ) => {
+                assert_eq!(current_revision, 0, "the set reports the removal that won");
+                assert!(
+                    stored.is_none(),
+                    "the winning removal is not overwritten by the losing set"
+                );
+            }
+            (set, remove) => {
+                panic!("exactly one concurrent mutation commits: {set:?} / {remove:?}")
+            }
+        }
+
+        drop(first_db);
+        drop(second_db);
+        remove_file_db(&path);
     }
 }

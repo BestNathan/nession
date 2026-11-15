@@ -217,28 +217,12 @@ export function validateRequirementBody(body, { mode = 'closure', targetBranch =
       continue;
     }
 
-    // Development Complete is the earliest closure boundary: every SC proved at
-    // the PR head or in a shipped Staging lane is Issue-required, while a
-    // post-merge (merged Main / deployed) criterion belongs to the later
-    // lifecycle states (Main Promoted, Regression Qualified, Released) and does
-    // not block Issue completion. Its Pending/Fail result is still truthful and
-    // still blocks release; the row must say what is being awaited.
-    // Owner: docs/architecture/acceptance-sc-format.md#issue-lifecycle-states.
+    // All declared SCs are mandatory at Issue closure, regardless of when
+    // their plan permits proof. A merged-main/deployed Pending SC is an
+    // acceptance obligation, not permission to close the Issue.
+    // This counter is retained for legacy diagnostics; it grants no exemption.
     if (mode === 'closure' && row.stage === 'post-merge') {
       releaseQualificationCount += 1;
-      if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
-        errors.push(`${criterion.id} release-qualification evidence must describe the pending release condition`);
-      }
-      // An unrun later state does not block Development Complete, but an
-      // observed post-merge failure is a real regression for this Issue.
-      if (normalizedResult !== 'pending' && normalizedResult !== 'pass' &&
-          normalizedResult !== 'n/a') {
-        errors.push(`${criterion.id} release-qualification result is ${row.result}; an observed post-merge failure blocks Issue closure`);
-      }
-      if (normalizedResult === 'pending' && criterion.checked) {
-        errors.push(`${criterion.id} is checked but post-merge acceptance is still Pending`);
-      }
-      continue;
     }
 
     if (!criterion.checked) {
@@ -462,6 +446,18 @@ export function issuesFromAssociatedPulls(pulls, targetSha, owner, name) {
   return [...numbers].sort((a, b) => a - b);
 }
 
+// A merge event can race GitHub's automatic Issue closure. The close guard
+// reopens an incomplete Issue asynchronously, but the merged-SHA planner may
+// observe its briefly closed snapshot first. Such a source-bound obligation
+// must remain discoverable, without treating completed or not_planned Issues
+// as eligible work.
+export function isMergedRefAcceptanceCandidate(issue) {
+  if (!isAcceptanceIssue(issue) || issue.state_reason === 'not_planned') return false;
+  if (isOpenAcceptanceIssue(issue)) return true;
+  return String(issue.state).toLowerCase() === 'closed' &&
+    completedIssueAcceptanceDecision(issue).kind === 'reopen';
+}
+
 async function requirementIssuesForRef({ owner, name, sha, token }) {
   const targetSha = String(sha ?? '').trim();
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) {
@@ -476,7 +472,7 @@ async function requirementIssuesForRef({ owner, name, sha, token }) {
   const issues = [];
   for (const number of numbers) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
-    if (isOpenAcceptanceIssue(issue)) {
+    if (isMergedRefAcceptanceCandidate(issue)) {
       issues.push(issue);
     }
   }
@@ -619,8 +615,8 @@ function postMergePendingBody(evidence = 'requires production deployment; verify
   return `### Success Criteria\n\n- [x] SC-01 works before merge\n- [ ] SC-02 works after merge\n\n## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | staging | Pass | staging smoke test passed |\n| SC-02 | post-merge | Pending | ${evidence} |`;
 }
 
-// A deployed criterion derives the post-merge compatibility stage; its Pending
-// row is release qualification, exactly like a merged-Main criterion.
+// A deployed criterion derives the post-merge compatibility stage, but its
+// Pending report still blocks Issue completion until deployment proof exists.
 function deployedPendingBody() {
   return `### Success Criteria
 
@@ -669,9 +665,9 @@ function runSelfTest() {
   for (const label of ['bug', 'requirement']) {
     const base={number:42,labels:[{name:label}],state:'closed',body:validBody()};
     assert.equal(completedIssueAcceptanceDecision(base).kind,'accepted');
-    // A post-merge criterion is release qualification: it stays Pending and
-    // truthful, but it cannot block Issue completion at Development Complete.
-    assert.equal(completedIssueAcceptanceDecision({...base,body:postMergePendingBody()}).kind,'accepted');
+    // Post-merge SCs remain mandatory even when their execution is deferred
+    // until the exact main/deployment source is available.
+    assert.equal(completedIssueAcceptanceDecision({...base,body:postMergePendingBody()}).kind,'reopen');
     assert.equal(completedIssueAcceptanceDecision({...base,body:postMergePendingBody()}).result.releaseQualificationCount,1);
     assert.equal(completedIssueAcceptanceDecision({...base,body:validBody().replace('- [x] SC-01','- [ ] SC-01')}).kind,'reopen');
     assert.equal(completedIssueAcceptanceDecision({...base,state_reason:'not_planned',body:'invalid'}).kind,'not-planned');
@@ -695,11 +691,17 @@ function runSelfTest() {
     ['missing report row', validBody().replace('| SC-02 | staging | N/A | superseded by #88 after requirement amendment |', ''), 'closure', false, 'SC-02 has no Acceptance Report row'],
     ['staging pending blocks merge', validBody().replace('| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |', '| SC-01 | staging | Pending | staging verification |'), 'merge', false, 'SC-01 result is Pending'],
     ['post-merge pending is merge-ready', postMergePendingBody(), 'merge', true, null],
-    ['post-merge pending is release qualification, not closure-blocking', postMergePendingBody(), 'closure', true, null],
-    ['release-qualification pending needs actionable evidence', postMergePendingBody('pending'), 'closure', false, 'release-qualification evidence must describe'],
-    ['deployed pending is release qualification, not closure-blocking', deployedPendingBody(), 'closure', true, null],
-    ['observed post-merge failure blocks closure', postMergePendingBody().replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Fail |'), 'closure', false, 'an observed post-merge failure blocks Issue closure'],
-    ['checked post-merge pending is invalid at closure', postMergePendingBody().replace('- [ ] SC-02', '- [x] SC-02'), 'closure', false, 'checked but post-merge acceptance is still Pending'],
+    ['post-merge pending blocks closure', postMergePendingBody(), 'closure', false, 'SC-02 is not checked'],
+    ['post-merge pending without evidence blocks closure', postMergePendingBody('pending'), 'closure', false, 'SC-02 must include concrete acceptance evidence'],
+    ['deployed pending blocks closure', deployedPendingBody(), 'closure', false, 'SC-02 is not checked'],
+    ['observed post-merge failure blocks closure', postMergePendingBody().replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Fail |'), 'closure', false, 'SC-02 result is Fail'],
+    ['checked post-merge pending is invalid at closure', postMergePendingBody().replace('- [ ] SC-02', '- [x] SC-02'), 'closure', false, 'SC-02 result is Pending'],
+    ['post-merge Pass with checked SC permits closure', postMergePendingBody()
+      .replace('- [ ] SC-02', '- [x] SC-02')
+      .replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Pass |'), 'closure', true, null],
+    ['deployed Pass with checked SC permits closure', deployedPendingBody()
+      .replace('- [ ] SC-02', '- [x] SC-02')
+      .replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Pass |'), 'closure', true, null],
     ['post-merge pending needs actionable evidence', postMergePendingBody('implementation pending'), 'merge', false, 'post-merge Pending must describe'],
     ['post-merge fail blocks merge', postMergePendingBody().replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Fail |'), 'merge', false, 'SC-02 result is Fail'],
     ['checked post-merge pending is invalid', postMergePendingBody().replace('- [ ] SC-02', '- [x] SC-02'), 'merge', false, 'checked but deferred merged-stage acceptance is still Pending'],
@@ -717,6 +719,40 @@ function runSelfTest() {
       assert.ok(result.errors.some((error) => error.includes(expectedError)), `${name}: missing ${expectedError}; got ${result.errors.join('; ')}`);
     }
   }
+
+  // Original #3491 failure: an unchecked merged/main SC must be merge-ready
+  // (the merge creates its SHA) but must never authorize Issue closure.
+  const mergedMainPending = [
+    '## Success Criteria', '- [x] SC-01 source protocol verified',
+    '- [ ] SC-02 source-bound main Store/Publisher behavior',
+    '', '## Acceptance Plan', '```yaml', 'acceptance:',
+    '  SC-01:', '    when: pr', '    method: agent',
+    '  SC-02:', '    when: merged', '    branch: main', '    method: agent',
+    '```', '', '## Acceptance Report', '| Criterion | Result | Evidence |',
+    '|---|---|---|', '| SC-01 | Pass | verified exact PR SHA |',
+    '| SC-02 | Pending | await merged main SHA Store readback and Publisher |',
+  ].join('\n');
+  assert.equal(validateRequirementBody(mergedMainPending,
+    { mode: 'merge', targetBranch: 'main' }).ok, true);
+  assert.equal(validateRequirementBody(mergedMainPending, { mode: 'closure' }).ok, false);
+  assert.equal(completedIssueAcceptanceDecision({
+    number: 3491, labels: [{ name: 'bug' }], state: 'closed',
+    body: mergedMainPending,
+  }).kind, 'reopen');
+
+  // Live merge race: GitHub may close a referenced Issue for seconds before
+  // the close guard reopens it. Merged-SHA selection must not lose Pending SCs.
+  const mergedMainClosed = { number: 3491, state: 'closed',
+    state_reason: 'completed', labels: [{ name: 'bug' }], body: mergedMainPending };
+  assert.equal(isMergedRefAcceptanceCandidate(mergedMainClosed), true);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed, state: 'open' }), true);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed,
+    state_reason: 'not_planned' }), false);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed,
+    body: mergedMainPending.replace('- [ ] SC-02', '- [x] SC-02')
+      .replace('| SC-02 | Pending |', '| SC-02 | Pass |') }), false);
+  assert.equal(isMergedRefAcceptanceCandidate({ ...mergedMainClosed,
+    labels: [{ name: 'ci' }] }), false);
 
   // Staging-target PR may defer only explicitly declared merged-staging
   // proof. Main promotion and Issue closure must still reject Pending.

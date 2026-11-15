@@ -57,6 +57,21 @@ async fn create_with_agent(
     name: &str,
     agent_response: serde_json::Value,
 ) -> (serde_json::Value, serde_json::Value) {
+    create_with_agent_managed(
+        h,
+        name,
+        json!({ "base_digest": BASE_DIGEST }),
+        agent_response,
+    )
+    .await
+}
+
+async fn create_with_agent_managed(
+    h: &mut ConnectionHandler,
+    name: &str,
+    managed: serde_json::Value,
+    agent_response: serde_json::Value,
+) -> (serde_json::Value, serde_json::Value) {
     let (sender, mut rx) = WsMessageSender::new();
     let generation = h.command_broker.new_connection_generation();
     h.command_broker.claim_agent("a1", generation, sender).await;
@@ -67,7 +82,7 @@ async fn create_with_agent(
             "agent_id": "a1",
             "name": name,
             "project_id": PROJECT,
-            "managed": { "base_digest": BASE_DIGEST }
+            "managed": managed
         }),
     ));
     let agent = async move {
@@ -136,7 +151,17 @@ async fn managed_create_pins_and_authorizes_every_artifact() {
         images[0]["path"],
         json!(format!("/images/blobs/{BASE_DIGEST}"))
     );
-    assert_eq!(images[0]["token"].as_str().unwrap().len(), 64);
+    // The Agent fetches these routes with the durable Agent Token it already
+    // holds; a per-artifact bearer is gone (#3440).
+    assert!(
+        images[0].get("token").is_none(),
+        "a managed artifact carries no minted credential: {}",
+        images[0]
+    );
+    assert_eq!(
+        images[1]["path"],
+        json!(format!("/images/blobs/{WORKSPACE_DIGEST}"))
+    );
 
     let context =
         h.db.get_session_managed_context("a1:managed-1")
@@ -285,6 +310,7 @@ async fn a_stale_managed_attempt_cannot_overwrite_the_winner() {
         status: "preparing".to_string(),
         error: None,
         updated_at: 1,
+        resolved_images: Vec::new(),
     };
 
     deps.db
@@ -522,4 +548,114 @@ async fn deleting_one_managed_context_keeps_another_sessions() {
             .unwrap()
             .expect("the shared image row is not Session-owned");
     assert_eq!(image.status, "ready");
+}
+
+#[tokio::test]
+async fn a_manifest_create_mints_reachable_object_grants_and_records_the_binding() {
+    use nession_erofs::build::publication::{publish_layer, LayerPublication};
+    use nession_erofs::catalog::tag::TagExpectation;
+    use nession_erofs::oci::annotation::{
+        MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+    };
+    use nession_erofs::oci::descriptor::{Descriptor, Platform};
+
+    let deps = TestDeps::new().await;
+    let layer = deps
+        .image_manager
+        .blob_store()
+        .put_bytes(b"managed manifest erofs payload")
+        .unwrap();
+    let published = publish_layer(
+        deps.db.connection(),
+        deps.image_manager.blob_store(),
+        &LayerPublication {
+            repository: "nession/base".to_string(),
+            tag: None,
+            expectation: TagExpectation::Absent,
+            layer: Descriptor {
+                media_type: MEDIA_TYPE_EROFS.to_string(),
+                digest: layer.digest.clone(),
+                size: layer.size_bytes,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: serde_json::Map::new(),
+            },
+            platform: Platform::for_consumer("linux", "amd64", None),
+            env: vec!["PATH=/usr/bin".to_string()],
+            annotations: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .unwrap();
+    deps.db
+        .insert_project(&crate::db::ProjectRow {
+            project_id: PROJECT.to_string(),
+            name: "Managed Manifest".to_string(),
+            description: None,
+            source: None,
+            locations: Vec::new(),
+            session_defaults: None,
+            image_digest: Some(published.manifest_digest.clone()),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .unwrap();
+    let mut h = deps.handler("");
+    h.authenticated_client = true;
+    // The registered test Agent advertises linux/amd64, so a Manifest identity
+    // is selectable (#3499).
+    register_agent_id(&h, "a1", None).await;
+
+    let (reply, request) = create_with_agent_managed(
+        &mut h,
+        "managed-manifest",
+        json!({ "base_digest": published.manifest_digest }),
+        json!({ "success": true, "workspace": "/state/managed/m/workspace" }),
+    )
+    .await;
+    assert_eq!(reply["payload"]["success"], json!(true));
+
+    let images = request["payload"]["managed"]["images"].as_array().unwrap();
+    assert_eq!(images.len(), 2);
+    assert_eq!(
+        images[0]["digest"],
+        json!(published.manifest_digest),
+        "the granted identity is the resolved Manifest"
+    );
+    assert_eq!(
+        images[0]["path"],
+        json!(format!("/images/blobs/{}", published.manifest_digest))
+    );
+    let objects = images[0]["objects"].as_array().unwrap();
+    assert_eq!(objects.len(), 3);
+    let media_types: Vec<&str> = objects
+        .iter()
+        .map(|object| object["media_type"].as_str().unwrap())
+        .collect();
+    assert!(media_types.contains(&MEDIA_TYPE_MANIFEST));
+    assert!(media_types.contains(&MEDIA_TYPE_CONFIG));
+    assert!(media_types.contains(&MEDIA_TYPE_EROFS));
+    for object in objects {
+        let digest = object["digest"].as_str().unwrap();
+        assert_eq!(object["path"], json!(format!("/images/blobs/{digest}")));
+        assert!(object["size_bytes"].as_u64().unwrap() > 0);
+    }
+
+    let context =
+        h.db.get_session_managed_context("a1:managed-manifest")
+            .await
+            .unwrap()
+            .expect("the resolved runtime binding is recorded");
+    assert_eq!(context.resolved_images.len(), 2);
+    for binding in &context.resolved_images {
+        assert_eq!(
+            binding.manifest_digest.as_deref(),
+            Some(published.manifest_digest.as_str())
+        );
+        assert_eq!(binding.layer_digest, published.layer_digest);
+    }
 }

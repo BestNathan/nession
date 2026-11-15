@@ -1,18 +1,6 @@
-import { buildAgentWsUrl } from '@/shared/lib/agentWsUrl';
 import type { ProbedAddress, AddressLatency } from '@/types';
 
 export interface ProbeOptions {
-  /**
-   * Credential presented at the WebSocket upgrade, as `?token=` (#1091).
-   *
-   * **Required for a meaningful result.** Since #1013 the agent refuses an
-   * uncredentialed upgrade with a 401, so a probe without one can only ever
-   * report every candidate unreachable — which is a statement about the probe,
-   * not about the network. The only credential the browser can hold before a
-   * connection is the one the attach reply carries, so probes run where an
-   * attach reply exists.
-   */
-  credential?: string;
   /** Per-candidate handshake deadline. */
   timeoutMs?: number;
 }
@@ -26,15 +14,12 @@ export interface ProbeOptions {
  * exceeds `timeoutMs`. Never rejects — callers treat null as "unreachable
  * from this browser".
  *
- * **Invariant:** the resolved `url` is the candidate URL the caller passed,
- * never the dialled one. The credential is a detail of *how* the handshake is
- * made and must not leak into a result that callers use as an identity —
- * `AttachDialog` keys its latency column by it, and the chosen URL is later
- * handed to `buildAgentWsUrl` again, where an already-credentialled URL would
- * produce `?token=A&token=B`.
+ * The probe is an unauthenticated upgrade: the Agent admits the socket and
+ * never sees a business frame, and the socket is closed immediately. The
+ * durable Agent token is not part of reachability measurement.
  */
 export function measureLatency(url: string, options: ProbeOptions = {}): Promise<AddressLatency> {
-  const { credential, timeoutMs = 3_000 } = options;
+  const { timeoutMs = 3_000 } = options;
   return new Promise((resolve) => {
     const start = performance.now();
     let settled = false;
@@ -77,9 +62,7 @@ export function measureLatency(url: string, options: ProbeOptions = {}): Promise
     const timer = setTimeout(() => finish(null), timeoutMs);
 
     try {
-      // The credential rides the dial only; `url` stays what the caller gave us
-      // and is what `finish` resolves with.
-      ws = new WebSocket(buildAgentWsUrl(url, credential));
+      ws = new WebSocket(url);
       ws.onopen = () => finish(Math.round(performance.now() - start));
       ws.onerror = () => finish(null);
       // A close before open (e.g. connection refused) also means failure.

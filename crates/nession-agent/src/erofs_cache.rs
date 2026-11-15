@@ -6,14 +6,21 @@
 //! [`crate::config::AgentConfig::effective_erofs_storage_dir`] and the stable
 //! Agent identity.
 
+pub use nession_erofs::cache::eviction::{evict_all_unpinned, evict_unpinned, EvictionReport};
+pub use nession_erofs::cache::fetch::{
+    fetch_manifest_image, FetchedImage, ImageObjectGrant, MAX_METADATA_BYTES,
+};
 pub use nession_erofs::cache::{
     identity_root, CacheDiagnostics, CacheObservation, CachePhase, CacheProgress, CachedImage,
     DownloadGrant, ErofsCache, PinGuard, ProcMountsProbe, StorageProbe, IDENTITY_NAMESPACE_DIR,
     PARTIAL_RETENTION, TRANSFER_CHUNK_BYTES,
 };
 use nession_protocol::contracts::image::v1::{
-    ImageCacheObservation, ImageCachePhase, ImageCacheStatus, IMAGE_CACHE_OBSERVATION_VERSION,
+    ImageCacheObservation, ImageCachePhase, ImageCacheStatus, IMAGE_BLOB_PATH_PREFIX,
+    IMAGE_CACHE_OBSERVATION_VERSION,
 };
+use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ResolvedErofsStorage;
@@ -70,6 +77,131 @@ pub async fn open_resolved(
         &ProcMountsProbe,
     )
     .await
+}
+
+/// The immutable Manifest identity one prepared image resolved to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedManifestBinding {
+    pub role: ManagedImageRole,
+    pub manifest_digest: String,
+    pub layer_digest: String,
+}
+
+/// One grant resolved to the physical EROFS identity the mount layer uses.
+///
+/// A Manifest-aware grant carries the immutable Manifest digest and the
+/// standard Config/advisory annotation suggestions (#3500); a legacy
+/// digest-addressed grant has neither. `layer_path` is a verified cache file,
+/// not a guessed path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedGrantImage {
+    pub manifest_digest: Option<String>,
+    pub layer_digest: String,
+    pub layer_path: PathBuf,
+    /// Typed read-only Config/annotation suggestions. Present only for a
+    /// Manifest-aware grant whose Config bytes were verified.
+    pub usage: Option<nession_erofs::oci::usage::ImageRuntimeUsage>,
+}
+
+/// Fetch one Server grant into this Agent's verified cache (#3499).
+///
+/// A grant with `objects` names a resolved Manifest and its reachable Config/
+/// EROFS routes; the Agent fetches exactly that set, validates every descriptor
+/// and returns the EROFS layer identity. An empty set preserves the accepted
+/// legacy digest-addressed fetch.
+pub async fn resolve_grant_image(
+    cache: &ErofsCache,
+    grant: &ManagedImageGrant,
+    origin: &str,
+    server_auth_token: &str,
+) -> anyhow::Result<ResolvedGrantImage> {
+    use anyhow::Context;
+
+    if !grant.path.starts_with(IMAGE_BLOB_PATH_PREFIX) {
+        anyhow::bail!(
+            "authorization route '{}' is not an image blob path",
+            grant.path
+        );
+    }
+    if grant.objects.is_empty() {
+        let download = DownloadGrant {
+            url: format!("{origin}{}", grant.path),
+            token: server_auth_token.to_string(),
+        };
+        let cached = cache
+            .get_or_fetch(&grant.digest, &download)
+            .await
+            .with_context(|| format!("cannot prepare image {}", grant.digest))?;
+        return Ok(ResolvedGrantImage {
+            manifest_digest: None,
+            layer_digest: grant.digest.clone(),
+            layer_path: cached.path,
+            usage: None,
+        });
+    }
+
+    let manifest = grant
+        .objects
+        .iter()
+        .find(|object| object.digest == grant.digest)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "authorized object set does not contain the manifest identity {}",
+                grant.digest
+            )
+        })?;
+    if manifest.media_type != nession_erofs::oci::MEDIA_TYPE_MANIFEST {
+        anyhow::bail!(
+            "authorized image identity {} is {:?}, not a Manifest",
+            grant.digest,
+            manifest.media_type
+        );
+    }
+    if manifest.path != grant.path {
+        anyhow::bail!(
+            "manifest route {:?} is not the image grant route {:?}",
+            manifest.path,
+            grant.path
+        );
+    }
+    let objects = grant
+        .objects
+        .iter()
+        .map(|object| {
+            if !object.path.starts_with(IMAGE_BLOB_PATH_PREFIX) {
+                anyhow::bail!(
+                    "authorization route '{}' is not an image blob path",
+                    object.path
+                );
+            }
+            Ok(ImageObjectGrant {
+                digest: object.digest.clone(),
+                media_type: object.media_type.clone(),
+                size_bytes: object.size_bytes,
+                path: object.path.clone(),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let fetched = fetch_manifest_image(
+        cache,
+        &objects,
+        origin,
+        server_auth_token,
+        IMAGE_BLOB_PATH_PREFIX,
+    )
+    .await
+    .with_context(|| format!("cannot prepare Manifest image {}", grant.digest))?;
+    let usage = nession_erofs::oci::usage::ImageRuntimeUsage::from_manifest_and_config(
+        &fetched.manifest,
+        &fetched.config,
+    )
+    .with_context(|| format!("cannot read the runtime usage of Manifest {}", grant.digest))?;
+    Ok(ResolvedGrantImage {
+        manifest_digest: Some(fetched.manifest_digest.clone()),
+        layer_digest: fetched.layer.digest.clone(),
+        layer_path: fetched.layer_path,
+        usage: Some(usage),
+    })
 }
 
 /// Project one digest into the authoritative per-digest observation (#3412).

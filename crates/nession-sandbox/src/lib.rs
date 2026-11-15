@@ -38,9 +38,10 @@ pub use capabilities::{catalog, Capabilities};
 pub use draft::{draft_from_policy, materialize, materialize_with_composition};
 pub use error::{Result, SandboxError};
 pub use exec::{
-    cleanup_record, preflight, preflight_unprepared_composition, prepare, probe, reconcile,
-    CleanupReport, ExecutionRecord, LaunchRequest, LivePane, PreflightReport, PreparedSandbox,
-    ReconcileOutcome, SandboxExecutionHandle, SharedMountRecord,
+    cleanup_record, compose_path_prepend, preflight, preflight_unprepared_composition, prepare,
+    probe, reconcile, CleanupReport, ExecutionRecord, ImageRuntimeEnvironment, LaunchRequest,
+    LivePane, PreflightReport, PreparedSandbox, ReconcileOutcome, SandboxExecutionHandle,
+    SharedMountRecord,
 };
 pub use policy::{compile, hex_sha256, requested_mechanisms, CompiledSandboxPolicy};
 pub use settings::SandboxSettings;

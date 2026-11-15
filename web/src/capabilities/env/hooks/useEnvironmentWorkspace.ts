@@ -125,6 +125,10 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       if (!isCurrentSession()) {
         return false;
       }
+      if (resp.refusal === 'revision_conflict') {
+        // Another writer advanced the binding; re-read only while this Session still owns the UI.
+        void refreshBinding();
+      }
       notifyBindingResult(resp, 'Failed to update the Session binding');
       if (resp.binding) {
         // The Server answered with the resulting desired state, even when the
@@ -134,7 +138,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       }
       return resp.success;
     },
-    [binding, screen, isCurrentSession],
+    [binding, refreshBinding, screen, isCurrentSession],
   );
 
   const reapplyBinding = useCallback(async (): Promise<boolean> => {
@@ -142,9 +146,12 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
     if (!isCurrentSession()) {
       return false;
     }
+    if (resp.refusal === 'revision_conflict') {
+      void refreshBinding();
+    }
     notifyBindingResult(resp, 'Failed to reapply the Session binding');
     return resp.success;
-  }, [binding, isCurrentSession]);
+  }, [binding, refreshBinding, isCurrentSession]);
 
   const showSession = useSessionNavigation(screen, refreshBinding);
 

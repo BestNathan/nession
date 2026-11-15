@@ -16,7 +16,14 @@ use nession_client::{AttachMode, ClientConfig, ClientConnection, ClientError};
 use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
 use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRenameReply};
-use nession_protocol::contracts::session::v1::{ClientSessionAttachReply, ServerSessionListReply};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
+};
+use nession_protocol::contracts::session::v1::{
+    ClientSessionAttachReply, ClientSessionEnvBindingGetPayload,
+    ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingSetPayload,
+    ServerSessionListReply, SessionEnvBindingRefusalKind,
+};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 
@@ -217,5 +224,214 @@ async fn a_real_server_answers_info_force_list_rename_delete_and_preview() {
             .and_then(|value| value.as_str())
             .is_some(),
         "a missing Agent must be a refusal payload, not a transport error"
+    );
+}
+
+/// The Server-owned ENV file methods decode the replies the real handlers
+/// build: create-only, explicit overwrite, metadata listing without content,
+/// and an explicit read that returns the raw file.
+#[tokio::test]
+async fn a_real_server_answers_env_file_crud() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let listed = client.env_list().await.expect("env list");
+    assert!(
+        !listed.files.iter().any(|file| file.name == "fixture.env"),
+        "the fixture file must not exist before the test creates it"
+    );
+    assert!(listed.error.is_none(), "{:?}", listed.error);
+
+    let create = ClientEnvWritePayload {
+        name: "fixture.env".to_string(),
+        source: EnvSource::Server,
+        agent_id: None,
+        content: "FIXTURE_VALUE=one\n".to_string(),
+        overwrite: false,
+        force: false,
+    };
+    let created = client.env_write(create.clone()).await.expect("env write");
+    assert!(created.success, "{:?}", created.error);
+    assert!(!created.exists);
+
+    // The default is create-only: the second write is refused and says the
+    // file already exists rather than pretending it overwrote anything.
+    let refused = client.env_write(create).await.expect("create-only refusal");
+    assert!(!refused.success);
+    assert!(refused.exists, "the refusal must name the existing file");
+
+    let mut replace = ClientEnvWritePayload {
+        name: "fixture.env".to_string(),
+        source: EnvSource::Server,
+        agent_id: None,
+        content: "FIXTURE_VALUE=two\n".to_string(),
+        overwrite: true,
+        force: false,
+    };
+    let replaced = client.env_write(replace.clone()).await.expect("overwrite");
+    assert!(replaced.success, "{:?}", replaced.error);
+    replace.content = "FIXTURE_VALUE=three\n".to_string();
+    let replaced_again = client.env_write(replace).await.expect("forced overwrite");
+    assert!(replaced_again.success, "{:?}", replaced_again.error);
+
+    // Listing is metadata only; reading is the explicit operation that returns
+    // the file's bytes.
+    let listed = client.env_list().await.expect("env list");
+    let fixture: Vec<_> = listed
+        .files
+        .iter()
+        .filter(|file| file.name == "fixture.env")
+        .collect();
+    assert_eq!(fixture.len(), 1);
+    assert_eq!(fixture[0].source, EnvSource::Server);
+    assert_eq!(fixture[0].var_count, 1);
+
+    let read = client
+        .env_get(ClientEnvGetPayload {
+            name: "fixture.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        })
+        .await
+        .expect("env get");
+    assert!(read.success, "{:?}", read.error);
+    assert_eq!(read.content.as_deref(), Some("FIXTURE_VALUE=three\n"));
+    assert_eq!(read.in_use_by.as_deref(), Some(&[][..]));
+
+    let missing = client
+        .env_get(ClientEnvGetPayload {
+            name: "absent.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        })
+        .await
+        .expect("missing file is a refusal payload");
+    assert!(!missing.success);
+    assert!(missing.content.is_none());
+    assert!(missing.error.is_some(), "the refusal names the reason");
+
+    let invalid = client
+        .env_write(ClientEnvWritePayload {
+            name: "../escape.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            content: "A=1\n".to_string(),
+            overwrite: true,
+            force: true,
+        })
+        .await
+        .expect("invalid name is a refusal payload");
+    assert!(!invalid.success);
+    assert!(invalid.error.is_some(), "the refusal names the reason");
+
+    let deleted = client
+        .env_delete(ClientEnvDeletePayload {
+            name: "fixture.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            force: false,
+        })
+        .await
+        .expect("env delete");
+    assert!(deleted.success, "{:?}", deleted.error);
+
+    // Deleting an absent file is idempotent, matching the store's contract.
+    let deleted_again = client
+        .env_delete(ClientEnvDeletePayload {
+            name: "fixture.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            force: false,
+        })
+        .await
+        .expect("idempotent env delete");
+    assert!(deleted_again.success, "{:?}", deleted_again.error);
+
+    let listed = client.env_list().await.expect("env list after delete");
+    assert!(
+        !listed.files.iter().any(|file| file.name == "fixture.env"),
+        "the deleted file must not be listed"
+    );
+}
+
+/// The three Session Environment Binding methods decode the real Server's
+/// state and its structured revision conflict.
+#[tokio::test]
+async fn a_real_server_answers_session_env_binding_state_and_conflicts() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+    let session_id = "a1:absent".to_string();
+
+    // A Session with no binding still has a state: revision 0 and no profiles.
+    let state = client
+        .session_env_binding_get(ClientSessionEnvBindingGetPayload {
+            session_id: session_id.clone(),
+        })
+        .await
+        .expect("binding get");
+    assert!(state.success, "{:?}", state.error);
+    assert!(state.refusal.is_none());
+    let binding = state.binding.expect("a state is always present");
+    assert_eq!(binding.session_id, session_id);
+    assert_eq!(binding.desired_revision, 0);
+    assert!(binding.desired_profiles.is_empty());
+    assert!(
+        binding
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("observed state")),
+        "an unreachable Agent must be stated instead of implied as converged: {:?}",
+        binding.error
+    );
+
+    // `set` requires a live Session. The Server's own refusal travels, and it
+    // is not a revision conflict.
+    let refused = client
+        .session_env_binding_set(ClientSessionEnvBindingSetPayload {
+            session_id: session_id.clone(),
+            profiles: Vec::new(),
+            expected_revision: Some(0),
+        })
+        .await
+        .expect("binding set refusal");
+    assert!(!refused.success);
+    assert!(refused.refusal.is_none());
+    assert!(
+        refused
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("not found")),
+        "{:?}",
+        refused.error
+    );
+
+    // Reapplying an empty binding at revision 0 is a no-op; a stale revision
+    // is the structured conflict the caller recovers from by re-reading.
+    let noop = client
+        .session_env_binding_reapply(ClientSessionEnvBindingReapplyPayload {
+            session_id: session_id.clone(),
+            expected_revision: Some(0),
+        })
+        .await
+        .expect("binding reapply");
+    assert!(noop.success, "{:?}", noop.error);
+
+    let stale = client
+        .session_env_binding_reapply(ClientSessionEnvBindingReapplyPayload {
+            session_id: session_id.clone(),
+            expected_revision: Some(3),
+        })
+        .await
+        .expect("binding reapply conflict");
+    assert!(!stale.success);
+    assert_eq!(
+        stale.refusal,
+        Some(SessionEnvBindingRefusalKind::RevisionConflict)
+    );
+    assert!(
+        stale
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("revision_conflict")),
+        "{:?}",
+        stale.error
     );
 }

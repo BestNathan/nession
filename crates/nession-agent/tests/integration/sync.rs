@@ -1,6 +1,6 @@
 //! Integration tests for the sync module (heartbeat loop and session watcher).
 
-use super::TestSession;
+use super::{TestSession, TEST_AGENT_TOKEN};
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::connection::{ServerClient, ServerClientHandle};
 use nession_agent::sync::heartbeat::HeartbeatLoop;
@@ -67,6 +67,9 @@ async fn get_handle(addr: std::net::SocketAddr) -> anyhow::Result<ServerClientHa
         os_version: "Linux".to_string(),
         nession_version: "0.1.0".to_string(),
         image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
     };
 
     let client = ServerClient::new(
@@ -83,7 +86,7 @@ async fn get_handle(addr: std::net::SocketAddr) -> anyhow::Result<ServerClientHa
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
         None, // extension_registry
-        Arc::new(nession_agent::p2p_credentials::P2pCredentials::new()),
+        nession_common::SecretString::new(TEST_AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
     );
 

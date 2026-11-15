@@ -5,10 +5,14 @@ use super::{
     info, json, reply_json, warn, ClientSessionSandboxEnterPayload, ConnectionHandler, Duration,
     HandlerAction, ProtocolMessage, SandboxActionErrorKind, SandboxActionResult,
 };
+use nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX;
 use nession_protocol::contracts::sandbox::v1::{
-    validate_image_selections, SandboxFieldError, SandboxImageRole, SandboxImageSelection,
+    validate_image_selections, SandboxFieldError, SandboxImageMode, SandboxImageRole,
+    SandboxImageSelection,
 };
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
+
+use crate::image::ImageResolution;
 
 /// Enter may prepare a full image composition in the Agent's durable cache
 /// before it creates the Pane. The budget covers preparation, launch and the
@@ -107,6 +111,28 @@ impl ConnectionHandler {
                 "filesystem.composition replaces filesystem.access; clear the access lists before selecting images",
             ));
         }
+        let workspace = match self
+            .resolve_sandbox_workspace(&agent_id, &payload.session_id, &payload.policy, &images)
+            .await
+        {
+            Ok(workspace) => workspace,
+            Err((error, field_error)) => {
+                return Ok(refuse_with_fields(
+                    SandboxActionErrorKind::Invalid,
+                    &error,
+                    vec![field_error],
+                ));
+            }
+        };
+        let mut images = images;
+        if let Some(digest) = workspace.lower_digest {
+            images.push(SandboxImageSelection {
+                role: SandboxImageRole::Workspace,
+                digest,
+                target: None,
+                mode: SandboxImageMode::Overlay,
+            });
+        }
         if let Err(errors) = validate_image_selections(&images) {
             return Ok(refuse_with_fields(
                 SandboxActionErrorKind::Invalid,
@@ -115,13 +141,18 @@ impl ConnectionHandler {
             ));
         }
         let mut grants = Vec::with_capacity(images.len());
+        let platform = self
+            .agent_registry
+            .get(&agent_id)
+            .await
+            .and_then(|agent| crate::image::agent_platform(&agent));
         for selection in &images {
-            let grant = match self
+            let resolution = match self
                 .image_manager
-                .grant_sandbox_access(&payload.session_id, &selection.digest)
+                .resolve_sandbox_image(&payload.session_id, &selection.digest, platform.as_ref())
                 .await
             {
-                Ok(grant) => grant,
+                Ok(resolution) => resolution,
                 Err(error) => {
                     return Ok(refuse(
                         if error.kind() == "unavailable" {
@@ -137,7 +168,10 @@ impl ConnectionHandler {
                     ));
                 }
             };
-            grants.push(managed_grant(selection, grant));
+            grants.push(match resolution {
+                ImageResolution::Manifest(access) => managed_manifest_grant(selection, access),
+                ImageResolution::Legacy(grant) => managed_grant(selection, grant),
+            });
         }
 
         info!(
@@ -159,6 +193,7 @@ impl ConnectionHandler {
                     "enter_id": payload.enter_id,
                     "policy": payload.policy,
                     "images": grants,
+                    "project_location": workspace.project_location,
                     "working_dir": payload.working_dir,
                 }),
                 SANDBOX_ENTER_TIMEOUT,
@@ -213,7 +248,36 @@ fn managed_grant(
         role,
         digest: selection.digest.clone(),
         path: grant.path,
-        token: grant.token,
         target,
+        objects: Vec::new(),
+    }
+}
+
+fn managed_manifest_grant(
+    selection: &SandboxImageSelection,
+    access: crate::image::ResolvedManifestAccess,
+) -> ManagedImageGrant {
+    let (role, target) = match selection.role {
+        SandboxImageRole::Base => (ManagedImageRole::Base, None),
+        SandboxImageRole::Workspace => (ManagedImageRole::Workspace, None),
+        SandboxImageRole::Toolchain => (ManagedImageRole::Toolchain, selection.target.clone()),
+    };
+    ManagedImageGrant {
+        role,
+        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", access.manifest_digest),
+        digest: access.manifest_digest,
+        target,
+        objects: access
+            .objects
+            .into_iter()
+            .map(
+                |object| nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
+                    digest: object.digest,
+                    media_type: object.media_type,
+                    size_bytes: object.size_bytes,
+                    path: object.path,
+                },
+            )
+            .collect(),
     }
 }

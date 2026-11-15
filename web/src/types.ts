@@ -52,6 +52,16 @@ export interface Session {
   foreground_command?: string | null;
   /** Live cwd when the agent last reported the session (force refresh). */
   working_dir?: string | null;
+  /**
+   * Durable tmux Session instance identity (`@nession_instance_id`).
+   *
+   * `session_id` is recyclable: killing and recreating the same name yields a
+   * new instance under the same public id. Name-addressed Web projections
+   * (Session metadata, #3424) compare this value to invalidate the previous
+   * incarnation's cached context. Absent for a legacy Session that has not
+   * been asked yet — absence is not an incarnation change.
+   */
+  instance_id?: string | null;
   /** Server-owned explicit Project membership (#3082); absent when unbound. */
   project_id?: string | null;
   last_activity: string; // ISO 8601 timestamp
@@ -92,15 +102,14 @@ export interface AttachInfo {
   session_name?: string;
   // For P2P mode:
   agent_address?: string; // Legacy single URL (first/tunnel-preferred address)
-  connection_token?: string;
   /**
-   * RFC 3339 deadline the Server states for `connection_token` (#2645).
+   * The resolved target Agent's durable token (#3440).
    *
-   * The token is opaque, so this is how the client knows a new physical
-   * connection needs a fresh credential. Absent on older Servers; the Agent's
-   * refusal remains authoritative either way.
+   * Handed off only by an authenticated attach for this Agent, kept in runtime
+   * memory, presented as the first `client.auth` frame and never placed in a
+   * URL or browser storage. Relay mode omits it: the Server dials the Agent.
    */
-  connection_token_expires_at?: string;
+  agent_token?: string;
   /** Full candidate list with probe status (issue #43). Empty for relay. */
   addresses?: ProbedAddress[];
   /**

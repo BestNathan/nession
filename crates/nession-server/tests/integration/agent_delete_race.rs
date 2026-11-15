@@ -10,6 +10,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use nession_protocol::contracts::env::v1::SessionEnvObservedState;
+use nession_runtime::frame::WsFrame;
 use nession_server::db::Database;
 use nession_server::env::{BindingRecord, EnvService};
 use nession_server::registry::agent::{AgentDeleteClaim, AgentInfo, AgentRegistry, AgentStatus};
@@ -21,7 +22,6 @@ use nession_server::server::{
     WebClientRegistry,
 };
 use serde_json::Value;
-use tokio_tungstenite::tungstenite::Message;
 
 const AGENT_ID: &str = "a1";
 
@@ -77,7 +77,6 @@ impl Fixture {
             env_service: Arc::clone(&self.env),
             image_manager: image_manager(Arc::clone(&self.db))?,
             db: Arc::clone(&self.db),
-            p2p_broker: Arc::new(nession_server::broker::ConnectionBroker::new(300)),
         })
     }
 
@@ -105,8 +104,8 @@ impl Fixture {
     }
 }
 
-fn text_message(msg_type: &str, payload: Value) -> Message {
-    Message::Text(
+fn text_message(msg_type: &str, payload: Value) -> WsFrame {
+    WsFrame::Text(
         serde_json::json!({
             "msg_type": msg_type,
             "id": format!("{msg_type}-test"),
@@ -119,7 +118,7 @@ fn text_message(msg_type: &str, payload: Value) -> Message {
 
 fn parse_reply(action: HandlerAction) -> anyhow::Result<Value> {
     match action {
-        HandlerAction::Reply(Some(Message::Text(text))) => Ok(serde_json::from_str(&text)?),
+        HandlerAction::Reply(Some(WsFrame::Text(text))) => Ok(serde_json::from_str(&text)?),
         _ => anyhow::bail!("expected Reply(Some(Text))"),
     }
 }
@@ -171,10 +170,14 @@ fn agent_info(agent_id: &str, last_heartbeat: chrono::DateTime<Utc>) -> AgentInf
             os_version: "linux".to_string(),
             nession_version: "0.1".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         },
         session_count: 0,
         active_sessions: 0,
         protocol_manifest: None,
+        agent_token: None,
         probe_generation: 0,
         offline_generation: 0,
     }

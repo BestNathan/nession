@@ -67,6 +67,14 @@ export function base64Decode(b64: string): string {
 /** Default chunk size — 256 KB keeps each request snappy on slow P2P links. */
 export const DEFAULT_CHUNK_SIZE = 256 * 1024;
 
+/**
+ * A chunk belongs to a different source revision than the read's first chunk.
+ * The assembled text would be a document that never existed on disk, so the
+ * read rejects instead of publishing it.
+ */
+export const FILE_CHANGED_DURING_READ_MESSAGE =
+  'The file changed while it was being read. Reload to see the current content.';
+
 /** Decode base64 to raw bytes, without interpreting them as text. */
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64);
@@ -88,6 +96,12 @@ function base64ToBytes(b64: string): Uint8Array {
  * count but one or two UTF-16 code units. A streaming `TextDecoder` carries a
  * sequence split across a chunk boundary into the next chunk instead of emitting
  * a replacement character for each half.
+ *
+ * The agent stats and opens the path for every request, so the chunks are only
+ * one document if the source revision stayed the same. The first chunk fixes
+ * the expected revision (and total size, for older agents that omit a
+ * revision); a later chunk from a different revision rejects the whole read
+ * before any mixed text is returned (#3562).
  */
 export function readFileChunked(
   fileOps: FileOps,
@@ -102,6 +116,9 @@ export function readFileChunked(
     let offset = 0;
     let totalSize = 0;
     let hasMore = true;
+    let sawResponse = false;
+    let sourceRevision: string | undefined;
+    let sourceTotalSize: number | undefined;
 
     while (hasMore) {
       if (cancelled) {
@@ -114,6 +131,21 @@ export function readFileChunked(
       // reject rather than return its last chunk as a complete document.
       if (cancelled) {
         throw new DOMException('Read cancelled', 'AbortError');
+      }
+      if (!sawResponse) {
+        sawResponse = true;
+        sourceRevision = data.revision;
+        sourceTotalSize = data.total_size;
+      } else {
+        const revisionChanged =
+          sourceRevision !== undefined && data.revision !== sourceRevision;
+        const sizeChanged =
+          sourceTotalSize !== undefined &&
+          data.total_size !== undefined &&
+          data.total_size !== sourceTotalSize;
+        if (revisionChanged || sizeChanged) {
+          throw new Error(FILE_CHANGED_DURING_READ_MESSAGE);
+        }
       }
       totalSize = data.total_size ?? 0;
       const bytes = base64ToBytes(data.content);

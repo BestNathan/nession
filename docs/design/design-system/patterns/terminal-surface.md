@@ -89,6 +89,16 @@ This can drive:
 
 The exact CSS variable/hooks are implementation details. The product invariant is that contextual chrome should not permanently consume more Terminal viewport than necessary.
 
+**The keyboard is not surface occlusion** (#3523). The band above is measured
+floating UI (composer/upper panel), and it is the only number that may change
+the terminal's fit. A soft keyboard changes the browser's **visible** rectangle;
+the App Experience lifts the focused Capsule composer or mobile-IME caret with
+a bounded outer scroll while the well keeps its measured layout height. xterm
+rows, PTY/tmux size and the rendered grid therefore stay unchanged across
+keyboard open/adjust/close. The ownership split is
+[composition §15](../../composition.md#15-app-viewport-environment-and-keyboard-avoidance-3523);
+the sizing boundary is [terminal-sizing.md](../../terminal/terminal-sizing.md).
+
 **Anti-pattern:** reserving a large fixed bottom toolbar region merely because the capsule can expose more capabilities.
 
 ## Connection and attachment lifecycle

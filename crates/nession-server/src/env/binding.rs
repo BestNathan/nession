@@ -100,16 +100,24 @@ impl EnvBindingStore {
     }
 
     pub async fn put(&self, record: &BindingRecord) -> Result<()> {
-        let profiles_json = serde_json::to_string(&record.profiles)
-            .context("serialising materialized env binding profiles")?;
         self.db
-            .upsert_session_env_binding(&SessionEnvBindingRow {
-                session_id: record.session_id.clone(),
-                agent_id: record.agent_id.clone(),
-                desired_revision: record.desired_revision,
-                profiles_json,
-                updated_at: record.updated_at,
-            })
+            .upsert_session_env_binding(&binding_row(record)?)
+            .await
+    }
+
+    /// Persist `record` only if the stored desired revision still equals
+    /// `expected_revision`.
+    ///
+    /// `false` means a concurrent writer advanced the binding first: nothing
+    /// was changed, so the caller must not dispatch an Agent mutation. The
+    /// comparison lives in the database write, not in a caller-side preflight.
+    pub async fn compare_and_swap(
+        &self,
+        record: &BindingRecord,
+        expected_revision: u64,
+    ) -> Result<bool> {
+        self.db
+            .compare_and_swap_session_env_binding(&binding_row(record)?, expected_revision)
             .await
     }
 
@@ -164,6 +172,21 @@ fn record_from_row(row: SessionEnvBindingRow) -> Result<BindingRecord> {
         desired_revision: row.desired_revision,
         profiles,
         updated_at: row.updated_at,
+    })
+}
+
+/// The one persisted projection of a desired binding. Both the unconditional
+/// replace and the compare-and-swap write through this shape, so the two paths
+/// cannot drift.
+fn binding_row(record: &BindingRecord) -> Result<SessionEnvBindingRow> {
+    let profiles_json = serde_json::to_string(&record.profiles)
+        .context("serialising materialized env binding profiles")?;
+    Ok(SessionEnvBindingRow {
+        session_id: record.session_id.clone(),
+        agent_id: record.agent_id.clone(),
+        desired_revision: record.desired_revision,
+        profiles_json,
+        updated_at: record.updated_at,
     })
 }
 

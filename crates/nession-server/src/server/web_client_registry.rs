@@ -10,9 +10,9 @@
 //! the runtime that answers. Nothing answers a notification; see
 //! `docs/architecture/protocol.md` § *Notification*.
 
+use nession_runtime::frame::WsFrame;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info};
 
 use super::outbound::{OutboundError, WsMessageSender};
@@ -76,7 +76,7 @@ impl WebClientRegistry {
                         // nobody will ever drain. A full queue is only this
                         // subscriber being behind, and the next push restates
                         // the state it missed.
-                        if let Err(e) = sender.try_send_broadcast(WsMessage::Text(json)) {
+                        if let Err(e) = sender.try_send_broadcast(WsFrame::Text(json)) {
                             if e == OutboundError::Closed {
                                 debug!("WebClientRegistry: subscriber sender closed");
                                 break;

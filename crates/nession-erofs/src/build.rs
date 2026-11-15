@@ -18,6 +18,20 @@
 //! [`ProcessControl`], which bounds its wall time, forwards cancellation by
 //! terminating and reaping it, and reports its first diagnostic line. Dropping a
 //! Tokio future is not how this builder cancels work.
+//!
+//! Source acquisition adapters (#3497) live in the gated submodules:
+//! bounded archive/HTTPS inputs, raw EROFS import, the external OCI conversion
+//! boundary, and the standard Config/Manifest publication helper. None of them
+//! executes input content.
+
+#[cfg(feature = "sources")]
+pub mod archive;
+#[cfg(feature = "sources")]
+pub mod import;
+#[cfg(feature = "sources")]
+pub mod oci;
+#[cfg(feature = "sources")]
+pub mod publication;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -1365,8 +1379,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
             flag.cancel();
         });
+        // `exec` makes the owned child the sleeper itself. A forking shell
+        // leaves a grandchild holding the pipes, so the reader join would wait
+        // for the natural exit — the exact delay this test forbids.
         let mut command = Command::new("sh");
-        command.args(["-c", "sleep 30"]);
+        command.args(["-c", "exec sleep 30"]);
         let started = Instant::now();
         let error = control.execute(&mut command, "sleep fixture").unwrap_err();
         assert!(format!("{error:#}").contains("canceled"), "{error:#}");
@@ -1380,7 +1397,9 @@ mod tests {
     fn a_subprocess_wall_time_bound_is_enforced() {
         let control = ProcessControl::with_timeout(Duration::from_millis(100));
         let mut command = Command::new("sh");
-        command.args(["-c", "sleep 30"]);
+        // Same reason as the cancellation fixture: the sleeper is the child
+        // the control owns, not a grandchild behind a forking shell.
+        command.args(["-c", "exec sleep 30"]);
         let error = control.execute(&mut command, "sleep fixture").unwrap_err();
         assert!(
             format!("{error:#}").contains("wall-time bound"),

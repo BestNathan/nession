@@ -13,12 +13,14 @@ mod tmux;
 // unique_session_name: defined 5× across the 6 files, 4 of them byte-identical.
 // Extract to crate root. control_mode's copy differs (extra ctrl- segment) and
 // stays module-private.
-use futures_util::StreamExt;
-use nession_agent::p2p_credentials::P2pCredentials;
-use nession_protocol::contracts::p2p::agent_url_with_credential;
-use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
+use futures_util::{SinkExt, StreamExt};
+use nession_agent::p2p_auth::P2pAuth;
+use nession_agent::server::websocket::{
+    msg_types, new_message, AuthResponsePayload, ClientAuthPayload, Message,
+};
 use rand::Rng;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 /// Prefix shared by every tmux session these tests create, so the contents of
 /// a run directory left behind by a crashed run are recognizable at a glance.
@@ -32,93 +34,19 @@ pub(crate) fn unique_session_name(prefix: &str) -> String {
 }
 
 /// The agent id every test `AgentServer` in this crate registers under.
-///
-/// One constant because two things have to agree on it: the id the server is
-/// built with, and the id a granted credential names. The store refuses a grant
-/// addressed to another agent, so a mismatch is a credential that is never
-/// honoured — silence at the dial, with nothing pointing at the cause.
 pub(crate) const TEST_AGENT_ID: &str = "test-agent";
 
-/// The credential every test dial presents.
+/// The durable Agent Token every test `AgentServer` is configured with and
+/// every dial presents (#3440).
 ///
-/// **A literal, not a fresh UUID per server.** The store is per-server and the
-/// servers are per-test, so uniqueness buys nothing — and a value that has to
-/// appear twice in a function (granted, then put on the URL) is a value that
+/// **A literal, not a fresh UUID per server.** The verifier is per-server and
+/// the servers are per-test, so uniqueness buys nothing — and a value that has
+/// to appear twice in a function (configured, then presented) is a value that
 /// can drift.
-pub(crate) const TEST_CREDENTIAL: &str = "nession-test-credential";
+pub(crate) const TEST_AGENT_TOKEN: &str = "nession-test-agent-token";
 
-/// The scope a test dial presents unless it says otherwise: a browser's, at its
-/// broadest.
-///
-/// The session name is a **placeholder**, and that is a statement rather than a
-/// shortcut: the server is started before the test creates the session it will
-/// attach to, so no credential granted here can name the right one, and the gate
-/// compares the name in the credential against the name in the frame (#1013).
-/// The consequence is deliberate — the five session-scoped wires are closed to
-/// this credential, and a test that sends one dials through
-/// [`connect_for`] once it knows its session's name.
-pub(crate) fn browser_scope() -> CredentialScope {
-    CredentialScope::for_attach(PLACEHOLDER_SESSION)
-}
-
-/// The session name [`browser_scope`] binds to.
-///
-/// Deliberately one **no frame in these tests names**, so that the dials which
-/// reach a session-scoped wire by accident fail loudly instead of passing on a
-/// placeholder that happened to match. It is spelled out rather than read as
-/// "any session" because `CredentialScope` has no wildcard: a scope that covers
-/// every session says so in [`CredentialScope::for_standalone`]'s field, and
-/// nothing else does.
-pub(crate) const PLACEHOLDER_SESSION: &str = "nession-test-placeholder";
-
-/// The credential a **standalone** dial presents, for the one test whose single
-/// connection names two sessions.
-pub(crate) const STANDALONE_CREDENTIAL: &str = "nession-test-standalone-credential";
-
-/// Grant `credential` into `credentials`, so a dial presenting it is honoured
-/// (#1013).
-///
-/// Goes through [`P2pCredentials::grant`] — the method the Server's
-/// `agent.p2p.grant` arrives at — rather than inserting into the map, so the
-/// store's own rules (the target-agent binding, the refusal of an unreadable
-/// expiry) apply to the credential a test presents: one a helper slipped past
-/// them would be a test green on a credential production would refuse.
-///
-/// **Deliberately not a method on `AgentServer`.** A minter there is test-only
-/// API on a production type, and the one this work first reached for was gated
-/// on a cargo feature that this repo's test command never enables
-/// (`scripts/filtered-test.sh` → `cargo test --workspace`, no `--features`) — so
-/// it did not exist in the build that matters, and nothing said so until the
-/// gate ran. `grant` is public and unconditional and is the same path, so the
-/// wrapper was buying nothing but that hazard.
-///
-/// `p2p_credentials::Refusal` carries no `Error` impl and so cannot ride out on
-/// `anyhow`'s `?`; it is rendered rather than chained.
-pub(crate) fn mint_credential(
-    credentials: &P2pCredentials,
-    agent_id: &str,
-    credential: &str,
-    scope: CredentialScope,
-) -> anyhow::Result<()> {
-    let grant = P2pGrantPayload {
-        request_id: "test-grant".to_string(),
-        credential: credential.to_string(),
-        agent_id: agent_id.to_string(),
-        session_id: format!("{agent_id}:test"),
-        scope,
-        expires_at: (chrono::Utc::now() + chrono::Duration::seconds(300)).to_rfc3339(),
-    };
-    // `grant` hands back the credential's log tag, which is the store's answer
-    // to "did this land"; the tag is what a warning would carry, and a test that
-    // fails to grant has nothing to log it to.
-    credentials.grant(agent_id, &grant).map_err(|refusal| {
-        anyhow::anyhow!("the agent refused its own test credential: {refusal:?}")
-    })?;
-    Ok(())
-}
-
-/// The halves of a dialed P2P connection, named once: the three dial helpers
-/// below would otherwise each spell the pair out.
+/// The halves of a dialed P2P connection, named once: the dial helpers below
+/// would otherwise each spell the pair out.
 pub(crate) type WsSink = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     tokio_tungstenite::tungstenite::Message,
@@ -127,86 +55,94 @@ pub(crate) type WsStream = futures_util::stream::SplitStream<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
 >;
 
-/// Dial `addr`, presenting `credential` — which this store must already hold.
+/// Send `client.auth` as a connection's first frame and wait for its answer.
 ///
-/// The credential travels **in** the URL rather than beside it, and through the
-/// shared builder rather than by hand: the agent's listener binds
-/// `127.0.0.1:0`, so the URL has no path, and writing the query onto it by hand
-/// gives the request target `?token=x`. That is not origin-form, so the peer
-/// drops the connection mid-handshake and the client reports an opaque
-/// `HandshakeIncomplete` with no URL in it (#1013).
-///
-/// The store is asked first for the same reason: a dial presenting something it
-/// never minted fails here, naming the reason, instead of arriving as that
-/// opaque handshake failure.
-async fn connect_presenting(
-    credentials: &P2pCredentials,
-    addr: std::net::SocketAddr,
-    credential: &str,
-) -> anyhow::Result<(WsSink, WsStream)> {
-    anyhow::ensure!(
-        credentials.authorize(credential).is_ok(),
-        "the credential a test dial presents must be one its agent's store honours"
+/// The upgrade is not authentication (#3440): a peer becomes a peer only when
+/// this frame presents the Agent's durable token, and the Agent settles it on
+/// the reader before any business frame.
+pub(crate) async fn authenticate(
+    sink: &mut WsSink,
+    stream: &mut WsStream,
+    client_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let request = new_message(
+        msg_types::CLIENT_AUTH,
+        ClientAuthPayload {
+            auth_token: TEST_AGENT_TOKEN.into(),
+            client_id: client_id.map(str::to_string),
+        },
     );
-    let url = agent_url_with_credential(&format!("ws://{addr}"), credential);
-    let (ws, _resp) = connect_async(&url).await?;
+    let request_id = request.id.clone();
+    sink.send(WsMessage::Text(serde_json::to_string(&request)?))
+        .await?;
+    loop {
+        match stream.next().await {
+            Some(Ok(WsMessage::Text(text))) => {
+                let raw: serde_json::Value = serde_json::from_str(&text)?;
+                if raw.get("id").and_then(serde_json::Value::as_str) != Some(request_id.as_str()) {
+                    continue;
+                }
+                let reply: Message<AuthResponsePayload> = serde_json::from_value(raw)?;
+                anyhow::ensure!(
+                    reply.msg_type == msg_types::OK && reply.payload.status == "success",
+                    "client.auth was refused: {:?}",
+                    reply.payload
+                );
+                if let Some(client_id) = client_id {
+                    anyhow::ensure!(
+                        reply.payload.client_id.as_deref() == Some(client_id),
+                        "the agent assigned a different client id than the one presented"
+                    );
+                }
+                return Ok(());
+            }
+            Some(Ok(_)) => continue,
+            Some(Err(error)) => return Err(error.into()),
+            None => anyhow::bail!("the agent closed before answering client.auth"),
+        }
+    }
+}
+
+/// Complete the upgrade without authenticating.
+///
+/// The upgrade is not authentication (#3440): a test that exercises the
+/// `client.auth` handshake itself has to start from a socket that has not
+/// presented a token yet.
+pub(crate) async fn dial_plain(addr: std::net::SocketAddr) -> anyhow::Result<(WsSink, WsStream)> {
+    let (ws, _resp) = connect_async(format!("ws://{addr}")).await?;
     Ok(ws.split())
 }
 
-/// Connect presenting [`TEST_CREDENTIAL`], the broad credential a test server
-/// mints for itself.
+/// Dial `addr` and authenticate as [`TEST_AGENT_TOKEN`].
 ///
-/// Reaches every wire **except** the five the scope gate binds to a session name
-/// (#1013); a test that sends one of those says which session it means through
-/// [`connect_for`].
+/// A plain URL and one first frame: there is no token in the URL and no
+/// per-attach grant. The token reaches the Agent's whole trusted surface
+/// (#3440), so one dial serves every wire these tests send.
 pub(crate) async fn connect(
-    credentials: &P2pCredentials,
+    auth: &P2pAuth,
     addr: std::net::SocketAddr,
 ) -> anyhow::Result<(WsSink, WsStream)> {
-    connect_presenting(credentials, addr, TEST_CREDENTIAL).await
+    connect_as(auth, addr, None).await
 }
 
-/// Connect presenting a credential bound to `session`.
+/// Dial `addr`, authenticate as [`TEST_AGENT_TOKEN`], and name this connection.
 ///
-/// Minted **here** rather than at server start, because the session names these
-/// tests use are generated per run ([`TestSession`]) and so do not exist when
-/// the server does. The credential string is derived from the session name,
-/// which is all the uniqueness a per-server store needs: a second dial for the
-/// same session re-grants the same value rather than needing a counter.
-pub(crate) async fn connect_for(
-    credentials: &P2pCredentials,
+/// The client id is the identity the Agent binds to the connection for its
+/// life, so tests that need two distinct clients (the lease and subscription
+/// tests) dial through this rather than a bare [`connect`].
+pub(crate) async fn connect_as(
+    auth: &P2pAuth,
     addr: std::net::SocketAddr,
-    session: &str,
+    client_id: Option<&str>,
 ) -> anyhow::Result<(WsSink, WsStream)> {
-    let credential = format!("credential-for-{session}");
-    mint_credential(
-        credentials,
-        TEST_AGENT_ID,
-        &credential,
-        CredentialScope::for_attach(session),
-    )?;
-    connect_presenting(credentials, addr, &credential).await
-}
-
-/// Connect presenting a **node-wide** credential: the terminal for every session.
-///
-/// [`CredentialScope::for_standalone`] — the shape an agent with no Server
-/// honours (see `AgentConfig::server_url` in the agent runtime) — and the only
-/// scope that lets one connection name more than one session, which is why the
-/// one test that does is the one test that dials through this. Every other dial
-/// here is bound to a single session, and that is where the gate's name
-/// comparison is exercised.
-pub(crate) async fn connect_all_sessions(
-    credentials: &P2pCredentials,
-    addr: std::net::SocketAddr,
-) -> anyhow::Result<(WsSink, WsStream)> {
-    mint_credential(
-        credentials,
-        TEST_AGENT_ID,
-        STANDALONE_CREDENTIAL,
-        CredentialScope::for_standalone(),
-    )?;
-    connect_presenting(credentials, addr, STANDALONE_CREDENTIAL).await
+    anyhow::ensure!(
+        auth.verify(TEST_AGENT_TOKEN),
+        "the token a test dial presents must be the one its agent verifies"
+    );
+    let (ws, _resp) = connect_async(format!("ws://{addr}")).await?;
+    let (mut sink, mut stream) = ws.split();
+    authenticate(&mut sink, &mut stream, client_id).await?;
+    Ok((sink, stream))
 }
 
 /// A fake `tmux` binary, for substitution through

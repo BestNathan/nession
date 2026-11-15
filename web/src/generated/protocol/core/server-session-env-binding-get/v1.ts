@@ -28,7 +28,14 @@ export type ClientSessionEnvBindingResponsePayload = { success: boolean,
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, };
+binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+/**
+ * A machine-readable classification for a refusal that happened *before*
+ * any durable mutation. `None` means the ordinary `error` path: a refused
+ * materialization may still have advanced the desired revision.
+ */
+refusal?: SessionEnvBindingRefusalKind | null, };
+export type SessionEnvBindingRefusalKind = "revision_conflict";
 export type SessionEnvBindingState = { session_id: string, desired_revision: number, desired_profiles: Array<SessionEnvBindingProfileState>, observed?: SessionEnvObservedState | null, 
 /**
  * Why `observed` is absent or the binding could not be read. Desired
@@ -86,5 +93,11 @@ export type SessionEnvBindingGetReply = { success: boolean,
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, };
+binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+/**
+ * A machine-readable classification for a refusal that happened *before*
+ * any durable mutation. `None` means the ordinary `error` path: a refused
+ * materialization may still have advanced the desired revision.
+ */
+refusal?: SessionEnvBindingRefusalKind | null, };
 

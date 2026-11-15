@@ -24,25 +24,6 @@ pub(super) fn image_list_reply(id: &str, wire: &str, page: &ImageListPage) -> Ha
     reply_json(id, wire, Value::Object(payload))
 }
 
-pub(super) fn image_access_reply(
-    id: &str,
-    wire: &str,
-    token: &str,
-    expires_at: u64,
-    path: &str,
-) -> HandlerAction {
-    reply_json(
-        id,
-        wire,
-        json!({
-            "success": true,
-            "token": token,
-            "expires_at": expires_at,
-            "path": path,
-        }),
-    )
-}
-
 pub(super) fn image_build_success_reply(
     id: &str,
     wire: &str,

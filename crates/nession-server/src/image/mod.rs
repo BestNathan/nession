@@ -28,8 +28,6 @@ pub use builds::{
 pub use http::ImageHttpService;
 
 use anyhow::Result;
-use rand::RngCore;
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -37,6 +35,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
 use nession_erofs::build::Packaging as ErofsPackaging;
+use nession_erofs::oci::descriptor::Platform;
 use nession_erofs::{
     discard_packaged_image, discard_snapshot_artifacts, verify_snapshot, BlobStore, BuildObserver,
     BuildRequest, BuildSource, BuiltImage, ErofsBuilder, ProcessControl, ResumePoint,
@@ -51,7 +50,7 @@ use nession_protocol::contracts::image::v1::{
 };
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 
-use crate::db::{Database, ImageGrantRow, ImageLeaseRow, ImageRow};
+use crate::db::{Database, ImageLeaseRow, ImageRow};
 
 /// One stage-level build execution handed to the mechanical backend.
 pub struct BuildExecution {
@@ -166,7 +165,7 @@ pub struct BuildListPage {
     pub next_offset: Option<u32>,
 }
 
-/// The single consumer context a grant is scoped to.
+/// The single consumer context a path grant is scoped to.
 enum GrantConsumer<'a> {
     Project(&'a str),
     Session(&'a str),
@@ -178,12 +177,62 @@ impl From<nession_protocol::contracts::image::v1::ImageValidationError> for Imag
     }
 }
 
-/// One minted scoped bearer grant.
+/// The OCI platform an Agent advertised, if it knows one (#3499).
+///
+/// An Agent built before platform advertisement registers empty fields; the
+/// Server then keeps the legacy digest-addressed image path for it.
+pub fn agent_platform(agent: &crate::registry::agent::AgentInfo) -> Option<Platform> {
+    if agent.metadata.os.is_empty() || agent.metadata.architecture.is_empty() {
+        return None;
+    }
+    Some(Platform::for_consumer(
+        &agent.metadata.os,
+        &agent.metadata.architecture,
+        agent.metadata.variant.clone(),
+    ))
+}
+
+/// The authorized blob route for one digest (#3440).
+///
+/// The bearer credential is the Server Token, verified by the HTTP route itself;
+/// this value carries only the route the Server resolved for the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageAccessGrant {
-    pub token: String,
-    pub expires_at: u64,
     pub path: String,
+}
+
+/// One reachable OCI object the Server authorized for a resolved Manifest
+/// (#3499).
+///
+/// The set is derived from the resolved Manifest's descriptors after the
+/// consumer's catalog reachability was proven; a caller cannot add a digest it
+/// merely knows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageObjectAccess {
+    pub digest: String,
+    pub media_type: String,
+    pub size_bytes: u64,
+    /// Authorized route, `IMAGE_BLOB_PATH_PREFIX<digest>`.
+    pub path: String,
+}
+
+/// A resolved, authorized Manifest identity and its reachable objects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedManifestAccess {
+    pub manifest_digest: String,
+    pub config_digest: String,
+    pub layer_digest: String,
+    pub objects: Vec<ImageObjectAccess>,
+}
+
+/// The Server's resolution for one requested image.
+///
+/// A historical digest-addressed EROFS blob with no catalog identity keeps the
+/// accepted `Legacy` path; a catalog image resolves to a pinned Manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageResolution {
+    Manifest(ResolvedManifestAccess),
+    Legacy(ImageAccessGrant),
 }
 
 /// The outcome of one GC sweep (#3180 SC-02).
@@ -199,6 +248,9 @@ pub struct GcReport {
     pub skipped_active_transfers: u64,
     /// `building` rows protected by a live durable build directory (#3334).
     pub skipped_active_builds: u64,
+    /// Legacy rows protected because a catalog Tag/pin reaches their EROFS
+    /// digest through Manifest descriptor edges (#3496).
+    pub skipped_catalog_references: u64,
     /// Candidates left for a later sweep by `max_candidates` or
     /// `max_deleted_bytes`. A bounded sweep is resumable: the next call
     /// re-evaluates these from the database, not from in-memory state.
@@ -240,7 +292,6 @@ pub struct ImageStorageDiagnostics {
 #[derive(Debug, Clone)]
 pub struct ImageManagerOptions {
     pub max_concurrent_builds: usize,
-    pub access_token_ttl_secs: u64,
     /// The existing configured Server build root (`image_build_dir`).
     pub build_root: PathBuf,
     /// Bound for one Git/`mkfs.erofs` subprocess.
@@ -403,7 +454,6 @@ pub struct ImageManager {
     builder: Arc<dyn ImageBuildBackend>,
     blobs: BlobStore,
     semaphore: Arc<Semaphore>,
-    access_token_ttl_secs: u64,
     /// In-process active transfers, keyed by digest. GC consults this so a
     /// reader is never racing a delete.
     transfers: Arc<Mutex<HashMap<String, usize>>>,
@@ -450,7 +500,6 @@ impl ImageManager {
             blobs,
             None,
             1,
-            60,
             None,
             DEFAULT_BUILD_RETENTION_SECS,
         ))
@@ -470,7 +519,6 @@ impl ImageManager {
             blobs,
             Some(Arc::new(store)),
             options.max_concurrent_builds,
-            options.access_token_ttl_secs,
             options.build_stage_timeout,
             options.build_retention_secs,
         ))
@@ -483,7 +531,6 @@ impl ImageManager {
         blobs: BlobStore,
         builds: Option<Arc<BuildStore>>,
         max_concurrent_builds: usize,
-        access_token_ttl_secs: u64,
         stage_timeout: Option<Duration>,
         retention_secs: u64,
     ) -> Self {
@@ -492,7 +539,6 @@ impl ImageManager {
             builder,
             blobs,
             semaphore: Arc::new(Semaphore::new(max_concurrent_builds.max(1))),
-            access_token_ttl_secs: access_token_ttl_secs.max(1),
             transfers: Arc::new(Mutex::new(HashMap::new())),
             builds,
             runtime: Mutex::new(HashMap::new()),
@@ -1322,6 +1368,8 @@ impl ImageManager {
                 "successful image build scratch bytes could not be released"
             );
         }
+        self.publish_catalog_identity(&state, &digest, built.blob.size_bytes)
+            .await;
         state.status = ImageBuildStatus::Succeeded;
         state.digest = Some(digest);
         state.size_bytes = built.blob.size_bytes;
@@ -1343,6 +1391,47 @@ impl ImageManager {
         // that is only finalizing.
         self.release_runtime(&state.build_id);
         self.publish_state(&state);
+    }
+
+    /// Publish the standard Config+Manifest identity for a successful build
+    /// (#3497). The legacy digest/alias registry remains authoritative for old
+    /// consumers; this adds the Manifest-addressed identity beside it.
+    async fn publish_catalog_identity(&self, state: &BuildState, digest: &str, size_bytes: u64) {
+        let conn = self.db.connection();
+        let mut annotations = std::collections::BTreeMap::new();
+        annotations.insert(
+            nession_erofs::oci::annotation::ANNOTATION_KIND.to_string(),
+            "directory".to_string(),
+        );
+        let publication = nession_erofs::build::publication::LayerPublication {
+            repository: "builds".to_string(),
+            tag: None,
+            expectation: nession_erofs::catalog::tag::TagExpectation::Absent,
+            layer: nession_erofs::oci::descriptor::Descriptor {
+                media_type: nession_erofs::oci::annotation::MEDIA_TYPE_EROFS.to_string(),
+                digest: digest.to_string(),
+                size: size_bytes,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: serde_json::Map::new(),
+            },
+            platform: nession_erofs::build::publication::host_platform(),
+            env: Vec::new(),
+            annotations,
+        };
+        if let Err(error) =
+            nession_erofs::build::publication::publish_layer(conn, &self.blobs, &publication).await
+        {
+            tracing::warn!(
+                build_id = %state.build_id,
+                image_id = %state.image_id,
+                error = %format!("{error:#}"),
+                "standard image Manifest identity could not be published"
+            );
+        }
     }
 
     async fn finish_failed(
@@ -1502,60 +1591,60 @@ impl ImageManager {
         self.descriptor_with_aliases(&row, used_alias).await
     }
 
-    /// Mint a scoped read grant for one Project's referenced digest.
+    /// Resolve one Project's referenced digest to its authorized blob route.
+    ///
+    /// The Project-reference rule still decides whether this Project may name
+    /// the digest; authorization to read the bytes is the Server Token on the
+    /// blob route (#3440).
     pub async fn grant_access(
         &self,
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Project(project_id), digest, true, false)
+        self.resolve_access_grant(GrantConsumer::Project(project_id), digest, true, false)
             .await
     }
 
-    /// Mint a scoped read grant for a Server-resolved Managed Session artifact
-    /// (#3062).
+    /// Resolve a Server-resolved Managed Session artifact (#3062).
     ///
     /// Managed creation is orchestrated by the Server: the Project pins the
     /// source image and the request pins the Base Runtime/toolchain artifacts,
-    /// so the Server authorizes every one of them for the Session. This is
-    /// deliberately separate from the client-facing `server.image.access`
-    /// unit, which keeps the "Project references this digest" rule.
+    /// so the Server resolves every one of them for the Session.
     pub async fn grant_managed_access(
         &self,
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Project(project_id), digest, false, false)
+        self.resolve_access_grant(GrantConsumer::Project(project_id), digest, false, false)
             .await
     }
 
-    /// Mint a Session-scoped grant for a digest the Session's Managed context
-    /// already resolved. Knowing a digest or another Session's identity is not
-    /// authorization.
+    /// Resolve a digest the Session's Managed context already named. Knowing a
+    /// digest or another Session's identity is not scope.
     pub async fn grant_session_access(
         &self,
         session_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Session(session_id), digest, false, true)
+        self.resolve_access_grant(GrantConsumer::Session(session_id), digest, false, true)
             .await
     }
 
-    /// Mint a Session-scoped grant for an explicit Sandbox composition image.
+    /// Resolve an explicit Sandbox composition image for one Session.
     ///
-    /// The caller has already resolved the authenticated Session and Agent; the
-    /// grant is still bound to one `(session_id, digest)` so a token cannot be
-    /// replayed for another digest or claimed by another consumer.
+    /// The caller has already resolved the authenticated Session and Agent;
+    /// the scope is still `(session_id, digest)` so one consumer's route
+    /// cannot be claimed by another.
     pub async fn grant_sandbox_access(
         &self,
         session_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(GrantConsumer::Session(session_id), digest, false, false)
+        self.resolve_access_grant(GrantConsumer::Session(session_id), digest, false, false)
             .await
     }
 
-    async fn mint_access_grant(
+    async fn resolve_access_grant(
         &self,
         consumer: GrantConsumer<'_>,
         digest: &str,
@@ -1641,79 +1730,418 @@ impl ImageManager {
                 ));
             }
         }
-        let mut token = String::with_capacity(64);
-        let mut bytes = [0_u8; 32];
-        rand::thread_rng().fill_bytes(&mut bytes);
-        for byte in bytes {
-            token.push_str(&format!("{byte:02x}"));
-        }
-        let expires_at = now_secs().saturating_add(self.access_token_ttl_secs);
-        let token_hash = sha256_hex(&token);
-        self.db
-            .insert_image_access_grant(&ImageGrantRow {
-                token_hash,
-                image_digest: digest.clone(),
-                project_id,
-                session_id,
-                expires_at: expires_at as i64,
-            })
-            .await
-            .map_err(|e| ImageError::Unavailable(format!("image grant failed: {e:#}")))?;
-        let _ = self.db.delete_expired_image_access_grants(now_i64()).await;
         Ok(ImageAccessGrant {
-            token,
-            expires_at,
             path: format!("{IMAGE_BLOB_PATH_PREFIX}{digest}"),
         })
     }
 
-    /// Authorize one bearer token for one digest.
-    pub async fn authorize(
+    /// Resolve one Project's image reference to a pinned Manifest identity.
+    ///
+    /// The Project must reach the catalog root through the descriptor graph,
+    /// so a caller cannot resolve an arbitrary Tag/digest it merely knows.
+    /// A legacy digest with no catalog identity keeps the accepted
+    /// digest-addressed route.
+    pub async fn resolve_project_image(
         &self,
-        token: &str,
-        digest: &str,
-    ) -> std::result::Result<ImageGrantRow, ImageError> {
-        if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(ImageError::Forbidden(
-                "image access token is invalid or expired".to_string(),
-            ));
+        project_id: &str,
+        repository: Option<&str>,
+        reference: &str,
+        platform: Option<&Platform>,
+    ) -> std::result::Result<ImageResolution, ImageError> {
+        self.resolve_image_for(
+            GrantConsumer::Project(project_id),
+            None,
+            repository,
+            reference,
+            platform,
+            true,
+            false,
+        )
+        .await
+    }
+
+    /// Resolve and authorize one Managed create's Base/Toolchain/workspace
+    /// artifact, recording a Session pin on the resolved Manifest.
+    ///
+    /// Project authorization is the accepted Managed-create rule (the Project
+    /// owns the artifact); the Session pin protects the resolved closure from
+    /// catalog GC while the Session exists.
+    pub async fn resolve_managed_image(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        reference: &str,
+        platform: Option<&Platform>,
+    ) -> std::result::Result<ImageResolution, ImageError> {
+        self.resolve_image_for(
+            GrantConsumer::Project(project_id),
+            Some(session_id),
+            None,
+            reference,
+            platform,
+            false,
+            false,
+        )
+        .await
+    }
+
+    /// Resolve an image for a Session whose Managed context already names it.
+    ///
+    /// Knowing a digest or another Session's identity is not scope: the
+    /// resolved closure must contain a digest this Session's context recorded.
+    pub async fn resolve_session_image(
+        &self,
+        session_id: &str,
+        repository: Option<&str>,
+        reference: &str,
+        platform: Option<&Platform>,
+    ) -> std::result::Result<ImageResolution, ImageError> {
+        self.resolve_image_for(
+            GrantConsumer::Session(session_id),
+            Some(session_id),
+            repository,
+            reference,
+            platform,
+            false,
+            true,
+        )
+        .await
+    }
+
+    /// Resolve an explicit Sandbox composition image for one Session.
+    ///
+    /// The caller has already resolved the authenticated Session and Agent;
+    /// the scope is still `(session_id, digest)` so one consumer's grant
+    /// cannot be claimed by another.
+    pub async fn resolve_sandbox_image(
+        &self,
+        session_id: &str,
+        reference: &str,
+        platform: Option<&Platform>,
+    ) -> std::result::Result<ImageResolution, ImageError> {
+        self.resolve_image_for(
+            GrantConsumer::Session(session_id),
+            Some(session_id),
+            None,
+            reference,
+            platform,
+            false,
+            false,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn resolve_image_for(
+        &self,
+        consumer: GrantConsumer<'_>,
+        pin_session: Option<&str>,
+        repository: Option<&str>,
+        reference: &str,
+        platform: Option<&Platform>,
+        require_project_reference: bool,
+        require_session_membership: bool,
+    ) -> std::result::Result<ImageResolution, ImageError> {
+        match &consumer {
+            GrantConsumer::Project(project_id) => {
+                if !is_valid_project_id(project_id) {
+                    return Err(ImageError::Invalid(
+                        "project_id is not a valid Project identity".to_string(),
+                    ));
+                }
+            }
+            GrantConsumer::Session(session_id) => {
+                if session_id.is_empty() {
+                    return Err(ImageError::Invalid(
+                        "session_id must not be empty".to_string(),
+                    ));
+                }
+            }
         }
-        let grant = self
-            .db
-            .get_image_access_grant(&sha256_hex(token))
+        let conn = self.db.connection();
+        let root = match nession_erofs::image::resolve_root(conn, repository, reference).await {
+            Ok(root) => root,
+            Err(root_error) => {
+                // A ready legacy image row has no catalog identity. Its
+                // accepted digest-addressed path stays available.
+                return match self
+                    .legacy_image_resolution(
+                        &consumer,
+                        reference,
+                        pin_session,
+                        require_session_membership,
+                    )
+                    .await
+                {
+                    Ok(Some(resolution)) => Ok(resolution),
+                    Ok(None) => Err(ImageError::Invalid(format!("{root_error:#}"))),
+                    Err(error) => Err(error),
+                };
+            }
+        };
+
+        // Authorization is proven from catalog metadata before any blob read.
+        let reachable =
+            nession_erofs::catalog::reference::reachable(conn, std::slice::from_ref(&root.digest))
+                .await
+                .map_err(|error| {
+                    ImageError::Unavailable(format!("image authorization failed: {error:#}"))
+                })?;
+        match &consumer {
+            GrantConsumer::Project(project_id) => {
+                if require_project_reference {
+                    let project = self
+                        .db
+                        .get_project(project_id)
+                        .await
+                        .map_err(|error| {
+                            ImageError::Unavailable(format!(
+                                "image authorization failed: {error:#}"
+                            ))
+                        })?
+                        .ok_or_else(|| ImageError::NotFound("Project not found".to_string()))?;
+                    let referenced = project
+                        .image_digest
+                        .as_deref()
+                        .is_some_and(|digest| reachable.contains(digest));
+                    if !referenced {
+                        return Err(ImageError::Forbidden(
+                            "Project does not reference this image".to_string(),
+                        ));
+                    }
+                }
+            }
+            GrantConsumer::Session(session_id) => {
+                if require_session_membership {
+                    let context = self
+                        .db
+                        .get_session_managed_context(session_id)
+                        .await
+                        .map_err(|error| {
+                            ImageError::Unavailable(format!(
+                                "image authorization failed: {error:#}"
+                            ))
+                        })?
+                        .filter(|context| context.status == "ready")
+                        .ok_or_else(|| {
+                            ImageError::Forbidden(
+                                "Session has no ready managed image context".to_string(),
+                            )
+                        })?;
+                    let allowed = std::iter::once(context.base_digest.as_str())
+                        .chain(std::iter::once(context.workspace_digest.as_str()))
+                        .chain(
+                            context
+                                .toolchains
+                                .iter()
+                                .map(|toolchain| toolchain.digest.as_str()),
+                        )
+                        .any(|digest| reachable.contains(digest));
+                    if !allowed {
+                        return Err(ImageError::Forbidden(
+                            "Session does not reference this image".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let Some(platform) = platform else {
+            // An Agent without an advertised platform can still consume the
+            // accepted digest-addressed EROFS row; it cannot prove a Manifest
+            // platform match, so a catalog-only image fails closed.
+            if let Some(resolution) = self
+                .legacy_image_resolution(
+                    &consumer,
+                    reference,
+                    pin_session,
+                    require_session_membership,
+                )
+                .await?
+            {
+                return Ok(resolution);
+            }
+            return Err(ImageError::Invalid(
+                "the Agent did not advertise os/architecture; a Manifest identity cannot be selected"
+                    .to_string(),
+            ));
+        };
+        let target = nession_erofs::image::resolve_root_for_platform(
+            conn,
+            self.blob_store(),
+            &root,
+            platform,
+        )
+        .await
+        .map_err(|error| ImageError::Invalid(format!("{error:#}")))?;
+        let manifest_object =
+            nession_erofs::catalog::reference::get_object(conn, &target.manifest_digest)
+                .await
+                .map_err(|error| ImageError::Unavailable(format!("image read failed: {error:#}")))?
+                .ok_or_else(|| {
+                    ImageError::Unavailable(
+                        "resolved Manifest disappeared from the catalog".to_string(),
+                    )
+                })?;
+        let objects = vec![
+            ImageObjectAccess {
+                digest: target.manifest_digest.clone(),
+                media_type: manifest_object.media_type,
+                size_bytes: manifest_object.size_bytes,
+                path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.manifest_digest),
+            },
+            ImageObjectAccess {
+                digest: target.config_digest.clone(),
+                media_type: target.manifest.config.media_type.clone(),
+                size_bytes: target.manifest.config.size,
+                path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.config_digest),
+            },
+            ImageObjectAccess {
+                digest: target.layer.digest.clone(),
+                media_type: target.layer.media_type.clone(),
+                size_bytes: target.layer.size,
+                path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.layer.digest),
+            },
+        ];
+        if let Some(session_id) = pin_session {
+            nession_erofs::catalog::pin::pin(
+                conn,
+                nession_erofs::catalog::pin::ConsumerKind::Session,
+                session_id,
+                &target.manifest_digest,
+                now_i64(),
+                None,
+            )
             .await
-            .map_err(|e| ImageError::Unavailable(format!("image authorization failed: {e:#}")))?
-            .ok_or_else(|| {
-                ImageError::Forbidden("image access token is invalid or expired".to_string())
-            })?;
-        if grant.expires_at <= now_secs() as i64 || grant.image_digest != digest {
-            return Err(ImageError::Forbidden(
-                "image access token is invalid or expired".to_string(),
-            ));
+            .map_err(|error| ImageError::Unavailable(format!("image pin failed: {error:#}")))?;
         }
-        Ok(grant)
+        Ok(ImageResolution::Manifest(ResolvedManifestAccess {
+            manifest_digest: target.manifest_digest,
+            config_digest: target.config_digest,
+            layer_digest: target.layer.digest,
+            objects,
+        }))
+    }
+
+    /// The accepted legacy digest-addressed path for a ready image row.
+    async fn legacy_image_resolution(
+        &self,
+        consumer: &GrantConsumer<'_>,
+        reference: &str,
+        pin_session: Option<&str>,
+        require_session_membership: bool,
+    ) -> std::result::Result<Option<ImageResolution>, ImageError> {
+        if !is_valid_image_digest(reference) {
+            return Ok(None);
+        }
+        let Some(row) = self
+            .db
+            .get_image_by_digest(reference)
+            .await
+            .map_err(|error| ImageError::Unavailable(format!("image read failed: {error:#}")))?
+        else {
+            return Ok(None);
+        };
+        if row.status != ImageStatus::Ready.as_str() {
+            return Err(ImageError::Invalid(format!(
+                "image {reference} is not ready"
+            )));
+        }
+        match consumer {
+            GrantConsumer::Project(project_id) => {
+                if !is_valid_project_id(project_id) {
+                    return Err(ImageError::Invalid(
+                        "project_id is not a valid Project identity".to_string(),
+                    ));
+                }
+            }
+            GrantConsumer::Session(session_id) => {
+                if session_id.is_empty() {
+                    return Err(ImageError::Invalid(
+                        "session_id must not be empty".to_string(),
+                    ));
+                }
+                if require_session_membership {
+                    let context = self
+                        .db
+                        .get_session_managed_context(session_id)
+                        .await
+                        .map_err(|error| {
+                            ImageError::Unavailable(format!(
+                                "image authorization failed: {error:#}"
+                            ))
+                        })?
+                        .ok_or_else(|| {
+                            ImageError::Forbidden(
+                                "Session has no managed image context".to_string(),
+                            )
+                        })?;
+                    let allowed = std::iter::once(context.base_digest.as_str())
+                        .chain(std::iter::once(context.workspace_digest.as_str()))
+                        .chain(
+                            context
+                                .toolchains
+                                .iter()
+                                .map(|toolchain| toolchain.digest.as_str()),
+                        )
+                        .any(|digest| digest == reference);
+                    if !allowed {
+                        return Err(ImageError::Forbidden(
+                            "Session does not reference this image".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(session_id) = pin_session {
+            nession_erofs::catalog::pin::pin(
+                self.db.connection(),
+                nession_erofs::catalog::pin::ConsumerKind::Session,
+                session_id,
+                reference,
+                now_i64(),
+                None,
+            )
+            .await
+            .map_err(|error| ImageError::Unavailable(format!("image pin failed: {error:#}")))?;
+        }
+        Ok(Some(ImageResolution::Legacy(ImageAccessGrant {
+            path: format!("{IMAGE_BLOB_PATH_PREFIX}{reference}"),
+        })))
     }
 
     /// Whether a digest is ready and its bytes verify.
+    ///
+    /// A ready legacy Image Manager row is the accepted #3022 shape. Catalog
+    /// objects (Index/Manifest/Config/EROFS) are served from the same verified
+    /// CAS once their catalog row's size and digest are proven (#3499); this is
+    /// what lets the Agent fetch the resolved Manifest's reachable objects.
     pub async fn ready_blob(&self, digest: &str) -> std::result::Result<u64, ImageError> {
         let digest = normalize_image_digest(digest)?;
-        let row = self
+        let ready_image = self
             .db
             .get_image_by_digest(&digest)
             .await
             .map_err(|e| ImageError::Unavailable(format!("image read failed: {e:#}")))?
-            .ok_or_else(|| ImageError::NotFound("image not found".to_string()))?;
-        if row.status != ImageStatus::Ready.as_str() {
-            return Err(ImageError::NotFound(
-                "image bytes are not ready".to_string(),
-            ));
+            .is_some_and(|row| row.status == ImageStatus::Ready.as_str());
+        if ready_image {
+            self.blobs.verify(&digest).map_err(|e| {
+                ImageError::Unavailable(format!("image bytes are not readable: {e:#}"))
+            })?;
+            return self.blobs.size(&digest).map_err(|e| {
+                ImageError::Unavailable(format!("image bytes are not readable: {e:#}"))
+            });
         }
+        let object = nession_erofs::catalog::reference::get_object(self.db.connection(), &digest)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?;
+        let Some(object) = object else {
+            return Err(ImageError::NotFound("image not found".to_string()));
+        };
         self.blobs
-            .verify(&digest)
+            .verify_named_size(&digest, object.size_bytes)
             .map_err(|e| ImageError::Unavailable(format!("image bytes are not readable: {e:#}")))?;
-        self.blobs
-            .size(&digest)
-            .map_err(|e| ImageError::Unavailable(format!("image bytes are not readable: {e:#}")))
+        Ok(object.size_bytes)
     }
 
     pub fn open_blob(&self, digest: &str) -> Result<std::fs::File> {
@@ -1749,6 +2177,13 @@ impl ImageManager {
     /// failed unlink leaves the row for the next attempt.
     pub async fn gc_bounded(&self, limits: GcLimits) -> Result<GcReport> {
         let now = now_i64();
+        // A migrated EROFS Blob is still physical data for a catalog Manifest.
+        // The legacy registry GC must never reclaim it while a Tag or live pin
+        // reaches it through descriptor edges (#3496).
+        let catalog_protected =
+            nession_erofs::catalog::protected_digests(self.db.connection(), now)
+                .await
+                .unwrap_or_default();
         let _ = self.db.delete_expired_image_access_grants(now).await;
         let _ = self.db.delete_expired_image_leases(now).await;
         let candidates = self
@@ -1780,6 +2215,10 @@ impl ImageManager {
                 continue;
             }
             if let Some(digest) = &row.digest {
+                if catalog_protected.contains(digest) {
+                    report.skipped_catalog_references += 1;
+                    continue;
+                }
                 let active = self
                     .transfers
                     .lock()
@@ -1975,12 +2414,6 @@ pub fn now_i64() -> i64 {
     i64::try_from(now_secs()).unwrap_or(i64::MAX)
 }
 
-fn sha256_hex(value: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(value.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
 fn bounded_error(value: &str) -> String {
     value.chars().take(1024).collect()
 }
@@ -2031,6 +2464,11 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    use nession_erofs::catalog::reference::{
+        record_object, record_reference, ObjectKind, StoredObject,
+    };
+    use nession_erofs::catalog::tag::{set_tag, TagExpectation};
+    use nession_erofs::oci::MEDIA_TYPE_MANIFEST;
     use nession_protocol::contracts::image::v1::{
         ImageSource, NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX,
     };
@@ -2105,7 +2543,6 @@ mod tests {
     fn test_options(dir: &std::path::Path) -> ImageManagerOptions {
         ImageManagerOptions {
             max_concurrent_builds: 2,
-            access_token_ttl_secs: 60,
             build_root: dir.join("builds"),
             build_stage_timeout: Some(Duration::from_secs(60)),
             build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
@@ -2168,7 +2605,8 @@ mod tests {
             std::fs::read_dir(dir.path().join("blobs/sha256"))
                 .unwrap()
                 .count(),
-            1
+            3,
+            "one EROFS payload plus its Config and Manifest identity"
         );
         let by_alias = manager.get(None, Some("latest")).await.unwrap();
         assert_eq!(by_alias.digest, first.digest);
@@ -2309,7 +2747,7 @@ mod tests {
             toolchains: vec![
                 nession_protocol::contracts::session::v1::ManagedToolchainRequest {
                     digest: tool_digest.clone(),
-                    target: "/opt/tool".to_string(),
+                    target: Some("/opt/tool".to_string()),
                 },
             ],
             source_sha: None,
@@ -2317,6 +2755,7 @@ mod tests {
             status: "ready".to_string(),
             error: None,
             updated_at: now_i64(),
+            resolved_images: Vec::new(),
         })
         .await
         .unwrap();
@@ -2325,10 +2764,12 @@ mod tests {
             .grant_session_access("a1:s1", &base_digest)
             .await
             .unwrap();
-        manager
-            .authorize(&base_grant.token, &base_digest)
-            .await
-            .unwrap();
+        // The grant carries only the route: the bearer credential is the
+        // Server Token, verified by the HTTP route itself (#3440).
+        assert_eq!(
+            base_grant.path,
+            format!("{IMAGE_BLOB_PATH_PREFIX}{base_digest}")
+        );
         assert!(manager
             .grant_session_access("a1:s1", &other_digest)
             .await
@@ -2348,17 +2789,10 @@ mod tests {
             .grant_sandbox_access("a1:s1", &other_digest)
             .await
             .unwrap();
-        manager
-            .authorize(&sandbox_grant.token, &other_digest)
-            .await
-            .unwrap();
-        let stored = db
-            .get_image_access_grant(&sha256_hex(&sandbox_grant.token))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(stored.project_id, None);
-        assert_eq!(stored.session_id.as_deref(), Some("a1:s1"));
+        assert_eq!(
+            sandbox_grant.path,
+            format!("{IMAGE_BLOB_PATH_PREFIX}{other_digest}")
+        );
     }
 
     #[tokio::test]
@@ -2394,14 +2828,8 @@ mod tests {
             grant_a.path,
             format!("{IMAGE_BLOB_PATH_PREFIX}{}", a.digest.as_deref().unwrap())
         );
-        manager
-            .authorize(&grant_a.token, a.digest.as_deref().unwrap())
-            .await
-            .unwrap();
-        assert!(manager
-            .authorize(&grant_a.token, b.digest.as_deref().unwrap())
-            .await
-            .is_err());
+        // A Project reference is still the one rule this resolution enforces;
+        // the bearer credential it used to mint belongs to the HTTP route now.
         assert!(manager
             .grant_access(
                 "project-00000000-0000-0000-0000-000000000002",
@@ -2410,7 +2838,10 @@ mod tests {
             .await
             .is_err());
         assert!(manager
-            .authorize("not-a-token", a.digest.as_deref().unwrap())
+            .grant_access(
+                "project-00000000-0000-0000-0000-000000000001",
+                &format!("sha256:{}", "e".repeat(64)),
+            )
             .await
             .is_err());
     }
@@ -2463,6 +2894,86 @@ mod tests {
         drop(guard);
         let report = manager.gc().await.unwrap();
         assert_eq!(report.removed_images, 1);
+    }
+
+    /// #3496: the legacy registry GC must not reclaim an EROFS Blob that a
+    /// catalog Tag reaches through a Manifest descriptor edge.
+    #[tokio::test]
+    async fn gc_keeps_a_blob_referenced_from_the_catalog_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/catalog", b"catalog-referenced");
+        let built = manager
+            .build(&local("/source/catalog"), None)
+            .await
+            .unwrap();
+        let digest = built.digest.clone().unwrap();
+        let now = now_i64();
+        let manifest_digest = format!("sha256:{}", "b".repeat(64));
+        record_object(
+            db.connection(),
+            &StoredObject {
+                digest: manifest_digest.clone(),
+                media_type: MEDIA_TYPE_MANIFEST.to_string(),
+                size_bytes: 1,
+                kind: ObjectKind::Manifest,
+            },
+            now,
+        )
+        .await
+        .unwrap();
+        record_reference(db.connection(), &manifest_digest, &digest, "layer", now)
+            .await
+            .unwrap();
+        set_tag(
+            db.connection(),
+            "nession/catalog",
+            "v1",
+            &manifest_digest,
+            &TagExpectation::Absent,
+            now,
+        )
+        .await
+        .unwrap();
+
+        let report = manager.gc().await.unwrap();
+        assert_eq!(report.skipped_catalog_references, 1);
+        assert_eq!(report.removed_images, 0);
+        assert!(manager.get(Some(&digest), None).await.is_ok());
+        assert!(manager.blob_store().contains(&digest).unwrap());
+    }
+
+    /// #3497 SC-01: a successful existing Git/local build path publishes a
+    /// standards-valid Manifest/Config whose layer is the built EROFS digest.
+    #[tokio::test]
+    async fn a_successful_build_publishes_a_standard_manifest_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/standard", b"standard image bytes");
+        let descriptor = manager
+            .build(&local("/source/standard"), None)
+            .await
+            .unwrap();
+        let digest = descriptor.digest.clone().unwrap();
+        let manifest_digest = nession_erofs::catalog::reference::parents_for_reference(
+            db.connection(),
+            &digest,
+            "layer",
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("the build must publish a catalog Manifest edge");
+        let inspection =
+            nession_erofs::image::inspect::inspect_manifest(manager.blob_store(), &manifest_digest)
+                .unwrap();
+        assert_eq!(inspection.layer_digest, digest);
+        assert!(inspection.config.supports_erofs());
+        assert_eq!(
+            inspection.usage.kind,
+            Some(nession_erofs::oci::ImageKind::Directory)
+        );
     }
 
     /// #3180 SC-02: one sweep deletes at most the configured candidate count;
@@ -2566,10 +3077,23 @@ mod tests {
         assert_eq!(diagnostics.ready_images, 1);
         assert_eq!(diagnostics.failed_images, 1);
         assert_eq!(diagnostics.building_images, 0);
-        assert_eq!(diagnostics.blobs, 1);
-        assert_eq!(diagnostics.blob_bytes, b"ready-bytes".len() as u64);
+        assert_eq!(
+            diagnostics.blobs, 3,
+            "one EROFS payload plus its Config and Manifest identity"
+        );
+        assert!(
+            diagnostics.blob_bytes > b"ready-bytes".len() as u64,
+            "the Config and Manifest bytes are stored beside the payload"
+        );
         assert_eq!(diagnostics.temp_files, 1);
         assert_eq!(diagnostics.temp_bytes, b"unpublished".len() as u64);
+    }
+
+    /// The Server Token the blob route verifies (#3440).
+    const TEST_SERVER_TOKEN: &str = "image-route-server-token";
+
+    fn server_bearer() -> String {
+        format!("Bearer {TEST_SERVER_TOKEN}")
     }
 
     async fn http_request(
@@ -2591,7 +3115,10 @@ mod tests {
                 HeaderValue::from_str(value).expect("valid test header value"),
             );
         }
-        let service = crate::image::http::ImageHttpService::new(Arc::clone(manager));
+        let service = crate::image::http::ImageHttpService::new(
+            Arc::clone(manager),
+            nession_protocol::TokenVerifier::new(TEST_SERVER_TOKEN),
+        );
         let response = service.respond(&method, digest, &request_headers).await;
         let status = response.status();
         let response_headers = response.headers().clone();
@@ -2659,8 +3186,13 @@ mod tests {
             .grant_access("project-00000000-0000-0000-0000-000000000021", &digest)
             .await
             .unwrap();
-        let target = format!("{IMAGE_BLOB_PATH_PREFIX}{digest}");
-        let auth = format!("Bearer {}", grant.token);
+        let target = grant.path.clone();
+        assert_eq!(
+            target,
+            format!("{IMAGE_BLOB_PATH_PREFIX}{digest}"),
+            "the grant resolves the authorized route and nothing else"
+        );
+        let auth = server_bearer();
         let response = http_request(
             &manager,
             "GET",
@@ -2701,36 +3233,29 @@ mod tests {
         assert!(body.is_empty());
     }
 
+    /// The route's authority is the Server Token itself (#3440).
+    ///
+    /// There is no per-consumer grant to consult any more: a caller holding the
+    /// Server Token may read any ready blob this Server has, and a caller
+    /// without it gets nothing. The two refusals are asserted separately —
+    /// absent and wrong — because they are different mistakes and the route
+    /// checks them separately.
     #[tokio::test]
-    async fn http_denies_foreign_projects_and_unknown_digests() {
+    async fn http_binds_reads_to_the_server_token_and_unknown_digests_are_404() {
         let dir = tempfile::tempdir().unwrap();
-        let (manager, backend, db) = manager(dir.path()).await;
+        let (manager, backend, _db) = manager(dir.path()).await;
         backend.set("/source/a", b"project a");
         backend.set("/source/b", b"project b");
         let a = manager.build(&local("/source/a"), None).await.unwrap();
         let b = manager.build(&local("/source/b"), None).await.unwrap();
         let digest_a = a.digest.clone().unwrap();
         let digest_b = b.digest.clone().unwrap();
-        db.insert_project(&project(
-            &db,
-            "project-00000000-0000-0000-0000-000000000031",
-            Some(&digest_a),
-        ))
-        .await
-        .unwrap();
-        db.insert_project(&project(
-            &db,
-            "project-00000000-0000-0000-0000-000000000032",
-            Some(&digest_b),
-        ))
-        .await
-        .unwrap();
-        let grant_a = manager
-            .grant_access("project-00000000-0000-0000-0000-000000000031", &digest_a)
-            .await
-            .unwrap();
+        let target_a = format!("{IMAGE_BLOB_PATH_PREFIX}{digest_a}");
         let target_b = format!("{IMAGE_BLOB_PATH_PREFIX}{digest_b}");
-        let auth = format!("Bearer {}", grant_a.token);
+        let auth = server_bearer();
+
+        // Ready bytes are served to the Server Token whichever Project (if
+        // any) happens to reference them.
         let response = http_request(
             &manager,
             "GET",
@@ -2738,14 +3263,33 @@ mod tests {
             vec![("Authorization", auth.as_str())],
         )
         .await;
-        assert!(split_response(&response)
-            .0
-            .starts_with("HTTP/1.1 403 Forbidden"));
-        let target_a = format!("{IMAGE_BLOB_PATH_PREFIX}{digest_a}");
+        let (head, body) = split_response(&response);
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+        assert_eq!(body, b"project b");
+
+        // Absent bearer: refused, and told what to present.
         let response = http_request(&manager, "GET", &target_a, vec![]).await;
+        let (head, _) = split_response(&response);
+        assert!(head.starts_with("HTTP/1.1 403 Forbidden"), "{head}");
+        assert!(
+            head.to_ascii_lowercase()
+                .contains("www-authenticate: bearer"),
+            "{head}"
+        );
+
+        // Wrong bearer: the same refusal.
+        let response = http_request(
+            &manager,
+            "GET",
+            &target_a,
+            vec![("Authorization", "Bearer not-the-server-token")],
+        )
+        .await;
         assert!(split_response(&response)
             .0
             .starts_with("HTTP/1.1 403 Forbidden"));
+
+        // A digest this Server does not have stays absent, even to the token.
         let unknown = format!("{IMAGE_BLOB_PATH_PREFIX}sha256:{}", "e".repeat(64));
         let response = http_request(
             &manager,
@@ -2777,8 +3321,8 @@ mod tests {
             .grant_access("project-00000000-0000-0000-0000-000000000041", &digest)
             .await
             .unwrap();
-        let target = format!("{IMAGE_BLOB_PATH_PREFIX}{digest}");
-        let auth = format!("Bearer {}", grant.token);
+        let target = grant.path;
+        let auth = server_bearer();
         let response = http_request(
             &manager,
             "GET",
@@ -2834,5 +3378,257 @@ mod tests {
             .project_references_image("project-00000000-0000-0000-0000-000000000013", &digest)
             .await
             .unwrap());
+    }
+
+    fn linux_amd64() -> Platform {
+        Platform::for_consumer("linux", "amd64", None)
+    }
+
+    async fn publish_shared_layer_manifests(
+        manager: &ImageManager,
+        db: &Database,
+    ) -> (String, String, String) {
+        use nession_erofs::build::publication::{publish_layer, LayerPublication};
+        use nession_erofs::catalog::tag::TagExpectation;
+        use nession_erofs::oci::annotation::MEDIA_TYPE_EROFS;
+        use nession_erofs::oci::descriptor::Descriptor;
+
+        let layer = manager
+            .blob_store()
+            .put_bytes(b"one shared physical erofs layer")
+            .unwrap();
+        let descriptor = Descriptor {
+            media_type: MEDIA_TYPE_EROFS.to_string(),
+            digest: layer.digest.clone(),
+            size: layer.size_bytes,
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: serde_json::Map::new(),
+        };
+        let mut published = Vec::new();
+        for (tag, env) in [("a", "A=1"), ("b", "A=2")] {
+            let outcome = publish_layer(
+                db.connection(),
+                manager.blob_store(),
+                &LayerPublication {
+                    repository: "nession/tools".to_string(),
+                    tag: Some(tag.to_string()),
+                    expectation: TagExpectation::Absent,
+                    layer: descriptor.clone(),
+                    platform: linux_amd64(),
+                    env: vec![env.to_string()],
+                    annotations: std::collections::BTreeMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+            published.push(outcome.manifest_digest);
+        }
+        (layer.digest, published[0].clone(), published[1].clone())
+    }
+
+    #[tokio::test]
+    async fn manifest_resolution_shares_one_layer_but_not_authorization() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, _backend, db) = manager(dir.path()).await;
+        let (layer_digest, manifest_a, manifest_b) =
+            publish_shared_layer_manifests(&manager, &db).await;
+        let project_a = "project-00000000-0000-0000-0000-000000000021";
+        let project_b = "project-00000000-0000-0000-0000-000000000022";
+        db.insert_project(&project(&db, project_a, Some(&manifest_a)))
+            .await
+            .unwrap();
+        db.insert_project(&project(&db, project_b, Some(&manifest_b)))
+            .await
+            .unwrap();
+
+        let resolved_a = manager
+            .resolve_project_image(project_a, Some("nession/tools"), "a", Some(&linux_amd64()))
+            .await
+            .unwrap();
+        let resolved_b = manager
+            .resolve_project_image(project_b, Some("nession/tools"), "b", Some(&linux_amd64()))
+            .await
+            .unwrap();
+        let (resolved_a, resolved_b) = match (resolved_a, resolved_b) {
+            (ImageResolution::Manifest(a), ImageResolution::Manifest(b)) => (a, b),
+            _ => panic!("catalog images must resolve to a Manifest"),
+        };
+        assert_ne!(resolved_a.manifest_digest, resolved_b.manifest_digest);
+        assert_eq!(resolved_a.layer_digest, layer_digest);
+        assert_eq!(resolved_b.layer_digest, layer_digest);
+        assert_eq!(resolved_a.objects.len(), 3);
+        for object in &resolved_a.objects {
+            assert_eq!(
+                object.path,
+                format!("{IMAGE_BLOB_PATH_PREFIX}{}", object.digest)
+            );
+        }
+
+        // Project B references its own Manifest; resolving Project A's tag or
+        // digest is refused even though B knows the EROFS layer digest.
+        assert!(matches!(
+            manager
+                .resolve_project_image(project_b, Some("nession/tools"), "a", Some(&linux_amd64()))
+                .await,
+            Err(ImageError::Forbidden(_))
+        ));
+        assert!(matches!(
+            manager
+                .resolve_project_image(project_b, None, &manifest_a, Some(&linux_amd64()))
+                .await,
+            Err(ImageError::Forbidden(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_session_binding_records_and_releases_the_resolved_manifest_pin() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, _backend, db) = manager(dir.path()).await;
+        let (layer_digest, manifest_a, _manifest_b) =
+            publish_shared_layer_manifests(&manager, &db).await;
+        let project_id = "project-00000000-0000-0000-0000-000000000023";
+        db.insert_project(&project(&db, project_id, Some(&manifest_a)))
+            .await
+            .unwrap();
+        let session_id = "a1:manifest-session";
+        let resolved = manager
+            .resolve_managed_image(project_id, session_id, &manifest_a, Some(&linux_amd64()))
+            .await
+            .unwrap();
+        let resolved = match resolved {
+            ImageResolution::Manifest(access) => access,
+            ImageResolution::Legacy(_) => panic!("a catalog digest must resolve to a Manifest"),
+        };
+        let pin_id = nession_erofs::catalog::pin::pin_id(
+            nession_erofs::catalog::pin::ConsumerKind::Session,
+            session_id,
+            &resolved.manifest_digest,
+        )
+        .unwrap();
+        assert!(
+            nession_erofs::catalog::pin::get_pin(db.connection(), &pin_id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        db.begin_session_managed_context(&crate::db::SessionManagedContextRow {
+            session_id: session_id.to_string(),
+            agent_id: "a1".to_string(),
+            project_id: project_id.to_string(),
+            attempt_id: "attempt-1".to_string(),
+            base_digest: manifest_a.clone(),
+            workspace_digest: manifest_a.clone(),
+            toolchains: Vec::new(),
+            source_sha: None,
+            workspace: None,
+            status: "ready".to_string(),
+            error: None,
+            updated_at: now_i64(),
+            resolved_images: vec![crate::db::ResolvedImageBinding {
+                role: "base".to_string(),
+                requested_digest: manifest_a.clone(),
+                manifest_digest: Some(resolved.manifest_digest.clone()),
+                layer_digest: layer_digest.clone(),
+            }],
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            db.get_session_managed_context(session_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .resolved_images
+                .len(),
+            1
+        );
+        db.delete_session_managed_context(session_id).await.unwrap();
+        assert!(
+            nession_erofs::catalog::pin::get_pin(db.connection(), &pin_id)
+                .await
+                .unwrap()
+                .is_none(),
+            "cleanup releases the resolved Manifest pin"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_legacy_digest_keeps_its_route_and_a_manifest_needs_a_platform() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/legacy", b"legacy image");
+        let legacy = manager.build(&local("/source/legacy"), None).await.unwrap();
+        let legacy_digest = legacy.digest.clone().unwrap();
+        let project_id = "project-00000000-0000-0000-0000-000000000024";
+        db.insert_project(&project(&db, project_id, Some(&legacy_digest)))
+            .await
+            .unwrap();
+        match manager
+            .resolve_project_image(project_id, None, &legacy_digest, None)
+            .await
+            .unwrap()
+        {
+            ImageResolution::Legacy(grant) => assert_eq!(
+                grant.path,
+                format!("{IMAGE_BLOB_PATH_PREFIX}{legacy_digest}")
+            ),
+            ImageResolution::Manifest(_) => panic!("a legacy row must keep its digest route"),
+        }
+
+        let (_layer, manifest, _other) = publish_shared_layer_manifests(&manager, &db).await;
+        let manifest_project = "project-00000000-0000-0000-0000-000000000026";
+        db.insert_project(&project(&db, manifest_project, Some(&manifest)))
+            .await
+            .unwrap();
+        let error = manager
+            .resolve_project_image(manifest_project, None, &manifest, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ImageError::Invalid(_)), "{error}");
+    }
+
+    #[tokio::test]
+    async fn catalog_metadata_is_served_only_after_digest_and_size_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, _backend, db) = manager(dir.path()).await;
+        let (_layer, manifest, _other) = publish_shared_layer_manifests(&manager, &db).await;
+        let access = match manager
+            .resolve_managed_image(
+                "project-00000000-0000-0000-0000-000000000025",
+                "a1:served",
+                &manifest,
+                Some(&linux_amd64()),
+            )
+            .await
+            .unwrap()
+        {
+            ImageResolution::Manifest(access) => access,
+            ImageResolution::Legacy(_) => panic!("catalog objects must resolve to a Manifest"),
+        };
+        for object in &access.objects {
+            assert_eq!(
+                manager.ready_blob(&object.digest).await.unwrap(),
+                object.size_bytes
+            );
+        }
+        let path = manager
+            .blob_store()
+            .path_for(&access.manifest_digest)
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(manager.ready_blob(&access.manifest_digest).await.is_err());
+        assert!(matches!(
+            manager
+                .ready_blob(
+                    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                )
+                .await,
+            Err(ImageError::NotFound(_))
+        ));
     }
 }

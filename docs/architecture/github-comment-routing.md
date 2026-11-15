@@ -13,6 +13,7 @@ admission, Gate results, provenance, and independent Acceptance projection.
 | `/audit` | open native Issue | current Issue → Agent / Issue Audit (single) | OWNER/MEMBER/COLLABORATOR |
 | `/audit tree` | open native Issue | current Issue → Agent / Issue Audit (tree) | same |
 | `/accept` | open native Issue | current Issue → Acceptance / Manual Request | same; recovery request only |
+| `/develop dev-qwen-01` | open, unclaimed native Bug Issue | current Bug → trusted Controller → agent-store → Qwen Developer | **BestNathan OWNER only**, exact unedited comment, no in-progress status or linked open PR |
 | `/case SC-NN` | open native Requirement/Bug Issue | trusted associated merged SHA → Acceptance / Cases | OWNER/MEMBER/COLLABORATOR; Case-method SC only |
 | `/e2e full` | open same-repository PR | exact current PR HEAD SHA + branch → E2E / Full Regression | repo owner or collaborator with write+ |
 
@@ -63,7 +64,25 @@ existing dual-native Case combiner withholds unpaired success. A separate
 native platform execution must supply the paired evidence.
 
 The routed `Acceptance / Cases` workflow carries `source_comment_id` and
-uses a comment-bound Run name. On the chosen platform **before target checkout**,
+uses a comment-bound Run title. GitHub's completed `workflow_run.name` can
+report the dynamic title rather than the static workflow `name`, but a
+comment Router's `GITHUB_TOKEN`-initiated `workflow_dispatch` also **does
+not emit a recursively triggered `workflow_run`**. A name glob alone
+cannot complete the Case evidence chain. The Cases workflow instead has a
+separate target-code-free, narrowly `actions: write` wake job after both
+platform artifact jobs. It sends a GitHub `repository_dispatch` event of exact type
+`nession-comment-case-ingest` (runs only the default-branch workflow) with
+**only the source Run ID**, rather than permitting an arbitrary-ref
+`workflow_dispatch` on a privileged Store writer. The ingester allows this path
+only for the GitHub Actions bot on Main, re-reads the completed GitHub
+Run/Attempt, canonical source workflow path, actor, comment-bound Issue/SC
+name, and successful original-comment authentication Job step **before**
+accepting any Case artifact or minting Store credentials. Comment
+`workflow_run` deliveries are excluded from the ordinary, static-name
+subscriber so only the explicit trusted wake ingests comment Cases. Normal
+static/push and human-manual Cases retain the native `workflow_run` lane.
+
+On the chosen platform **before target checkout**,
 trusted Main independently reads the original GitHub human comment/Issue,
 rejects edits, untrusted actors, unsupported or stale targets, and recomputes
 the bound merge SHA/Case manifest. Ordinary direct Actions/UI/manual and
@@ -95,6 +114,53 @@ that case the bot acknowledgment points to the workflow page rather than
 inventing a Run ID. Any dispatch/receipt uncertainty must be reconciled
 against the authoritative GitHub source records.
 
+## Bug Developer from an Owner comment (#3488)
+
+The first production command is **`/develop dev-qwen-01`**, posted as a
+single unedited line under the Bug Issue itself. It is intentionally not
+`/develop #1234`: Issue identity comes from the GitHub comment, not free text.
+It supports the already registered Qwen Developer only. For example, post it
+under #3433 if that Bug is still open and unclaimed; do **not** post it under
+an already progressing #3444/#3451 PR.
+
+GitHub deliberately suppresses the `workflow_run` cascade for a
+`workflow_dispatch` initiated with `GITHUB_TOKEN`. After dispatching the
+unprivileged Controller, the Router therefore re-reads its exact authenticated
+Run/Attempt from GitHub, requires **completed success**, and performs one
+explicit `workflow_dispatch` to `Store / Agent Controller Ingest` with only
+`source_run_id`. That Store workflow accepts the bot-only main request,
+re-fetches the real Controller Run/Artifact and revalidates the original human
+comment *before* minting the scoped Store App token. A Router receipt still
+does not assert Store creation or Worker execution. Duplicate wakes are detected
+by their exact source-bound Run name; the Store CAS root is never reset.
+
+The existing Comment Router confirms owner identity and the original open Bug
+Issue via REST; it refuses edited comments, arbitrary providers, existing
+`status:in-progress` and related open implementation PRs. It dispatches
+**only an unprivileged Controller request** with the Issue number and original
+comment ID. The Controller pins the trusted `main` SHA, resolves the registered
+roles, and emits a uniquely attested request Artifact. The independent
+`Store / Agent Controller Ingest` re-authenticates the original comment,
+actual Run/Attempt/Artifact and GitHub SHA before Store App issuance. It commits
+one immutable Controller root on `agent-store`, marks the Bug in progress, and
+uses the existing Store CAS/write-ahead/HMAC-ticket machinery to dispatch one
+`Agent / Development` Qwen Worker. It never gives the Worker its GitHub writer,
+Store secret, signing key or publisher token.
+
+The Worker edits only bounded tracked source with Read/Edit/Write, and emits
+an untrusted patch and encrypted native Session; the separate Publisher,
+Reviewer, Quality and Acceptance keep their independent responsibilities.
+Repeated comments never reset an existing Controller state, and a 204/timeout
+does not justify blindly dispatching a second Worker. A router acknowledgment
+means *request accepted*, not *Worker started*, *PR published* or *SC Pass*.
+
+For a rejected command, first inspect the original Issue type/status, existing
+PRs, edited comment/author permissions and the router/Controller Run. A failed
+source verification does not trigger a model. Existing historical #1997/#3001
+recovery commands stay pinned and separate. The command is active only after
+the main-owned workflow and script changes have merged and their authenticated
+Run/Store readback has been checked.
+
 ## Migration boundaries
 
 The direct `issue_comment` subscriptions have been removed from
@@ -109,3 +175,25 @@ exact event/Run/Artifact/Gate parity.
 The thin workflow and stable script contract are checked by the existing
 `workflow-conventions` Gate. Changes to a command's context or privilege
 require positive/negative fixtures and a fresh GitHub Run/Job/Step review.
+
+
+## Source-bound Qwen Worker result recovery (#3491)
+
+The signed Developer Ticket is issued by the independently privileged
+`Store / Agent Controller Ingest` Run, not by the original
+`Acceptance / Agent Controller` request Run. Trusted reconciliation checks
+both bot/Main GitHub Run identities against the signed Issue, worker SHA,
+first attempt, and authenticated original Owner Bug command before any Store
+checkpoint is written. The historical Owner Controller Ticket path remains
+supported. A forged/mismatched Run, comment/Issue, SHA or signed Ticket fails
+closed.
+
+The Owner's `/develop result` recovers the *single* Store-bound successful
+Qwen Worker without rerunning the model. One previously failed main-owned
+Store Ingest wake authorizes at most one new first-attempt Ingest Run, guarded
+by the original Worker Artifacts and Store CAS replay; successful, running or
+two-wake histories never re-dispatch. The bot-origin first-attempt Qwen Ingest
+uploads its source-bound receipt and wakes the existing Publisher. The
+Publisher authenticates the `Qwen Developer Ingest worker:<run_id>` Run name
+against the exact receipt before PR publication; no Worker/model credentials
+are extended.

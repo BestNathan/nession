@@ -93,6 +93,55 @@ function WorkspaceRow({
 }
 
 /**
+ * A fresh mount per open. Reusing one controlled Radix portal while the close
+ * animation runs can reorder the scrim above the content and make Confirm
+ * unclickable (measured #2654); a closed dialog renders nothing.
+ */
+function DeleteWorkspaceDialog({
+  workspace,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  workspace: AgentWorkspaceDescriptor;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          onCancel();
+        }
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {workspace.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This deletes the Agent-owned directory and its registry entry. The Agent refuses
+            while the Workspace is leased or attached to an execution. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            data-testid="sandbox-workspace-delete-confirm"
+            disabled={busy}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={onConfirm}
+          >
+            {busy ? 'Deleting…' : 'Delete'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
  * The Sandbox Workspaces section (#3407, #3408).
  *
  * The inventory and lifecycle are owned by the Agent Workspace Manager. This
@@ -194,35 +243,14 @@ export function SandboxWorkspacesPanel({ sessionId }: { sessionId: string | null
         </ul>
       )}
 
-      <AlertDialog
-        open={pendingDelete !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDelete(null);
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {pendingDelete?.name ?? 'Workspace'}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This deletes the Agent-owned directory and its registry entry. The Agent refuses
-              while the Workspace is leased or attached to an execution. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={inventory.busy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              data-testid="sandbox-workspace-delete-confirm"
-              disabled={inventory.busy}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => void confirmDelete()}
-            >
-              {inventory.busy ? 'Deleting…' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {pendingDelete ? (
+        <DeleteWorkspaceDialog
+          workspace={pendingDelete}
+          busy={inventory.busy}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void confirmDelete()}
+        />
+      ) : null}
     </DetailSurface>
   );
 }

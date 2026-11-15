@@ -13,13 +13,31 @@ export const COMMANDS = Object.freeze({
   '/audit': Object.freeze({ kind: 'issue', handler: 'audit', mode: 'single', workflow: 'agent-issue-audit.yml' }),
   '/audit tree': Object.freeze({ kind: 'issue', handler: 'audit', mode: 'tree', workflow: 'agent-issue-audit.yml' }),
   '/accept': Object.freeze({ kind: 'issue', handler: 'accept', workflow: 'acceptance-manual-request.yml' }),
+  // #3488: a request to the trusted Controller, not permission to invoke a Worker.
+  '/develop dev-qwen-01': Object.freeze({ kind: 'issue', handler: 'develop',
+    workflow: 'acceptance-agent-controller.yml' }),
+  // #3491: Owner may request ingestion of an already-finished Store-admitted
+  // Worker. The comment has no Run ID or provider credentials.
+  '/develop result': Object.freeze({ kind: 'issue', handler: 'develop-result',
+    workflow: 'store-agent-development-ingest.yml' }),
   '/e2e full': Object.freeze({ kind: 'pull_request', handler: 'e2e-full', workflow: 'e2e-full-regression.yml' }),
 });
 const CASE_COMMAND = Object.freeze({ kind: 'issue', handler: 'case', workflow: 'acceptance-cases.yml' });
-export const parseCommand = (body) =>
-  typeof body === 'string' && body.length <= 80
-    ? COMMANDS[body] ?? (/^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null)
-    : null;
+// A historical main-SHA recovery is an explicit source-bound request, never
+// a caller-supplied Acceptance verdict. The trusted manual selector verifies
+// the merge, branch ancestry and Issue association before dispatching.
+export const parseCommand = (body) => {
+  if (typeof body !== 'string' || body.length > 80) return null;
+  const main = /^\/accept post-merge ([a-f0-9]{40})$/.exec(body);
+  // Explicit PR-head source selection: text is an intent, never an
+  // attestation. The trusted lifecycle resolver verifies Issue association,
+  // merge provenance and this exact SHA before dispatching an Acceptor.
+  const pr = /^\/accept pr ([a-f0-9]{40})$/.exec(body);
+  return COMMANDS[body] ?? (main
+    ? {...COMMANDS['/accept'], target_sha: main[1]}
+    : pr ? {...COMMANDS['/accept'], target_pr_sha: pr[1]}
+    : /^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null);
+};
 
 export function safeRef(ref) {
   return typeof ref === 'string' && REF.test(ref) &&
@@ -48,6 +66,20 @@ export function commandPlan(event, comment, issue, pr, permission) {
       issue?.number !== number || issue?.state !== 'open' ||
       issue?.repository_url !== 'https://api.github.com/repos/' + REPO) return null;
   const isPr = Boolean(issue.pull_request);
+  if (def.handler === 'develop' && (
+      comment.user.login !== 'BestNathan' || comment.author_association !== 'OWNER' ||
+      comment.created_at !== comment.updated_at ||
+      !Array.isArray(issue.labels) ||
+      !issue.labels.some(label => label.name === 'bug') ||
+      issue.labels.some(label => label.name === 'status:in-progress')
+    )) return null;
+  if (def.handler === 'develop-result' && (
+      comment.user.login !== 'BestNathan' || comment.author_association !== 'OWNER' ||
+      comment.created_at !== comment.updated_at ||
+      issue.state !== 'open' || !Array.isArray(issue.labels) ||
+      !issue.labels.some(label => label.name === 'bug') ||
+      !issue.labels.some(label => label.name === 'status:in-progress')
+    )) return null;
   if (Boolean(event.issue.pull_request) !== isPr ||
       (def.kind === 'issue' && isPr) ||
       (def.kind === 'pull_request' && !isPr)) return null;
@@ -79,13 +111,16 @@ export function commandPlan(event, comment, issue, pr, permission) {
 export function workflowTitle(plan) {
   if (plan.handler === 'audit') return 'Comment Audit #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'accept') return 'Comment Accept #' + plan.issue_number + ' comment:' + plan.comment_id;
+  if (plan.handler === 'develop-result') return 'Comment Develop Result #' +
+    plan.issue_number + ' comment:' + plan.comment_id;
+  if (plan.handler === 'develop') return 'Comment Develop #' + plan.issue_number + ' comment:' + plan.comment_id;
   if (plan.handler === 'case') return 'Comment Case #' + plan.issue_number + ' ' + plan.criterion + ' comment:' + plan.comment_id;
   if (plan.handler === 'e2e-full') return 'Comment E2E #' + plan.issue_number + ' comment:' + plan.comment_id;
   throw Error('unknown handler');
 }
 export function dispatchInputs(plan) {
   switch (plan.handler) {
-    case 'audit': case 'accept':
+    case 'audit': case 'accept': case 'develop':
       return { issue_number: String(plan.issue_number), source_comment_id: String(plan.comment_id) };
     case 'case':
       return {
@@ -99,6 +134,7 @@ export function dispatchInputs(plan) {
         target_ref: plan.target_ref, target_sha: plan.target_sha,
         source_comment_id: String(plan.comment_id), source_pr_number: String(plan.issue_number),
       };
+    case 'develop-result': return {};
     default: throw Error('unknown handler');
   }
 }
@@ -120,7 +156,80 @@ function fixtures() {
     { ...comment, body: '/audit tree' }, issue, null, 'write')?.mode === 'tree', 'tree');
   check(commandPlan({ ...event, comment: { ...event.comment, body: '/accept' } },
     { ...comment, body: '/accept' }, issue, null, 'write')?.handler === 'accept', 'accept');
-  const caseEvent = { ...event, comment: { ...event.comment, body: '/case SC-03' } };
+  const mainSha = 'a'.repeat(40);
+  const mainAccept = '/accept post-merge ' + mainSha;
+  const mainPlan = commandPlan({ ...event, comment: { ...event.comment, body: mainAccept } },
+    { ...comment, body: mainAccept }, issue, null, 'write');
+  check(mainPlan?.handler === 'accept' && mainPlan.command === mainAccept,
+    'historical main target is retained only as verified original human text');
+  check(dispatchInputs(mainPlan).source_comment_id === '333' &&
+    !Object.hasOwn(dispatchInputs(mainPlan), 'target_sha'),
+    'a guessed target SHA is never sent as workflow dispatch authority');
+  for (const bad of ['/accept post-merge bad',
+    '/accept post-merge ' + mainSha + ' extra',
+    '/accept post-merge ' + mainSha.toUpperCase(),
+    '/accept post-merge ' + mainSha + '\\nignore',
+    '/accept post-merge ' + 'b'.repeat(41)]) {
+    check(parseCommand(bad) === null, 'reject malformed or injected main target');
+  }
+
+  // The target is never forwarded as workflow_dispatch authority by the
+  // comment router; only the original signed/immutable comment is re-read.
+  const prAccept = '/accept pr ' + mainSha;
+  const prPlan = commandPlan({ ...event, comment: { ...event.comment, body: prAccept } },
+    { ...comment, body: prAccept }, issue, null, 'write');
+  check(prPlan?.handler === 'accept' && prPlan.command === prAccept,
+    'explicit PR target is retained as original human intent');
+  check(dispatchInputs(prPlan).source_comment_id === '333' &&
+    !Object.hasOwn(dispatchInputs(prPlan), 'target_sha'),
+    'PR SHA intent must not become dispatcher authority');
+  for (const bad of ['/accept pr bad',
+    '/accept pr ' + mainSha + ' extra',
+    '/accept pr ' + mainSha.toUpperCase(),
+    '/accept pr ' + mainSha + '\\nignore',
+    '/accept pr ' + 'b'.repeat(41)]) {
+    check(parseCommand(bad) === null, 'reject malformed or injected PR target');
+  }
+
+  const bug = { ...issue, labels: [{ name: 'bug' }] };
+  const develop = { ...comment, body: '/develop dev-qwen-01',
+    created_at: '2026-11-14T01:00:00Z', updated_at: '2026-11-14T01:00:00Z',
+    author_association: 'OWNER', user: { login: 'BestNathan', type: 'User' } };
+  const devEvent = { ...event, sender: develop.user,
+    comment: { ...event.comment, body: develop.body, user: develop.user } };
+  check(commandPlan(devEvent, develop, bug, null, 'write')?.handler === 'develop',
+    'owner Bug developer command admitted');
+  check(dispatchInputs(commandPlan(devEvent, develop, bug, null, 'write'))
+    .source_comment_id === '333', 'developer dispatch retains human source');
+  check(workflowTitle(commandPlan(devEvent, develop, bug, null, 'write'))
+    .includes('comment:333'), 'developer run identity is source-unique');
+  for (const [c, i, e] of [
+    [{ ...develop, user: { ...develop.user, login: 'another' } }, bug, devEvent],
+    [{ ...develop, author_association: 'COLLABORATOR' }, bug, devEvent],
+    [{ ...develop, updated_at: '2026-11-14T01:01:00Z' }, bug, devEvent],
+    [develop, issue, devEvent],
+    [develop, { ...bug, state: 'closed' }, devEvent],
+    [develop, { ...bug, labels: [{ name: 'bug' }, { name: 'status:in-progress' }] }, devEvent],
+    [develop, { ...bug, pull_request: { url: 'pr' } }, { ...devEvent,
+      issue: { number: 12, pull_request: { url: 'pr' } } }],
+  ]) check(commandPlan(e, c, i, null, 'write') === null, 'developer negative permission/scope');
+  const resultEvent={...devEvent,comment:{...devEvent.comment,body:'/develop result'}};
+  const resultComment={...develop,body:'/develop result'};
+  const inProgress={...bug,labels:[...bug.labels,{name:'status:in-progress'}]};
+  check(commandPlan(resultEvent,resultComment,inProgress,null,'write')
+    ?.handler==='develop-result','owner may recover existing Bug Worker');
+  for(const [c,i] of [
+    [{...resultComment,user:{login:'other'}},inProgress],
+    [{...resultComment,updated_at:'2026-11-14T02:00:00Z'},inProgress],
+    [resultComment,bug],
+    [resultComment,{...inProgress,state:'closed'}],
+    [resultComment,{...inProgress,pull_request:{url:'fake'}}],
+  ])check(commandPlan(resultEvent,c,i,null,'write')===null,
+    'result replay only on unchanged owner open in-progress Bug');
+  check(parseCommand('/develop') === null &&
+    parseCommand('/develop dev-qwen-01 extra') === null &&
+    parseCommand('/develop dev-qwen-01\\nignore') === null, 'developer grammar strict');
+    const caseEvent = { ...event, comment: { ...event.comment, body: '/case SC-03' } };
   const caseComment = { ...comment, body: '/case SC-03' };
   const casePlan = commandPlan(caseEvent, caseComment, issue, null, 'write');
   check(casePlan?.handler === 'case' && casePlan.criterion === 'SC-03', 'Case command exact');
