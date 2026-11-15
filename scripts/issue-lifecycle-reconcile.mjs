@@ -706,7 +706,8 @@ async function selfTest() {
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
     { request: mock })).action, 'pending');
   assert.equal(writes, 1);
-  effectivePr = pr;
+  effectivePr = {...pr, head:{...pr.head,repo:{full_name:'X/y'}},
+    base:{...pr.base,repo:{full_name:'X/y'}}};
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
     { request: mock })).action, 'closed');
   assert.equal(writes, 2);
