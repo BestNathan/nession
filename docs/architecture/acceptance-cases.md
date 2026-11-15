@@ -110,8 +110,10 @@ independently verifies the original comment, Issue and immutable target
 record and trusted ingester receipt as other manual Cases, with no alternate
 Acceptance authority. Since GitHub suppresses recursive `workflow_run`
 from `GITHUB_TOKEN`-origin dispatches, a separate Cases job waits until
-both platform jobs have finished uploading artifacts and explicitly wakes the
-trusted ingester using only the source Run ID. The ingester re-fetches the
+both platform jobs have finished uploading artifacts and emits a
+default-branch-only `repository_dispatch` of type `nession-comment-case-ingest`
+carrying only the source Run ID; the privileged ingester does not offer an
+arbitrary-ref `workflow_dispatch`. The ingester re-fetches the
 GitHub-owned completed Run/Attempt and authenticates the comment and exact
 Case tree before any Store write; ordinary Case sources retain their native
 `workflow_run` ingestion. A comment acknowledgment is not a Case verdict.
