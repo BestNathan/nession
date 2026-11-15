@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43716872992,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/mcp-env-management",
+    "target_sha": "13ca0c1eac189e041d16c255ab94438a43375ff2",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43716872992",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "157d6e1cd8f369a5962033e7a299c85f1e4acb99875528b40bd01fc3967bd491"
+  },
+  "record": "runs/2026-11-15/43716872992-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "261a76272e87dcbaddc9c976f3db124c9e52bdd88180455c2abc457241b4f665"
+}
