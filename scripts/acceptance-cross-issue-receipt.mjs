@@ -8,6 +8,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { attestPrSmokeSource, caseIndexRecord, recordPath, sourceRunIdentity, validateCaseRecord } from './acceptance-case-ingest.mjs';
+import { buildAcceptanceContext } from './acceptance-executor.mjs';
+import { validateRunIndex } from './run-record-index-contract.mjs';
+import { extractSection, isAcceptanceIssue, parseAcceptanceReport } from './requirement-acceptance.mjs';
 
 const REPO = 'BestNathan/nession';
 const SHA = /^[0-9a-f]{40}$/;
@@ -26,6 +30,14 @@ export function pinnedCrossIssueAcceptance(body) {
       if (![issue,pr,run,attempt,e2eRun,e2eAttempt].every(Number.isSafeInteger))
         throw Error('historical Acceptance witness integer overflow');
       return {kind:'pre-merge',issue,sc:pre[2],pr,sha:pre[4],run,attempt,e2eRun,e2eAttempt};
+    }
+    // Source-aligned PR Cases use the immutable Case Store, not an Agent verdict.
+    const prCase = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); PR #([1-9]\d*) SHA ([0-9a-f]{40}); Case Run ([1-9]\d*) attempt ([1-9]\d*)$/);
+    if (prCase) {
+      const [issue,pr,run,attempt] = [prCase[1],prCase[3],prCase[5],prCase[6]].map(Number);
+      if (![issue,pr,run,attempt].every(Number.isSafeInteger))
+        throw Error('historical PR Case witness integer overflow');
+      return {kind:'pr-case',issue,sc:prCase[2],pr,sha:prCase[4],run,attempt};
     }
     // A staging witness names the historical source SHA explicitly. A later
     // staging execution must prove SHA ancestry using GitHub compare metadata;
