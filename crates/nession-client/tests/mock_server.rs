@@ -18,7 +18,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use nession_client::{ClientConfig, ClientConnection, ClientError, P2pConnection};
+use nession_client::{
+    ClientConfig, ClientConnection, ClientError, P2pConnection, RelayBeginOutcome,
+};
 use nession_protocol::contracts::agent::v1::AgentListReply;
 use nession_protocol::Message;
 use serde_json::{json, Value};
@@ -753,4 +755,155 @@ async fn a_close_mid_call_is_reported() {
     });
 
     server.unwrap();
+}
+
+// ── Relay begin ─────────────────────────────────────────────────────────────
+
+/// Only a receipt naming **this** begin request proves the relay is live, and
+/// anything that arrived before it is kept for replay.
+#[tokio::test]
+async fn relay_begin_accepts_only_its_own_receipt_and_keeps_earlier_frames() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let begin = next_request(&mut ws).await?;
+        assert_eq!(begin["msg_type"], "server.session.relay.begin");
+        let request_id = begin["id"].as_str().unwrap_or_default().to_string();
+
+        // Terminal output can precede the receipt; dropping it would lose the
+        // session's first bytes.
+        let terminal = Message::new(
+            "terminal.output",
+            "terminal-1",
+            0,
+            json!({ "data": "first bytes" }),
+        );
+        ws.send(WsMessage::Text(serde_json::to_string(&terminal)?))
+            .await?;
+
+        // A receipt for another begin cannot prove this one.
+        push(
+            &mut ws,
+            "server.session.relay.ready",
+            "ready-other",
+            json!({ "relay_request_id": "another-request" }),
+        )
+        .await?;
+
+        push(
+            &mut ws,
+            "server.session.relay.ready",
+            "ready-ours",
+            json!({ "relay_request_id": request_id }),
+        )
+        .await?;
+
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, outcome) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        client
+            .relay_begin("a1:work", 80, 24, Some(true))
+            .await
+            .expect("relay begin")
+    });
+
+    server.unwrap();
+    match outcome {
+        RelayBeginOutcome::Ready { buffered } => {
+            assert_eq!(buffered.len(), 2, "both earlier frames must be replayed");
+            assert_eq!(
+                serde_json::from_str::<Value>(&buffered[0]).unwrap()["msg_type"],
+                "terminal.output"
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(&buffered[1]).unwrap()["payload"]["relay_request_id"],
+                "another-request"
+            );
+        }
+        other => panic!("expected Ready, got {other:?}"),
+    }
+}
+
+/// A refusal travels with the sender's own sentence, in either envelope the
+/// canonical unit accepts.
+#[tokio::test]
+async fn relay_begin_reports_a_refusal() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let _ = next_request(&mut ws).await?;
+        push(
+            &mut ws,
+            "error",
+            "refusal",
+            json!({ "message": "the agent refused the relay" }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, outcome) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        client
+            .relay_begin("a1:work", 80, 24, Some(true))
+            .await
+            .expect("relay begin")
+    });
+
+    server.unwrap();
+    match outcome {
+        RelayBeginOutcome::Refused { message } => {
+            assert_eq!(message, "the agent refused the relay")
+        }
+        other => panic!("expected Refused, got {other:?}"),
+    }
+}
+
+/// The unit's own error reply is a refusal too, not buffered terminal traffic.
+#[tokio::test]
+async fn relay_begin_reports_the_units_own_refusal() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let _ = next_request(&mut ws).await?;
+        push(
+            &mut ws,
+            "server.session.relay.begin",
+            "refusal",
+            json!({ "status": "error", "message": "no relay route" }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, outcome) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        client
+            .relay_begin("a1:work", 80, 24, Some(true))
+            .await
+            .expect("relay begin")
+    });
+
+    server.unwrap();
+    match outcome {
+        RelayBeginOutcome::Refused { message } => assert_eq!(message, "no relay route"),
+        other => panic!("expected Refused, got {other:?}"),
+    }
 }

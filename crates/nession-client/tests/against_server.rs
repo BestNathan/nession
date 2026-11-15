@@ -16,6 +16,9 @@ use nession_client::{AttachMode, ClientConfig, ClientConnection, ClientError};
 use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
 use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRenameReply};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
+};
 use nession_protocol::contracts::session::v1::{ClientSessionAttachReply, ServerSessionListReply};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
@@ -217,5 +220,131 @@ async fn a_real_server_answers_info_force_list_rename_delete_and_preview() {
             .and_then(|value| value.as_str())
             .is_some(),
         "a missing Agent must be a refusal payload, not a transport error"
+    );
+}
+
+/// The Server-owned ENV file methods decode the replies the real handlers
+/// build: create-only, explicit overwrite, metadata listing without content,
+/// and an explicit read that returns the raw file.
+#[tokio::test]
+async fn a_real_server_answers_env_file_crud() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let listed = client.env_list().await.expect("env list");
+    assert!(
+        !listed.files.iter().any(|file| file.name == "fixture.env"),
+        "the fixture file must not exist before the test creates it"
+    );
+    assert!(listed.error.is_none(), "{:?}", listed.error);
+
+    let create = ClientEnvWritePayload {
+        name: "fixture.env".to_string(),
+        source: EnvSource::Server,
+        agent_id: None,
+        content: "FIXTURE_VALUE=one\n".to_string(),
+        overwrite: false,
+        force: false,
+    };
+    let created = client.env_write(create.clone()).await.expect("env write");
+    assert!(created.success, "{:?}", created.error);
+    assert!(!created.exists);
+
+    // The default is create-only: the second write is refused and says the
+    // file already exists rather than pretending it overwrote anything.
+    let refused = client.env_write(create).await.expect("create-only refusal");
+    assert!(!refused.success);
+    assert!(refused.exists, "the refusal must name the existing file");
+
+    let mut replace = ClientEnvWritePayload {
+        name: "fixture.env".to_string(),
+        source: EnvSource::Server,
+        agent_id: None,
+        content: "FIXTURE_VALUE=two\n".to_string(),
+        overwrite: true,
+        force: false,
+    };
+    let replaced = client.env_write(replace.clone()).await.expect("overwrite");
+    assert!(replaced.success, "{:?}", replaced.error);
+    replace.content = "FIXTURE_VALUE=three\n".to_string();
+    let replaced_again = client.env_write(replace).await.expect("forced overwrite");
+    assert!(replaced_again.success, "{:?}", replaced_again.error);
+
+    // Listing is metadata only; reading is the explicit operation that returns
+    // the file's bytes.
+    let listed = client.env_list().await.expect("env list");
+    let fixture: Vec<_> = listed
+        .files
+        .iter()
+        .filter(|file| file.name == "fixture.env")
+        .collect();
+    assert_eq!(fixture.len(), 1);
+    assert_eq!(fixture[0].source, EnvSource::Server);
+    assert_eq!(fixture[0].var_count, 1);
+
+    let read = client
+        .env_get(ClientEnvGetPayload {
+            name: "fixture.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        })
+        .await
+        .expect("env get");
+    assert!(read.success, "{:?}", read.error);
+    assert_eq!(read.content.as_deref(), Some("FIXTURE_VALUE=three\n"));
+    assert_eq!(read.in_use_by.as_deref(), Some(&[][..]));
+
+    let missing = client
+        .env_get(ClientEnvGetPayload {
+            name: "absent.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        })
+        .await
+        .expect("missing file is a refusal payload");
+    assert!(!missing.success);
+    assert!(missing.content.is_none());
+    assert!(missing.error.is_some(), "the refusal names the reason");
+
+    let invalid = client
+        .env_write(ClientEnvWritePayload {
+            name: "../escape.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            content: "A=1\n".to_string(),
+            overwrite: true,
+            force: true,
+        })
+        .await
+        .expect("invalid name is a refusal payload");
+    assert!(!invalid.success);
+    assert!(invalid.error.is_some(), "the refusal names the reason");
+
+    let deleted = client
+        .env_delete(ClientEnvDeletePayload {
+            name: "fixture.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            force: false,
+        })
+        .await
+        .expect("env delete");
+    assert!(deleted.success, "{:?}", deleted.error);
+
+    // Deleting an absent file is idempotent, matching the store's contract.
+    let deleted_again = client
+        .env_delete(ClientEnvDeletePayload {
+            name: "fixture.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            force: false,
+        })
+        .await
+        .expect("idempotent env delete");
+    assert!(deleted_again.success, "{:?}", deleted_again.error);
+
+    let listed = client.env_list().await.expect("env list after delete");
+    assert!(
+        !listed.files.iter().any(|file| file.name == "fixture.env"),
+        "the deleted file must not be listed"
     );
 }

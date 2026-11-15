@@ -531,7 +531,7 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 
     let session = initialize_with(mcp_addr, MCP_TOKEN).await;
     let tools = tools_of(mcp_addr, MCP_TOKEN).await;
-    assert_eq!(tools.as_array().expect("tools").len(), 4);
+    assert_eq!(tools.as_array().expect("tools").len(), 8);
 
     let agents = call_tool(
         mcp_addr,
@@ -698,7 +698,7 @@ async fn all_three_hosts_share_one_tool_catalog() {
     let agent_tools = tools_of(agent_addr, AGENT_TOKEN).await;
     let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
 
-    assert_eq!(server_tools.as_array().expect("tools").len(), 4);
+    assert_eq!(server_tools.as_array().expect("tools").len(), 8);
     let names: Vec<_> = server_tools
         .as_array()
         .expect("tools")
@@ -709,6 +709,10 @@ async fn all_three_hosts_share_one_tool_catalog() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_env_list",
+            "nession_server_env_get",
+            "nession_server_env_write",
+            "nession_server_env_delete",
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",

@@ -10,9 +10,9 @@
 //!   existing command broker. The Server host never creates a tmux Session
 //!   itself.
 //!
-//! Only four Tools exist: one Server-owned discovery Tool and three
-//! Agent-owned Session Tools. Removing an MCP projection did not remove any
-//! Protocol route.
+//! The Server-owned ENV operations use the existing Server route table, including
+//! its in-use and overwrite protections; Agent-owned Session tools still route
+//! to the Agent that owns the Session.
 
 use std::sync::Arc;
 
@@ -20,6 +20,9 @@ use nession_common::config::ServerConfig;
 use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::{McpService, ServiceConfig};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+};
 use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
 use serde_json::{json, Value};
@@ -123,6 +126,28 @@ async fn dispatch_with(
 impl ClusterBackend for ServerClusterBackend {
     async fn list_agents(&self) -> Result<Value, ToolError> {
         dispatch_with(self.handler.clone(), "server.agent.list", json!({})).await
+    }
+
+    async fn env_list(&self) -> Result<Value, ToolError> {
+        dispatch_with(self.handler.clone(), "server.env.list", json!({})).await
+    }
+
+    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(self.handler.clone(), "server.env.get", payload).await
+    }
+
+    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(self.handler.clone(), "server.env.write", payload).await
+    }
+
+    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(self.handler.clone(), "server.env.delete", payload).await
     }
 }
 

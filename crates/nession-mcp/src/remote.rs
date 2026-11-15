@@ -25,6 +25,9 @@
 use async_trait::async_trait;
 use nession_client::{AgentConnection, ClientConfig, ClientConnection, ClientError};
 use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRefusal};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+};
 use nession_protocol::contracts::session::v1::{ServerSessionListReply, SessionRefusal};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -82,6 +85,43 @@ impl ClusterBackend for RemoteClusterBackend {
                 Err(refusal_error(status, message))
             }
         }
+    }
+
+    async fn env_list(&self) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection.env_list().await.map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+    }
+
+    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .env_get(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+    }
+
+    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .env_write(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+    }
+
+    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .env_delete(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
     }
 }
 
