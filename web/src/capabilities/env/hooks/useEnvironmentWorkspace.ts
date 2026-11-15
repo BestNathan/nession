@@ -70,6 +70,15 @@ function notifyBindingResult(
   }
 }
 
+function refreshOnBindingRevisionConflict(
+  resp: { refusal?: string | null },
+  refresh: () => Promise<void>,
+): void {
+  if (resp.refusal === 'revision_conflict') {
+    void refresh();
+  }
+}
+
 function useSessionNavigation(screen: EnvironmentScreen, refresh: () => Promise<void>) {
   return useCallback(() => {
     screen.showSession();
@@ -125,10 +134,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       if (!isCurrentSession()) {
         return false;
       }
-      if (resp.refusal === 'revision_conflict') {
-        // Another writer advanced the binding; re-read only while this Session still owns the UI.
-        void refreshBinding();
-      }
+      refreshOnBindingRevisionConflict(resp, refreshBinding);
       notifyBindingResult(resp, 'Failed to update the Session binding');
       if (resp.binding) {
         // The Server answered with the resulting desired state, even when the
@@ -146,9 +152,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
     if (!isCurrentSession()) {
       return false;
     }
-    if (resp.refusal === 'revision_conflict') {
-      void refreshBinding();
-    }
+    refreshOnBindingRevisionConflict(resp, refreshBinding);
     notifyBindingResult(resp, 'Failed to reapply the Session binding');
     return resp.success;
   }, [binding, refreshBinding, isCurrentSession]);
