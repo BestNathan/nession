@@ -8,6 +8,8 @@ import {REVIEWER_PREMODEL_FAILURE as F,validateDevelopmentState,
   from './outbox.mjs';
 import {attestQwenRepairReconciliationIntent}
   from '../publisher/qwen-repair-intent.mjs';
+import {qwenRepairReviewerWakeAction}
+  from '../publisher/qwen-trusted-publisher.mjs';
 
 const A=F.source_sha,B='b'.repeat(40),REPO='BestNathan/nession';
 const repairId='bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856';
@@ -128,4 +130,17 @@ for(const change of [
   originalIntent,{...again,...change}),
   /Qwen Repair write-ahead/);
 
+// A recovery Publisher Run is not the immutable original PR writer.
+// Never send an automatically mismatched bot Publisher->Controller wake.
+// An authenticated Owner may dispatch the Store's exact pending Reviewer.
+const recoveredIntent={record:originalIntent};
+assert.equal(qwenRepairReviewerWakeAction(recoveredIntent,
+  originalIntent.publisher_run_id,repairId),repairId);
+assert.equal(qwenRepairReviewerWakeAction(recoveredIntent,
+  again.publisher_run_id,repairId),null);
+assert.equal(qwenRepairReviewerWakeAction(recoveredIntent,
+  again.publisher_run_id,null),null);
+for(const [run,action] of [[0,repairId],[again.publisher_run_id,'bad']])
+  assert.throws(()=>qwenRepairReviewerWakeAction(recoveredIntent,run,action),
+    /trusted Qwen Publisher Runner/);
 console.log('✓ signed Qwen Repair A->B: exact terminal Reviewer failure retained; active, forged, duplicate and unrelated Reviewer denied');
