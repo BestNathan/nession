@@ -9,6 +9,7 @@ import { validateAcceptancePlan, isProofEligible, deploymentProofEligible, canon
 import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
+import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
   collectPrWebQuality, collectPrToolingQuality,
@@ -268,6 +269,74 @@ function automatedRunId(evidence) {
   return match ? Number(match[1]) : null;
 }
 
+const SHA = /^[a-f0-9]{40}$/i;
+
+// Only trusted projected Pass/N/A receipts, paired with a checked SC, anchor
+// the accepted source. Human prose or an unaccepted Pending is not a lock.
+function acceptedPrSourceRef(criterion, row) {
+  if (!criterion?.checked || !['pass', 'n/a'].includes(String(row?.result || '').toLowerCase()))
+    return null;
+  return /^run [1-9]\d*; ref ([a-f0-9]{40}); source (?:agent(?:-[a-z0-9-]+)?|case-runner);/i
+    .exec(String(row?.evidence || ''))?.[1] ?? null;
+}
+
+// A newer Run ID is never sufficient proof to replace an authenticated SC
+// evaluated at a different PR head. The trusted updater supplies the actual
+// REST source-commit associations and compare metadata, not model prose.
+export function verifiedPrSourceSupersession(issueNumber, previous, next, proof) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next || !proof ||
+      proof.issue !== Number(issueNumber) || proof.previous !== previous ||
+      proof.next !== next || !/^[-\w.]+\/[-\w.]+$/.test(String(proof.repo || '')) ||
+      !isMainMergeAncestorOfStaging(previous, next, proof.comparison) ||
+      proof.comparison.ahead_by < 1 ||
+      !Array.isArray(proof.previous_pulls) || !Array.isArray(proof.next_pulls) ||
+      proof.previous_pulls.length >= 100 || proof.next_pulls.length >= 100)
+    return false;
+  const [owner, name] = proof.repo.split('/');
+  const valid = p => Number.isSafeInteger(p?.number) && p.number > 0 &&
+    p.head?.repo?.full_name === proof.repo &&
+    p.base?.repo?.full_name === proof.repo &&
+    ['main','staging'].includes(p.base?.ref) &&
+    explicitlyImplementsIssue(p, issueNumber, owner, name);
+  const predecessors = proof.previous_pulls.filter(valid);
+  const successors = proof.next_pulls.filter(p => valid(p) && p.head.sha === next);
+  return predecessors.some(old => successors.some(current =>
+    current.number === old.number ||
+    // Different PRs can explicitly supersede an original implementation,
+    // but they must also carry independently authenticated commit ancestry.
+    new RegExp('^\\s*Supersedes\\s+#' + old.number + '\\b', 'im')
+      .test(String(current.body || ''))));
+}
+
+function priorAcceptedPrRefs(body, normalized) {
+  if (stageOf(normalized.stage) !== 'pr') return [];
+  const contract = parseContract(body);
+  return (normalized.criteria || []).flatMap(({ criterion }) => {
+    const id = String(criterion || '').toUpperCase();
+    const previous = acceptedPrSourceRef(contract.criteria.get(id), contract.rows.get(id));
+    return previous && previous !== normalized.target_ref ? [previous] : [];
+  });
+}
+
+function githubEvidence(path) {
+  const raw = execFileSync('gh', ['api', path], { encoding: 'utf8', env: process.env });
+  return JSON.parse(raw);
+}
+
+function livePrSourceSupersession(issueNumber, previous, next) {
+  const repo = String(process.env.GITHUB_REPOSITORY || '');
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      !/^[-\w.]+\/[-\w.]+$/.test(repo)) return null;
+  const base = 'repos/' + repo;
+  return {
+    issue: Number(issueNumber), previous, next, repo,
+    comparison: githubEvidence(base + '/compare/' + previous + '...' + next),
+    previous_pulls: githubEvidence(base + '/commits/' + previous + '/pulls?per_page=100'),
+    next_pulls: githubEvidence(base + '/commits/' + next + '/pulls?per_page=100'),
+  };
+}
+
 function updateCheckboxes(body, resultMap) {
   return replaceSection(body, 'Success Criteria', (lines) => lines.map((line) => {
     const match = line.match(/^(\s*-\s+\[)[ xX](\]\s+(SC-\d{2,})\b.*)$/i);
@@ -375,6 +444,16 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   }
 
   for (const [id] of resultMap) {
+    if (stage === 'pr') {
+      const oldRef = acceptedPrSourceRef(contract.criteria.get(id), contract.rows.get(id));
+      if (oldRef && oldRef !== normalized.target_ref &&
+          !verifiedPrSourceSupersession(normalized.issue, oldRef,
+            normalized.target_ref, options.prSourceSupersession)) {
+        throw new Error(id + ' accepted PR source ' + oldRef +
+          ' cannot be overwritten by unrelated exact head ' + normalized.target_ref +
+          '; requires authenticated implementing PR supersession lineage');
+      }
+    }
     const previous = automatedRunId(contract.rows.get(id).evidence);
     if (previous != null && previous > runId &&
         !originalStagingPrRecovery(body, normalized, id, contract.rows.get(id).evidence, resultMap.get(id))) {
@@ -494,7 +573,14 @@ function applyCommand(issueNumber, resultFile) {
   // All other contract, provenance and result validation errors still fail.
   let updated;
   try {
-    updated = applyAcceptanceResultToBody(issue.body, normalized);
+    const conflicts = [...new Set(priorAcceptedPrRefs(issue.body, normalized))];
+    // One explicit source lineage proof may authorize multiple SCs anchored
+    // to the same prior head; multiple predecessors are ambiguous and rejected.
+    const proof = conflicts.length === 1
+      ? livePrSourceSupersession(issueNumber, conflicts[0], normalized.target_ref)
+      : null;
+    updated = applyAcceptanceResultToBody(issue.body, normalized,
+      { prSourceSupersession: proof });
   } catch (error) {
     if (isSupersededRunError(error)) {
       console.log('superseded acceptance run ' + normalized.run_id + ' for requirement #' + issueNumber + '; newer Issue evidence preserved');
@@ -712,6 +798,53 @@ function selfTest() {
     ci_evidence:{authenticated_issue_audit_repair_readback:tampered}},
     uncertain).criteria[0].result,'Pending');
 
+  // #3545: a later read-only Agent on tooling PR #3540 cannot downgrade the
+  // already accepted implementation PR #3529, even with a larger run ID.
+  const hostingHead = '7c7d36f9456d901d252abcfbbe5d2a991f202ba7';
+  const toolingHead = '06857762ece34cf9cbcd50c21454470ed39456f1';
+  const prBody = fixtureBody()
+    .replace('staging | Pending', 'pr | Pending')
+    .replace('staging | Pass', 'pr | Pass');
+  const prIssue = { ...issue, body: prBody };
+  const first = normalizeAcceptanceResult(buildAcceptanceContext(prIssue, 'pr',
+    {targetRef: hostingHead,runId: 43607237629}), {
+    criteria:[{criterion:'SC-01',result:'Pass',
+      evidence:'test: exact-head source aligned Web acceptance'}]}, 'agent-qwen');
+  const accepted = applyAcceptanceResultToBody(prBody, first);
+  const later = normalizeAcceptanceResult(buildAcceptanceContext(prIssue, 'pr',
+    {targetRef: toolingHead,runId: 43611457037}), {
+    criteria:[{criterion:'SC-01',result:'Fail',evidence:'test: unrelated source'}]},
+  'agent-qwen');
+  assert.throws(()=>applyAcceptanceResultToBody(accepted,later),
+    /accepted PR source .* cannot be overwritten/);
+  const properRetry = normalizeAcceptanceResult(buildAcceptanceContext(prIssue, 'pr',
+    {targetRef: hostingHead,runId: 43611749900}), {
+    criteria:[{criterion:'SC-01',result:'Pass',evidence:'test: recovered exact-head check'}]},
+  'agent-qwen');
+  assert.match(applyAcceptanceResultToBody(accepted,properRetry),/run 43611749900/);
+  const sourcePr=(number,sha,body='Fixes #1360')=>({
+    number,body,title:'fix (#1360)',head:{sha,repo:{full_name:'BestNathan/nession'}},
+    base:{ref:'staging',repo:{full_name:'BestNathan/nession'}}});
+  const compare={status:'ahead',ahead_by:1,behind_by:0,
+    base_commit:{sha:hostingHead},merge_base_commit:{sha:hostingHead}};
+  const proof={issue:1360,previous:hostingHead,next:toolingHead,
+    repo:'BestNathan/nession',comparison:compare,
+    previous_pulls:[sourcePr(3529,hostingHead)],
+    next_pulls:[sourcePr(3540,toolingHead)]};
+  assert.equal(verifiedPrSourceSupersession(1360,hostingHead,toolingHead,proof),false,
+    'a later implementing PR must explicitly supersede the original');
+  const successor={...sourcePr(3540,toolingHead,'Fixes #1360\nSupersedes #3529')};
+  assert.equal(verifiedPrSourceSupersession(1360,hostingHead,toolingHead,
+    {...proof,next_pulls:[successor]}),true);
+  assert.match(applyAcceptanceResultToBody(accepted,later,
+    {prSourceSupersession:{...proof,next_pulls:[successor]}}),/run 43611457037/);
+  for(const bad of [
+    {...proof,comparison:{...compare,behind_by:1},next_pulls:[successor]},
+    {...proof,next_pulls:[{...successor,body:'Refs #1360\nSupersedes #3529',
+      title:'tooling (#3479)'}]},
+    {...proof,previous_pulls:[],next_pulls:[successor]},
+    {...proof,next_pulls:[successor],issue:1361},
+  ]) assert.equal(verifiedPrSourceSupersession(1360,hostingHead,toolingHead,bad),false);
   const newer = passedBody.replace('run 100; ref abc123;', 'run 200; ref newer;');
   assert.throws(() => applyAcceptanceResultToBody(newer, pass), /newer acceptance run 200/);
   assert.equal(isSupersededRunError(new Error('SC-01 has newer acceptance run 200; refusing stale run 100')), true);
