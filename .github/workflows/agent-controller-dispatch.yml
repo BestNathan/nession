@@ -76,6 +76,12 @@ jobs:
          github.event.comment.body == '/nession recover-review-preflight issue=3433 run=43667393107') ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         startsWith(github.event.comment.body, '/nession dispatch-repair issue=')) ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
          github.event.issue.number == 1997 &&
          github.event.comment.user.login == 'BestNathan' &&
          (github.event.comment.body == '/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae' ||
