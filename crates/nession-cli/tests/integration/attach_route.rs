@@ -759,13 +759,13 @@ async fn sc02_forced_relay_does_not_attempt_p2p() {
 
     let server = TestServer::start().await;
     let agent = TestAgent::start(agent_id).await;
-    // Nothing is refused: any direct CLI dial would be visible as a count above
-    // the Server's single relay dial.
+    // #3584: one valid Relay endpoint makes this a route-policy assertion.
+    // With two candidates, the Server may legitimately retry a second relay
+    // URL after a failed first dial, which must not count as CLI P2P traffic.
+    // Multi-candidate fallback has separate tests above; with one endpoint,
+    // any extra WebSocket upgrade here is an unexpected direct client dial.
     let proxy = refuse_direct_dials(agent.addr, 0).await;
-    let addresses = vec![
-        agent_address(&format!("ws://{}/ws-a", proxy.addr), 1),
-        agent_address(&format!("ws://{}/ws-b", proxy.addr), 2),
-    ];
+    let addresses = vec![agent_address(&format!("ws://{}/ws", proxy.addr), 1)];
     let handle = register_agent(&server, &agent, agent_id, addresses).await;
     let sync = start_sync(&handle);
 
