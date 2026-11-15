@@ -14,10 +14,7 @@ const bindingHook = vi.hoisted(() => ({
 
 vi.mock('@/capabilities/env/hooks/useSessionEnvBinding', () => bindingHook);
 
-vi.mock('@/capabilities/env', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/capabilities/env')>()),
-  envApi,
-}));
+vi.mock('@/capabilities/env/envApi', () => ({ envApi }));
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },

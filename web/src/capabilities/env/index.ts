@@ -1,4 +1,3 @@
-import { EnvPlugin } from './EnvPlugin';
 export { EnvPlugin } from './EnvPlugin';
 export type {
   ActiveEnvFile,
@@ -18,8 +17,13 @@ export type {
   SessionEnvResponse,
 } from './types';
 
-/** App-level singleton — one env binding per WebSocketService lifetime. */
-export const envApi = new EnvPlugin();
+/**
+ * App-level singleton — one env binding per WebSocketService lifetime.
+ *
+ * Defined in `envApi.ts` so capability hooks can use it without importing
+ * this barrel.
+ */
+export { envApi } from './envApi';
 
 // The presentation half of the capability, for the surfaces that compose it —
 // the Attach/Create dialogs offer env files, the Workspace views render the
@@ -37,6 +41,10 @@ export { SessionEnvironmentView } from './components/SessionEnvironmentView';
 export { SessionEnvironmentSummary } from './components/SessionEnvironmentSummary';
 export { EnvImportDialog } from './components/EnvImportDialog';
 export { EnvironmentGuardDialog } from './components/EnvironmentGuardDialog';
+export {
+  useEnvironmentProfiles,
+  type EnvironmentProfiles,
+} from './hooks/useEnvironmentProfiles';
 export {
   useEnvironmentWorkspace,
   type EnvironmentWorkspace,

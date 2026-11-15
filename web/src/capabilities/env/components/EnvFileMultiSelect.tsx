@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Check, Search, FileText } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, FileText, Search, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,123 @@ interface EnvFileMultiSelectProps {
    */
   listClassName?: string;
   scroll?: boolean;
+  /**
+   * Render the selection as an ordered list above the picker (#3649).
+   *
+   * The selection order is semantic — later files win — so a consumer that
+   * declares an ordered reference list needs move controls, not just the
+   * picker's insertion order. A selected ref absent from `files` stays in the
+   * list and is marked missing rather than silently dropped.
+   */
+  reorderable?: boolean;
+  /**
+   * Whether `files` is a successfully read catalog (#3649). When false, a
+   * selected ref that is absent from `files` is not reported as missing: an
+   * unavailable read is unknown, not evidence that the file is gone.
+   */
+  catalogReady?: boolean;
+}
+
+function SelectedOrder({
+  selected,
+  files,
+  catalogReady,
+  disabled,
+  onChange,
+}: {
+  selected: EnvFileRef[];
+  files: EnvFileInfo[];
+  catalogReady: boolean;
+  disabled?: boolean;
+  onChange: (selected: EnvFileRef[]) => void;
+}) {
+  const move = (index: number, delta: number) => {
+    const target = index + delta;
+    const next = [...selected];
+    const [item] = next.splice(index, 1);
+    next.splice(target, 0, item);
+    onChange(next);
+  };
+  const missing = catalogReady
+    ? selected.filter((ref) => !files.some((file) => refKey(file) === refKey(ref)))
+    : [];
+
+  return (
+    <div className="flex flex-col gap-2">
+      <ol
+        data-testid="env-selected-order"
+        className="divide-y divide-border rounded-[var(--nession-radius-surface)] border"
+      >
+        {selected.map((ref, index) => (
+          <li
+            key={refKey(ref)}
+            data-testid={`env-selected-${refKey(ref)}`}
+            className="flex items-center gap-2 px-2 py-1.5"
+          >
+            <span className={cn('w-5 shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>
+              {index + 1}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className={cn('block truncate', chromeSansRole('primary'))}
+                title={ref.name}
+              >
+                {ref.name}
+              </span>
+              <span className={cn('block truncate text-muted-foreground', chromeSansRole('metadata'))}>
+                {sourceLabel(ref)}
+                {missing.some((candidate) => refKey(candidate) === refKey(ref))
+                  ? ' · missing'
+                  : ''}
+              </span>
+            </span>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Move ${ref.name} earlier`}
+              data-testid={`env-selected-up-${refKey(ref)}`}
+              disabled={disabled || index === 0}
+              onClick={() => move(index, -1)}
+            >
+              <ArrowUp className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Move ${ref.name} later`}
+              data-testid={`env-selected-down-${refKey(ref)}`}
+              disabled={disabled || index === selected.length - 1}
+              onClick={() => move(index, 1)}
+            >
+              <ArrowDown className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Remove ${ref.name}`}
+              data-testid={`env-selected-remove-${refKey(ref)}`}
+              disabled={disabled}
+              onClick={() => onChange(selected.filter((_, i) => i !== index))}
+            >
+              <X className="size-3.5" />
+            </Button>
+          </li>
+        ))}
+      </ol>
+      {missing.length > 0 ? (
+        <p
+          data-testid="env-selected-missing"
+          className={cn('text-destructive', chromeSansRole('caption'))}
+        >
+          Not in the ENV Library: {missing.map((ref) => ref.name).join(', ')}. A Session
+          cannot inherit a missing file.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -38,6 +156,8 @@ export function EnvFileMultiSelect({
   emptyLabel = 'No env files available',
   listClassName = 'h-40',
   scroll = true,
+  reorderable = false,
+  catalogReady = true,
 }: EnvFileMultiSelectProps) {
   const [query, setQuery] = useState('');
 
@@ -63,6 +183,15 @@ export function EnvFileMultiSelect({
 
   return (
     <div className="flex flex-col gap-2">
+      {reorderable && selected.length > 0 ? (
+        <SelectedOrder
+          selected={selected}
+          files={files}
+          catalogReady={catalogReady}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      ) : null}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
         <Input
@@ -83,7 +212,7 @@ export function EnvFileMultiSelect({
         scroll={scroll}
         listClassName={listClassName}
       />
-      {selected.length > 0 && (
+      {selected.length > 0 && !reorderable && (
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {selected.length} file{selected.length !== 1 ? 's' : ''} selected
         </p>

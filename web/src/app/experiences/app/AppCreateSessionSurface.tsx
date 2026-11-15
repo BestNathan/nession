@@ -9,6 +9,12 @@ import { Label } from '@/components/ui/label';
 import { EnvFileMultiSelect } from '@/capabilities/env';
 import type { Agent, EnvFileRef } from '@/types';
 import { useCreateSessionForm } from '@/product/session/hooks/useCreateSessionForm';
+import {
+  ENV_MODE_LABEL,
+  ENV_MODE_OPTIONS,
+  ENV_ORIGIN_LABEL,
+  type CreateEnvSelectionMode,
+} from '@/product/session/model/envSelection';
 import type { Project, ProjectLocation } from '@/product/project/types';
 import { ProjectLocationDetails } from '@/product/session/components/CreateSessionParts';
 import { AppOperationPage } from './AppOperationPage';
@@ -124,23 +130,143 @@ function AppCreateAgentPage({
   );
 }
 
-function AppCreateEnvPage({ form, onBack }: { form: CreateForm; onBack: () => void }) {
+function AppEnvModeChoice({
+  value,
+  title,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  value: CreateEnvSelectionMode;
+  title: string;
+  description: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: (value: CreateEnvSelectionMode) => void;
+}) {
+  return (
+    <label
+      data-testid={`app-env-mode-${value}`}
+      className={cn(
+        'flex min-h-11 cursor-pointer items-start gap-3 rounded-[var(--nession-radius-surface)] border px-3 py-2 text-left',
+        selected ? 'border-primary bg-primary/10' : 'border-input',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <input
+        type="radio"
+        name="app-env-selection-mode"
+        value={value}
+        checked={selected}
+        disabled={disabled}
+        onChange={() => onSelect(value)}
+        className="mt-1 size-4 accent-primary"
+      />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className={bodyAppClass}>{title}</span>
+        <span className={secondaryAppClass}>{description}</span>
+      </span>
+    </label>
+  );
+}
+
+/** The effective selection on App, at a touch-friendly density (#3649). */
+function AppEffectiveEnvPreview({ form }: { form: CreateForm }) {
+  const { effectiveEnv, unavailableEnv } = form;
+  return (
+    <div
+      data-testid="app-env-effective-preview"
+      className="flex flex-col gap-1 rounded-[var(--nession-radius-surface)] border px-3 py-2"
+    >
+      <span className={cn('text-muted-foreground', secondaryAppClass)}>
+        Effective Session environment · {ENV_ORIGIN_LABEL[effectiveEnv.origin]}
+      </span>
+      {effectiveEnv.refs.length === 0 ? (
+        <span data-testid="app-env-effective-empty" className={bodyAppClass}>
+          No ENV files will be bound.
+        </span>
+      ) : (
+        <ol data-testid="app-env-effective-list" className="flex flex-col gap-0.5">
+          {effectiveEnv.refs.map((ref, index) => (
+            <li
+              key={`${ref.name}-${index}`}
+              data-testid={`app-env-effective-item-${index}`}
+              className={cn('flex min-w-0 items-baseline gap-1.5', bodyAppClass)}
+            >
+              <span className="w-4 shrink-0 text-muted-foreground">{index + 1}.</span>
+              <span className="min-w-0 break-words">{ref.name}</span>
+              {unavailableEnv.some((candidate) => candidate.name === ref.name) ? (
+                <span className="shrink-0 text-destructive">missing</span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function AppCreateEnvPage({
+  form,
+  project,
+  onBack,
+}: {
+  form: CreateForm;
+  project?: Project | null;
+  onBack: () => void;
+}) {
   return (
     <AppOperationPage
       testId="app-create-env-page"
-      title="Environment files"
+      title={project ? 'Environment' : 'Environment files'}
       backLabel="New Session"
       onBack={onBack}
       footer={<DoneButton testId="app-create-env-done" onClick={onBack} />}
     >
-      <EnvFileMultiSelect
-        files={form.envFiles}
-        selected={form.selectedEnv}
-        onChange={(selected: EnvFileRef[]) => form.setSelectedEnv(selected)}
-        disabled={form.loading}
-        emptyLabel="No env files — create one in Env Files"
-        scroll={false}
-      />
+      {project ? (
+        <div className="flex flex-col gap-[var(--nession-shell-space-3)]">
+          <div
+            role="radiogroup"
+            aria-label="Session environment selection"
+            className="flex flex-col gap-2"
+          >
+            {ENV_MODE_OPTIONS.map((option) => (
+              <AppEnvModeChoice
+                key={option.value}
+                value={option.value}
+                title={option.title}
+                description={option.description}
+                selected={form.envSelectionMode === option.value}
+                disabled={form.loading}
+                onSelect={form.setEnvSelectionMode}
+              />
+            ))}
+          </div>
+          <AppEffectiveEnvPreview form={form} />
+          {form.envSelectionMode === 'custom' ? (
+            <EnvFileMultiSelect
+              files={form.envFiles}
+              selected={form.selectedEnv}
+              onChange={(selected: EnvFileRef[]) => form.setSelectedEnv(selected)}
+              disabled={form.loading}
+              emptyLabel="No env files — create one in Env Files"
+              scroll={false}
+              reorderable
+              catalogReady={form.envCatalogState === 'ready'}
+            />
+          ) : null}
+        </div>
+      ) : (
+        <EnvFileMultiSelect
+          files={form.envFiles}
+          selected={form.selectedEnv}
+          onChange={(selected: EnvFileRef[]) => form.setSelectedEnv(selected)}
+          disabled={form.loading}
+          emptyLabel="No env files — create one in Env Files"
+          scroll={false}
+        />
+      )}
     </AppOperationPage>
   );
 }
@@ -186,9 +312,15 @@ function AppCreateFields({
   const selectedAgent = form.selectedLocation
     ? agents.find((agent) => agent.agent_id === form.selectedLocation?.agent_id)
     : undefined;
-  const envSummary = form.selectedEnv.length > 0
-    ? form.selectedEnv.map((ref) => ref.name).join(', ')
-    : 'Optional · None selected';
+  const envSummary = project
+    ? `${ENV_MODE_LABEL[form.envSelectionMode]} · ${
+        form.effectiveEnv.refs.length === 0
+          ? 'No ENV'
+          : form.effectiveEnv.refs.map((ref) => ref.name).join(', ')
+      }${form.unavailableEnv.length > 0 ? ' · missing file' : ''}`
+    : form.selectedEnv.length > 0
+      ? form.selectedEnv.map((ref) => ref.name).join(', ')
+      : 'Optional · None selected';
 
   return (
     <form
@@ -259,10 +391,12 @@ function AppCreateFields({
       )}
       <ChooseRow
         testId="app-session-env"
-        label="Environment files"
+        label={project ? 'Environment' : 'Environment files'}
         value={
           <span className="flex min-w-0 flex-col gap-0.5">
-            <span className={bodyAppClass}>Environment files</span>
+            <span className={bodyAppClass}>
+              {project ? 'Environment' : 'Environment files'}
+            </span>
             <span className={cn('break-words text-muted-foreground', secondaryAppClass)}>
               {envSummary}
             </span>
@@ -369,7 +503,13 @@ export function AppCreateSessionSurface({
     return <AppCreateAgentPage form={form} onBack={() => setPhase('form')} />;
   }
   if (phase === 'env') {
-    return <AppCreateEnvPage form={form} onBack={() => setPhase('form')} />;
+    return (
+      <AppCreateEnvPage
+        form={form}
+        project={project}
+        onBack={() => setPhase('form')}
+      />
+    );
   }
   return (
     <AppCreateFormPage
