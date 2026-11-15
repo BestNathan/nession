@@ -656,9 +656,17 @@ try {
     repairWalIntent.store_commit_sha);
   const walLocation=qwenRepairPublisherIntentPath(repairWalIntent.record);
   assert.match(walLocation,/^workflows\/issues\/[0-9]+\/results\/[0-9]+-1-[a-f0-9]{64}\.json$/);
-  assert.throws(()=>commitQwenRepairPublisherIntent({
-    remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun+1}),
-    /conflicting immutable/);
+  // A later trusted Publisher Run may reconcile the ORIGINAL committed
+  // Intent after PR-B was written but Store state CAS failed. It must reuse
+  // the old publisher_run_id and remain strictly GET-only, never mint a
+  // second writer grant or replace the original immutable record.
+  const laterReconciler=commitQwenRepairPublisherIntent({
+    remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun+1});
+  assert.equal(laterReconciler.status,'reconcile');
+  assert.equal(laterReconciler.may_publish,false);
+  assert.equal(laterReconciler.record.publisher_run_id,repairPublisherRun);
+  assert.equal(laterReconciler.store_commit_sha,
+    repairWalIntent.store_commit_sha);
   const materialized=materializeQwenRepairGitTree({
     preflight:repairPreflight,intent:repairWalIntent,sourceCheckout:repairPubCheckout});
   const repairBlob=git(repairSource,'rev-parse',shaB+':calc.js');
@@ -727,7 +735,7 @@ try {
     'POST:git/blobs','POST:git/trees','POST:git/commits',
     'PATCH:git/refs/heads/'+branch]);
   const repairReadback=await readBackQwenRepairPR({
-    preflight:repairPreflight,intent:repairIntentReplay,
+    preflight:repairPreflight,intent:laterReconciler,
     sourceCheckout:repairPubCheckout,api:repairApi});
   assert.deepEqual(repairReadback,repairPR);
   assert.equal(repairMutations.length,4,
@@ -800,7 +808,7 @@ try {
   // The real Store publisher handoff consumes only independently checked
   // GitHub PR-B receipt + committed WAL. It CAS-projects one Reviewer.
   const repairHandoff=applyQwenRepairPublicationToRemote({
-    remote,readback:repairReadback,intent:repairWalIntent,registry});
+    remote,readback:repairReadback,intent:laterReconciler,registry});
   assert.equal(repairHandoff.changed,true);
   assert.equal(repairHandoff.reviewer_agent_id,'review-qwen-01');
   assert.equal(repairHandoff.reviewer_action_id,nextReview[0].id);
