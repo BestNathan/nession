@@ -22,7 +22,7 @@ export function renderMcpDocuments(root,data){
   root.append(el('div','NESSION / DOCUMENTS / MCP','eyebrow'),
     el('h1','MCP Tools','documents-heading'),
     el('p','Current MCP capabilities exported from the registered Rust Tool handlers at a pinned Nession main revision. This is a source catalog, not a live endpoint.','documents-lede'));
-  const back=el('a','← Protocol reference','documents-back');
+  const back=el('a','← Protocol reference','documents-mcp-back');
   back.href='#/documents';root.append(back);
   if(!validMcpSnapshot(data)){
     root.append(el('p','MCP catalog unavailable; no supported Tool count can be inferred.','documents-unavailable'));
