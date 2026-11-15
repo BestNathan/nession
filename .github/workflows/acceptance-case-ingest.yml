@@ -1,5 +1,4 @@
 name: Acceptance / Case Ingest
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('Comment Case Ingest source:{0}', inputs.source_run_id) || github.workflow }}
 
 on:
   workflow_dispatch:
