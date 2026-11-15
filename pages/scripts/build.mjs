@@ -15,7 +15,7 @@ import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
 import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
 import {createHash} from 'node:crypto';
-import {mcpSemanticDigest} from './mcp-semantic.mjs';
+import {reconcileMcpPublication} from './mcp-reconcile.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -214,13 +214,22 @@ if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
     ['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'],
     {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
   const parsed=JSON.parse(stdout);
-  if(parsed.schema_version!==1||!Array.isArray(parsed.tools)||
-    !parsed.tools.length||parsed.tools.length>256||
-    !parsed.tools.every(t=>typeof t.name==='string'&&
-      typeof t.description==='string'&&t.inputSchema?.type==='object'))
-    throw Error('Invalid canonical MCP Tool catalog');
-  mcp={...parsed,semantic_sha256:mcpSemanticDigest(parsed),status:'available',
-    source:{repository:repo,branch:'main',sha:mainSha}};
+  if(parsed.schema_version!==1)throw Error('Unexpected MCP exporter schema version');
+  const prevFile=process.env.PAGES_MCP_PREVIOUS_FILE;
+  const publication=process.env.PAGES_MCP_RECONCILE==='1';
+  if(publication&&!prevFile&&process.env.PAGES_MCP_BOOTSTRAP!=='1')
+    throw Error('MCP last-good publication state not checked');
+  let previous=null;
+  if(prevFile){
+    const stat=await (await import('node:fs/promises')).lstat(prevFile);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>2_000_000||stat.size<10)
+      throw Error('Invalid last-good MCP publication file');
+    previous=JSON.parse(await readFile(prevFile,'utf8'));
+  }
+  const reconciled=reconcileMcpPublication({catalog:parsed,mainSha,previous});
+  mcp=reconciled.document;
+  console.log('MCP document reconciliation:',reconciled.reason,mcp.semantic_sha256);
+
 }
 
 const selectedIssueNumbers=Array.isArray(issues)?issues
