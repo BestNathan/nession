@@ -373,6 +373,14 @@ async fn a_real_server_answers_session_env_binding_state_and_conflicts() {
     assert_eq!(binding.session_id, session_id);
     assert_eq!(binding.desired_revision, 0);
     assert!(binding.desired_profiles.is_empty());
+    assert!(
+        binding
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("observed state")),
+        "an unreachable Agent must be stated instead of implied as converged: {:?}",
+        binding.error
+    );
 
     // `set` requires a live Session. The Server's own refusal travels, and it
     // is not a revision conflict.

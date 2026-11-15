@@ -187,6 +187,11 @@ materialized revision is on tmux and waiting for the shell's next prompt;
 tmux failure. A child process already running when the binding changes keeps
 its original environment — this is the honest contract.
 
+When the Agent cannot be asked for the observed half, the state carries an
+`error` naming that failed observation alongside the desired side (and the
+last cached observed state, when there is one). No `in_sync` or other
+convergence status is synthesized from the desired revision alone.
+
 ## Reconnect and migration
 
 - An Agent restart or reconnect reports every recorded observed state; the

@@ -945,7 +945,18 @@ impl ConnectionHandler {
                 }
                 observed
             }
-            Err(_) => self.env_service.observed.get(session_id),
+            Err(query_error) => {
+                // The observed half is the Agent's claim. When it cannot be
+                // asked, say so in the state rather than presenting the last
+                // cache (or its absence) as a confirmed convergence.
+                let suffix =
+                    format!("the Agent could not report the observed state: {query_error}");
+                state_error = Some(match state_error {
+                    Some(existing) => format!("{existing}; {suffix}"),
+                    None => suffix,
+                });
+                self.env_service.observed.get(session_id)
+            }
         };
 
         let mut state = self.binding_state(record, observed, state_error.clone());
