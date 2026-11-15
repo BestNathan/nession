@@ -1776,6 +1776,7 @@ async function main() {
     fs.writeFileSync(output, JSON.stringify(resolved.event) + '\n', { flag: 'wx' });
     process.stdout.write(JSON.stringify({
       run_id: resolved.source.run_id, run_attempt: resolved.source.run_attempt,
+      source_kind: resolved.source.source_kind ?? 'merged-case',
       source_conclusion: resolved.event.workflow_run.conclusion,
       source_url: 'https://github.com/' + resolved.source.repository +
         '/actions/runs/' + resolved.source.run_id,
