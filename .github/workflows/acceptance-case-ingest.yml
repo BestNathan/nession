@@ -6,7 +6,7 @@ on:
   workflow_run:
     # Native push and owner-manual Cases keep the static source name.
     # GITHUB_TOKEN comment Cases are explicitly woken by their source Run job.
-    workflows: ["Acceptance / Cases"]
+    workflows: ["Acceptance / Cases", "Acceptance / Case Smoke"]
     types: [completed]
 
 permissions:
@@ -60,7 +60,7 @@ jobs:
           node trusted/scripts/acceptance-case-ingest.mjs prepare-event \
             "$GITHUB_EVENT_PATH" "${RUNNER_TEMP}/case-source-event.json" \
             > "${RUNNER_TEMP}/case-source-metadata.json"
-          for field in run_id run_attempt source_url source_conclusion; do
+          for field in run_id run_attempt source_url source_conclusion source_kind; do
             echo "${field}=$(jq -er ".${field}" "${RUNNER_TEMP}/case-source-metadata.json")" >> "$GITHUB_OUTPUT"
           done
 
@@ -69,12 +69,22 @@ jobs:
         run: |
           ./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-case-ingest-selftest
 
-      - name: Download source Case results
+      - name: Download merged branch Case results
+        if: steps.source.outputs.source_kind != 'pr-smoke'
         uses: actions/download-artifact@v4
         with:
           # The Linux and macOS jobs publish separate artifacts in one run.
           pattern: acceptance-case-results-*
           merge-multiple: true
+          path: incoming
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.source.outputs.run_id }}
+
+      - name: Download exact Run/Attempt PR Case Smoke artifact
+        if: steps.source.outputs.source_kind == 'pr-smoke'
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-case-smoke-${{ steps.source.outputs.run_id }}-${{ steps.source.outputs.run_attempt }}
           path: incoming
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.source.outputs.run_id }}
