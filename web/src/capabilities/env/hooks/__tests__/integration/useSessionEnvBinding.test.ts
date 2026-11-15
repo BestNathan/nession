@@ -8,10 +8,7 @@ const envApi = vi.hoisted(() => ({
   reapplySessionEnvBinding: vi.fn(),
 }));
 
-vi.mock('@/capabilities/env', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/capabilities/env')>()),
-  envApi,
-}));
+vi.mock('@/capabilities/env/envApi', () => ({ envApi }));
 
 import { useSessionEnvBinding } from '@/capabilities/env/hooks/useSessionEnvBinding';
 

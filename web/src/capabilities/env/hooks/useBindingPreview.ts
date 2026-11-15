@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { EnvFileRef } from '@/types';
-import { envApi } from '@/capabilities/env';
+import { envApi } from '../envApi';
 import { refKey } from '@/capabilities/env/model/envRef';
 import {
   changedKeys,

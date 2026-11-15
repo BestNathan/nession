@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { envApi } from '@/capabilities/env';
+import { envApi } from '../envApi';
 import type { EnvFileRef } from '@/types';
 import type {
   SessionEnvBindingResponse,

@@ -30,6 +30,30 @@ Session
 
 An empty binding is a valid state: desired revision 0, no profiles, no overlay.
 
+## Create-time selection (#3649)
+
+`server.session.create` carries an optional `env_selection_mode` that states
+whether the request's `env_files` are an explicit replacement or an inheritance
+request:
+
+| Mode | Meaning |
+|---|---|
+| absent | Legacy: non-empty `env_files` replaces; empty `env_files` inherits the named Project's defaults |
+| `inherit` | Resolve the Project's ordered `session_defaults.env_profile_ids`; an explicit `env_files` selection is refused |
+| `replace` | Use `env_files` exactly, including `[]` — the explicit "No environment" choice |
+
+Project defaults are Server ENV references. Resolution, snapshot capture and
+validation happen at create time through the same `resolve_snapshots` path; an
+unsupported mode, an `inherit` without a Project, or a reference the ENV
+Library no longer contains refuses the create. There is no fallback to an empty
+or different environment.
+
+The resolved selection becomes the Session-owned desired binding only after the
+create succeeds (or on the documented ambiguous-create recovery). The Project
+declaration is not consulted again: editing defaults later affects future
+Sessions only, and an existing Session changes only through its own binding
+`set` / `reapply` units.
+
 ## Protocol units
 
 | Unit | Owner | Semantics |

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { EnvFileInfo, EnvFileRef, EnvWriteResponse } from '@/types';
-import { envApi } from '@/capabilities/env';
+import { envApi } from '../envApi';
 import { refKey, toRef } from '@/capabilities/env/model/envRef';
 import {
   useEnvironmentProfiles,

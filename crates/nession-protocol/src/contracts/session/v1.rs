@@ -223,6 +223,26 @@ pub struct AgentCommandResponsePayload {
 
 // --- Client → Server session command payloads ---
 
+/// How a create resolves its environment selection against Project Session
+/// defaults (#3649).
+///
+/// The field that carries this on [`ClientSessionCreatePayload`] is optional.
+/// Absent preserves the legacy precedence: a non-empty `env_files` replaces,
+/// an empty one inherits the named Project's defaults. `Inherit` asks for the
+/// Project defaults explicitly and refuses a simultaneous explicit selection;
+/// `Replace` uses `env_files` exactly, including an empty list that means
+/// "No environment".
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvSelectionMode {
+    /// Resolve the named Project's declared defaults at create time.
+    Inherit,
+    /// Use `env_files` as the complete replacement, even when it is empty.
+    Replace,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,6 +261,15 @@ pub struct ClientSessionCreatePayload {
     /// having to notice it.
     #[serde(default)]
     pub env_files: Vec<EnvFileRef>,
+    /// Explicit create-time ENV intent (#3649).
+    ///
+    /// `inherit` resolves the Project's ordered Server ENV references and
+    /// refuses an explicit `env_files` selection; `replace` uses `env_files`
+    /// exactly, including an empty list that explicitly binds no environment.
+    /// Absent keeps the legacy behavior: empty `env_files` with a Project
+    /// inherits its defaults, while non-empty `env_files` overrides them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_selection_mode: Option<EnvSelectionMode>,
     /// Optional, versioned Sandbox policy binding for this Session (#2681).
     /// The Server routes it to the Agent, which is the validating owner.
     #[cfg_attr(feature = "codegen", ts(skip))]

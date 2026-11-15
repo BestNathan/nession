@@ -16,14 +16,21 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
-import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
+import type { Agent } from '@/types';
 import { agentDisplayName } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { EnvFileMultiSelect } from '@/capabilities/env';
+import { EnvFileMultiSelect, refKey } from '@/capabilities/env';
 import { useCreateSessionForm } from '@/product/session/hooks/useCreateSessionForm';
+import {
+  ENV_MODE_OPTIONS,
+  ENV_ORIGIN_LABEL,
+  type CreateEnvSelectionMode,
+} from '@/product/session/model/envSelection';
 import type { Project, ProjectLocation } from '@/product/project/types';
 import { ProjectLocationDetails } from './CreateSessionParts';
+
+type CreateSessionForm = ReturnType<typeof useCreateSessionForm>;
 
 interface CreateSessionDialogProps {
   isOpen: boolean;
@@ -176,18 +183,14 @@ function SessionFields({
   nameInputRef,
   sessionName,
   setSessionName,
-  envFiles,
-  selectedEnv,
-  setSelectedEnv,
   loading,
+  children,
 }: {
   nameInputRef: React.RefObject<HTMLInputElement | null>;
   sessionName: string;
   setSessionName: (value: string) => void;
-  envFiles: EnvFileInfo[];
-  selectedEnv: EnvFileRef[];
-  setSelectedEnv: (value: EnvFileRef[]) => void;
   loading: boolean;
+  children: React.ReactNode;
 }) {
   return (
     <>
@@ -204,19 +207,163 @@ function SessionFields({
           autoComplete="off"
         />
       </div>
-      <div className="flex flex-col gap-2">
-        <Label>Env Files (optional)</Label>
-        <EnvFileMultiSelect
-          files={envFiles}
-          selected={selectedEnv}
-          onChange={setSelectedEnv}
-          disabled={loading}
-          emptyLabel="No env files — create one in Env Files"
-          /* The roomy dialog can show more than the old 160px nested list. */
-          listClassName="h-56"
-        />
-      </div>
+      {children}
     </>
+  );
+}
+
+/** The ordinary non-Project create keeps its optional ENV selection (#3649). */
+function OptionalEnvField({ form }: { form: CreateSessionForm }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Env Files (optional)</Label>
+      <EnvFileMultiSelect
+        files={form.envFiles}
+        selected={form.selectedEnv}
+        onChange={form.setSelectedEnv}
+        disabled={form.loading}
+        emptyLabel="No env files — create one in Env Files"
+        /* The roomy dialog can show more than the old 160px nested list. */
+        listClassName="h-56"
+      />
+    </div>
+  );
+}
+
+function EnvModeChoice({
+  value,
+  title,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  value: CreateEnvSelectionMode;
+  title: string;
+  description: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: (value: CreateEnvSelectionMode) => void;
+}) {
+  return (
+    <label
+      data-testid={`env-mode-${value}`}
+      className={cn(
+        'flex cursor-pointer items-start gap-3 rounded-[var(--nession-radius-surface)] border px-3 py-2 transition-colors',
+        selected ? 'border-primary bg-primary/10' : 'border-input',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <input
+        type="radio"
+        name="env-selection-mode"
+        value={value}
+        checked={selected}
+        disabled={disabled}
+        onChange={() => onSelect(value)}
+        className="mt-0.5 size-4 accent-primary"
+      />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className={chromeSansRole('primary')}>{title}</span>
+        <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+          {description}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/** The effective selection and its origin, before Submit (#3649). */
+function EffectiveEnvPreview({ form }: { form: CreateSessionForm }) {
+  const { effectiveEnv, unavailableEnv } = form;
+  return (
+    <div
+      data-testid="env-effective-preview"
+      className="flex flex-col gap-1 rounded-[var(--nession-radius-surface)] border px-3 py-2"
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className={chromeSansRole('secondary')}>Effective Session environment</span>
+        <span
+          data-testid="env-effective-origin"
+          className={cn('text-muted-foreground', chromeSansRole('caption'))}
+        >
+          {ENV_ORIGIN_LABEL[effectiveEnv.origin]}
+        </span>
+      </div>
+      {effectiveEnv.refs.length === 0 ? (
+        <p
+          data-testid="env-effective-empty"
+          className={cn('text-muted-foreground', chromeSansRole('metadata'))}
+        >
+          No ENV files will be bound.
+        </p>
+      ) : (
+        <ol data-testid="env-effective-list" className="flex flex-col gap-0.5">
+          {effectiveEnv.refs.map((ref, index) => (
+            <li
+              key={`${refKey(ref)}-${index}`}
+              data-testid={`env-effective-item-${index}`}
+              className={cn('flex min-w-0 items-baseline gap-1.5', chromeSansRole('metadata'))}
+            >
+              <span className="w-4 shrink-0 text-muted-foreground">{index + 1}.</span>
+              <span className="min-w-0 break-words">{ref.name}</span>
+              {unavailableEnv.some((candidate) => refKey(candidate) === refKey(ref)) ? (
+                <span
+                  data-testid={`env-effective-missing-${index}`}
+                  className="shrink-0 text-destructive"
+                >
+                  missing
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Project branch's three explicit choices (#3649): inherit, an explicit
+ * custom replacement, or an explicit empty replacement. `No environment` is a
+ * real choice, not "nothing selected" — the legacy empty `env_files` means
+ * inherit, so only the explicit mode can bind zero files against Project
+ * defaults.
+ */
+function ProjectEnvField({ form }: { form: CreateSessionForm }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Environment</Label>
+      <div
+        role="radiogroup"
+        aria-label="Session environment selection"
+        className="flex flex-col gap-2"
+      >
+        {ENV_MODE_OPTIONS.map((option) => (
+          <EnvModeChoice
+            key={option.value}
+            value={option.value}
+            title={option.title}
+            description={option.description}
+            selected={form.envSelectionMode === option.value}
+            disabled={form.loading}
+            onSelect={form.setEnvSelectionMode}
+          />
+        ))}
+      </div>
+      <EffectiveEnvPreview form={form} />
+      {form.envSelectionMode === 'custom' ? (
+        <EnvFileMultiSelect
+          files={form.envFiles}
+          selected={form.selectedEnv}
+          onChange={form.setSelectedEnv}
+          disabled={form.loading}
+          emptyLabel="No env files — create one in Env Files"
+          listClassName="h-56"
+          reorderable
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -268,11 +415,14 @@ export function CreateSessionDialog({
               nameInputRef={form.nameInputRef}
               sessionName={form.sessionName}
               setSessionName={form.setSessionName}
-              envFiles={form.envFiles}
-              selectedEnv={form.selectedEnv}
-              setSelectedEnv={form.setSelectedEnv}
               loading={form.loading}
-            />
+            >
+              {project ? (
+                <ProjectEnvField form={form} />
+              ) : (
+                <OptionalEnvField form={form} />
+              )}
+            </SessionFields>
             {form.error && (
               <p className={cn('text-destructive', chromeSansRole('body'))} data-testid="create-session-error">
                 {form.error}

@@ -7,9 +7,10 @@ import {
   FormSurface,
 } from '@/components/ui/configuration-form';
 import { Textarea } from '@/components/ui/textarea';
-import type { Agent } from '@/types';
+import type { Agent, EnvFileInfo } from '@/types';
 import type { ProjectDraft } from '@/product/project/types';
 import { ProjectLocationsEditor } from './ProjectLocationsEditor';
+import { ProjectSessionDefaultsEditor } from './ProjectSessionDefaultsEditor';
 
 function ProjectIdentityFields({
   draft,
@@ -126,6 +127,8 @@ export function ProjectFormFields({
   draft,
   onChange,
   agents,
+  envFiles,
+  envFilesLoading,
   disabled,
   idPrefix,
   locationsLayout = 'responsive',
@@ -133,6 +136,8 @@ export function ProjectFormFields({
   draft: ProjectDraft;
   onChange: (next: ProjectDraft) => void;
   agents: Agent[];
+  envFiles: EnvFileInfo[];
+  envFilesLoading: boolean;
   disabled: boolean;
   idPrefix: string;
   locationsLayout?: 'responsive' | 'stacked';
@@ -158,6 +163,14 @@ export function ProjectFormFields({
         disabled={disabled}
         idPrefix={idPrefix}
         layout={locationsLayout}
+      />
+      <ProjectSessionDefaultsEditor
+        draft={draft}
+        onChange={onChange}
+        envFiles={envFiles}
+        loading={envFilesLoading}
+        disabled={disabled}
+        idPrefix={idPrefix}
       />
       <ProjectImageField
         draft={draft}

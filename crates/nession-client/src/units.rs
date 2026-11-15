@@ -409,6 +409,7 @@ impl ClientConnection {
                     name: name.to_string(),
                     working_dir: working_dir.map(str::to_owned),
                     env_files: Vec::new(),
+                    env_selection_mode: None,
                     sandbox,
                     project_id: None,
                     managed: None,

@@ -65,4 +65,63 @@ describe('EnvFileMultiSelect', () => {
     expect(screen.getByText('server')).toBeInTheDocument();
     expect(screen.getByText('agent:h1')).toBeInTheDocument();
   });
+
+  describe('reorderable selection (#3649)', () => {
+    const selected: EnvFileRef[] = [
+      { name: 'a.env', source: 'server' },
+      { name: 'b.env', source: 'server' },
+    ];
+
+    it('moves a selected reference earlier and later', async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <EnvFileMultiSelect
+          files={[info('a.env'), info('b.env')]}
+          selected={selected}
+          onChange={onChange}
+          reorderable
+        />,
+      );
+
+      expect(screen.getByTestId('env-selected-server::a.env')).toBeInTheDocument();
+      expect(screen.getByTestId('env-selected-server::b.env')).toBeInTheDocument();
+      await user.click(screen.getByTestId('env-selected-down-server::a.env'));
+      expect(onChange).toHaveBeenCalledWith([selected[1], selected[0]]);
+    });
+
+    it('removes a selected reference without touching the rest', async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <EnvFileMultiSelect
+          files={[info('a.env'), info('b.env')]}
+          selected={selected}
+          onChange={onChange}
+          reorderable
+        />,
+      );
+
+      await user.click(screen.getByTestId('env-selected-remove-server::a.env'));
+      expect(onChange).toHaveBeenCalledWith([selected[1]]);
+    });
+
+    it('marks a selected reference absent from the catalog as missing', () => {
+      render(
+        <EnvFileMultiSelect
+          files={[info('a.env'), info('b.env')]}
+          selected={[...selected, { name: 'gone.env', source: 'server' }]}
+          onChange={vi.fn()}
+          reorderable
+        />,
+      );
+
+      expect(screen.getByTestId('env-selected-missing')).toHaveTextContent(
+        'Not in the ENV Library: gone.env',
+      );
+      expect(screen.getByTestId('env-selected-server::gone.env')).toHaveTextContent(
+        'missing',
+      );
+    });
+  });
 });

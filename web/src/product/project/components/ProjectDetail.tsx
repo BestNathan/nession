@@ -20,6 +20,7 @@ import {
   DetailSurface,
 } from '@/components/ui/resource-detail';
 import { detailInteractiveRowClass, detailRowClass } from '@/components/ui/resource-detailStyles';
+import { useEnvironmentProfiles } from '@/capabilities/env';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { agentDisplayName } from '@/shared/lib/format';
@@ -181,6 +182,52 @@ function LocationsSection({ project, agents }: { project: Project; agents: Agent
   );
 }
 
+/**
+ * The Project's declared ENV references (#3649), in declaration order.
+ *
+ * Names are shown; contents never are. A reference absent from the current
+ * ENV Library is marked at the fact, because a create that inherits it must
+ * fail visibly rather than silently start with a different environment.
+ */
+function EnvDefaultsFact({ ids }: { ids: string[] }) {
+  const { profiles, loading, error } = useEnvironmentProfiles();
+  const canCheck = !loading && !error;
+  const missing = new Set(
+    canCheck
+      ? ids.filter(
+          (id) =>
+            !profiles.some(
+              (profile) => profile.source === 'server' && profile.name === id,
+            ),
+        )
+      : [],
+  );
+
+  return (
+    <DetailFact label="Env profiles" mono inline>
+      <span data-testid="project-env-defaults">
+        {ids.length === 0
+          ? 'None'
+          : ids.map((id, index) => (
+              <span key={`${id}-${index}`}>
+                {index > 0 ? ', ' : ''}
+                <span data-testid={`project-env-default-${index}`}>{id}</span>
+                {missing.has(id) ? (
+                  <span
+                    data-testid={`project-env-default-missing-${index}`}
+                    className="text-destructive"
+                  >
+                    {' '}
+                    (missing)
+                  </span>
+                ) : null}
+              </span>
+            ))}
+      </span>
+    </DetailFact>
+  );
+}
+
 function DefaultsSection({ project }: { project: Project }) {
   const defaults = project.session_defaults;
   return (
@@ -191,11 +238,7 @@ function DefaultsSection({ project }: { project: Project }) {
             <DetailFact label="Shell" mono inline>
               {defaults.shell ?? 'Unset'}
             </DetailFact>
-            <DetailFact label="Env profiles" mono inline>
-              {defaults.env_profile_ids.length > 0
-                ? defaults.env_profile_ids.join(', ')
-                : 'None'}
-            </DetailFact>
+            <EnvDefaultsFact ids={defaults.env_profile_ids} />
             <DetailFact label="Sandbox policy" mono inline>
               {defaults.sandbox_policy_ref ?? 'Unset'}
             </DetailFact>

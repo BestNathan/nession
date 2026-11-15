@@ -1272,6 +1272,7 @@ wires: &["client.auth"],
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionCreateResponsePayload>(
                     cfg,
                 ),
+                decl_of::<nession_protocol::contracts::session::v1::EnvSelectionMode>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
             ],

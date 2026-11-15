@@ -4,7 +4,10 @@ import {
   WIRE as SESSION_PROCESSES_WIRE,
   type ProcessSnapshot,
 } from '@/generated/protocol/core/server-session-processes/v1';
-import { WIRE as SESSION_CREATE_WIRE } from '@/generated/protocol/core/server-session-create/v1';
+import {
+  WIRE as SESSION_CREATE_WIRE,
+  type EnvSelectionMode,
+} from '@/generated/protocol/core/server-session-create/v1';
 import { WIRE as SESSION_KILL_WIRE } from '@/generated/protocol/core/server-session-kill/v1';
 import { WIRE as SESSION_LIST_WIRE } from '@/generated/protocol/core/server-session-list/v1';
 import {
@@ -225,7 +228,16 @@ export class SessionsPlugin implements TransportPlugin {
     agentId: string,
     name: string,
     envFiles: EnvFileRef[] = [],
-    options: { workingDir?: string; projectId?: string } = {},
+    options: {
+      workingDir?: string;
+      projectId?: string;
+      /**
+       * Explicit create-time ENV intent (#3649). `inherit` resolves the
+       * Project defaults; `replace` uses `envFiles` exactly, including empty.
+       * Absent keeps the legacy inherit-on-empty behavior.
+       */
+      envSelectionMode?: EnvSelectionMode;
+    } = {},
   ): Promise<CreateSessionResponse> {
     return this.requireConnection().request<CreateSessionResponse>(SESSION_CREATE_WIRE, {
       agent_id: agentId,
@@ -233,6 +245,9 @@ export class SessionsPlugin implements TransportPlugin {
       env_files: envFiles,
       ...(options.workingDir ? { working_dir: options.workingDir } : {}),
       ...(options.projectId ? { project_id: options.projectId } : {}),
+      ...(options.envSelectionMode
+        ? { env_selection_mode: options.envSelectionMode }
+        : {}),
     });
   }
 
