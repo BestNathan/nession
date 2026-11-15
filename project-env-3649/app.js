@@ -207,6 +207,6 @@
     state.defaults=[];if(state.operation==='settings')state.draft=[];
     state.notice='Project default ENV references cleared (fixture). Existing Sessions preserved.';render();
   });
-  device.addEventListener('np:resize', e=>{state.viewport=e.detail.width;render();});
+  device.addEventListener('np:resize', e=>{state.viewport=e.detail.width;if(e.detail.width>600&&state.view==='home')state.view='project';render();});
   render();
 })();
