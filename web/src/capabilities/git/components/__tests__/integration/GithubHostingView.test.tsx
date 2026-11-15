@@ -135,6 +135,14 @@ describe('GithubHostingView', () => {
     expect(screen.getByTestId('github-pr-detail-2229')).toHaveTextContent('read-only');
   });
 
+  it('renders an unresolved current-branch relation without claiming absence', async () => {
+    renderHosting('relation-unknown');
+    await userEvent.click(await screen.findByTestId('github-tab-pull-requests'));
+    expect(await screen.findByTestId('github-pr-relation')).toHaveTextContent(
+      'Current branch · relation unavailable',
+    );
+  });
+
   it('scopes Actions to repository or current branch and preserves run states', async () => {
     renderHosting();
     await userEvent.click(await screen.findByTestId('github-tab-actions'));

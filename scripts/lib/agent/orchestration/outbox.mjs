@@ -45,6 +45,15 @@ export const REVIEWER_PREMODEL_FAILURE=Object.freeze({
   publisher_run_id:43607502468,
   failure_code:'qwen_reviewer_publisher_trigger_pre_model_failure',
 });
+export const REVIEWER_JSON_FAILURE=Object.freeze({
+  issue:3433,
+  action_id:'8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7',
+  run_id:43681851455,
+  source_sha:'1159e58c19b927b4e53d4fe594174a50b6bbf092',
+  main_sha:'af25010e06a4c39eb172d9ab1df7ab16c83853cd',
+  publisher_run_id:43681716536,
+  failure_code:'qwen_reviewer_invalid_json_after_model',
+});
 function reject(message) { throw new Error('agent outbox: ' + message); }
 function isIssue(value) { return Number.isSafeInteger(value) && value > 0; }
 function positive(value) { return Number.isSafeInteger(value) && value > 0; }
@@ -96,6 +105,18 @@ export function validateDevelopmentState(state) {
   for (const role of ['developer','reviewer','acceptor']) {
     if (typeof state.assignments[role] !== 'string' ||
         !/^[a-z][a-z0-9-]{1,80}$/.test(state.assignments[role])) reject('missing agent assignment');
+  }
+  // A recovered Qwen Repair PR-B may be read back and committed by a
+  // different successful Publisher Run than the original failed GitHub
+  // writer. The extra history link is permitted ONLY on its exact
+  // authenticated publisher transition; no alias for another role.
+  for(const t of state.transitions){
+    if(t.write_ahead_publisher_run_id!==undefined&&
+       (t.kind!=='publisher'||t.outcome!=='published'||
+        !positive(t.run_id)||!positive(t.write_ahead_publisher_run_id)||
+        t.write_ahead_publisher_run_id>=t.run_id||
+        !SHA.test(t.target_sha??'')))
+      reject('invalid cross-Run Repair Publisher provenance');
   }
   const ids = new Set();
   for (const item of state.outbox) {
@@ -218,7 +239,8 @@ export function validateDevelopmentState(state) {
             QWEN_PREFLIGHT_FAILURE.failure_code,
             QWEN_PREFLIGHT_FAILURE_V2.failure_code,
             QWEN_PREFLIGHT_FAILURE_V3.failure_code,
-            REVIEWER_PREMODEL_FAILURE.failure_code].includes(r.failure_code)||
+            REVIEWER_PREMODEL_FAILURE.failure_code,
+            REVIEWER_JSON_FAILURE.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
             state.issue!==QWEN_PREFLIGHT_FAILURE.issue||
             item.id!==QWEN_PREFLIGHT_FAILURE.action_id||
@@ -232,6 +254,15 @@ export function validateDevelopmentState(state) {
             item.task.task!=='implement'||
             item.task.sha!==QWEN_PREFLIGHT_FAILURE_V2.source_sha||
             r.source_run_id!==QWEN_PREFLIGHT_FAILURE_V2.run_id))||
+          (r.failure_code===REVIEWER_JSON_FAILURE.failure_code&&(
+            state.issue!==REVIEWER_JSON_FAILURE.issue||
+            item.id!==REVIEWER_JSON_FAILURE.action_id||
+            item.task.role!=='reviewer'||
+            item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||
+            item.task.sha!==REVIEWER_JSON_FAILURE.source_sha||
+            r.source_run_id!==REVIEWER_JSON_FAILURE.run_id||
+            r.source_attempt!==1))||
           (r.failure_code===REVIEWER_PREMODEL_FAILURE.failure_code&&(
             state.issue!==REVIEWER_PREMODEL_FAILURE.issue||
             item.id!==REVIEWER_PREMODEL_FAILURE.action_id||
@@ -260,7 +291,8 @@ export function validateDevelopmentState(state) {
           item.task.type!=='dispatch'||
           (item.task.role!=='developer'&&
             !(item.task.role==='reviewer'&&
-              r.failure_code===REVIEWER_PREMODEL_FAILURE.failure_code)))
+              [REVIEWER_PREMODEL_FAILURE.failure_code,
+                REVIEWER_JSON_FAILURE.failure_code].includes(r.failure_code))))
         reject('invalid authenticated failure receipt');
     } else if (item.receipt !== null) reject('unacknowledged item has receipt');
   }
@@ -519,6 +551,27 @@ export function acceptAttestedQwenPublication(state,expectedVersion,event,truste
   return validateDevelopmentState({...advanced.state,version:state.version+1,
     outbox:[...outbox,child]});
 }
+// #3592. A previously authenticated pre-model Reviewer failure is terminal,
+// not a competing live Reviewer. Keep its immutable evidence in Store, but
+// require its exact known Run/Action/failure identity. Any other Reviewer
+// still blocks a new Qwen Repair publication.
+export function hasOnlyRetiredReviewerForQwenRepair(state){
+  const entries=state?.outbox?.filter(x=>x.task?.role==='reviewer');
+  if(!Array.isArray(entries))return false;
+  if(entries.length===0)return true;
+  if(entries.length!==1||state.issue!==REVIEWER_PREMODEL_FAILURE.issue)
+    return false;
+  const old=entries[0],f=REVIEWER_PREMODEL_FAILURE;
+  return old.id===f.action_id&&old.status==='failed'&&
+    old.task.type==='dispatch'&&old.task.task==='review'&&
+    old.task.agent_id==='review-qwen-01'&&old.task.sha===f.source_sha&&
+    old.attempts===1&&old.receipt?.status==='failed'&&
+    old.receipt?.dispatch_id===f.action_id&&
+    old.receipt?.source_run_id===f.run_id&&
+    old.receipt?.source_attempt===1&&
+    old.receipt?.failure_code===f.failure_code;
+}
+
 // #2137: The separately authenticated Qwen Repair Publisher has already
 // verified the original PR and a non-force A->B update by exact GET readback.
 // This state transition may ONLY retire the existing signed Repair Action and
@@ -544,7 +597,10 @@ export function acceptAttestedQwenRepairPublication(
       !positive(trusted.original_publisher_run_id)||
       !positive(trusted.pr_number)||
       trusted.pr_previous_sha!==trusted.developer_source_sha||
-      event.reviewer_agent_id!=null)
+      event.reviewer_agent_id!=null||
+      (trusted.write_ahead_publisher_run_id!==undefined&&
+        (!positive(trusted.write_ahead_publisher_run_id)||
+         trusted.write_ahead_publisher_run_id>=event.run_id)))
     reject('Qwen Repair requires signed Worker, existing PR and exact readback');
   const previous=state.transitions.find(t=>
     t.kind==='publisher'&&t.run_id===event.run_id&&t.attempt===1);
@@ -582,7 +638,7 @@ export function acceptAttestedQwenRepairPublication(
       tasks[0].receipt.dispatch_id!==tasks[0].id||
       state.outbox.some(x=>x!==tasks[0]&&
         ['dispatching','dispatched'].includes(x.status))||
-      state.outbox.some(x=>x.task.role==='reviewer'))
+      !hasOnlyRetiredReviewerForQwenRepair(state))
     reject('Qwen Repair lacks one completed signed Developer dispatch');
   const next=advanceWorkflow(state,event,{
     role:'publisher',workflow_run_id:event.run_id,attempt:1,
@@ -596,8 +652,14 @@ export function acceptAttestedQwenRepairPublication(
   const child=makeAction(state.issue,state.version+1,next.actions[0],
     state.assignments,0);
   boundRole(registry,child.task.agent_id,child.task.role,child.task.task);
+  const transitions=next.state.transitions.map((transition,index)=>
+    index===next.state.transitions.length-1&&
+      trusted.write_ahead_publisher_run_id!==undefined
+      ?{...transition,
+        write_ahead_publisher_run_id:trusted.write_ahead_publisher_run_id}
+      :transition);
   return validateDevelopmentState({...next.state,version:state.version+1,
-    outbox:[...remaining,child]});
+    transitions,outbox:[...remaining,child]});
 }
 
 // Bind an independently verified immutable Developer checkpoint to a pending
@@ -811,6 +873,63 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
   return validateDevelopmentState({...state,version:version+1,
     outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),
       successor]});
+}
+
+// #3601: one exact *post-model* Reviewer output-format failure has no
+// accepted result Artifact. Retire only its verified signed Run and add one
+// deterministic successor. The original immutable repair Publisher and older
+// pre-model Reviewer failure remain intact; do not fabricate a verdict.
+export function reviewerJsonSuccessorId(issue,actionId,runId){
+  const f=REVIEWER_JSON_FAILURE;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized JSON Reviewer recovery source');
+  return hash([issue,actionId,runId,'qwen-reviewer-json-failure-recovery-v1']);
+}
+export function recordAttestedReviewerJsonFailure(state,version,proof){
+  const f=REVIEWER_JSON_FAILURE,p=REVIEWER_PREMODEL_FAILURE;
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','failure_code'],'Reviewer JSON failure proof');
+  const old=state.outbox.find(x=>x.id===f.action_id);
+  const historical=state.outbox.find(x=>x.id===p.action_id);
+  const current=state.transitions.at(-1);
+  if(state.issue!==f.issue||state.version!==16||version!==16||
+     state.phase!=='review'||state.target_sha!==f.source_sha||
+     state.assignments.developer!=='dev-qwen-01'||
+     state.assignments.reviewer!=='review-qwen-01'||
+     state.transitions.length!==3||
+     current?.kind!=='publisher'||current.outcome!=='published'||
+     current.run_id!==f.publisher_run_id||current.attempt!==1||
+     current.target_sha!==f.source_sha||
+     current.write_ahead_publisher_run_id!==43678506569||
+     state.transitions.some(t=>t.kind==='reviewer'&&
+       t.target_sha===f.source_sha)||
+     state.outbox.length!==2||
+     historical?.status!=='failed'||
+     historical.receipt?.source_run_id!==p.run_id||
+     historical.receipt.failure_code!==p.failure_code||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='reviewer'||
+     old.task.task!=='review'||old.task.agent_id!=='review-qwen-01'||
+     old.task.sha!==f.source_sha||
+     old.receipt?.status!=='verified'||
+     old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id||
+     proof?.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.failure_code!==f.failure_code)
+    reject('unverified or already consumed JSON Reviewer failure');
+  const id=reviewerJsonSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===id))
+    reject('JSON Reviewer recovery Action collision');
+  const failed={...old,status:'failed',receipt:{status:'failed',
+    dispatch_id:f.action_id,source_run_id:f.run_id,source_attempt:1,
+    failure_code:f.failure_code}};
+  const successor={id,task:{...old.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),successor]});
 }
 
 // A terminal failed continuation may have one replacement, but NEVER a second

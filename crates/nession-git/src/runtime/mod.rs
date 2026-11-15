@@ -34,4 +34,6 @@ pub mod preview;
 pub mod security;
 pub mod snapshot;
 pub mod status;
+#[cfg(all(test, unix))]
+pub(crate) mod testing;
 pub mod worktrees;

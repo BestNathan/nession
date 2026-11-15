@@ -1323,6 +1323,31 @@ Session lifetime is not connection lifetime. A browser WebSocket ending —
 normally or through any of the error exits above — retires that physical
 attachment only; it does not kill the tmux Session the Agent owns.
 
+### Upgraded sockets have their own admission bounds
+
+An HTTP admission slot ends when the request is answered or the upgrade is
+accepted; that is what keeps a long-lived WebSocket or MCP stream from being
+cut by the pre-authentication bound. The bounds after that point are separate
+owners (`#3439` W1/W2/W3):
+
+- **Every HTTP request head** has a per-request deadline (10 s), including the
+  idle keep-alive wait for a next request and a partial second request. Hyper
+  arms it when it begins reading a head and disarms it when the head is
+  complete, so a response body, a long-running tool call and a streaming
+  MCP/SSE body are **not** bounded by it (`ingress::serve`).
+- **An upgraded socket** has one **absolute** first-authentication deadline:
+  `server.auth` for a browser or an authenticated Agent registration on the
+  Server, `client.auth` on the Agent. Pings, malformed frames, refused
+  authentication and business frames do not reset it.
+- **Upgraded-but-unauthenticated sockets** have a concurrency budget separate
+  from the pre-upgrade handshake budget. An upgrade beyond it receives `503`
+  before a connection task, queue or writer is created.
+- **The Agent listener owns its upgraded tasks** in one supervisor. Listener
+  shutdown stops accepting, signals every upgraded connection, settles its
+  lanes, peer detach and writer within the shutdown grace, and only then closes
+  the terminal backends. `ServerHandle::wait_closed` is the completion barrier;
+  a tmux Session is not killed by transport shutdown.
+
 ## Related
 ## Related
 

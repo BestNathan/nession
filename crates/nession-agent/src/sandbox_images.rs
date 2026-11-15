@@ -325,9 +325,15 @@ pub async fn prepare(
         base_env,
     };
     let mut workspace_lease = None;
+    #[cfg(target_os = "linux")]
+    let mut owns_scratch_workspace = true;
     if let Some(workspace_override) = workspace_override {
         // The selected directory is the durable workspace; the manager owns
         // its bytes. Remove the per-execution placeholder.
+        #[cfg(target_os = "linux")]
+        {
+            owns_scratch_workspace = false;
+        }
         guard.disarm();
         remove_owned_workspace(&guard.root, &guard.path);
         let (write, ownership) = match workspace_override {
@@ -358,6 +364,30 @@ pub async fn prepare(
             write: write.display().to_string(),
             ownership,
         });
+    }
+    // The durable Overlay upper/work is Agent-owned workspace state (#3582).
+    // A scratch workspace is initialized here; a selected managed Workspace
+    // must already have been initialized by its owner, so a missing pair is a
+    // data-loss refusal rather than a fresh empty upper.
+    #[cfg(target_os = "linux")]
+    if let Some(workspace) = composition
+        .workspace
+        .as_ref()
+        .filter(|workspace| workspace.image.is_some())
+    {
+        let write = workspace.write.clone();
+        let write = Path::new(&write);
+        let outcome = if owns_scratch_workspace {
+            nession_erofs::overlay::storage::initialize(write)
+        } else {
+            nession_erofs::overlay::storage::verify(write)
+        };
+        if let Err(error) = outcome {
+            return Err(error.context(format!(
+                "the Sandbox workspace {} has no usable durable Overlay storage",
+                write.display()
+            )));
+        }
     }
     Ok(PreparedSandboxImages {
         composition,
@@ -787,6 +817,10 @@ mod workspace_override_tests {
         let path = manager
             .workspace_directory(&workspace.workspace_id)
             .unwrap();
+        // The Agent owner initializes the durable Overlay storage before a
+        // lower-backed composition is prepared (#3582).
+        #[cfg(target_os = "linux")]
+        nession_erofs::overlay::storage::initialize(&path).unwrap();
         let prepared = prepare(
             &cache,
             &[

@@ -17,7 +17,12 @@
 //! - [`cache`] (feature `cache`): a durable authenticated download/resume/
 //!   verify/pin cache;
 //! - [`mount`] (feature `mount`, Linux): an unprivileged EROFS FUSE
-//!   mount/unmount primitive with an owned handle.
+//!   mount/unmount primitive with an owned handle;
+//! - [`mount_manager`] (feature `mount`, Linux): content-addressed shared
+//!   read-only mounts with identified consumer leases (#3449);
+//! - [`overlay`] (feature `mount`, Linux): the one physical writable
+//!   `fuse-overlayfs` Merged View per managed Workspace, durable Upper
+//!   ownership fencing and recoverable consumer leases (#3582).
 //!
 //! It deliberately does not depend on `nession-protocol`: wire DTOs, image
 //! roles, authorization and runtime orchestration stay with their owners.
@@ -25,6 +30,9 @@
 
 pub mod blob;
 pub mod oci;
+
+#[cfg(all(test, unix))]
+pub(crate) mod testing;
 
 #[cfg(feature = "catalog")]
 pub mod catalog;
@@ -49,6 +57,8 @@ pub mod registry;
 pub mod mount;
 #[cfg(all(feature = "mount", target_os = "linux"))]
 pub mod mount_manager;
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub mod overlay;
 
 pub use blob::digest;
 pub use blob::digest::{
@@ -91,4 +101,9 @@ pub use mount::ErofsMount;
 pub use mount_manager::{
     BlobPinGuard, BlobPinner, ConsumerRef, MountLease, MountManager, MountManagerConfig,
     MountRecoveryReport, MountState, MountStatus, VerifiedImage,
+};
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub use overlay::{
+    OverlayBinding, OverlayConsumerRef, OverlayLease, OverlayMountManager,
+    OverlayMountManagerConfig, OverlayRequest, OverlayState, OverlayStatus, OverlayWorkspaceKey,
 };

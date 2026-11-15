@@ -15,3 +15,4 @@ Output JSON only, with exactly these fields:
 {"outcome":"changes_requested|approved","summary":"single-line conclusion","findings":[{"path":"repository/relative/path","evidence":"single-line concrete finding"}]}
 
 Use an empty findings array only for approved. Output no other fields and no prose outside the JSON.
+The output MUST be strict parseable JSON: double-quote every property name and string value, escape double quotes and newlines inside strings, do not use single-quoted strings, unquoted keys, trailing commas, JavaScript object literals, markdown fences, or comments. Before finishing, check that the response can be parsed by JSON.parse.

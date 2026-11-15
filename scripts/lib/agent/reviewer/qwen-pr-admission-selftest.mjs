@@ -190,6 +190,46 @@ for(const bad of [
   state:repairPublished,intent:repairIntent,publisherRun:repairPublisherRun,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
   actionId:REPAIR_ACTION,...bad}),/Qwen Reviewer admission|Repair/);
+// A failed original PR-B writer can be reconciled by a distinct successful
+// main-owned Publisher Run; the signed Store transition binds both IDs.
+const recoveredRunId=REPAIR_RUN+1;
+const recoveredPublisherRun={...repairPublisherRun,id:recoveredRunId};
+const recoveredPublished=validateDevelopmentState({
+  ...repairPublished,
+  transitions:repairPublished.transitions.map((t,i)=>
+    i===repairPublished.transitions.length-1
+      ?{...t,run_id:recoveredRunId,
+        write_ahead_publisher_run_id:REPAIR_RUN}
+      :t),
+});
+const recoveredAdmission=admitQwenRepairPublishedReview({
+  state:recoveredPublished,intent:repairIntent,
+  publisherRun:recoveredPublisherRun,
+  pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
+  actionId:REPAIR_ACTION});
+assert.equal(recoveredAdmission.publisher_run_id,recoveredRunId);
+assert.equal(recoveredAdmission.publisher_intent_sha256,
+  repairAdmission.publisher_intent_sha256);
+for(const bad of [
+  {state:{...recoveredPublished,
+    transitions:recoveredPublished.transitions.map((t,i)=>
+      i===recoveredPublished.transitions.length-1
+        ?{...t,write_ahead_publisher_run_id:401}
+        :t)}},
+  {publisherRun:repairPublisherRun},
+  {publisherRun:{...recoveredPublisherRun,conclusion:'failure'}},
+  {publisherRun:{...recoveredPublisherRun,id:recoveredRunId+1}},
+  {state:{...recoveredPublished,
+    transitions:recoveredPublished.transitions.map((t,i)=>
+      i===recoveredPublished.transitions.length-1
+        ?{...t,write_ahead_publisher_run_id:recoveredRunId}
+        :t)}},
+])assert.throws(()=>admitQwenRepairPublishedReview({
+  state:recoveredPublished,intent:repairIntent,
+  publisherRun:recoveredPublisherRun,
+  pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
+  actionId:REPAIR_ACTION,...bad}),/Qwen Reviewer admission|Repair|agent outbox/);
+
 console.log('Qwen Reviewer repair: SHA A parent, repair Publisher/outbox, SHA B admission and negatives pass');
 
 
@@ -242,5 +282,32 @@ try{
   await assert.rejects(()=>prepareQwenReviewAdmission({
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher}),
   /unique Qwen review publication Intent/);
+  // The Reviewer prepare reader must fetch the successful reconciler
+  // Run (403), not the original failed writer Run (402).
+  writeIssueWorkflowState(root,recoveredPublished,published.version);
+  fs.writeFileSync(path.join(directory,'302-1-'+REPAIR_ACTION+'.json'),
+    JSON.stringify(repairIntent)+'\n');
+  const recoveryEndpoints={
+    ...endpoints,
+    ['actions/runs/'+recoveredRunId]:recoveredPublisherRun,
+    ['pulls/541']:prB,
+    ['git/ref/heads/'+intent.branch]:refB,
+    ['git/commits/'+SHA_B]:commitB,
+  };
+  const recoveryFetch=async name=>{
+    if(!Object.hasOwn(recoveryEndpoints,name))
+      throw Error('unexpected reconciled Reviewer GitHub fetch '+name);
+    return recoveryEndpoints[name];
+  };
+  const recoveredPrepared=await prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:REPAIR_ACTION,
+    fetcher:recoveryFetch});
+  assert.equal(recoveredPrepared.publisher_run_id,recoveredRunId);
+  assert.equal(recoveredPrepared.target_sha,SHA_B);
+  await assert.rejects(()=>prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:REPAIR_ACTION,
+    fetcher:async name=>name==='actions/runs/'+recoveredRunId
+      ?{...recoveredPublisherRun,conclusion:'failure'}
+      :recoveryFetch(name)}),/Publisher Run/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen Reviewer: trusted Store readback, live GitHub source routing, duplicate intent and PR rejection verified');

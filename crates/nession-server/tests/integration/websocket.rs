@@ -295,6 +295,114 @@ async fn test_close_frame_triggers_disconnect() {
     let (_ws2, _) = connect_async(&url).await.unwrap();
 }
 
+/// #3439 W2: an upgraded Server socket that never authenticates closes at its
+/// absolute deadline, even while it keeps sending control frames. The pre-fix
+/// loop had no first-authentication deadline at all.
+#[tokio::test]
+async fn a_server_socket_that_never_authenticates_closes_at_the_absolute_auth_deadline(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_auth_policy("test_ws_auth_deadline.db", 64, 1).await?;
+    let (ws, _) = connect_async(format!("ws://{addr}")).await?;
+    let (mut sink, mut stream) = ws.split();
+
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader_closed = std::sync::Arc::clone(&closed);
+    let reader = tokio::spawn(async move {
+        while let Some(frame) = stream.next().await {
+            if !matches!(frame, Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) {
+                reader_closed.store(true, Ordering::SeqCst);
+                return;
+            }
+        }
+        reader_closed.store(true, Ordering::SeqCst);
+    });
+
+    let started = tokio::time::Instant::now();
+    let mut writer_saw_close = false;
+    while started.elapsed() < std::time::Duration::from_secs(3) {
+        if closed.load(Ordering::SeqCst) {
+            break;
+        }
+        if sink
+            .send(tokio_tungstenite::tungstenite::Message::Ping(vec![1]))
+            .await
+            .is_err()
+        {
+            writer_saw_close = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let saw_close = writer_saw_close || closed.load(Ordering::SeqCst);
+    reader.abort();
+    assert!(
+        saw_close,
+        "an unauthenticated Server socket must close at its absolute auth deadline despite frames"
+    );
+    Ok(())
+}
+
+/// #3439 W2: the upgraded-pending-auth budget is separate from the pre-upgrade
+/// handshake budget. While one unauthenticated upgrade holds the only slot, the
+/// next upgrade is refused `503`; a successful `server.auth` returns the slot
+/// while the connection stays open.
+#[tokio::test]
+async fn the_server_pending_auth_budget_refuses_an_upgrade_and_authentication_returns_it(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_auth_policy("test_ws_auth_budget.db", 1, 30).await?;
+
+    let (mut first, _) = connect_async(format!("ws://{addr}")).await?;
+    match connect_async(format!("ws://{addr}")).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(
+                response.status(),
+                503,
+                "an upgrade beyond the pending-auth budget is refused before it is answered"
+            );
+        }
+        other => panic!("expected a 503 for an exhausted pending-auth budget, got {other:?}"),
+    }
+
+    send_json(&mut first, auth_request("auth-budget")).await?;
+    let reply = next_reply(
+        &mut first,
+        &["auth-budget"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(
+        payload_of(&reply, "server.auth")?["status"],
+        "success",
+        "the first connection authenticates"
+    );
+
+    let mut admitted = false;
+    for _ in 0..40 {
+        match connect_async(format!("ws://{addr}")).await {
+            Ok((mut ws, _)) => {
+                send_json(&mut ws, auth_request("auth-admitted")).await?;
+                let reply = next_reply(
+                    &mut ws,
+                    &["auth-admitted"],
+                    std::time::Duration::from_secs(5),
+                )
+                .await?;
+                assert_eq!(payload_of(&reply, "server.auth")?["status"], "success");
+                admitted = true;
+                break;
+            }
+            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
+        }
+    }
+    assert!(
+        admitted,
+        "a successful authentication must return the pending-auth slot without closing"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_agent_registration_with_connect_url() {
     let (_db_dir, db_path) = test_db("test_ws_connect_url.db").unwrap();
@@ -501,6 +609,21 @@ async fn start_ownership_server_with_queries(
     let (db_dir, db_path) = test_db(db_name)?;
     let mut config = ownership_server_config(db_path);
     config.query_concurrency_per_connection = query_concurrency;
+    let (addr, handle) = start_test_server(config).await?;
+    Ok((db_dir, addr, handle))
+}
+
+/// A server with the upgraded-WebSocket pending-auth policy set by the test
+/// (`#3439` W2).
+async fn start_ownership_server_with_auth_policy(
+    db_name: &str,
+    max_pending_ws_auth: usize,
+    ws_auth_timeout_secs: u64,
+) -> anyhow::Result<OwnershipServer> {
+    let (db_dir, db_path) = test_db(db_name)?;
+    let mut config = ownership_server_config(db_path);
+    config.max_pending_ws_auth = max_pending_ws_auth;
+    config.ws_auth_timeout_secs = ws_auth_timeout_secs;
     let (addr, handle) = start_test_server(config).await?;
     Ok((db_dir, addr, handle))
 }
