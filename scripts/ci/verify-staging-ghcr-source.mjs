@@ -143,7 +143,8 @@ async function main() {
         deny('Staging moved to another SHA; refuse a stale rollout');
       }
       fs.appendFileSync(process.env.GITHUB_OUTPUT,
-        'short_sha=' + verified.short_sha + '\n');
+        'short_sha=' + verified.short_sha + '\n' +
+        'source_run_id=' + verified.source_run_id + '\n');
       console.log('TRUSTED_STAGING_GHCR_V1 ' + JSON.stringify(verified));
       return;
     }
