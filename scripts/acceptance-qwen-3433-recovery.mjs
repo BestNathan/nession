@@ -43,7 +43,8 @@ export function attestQwen3433Recovery({issue,stage,targetSha,states,head,runs,
   'source PR or historical acceptance target is not an ancestor');
   check(pr?.number===3530&&pr?.head?.repo?.full_name===REPO&&
     SHA.test(pr.head.sha??'')&&pr.changed_files===1&&
-    pr.state==='open'||false,'wrong published PR or its source scope');
+    (pr.state==='open'||(pr.state==='closed'&&pr.merged_at!=null)),
+    'wrong published PR or its source scope');
   check(head?.version>=20&&head.version<=1024&&
     head.path==='workflows/issues/3433/states/'+String(head.version).padStart(8,'0')+'.json'&&
     /^[a-f0-9]{64}$/.test(head.sha256??''),'invalid committed Store head');
@@ -212,10 +213,10 @@ export async function collectQwen3433Recovery({
   const contents=path=>get(prefix+'/contents/'+path+'?ref=agent-store')
     .then(x=>contentObject(x,path));
   const jobsKeys=['firstReview','repairWorker','finalReview'];
-  const [headFile,pr,sourceAncestry,targetAncestry,...rest]=await Promise.all([
+  const pr=await get(prefix+'/pulls/3530');
+  const [headFile,sourceAncestry,targetAncestry,...rest]=await Promise.all([
     contents('workflows/issues/3433/head.json'),
-    get(prefix+'/pulls/3530'),
-    get(prefix+'/compare/'+B+'...'+(await get(prefix+'/pulls/3530')).head.sha),
+    get(prefix+'/compare/'+B+'...'+pr.head.sha),
     get(prefix+'/compare/'+targetSha+'...'+FINAL_SHA),
     ...VERSIONS.map(v=>contents(storePath(v))),
     ...Object.values(RUNS).map(spec=>get(prefix+'/actions/runs/'+spec[0])),
