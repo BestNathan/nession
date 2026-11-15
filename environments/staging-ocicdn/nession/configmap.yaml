@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nession-image-pull-benchmark
+data:
+  benchmark.cjs: |
+    'use strict';
+    // Read-only OCI layer-transfer probe. This measures registry download, not kubelet unpack.
+    // Source: publicly published nession images. No private token is sent to ocicdn.
+    const { createHash } = require('node:crypto');
+    const { writeFileSync } = require('node:fs');
+    const { performance } = require('node:perf_hooks');
+    const REPO = 'bestnathan/nession';
+    const TAG = '0676864';
+    const MIME = 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json';
+    const SOURCES = [
+      { name: 'ghcr', root: 'https://ghcr.io' },
+      { name: 'ocicdn', root: 'https://ghcr.ocicdn.net' }
+    ];
+    const roles = ['ui', 'server', 'agent'];
+    const report = {
+      schema: 'nession-oci-pull-benchmark-v1',
+      location: 'existing-staging-kubernetes-node',
+      node: process.env.NODE_NAME || 'unknown',
+      pod: process.env.POD_NAME || 'unknown',
+      tag: TAG,
+      platform: 'linux/amd64',
+      transfers: [],
+      comparisons: [],
+      caveat: 'OCI blob streaming, not containerd unpack; warm means repeat HTTP pull, not cold Kubernetes node cache'
+    };
+    const started = performance.now();
+    let ghToken;
+    
+    function digestBytes(bytes) {
+      return 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+    }
+    function round(x) {
+      return Math.round(x * 100) / 100;
+    }
+    function cleanError(e) {
+      return String((e && e.message) || e || 'unknown').slice(0, 160);
+    }
+    async function authorizeGhcr() {
+      const t0 = performance.now();
+      const url = 'https://ghcr.io/token?scope=repository:' + REPO + ':pull&service=ghcr.io';
+      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error('GHCR anonymous token HTTP ' + r.status);
+      const j = await r.json();
+      if (!j.token) throw new Error('GHCR anonymous token absent');
+      ghToken = j.token;
+      report.ghcr_auth_ms = round(performance.now() - t0);
+    }
+    async function request(src, path) {
+      const headers = { Accept: MIME };
+      // This is a public, anonymous GHCR pull token, never forwarded to third party.
+      if (src.name === 'ghcr') headers.Authorization = 'Bearer ' + ghToken;
+      const response = await fetch(src.root + '/v2/' + REPO + '/' + path, {
+        headers, redirect: 'follow', signal: AbortSignal.timeout(110000)
+      });
+      if (!response.ok) {
+        if (response.body) await response.body.cancel().catch(() => {});
+        throw new Error(src.name + ' ' + path.split('/')[0] + ' HTTP ' + response.status);
+      }
+      return response;
+    }
+    async function readManifest(src, ref, expectedDigest) {
+      const response = await request(src, 'manifests/' + ref);
+      const raw = Buffer.from(await response.arrayBuffer());
+      const actual = digestBytes(raw);
+      if (expectedDigest && actual !== expectedDigest) {
+        throw new Error(src.name + ' manifest digest mismatch ' + ref);
+      }
+      return { digest: actual, document: JSON.parse(raw.toString('utf8')) };
+    }
+    async function prepare(src, role) {
+      const t0 = performance.now();
+      const index = await readManifest(src, role + '-' + TAG);
+      const candidates = index.document.manifests || [];
+      const chosen = candidates.find(x => x.platform && x.platform.os === 'linux' && x.platform.architecture === 'amd64');
+      if (!chosen) throw new Error(src.name + ' missing linux/amd64 in ' + role);
+      const manifest = await readManifest(src, chosen.digest, chosen.digest);
+      if (!Array.isArray(manifest.document.layers) || !manifest.document.config) {
+        throw new Error(src.name + ' missing config/layers for ' + role);
+      }
+      return { indexDigest: index.digest, platformDigest: chosen.digest,
+        descriptors: [manifest.document.config, ...manifest.document.layers],
+        metadataMs: round(performance.now() - t0) };
+    }
+    async function streamBlob(src, desc) {
+      if (!/^sha256:[0-9a-f]{64}$/.test(desc.digest)) throw new Error('invalid layer digest');
+      const response = await request(src, 'blobs/' + desc.digest);
+      const hash = createHash('sha256');
+      let bytes = 0;
+      for await (const chunk of response.body) {
+        const buffer = Buffer.from(chunk);
+        bytes += buffer.length;
+        hash.update(buffer);
+      }
+      const actual = 'sha256:' + hash.digest('hex');
+      if (actual !== desc.digest) throw new Error(src.name + ' layer digest mismatch ' + desc.digest.slice(0, 24));
+      if (typeof desc.size === 'number' && desc.size !== bytes) {
+        throw new Error(src.name + ' layer length mismatch');
+      }
+      return bytes;
+    }
+    async function transfer(src, role, pass, details) {
+      const t0 = performance.now();
+      const row = { role, via: src.name, pass, platform_digest: details.platformDigest,
+        index_digest: details.indexDigest, metadata_ms: details.metadataMs };
+      try {
+        let bytes = 0;
+        for (const desc of details.descriptors) bytes += await streamBlob(src, desc);
+        const ms = performance.now() - t0;
+        row.ok = true;
+        row.bytes = bytes;
+        row.transfer_ms = round(ms);
+        row.mib_s = round((bytes / 1048576) / (ms / 1000));
+        row.layers_verified = details.descriptors.length;
+      } catch (e) {
+        row.ok = false;
+        row.error = cleanError(e);
+        row.transfer_ms = round(performance.now() - t0);
+      }
+      report.transfers.push(row);
+      console.log('PULL_SAMPLE ' + JSON.stringify(row));
+    }
+    async function main() {
+      await authorizeGhcr();
+      for (const role of roles) {
+        const details = [];
+        for (const src of SOURCES) {
+          try {
+            details.push(await prepare(src, role));
+          } catch (e) {
+            details.push(null);
+            report.transfers.push({ role, via: src.name, pass: 'first', ok: false, error: cleanError(e) });
+          }
+        }
+        const sameDigest = details.every(Boolean) && details[0].platformDigest === details[1].platformDigest;
+        report.comparisons.push({ role, same_platform_digest: Boolean(sameDigest) });
+        if (!sameDigest) {
+          console.log('PULL_COMPARE_FAIL ' + role + ': source/proxy platform manifests unavailable or inconsistent');
+          continue;
+        }
+        // Alternate first/second passes for the same image. No containerd cache/host writes.
+        for (let i = 0; i < SOURCES.length; i++) await transfer(SOURCES[i], role, 'first', details[i]);
+        // Warm repeat only the small UI role, to bound egress and execution time.
+        if (role === 'ui') {
+          for (let i = 0; i < SOURCES.length; i++) await transfer(SOURCES[i], role, 'repeat', details[i]);
+        }
+      }
+    }
+    (async () => {
+      let fatal = null;
+      try { await main(); } catch (e) { fatal = cleanError(e); }
+      report.total_ms = round(performance.now() - started);
+      if (fatal) report.fatal = fatal;
+      report.ok = !fatal && report.comparisons.length === roles.length &&
+        report.comparisons.every(x => x.same_platform_digest) &&
+        report.transfers.length === 8 &&
+        report.transfers.every(x => x.ok);
+      const json = JSON.stringify(report);
+      console.log('NESSION_PULL_BENCHMARK_V1 ' + json);
+      try { writeFileSync('/dev/termination-log', json.slice(0, 3900)); }
+      catch (e) { console.log('TERMINATION_MESSAGE_WRITE_FAILED ' + cleanError(e)); }
+      process.exitCode = report.ok ? 0 : 1;
+    })();

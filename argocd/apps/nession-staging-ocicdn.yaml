@@ -1,0 +1,25 @@
+# Isolated OCI pull-through benchmark (#3669). No Nession deployments,
+# ingress, PVC, storage or release-controller ownership.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nession-staging-ocicdn
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BestNathan/nession.git
+    targetRevision: gitops
+    path: environments/staging-ocicdn/nession
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nession
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Replace=true
