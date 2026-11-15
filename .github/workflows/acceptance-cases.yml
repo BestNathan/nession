@@ -885,8 +885,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read
-      actions: write
+      contents: write
     steps:
       - name: Explicitly wake source-authenticated Case Ingest
         env:
