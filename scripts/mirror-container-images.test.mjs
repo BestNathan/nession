@@ -102,6 +102,7 @@ test('a stalled Buildx copy falls back to chunked per-arch OCI transfer',()=>{
   assert.match(log,/image copy ghcr.io\/bestnathan\/nession@sha256:aaaa crpi.example.cn\/n_public\/nession:agent-0123456-amd64/);
   assert.match(log,/image copy ghcr.io\/bestnathan\/nession@sha256:bbbb crpi.example.cn\/n_public\/nession:agent-0123456-arm64/);
   assert.equal((log.match(/90s regctl index create/g)||[]).length,1);
+  assert.match(log,/index create crpi.example.cn\/n_public\/nession:agent-0123456 --ref crpi.example.cn\/n_public\/nession:agent-0123456-amd64 --ref crpi.example.cn\/n_public\/nession:agent-0123456-arm64/);
 });
 test('three failed chunk uploads block index and GitOps publication',()=>{
   const {run,log}=fixture('copy-fail');
@@ -129,4 +130,15 @@ test('the independently retried ACR mirror builder retains the HTTP/1.1 transpor
   assert.match(beforeLogin,
     /driver-opts:\s*\|\s*\n\s*env\.GODEBUG=http2client=0\s*\n/,
     'the ACR mirror buildx builder must receive GODEBUG=http2client=0');
+});
+
+test('chunked fallback binary is pinned to an immutable published SHA256',()=>{
+  const workflow=fs.readFileSync(
+    path.join(root,'.github/workflows/deploy-staging-acr.yml'),'utf8');
+  const install=workflow.split('      - name: Install pinned regctl chunked-OCI fallback')[1]
+    ?.split('      - name: Mirror and verify')[0]??'';
+  assert.match(install,/releases\/download\/v0\.11\.7\/regctl-linux-amd64/);
+  assert.match(install,/3737fbbdd791e04e7a831640b681f3397a376498e80e2ad9b1b2d27296f239bc/);
+  assert.match(install,/sha256sum -c -/);
+  assert.match(install,/\$GITHUB_PATH/);
 });
