@@ -354,6 +354,10 @@ function selfTest() {
   const qualitySc = { criterion: 'SC-02',
     text: 'The new test-only commit passes the source-aligned Web Integration/Quality check at its exact PR head and leaves the Issues list/row assertions intact.' };
   assert.equal(requiresWebIntegrationExecution(qualitySc, body), true);
+  // Active verification verbs still require exact-head Web execution.
+  const verifySc = { criterion: 'SC-04',
+    text: 'The PR verifies the Web Quality check on its exact HEAD.' };
+  assert.equal(requiresWebIntegrationExecution(verifySc, body), true);
   const policySc = { criterion: 'SC-01',
     text: 'For a PR SC explicitly requiring executable Web integration-test evidence, a successful source review of the test file cannot produce Pass while its exact-head Web Gate is pending.' };
   assert.equal(requiresWebIntegrationExecution(policySc, body), false);
