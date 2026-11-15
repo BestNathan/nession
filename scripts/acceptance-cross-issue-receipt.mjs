@@ -157,6 +157,113 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
   };
 }
 
+
+// Immutable Git Store readback: the source-selected Issue witness supplies an
+// exact SHA-index locator, never the record path or the verdict.
+async function readCaseStoreJson(repo, file, request) {
+  const pattern=/^(?:indexes\/by-sha\/[a-f0-9]{40}\/acceptance\/[0-9]+-[0-9]+-[0-9]+-SC-[0-9]+\.json|runs\/\d{4}-\d\d-\d\d\/[0-9]+-[0-9]+\/[0-9]+\/SC-[0-9]+\.json)$/;
+  if (repo!==REPO || !pattern.test(file))
+    throw Error('invalid immutable Case Store locator');
+  const response=await request('/repos/'+repo+'/contents/'+file+'?ref=acceptance-results');
+  if (response?.type!=='file' || response.encoding!=='base64' ||
+      !Number.isSafeInteger(response.size) || response.size<1 ||
+      response.size>MAX_BYTES || !/^[a-f0-9]{40}$/.test(response.sha??'') ||
+      typeof response.content!=='string')
+    throw Error('Case Store Git blob metadata unavailable');
+  const bytes=Buffer.from(response.content.replace(/\s/g,''),'base64');
+  if(bytes.length!==response.size || bytes.length>MAX_BYTES)
+    throw Error('Case Store blob size mismatch');
+  return JSON.parse(bytes.toString('utf8'));
+}
+
+/** Pure, fail-closed proof after independent GitHub Run/PR/CI re-attestation. */
+export function attestPrCaseCrossIssue(pin,index,record,certified,issue,{
+  repo=REPO,targetSha,subjectIssue,
+}={}) {
+  if (repo!==REPO || pin?.kind!=='pr-case' || !SHA.test(String(targetSha)) ||
+      !Number.isSafeInteger(subjectIssue) || subjectIssue===pin.issue ||
+      !Number.isSafeInteger(pin.pr) || !Number.isSafeInteger(pin.run) ||
+      !Number.isSafeInteger(pin.attempt) || !Number.isSafeInteger(pin.issue) ||
+      !/^SC-\d{2,}$/.test(pin.sc) || !SHA.test(pin.sha))
+    throw Error('historical PR Case witness scope unverified');
+  const item=validateCaseRecord(record);
+  const canonicalIndex=caseIndexRecord(item);
+  validateRunIndex(index);
+  assert.deepEqual(index,canonicalIndex,'immutable PR Case SHA index does not match source record');
+  if(item.stage!=='pr' || item.result!=='Pass' || item.issue!==pin.issue ||
+     item.criterion!==pin.sc || item.target_sha!==pin.sha ||
+     item.run_id!==pin.run || item.run_attempt!==pin.attempt ||
+     recordPath(item)!==index.record ||
+     item.provenance?.record_path!==index.record ||
+     item.provenance?.workflow_url!=='https://github.com/'+repo+'/actions/runs/'+pin.run ||
+     !certified || certified.source_kind!=='pr-smoke' ||
+     certified.run_id!==pin.run || certified.run_attempt!==pin.attempt ||
+     certified.head_sha!==pin.sha || certified.event!=='pull_request' ||
+     certified.pr_binding?.pr_number!==pin.pr ||
+     certified.pr_binding?.issue!==pin.issue ||
+     JSON.stringify(item.provenance?.verified_source)!==JSON.stringify(certified))
+    throw Error('historical PR Case Store/Run/PR association unverified');
+  if(!issue || issue.number!==pin.issue || issue.state!=='closed' ||
+     !isAcceptanceIssue(issue)) throw Error('historical PR Case source Issue not reconciled');
+  const context=buildAcceptanceContext(issue,'pr',{
+    method:'case',targetRef:pin.sha,runId:pin.run,
+  });
+  if(context.contract_sha256!==item.contract_sha256 ||
+     !context.criteria.some(c=>c.criterion===pin.sc && c.text===item.criterion_text))
+    throw Error('historical PR Case source Issue contract changed');
+  const parsed=parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+  const row=parsed.rows.get(pin.sc);
+  if(parsed.errors.length || !row || row.result.toLowerCase()!=='pass' ||
+     !row.evidence.includes('run '+pin.run+'; ref '+pin.sha+'; source case-runner') ||
+     !row.evidence.includes('record: '+index.record) ||
+     !row.evidence.includes('execution='+item.execution_id))
+    throw Error('historical PR Case was not accepted in the source Issue');
+  return {
+    kind:'source_issue_pr_case_acceptance_receipt',
+    subject_issue:subjectIssue,source_issue:pin.issue,source_sc:pin.sc,
+    source_pr:pin.pr,source_sha:pin.sha,target_sha:targetSha,
+    case_run:pin.run,case_attempt:pin.attempt,
+    case_job_id:certified.pr_binding.case_job_id,
+    case_artifact_id:certified.pr_binding.artifact_id,
+    quality_run_id:certified.pr_binding.quality_run_id,
+    e2e_run_id:certified.pr_binding.e2e_run_id,
+    store_record:index.record,execution_id:item.execution_id,
+    case_tree_sha:item.case_tree_sha,contract_sha256:item.contract_sha256,
+    source_sc_result:'Pass',source_issue_state:'closed',
+    provenance:'GitHub exact-head PR Run/Attempt + Case Job/Artifact/CI + immutable Store SHA index/Case bytes + reconciled source Issue',
+    limitation:'Independent historical source Issue proof; not a standalone Pass or authorization to mutate the subject Issue',
+  };
+}
+
+export async function collectPrCaseCrossIssueAcceptance(pin,{
+  repo=REPO,targetSha,subjectIssue,request,token,
+}={}) {
+  if(pin?.kind!=='pr-case' || typeof request!=='function' || !token)
+    throw Error('PR Case proof requires pinned identity and read-only GitHub');
+  const indexPath='indexes/by-sha/'+pin.sha+'/acceptance/'+
+    pin.run+'-'+pin.attempt+'-'+pin.issue+'-'+pin.sc+'.json';
+  const [index,run,issue]=await Promise.all([
+    readCaseStoreJson(repo,indexPath,request),
+    request('/repos/'+repo+'/actions/runs/'+pin.run),
+    request('/repos/'+repo+'/issues/'+pin.issue),
+  ]);
+  const indexed=validateRunIndex(index);
+  if(indexed?.mode!=='acceptance' || indexed.stage!=='pr' ||
+     indexed.issue!==pin.issue || indexed.criterion!==pin.sc ||
+     indexed.target_sha!==pin.sha ||
+     indexed.source?.run_id!==pin.run ||
+     indexed.source?.run_attempt!==pin.attempt)
+    throw Error('historical PR Case index is not bound to witness');
+  const item=await readCaseStoreJson(repo,indexed.record,request);
+  const source=sourceRunIdentity({workflow_run:{...run,name:run.name}},repo);
+  const certified=await attestPrSmokeSource(item,source,{
+    repository:repo,token,request,
+  });
+  return attestPrCaseCrossIssue(pin,index,item,certified,issue,{
+    repo,targetSha,subjectIssue,
+  });
+}
+
 // A prior staging Issue's accepted Agent verdict is a source observation,
 // not a verdict for the current Issue. Authenticate the actual source result
 // artifact, each required workflow step, and GitHub merge ancestry instead
