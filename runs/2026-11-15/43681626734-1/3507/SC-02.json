@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f5a2c11cf10ff6ca0ddeaddc5999c7bd65131886d0edd7128f6e13e62151a0a5",
+  "run_id": 43681626734,
+  "run_attempt": 1,
+  "issue": 3507,
+  "criterion": "SC-02",
+  "criterion_text": "The actual Terminal Controller observer/visibility transition cannot apply a pending OSC 5522 write after authority loss; the authorized path and existing read/listing protections remain intact.",
+  "stage": "staging",
+  "target_sha": "6de34f30d8a4391a0b607dc67b95292d106963c6",
+  "contract_sha256": "2a9176aaf2ec225b3973d6ad00b275f241a57862b4497644bff0570622705ff0",
+  "case_revision": "6de34f30d8a4391a0b607dc67b95292d106963c6",
+  "case_tree_sha": "a8eb4a9aaf8c878b97a9c3ff5166954e0084d45e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T05:37:10.077Z",
+  "finished_at": "2026-11-15T05:37:13.472Z",
+  "duration_ms": 3395,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The controller/protocol route denies completed OSC 5522 writes after authority loss and keeps the authorized write and read/listing protections intact",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 6de34f30d8a4391a0b607dc67b95292d106963c6: with document.visibilityState=hidden a pending chunked write replied only EPERM and invoked no clipboard effect; a read-only observer transition applied nothing and emitted no PTY bytes; the authorized controller still applied the identical MIME payload and replied DONE, and the #3395 MIME listing still withheld offer metadata after authority loss"
+        }
+      ],
+      "duration_ms": 3359,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43681626734,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6de34f30d8a4391a0b607dc67b95292d106963c6",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43681626734",
+    "record_path": "runs/2026-11-15/43681626734-1/3507/SC-02.json",
+    "source_result_sha256": "d2657cb889853a58a0140951a62beb65243153d1de10db27feac3973c634d256"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43681626734-1",
+    "sha256": "d2657cb889853a58a0140951a62beb65243153d1de10db27feac3973c634d256",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43681626734",
+    "durability": "time-limited; object archival not configured"
+  }
+}
