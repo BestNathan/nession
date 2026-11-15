@@ -818,7 +818,8 @@ try {
   assert.equal(repairHandoff.reviewer_agent_id,'review-qwen-01');
   assert.equal(repairHandoff.reviewer_action_id,nextReview[0].id);
   const repairHandoffReplay=applyQwenRepairPublicationToRemote({
-    remote,readback:repairReadback,intent:repairIntentReplay,registry});
+    remote,readback:repairReadback,intent:laterReconciler,registry,
+    authenticated_run_id:recoveredPublisherRun});
   assert.equal(repairHandoffReplay.changed,false);
   assert.equal(repairHandoffReplay.replayed,true);
   git(post,'pull','--ff-only','origin','agent-store');
