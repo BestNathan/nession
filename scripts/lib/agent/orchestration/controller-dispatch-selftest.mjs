@@ -5,7 +5,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
-  REVIEWER_PREMODEL_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
   assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
@@ -249,6 +249,26 @@ for(const bad of [
     user:{login:'external'}}}},
   {event:{...premodelRecovery.event,issue:{number:3434,state:'open'}}},
 ])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
+  /authenticated owner\/main/);
+
+const jsonAction='8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7';
+const jsonRecovery={...ownerReview,actionId:jsonAction,
+  event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:REVIEWER_JSON_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(jsonRecovery).action_id,jsonAction);
+for(const bad of [
+  {actionId:'f'.repeat(64)},
+  {issue:1997},
+  {event:{...jsonRecovery.event,action:'edited'}},
+  {event:{...jsonRecovery.event,issue:{number:3433,state:'closed'}}},
+  {event:{...jsonRecovery.event,issue:{number:3433,state:'open',pull_request:{}}}},
+  {event:{...jsonRecovery.event,comment:{...jsonRecovery.event.comment,
+    body:REVIEWER_JSON_RECOVERY_COMMENT+' '}}},
+  {event:{...jsonRecovery.event,comment:{...jsonRecovery.event.comment,
+    user:{login:'external'}}}},
+  {event:{...jsonRecovery.event,issue:{number:3434,state:'open'}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'external'}},
+])assert.throws(()=>assertDispatchAuthority({...jsonRecovery,...bad}),
   /authenticated owner\/main/);
 
 const qwenRepairAction='bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856';
