@@ -716,7 +716,7 @@ function selfTest() {
   assert.equal(acceptsWake({...releaseWake, event: 'workflow_dispatch'}), true,
     'independently retried verified ACR deployment must also wake convergence');
   const refusedWake = [
-    {event: 'pull_request'},
+    {event: 'schedule'},
     {name: 'Deploy / Staging ACR (forged)'},
     {path: '.github/workflows/foreign.yml'},
     {head_branch: 'main'},
