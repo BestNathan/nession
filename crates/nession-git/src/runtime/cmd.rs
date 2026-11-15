@@ -650,11 +650,40 @@ mod tests {
 
     // ── wall-clock child lifecycle (#3462) ───────────────────────────────
 
+    /// Install an executable fixture **without this process writing the path it
+    /// will exec**.
+    ///
+    /// `fork` copies the whole descriptor table, so a write descriptor held
+    /// here is inherited by every child a concurrently running test forks.
+    /// `O_CLOEXEC` drops that copy only once the child reaches its own `exec`;
+    /// until then the inode's write count is positive, and an `exec` of the
+    /// same path fails with `ETXTBSY` — `Text file busy (os error 26)`, the
+    /// intermittent failure #3504 records. The content therefore goes to a path
+    /// that is never exec'd, and a child `cp` creates the one that is: this
+    /// process's descriptor table then holds no write descriptor on the
+    /// executable, so a fork has nothing to copy.
+    ///
+    /// `rename` does not give the same guarantee: it moves a directory entry,
+    /// so the inode whose write count is positive is still the one that gets
+    /// exec'd. This is the construction and the rejection measured for the
+    /// fake-tmux fixtures (#1026, `crates/nession-agent/src/test_support.rs`).
     #[cfg(target_os = "linux")]
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let path = dir.join(name);
-        std::fs::write(&path, body).expect("write fake git");
+        let staged = path.with_extension("src");
+        std::fs::write(&staged, body).expect("stage fake git");
+        let status = std::process::Command::new("cp")
+            .arg(&staged)
+            .arg(&path)
+            .status()
+            .expect("install fake git");
+        let _ = std::fs::remove_file(&staged);
+        assert!(
+            status.success(),
+            "installing the fake git: cp exited with {status}"
+        );
+        // `chmod` does not open the file, so it cannot reintroduce the window.
         let mut permissions = std::fs::metadata(&path)
             .expect("stat fake git")
             .permissions();
@@ -702,6 +731,29 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         false
+    }
+
+    /// Wait until `pid` holds `path` open for writing on descriptor 1.
+    ///
+    /// The holder redirects its stdout to the fixture before `exec`, so the
+    /// descriptor crosses the `exec` and stays live until the holder exits —
+    /// the kernel state the #3504 race produces when a forked child inherits a
+    /// fixture writer's descriptor.
+    #[cfg(target_os = "linux")]
+    async fn wait_for_write_descriptor(pid: u32, path: &Path) {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(target) = std::fs::read_link(format!("/proc/{pid}/fd/1")) {
+                if target.as_path() == path {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "process {pid} never held {} open for writing",
+            path.display()
+        );
     }
 
     /// A controlled child that closes both pipes but stays alive must not keep
@@ -843,5 +895,116 @@ mod tests {
         let text = format!("{error:#}");
         assert!(text.contains("failed (exit status: 7)"), "{text}");
         assert!(text.contains("fatal diagnostic"), "{text}");
+    }
+
+    // ── fixture installation (#3504) ─────────────────────────────────────
+
+    /// A writable descriptor on the executable's inode makes `exec` fail with
+    /// `ETXTBSY` until it closes. The old [`script`] wrote the fixture from
+    /// this process, so a child forked by a concurrent test while that write
+    /// was in flight inherited exactly such a descriptor.
+    ///
+    /// The holder reproduces that child deterministically: it redirects its
+    /// stdout to the fixture before `exec`, so the write descriptor crosses the
+    /// `exec` and stays live until the holder exits. `git-held` cannot exec
+    /// while it lives, the fixture installed by the corrected helper can, and
+    /// the held file executes again once the holder is gone — the live write
+    /// descriptor was the only difference.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_live_write_descriptor_is_what_makes_a_fixture_unexecutable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let held = script(dir.path(), "git-held", "#!/bin/sh\nexit 0\n");
+        let installed = script(
+            dir.path(),
+            "git-installed",
+            "#!/bin/sh\nprintf 'ok\\n'\nexit 0\n",
+        );
+
+        // Installing a fixture must leave no descriptor on the executable in
+        // this process, whose table every fork copies.
+        for entry in std::fs::read_dir("/proc/self/fd").expect("list descriptors") {
+            let target = std::fs::read_link(entry.expect("descriptor entry").path());
+            assert_ne!(
+                target.ok().as_deref(),
+                Some(installed.as_path()),
+                "the installed fixture is still open in this process"
+            );
+        }
+
+        let pidfile = dir.path().join("holder.pid");
+        let mut holder = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("echo $$ > \"$2\"; exec sleep 60 >> \"$1\"")
+            .arg("sh")
+            .arg(&held)
+            .arg(&pidfile)
+            .spawn()
+            .expect("spawn the write-descriptor holder");
+        let pid = wait_for_pid(&pidfile).await;
+        wait_for_write_descriptor(pid, &held).await;
+
+        // not-tmux: executes the git fixture; the variable holds a fixture path.
+        let busy = std::process::Command::new(&held)
+            .arg("status")
+            .output()
+            .expect_err("executing a write-held fixture must fail");
+        assert!(
+            busy.to_string().contains("Text file busy"),
+            "expected ETXTBSY, got: {busy}"
+        );
+
+        // not-tmux: executes the git fixture; the variable holds a fixture path.
+        let output = std::process::Command::new(&installed)
+            .arg("status")
+            .output()
+            .expect("a fixture installed via a child must execute");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"ok\n".to_vec());
+
+        holder.kill().expect("stop the write-descriptor holder");
+        holder.wait().expect("reap the write-descriptor holder");
+        assert!(
+            wait_for_exit(pid).await,
+            "the write-descriptor holder {pid} must be gone"
+        );
+        // not-tmux: executes the git fixture; the variable holds a fixture path.
+        let released = std::process::Command::new(&held)
+            .arg("status")
+            .output()
+            .expect("the fixture must execute once its write descriptor is gone");
+        assert!(released.status.success());
+    }
+
+    /// The #3504 race is between fixture installation and children forked by
+    /// sibling tests, so repeat both concurrently: every worker installs and
+    /// executes four fixtures while the rest of the suite keeps spawning.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fixture_installation_survives_repeated_parallel_spawns() {
+        let mut workers = Vec::new();
+        for worker in 0..4 {
+            workers.push(std::thread::spawn(move || {
+                for round in 0..4 {
+                    let dir = tempfile::tempdir().expect("tempdir");
+                    let fixture = script(
+                        dir.path(),
+                        &format!("git-parallel-{worker}-{round}"),
+                        "#!/bin/sh\nprintf 'ok\\n'\nexit 0\n",
+                    );
+                    // not-tmux: executes the git fixture; the variable holds a
+                    // fixture path.
+                    let output = std::process::Command::new(&fixture)
+                        .arg("status")
+                        .output()
+                        .expect("a parallel fixture must execute");
+                    assert!(output.status.success());
+                    assert_eq!(output.stdout, b"ok\n".to_vec());
+                }
+            }));
+        }
+        for worker in workers {
+            worker.join().expect("a fixture worker must not panic");
+        }
     }
 }
