@@ -1,7 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { base64Decode, base64Encode, type FileData, type FileOps } from '@/capabilities/files';
+import {
+  FILE_CHANGED_DURING_READ_MESSAGE,
+  base64Decode,
+  base64Encode,
+  type FileData,
+  type FileOps,
+} from '@/capabilities/files';
 import { useFileViewer } from '../../useFileViewer';
 
 const BIG_FILE = 11 * 1024 * 1024;
@@ -50,7 +56,12 @@ function chunkedFileOps() {
   return { fileOps, readFile, requests };
 }
 
-function chunkData(offset: number, text: string, hasMore: boolean): FileData {
+function chunkData(
+  offset: number,
+  text: string,
+  hasMore: boolean,
+  revision = 'rev-stable',
+): FileData {
   return {
     path: '/logs/big.txt',
     content: base64Encode(text),
@@ -58,6 +69,7 @@ function chunkData(offset: number, text: string, hasMore: boolean): FileData {
     offset,
     total_size: BIG_FILE,
     has_more: hasMore,
+    revision,
   };
 }
 
@@ -168,5 +180,35 @@ describe('useFileViewer chunked-load flight ownership', () => {
     expect(result.current.content).toBe('');
     expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
+  });
+
+  it('a replacement between chunks surfaces an error, and Retry loads the stable file (SC-01)', async () => {
+    const { result, requests } = renderChunkedViewer();
+    expect(requests).toHaveLength(1);
+
+    // First chunk is revision A; the agent replaced the file before the next
+    // request, so the final chunk is revision B with the same length.
+    await settle(requests, 0, chunkData(0, 'A first ', true, 'rev-a'));
+    expect(requests).toHaveLength(2);
+    await settle(requests, 1, chunkData(8, 'B final', false, 'rev-b'));
+
+    expect(result.current.content).toBe('');
+    expect(result.current.originalContent).toBe('');
+    expect(result.current.error).toBe(FILE_CHANGED_DURING_READ_MESSAGE);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.isChunkedLoading).toBe(false);
+
+    // Retry is the viewer's fresh reload; the stable revision now completes.
+    act(() => { void result.current.loadFile(); });
+    expect(requests).toHaveLength(3);
+    await settle(requests, 2, chunkData(0, 'stable ', true, 'rev-c'));
+    expect(requests).toHaveLength(4);
+    await settle(requests, 3, chunkData(7, 'content', false, 'rev-c'));
+
+    expect(result.current.content).toBe('stable content');
+    expect(result.current.originalContent).toBe('stable content');
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.isChunkedLoading).toBe(false);
   });
 });

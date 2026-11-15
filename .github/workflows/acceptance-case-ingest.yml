@@ -1,7 +1,11 @@
 name: Acceptance / Case Ingest
 
 on:
+  repository_dispatch:
+    types: [nession-comment-case-ingest]
   workflow_run:
+    # Native push and owner-manual Cases keep the static source name.
+    # GITHUB_TOKEN comment Cases are explicitly woken by their source Run job.
     workflows: ["Acceptance / Cases"]
     types: [completed]
 
@@ -17,6 +21,22 @@ concurrency:
 
 jobs:
   ingest:
+    # Explicitly dispatched comment Runs have one canonical ingester.
+    # Native workflow_run remains for ordinary push/manual Case sources only.
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.event.action == 'nession-comment-case-ingest' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'github-actions[bot]' &&
+         github.event.sender.login == 'github-actions[bot]' &&
+         github.run_attempt == 1 &&
+         github.event.client_payload.source_run_id != '') ||
+        (github.event_name == 'workflow_run' &&
+         !startsWith(github.event.workflow_run.name, 'Comment Case #') &&
+         !startsWith(github.event.workflow_run.display_title, 'Comment Case #'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -31,6 +51,19 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Authenticate exact source Run and prepare Case event
+        id: source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node trusted/scripts/acceptance-case-ingest.mjs prepare-event \
+            "$GITHUB_EVENT_PATH" "${RUNNER_TEMP}/case-source-event.json" \
+            > "${RUNNER_TEMP}/case-source-metadata.json"
+          for field in run_id run_attempt source_url source_conclusion; do
+            echo "${field}=$(jq -er ".${field}" "${RUNNER_TEMP}/case-source-metadata.json")" >> "$GITHUB_OUTPUT"
+          done
+
       - name: Self-test trusted ingestion
         working-directory: trusted
         run: |
@@ -44,7 +77,7 @@ jobs:
           merge-multiple: true
           path: incoming
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.source.outputs.run_id }}
 
       - name: Count source Case results
         id: incoming
@@ -113,9 +146,9 @@ jobs:
       - name: Validate and prepare immutable records
         id: records
         env:
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+          SOURCE_WORKFLOW_URL: ${{ steps.source.outputs.source_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -125,7 +158,7 @@ jobs:
           while IFS= read -r file; do
             # Never create a persistent path until the GitHub-owned source run
             # identity and immutable source Case tree have been attested.
-            durable_path="$(node trusted/scripts/acceptance-case-ingest.mjs attest "${file}" "${GITHUB_EVENT_PATH}")"
+            durable_path="$(node trusted/scripts/acceptance-case-ingest.mjs attest "${file}" "${RUNNER_TEMP}/case-source-event.json")"
             echo "${file}"$'\t'"${durable_path}" >> "${RUNNER_TEMP}/records-to-ingest.tsv"
             count=$((count + 1))
           done < <(find incoming -type f -name '*.case.json' -print | sort)
@@ -134,7 +167,7 @@ jobs:
       - name: Append compact immutable records and SHA indexes
         if: steps.records.outputs.count != '0'
         env:
-          SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          SOURCE_WORKFLOW_URL: ${{ steps.source.outputs.source_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -143,7 +176,7 @@ jobs:
             mkdir -p "$(dirname "${destination}")"
             candidate="$(mktemp)"
             node trusted/scripts/acceptance-case-ingest.mjs enrich \
-              "${source}" "${candidate}" "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${GITHUB_EVENT_PATH}"
+              "${source}" "${candidate}" "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${RUNNER_TEMP}/case-source-event.json"
             node trusted/scripts/acceptance-case-ingest.mjs validate "${candidate}" >/dev/null
             if [[ -e "${destination}" ]]; then
               cmp -s "${destination}" "${candidate}" || {
@@ -179,7 +212,7 @@ jobs:
           if git -C results-repo diff --cached --quiet; then
             echo "Idempotent Case ingestion retry: identical durable record and index bytes"
           else
-            git -C results-repo commit -m "acceptance: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            git -C results-repo commit -m "acceptance: ingest run ${{ steps.source.outputs.run_id }} attempt ${{ steps.source.outputs.run_attempt }}"
             node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
       - name: Verify immutable Git bytes before uploading Run Store receipts
@@ -242,8 +275,8 @@ jobs:
           {
             echo "## Acceptance Case ingestion"
             echo
-            echo "- Source run: ${{ github.event.workflow_run.html_url }}"
-            echo "- Source conclusion: \`${{ github.event.workflow_run.conclusion }}\`"
+            echo "- Source run: ${{ steps.source.outputs.source_url }}"
+            echo "- Source conclusion: \`${{ steps.source.outputs.source_conclusion }}\`"
             echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
             echo "- Durable branch: \`acceptance-results\`"
           } >> "${GITHUB_STEP_SUMMARY}"
