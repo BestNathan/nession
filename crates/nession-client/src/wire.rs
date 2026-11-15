@@ -75,6 +75,12 @@ pub const SERVER_AGENT_RENAME: &str = "server.agent.rename";
 /// `server.agent.delete` — remove an offline Agent.
 pub const SERVER_AGENT_DELETE: &str = "server.agent.delete";
 
+/// Server-owned ENV file management (including Agent files routed by Server).
+pub const SERVER_ENV_LIST: &str = "server.env.list";
+pub const SERVER_ENV_GET: &str = "server.env.get";
+pub const SERVER_ENV_WRITE: &str = "server.env.write";
+pub const SERVER_ENV_DELETE: &str = "server.env.delete";
+
 // ── The agent-facing wires ──────────────────────────────────────────────────
 //
 // These are sent on a socket to an **agent**, not to the Server, and they are

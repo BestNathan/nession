@@ -13,18 +13,32 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+};
 
 use crate::error::ToolError;
 
 /// The Server-owned cluster view.
 ///
-/// The only Server-owned Tool is Agent discovery; Session lifecycle and live
-/// state belong to the Agent even when the caller reaches them through the
-/// Server's routing.
+/// The Server owns registry discovery and ENV-file inventory and mutation.
+/// Agent-owned Session lifecycle and live state remain on the Node seam.
 #[async_trait]
 pub trait ClusterBackend: Send + Sync {
     /// `nession_server_list_agents` — the Server registry's Agent view.
     async fn list_agents(&self) -> Result<Value, ToolError>;
+
+    /// `nession_server_env_list` — server and online-agent file inventory.
+    async fn env_list(&self) -> Result<Value, ToolError>;
+
+    /// `nession_server_env_get` — raw file content (potentially sensitive).
+    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError>;
+
+    /// `nession_server_env_write` — canonical in-use/overwrite protection.
+    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError>;
+
+    /// `nession_server_env_delete` — canonical in-use/delete protection.
+    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError>;
 }
 
 /// One explicitly named Agent node's real Session state.
@@ -75,6 +89,22 @@ impl UnavailableClusterBackend {
 #[async_trait]
 impl ClusterBackend for UnavailableClusterBackend {
     async fn list_agents(&self) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn env_list(&self) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn env_get(&self, _payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn env_write(&self, _payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn env_delete(&self, _payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 }
