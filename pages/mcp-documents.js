@@ -8,6 +8,7 @@ function el(tag,text='',cls=''){
 }
 export function validMcpSnapshot(data){
   return data?.schema_version===1&&data?.status==='available'&&
+    /^[a-f0-9]{64}$/.test(data.semantic_sha256||'')&&
     data.source?.repository==='BestNathan/nession'&&data.source?.branch==='main'&&
     /^[a-f0-9]{40}$/.test(data.source?.sha||'')&&
     Array.isArray(data.tools)&&data.tools.length>0&&data.tools.length<=256&&
