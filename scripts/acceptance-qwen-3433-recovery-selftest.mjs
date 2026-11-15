@@ -112,6 +112,12 @@ assert.equal(proof.verified,true);
 assert.equal(proof.original_published_pr_sha,B);
 assert.equal(proof.protected_state_chain.at(-1).approved_reviewer_run,R.finalReview[0]);
 assert.equal(proof.quality_outcome,'unverified');
+// Historical source PR is now merged, but the original Reviewed head remains
+// an ancestor: a closed merged PR does not invalidate its signed evidence.
+const merged=structuredClone(fixture);
+merged.pr.state='closed';
+merged.pr.merged_at='2026-11-15T13:00:00Z';
+assert.equal(attestQwen3433Recovery(merged).verified,true);
 function reject(mutator){
   const value=structuredClone(fixture);
   mutator(value);
@@ -134,6 +140,9 @@ reject(x=>x.states[10].phase='quality');
 reject(x=>x.states[10].transitions[1].outcome='approved');
 reject(x=>x.states[13].outbox[1].status='pending');
 reject(x=>x.states[14].transitions[2].target_sha=A);
+reject(x=>x.states[14].outbox.unshift(
+  action('1'.repeat(64),reviewerB,'pending')));
+reject(x=>x.states[14].outbox[0].status='pending');
 reject(x=>x.states[16].outbox[1].receipt.source_run_id=4);
 reject(x=>x.states[17].outbox[1].receipt.failure_code='other');
 reject(x=>x.states[19].outbox[2].receipt.source_run_id=2);
