@@ -16,7 +16,9 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
   repairRuntimeSuccessorId,REVIEWER_PREMODEL_FAILURE,
-  reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure}
+  reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
+  REVIEWER_JSON_FAILURE,reviewerJsonSuccessorId,
+  recordAttestedReviewerJsonFailure}
   from './outbox.mjs';
 import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
@@ -154,6 +156,38 @@ export function recoverAttestedReviewerPremodelFailure({remote,source}){
     const next=recordAttestedReviewerPremodelFailure(state,prior.version,source);
     const pushed=persist(dir,next,prior.version,f.issue);
     if(pushed.replayed)fail('ambiguous new Reviewer recovery Store CAS');
+    return {status:'recovered',issue:f.issue,action_id:id,
+      state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// #3601: source-bound recovery from exactly one failed post-model Reviewer
+// with no accepted verdict Artifacts. Read-only GitHub proof is obtained
+// before any Store credential is used; this transaction never retries the
+// original workflow_dispatch or invents a Reviewer verdict.
+export function recoverAttestedReviewerJsonFailure({remote,source}){
+  const f=REVIEWER_JSON_FAILURE;
+  if(source?.verified!==true||source.issue!==f.issue||
+      source.action_id!==f.action_id||source.run_id!==f.run_id||
+      source.attempt!==1||source.source_sha!==f.source_sha||
+      source.failure_code!==f.failure_code)
+    fail('JSON Reviewer failure is not independently authenticated');
+  const id=reviewerJsonSuccessorId(f.issue,f.action_id,f.run_id);
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,f.issue),state=prior.state;
+    if(!state)fail('missing recovered Reviewer Issue');
+    const previous=state.outbox.find(x=>x.id===f.action_id);
+    if(state.outbox.some(x=>x.id===id)){
+      if(previous?.status!=='failed'||
+          previous.receipt?.failure_code!==f.failure_code||
+          previous.receipt?.source_run_id!==f.run_id)
+        fail('conflicting JSON Reviewer successor replay');
+      return {status:'replayed',issue:f.issue,action_id:id,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const next=recordAttestedReviewerJsonFailure(state,prior.version,source);
+    const pushed=persist(dir,next,prior.version,f.issue);
+    if(pushed.replayed)fail('ambiguous Reviewer JSON recovery Store CAS');
     return {status:'recovered',issue:f.issue,action_id:id,
       state_version:next.version,store_commit_sha:pushed.commit_sha};
   });
