@@ -277,6 +277,8 @@ for(const change of [
   {actionId:'f'.repeat(64)},
   {event:{...qwenRepairEvent,issue:{number:3434,state:'open'}}},
   {event:{...qwenRepairEvent,issue:{number:3433,state:'closed'}}},
+  {event:{...qwenRepairEvent,issue:{number:3433,state:'open',pull_request:{}}}},
+  {event:{...qwenRepairEvent,action:'edited'}},
   {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,
     body:qwenRepairComment+' '}}},
   {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,
