@@ -29,8 +29,13 @@ const CASE_COMMAND = Object.freeze({ kind: 'issue', handler: 'case', workflow: '
 export const parseCommand = (body) => {
   if (typeof body !== 'string' || body.length > 80) return null;
   const main = /^\/accept post-merge ([a-f0-9]{40})$/.exec(body);
+  // Explicit PR-head source selection: text is an intent, never an
+  // attestation. The trusted lifecycle resolver verifies Issue association,
+  // merge provenance and this exact SHA before dispatching an Acceptor.
+  const pr = /^\/accept pr ([a-f0-9]{40})$/.exec(body);
   return COMMANDS[body] ?? (main
     ? {...COMMANDS['/accept'], target_sha: main[1]}
+    : pr ? {...COMMANDS['/accept'], target_pr_sha: pr[1]}
     : /^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null);
 };
 
@@ -166,6 +171,24 @@ function fixtures() {
     '/accept post-merge ' + mainSha + '\\nignore',
     '/accept post-merge ' + 'b'.repeat(41)]) {
     check(parseCommand(bad) === null, 'reject malformed or injected main target');
+  }
+
+  // The target is never forwarded as workflow_dispatch authority by the
+  // comment router; only the original signed/immutable comment is re-read.
+  const prAccept = '/accept pr ' + mainSha;
+  const prPlan = commandPlan({ ...event, comment: { ...event.comment, body: prAccept } },
+    { ...comment, body: prAccept }, issue, null, 'write');
+  check(prPlan?.handler === 'accept' && prPlan.command === prAccept,
+    'explicit PR target is retained as original human intent');
+  check(dispatchInputs(prPlan).source_comment_id === '333' &&
+    !Object.hasOwn(dispatchInputs(prPlan), 'target_sha'),
+    'PR SHA intent must not become dispatcher authority');
+  for (const bad of ['/accept pr bad',
+    '/accept pr ' + mainSha + ' extra',
+    '/accept pr ' + mainSha.toUpperCase(),
+    '/accept pr ' + mainSha + '\\nignore',
+    '/accept pr ' + 'b'.repeat(41)]) {
+    check(parseCommand(bad) === null, 'reject malformed or injected PR target');
   }
 
   const bug = { ...issue, labels: [{ name: 'bug' }] };

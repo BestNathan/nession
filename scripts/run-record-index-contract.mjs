@@ -35,16 +35,17 @@ export function validateRunIndex(raw){
   // of the dispatched run's head: a workflow_dispatch reports the ref tip,
   // which is not the deployed source SHA (#2614).
   const deployedAcceptance = raw.mode === 'acceptance' && raw.deployment !== undefined;
-  // Manual Staging Cases have two independently pinned identities: trusted
+  // Manual merged Cases may have two independently pinned identities: trusted
   // workflow code on main and the target chosen by original GitHub dispatch
   // inputs. Ingestion verifies the original Jobs/Steps before writing source.
-  const manualStaging = raw.mode === 'acceptance' && !deployedAcceptance &&
+  const manualMerged = raw.mode === 'acceptance' && !deployedAcceptance &&
     source.event === 'workflow_dispatch' && source.head_branch === 'main' &&
     source.dispatch_binding !== undefined;
-  if (manualStaging) {
+  if (manualMerged) {
     const binding = source.dispatch_binding;
-    assert.equal(raw.stage, 'staging', 'manual Case dispatch must target Staging');
-    assert.equal(binding.stage, 'staging', 'manual Case stage disagrees');
+    assert.ok(['staging','post-merge'].includes(raw.stage),
+      'manual Case dispatch must target an eligible merged stage');
+    assert.equal(binding.stage, raw.stage, 'manual Case stage disagrees');
     assert.equal(binding.target_sha, raw.target_sha, 'manual Case target SHA disagrees');
     assert.equal(binding.issue, raw.issue, 'manual Case Issue disagrees');
     assert.equal(binding.criterion, raw.criterion, 'manual Case SC disagrees');
@@ -53,14 +54,14 @@ export function validateRunIndex(raw){
   } else if (source.dispatch_binding !== undefined) {
     assert.fail('manual Case dispatch binding is not applicable to this source');
   }
-  if (!deployedAcceptance && !manualStaging && raw.target_sha !== undefined) {
+  if (!deployedAcceptance && !manualMerged && raw.target_sha !== undefined) {
     assert.equal(raw.target_sha,target,'index source SHA disagrees');
   }
   if(raw.mode==='acceptance'){
     assert.ok(scalar(raw.issue));
     assert.match(raw.criterion,/^SC-\d{2,}$/);
     assert.ok(['staging','post-merge'].includes(raw.stage));
-    if (!manualStaging) {
+    if (!manualMerged) {
       assert.equal(source.head_branch,raw.stage==='staging'?'staging':'main');
     }
     if (deployedAcceptance) {
@@ -119,6 +120,20 @@ export function selfTest(){
   };
   const boundIndex = { ...accept, source: boundSource };
   assert.equal(makeRunIndex(boundIndex).target_sha, accept.target_sha);
+  const postMergeBound = { ...boundIndex, stage: 'post-merge',
+    source: { ...boundSource, dispatch_binding: { ...boundSource.dispatch_binding,
+      stage: 'post-merge' } } };
+  assert.equal(makeRunIndex(postMergeBound).stage, 'post-merge');
+  assert.throws(() => makeRunIndex({ ...postMergeBound,
+    source: { ...postMergeBound.source, dispatch_binding: {
+      ...postMergeBound.source.dispatch_binding, stage: 'staging' } } }),
+  /manual Case stage disagrees/);
+  assert.throws(() => makeRunIndex({ ...postMergeBound, target_sha: 'f'.repeat(40) }),
+  /manual Case target SHA disagrees/);
+  // A source main-head Case remains strict without a dual-SHA binding.
+  const plainMain = { ...accept, stage: 'post-merge', source: {
+    ...caseSource, head_branch: 'main' } };
+  assert.equal(makeRunIndex(plainMain).stage, 'post-merge');
   for (const changed of [
     { target_sha: 'f'.repeat(40) },
     { issue: 1498 },

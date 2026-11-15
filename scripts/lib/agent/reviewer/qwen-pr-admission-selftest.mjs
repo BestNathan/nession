@@ -11,7 +11,8 @@ import {startDevelopment,validateDevelopmentState,
   acceptAttestedQwenPublication} from '../orchestration/outbox.mjs';
 import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
 import {assertReviewerAdmission} from './pr-admission.mjs';
-import {admitQwenPublishedReview,admitQwenRepairPublishedReview}
+import {admitQwenPublishedReview,admitQwenRepairPublishedReview,
+  authenticatedQwenPublisherTrigger}
   from './qwen-pr-admission.mjs';
 import {renderReviewPrompt,reviewModelResult} from '../tasks/review.mjs';
 
@@ -70,6 +71,15 @@ const good={state:published,intent,publisherRun,pullRequests:[pr],pr,
   ref,commit,files,tree,actionId:reviewerAction,base_files:baseFiles};
 const make=delta=>admitQwenPublishedReview({...good,...delta});
 const accepted=make({});
+const botPublisherRun={...publisherRun,event:'workflow_dispatch',
+  actor:{login:'github-actions[bot]'}};
+assert.equal(authenticatedQwenPublisherTrigger(botPublisherRun),true);
+assert.equal(authenticatedQwenPublisherTrigger(publisherRun),true);
+assert.equal(authenticatedQwenPublisherTrigger({...botPublisherRun,
+  actor:{login:'BestNathan'}}),false);
+const botAccepted=make({publisherRun:botPublisherRun});
+assert.equal(botAccepted.target_sha,HEAD);
+assert.deepEqual(botAccepted,accepted);
 assert.equal(accepted.issue,ISSUE);
 assert.equal(accepted.review_action_id,reviewerAction);
 assert.deepEqual(accepted.expected_files.map(x=>x.path),
@@ -100,6 +110,10 @@ const rejects=[
   [{intent:{...intent,publisher_run_id:402}},/Outbox/],
   [{publisherRun:{...publisherRun,head_sha:'0'.repeat(40)}},/Publisher Run/],
   [{publisherRun:{...publisherRun,run_attempt:2}},/Publisher Run/],
+  [{publisherRun:{...botPublisherRun,actor:{login:'BestNathan'}}},/Publisher Run/],
+  [{publisherRun:{...botPublisherRun,actor:{login:'external'}}},/Publisher Run/],
+  [{publisherRun:{...botPublisherRun,event:'issue_comment'}},/Publisher Run/],
+  [{publisherRun:{...botPublisherRun,conclusion:'failure'}},/Publisher Run/],
   [{pullRequests:[pr,pr]},/Qwen PR/],
   [{pr:{...pr,head:{...pr.head,sha:MAIN}}},/Outbox/],
   [{pr:{...pr,base:{...pr.base,ref:'staging'}}},/Qwen PR/],
@@ -156,7 +170,17 @@ assert.equal(repairAdmission.target_sha,SHA_B);
 assert.equal(repairAdmission.base_sha_at_publication,MAIN);
 assert.equal(repairAdmission.publisher_run_id,REPAIR_RUN);
 assert.equal(repairAdmission.publisher_branch,intent.branch);
+const botRepairPublisher={...repairPublisherRun,event:'workflow_dispatch',
+  actor:{login:'github-actions[bot]'}};
+assert.equal(admitQwenRepairPublishedReview({
+  state:repairPublished,intent:repairIntent,publisherRun:botRepairPublisher,
+  pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
+  actionId:REPAIR_ACTION,
+}).target_sha,SHA_B);
 for(const bad of [
+  {publisherRun:{...botRepairPublisher,actor:{login:'BestNathan'}}},
+  {publisherRun:{...botRepairPublisher,event:'issue_comment'}},
+  {publisherRun:{...botRepairPublisher,run_attempt:2}},
   {commit:{...commitB,parents:[{sha:MAIN}]}},
   {publisherRun:{...repairPublisherRun,id:REPAIR_RUN+1}},
   {ref:{...refB,object:{sha:HEAD}}},
@@ -200,6 +224,12 @@ try{
   const prepared=await prepareQwenReviewAdmission({
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher});
   assert.deepEqual(prepared,accepted);
+  const preparedBot=await prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:reviewerAction,
+    fetcher:async name=>name==='actions/runs/401'?
+      botPublisherRun:fetcher(name),
+  });
+  assert.deepEqual(preparedBot,accepted);
   await assert.rejects(()=>prepareQwenReviewAdmission({
     storeRoot:root,issue:ISSUE,actionId:action,fetcher}),/Outbox/);
   await assert.rejects(()=>prepareQwenReviewAdmission({
