@@ -99,7 +99,8 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
       firstParentCommits.length===0)
     return fail('EMPTY_PROMOTION');
   const run=deployRuns.filter(r=>deployment_workflows.some(file=>r.path?.split('@')[0]==='.github/workflows/'+file) &&
-    r.head_sha===laneSha && r.head_branch===branch && r.event==='push' &&
+    r.head_sha===laneSha && r.head_branch===branch &&
+    ['push','workflow_dispatch'].includes(r.event) &&
     r.repository?.full_name===REPO && r.head_repository?.full_name===REPO);
   // GitHub run inventories are not a stable ordering guarantee; an older
   // success must not mask a later failed/in-progress deployment attempt.
