@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5573eb14ac15c9281276b644f9cb30a8fd44d607b033cc541359a8227267edda",
+  "run_id": 43713957942,
+  "run_attempt": 1,
+  "issue": 3439,
+  "criterion": "SC-03",
+  "criterion_text": "At both listeners, incomplete/unauthed handshake attempts and invalid/oversized HTTP/WS requests are bounded/rejected; the existing Agent #2653 admission guarantee and MCP Bearer/Origin/Host restrictions remain effective, while Server gains an equivalent bounded pre-auth path.",
+  "stage": "staging",
+  "target_sha": "5a804640f262aa54208f6cbecd53a1a8dca6105e",
+  "contract_sha256": "7d078f820c8d2c4b578dfa6eff494198e7f28c0e1ccb48c36f9e6ac5fe83850a",
+  "case_revision": "5a804640f262aa54208f6cbecd53a1a8dca6105e",
+  "case_tree_sha": "b2ae7fb35790633e46f6b0b53759a7e64e513185",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T12:30:52.847Z",
+  "finished_at": "2026-11-15T12:33:08.689Z",
+  "duration_ms": 135842,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify-http.cjs",
+      "result": "Pass",
+      "summary": "The HTTP listener bounds every request head (including the idle keep-alive wait) without cutting a streaming response body",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "5a804640f262aa54208f6cbecd53a1a8dca6105e: a keep-alive connection that went idle after one response and one that sent a partial second request were both closed at the per-request header deadline, while a streamed body longer than that deadline was delivered in full"
+        }
+      ],
+      "duration_ms": 16139,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-agent-auth.cjs",
+      "result": "Pass",
+      "summary": "Agent upgraded sockets are bounded by an absolute PendingAuth deadline and a separate pending-auth concurrency budget",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "5a804640f262aa54208f6cbecd53a1a8dca6105e: an upgraded Agent P2P socket closed at its absolute auth deadline despite a refused authentication and continuous Ping frames; a second upgrade was refused 503 while the only pending-auth slot was held, and a successful client.auth returned the slot"
+        }
+      ],
+      "duration_ms": 65739,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-server-auth.cjs",
+      "result": "Pass",
+      "summary": "Server upgraded sockets are bounded by an absolute PendingAuth deadline and a separate pending-auth concurrency budget",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "5a804640f262aa54208f6cbecd53a1a8dca6105e: an upgraded Server socket closed at its absolute auth deadline despite continuous Ping frames; a second upgrade was refused 503 while the only pending-auth slot was held, and a successful server.auth returned the slot"
+        }
+      ],
+      "duration_ms": 48014,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43713957942,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5a804640f262aa54208f6cbecd53a1a8dca6105e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43713957942",
+    "record_path": "runs/2026-11-15/43713957942-1/3439/SC-03.json",
+    "source_result_sha256": "2b20d28c8f2a2fcdc1a139e395d8d36a07cb5a2609b3cd6629138d6d677abaf1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43713957942-1",
+    "sha256": "2b20d28c8f2a2fcdc1a139e395d8d36a07cb5a2609b3cd6629138d6d677abaf1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43713957942",
+    "durability": "time-limited; object archival not configured"
+  }
+}
