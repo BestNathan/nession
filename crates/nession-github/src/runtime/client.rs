@@ -31,6 +31,9 @@ use crate::runtime::remote::{branch_relation, GithubIdentity};
 
 const DEFAULT_LIMIT: u32 = 20;
 const MAX_LIMIT: u32 = 50;
+/// GitHub's maximum page size for the internal branch-association lookup.
+/// This is deliberately separate from the displayed list page size.
+const BRANCH_LOOKUP_LIMIT: u32 = 100;
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -434,8 +437,12 @@ impl GithubClient {
             .append_pair("per_page", &limit.to_string())
             .append_pair("page", &page.to_string());
         let (body, link) = self.get::<Vec<ApiPull>>(url).await?;
-        let mut relation = BranchRelationV1::None;
-        let mut current = None;
+        let has_more = has_next(&link);
+        // Page-local evidence is authoritative only when this page is the
+        // complete filtered list (first page without a next page). On any
+        // other page a local miss is not repository-wide absence.
+        let mut page_relation = BranchRelationV1::None;
+        let mut page_current = None;
         let pull_requests: Vec<GithubPullRequestSummaryV1> = body
             .into_iter()
             .map(|pull| {
@@ -459,12 +466,16 @@ impl GithubClient {
                         &pull.head.ref_name,
                         branch,
                     ) {
-                        if relation == BranchRelationV1::Matched {
-                            relation = BranchRelationV1::Ambiguous;
-                            current = None;
-                        } else if relation == BranchRelationV1::None {
-                            relation = BranchRelationV1::Matched;
-                            current = Some(pull.number);
+                        match page_relation {
+                            BranchRelationV1::Matched => {
+                                page_relation = BranchRelationV1::Ambiguous;
+                                page_current = None;
+                            }
+                            BranchRelationV1::None => {
+                                page_relation = BranchRelationV1::Matched;
+                                page_current = Some(pull.number);
+                            }
+                            BranchRelationV1::Ambiguous | BranchRelationV1::Unknown => {}
                         }
                     }
                 }
@@ -492,15 +503,78 @@ impl GithubClient {
                 }
             })
             .collect();
-        let has_more = has_next(&link);
+        let (current_branch, current_branch_pr) = match branch {
+            None => (BranchRelationV1::None, None),
+            Some(_) if page == 1 && !has_more => (page_relation, page_current),
+            Some(branch) => self.resolve_branch_relation(identity, state, branch).await,
+        };
         Ok(PullRequestsOkV1 {
             repository: identity.reference(""),
             pull_requests,
-            current_branch: relation,
-            current_branch_pr: current,
+            current_branch,
+            current_branch_pr,
             has_more,
             next_cursor: has_more.then(|| (page + 1).to_string()),
         })
+    }
+
+    /// Resolve the Session branch's PR relation independently of whichever
+    /// list page is displayed. GitHub's canonical `head` filter keeps this to
+    /// one bounded list request, and every returned PR still passes the exact
+    /// head owner/repository/ref check. A failed or truncated lookup is
+    /// `unknown`, never a page-local `none`.
+    async fn resolve_branch_relation(
+        &self,
+        identity: &GithubIdentity,
+        state: &str,
+        branch: &str,
+    ) -> (BranchRelationV1, Option<u64>) {
+        let mut url = match self.repo_url(identity) {
+            Ok(url) => url,
+            Err(_) => return (BranchRelationV1::Unknown, None),
+        };
+        {
+            let mut segments = match url.path_segments_mut() {
+                Ok(segments) => segments,
+                Err(_) => return (BranchRelationV1::Unknown, None),
+            };
+            segments.extend(["pulls"]);
+        }
+        url.query_pairs_mut()
+            .append_pair("state", state)
+            .append_pair("head", &format!("{}:{}", identity.owner, branch))
+            .append_pair("per_page", &BRANCH_LOOKUP_LIMIT.to_string())
+            .append_pair("page", "1");
+        let (pulls, link) = match self.get::<Vec<ApiPull>>(url).await {
+            Ok(answer) => answer,
+            Err(_) => return (BranchRelationV1::Unknown, None),
+        };
+        let mut matches = Vec::new();
+        for pull in pulls {
+            let head_owner = pull
+                .head
+                .repo
+                .as_ref()
+                .map(|repo| repo.owner.login.as_str())
+                .unwrap_or_default();
+            let head_repo = pull
+                .head
+                .repo
+                .as_ref()
+                .map(|repo| repo.name.as_str())
+                .unwrap_or_default();
+            if branch_relation(identity, head_owner, head_repo, &pull.head.ref_name, branch) {
+                matches.push(pull.number);
+            }
+        }
+        let truncated = has_next(&link);
+        match matches.len() {
+            0 if truncated => (BranchRelationV1::Unknown, None),
+            0 => (BranchRelationV1::None, None),
+            1 if truncated => (BranchRelationV1::Unknown, None),
+            1 => (BranchRelationV1::Matched, matches.first().copied()),
+            _ => (BranchRelationV1::Ambiguous, None),
+        }
     }
 
     pub async fn pull_request_detail(
@@ -1043,6 +1117,232 @@ mod tests {
         assert_eq!(pulls.current_branch, BranchRelationV1::Matched);
         assert_eq!(pulls.current_branch_pr, Some(7));
         assert!(pulls.pull_requests[1].draft);
+        // A first page with no next page is the complete filtered list, so
+        // no branch lookup is needed.
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+
+    fn pull_json(number: u64, owner: &str, repo: &str, head: &str) -> serde_json::Value {
+        serde_json::json!({
+            "number": number, "title": format!("pr {number}"), "state": "open",
+            "draft": false, "user": {"login": "dev"},
+            "updated_at": "2026-01-01T00:00:00Z", "created_at": "2026-01-01T00:00:00Z",
+            "html_url": format!("https://github.com/acme/repo/pull/{number}"),
+            "head": {"ref": head, "sha": "aaa",
+                     "repo": {"name": repo, "owner": {"login": owner}}},
+            "base": {"ref": "main", "sha": "bbb"}
+        })
+    }
+
+    fn paginated(body: serde_json::Value) -> FakeResponse {
+        FakeResponse {
+            status: 200,
+            headers: vec![
+                ("content-type".into(), "application/json".into()),
+                (
+                    "link".into(),
+                    "<https://api.github.com/repos/acme/repo/pulls?page=2>; rel=\"next\"".into(),
+                ),
+            ],
+            body: body.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn current_branch_relation_is_resolved_independently_of_the_displayed_page() {
+        let server = fake_github(vec![
+            paginated(serde_json::json!([
+                pull_json(1, "acme", "repo", "feature/other"),
+                pull_json(2, "fork", "repo", "feature/old"),
+            ])),
+            FakeResponse::json(
+                200,
+                serde_json::json!([
+                    pull_json(42, "acme", "repo", "feature/old"),
+                    pull_json(43, "fork", "repo", "feature/old"),
+                ]),
+            ),
+        ])
+        .await;
+        let client = GithubClient::new(server.base, Some("secret".into()));
+        let pulls = client
+            .pull_requests(
+                &identity(),
+                PullRequestStateFilterV1::Open,
+                None,
+                None,
+                Some("feature/old"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pulls.pull_requests.len(), 2);
+        assert!(pulls.has_more);
+        assert_eq!(pulls.current_branch, BranchRelationV1::Matched);
+        assert_eq!(pulls.current_branch_pr, Some(42));
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("state=open"));
+        assert!(requests[1].contains("head=acme"));
+        assert!(requests[1].contains("feature"));
+    }
+
+    #[tokio::test]
+    async fn a_later_displayed_page_cannot_assert_repository_wide_absence() {
+        let server = fake_github(vec![
+            FakeResponse::json(
+                200,
+                serde_json::json!([pull_json(1, "acme", "repo", "feature/other")]),
+            ),
+            FakeResponse::json(
+                200,
+                serde_json::json!([pull_json(42, "acme", "repo", "feature/old")]),
+            ),
+        ])
+        .await;
+        let client = GithubClient::new(server.base, Some("secret".into()));
+        let pulls = client
+            .pull_requests(
+                &identity(),
+                PullRequestStateFilterV1::Open,
+                None,
+                Some("2"),
+                Some("feature/old"),
+            )
+            .await
+            .unwrap();
+        assert!(!pulls.has_more);
+        assert_eq!(pulls.current_branch, BranchRelationV1::Matched);
+        assert_eq!(pulls.current_branch_pr, Some(42));
+        let requests = server.requests.lock().unwrap();
+        assert!(requests[0].contains("page=2"));
+        assert!(requests[1].contains("head=acme"));
+    }
+
+    #[tokio::test]
+    async fn the_branch_lookup_requires_an_exact_head_owner_and_repository() {
+        let server = fake_github(vec![
+            paginated(serde_json::json!([pull_json(
+                1,
+                "acme",
+                "repo",
+                "feature/other"
+            ),])),
+            FakeResponse::json(
+                200,
+                serde_json::json!([
+                    pull_json(8, "fork", "repo", "feature/old"),
+                    pull_json(9, "acme", "other-repo", "feature/old"),
+                ]),
+            ),
+        ])
+        .await;
+        let client = GithubClient::new(server.base, Some("secret".into()));
+        let pulls = client
+            .pull_requests(
+                &identity(),
+                PullRequestStateFilterV1::Open,
+                None,
+                None,
+                Some("feature/old"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pulls.current_branch, BranchRelationV1::None);
+        assert_eq!(pulls.current_branch_pr, None);
+    }
+
+    #[tokio::test]
+    async fn the_branch_lookup_preserves_ambiguity_across_pages() {
+        let server = fake_github(vec![
+            paginated(serde_json::json!([pull_json(
+                1,
+                "acme",
+                "repo",
+                "feature/other"
+            ),])),
+            FakeResponse::json(
+                200,
+                serde_json::json!([
+                    pull_json(8, "acme", "repo", "feature/old"),
+                    pull_json(9, "acme", "repo", "feature/old"),
+                ]),
+            ),
+        ])
+        .await;
+        let client = GithubClient::new(server.base, Some("secret".into()));
+        let pulls = client
+            .pull_requests(
+                &identity(),
+                PullRequestStateFilterV1::Open,
+                None,
+                None,
+                Some("feature/old"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pulls.current_branch, BranchRelationV1::Ambiguous);
+        assert_eq!(pulls.current_branch_pr, None);
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_branch_lookup_is_unknown_not_none() {
+        let server = fake_github(vec![
+            paginated(serde_json::json!([pull_json(
+                1,
+                "acme",
+                "repo",
+                "feature/other"
+            ),])),
+            FakeResponse::empty(500),
+        ])
+        .await;
+        let client = GithubClient::new(server.base, Some("secret".into()));
+        let pulls = client
+            .pull_requests(
+                &identity(),
+                PullRequestStateFilterV1::Open,
+                None,
+                None,
+                Some("feature/old"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pulls.pull_requests.len(), 1);
+        assert!(pulls.has_more);
+        assert_eq!(pulls.current_branch, BranchRelationV1::Unknown);
+        assert_eq!(pulls.current_branch_pr, None);
+    }
+
+    #[tokio::test]
+    async fn a_truncated_branch_lookup_is_unknown_not_a_definitive_answer() {
+        let server = fake_github(vec![
+            paginated(serde_json::json!([pull_json(
+                1,
+                "acme",
+                "repo",
+                "feature/other"
+            ),])),
+            paginated(serde_json::json!([pull_json(
+                8,
+                "acme",
+                "repo",
+                "feature/old"
+            ),])),
+        ])
+        .await;
+        let client = GithubClient::new(server.base, Some("secret".into()));
+        let pulls = client
+            .pull_requests(
+                &identity(),
+                PullRequestStateFilterV1::Open,
+                None,
+                None,
+                Some("feature/old"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pulls.current_branch, BranchRelationV1::Unknown);
+        assert_eq!(pulls.current_branch_pr, None);
     }
 
     #[tokio::test]

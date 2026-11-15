@@ -12,9 +12,10 @@ import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-resu
 import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
-  collectPrWebQuality, collectPrToolingQuality,
-  enforcePrWebQuality, requiresWebIntegrationExecution,
-  requiresPrToolingEvidence, validWebQualityReceipt,
+  collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
+  enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
+  requiresPrToolingEvidence, requiresPrRustQualityEvidence,
+  requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
 export { normalizeAcceptanceResult };
@@ -319,21 +320,86 @@ function priorAcceptedPrRefs(body, normalized) {
   });
 }
 
-function githubEvidence(path) {
-  const raw = execFileSync('gh', ['api', path], { encoding: 'utf8', env: process.env });
-  return JSON.parse(raw);
+// #3581: a compare response carries commits/files and a PR object carries
+// unrelated fields; buffering the whole payload into one spawnSync result
+// overflowed the historical default buffer. Project only the provenance
+// fields the verifier consumes and keep an explicit safe child-buffer cap.
+const GITHUB_EVIDENCE_MAX_BUFFER = 8 * 1024 * 1024;
+const COMPARE_EVIDENCE_JQ =
+  '{status: .status, ahead_by: .ahead_by, behind_by: .behind_by, ' +
+  'base_commit: {sha: .base_commit.sha}, ' +
+  'merge_base_commit: {sha: .merge_base_commit.sha}}';
+const PULLS_EVIDENCE_JQ =
+  '[.[] | {number: .number, body: .body, title: .title, ' +
+  'head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}, ' +
+  'base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}}]';
+
+function githubEvidenceExecute(args, options) {
+  return execFileSync('gh', args, options);
 }
 
-function livePrSourceSupersession(issueNumber, previous, next) {
+export function collectGithubEvidence(path, jq, execute = githubEvidenceExecute) {
+  let raw;
+  try {
+    raw = execute(['api', path, '--jq', jq], {
+      encoding: 'utf8', env: process.env, maxBuffer: GITHUB_EVIDENCE_MAX_BUFFER,
+    });
+  } catch (error) {
+    if (error && error.code === 'ENOBUFS') {
+      throw new Error('GitHub evidence for ' + path +
+        ' exceeded the ' + GITHUB_EVIDENCE_MAX_BUFFER + '-byte bound');
+    }
+    throw error;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('GitHub evidence for ' + path + ' is truncated or not valid JSON');
+  }
+}
+
+function incompleteEvidence(detail) {
+  throw new Error('GitHub provenance evidence is incomplete: ' + detail);
+}
+
+function boundedCompareEvidence(comparison, path) {
+  if (!comparison || typeof comparison !== 'object' || Array.isArray(comparison) ||
+      typeof comparison.status !== 'string' ||
+      !Number.isSafeInteger(comparison.ahead_by) ||
+      !Number.isSafeInteger(comparison.behind_by) ||
+      !SHA.test(String(comparison.base_commit?.sha ?? '')) ||
+      !SHA.test(String(comparison.merge_base_commit?.sha ?? ''))) {
+    incompleteEvidence('comparison metadata for ' + path);
+  }
+  return comparison;
+}
+
+function boundedPullEvidence(pulls, label) {
+  if (!Array.isArray(pulls)) incompleteEvidence(label + ' is not a PR list');
+  if (pulls.length >= 100) {
+    incompleteEvidence(label + ' pagination is incomplete (100 returned)');
+  }
+  return pulls;
+}
+
+export function livePrSourceSupersession(
+  issueNumber, previous, next, execute = githubEvidenceExecute,
+) {
   const repo = String(process.env.GITHUB_REPOSITORY || '');
   if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
       !/^[-\w.]+\/[-\w.]+$/.test(repo)) return null;
   const base = 'repos/' + repo;
+  const comparePath = base + '/compare/' + previous + '...' + next;
+  const previousPath = base + '/commits/' + previous + '/pulls?per_page=100';
+  const nextPath = base + '/commits/' + next + '/pulls?per_page=100';
   return {
     issue: Number(issueNumber), previous, next, repo,
-    comparison: githubEvidence(base + '/compare/' + previous + '...' + next),
-    previous_pulls: githubEvidence(base + '/commits/' + previous + '/pulls?per_page=100'),
-    next_pulls: githubEvidence(base + '/commits/' + next + '/pulls?per_page=100'),
+    comparison: boundedCompareEvidence(
+      collectGithubEvidence(comparePath, COMPARE_EVIDENCE_JQ, execute), comparePath),
+    previous_pulls: boundedPullEvidence(
+      collectGithubEvidence(previousPath, PULLS_EVIDENCE_JQ, execute), 'previous pulls'),
+    next_pulls: boundedPullEvidence(
+      collectGithubEvidence(nextPath, PULLS_EVIDENCE_JQ, execute), 'next pulls'),
   };
 }
 
@@ -441,6 +507,11 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
         !validWebQualityReceipt(normalized.pr_web_quality_receipt, normalized.target_ref)) {
       throw new Error(id + ' Pass lacks authenticated exact-head Web Quality receipt');
     }
+    if (stage === 'pr' && result.result === 'Pass' &&
+        requiresExactHeadRustQuality(contract.criteria.get(id)) &&
+        !validRustQualityReceipt(normalized.pr_rust_quality_receipt, normalized.target_ref)) {
+      throw new Error(id + ' Pass lacks authenticated exact-head Rust Quality receipt');
+    }
   }
 
   for (const [id] of resultMap) {
@@ -546,6 +617,11 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   if (requiresPrToolingEvidence(context)) {
     context.pr_tooling_quality = collectPrToolingQuality(context.target_ref);
   }
+  // Same trusted read-only readback for a criterion that explicitly makes
+  // exact-head Rust Quality execution its proof obligation (#3584 SC-02).
+  if (requiresPrRustQualityEvidence(context)) {
+    context.pr_rust_quality = collectPrRustQuality(context.target_ref);
+  }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
 }
@@ -555,7 +631,7 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
   const normalized = verifiedIssueAuditCriterion(
     context, normalizeAcceptanceResult(context, raw, source));
-  const gated = enforcePrWebQuality(context, normalized);
+  const gated = enforcePrRustQuality(context, enforcePrWebQuality(context, normalized));
   fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
 }
 
@@ -845,6 +921,57 @@ function selfTest() {
     {...proof,previous_pulls:[],next_pulls:[successor]},
     {...proof,next_pulls:[successor],issue:1361},
   ]) assert.equal(verifiedPrSourceSupersession(1360,hostingHead,toolingHead,bad),false);
+  // #3581: GitHub evidence is projected and buffered. A large compare/PR
+  // response overflowed the historical unbounded spawnSync buffer; the
+  // collector must request only the needed fields and cap its child buffer.
+  const savedRepo=process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY='BestNathan/nession';
+  const evidenceCalls=[];
+  const boundedEvidence=(args,options)=>{
+    evidenceCalls.push({args,options});
+    const path=args[1];
+    assert.ok(args.includes('--jq'),'the evidence request must project only required fields: '+path);
+    assert.equal(options?.maxBuffer,GITHUB_EVIDENCE_MAX_BUFFER,
+      'the evidence child buffer must use the explicit safe cap');
+    if(path.includes('/compare/')) return JSON.stringify(compare);
+    if(path.endsWith('/pulls?per_page=100')) {
+      return JSON.stringify(path.includes(hostingHead)
+        ? [sourcePr(3529,hostingHead)] : [successor]);
+    }
+    throw new Error('unexpected evidence path '+path);
+  };
+  const live=livePrSourceSupersession(1360,hostingHead,toolingHead,boundedEvidence);
+  assert.equal(live.comparison.ahead_by,1);
+  assert.equal(live.previous_pulls.length,1);
+  assert.equal(live.next_pulls.length,1);
+  assert.equal(verifiedPrSourceSupersession(1360,hostingHead,toolingHead,live),true);
+  assert.equal(evidenceCalls.length,3);
+  // A response larger than the cap, invalid JSON, a missing comparison or an
+  // incomplete PR page must fail closed instead of projecting fabricated
+  // evidence.
+  const enobufs=Object.assign(new Error('spawnSync gh ENOBUFS'),{code:'ENOBUFS'});
+  assert.throws(()=>livePrSourceSupersession(1360,hostingHead,toolingHead,()=>{throw enobufs}),
+    /exceeded the 8388608-byte bound/);
+  assert.throws(()=>livePrSourceSupersession(1360,hostingHead,toolingHead,()=>'{"status":'),
+    /truncated or not valid JSON/);
+  const noCompare=args=>args[1].includes('/compare/')
+    ? JSON.stringify({status:'ahead'}) : JSON.stringify([]);
+  assert.throws(()=>livePrSourceSupersession(1360,hostingHead,toolingHead,noCompare),
+    /incomplete: comparison metadata/);
+  const hundred=Array.from({length:100},(_,index)=>sourcePr(4000+index,hostingHead));
+  const fullPage=args=>args[1].includes('/compare/')
+    ? JSON.stringify(compare) : JSON.stringify(hundred);
+  assert.throws(()=>livePrSourceSupersession(1360,hostingHead,toolingHead,fullPage),
+    /pagination is incomplete/);
+  // Stale heads and mismatched repositories stay unverifiable.
+  for(const stale of [
+    {...proof,previous:'f'.repeat(40)},
+    {...proof,next:'a'.repeat(40)},
+    {...proof,next_pulls:[{...successor,head:{...successor.head,
+      repo:{full_name:'Other/project'}}}]},
+  ]) assert.equal(verifiedPrSourceSupersession(1360,hostingHead,toolingHead,stale),false);
+  if(savedRepo===undefined) delete process.env.GITHUB_REPOSITORY;
+  else process.env.GITHUB_REPOSITORY=savedRepo;
   const newer = passedBody.replace('run 100; ref abc123;', 'run 200; ref newer;');
   assert.throws(() => applyAcceptanceResultToBody(newer, pass), /newer acceptance run 200/);
   assert.equal(isSupersededRunError(new Error('SC-01 has newer acceptance run 200; refusing stale run 100')), true);
@@ -1078,6 +1205,25 @@ function selfTest() {
   const downgraded = enforcePrWebQuality(webContext, rawWebPass);
   assert.equal(downgraded.criteria[0].result, 'Pending');
   assert.match(applyAcceptanceResultToBody(webBody, downgraded),
+    /\| SC-01 \| pr \| Pending \|/);
+  // The same barrier applies to an explicit exact-head Rust Quality
+  // obligation: source review alone cannot project Pass (#3584 SC-02).
+  const rustBody = fixtureBody()
+    .replace('SC-01 deterministic update works',
+      'SC-01 Exact-head Rust coverage/Quality on the repair PR completes successfully')
+    .replace('| SC-01 | staging |', '| SC-01 | pr |');
+  const rustBodyContext = buildAcceptanceContext({ ...issue, body: rustBody }, 'pr', {
+    targetRef: 'a'.repeat(40), runId: 701, method: 'agent',
+  });
+  const rawRustPass = normalizeAcceptanceResult(rustBodyContext, {
+    criteria: [{ criterion: 'SC-01', result: 'Pass',
+      evidence: [{ type: 'text', value: 'Source inspection is not an exact-head Rust Quality receipt' }] }],
+  }, 'agent-cursor');
+  assert.throws(() => applyAcceptanceResultToBody(rustBody, rawRustPass),
+    /lacks authenticated exact-head Rust Quality receipt/);
+  const rustDowngraded = enforcePrRustQuality(rustBodyContext, rawRustPass);
+  assert.equal(rustDowngraded.criteria[0].result, 'Pending');
+  assert.match(applyAcceptanceResultToBody(rustBody, rustDowngraded),
     /\| SC-01 \| pr \| Pending \|/);
 
   // Existing acceptance-executor-selftest Gate also exercises the exact-PR

@@ -30,6 +30,10 @@ pub enum BranchRelationV1 {
     Matched,
     None,
     Ambiguous,
+    /// The relation could not be resolved authoritatively within the bounded
+    /// lookup. This is deliberately distinct from `none`: an unresolved
+    /// relation is never rendered as an actual absence.
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

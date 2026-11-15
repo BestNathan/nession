@@ -60,9 +60,25 @@ export function validateRunIndex(raw){
   if(raw.mode==='acceptance'){
     assert.ok(scalar(raw.issue));
     assert.match(raw.criterion,/^SC-\d{2,}$/);
-    assert.ok(['staging','post-merge'].includes(raw.stage));
-    if (!manualMerged) {
-      assert.equal(source.head_branch,raw.stage==='staging'?'staging':'main');
+    assert.ok(['pr','staging','post-merge'].includes(raw.stage));
+    if (raw.stage === 'pr') {
+      assert.equal(source.source_kind,'pr-smoke','PR Case index must originate from authenticated Smoke');
+      assert.equal(source.event,'pull_request','PR Case index requires PR source event');
+      assert.ok(!raw.deployment && !source.dispatch_binding,
+        'PR Case index cannot carry deployed/manual merged proof');
+      const binding=source.pr_binding;
+      assert.ok(binding && typeof binding==='object',
+        'PR Case index lacks authenticated PR/CI/Case binding');
+      assert.equal(binding.head_sha,raw.target_sha,'PR Case index source HEAD differs');
+      assert.equal(binding.issue,raw.issue,'PR Case index Issue differs');
+      for (const key of ['pr_number','case_job_id','artifact_id','quality_run_id','e2e_run_id'])
+        assert.ok(scalar(binding[key]),'PR Case index missing '+key);
+    } else {
+      assert.ok(source.source_kind!=='pr-smoke' && !source.pr_binding,
+        'merged Case index must not reuse a PR Smoke source');
+      if (!manualMerged) {
+        assert.equal(source.head_branch,raw.stage==='staging'?'staging':'main');
+      }
     }
     if (deployedAcceptance) {
       const deployment = raw.deployment;
@@ -108,6 +124,29 @@ export function selfTest(){
     issue:1499,criterion:'SC-02',stage:'staging',
     case_tree_sha:'b'.repeat(40),contract_sha256:'d'.repeat(64)};
   assert.equal(makeRunIndex(accept).mode,'acceptance');
+  // #3611: the canonical Run Store index accepts only independently certified
+  // exact-head PR Case Smoke source bindings; no implicit staging migration.
+  const prSource={...caseSource,event:'pull_request',
+    source_kind:'pr-smoke',head_branch:'fix/1474-case',
+    pr_binding:{
+      pr_number:72,case_job_id:707,artifact_id:808,
+      quality_run_id:909,e2e_run_id:910,
+      issue:1499,head_sha:caseSource.head_sha,
+    }};
+  const prIndex={...accept,stage:'pr',source:prSource};
+  assert.equal(makeRunIndex(prIndex).stage,'pr');
+  for(const invalid of [
+    {source:{...prSource,source_kind:'untrusted'}},
+    {source:{...prSource,event:'push'}},
+    {source:{...prSource,pr_binding:{...prSource.pr_binding,issue:123}}},
+    {source:{...prSource,pr_binding:{...prSource.pr_binding,quality_run_id:0}}},
+    {source:{...prSource,pr_binding:{...prSource.pr_binding,head_sha:'f'.repeat(40)}}},
+    {source:{...prSource,pr_binding:undefined}},
+    {source:{...prSource,dispatch_binding:{}}},
+    {target_sha:'f'.repeat(40)},
+  ]) assert.throws(()=>makeRunIndex({...prIndex,...invalid}));
+  assert.throws(()=>makeRunIndex({...accept,source:prSource}),
+    /merged Case index must not reuse/);
   assert.throws(()=>makeRunIndex({...accept,stage:'post-merge'}),/Expected values/);
   // #3316: trusted-main manual Staging source and product target are distinct
   // only when a GitHub Jobs/Steps input binding independently matches both.

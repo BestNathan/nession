@@ -89,10 +89,22 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   unmount authority. Only the manager reclaims after the last identified
   consumer and a strict, bounded unmount. The manager root is not the
   execution directory.
-- Execution-owned resources (the writable Overlay mount and temporary files)
-  remain under the execution directory and are recorded. Cleanup unmounts or
-  releases only this execution's own resources; reconciliation never trusts
-  an arbitrary record path and never unmounts a manager-owned physical mount.
+- The writable `/workspace` Merged View is **shared and lease-managed**
+  (#3582). The Agent-owned
+  `nession_erofs::overlay::OverlayMountManager` owns one physical
+  `fuse-overlayfs` mount per managed Workspace for an Agent
+  identity/mount namespace, derived from an authorized Workspace root. The
+  Sandbox acquires an identified consumer lease and records its durable
+  binding (never a caller mountpoint); multiple Sessions may bind the same
+  Merged View. A lease carries no unmount authority. Only the manager
+  unmounts, only after the last consumer, and a failed unmount retains the
+  live mount, the read-only lower lease and the durable upper. The Sandbox
+  never creates a per-execution Overlay and never falls back to Native.
+- TEMPORARY execution-owned resources remain under the execution directory
+  and are recorded. Cleanup releases only this execution's own consumer
+  identities; reconciliation never trusts an arbitrary record path, never
+  deletes durable Workspace bytes and never unmounts a manager-owned
+  physical mount.
 
 ## Per-implementation discovery (#3161)
 

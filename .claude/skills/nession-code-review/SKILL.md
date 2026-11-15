@@ -133,6 +133,8 @@ Do not present a hypothesis as a confirmed bug.
 
 ## 12. Compare against the issue
 
+**Issue-first admission:** for an ordinary development/fix/refactor/repair PR, verify a real, scope-matching Nession Requirement/Bug Issue and explicit `Refs #<issue_number>` / `Fixes #<issue_number>` in the PR body. If absent, report a blocking process violation; do not accept an unrelated `#number`, silently create a retroactive Issue or implement a fix directly without opening/reusing its Issue first. Source-pinned automated release-convergence synchronization is not a development PR (see `nession-cicd`).
+
 Review implementation against the Requirement/Bug's current Success Criteria, not only the PR description.
 
 Identify:

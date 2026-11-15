@@ -24,7 +24,11 @@ pub const LOCK_FILE_NAME: &str = "lifecycle.lock";
 /// child would try to take the same lock and deadlock against its own parent.
 pub const LOCK_HELD_BY_PARENT_ENV: &str = "NESSION_START_LOCK_HELD";
 
-/// An acquired exclusive lifecycle lock. Released by dropping it.
+/// An acquired exclusive lifecycle lock.
+///
+/// Dropping it releases the lock explicitly (see the [`Drop`] implementation),
+/// so a child that inherited the descriptor during the critical section cannot
+/// keep the advisory lock after this process is done.
 #[derive(Debug)]
 pub struct LifecycleLock {
     _file: File,
@@ -49,6 +53,23 @@ impl LifecycleLock {
             Ok(false) => Ok(None),
             Err(error) => Err(error).context("failed to try the lifecycle lock"),
         }
+    }
+}
+
+/// Release the advisory lock explicitly.
+///
+/// `flock` locks belong to the open file description, and `fork` shares that
+/// description with every child spawned while the guard is held. Closing this
+/// descriptor alone would leave the lock held by such a child until its own
+/// `exec` closes the inherited copy — so "released by dropping it" would be
+/// false for exactly the processes the lock serialises. `LOCK_UN` releases the
+/// description's lock immediately (#3628).
+#[cfg(unix)]
+impl Drop for LifecycleLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // SAFETY: `self._file` owns a valid descriptor for the duration of the call.
+        let _ = unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
@@ -165,6 +186,40 @@ mod tests {
         assert!(
             LifecycleLock::try_acquire().unwrap().is_some(),
             "releasing the lock must let the next command proceed"
+        );
+    }
+
+    /// Dropping the guard must release the advisory lock even when another
+    /// descriptor still refers to the same open file description — the state a
+    /// `fork` creates for every child spawned while the guard is held.
+    ///
+    /// `flock` locks belong to the open file description, not to a single
+    /// descriptor, so closing only the guard's descriptor would leave the lock
+    /// held by the shared description (until that child's own `exec` closes its
+    /// inherited copy). `dup` reproduces that sharing deterministically
+    /// without forking the test process (#3628).
+    #[cfg(unix)]
+    #[test]
+    fn dropping_the_guard_releases_a_shared_open_file_description() {
+        use std::os::fd::AsRawFd;
+
+        let _runtime = IsolatedRuntime::new();
+        let held = LifecycleLock::try_acquire().unwrap().expect("first lock");
+        // SAFETY: `held._file` owns a valid descriptor for the duration of the call.
+        let shared = unsafe { libc::dup(held._file.as_raw_fd()) };
+        assert!(
+            shared >= 0,
+            "dup failed: {}",
+            std::io::Error::last_os_error()
+        );
+
+        drop(held);
+        let reacquired = LifecycleLock::try_acquire();
+        // SAFETY: `shared` is a descriptor this test owns and has not closed.
+        let _ = unsafe { libc::close(shared) };
+        assert!(
+            reacquired.unwrap().is_some(),
+            "dropping the guard must release the lock while a shared descriptor is open"
         );
     }
 
