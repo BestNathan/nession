@@ -84,6 +84,13 @@ const PROD_CONTENT = [
 /** `local.env` — a quiet third row: no sensitivity, no usage, no warnings. */
 const LOCAL_CONTENT = ['DEBUG=true', 'PORT=13000'].join('\n');
 
+/**
+ * A second Server profile for the #3649 Project-defaults Case. It is only
+ * offered by `?env=project-env`, so the canonical Environment screens keep
+ * their three-file baseline.
+ */
+const SHARED_CONTENT = ['SHARED=project-default'].join('\n');
+
 /** The sessions the server would name for `prod.env` — including none of the fixture's own. */
 const PROD_IN_USE_BY = ['api-tests', 'deploy'];
 
@@ -124,6 +131,9 @@ function contentFor(payload: Record<string, unknown>): EnvGetResponse {
   if (key === 'agent:devbox-01:local.env') {
     return { success: true, content: LOCAL_CONTENT, in_use_by: [] };
   }
+  if (key === 'server::shared.env') {
+    return { success: true, content: SHARED_CONTENT, in_use_by: [] };
+  }
   return { success: false, error: `env file not found: ${String(payload.name)}` };
 }
 
@@ -141,6 +151,7 @@ const BINDING_REF: EnvFileRef = { name: 'staging.env', source: 'server' };
 /** The keys a profile would manage, derived from the content the fixture serves. */
 const KEYS: Record<string, string[]> = {
   'server::staging.env': ['API_BASE', 'API_KEY', 'EMPTY_OVERRIDE', 'FEATURE_FLAGS', 'LOG_LEVEL', 'NODE_ENV'],
+  'server::shared.env': ['SHARED'],
   'agent:devbox-01:prod.env': ['DATABASE_URL', 'DB_PASSWORD', 'LOG_LEVEL', 'NODE_ENV'],
   'agent:devbox-01:local.env': ['DEBUG', 'PORT'],
 };
@@ -418,6 +429,15 @@ export function fixtureEnvSurface(search: string): PluginSurface {
   const race = scenario === 'race';
   const deferredBinding = scenario === 'deferred-binding';
   const files: EnvFileInfo[] = scenario === 'empty' ? [] : [...FILES];
+  if (scenario === 'project-env') {
+    files.push({
+      name: 'shared.env',
+      source: 'server',
+      size: SHARED_CONTENT.length,
+      modified: 1756425600,
+      var_count: 1,
+    });
+  }
   // The binding is the one mutable piece: SET and REAPPLY change the revision
   // this surface answers from then on.
   let binding = bindingFor(scenario);
@@ -426,6 +446,7 @@ export function fixtureEnvSurface(search: string): PluginSurface {
   // after it. Every other scenario keeps the stateless read-only answers.
   const contents = new Map<string, string>([
     ['server::staging.env', STAGING_CONTENT],
+    ['server::shared.env', SHARED_CONTENT],
     ['agent:devbox-01:prod.env', PROD_CONTENT],
     ['agent:devbox-01:local.env', LOCAL_CONTENT],
   ]);
