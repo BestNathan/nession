@@ -326,8 +326,10 @@ function answerPullRequests(
     state: 'ok',
     repository,
     pull_requests: context.scenario === 'empty' ? [] : filtered,
-    current_branch: current ? 'matched' : 'none',
-    current_branch_pr: current?.number ?? null,
+    current_branch:
+      context.scenario === 'relation-unknown' ? 'unknown' : current ? 'matched' : 'none',
+    current_branch_pr:
+      context.scenario === 'relation-unknown' ? null : current?.number ?? null,
     has_more: false,
     next_cursor: null,
   };
