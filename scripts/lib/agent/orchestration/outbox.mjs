@@ -97,6 +97,18 @@ export function validateDevelopmentState(state) {
     if (typeof state.assignments[role] !== 'string' ||
         !/^[a-z][a-z0-9-]{1,80}$/.test(state.assignments[role])) reject('missing agent assignment');
   }
+  // A recovered Qwen Repair PR-B may be read back and committed by a
+  // different successful Publisher Run than the original failed GitHub
+  // writer. The extra history link is permitted ONLY on its exact
+  // authenticated publisher transition; no alias for another role.
+  for(const t of state.transitions){
+    if(t.write_ahead_publisher_run_id!==undefined&&
+       (t.kind!=='publisher'||t.outcome!=='published'||
+        !positive(t.run_id)||!positive(t.write_ahead_publisher_run_id)||
+        t.write_ahead_publisher_run_id>=t.run_id||
+        !SHA.test(t.target_sha??'')))
+      reject('invalid cross-Run Repair Publisher provenance');
+  }
   const ids = new Set();
   for (const item of state.outbox) {
     onlyKeys(item, ['id','task','status','attempts','receipt'], 'outbox entry');
@@ -565,7 +577,10 @@ export function acceptAttestedQwenRepairPublication(
       !positive(trusted.original_publisher_run_id)||
       !positive(trusted.pr_number)||
       trusted.pr_previous_sha!==trusted.developer_source_sha||
-      event.reviewer_agent_id!=null)
+      event.reviewer_agent_id!=null||
+      (trusted.write_ahead_publisher_run_id!==undefined&&
+        (!positive(trusted.write_ahead_publisher_run_id)||
+         trusted.write_ahead_publisher_run_id>=event.run_id)))
     reject('Qwen Repair requires signed Worker, existing PR and exact readback');
   const previous=state.transitions.find(t=>
     t.kind==='publisher'&&t.run_id===event.run_id&&t.attempt===1);
@@ -617,8 +632,14 @@ export function acceptAttestedQwenRepairPublication(
   const child=makeAction(state.issue,state.version+1,next.actions[0],
     state.assignments,0);
   boundRole(registry,child.task.agent_id,child.task.role,child.task.task);
+  const transitions=next.state.transitions.map((transition,index)=>
+    index===next.state.transitions.length-1&&
+      trusted.write_ahead_publisher_run_id!==undefined
+      ?{...transition,
+        write_ahead_publisher_run_id:trusted.write_ahead_publisher_run_id}
+      :transition);
   return validateDevelopmentState({...next.state,version:state.version+1,
-    outbox:[...remaining,child]});
+    transitions,outbox:[...remaining,child]});
 }
 
 // Bind an independently verified immutable Developer checkpoint to a pending
