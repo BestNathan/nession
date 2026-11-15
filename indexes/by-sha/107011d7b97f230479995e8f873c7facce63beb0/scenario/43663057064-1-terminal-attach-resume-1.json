@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43663057064,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3547-ws-teardown",
+    "target_sha": "107011d7b97f230479995e8f873c7facce63beb0",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43663057064",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "d305f1c929e2c10e18b927e151c2449eedc5980075c496f16cde250e8fcbc918"
+  },
+  "record": "runs/2026-11-15/43663057064-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "ac0b690b7a5f1b54cc3718342ed914eb4cc074c5c5b65a756eb643b0d43bef6d"
+}
