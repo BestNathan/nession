@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43671216904,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3548-ws-frame-vocabulary",
+    "target_sha": "c4d8c5d89b73467e1dd57596bb4f0e59cbe5696a",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43671216904",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "220f220e50304e9e2fe5205bcaa5d3214b0ea64c677455aba5a5d6fea8c4cb58"
+  },
+  "record": "runs/2026-11-15/43671216904-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "dee146c0feee3aa950c3ab4dab37ff1b5e8c2d556e0bed669b3d46698a588c1f"
+}
