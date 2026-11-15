@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "69acd0519f01407e4849f2d641d494e69e483212929df5269cdb2a5d1cec7823",
+  "run_id": 43709517956,
+  "run_attempt": 1,
+  "issue": 3581,
+  "criterion": "SC-03",
+  "criterion_text": ": On an actual affected PR/run attempt, the canonical updater completes or reports a precise bounded provenance denial, with original Run/Job/Step and Issue projection linked.",
+  "stage": "post-merge",
+  "target_sha": "49c4922202cb3a886e35bebcb410286e299fa25f",
+  "contract_sha256": "782377b225b65051ce57ccb31e704e6e0162d2b5b35de1c58aa8ddae5a4d5fd9",
+  "case_revision": "49c4922202cb3a886e35bebcb410286e299fa25f",
+  "case_tree_sha": "e1594cfb09891e6f293187495ed8a71a7900c6f4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T11:36:27.410Z",
+  "finished_at": "2026-11-15T11:36:34.287Z",
+  "duration_ms": 6877,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "An actual affected post-fix PR Acceptance run completed the deterministic updater and projected Issue evidence after replacing a prior accepted PR source, satisfying the bounded provenance path",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 49c4922202cb3a886e35bebcb410286e299fa25f: Acceptance / Orchestrator run 43705552358 (pull_request_target, success) job 132786319144 step 6 \"Apply Acceptance Report and checkbox projection\" completed on trusted main after b22222fe1107c0d61ecb228cb78cd30f24d40659; the same updater step failed with spawnSync gh ENOBUFS in the original affected run 43669885175 job 132678304880"
+        },
+        {
+          "type": "runtime",
+          "value": "two successive PR-acceptance projections for Issue #3611 are bound by run/job/step and artifact digest: run 43704912813 artifact acceptance-result-3611-pr-43704912813-1 sha256:5b7ceaf80aa65d3ce3ed628c8ffbbe608ecfabaf12f78bafec931935cc4f4a82 (609127a30ec862bdb68ba2c45f7a811471033fc9) and run 43705552358 artifact acceptance-result-3611-pr-43705552358-1 sha256:8b36a2b7c1f18a9b2a413acba12f824d0fbe1be2dc53033bacc8fc401ba74e87 (c5e84b1fd7b3152a4735a2d1c5f862f5db21d18c); overwriting the prior accepted PR source requires the live supersession proof, so the bounded GitHub evidence collector ran and returned valid provenance without ENOBUFS"
+        }
+      ],
+      "duration_ms": 960,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43709517956,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "49c4922202cb3a886e35bebcb410286e299fa25f",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43709517956",
+    "record_path": "runs/2026-11-15/43709517956-1/3581/SC-03.json",
+    "source_result_sha256": "284ecd367d5ddae8c108a366535b74b4c507a2f8ffc0f3b63283c8d0722da21b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43709517956-1",
+    "sha256": "284ecd367d5ddae8c108a366535b74b4c507a2f8ffc0f3b63283c8d0722da21b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43709517956",
+    "durability": "time-limited; object archival not configured"
+  }
+}
