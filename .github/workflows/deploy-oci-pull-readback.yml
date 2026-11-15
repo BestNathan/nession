@@ -1,0 +1,78 @@
+name: Deploy / OCI Pull Readback
+# #3669: use pre-existing Identity tunnel and *read-only* staging kubeconfig.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-oci-pull-readback.yml
+      - scripts/ci/oci-pull-readback.sh
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-oci-pull-readback
+  cancel-in-progress: false
+jobs:
+  observe:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    environment:
+      name: nession-staging-identity
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify approved GitOps benchmark exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags origin gitops
+          git merge-base --is-ancestor 6134084ccc7e4d39e7b5f55213cc8866f0325b53 FETCH_HEAD ||
+            { echo "::error::GitOps benchmark revision absent"; exit 1; }
+          git show FETCH_HEAD:environments/staging-ocicdn/nession/job.yaml |
+            grep -F 'name: nession-image-pull-benchmark' >/dev/null ||
+            { echo "::error::GitOps benchmark Job missing"; exit 1; }
+      - name: Install existing GOST client
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gost.tgz" https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/gost.tgz" -C "$RUNNER_TEMP" gost
+          chmod +x "$RUNNER_TEMP/gost"
+          command -v kubectl
+          command -v jq
+      - name: Set up scoped Kubernetes credential
+        shell: bash
+        env:
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$KUBE_CONFIG_CI" && test -n "$GOST_RELAY_URL" ||
+            { echo "::error::staging Identity VPN credentials unavailable"; exit 1; }
+          umask 077
+          if [[ "$KUBE_CONFIG_CI" == *'apiVersion:'* ]]; then
+            printf '%s\n' "$KUBE_CONFIG_CI" > "$RUNNER_TEMP/nession-ci-kubeconfig"
+          else
+            printf '%s' "$KUBE_CONFIG_CI" | base64 -d > "$RUNNER_TEMP/nession-ci-kubeconfig"
+          fi
+          chmod 600 "$RUNNER_TEMP/nession-ci-kubeconfig"
+      - name: Start trusted job-owned VPN tunnel
+        shell: bash
+        env:
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+        run: bash scripts/ci/deploy-identity-tunnel.sh start
+      - name: Observe benchmark Pod via read-only API
+        shell: bash
+        env:
+          KUBECONFIG: ${{ runner.temp }}/nession-ci-kubeconfig
+        run: bash scripts/ci/oci-pull-readback.sh
+      - name: Cleanup owned tunnel and credentials
+        if: always()
+        shell: bash
+        run: bash scripts/ci/deploy-identity-tunnel.sh cleanup
