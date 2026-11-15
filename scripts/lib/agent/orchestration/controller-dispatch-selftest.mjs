@@ -227,7 +227,7 @@ for(const change of [
   {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
   {event:{...ownerReviewEvent,action:'edited'}},
 ])assert.throws(()=>assertDispatchAuthority({...ownerReview,...change}),
-  /authenticated owner\\/main/);
+  /authenticated owner\/main/);
 
 const reviewRecover={...commentValid,
   actionId:'555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434',
