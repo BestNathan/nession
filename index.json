@@ -20,6 +20,21 @@
     ],
     "engineering": [
       {
+        "title": "Claude Code MCP configuration and Nession onboarding",
+        "description": "Claude Code's own MCP configuration is a client-side owner: Session-scoped inventory, explicit bounded discovery, local/project mutation through the native CLI, and fail-closed Nession registration",
+        "path": "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "integration",
+          "security",
+          "agent",
+          "web",
+          "protocol"
+        ],
+        "updated_at": "2026-11-15T16:51:08Z"
+      },
+      {
         "title": "Endpoint-owned Server and Agent tokens",
         "description": "One durable Server Token for the control plane and one durable Agent Token per Agent for inbound P2P, Relay and MCP; registration-generation caching, handoff only to the resolved Agent, operator rotation, and the trusted-endpoint boundary that replaces per-attach grants",
         "path": "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
@@ -106,7 +121,7 @@
           "integration",
           "ownership"
         ],
-        "updated_at": "2026-11-14T10:05:23Z"
+        "updated_at": "2026-11-15T16:51:08Z"
       },
       {
         "title": "Nession runtime directories and daemon process state ownership",
@@ -392,6 +407,7 @@
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "agent": [
+      "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
@@ -410,6 +426,7 @@
       "topics/web/unified-overlay-and-operation-surface-system.md"
     ],
     "architecture": [
+      "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
@@ -473,6 +490,7 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "integration": [
+      "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md"
     ],
     "interaction": [
@@ -541,6 +559,7 @@
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md"
     ],
     "protocol": [
+      "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
@@ -579,6 +598,7 @@
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
     "security": [
+      "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
@@ -622,6 +642,7 @@
       "topics/web/shared-content-region-visual-recipes.md"
     ],
     "web": [
+      "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",

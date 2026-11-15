@@ -780,3 +780,17 @@
 - Categories: acceptance, ci, e2e, release
 - Reason: Document bounded GitHub provenance evidence projection: projected compare/PR fields, an explicit child-buffer cap, and fail-closed handling for oversized, truncated or incomplete evidence before Issue projection (#3581)
 - Source: https://github.com/BestNathan/nession/issues/3581
+
+## 2026-11-15T16:51:08Z | update | Nession MCP access layer semantic tool ownership and protocol versions
+- Path: topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md
+- Topic: engineering
+- Categories: architecture, protocol, agent, integration, ownership
+- Reason: Cross-reference the separate Claude Code client-side MCP configuration owner (#3600); the Nession endpoint's Tool catalog and inbound authentication are unchanged
+- Source: https://github.com/BestNathan/nession/issues/3600
+
+## 2026-11-15T16:51:08Z | create | Claude Code MCP configuration and Nession onboarding
+- Path: topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md
+- Topic: engineering
+- Categories: architecture, integration, security, agent, web, protocol
+- Reason: Record the Session-scoped Claude MCP configuration owner: file layout and whole-entry precedence, config-only inventory, explicit bounded discovery, native-CLI local/project mutation, and fail-closed Nession registration with a credential reference (#3600)
+- Source: https://github.com/BestNathan/nession/issues/3600

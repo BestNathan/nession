@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "protocol", "agent", "integration", "ownership"]
 status: verified
 created_at: 2026-11-11T13:15:17Z
-updated_at: 2026-11-14T10:05:23Z
-sources: ["https://github.com/BestNathan/nession/issues/3264", "https://github.com/BestNathan/nession/pull/3289", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/crates/nession-mcp/src/tools/mod.rs", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/pull/3493"]
+updated_at: 2026-11-15T16:51:08Z
+sources: ["https://github.com/BestNathan/nession/issues/3264", "https://github.com/BestNathan/nession/pull/3289", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/blob/a571cbc810e9ed6f9c3633ce4f0c0c02c70cefa6/crates/nession-mcp/src/tools/mod.rs", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/mcp.md", "https://github.com/BestNathan/nession/pull/3493", "https://github.com/BestNathan/nession/blob/e5284b019fd8d4b0206361dd53d206042a35bcc2/docs/architecture/claude-code-mcp.md"]
 ---
 
 # Nession MCP access layer semantic tool ownership and protocol versions
@@ -72,6 +72,14 @@ The Session authority used by the Agent-owned Tools is described by
 both the Server and MCP route Session work to the owning Agent rather than
 creating a second authority. The bearer each host verifies is described by
 [Endpoint-owned Server and Agent tokens](endpoint-owned-server-and-agent-tokens.md).
+
+Claude Code's own MCP client configuration is a **separate owner**. The
+Session-scoped inventory, explicit bounded discovery, local/project mutation and
+one-click Nession registration are described by
+[Claude Code MCP configuration and Nession onboarding](claude-code-mcp-configuration-and-nession-onboarding.md).
+That integration reads and writes Claude's configuration; it does not add to or
+change the Tool catalog owned here, and the Nession endpoint keeps its own
+inbound authentication.
 
 ## Limits and when to revisit
 
