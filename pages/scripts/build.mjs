@@ -205,6 +205,23 @@ if(validMainSha&&!process.env.PAGES_PROTOCOL_SCHEMA_FILE&&
     sha:validMainSha?mainSha:null,generatedAt,releases,sourceVersion});
 }
 if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
+// MCP is generated from the exact registered Rust Tool handlers, never a
+// hand-maintained inventory or a running authenticated MCP endpoint.
+let mcp={schema_version:1,status:'unavailable',source:null,tools:[]};
+if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
+  const {stdout}=await promisify(execFile)('cargo',
+    ['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'],
+    {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
+  const parsed=JSON.parse(stdout);
+  if(parsed.schema_version!==1||!Array.isArray(parsed.tools)||
+    !parsed.tools.length||parsed.tools.length>256||
+    !parsed.tools.every(t=>typeof t.name==='string'&&
+      typeof t.description==='string'&&t.inputSchema?.type==='object'))
+    throw Error('Invalid canonical MCP Tool catalog');
+  mcp={...parsed,status:'available',
+    source:{repository:repo,branch:'main',sha:mainSha}};
+}
+
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
@@ -308,11 +325,12 @@ const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
   /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
   generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js','documents.js']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js','documents.js','mcp-documents.js']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/documents.json'),JSON.stringify(documents,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/mcp.json'),JSON.stringify(mcp,null,2)+'\n',{mode:0o644});
 console.log('Public Pages artifact:',out);
 console.log(JSON.stringify({
   source_main_sha:result.source.main_sha,
