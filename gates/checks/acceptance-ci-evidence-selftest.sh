@@ -19,6 +19,7 @@ gate_check() {
   gate_run_invariant node scripts/acceptance-routing-proof.mjs self-test
   gate_run_invariant node scripts/verification-full-regression-evidence.mjs self-test
   gate_run_invariant node scripts/e2e-selected-run-receipt.mjs self-test
+  gate_run_invariant node scripts/acceptance-qwen-3433-recovery-selftest.mjs
   gate_run_invariant node scripts/acceptance-ci-evidence.mjs self-test
   gate_run_invariant node scripts/acceptance-pr-pages-e2e-evidence.mjs self-test
 }
