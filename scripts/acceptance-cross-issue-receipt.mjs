@@ -451,6 +451,12 @@ export async function collectCrossIssueAcceptance(repo,body,targetSha,subjectIss
     throw Error('historical Acceptance source environment unavailable');
   const results=[];
   for (const pin of pins) {
+    if (pin.kind==='pr-case') {
+      results.push(await collectPrCaseCrossIssueAcceptance(pin,{
+        repo,targetSha,subjectIssue,request,token,
+      }));
+      continue;
+    }
     if (pin.kind==='staging') {
       const [run,jobs,artifacts,comparison]=await Promise.all([
         request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt),
