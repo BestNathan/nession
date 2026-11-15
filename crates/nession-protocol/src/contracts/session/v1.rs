@@ -532,6 +532,16 @@ pub struct ClientSessionEnvBindingSetPayload {
     pub session_id: String,
     #[serde(default)]
     pub profiles: Vec<EnvFileRef>,
+    /// The desired revision the caller read before this replacement.
+    ///
+    /// When present, the Server performs a durable compare-and-swap: a stored
+    /// revision that no longer matches yields a `revision_conflict` refusal
+    /// before any durable or Agent-side mutation, and the caller re-reads the
+    /// binding rather than overwriting a concurrent writer. Absent for the
+    /// legacy `apply`/`unset` adapters and for callers that predate the field;
+    /// there is deliberately no `force`/`ignore_conflict` bypass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 /// `server.session.env.binding.reapply` — re-resolve the currently desired
@@ -541,6 +551,21 @@ pub struct ClientSessionEnvBindingSetPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingReapplyPayload {
     pub session_id: String,
+    /// The desired revision the caller read before this reapply. Same
+    /// compare-and-swap contract as
+    /// [`ClientSessionEnvBindingSetPayload::expected_revision`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+}
+
+/// Why a version-aware binding mutation was refused before any durable change.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEnvBindingRefusalKind {
+    /// `expected_revision` did not match the durable desired revision.
+    RevisionConflict,
 }
 
 /// The reply shared by the three binding units above.
@@ -558,6 +583,11 @@ pub struct ClientSessionEnvBindingResponsePayload {
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A machine-readable classification for a refusal that happened *before*
+    /// any durable mutation. `None` means the ordinary `error` path: a refused
+    /// materialization may still have advanced the desired revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<SessionEnvBindingRefusalKind>,
 }
 
 // ============================================================================

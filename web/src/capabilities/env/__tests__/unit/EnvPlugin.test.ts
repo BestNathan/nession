@@ -167,11 +167,46 @@ describe('EnvPlugin', () => {
         type: 'server.session.env.binding.set',
         payload: { session_id: 'a1:work', profiles: [agentFile, serverFile] },
       });
+      expect(surface.requests[0]?.payload).not.toHaveProperty('expected_revision');
 
       surface.resolveNext('server.session.env.binding.set', {
         success: true,
         warnings: [],
         binding: { session_id: 'a1:work', desired_revision: 1, desired_profiles: [] },
+      });
+      await expect(pending).resolves.toMatchObject({ success: true });
+    });
+
+    it('setSessionEnvBinding carries the read revision as a compare-and-swap', async () => {
+      const pending = plugin.setSessionEnvBinding('a1:work', [], 3);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'server.session.env.binding.set',
+        payload: { session_id: 'a1:work', profiles: [], expected_revision: 3 },
+      });
+
+      surface.resolveNext('server.session.env.binding.set', {
+        success: false,
+        warnings: [],
+        error: 'revision_conflict: expected revision 3, but the Session binding is now at revision 4',
+        refusal: 'revision_conflict',
+      });
+      await expect(pending).resolves.toMatchObject({
+        success: false,
+        refusal: 'revision_conflict',
+      });
+    });
+
+    it('reapplySessionEnvBinding carries the read revision too', async () => {
+      const pending = plugin.reapplySessionEnvBinding('a1:work', 7);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'server.session.env.binding.reapply',
+        payload: { session_id: 'a1:work', expected_revision: 7 },
+      });
+
+      surface.resolveNext('server.session.env.binding.reapply', {
+        success: true,
+        warnings: [],
+        binding: { session_id: 'a1:work', desired_revision: 8, desired_profiles: [] },
       });
       await expect(pending).resolves.toMatchObject({ success: true });
     });

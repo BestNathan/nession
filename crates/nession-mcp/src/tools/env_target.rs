@@ -1,6 +1,7 @@
-//! Shared ENV source validation; the file's management owner is the Server.
+//! Shared ENV source and Session identity validation; the file's management
+//! owner and the Session's binding owner are both the Server.
 use crate::error::ToolError;
-use nession_protocol::contracts::env::v1::EnvSource;
+use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSource};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -34,6 +35,49 @@ impl Source {
     }
 }
 
+/// Refuse a Session identity the Server would not resolve.
+///
+/// The canonical form is `agent_id:session_name`; the Server splits on the
+/// first colon. An empty part is not a wildcard or "this host", so it is
+/// rejected here rather than being sent as a lookup for a Session that cannot
+/// exist.
+pub(crate) fn canonical_session_id(session_id: &str) -> Result<(), ToolError> {
+    let Some((agent_id, session_name)) = session_id.split_once(':') else {
+        return Err(ToolError::invalid_argument(
+            "`session_id` must be the canonical `agent_id:session_name` form",
+        ));
+    };
+    if agent_id.trim().is_empty() || session_name.trim().is_empty() {
+        return Err(ToolError::invalid_argument(
+            "`session_id` must name both an Agent and a Session",
+        ));
+    }
+    Ok(())
+}
+
+/// One profile argument as the canonical `EnvFileRef`.
+///
+/// The same source/`agent_id` rule as the single-file Tools: an Agent profile
+/// names its owning node, and a Server profile must not carry a misleading
+/// `agent_id`.
+pub(crate) fn env_file_ref(
+    name: String,
+    source: Source,
+    agent_id: Option<String>,
+) -> Result<EnvFileRef, ToolError> {
+    if name.trim().is_empty() {
+        return Err(ToolError::invalid_argument(
+            "every profile must have a non-empty `name`",
+        ));
+    }
+    let (source, agent_id) = source.resolve(agent_id.as_deref())?;
+    Ok(EnvFileRef {
+        name,
+        source,
+        agent_id,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,5 +91,28 @@ mod tests {
             Source::Agent.resolve(Some("a")).unwrap().1.as_deref(),
             Some("a")
         );
+    }
+
+    #[test]
+    fn a_session_id_must_be_the_canonical_joined_identity() {
+        canonical_session_id("agent-1:dev").expect("canonical identity");
+        for invalid in ["", "agent-1", ":dev", "agent-1:", " : "] {
+            assert!(canonical_session_id(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn a_profile_carries_its_own_source_identity() {
+        let server = env_file_ref("common.env".into(), Source::Server, None).unwrap();
+        assert_eq!(server.source, EnvSource::Server);
+        assert!(server.agent_id.is_none());
+
+        let agent = env_file_ref("dev.env".into(), Source::Agent, Some("a1".into())).unwrap();
+        assert_eq!(agent.source, EnvSource::Agent);
+        assert_eq!(agent.agent_id.as_deref(), Some("a1"));
+
+        assert!(env_file_ref(" ".into(), Source::Server, None).is_err());
+        assert!(env_file_ref("x.env".into(), Source::Agent, None).is_err());
+        assert!(env_file_ref("x.env".into(), Source::Server, Some("a1".into())).is_err());
     }
 }

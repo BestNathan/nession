@@ -28,7 +28,10 @@ use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRefusal};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
 };
-use nession_protocol::contracts::session::v1::{ServerSessionListReply, SessionRefusal};
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
+    ClientSessionEnvBindingSetPayload, ServerSessionListReply, SessionRefusal,
+};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::debug;
@@ -118,6 +121,45 @@ impl ClusterBackend for RemoteClusterBackend {
         let mut connection = self.connect().await?;
         let reply = connection
             .env_delete(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+    }
+
+    async fn session_env_binding_get(
+        &self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .session_env_binding_get(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+    }
+
+    async fn session_env_binding_set(
+        &self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .session_env_binding_set(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+    }
+
+    async fn session_env_binding_reapply(
+        &self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .session_env_binding_reapply(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;

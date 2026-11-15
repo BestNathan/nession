@@ -26,7 +26,9 @@ use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoRespo
 use nession_protocol::contracts::session::v1::{
     ClientRelayBeginPayload, ClientSessionAttachPayload, ClientSessionAttachReply,
     ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
+    ClientSessionCreateResponsePayload, ClientSessionEnvBindingGetPayload,
+    ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
+    ClientSessionEnvBindingSetPayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
     ServerSessionListPayload, ServerSessionListReply,
 };
 use nession_protocol::Message;
@@ -68,6 +70,18 @@ impl UnitRequest for ClientEnvWritePayload {
 
 impl UnitRequest for ClientEnvDeletePayload {
     type Reply = ClientEnvDeleteResponsePayload;
+}
+
+impl UnitRequest for ClientSessionEnvBindingGetPayload {
+    type Reply = ClientSessionEnvBindingResponsePayload;
+}
+
+impl UnitRequest for ClientSessionEnvBindingSetPayload {
+    type Reply = ClientSessionEnvBindingResponsePayload;
+}
+
+impl UnitRequest for ClientSessionEnvBindingReapplyPayload {
+    type Reply = ClientSessionEnvBindingResponsePayload;
 }
 
 impl UnitRequest for ClientSessionAttachPayload {
@@ -201,6 +215,40 @@ impl ClientConnection {
         payload: ClientEnvDeletePayload,
     ) -> Result<ClientEnvDeleteResponsePayload, ClientError> {
         self.request(proto_msg(wire::SERVER_ENV_DELETE, payload))
+            .await
+    }
+
+    /// `server.session.env.binding.get` — desired + observed binding state.
+    ///
+    /// The reply never carries ENV values: only profile identities, revisions,
+    /// managed key names and the Agent's convergence status.
+    pub async fn session_env_binding_get(
+        &mut self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_ENV_BINDING_GET, payload))
+            .await
+    }
+
+    /// `server.session.env.binding.set` — replace the whole ordered selection.
+    ///
+    /// A present `expected_revision` is a durable compare-and-swap; a stale one
+    /// is answered with a `revision_conflict` refusal and changes nothing.
+    pub async fn session_env_binding_set(
+        &mut self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_ENV_BINDING_SET, payload))
+            .await
+    }
+
+    /// `server.session.env.binding.reapply` — re-resolve the current profiles
+    /// at a new revision without changing the selection.
+    pub async fn session_env_binding_reapply(
+        &mut self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_ENV_BINDING_REAPPLY, payload))
             .await
     }
 

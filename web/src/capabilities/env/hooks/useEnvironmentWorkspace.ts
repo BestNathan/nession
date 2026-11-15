@@ -99,6 +99,12 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       resp.warnings.forEach((warning) => toast.warning(warning));
       if (!resp.success) {
         toast.error(resp.error ?? 'Failed to update the Session binding');
+        if (resp.refusal === 'revision_conflict') {
+          // Another writer advanced the binding since this tab read it. Re-read
+          // so the next attempt carries the current revision instead of
+          // repeating the same conflict.
+          void refreshBinding();
+        }
       }
       if (resp.binding) {
         // The Server answered with the resulting desired state, even when the
@@ -108,7 +114,7 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       }
       return resp.success;
     },
-    [binding, screen],
+    [binding, refreshBinding, screen],
   );
 
   const reapplyBinding = useCallback(async (): Promise<boolean> => {
@@ -116,9 +122,12 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
     resp.warnings.forEach((warning) => toast.warning(warning));
     if (!resp.success) {
       toast.error(resp.error ?? 'Failed to reapply the Session binding');
+      if (resp.refusal === 'revision_conflict') {
+        void refreshBinding();
+      }
     }
     return resp.success;
-  }, [binding]);
+  }, [binding, refreshBinding]);
 
   const showSession = useCallback(() => {
     screen.showSession();

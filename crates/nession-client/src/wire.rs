@@ -81,6 +81,12 @@ pub const SERVER_ENV_GET: &str = "server.env.get";
 pub const SERVER_ENV_WRITE: &str = "server.env.write";
 pub const SERVER_ENV_DELETE: &str = "server.env.delete";
 
+/// Server-owned Session Environment Binding (#170): the durable desired
+/// selection, its observed materialization, and the two explicit mutations.
+pub const SERVER_SESSION_ENV_BINDING_GET: &str = "server.session.env.binding.get";
+pub const SERVER_SESSION_ENV_BINDING_SET: &str = "server.session.env.binding.set";
+pub const SERVER_SESSION_ENV_BINDING_REAPPLY: &str = "server.session.env.binding.reapply";
+
 // ── The agent-facing wires ──────────────────────────────────────────────────
 //
 // These are sent on a socket to an **agent**, not to the Server, and they are

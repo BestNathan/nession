@@ -1,4 +1,5 @@
-//! MCP baseline Session Tools plus Server-owned ENV file management.
+//! MCP baseline Session Tools plus Server-owned ENV file and Session
+//! Environment Binding management.
 //!
 //! This module only declares the Tool modules and registers their handlers
 //! with one [`ToolRegistry`]. It deliberately contains **no** `match name`
@@ -14,6 +15,9 @@ pub mod nession_server_env_get;
 pub mod nession_server_env_list;
 pub mod nession_server_env_write;
 pub mod nession_server_list_agents;
+pub mod nession_server_session_env_binding_get;
+pub mod nession_server_session_env_binding_reapply;
+pub mod nession_server_session_env_binding_set;
 
 use std::sync::Arc;
 
@@ -31,6 +35,9 @@ pub fn registry() -> Result<ToolRegistry, RegistryError> {
         Arc::new(nession_server_env_get::NessionServerEnvGet),
         Arc::new(nession_server_env_write::NessionServerEnvWrite),
         Arc::new(nession_server_env_delete::NessionServerEnvDelete),
+        Arc::new(nession_server_session_env_binding_get::NessionServerSessionEnvBindingGet),
+        Arc::new(nession_server_session_env_binding_set::NessionServerSessionEnvBindingSet),
+        Arc::new(nession_server_session_env_binding_reapply::NessionServerSessionEnvBindingReapply),
         Arc::new(nession_agent_list_sessions::NessionAgentListSessions),
         Arc::new(nession_agent_create_session::NessionAgentCreateSession),
         Arc::new(nession_agent_kill_session::NessionAgentKillSession),
@@ -44,6 +51,9 @@ pub const TOOL_NAMES: &[&str] = &[
     "nession_server_env_get",
     "nession_server_env_write",
     "nession_server_env_delete",
+    "nession_server_session_env_binding_get",
+    "nession_server_session_env_binding_set",
+    "nession_server_session_env_binding_reapply",
     "nession_agent_list_sessions",
     "nession_agent_create_session",
     "nession_agent_kill_session",
@@ -60,7 +70,11 @@ pub(crate) mod test_support {
     use crate::error::ToolError;
     use crate::tool::ToolContext;
     use nession_protocol::contracts::env::v1::{
-        ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
+        ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvFileRef, EnvSource,
+    };
+    use nession_protocol::contracts::session::v1::{
+        ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
+        ClientSessionEnvBindingSetPayload,
     };
 
     /// What one Tool call asked the backend for.
@@ -71,6 +85,9 @@ pub(crate) mod test_support {
         EnvGet(String, EnvSource, Option<String>),
         EnvWrite(String, EnvSource, Option<String>, String, bool, bool),
         EnvDelete(String, EnvSource, Option<String>, bool),
+        BindingGet(String),
+        BindingSet(String, u64, Vec<EnvFileRef>),
+        BindingReapply(String, u64),
         ListSessions(String),
         CreateSession(String, String, Option<String>),
         KillSession(String, String),
@@ -144,6 +161,59 @@ pub(crate) mod test_support {
                     payload.force,
                 ));
             Ok(json!({ "success": true }))
+        }
+
+        async fn session_env_binding_get(
+            &self,
+            payload: ClientSessionEnvBindingGetPayload,
+        ) -> Result<Value, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::BindingGet(payload.session_id));
+            Ok(json!({
+                "success": true,
+                "binding": {
+                    "session_id": "agent-a:dev",
+                    "desired_revision": 3,
+                    "desired_profiles": [],
+                    "observed": {
+                        "applied_revision": 3,
+                        "status": "in_sync",
+                        "profiles": [],
+                        "managed_keys": ["PUBLIC"]
+                    }
+                },
+                "warnings": []
+            }))
+        }
+
+        async fn session_env_binding_set(
+            &self,
+            payload: ClientSessionEnvBindingSetPayload,
+        ) -> Result<Value, ToolError> {
+            let expected = payload.expected_revision.expect("the Tool requires one");
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::BindingSet(
+                    payload.session_id,
+                    expected,
+                    payload.profiles,
+                ));
+            Ok(json!({ "success": true, "binding": null, "warnings": [] }))
+        }
+
+        async fn session_env_binding_reapply(
+            &self,
+            payload: ClientSessionEnvBindingReapplyPayload,
+        ) -> Result<Value, ToolError> {
+            let expected = payload.expected_revision.expect("the Tool requires one");
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::BindingReapply(payload.session_id, expected));
+            Ok(json!({ "success": true, "binding": null, "warnings": [] }))
         }
     }
 

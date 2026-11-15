@@ -70,7 +70,10 @@ impl ConnectionHandler {
             }
         };
 
-        match self.set_session_binding(&session_id, &refs, "attach").await {
+        match self
+            .set_session_binding(&session_id, &refs, "attach", None)
+            .await
+        {
             Ok((warnings, error, _binding)) => Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.unset",
@@ -85,7 +88,7 @@ impl ConnectionHandler {
                 "server.session.env.unset",
                 ClientSessionEnvResponsePayload {
                     success: false,
-                    error: Some(error),
+                    error: Some(error.message()),
                     warnings: Vec::new(),
                 },
             )),
