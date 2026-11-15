@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "issue": 3433,
+  "version": 15,
+  "phase": "review",
+  "target_sha": "1159e58c19b927b4e53d4fe594174a50b6bbf092",
+  "repair_attempts": 1,
+  "transitions": [
+    {
+      "key": "d7d22af47d68f7ade91ee778d84c8ef784357557a693c30cc33b0c02df56fb0e",
+      "kind": "publisher",
+      "run_id": 43607502468,
+      "attempt": 1,
+      "target_sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+      "outcome": "published"
+    },
+    {
+      "key": "ea8dd832f820af3d1b7ca0a36c400c316cedc9fb13161e7e0838d922a9c3e130",
+      "kind": "reviewer",
+      "run_id": 43669396046,
+      "attempt": 1,
+      "target_sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+      "outcome": "changes_requested"
+    },
+    {
+      "key": "8f89c067aa4f0cbadde66ae4097d3a6bca6f4bc63a7cbe4b70be41f8e334f3f4",
+      "kind": "publisher",
+      "run_id": 43681716536,
+      "attempt": 1,
+      "target_sha": "1159e58c19b927b4e53d4fe594174a50b6bbf092",
+      "outcome": "published",
+      "write_ahead_publisher_run_id": 43678506569
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "66a3bf916ce573adda08135524a2bb6d4db2a0a2125cab0bfdce2664e78614b6",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "66a3bf916ce573adda08135524a2bb6d4db2a0a2125cab0bfdce2664e78614b6",
+        "source_run_id": 43667393107,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_publisher_trigger_pre_model_failure"
+      }
+    },
+    {
+      "id": "8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "1159e58c19b927b4e53d4fe594174a50b6bbf092",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "dispatching",
+      "attempts": 1,
+      "receipt": {
+        "status": "prepared",
+        "dispatch_id": "8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7",
+        "issuer_run_id": 43681810300,
+        "ticket_sha256": "ebdf808c70bafef96d9fd09cefa0243bb7e0d52e4f5672d02b539afff9aec5f6"
+      }
+    }
+  ]
+}
