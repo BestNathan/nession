@@ -1731,6 +1731,173 @@ async function selfTest() {
   assert.throws(() => caseIndexRecord(deployedEnriched), /requires trusted deployment records/);
   assert.throws(() => caseIndexRecord(deployedEnriched, { deploymentRecords: [] }),
     /missing or ambiguous/);
+
+  // #3611: historical exact-head PR Case ingestion and negative trust fixtures.
+  const smokeSha = 'b'.repeat(40);
+  const smokeIssueBody = [
+    '## Success Criteria',
+    '- [ ] SC-14 Browser Session metadata invalidates on new incarnation.',
+    '## Acceptance Plan',
+    '~~~yaml',
+    'acceptance:',
+    '  SC-14:',
+    '    when: pr',
+    '    method: case',
+    '~~~',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-14 | Pending | Awaiting exact-head browser Case |',
+  ].join('\n').replaceAll('~~~', String.fromCharCode(96).repeat(3));
+  let smokeIssue = { number: 1474, title: 'Browser metadata cache',
+    state: 'open', labels: [{ name: 'bug' }], body: smokeIssueBody };
+  const smokeContext = buildAcceptanceContext(smokeIssue, 'pr', {
+    method: 'case', targetRef: smokeSha, runId: 100,
+  });
+  const smokeRecord = fixtureRecord({ stage: 'pr', target_sha: smokeSha,
+    case_revision: smokeSha,
+    criterion_text: 'Browser Session metadata invalidates on new incarnation.',
+    contract_sha256: smokeContext.contract_sha256 });
+  smokeRecord.execution_id = crypto.createHash('sha256').update(JSON.stringify({
+    schema_version: 1, run_id: smokeRecord.run_id,
+    run_attempt: smokeRecord.run_attempt, target_sha: smokeRecord.target_sha,
+    issue: smokeRecord.issue, criterion: smokeRecord.criterion,
+    contract_sha256: smokeRecord.contract_sha256,
+    case_tree_sha: smokeRecord.case_tree_sha,
+  })).digest('hex');
+  const smokeRun = { ...fixtureEvent.workflow_run,
+    name: 'Acceptance / Case Smoke',
+    path: '.github/workflows/acceptance-case-smoke.yml',
+    event: 'pull_request', head_branch: 'fix/1474-cache',
+    head_sha: smokeSha, workflow_id: 17,
+    created_at: '2026-11-14T19:19:11Z', run_number: 1, pull_requests: [] };
+  const smokeSource = sourceRunIdentity({ workflow_run: smokeRun }, 'BestNathan/nession');
+  assert.equal(smokeSource.source_kind, 'pr-smoke');
+  for (const bad of [
+    { path: '.github/workflows/acceptance-cases.yml' },
+    { event: 'workflow_dispatch' },
+    { conclusion: 'failure' },
+  ]) {
+    assert.throws(() => sourceRunIdentity({
+      workflow_run: { ...smokeRun, ...bad },
+    }, 'BestNathan/nession'));
+  }
+  const smokePr = { number: 70, title: 'fix: metadata', body: 'Refs #1474',
+    state: 'closed', merged: true,
+    head: { sha: smokeSha, ref: smokeRun.head_branch,
+      repo: { full_name: 'BestNathan/nession' } },
+    base: { ref: 'staging', repo: { full_name: 'BestNathan/nession' } },
+    created_at: '2026-11-14T18:00:00Z', merged_at: '2026-11-14T20:00:00Z' };
+  const stepNames = ['Validate canonical Case contracts and generic selection',
+    'Select PR-linked Case-method proofs (trusted main policy)',
+    'Run selected source-aligned Cases through one job-scoped batch',
+    'Run actions/upload-artifact@v4'];
+  const smokeJob = { id: 41, name: 'case-smoke', run_id: 100,
+    run_attempt: 1, head_sha: smokeSha, status: 'completed',
+    conclusion: 'success', steps: stepNames.map((name, index) => ({
+      name, number: index + 1, status: 'completed', conclusion: 'success' })) };
+  const smokeArtifact = { id: 55, name: 'acceptance-case-smoke-100-1',
+    expired: false, size_in_bytes: 1024,
+    workflow_run: { id: 100, head_sha: smokeSha } };
+  const smokeQuality = ['ci-quality.yml', 'e2e-tests.yml'].map((name, index) => ({
+    id: 80 + index, path: '.github/workflows/' + name,
+    event: 'pull_request', head_sha: smokeSha, head_branch: smokeRun.head_branch,
+    repository: { full_name: 'BestNathan/nession' },
+    head_repository: { full_name: 'BestNathan/nession' },
+    status: 'completed', conclusion: 'success', run_attempt: 1,
+    run_number: 1, created_at: smokeRun.created_at }));
+  const smokeApi = async (path, options = {}, overrides = {}) => {
+    if (path.endsWith('/actions/runs/100')) return overrides.run ?? smokeRun;
+    if (path.endsWith('/commits/' + smokeSha + '/pulls?per_page=100'))
+      return overrides.linked ?? [{ number: 70 }];
+    if (path.endsWith('/pulls/70')) return overrides.pr ?? smokePr;
+    if (path.endsWith('/attempts/1/jobs?per_page=100'))
+      return { total_count: 1, jobs: [overrides.job ?? smokeJob] };
+    if (path.endsWith('/runs/100/artifacts?per_page=100'))
+      return { total_count: 1, artifacts: [overrides.artifact ?? smokeArtifact] };
+    if (path.includes('/actions/runs?head_sha=' + smokeSha))
+      return { total_count: 2, workflow_runs: overrides.checks ?? smokeQuality };
+    if (path.endsWith('/issues/1474')) {
+      if (options.method === 'PATCH') smokeIssue = { ...smokeIssue, body: options.body.body };
+      return smokeIssue;
+    }
+    throw Error('unmocked PR Case source: ' + path);
+  };
+  const smokeOptions = { repository: 'BestNathan/nession', token: 'offline-proof' };
+  const certifiedSmoke = await attestPrSmokeSource(smokeRecord, smokeSource, {
+    ...smokeOptions, request: smokeApi });
+  assert.equal(certifiedSmoke.pr_binding.pr_number, 70);
+  assert.equal(certifiedSmoke.pr_binding.artifact_id, 55);
+  assert.equal(assertSourceBoundRecord(smokeRecord, certifiedSmoke).stage, 'pr');
+  assert.throws(() => assertSourceBoundRecord(smokeRecord, smokeSource));
+  assert.throws(() => assertSourceBoundRecord({
+    ...smokeRecord, contract_sha256: 'f'.repeat(64),
+  }, certifiedSmoke), /execution_id/);
+  assert.throws(() => assertSourceBoundRecord({
+    ...smokeRecord, run_attempt: 2,
+  }, certifiedSmoke), /run identity/);
+  for (const [label, overrides] of [
+    ['stale head', { pr: { ...smokePr, head: { ...smokePr.head, sha: 'f'.repeat(40) } } }],
+    ['wrong issue', { pr: { ...smokePr, body: 'Refs #9000' } }],
+    ['wrong base', { pr: { ...smokePr, base: { ...smokePr.base, ref: 'unknown' } } }],
+    ['unmerged closure', { pr: { ...smokePr, merged: false, state: 'closed' } }],
+    ['run after merge', { run: { ...smokeRun, created_at: '2026-11-15T20:00:00Z' } }],
+    ['skipped execution', { job: { ...smokeJob,
+      steps: smokeJob.steps.map(step => step.name.startsWith('Run selected')
+        ? { ...step, conclusion: 'skipped' } : step) } }],
+    ['failed source job', { job: { ...smokeJob, conclusion: 'failure' } }],
+    ['wrong job attempt', { job: { ...smokeJob, run_attempt: 2 } }],
+    ['expired artifact', { artifact: { ...smokeArtifact, expired: true } }],
+    ['wrong artifact attempt', { artifact: { ...smokeArtifact, name: 'acceptance-case-smoke-100-2' } }],
+    ['required E2E pending', { checks: smokeQuality.map((run, index) =>
+      index === 1 ? { ...run, conclusion: 'skipped' } : run) }],
+    ['required CI wrong SHA', { checks: smokeQuality.map((run, index) =>
+      index === 0 ? { ...run, head_sha: 'f'.repeat(40) } : run) }],
+  ]) {
+    await assert.rejects(() => attestPrSmokeSource(smokeRecord, smokeSource, {
+      ...smokeOptions, request: (path, opts) => smokeApi(path, opts, overrides),
+    }), undefined, label + ' must fail closed');
+  }
+  await assert.rejects(() => attestPrSmokeSource({
+    ...smokeRecord, result: 'Pending',
+    verifiers: [{ ...smokeRecord.verifiers[0], result: 'Pending' }],
+  }, smokeSource, { ...smokeOptions, request: smokeApi }), /Pass-only/);
+  const ownerReplay = { repository: { full_name: 'BestNathan/nession' },
+    inputs: { source_run_id: '100', source_run_attempt: '1' } };
+  const replayOpts = { ...smokeOptions, actor: 'BestNathan',
+    ref: 'refs/heads/main', request: smokeApi };
+  const replayedSource = await resolveCaseIngestSourceEvent(ownerReplay, replayOpts);
+  assert.equal(replayedSource.source.run_id, 100);
+  for (const override of [
+    { actor: 'attacker' }, { ref: 'refs/heads/staging' },
+    { request: async () => ({ ...smokeRun, run_attempt: 2 }) },
+  ]) {
+    await assert.rejects(() => resolveCaseIngestSourceEvent(ownerReplay,
+      { ...replayOpts, ...override }), undefined,
+    'unauthorized or wrong-attempt replay must fail');
+  }
+  const smokeEnriched = enrichCaseRecord(smokeRecord, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(smokeRecord), source: certifiedSmoke });
+  const smokeIndex = caseIndexRecord(smokeEnriched);
+  assert.equal(smokeIndex.stage, 'pr');
+  assert.equal(smokeIndex.source.pr_binding.case_job_id, 41);
+  await assert.rejects(() => applyCaseRecord(smokeRecord, {
+    ...smokeOptions, request: smokeApi,
+  }), /immutable trusted Store provenance/);
+  assert.deepEqual(await applyCaseRecord(smokeEnriched, {
+    ...smokeOptions, request: smokeApi,
+  }), { projected: true, changed: true });
+  assert.match(smokeIssue.body, /- \[x\] SC-14/);
+  assert.match(smokeIssue.body, /\| SC-14 \| Pass \| run 100;/);
+  assert.equal((await applyCaseRecord(smokeEnriched, {
+    ...smokeOptions, request: smokeApi,
+  })).projected, false, 'replay cannot rewrite accepted SC');
+  smokeIssue = { ...smokeIssue, body: smokeIssueBody.replace('method: case', 'method: agent') };
+  await assert.rejects(() => applyCaseRecord(smokeEnriched, {
+    ...smokeOptions, request: smokeApi,
+  }), /contract digest|selected method/);
+
   console.log('acceptance Case ingest self-test: provenance, deployment binding and record validation passed');
 }
 
