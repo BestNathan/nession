@@ -276,11 +276,17 @@ try{
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,
     fetcher:async name=>name.startsWith('pulls?')?[pr,pr]:fetcher(name),
   }),/unique published/);
+  fs.writeFileSync(path.join(directory,'301-1-'+'0'.repeat(64)+'.json'),
+    JSON.stringify({...intent,action_id:'0'.repeat(64),
+      branch:'agent/'+ISSUE+'/qwen-'+'0'.repeat(16)})+'\n');
+  await assert.rejects(()=>prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher}),
+  /unique Qwen review publication Intent/);
   // The Reviewer prepare reader must fetch the successful reconciler
   // Run (403), not the original failed writer Run (402).
   writeIssueWorkflowState(root,recoveredPublished,published.version);
   fs.writeFileSync(path.join(directory,'302-1-'+REPAIR_ACTION+'.json'),
-    JSON.stringify(repairIntent)+'\\n');
+    JSON.stringify(repairIntent)+'\n');
   const recoveryEndpoints={
     ...endpoints,
     ['actions/runs/'+recoveredRunId]:recoveredPublisherRun,
@@ -303,11 +309,5 @@ try{
     fetcher:async name=>name==='actions/runs/'+recoveredRunId
       ?{...recoveredPublisherRun,conclusion:'failure'}
       :recoveryFetch(name)}),/Publisher Run/);
-  fs.writeFileSync(path.join(directory,'301-1-'+'0'.repeat(64)+'.json'),
-    JSON.stringify({...intent,action_id:'0'.repeat(64),
-      branch:'agent/'+ISSUE+'/qwen-'+'0'.repeat(16)})+'\n');
-  await assert.rejects(()=>prepareQwenReviewAdmission({
-    storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher}),
-  /unique Qwen review publication Intent/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen Reviewer: trusted Store readback, live GitHub source routing, duplicate intent and PR rejection verified');
