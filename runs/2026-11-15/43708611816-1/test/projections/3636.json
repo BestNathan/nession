@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 3636,
+  "run_id": 43708611816,
+  "run_attempt": 1,
+  "target_sha": "7ac312b98b6f900ebc1308f864b3c625e72a0c9d",
+  "plan_digest": "89edb22283646ad6b176441c88e48f64c077b47a683fd1faef28d37e1e4c68a2",
+  "artifact_digest": "sha256:f2347429e651cdbe59fc3f3e68ede04b21538ecdabf55f110095440a6f04b765",
+  "ingest_run_id": 43709163716,
+  "ingest_attempt": 1,
+  "declaration_digest": "43970b71a19f8f821f5e57514de2790a01271a1b67bde1b433d7475885c8da4e",
+  "before_body_sha256": "948498f4e2a6fff48d326f1493ac5e8f7f3e963516a79efccb33d63723d069d7",
+  "body_sha256": "f30ab7fffa8f578c84e9df6368674d0400a34d2ead549cdb18011bbdc984384f",
+  "readback_body": "## Goal\nDeliver the **main-only trusted Pages workflow adapter** for the MCP Documents feature tracked by parent Requirement #3624. This is deliberately a distinct workflow ownership slice, not a second Tool generator or a new recurring monitor. The repository requires `.github/workflows/*` changes to be a separate PR directly to `main`, while the MCP generator in PR #3627 targets `staging`. Their PR-head E2E catalogs differ; one shared Issue declaration cannot truthfully call `pages-mcp` a New test on both PRs.\n\n## Scope\n- Integrate with the existing `Deploy / Public Pages` 4-hour publisher; never add a second scheduler or GPT automation.\n- Reconcile automatically on `crates/nession-mcp/**` main push and on the existing schedule for official upstream stable releases.\n- Resolve last successfully published public MCP JSON without credentials. A verified first-publish 404 is bootstrap; unexpected HTTP/error/malformed snapshots fail closed.\n- Invoke the canonical source-derived generator and semantic digest owned by parent #3624 / PR #3627; do not duplicate Tool semantics in YAML.\n- Hash the exact built MCP JSON; after Pages deploy, read back anonymous HTTPS bytes and verify source SHA, Tool count and semantic and artifact SHA-256.\n- Be a safe no-op before the generator reaches main; no false publication claims. Merge commits only.\n- The full feature's upstream ingestion, Tool UI, field-search and tests remain owned by parent #3624; this child owns only the trusted workflow adapter.\n\n## Success Criteria\n- [ ] **SC-01** The existing main-only Pages workflow triggers MCP reconciliation on MCP crate changes and current schedule, without an added recurring job or Agent.\n- [ ] **SC-02** The workflow provides a safe prior-publication state to the validated generator, rejects upstream/previous retrieval errors, and no-change runs preserve the prior MCP projection bytes.\n- [ ] **SC-03** The published MCP artifact is source/digest-bound to the build and validated by anonymous HTTPS exact-byte readback; a pre-generator main remains compatible. PR proof does not claim deployed success without the real deploy run.\n\n### SC scenario → proof mapping\nSC-01 and SC-02: deterministic workflow routing, script and exact-PR-head CI; SC-03: trusted workflow code review plus real post-main deployment receipt required before reporting public delivery.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Pending exact-head workflow CI |\n| SC-02 | Pending | Pending source-bound reconciliation and negative-path checks |\n| SC-03 | Pending | Pending trusted workflow CI and real deployed HTTPS readback |\n\n## E2E Verification\n### New\n- none: This main-only workflow PR creates no browser spec; `pages-mcp` is added in parent feature PR #3627\n### Regression\n- pages-documents\n- pages-overview\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-documents | Regression | Pass | run 43708611816/1, SHA 7ac312b98b6f900ebc1308f864b3c625e72a0c9d, contract 43970b71a19f8f821f5e57514de2790a01271a1b67bde1b433d7475885c8da4e, plan 89edb22283646ad6b176441c88e48f64c077b47a683fd1faef28d37e1e4c68a2, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/43708611816) |\n| pages-overview | Regression | Pass | run 43708611816/1, SHA 7ac312b98b6f900ebc1308f864b3c625e72a0c9d, contract 43970b71a19f8f821f5e57514de2790a01271a1b67bde1b433d7475885c8da4e, plan 89edb22283646ad6b176441c88e48f64c077b47a683fd1faef28d37e1e4c68a2, tests 7/7 (https://github.com/BestNathan/nession/actions/runs/43708611816) |\n\n## Knowledge Impact\n- **Decision:** Read.\n- **Related knowledge:** existing Pages publication and MCP documentation/provenance, parent #3624.\n- **Reason:** Workflow only consumes the canonical MCP source/digest owner; no new knowledge semantics.\n- **Owner and timing:** verify parent Knowledge Impact before final delivery.\n- **Evidence:** exact PR-head checks and post-publication receipt.\n\n## Prototype\n- **Decision:** None; no product UI is changed by this workflow-only slice.\n\n## Product alignment\nOne trusted publisher and one canonical Tool semantics owner, no redundant user-facing infrastructure.\n\n**Status:** Approved as the workflow-only implementation slice of #3624, required by repository's separate `.github` fast-track/E2E source-catalog rules.\n",
+  "patch_updated_at": "2026-11-15T11:29:51Z",
+  "readback_updated_at": "2026-11-15T11:29:51Z",
+  "rows": [
+    {
+      "id": "pages-documents",
+      "result": "Pass",
+      "evidence": "run 43708611816/1, SHA 7ac312b98b6f900ebc1308f864b3c625e72a0c9d, contract 43970b71a19f8f821f5e57514de2790a01271a1b67bde1b433d7475885c8da4e, plan 89edb22283646ad6b176441c88e48f64c077b47a683fd1faef28d37e1e4c68a2, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/43708611816)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 43708611816/1, SHA 7ac312b98b6f900ebc1308f864b3c625e72a0c9d, contract 43970b71a19f8f821f5e57514de2790a01271a1b67bde1b433d7475885c8da4e, plan 89edb22283646ad6b176441c88e48f64c077b47a683fd1faef28d37e1e4c68a2, tests 7/7 (https://github.com/BestNathan/nession/actions/runs/43708611816)"
+    }
+  ]
+}
