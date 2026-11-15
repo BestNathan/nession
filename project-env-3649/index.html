@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Nession · Project Default ENV · #3649</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+<script src="./app.js" defer></script>
+<script src="../prototype-frame-2758/frame.js" defer></script>
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+  <header class="np-overview">
+    <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Project ENV</span></nav>
+    <span class="np-eyebrow">PROJECT · SESSION DEFAULTS · ENV BINDING</span>
+    <div class="np-header-main"><div>
+      <h1 class="np-title">Project 默认 ENV 与 Session 创建继承</h1>
+      <p class="np-subtitle">在 Project 设置中管理有序 ENV 引用；创建 Session 时明确区分继承、自定义与不使用。创建后的 Session 独立持有 ENV Binding，Project 修改不自动传播。</p>
+    </div><div class="np-links">
+      <a href="https://github.com/BestNathan/nession/issues/3649">Requirement #3649</a>
+      <a href="https://github.com/BestNathan/nession/issues/3025">Project #3025</a>
+      <a href="https://github.com/BestNathan/nession/issues/170">Binding #170</a>
+      <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+    </div></div>
+    <div class="np-meta"><span>Surface: <strong>Project Detail → Settings / Create Session → Session</strong></span><span>Source baseline: <strong>main · 2026-11-15</strong></span><span>Fidelity: <strong>interactive mock, no backend</strong></span></div>
+  </header>
+  <section class="np-preview">
+    <div class="np-section-heading">
+      <div><h2>Interactive preview</h2><p>设备切换调整真实 CSS px 宽度；页面内部是模拟 Nession 视图。</p></div>
+      <div class="np-preview-toolbar">
+        <button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button>
+        <button type="button" data-np-size="1024" aria-pressed="false">Web 1024</button>
+        <button type="button" data-np-size="390" aria-pressed="false">App 390</button>
+        <button type="button" data-np-size="375" aria-pressed="false">App 375</button>
+        <button type="button" data-np-reset>Reset</button>
+      </div>
+    </div>
+    <div class="review-fixtures" aria-label="Mock fixtures">
+      <label><input type="checkbox" id="fixture-missing"> Simulate missing <code>development.env</code></label>
+      <button type="button" id="fixture-empty">Set Project defaults to empty</button>
+      <span data-np-current-size>1180 CSS px · 1:1</span>
+    </div>
+    <div class="np-stage">
+      <div data-np-device class="np-device" style="--np-device-width:1180px;--np-device-height:760px">
+        <div id="product" class="nession-product" aria-live="off"></div>
+      </div>
+    </div>
+    <p class="np-stage-label">Unscaled product viewport · horizontal stage scrolling on smaller review screens</p>
+  </section>
+  <section class="np-details">
+    <h2>Interaction &amp; verification contract</h2>
+    <p class="np-details-lede">Test the user-visible decision, not a simulated backend acceptance result.</p>
+    <div class="np-detail-grid">
+      <div class="np-detail"><h3>Primary walkthrough</h3>
+        <ol class="np-steps">
+          <li>Open <strong>Project Settings</strong>, reorder/add/remove Server ENV references and save.</li>
+          <li>Choose <strong>Create Session</strong>, inspect effective ENV, switch inherit → custom → none and explicitly create.</li>
+          <li>Inspect the created Session's independent Binding; reopen Project and edit defaults, then create another Session.</li>
+          <li>Switch between Web and App widths and use App Back to return without losing work.</li>
+        </ol>
+      </div>
+      <div class="np-detail"><h3>Decision &amp; boundary</h3>
+        <p><strong>Project</strong> stores ordered Server ENV references, not values. New <code>env_selection_mode</code> distinguishes inherit vs explicit replacement, including empty.</p>
+        <p>Missing ENV fails visibly at creation; existing Session Binding remains immutable after Project changes. No ProjectEnvironment object or automatic reapply.</p>
+      </div>
+      <div class="np-detail"><h3>What is simulated</h3>
+        <p>Project CRUD, ENV catalog and resolution, Session creation, Binding revision, error/availability and navigation are in-memory fixtures. No real credentials, agent, tmux or API calls.</p>
+        <p>Appearance approximates main Nession tokens and Project/Session operation-surface grammar, not pixel-matched shipping React.</p>
+      </div>
+      <div class="np-detail"><h3>Device/verification scope</h3>
+        <p>Source-led layout model: Web Sidebar → independent ProjectDetail; App Sessions → ProjectDetail → one depth-owned Header/Back → operation view; Session remains a top-level destination.</p>
+        <p id="verification-status">Local browser and Pages SHA verification not yet recorded; static mock only.</p>
+      </div>
+    </div>
+    <details class="np-inspector"><summary>Mock state inspector</summary><pre id="debug">Loading…</pre></details>
+  </section>
+  <footer class="np-footer">Issue #3649 · Prototype source is separate from production Web/Agent code · A design mock cannot satisfy production Acceptance.</footer>
+</div></body></html>
