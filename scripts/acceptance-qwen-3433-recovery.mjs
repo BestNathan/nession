@@ -86,9 +86,14 @@ export function attestQwen3433Recovery({issue,stage,targetSha,states,head,runs,
     last(v[14],'publisher')?.outcome==='published'&&
     last(v[14],'publisher')?.target_sha===B,
     'authenticated Repair Publisher did not publish original source B');
-  const malformed=v[14].outbox.find(o=>o.task.role==='reviewer');
-  check(validOutbox(malformed,'reviewer','review','pending')&&
-    malformed.task.sha===B&&
+  // The v14 Outbox contains the historical *failed* Reviewer plus the
+  // newly signed pending post-Repair Reviewer. Role alone is ambiguous.
+  const candidates=v[14].outbox.filter(o=>
+    validOutbox(o,'reviewer','review','pending')&&o.task.sha===B);
+  check(candidates.length===1&&pair(v[14],old.id)?.status==='failed',
+    'ambiguous signed post-Repair Reviewer successor');
+  const malformed=candidates[0];
+  check(malformed.task.sha===B&&
     validOutbox(pair(v[16],malformed.id),'reviewer','review','dispatched',
       RUNS.malformedReview[0]),'first post-Repair Reviewer was not signed');
   const recovered=v[17].outbox.find(o=>o.id!==old.id&&o.id!==malformed.id);
