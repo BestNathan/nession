@@ -90,6 +90,9 @@ export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
         branch:record.branch});
     }else if(record.kind==='trusted_qwen_repair_publisher_write_ahead'){
       const valid=validateQwenRepairPublisherIntent(record);
+      if(file.name!==valid.worker_run_id+'-'+valid.worker_run_attempt+
+          '-'+valid.action_id+'.json')
+        fail('Repair Reviewer Intent path differs from signed Worker');
       if(priorWriter!==null&&
           (state?.phase!=='review'||
            state.target_sha===valid.source_sha||
