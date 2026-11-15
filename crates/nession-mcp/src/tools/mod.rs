@@ -9,11 +9,11 @@ mod env_target;
 pub mod nession_agent_create_session;
 pub mod nession_agent_kill_session;
 pub mod nession_agent_list_sessions;
-pub mod nession_server_list_agents;
-pub mod nession_server_env_list;
-pub mod nession_server_env_get;
-pub mod nession_server_env_write;
 pub mod nession_server_env_delete;
+pub mod nession_server_env_get;
+pub mod nession_server_env_list;
+pub mod nession_server_env_write;
+pub mod nession_server_list_agents;
 
 use std::sync::Arc;
 
@@ -57,11 +57,11 @@ pub(crate) mod test_support {
     use serde_json::{json, Value};
 
     use crate::backend::{ClusterBackend, NodeBackend};
+    use crate::error::ToolError;
+    use crate::tool::ToolContext;
     use nession_protocol::contracts::env::v1::{
         ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
     };
-    use crate::error::ToolError;
-    use crate::tool::ToolContext;
 
     /// What one Tool call asked the backend for.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,29 +99,50 @@ pub(crate) mod test_support {
         }
 
         async fn env_list(&self) -> Result<Value, ToolError> {
-            self.calls.lock().expect("recording lock").push(Recorded::EnvList);
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::EnvList);
             Ok(json!({ "files": [] }))
         }
 
         async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
-            self.calls.lock().expect("recording lock").push(Recorded::EnvGet(
-                payload.name, payload.source, payload.agent_id,
-            ));
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::EnvGet(
+                    payload.name,
+                    payload.source,
+                    payload.agent_id,
+                ));
             Ok(json!({ "success": true, "content": "PUBLIC=1\n", "in_use_by": [] }))
         }
 
         async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
-            self.calls.lock().expect("recording lock").push(Recorded::EnvWrite(
-                payload.name, payload.source, payload.agent_id, payload.content,
-                payload.overwrite, payload.force,
-            ));
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::EnvWrite(
+                    payload.name,
+                    payload.source,
+                    payload.agent_id,
+                    payload.content,
+                    payload.overwrite,
+                    payload.force,
+                ));
             Ok(json!({ "success": true, "exists": false, "warnings": [] }))
         }
 
         async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
-            self.calls.lock().expect("recording lock").push(Recorded::EnvDelete(
-                payload.name, payload.source, payload.agent_id, payload.force,
-            ));
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::EnvDelete(
+                    payload.name,
+                    payload.source,
+                    payload.agent_id,
+                    payload.force,
+                ));
             Ok(json!({ "success": true }))
         }
     }

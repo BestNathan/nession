@@ -1,11 +1,11 @@
 //! `nession_server_env_list` — Server-owned ENV management.
 //! Routes through the same Server API as Web/CLI; does not access arbitrary host files.
 
+use crate::error::ToolError;
+use crate::tool::{parse_arguments, schema_for, ToolContext, ToolHandler};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use crate::error::ToolError;
-use crate::tool::{parse_arguments, schema_for, ToolContext, ToolHandler};
 
 /// The `nession_server_env_list` Tool.
 pub struct NessionServerEnvList;
@@ -54,8 +54,10 @@ mod tests {
     #[tokio::test]
     async fn empty_request_reads_metadata() {
         let recorder = Arc::new(Recording::default());
-        let reply = NessionServerEnvList.call(&context(&recorder), arguments(serde_json::json!({})))
-            .await.expect("reply");
+        let reply = NessionServerEnvList
+            .call(&context(&recorder), arguments(serde_json::json!({})))
+            .await
+            .expect("reply");
         assert_eq!(reply["files"], serde_json::json!([]));
         assert_eq!(recorder.calls(), vec![Recorded::EnvList]);
     }

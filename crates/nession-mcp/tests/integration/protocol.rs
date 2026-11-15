@@ -68,17 +68,29 @@ impl ClusterBackend for Recorder {
     }
 
     async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
-        self.push(format!("cluster.env_get:{}:{}", payload.source.as_str(), payload.name));
+        self.push(format!(
+            "cluster.env_get:{}:{}",
+            payload.source.as_str(),
+            payload.name
+        ));
         Ok(json!({ "success": true, "content": "PUBLIC=1\n", "in_use_by": [] }))
     }
 
     async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
-        self.push(format!("cluster.env_write:{}:{}", payload.source.as_str(), payload.name));
+        self.push(format!(
+            "cluster.env_write:{}:{}",
+            payload.source.as_str(),
+            payload.name
+        ));
         Ok(json!({ "success": true, "exists": false, "warnings": [] }))
     }
 
     async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
-        self.push(format!("cluster.env_delete:{}:{}", payload.source.as_str(), payload.name));
+        self.push(format!(
+            "cluster.env_delete:{}:{}",
+            payload.source.as_str(),
+            payload.name
+        ));
         Ok(json!({ "success": true }))
     }
 }
@@ -647,7 +659,7 @@ async fn the_legacy_initialize_lifecycle_still_works() {
             .as_array()
             .expect("tools")
             .len(),
-        4
+        8
     );
 
     let call = request(

@@ -96,21 +96,30 @@ impl ClusterBackend for RemoteClusterBackend {
 
     async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
         let mut connection = self.connect().await?;
-        let reply = connection.env_get(payload).await.map_err(map_client_error)?;
+        let reply = connection
+            .env_get(payload)
+            .await
+            .map_err(map_client_error)?;
         Self::close(connection).await;
         serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
     }
 
     async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
         let mut connection = self.connect().await?;
-        let reply = connection.env_write(payload).await.map_err(map_client_error)?;
+        let reply = connection
+            .env_write(payload)
+            .await
+            .map_err(map_client_error)?;
         Self::close(connection).await;
         serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
     }
 
     async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
         let mut connection = self.connect().await?;
-        let reply = connection.env_delete(payload).await.map_err(map_client_error)?;
+        let reply = connection
+            .env_delete(payload)
+            .await
+            .map_err(map_client_error)?;
         Self::close(connection).await;
         serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
     }

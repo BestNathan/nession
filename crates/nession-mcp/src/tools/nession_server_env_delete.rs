@@ -1,13 +1,13 @@
 //! `nession_server_env_delete` — Server-owned ENV management.
 //! Routes through the same Server API as Web/CLI; does not access arbitrary host files.
 
+use super::env_target::Source;
+use crate::error::ToolError;
+use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
 use async_trait::async_trait;
+use nession_protocol::contracts::env::v1::ClientEnvDeletePayload;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use nession_protocol::contracts::env::v1::ClientEnvDeletePayload;
-use crate::error::ToolError;
-use super::env_target::Source;
-use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
 
 /// The `nession_server_env_delete` Tool.
 pub struct NessionServerEnvDelete;
@@ -46,12 +46,14 @@ impl ToolHandler for NessionServerEnvDelete {
         let arguments: Arguments = parse_arguments(arguments)?;
         non_empty(&arguments.name, "name")?;
         let (source, agent_id) = arguments.source.resolve(arguments.agent_id.as_deref())?;
-        context.cluster.env_delete(ClientEnvDeletePayload {
-            name: arguments.name,
-            source,
-            agent_id,
-            force: arguments.force,
-        })
+        context
+            .cluster
+            .env_delete(ClientEnvDeletePayload {
+                name: arguments.name,
+                source,
+                agent_id,
+                force: arguments.force,
+            })
             .await
     }
 }
@@ -73,8 +75,10 @@ mod tests {
     async fn missing_or_empty_name_never_reaches_backend() {
         let recorder = Arc::new(Recording::default());
         let input = serde_json::json!({ "name": "" });
-        let error = NessionServerEnvDelete.call(&context(&recorder), arguments(input))
-            .await.expect_err("empty name");
+        let error = NessionServerEnvDelete
+            .call(&context(&recorder), arguments(input))
+            .await
+            .expect_err("empty name");
         assert_eq!(error.kind, crate::error::ToolErrorKind::InvalidArgument);
         assert!(recorder.calls().is_empty());
     }
@@ -110,8 +114,10 @@ mod tests {
     async fn agent_source_requires_target() {
         let recorder = Arc::new(Recording::default());
         let input = serde_json::json!({ "name": "prod.env", "source": "agent" });
-        let error = NessionServerEnvDelete.call(&context(&recorder), arguments(input))
-            .await.expect_err("agent_id");
+        let error = NessionServerEnvDelete
+            .call(&context(&recorder), arguments(input))
+            .await
+            .expect_err("agent_id");
         assert_eq!(error.kind, crate::error::ToolErrorKind::InvalidArgument);
         assert!(recorder.calls().is_empty());
     }

@@ -191,7 +191,8 @@ impl ClientConnection {
         &mut self,
         payload: ClientEnvWritePayload,
     ) -> Result<ClientEnvWriteResponsePayload, ClientError> {
-        self.request(proto_msg(wire::SERVER_ENV_WRITE, payload)).await
+        self.request(proto_msg(wire::SERVER_ENV_WRITE, payload))
+            .await
     }
 
     /// `server.env.delete` — remove through the canonical in-use gate.
@@ -199,7 +200,8 @@ impl ClientConnection {
         &mut self,
         payload: ClientEnvDeletePayload,
     ) -> Result<ClientEnvDeleteResponsePayload, ClientError> {
-        self.request(proto_msg(wire::SERVER_ENV_DELETE, payload)).await
+        self.request(proto_msg(wire::SERVER_ENV_DELETE, payload))
+            .await
     }
 
     /// `server.agent.list` — every agent the Server knows about, or its refusal.

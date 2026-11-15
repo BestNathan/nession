@@ -20,12 +20,12 @@ use nession_common::config::ServerConfig;
 use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::{McpService, ServiceConfig};
-use nession_protocol::Message;
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
 };
-use serde_json::{json, Value};
+use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
+use serde_json::{json, Value};
 
 use crate::registry::{AgentRegistry, AgentStatus};
 use crate::server::execution::{
@@ -133,20 +133,20 @@ impl ClusterBackend for ServerClusterBackend {
     }
 
     async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
-        let payload = serde_json::to_value(payload)
-            .map_err(|error| ToolError::backend(error.to_string()))?;
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
         dispatch_with(self.handler.clone(), "server.env.get", payload).await
     }
 
     async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
-        let payload = serde_json::to_value(payload)
-            .map_err(|error| ToolError::backend(error.to_string()))?;
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
         dispatch_with(self.handler.clone(), "server.env.write", payload).await
     }
 
     async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
-        let payload = serde_json::to_value(payload)
-            .map_err(|error| ToolError::backend(error.to_string()))?;
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
         dispatch_with(self.handler.clone(), "server.env.delete", payload).await
     }
 }
