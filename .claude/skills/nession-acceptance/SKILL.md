@@ -32,7 +32,7 @@ Requirement Success Criteria
 
 Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
-For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. New `when: pr` criteria use `method: agent` over independently executed exact-head CI receipts; PR Case Smoke does not project a separate SC verdict. `when: deployed` does not execute as part of an ordinary main push: it runs only through an explicit deployed Case run that presents an authenticated deployment record for its environment. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
+For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. New `when: pr` criteria select their declared proof method: `method: agent` uses independently attested read-only CI/Agent evidence; `method: case` uses source-aligned PR Smoke and trusted main Case ingestion to project its own SC verdict only after immutable exact-head Run/Attempt, Case/CI, PR association, source tree and contract verification. No method substitutes for the other. `when: deployed` does not execute as part of an ordinary main push: it runs only through an explicit deployed Case run that presents an authenticated deployment record for its environment. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
 
 Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
@@ -139,7 +139,7 @@ Choose the Case stage from the trusted Acceptance contract: the Plan for canonic
 
 A Case Pass requires concrete evidence from every declared verifier. Skip/absence is Pending. Results pin exact target SHA, Case revision/tree SHA and SC contract digest. Compact immutable records are ingested into the append-only `acceptance-results` orphan branch; large traces/screenshots/logs remain workflow artifacts.
 
-Automatic Case execution maps staging push → `staging` and main push → `post-merge` using exact SHA Requirement association discovery. Manual replay must select Issue, SC, exact 40-character SHA, stage and runtime profile.
+Automatic Case execution maps eligible PR Case Smoke → `pr`, staging push → `staging`, and main push → `post-merge` using their exact source SHA and Requirement association. Historical PR Case Smoke proof may be re-run on the original exact-head GitHub Actions Run as a new authenticated attempt; `Acceptance / Case Ingest` automatically ingests the completed source via trusted `workflow_run`. The privileged writer never exposes `workflow_dispatch` or direct Issue-write shortcuts. Manual merged-stage Case execution continues to select Issue, SC, exact 40-character SHA, stage and runtime profile.
 
 Security boundary: target Case code is read-only (`contents: read`, `issues: read`). It must never mutate an Issue, push result branches, or receive production secrets. Only trusted `main` ingestion/updater code may write `acceptance-results` and project an eligible result into the Issue, after current-SHA, association and contract-digest checks.
 
