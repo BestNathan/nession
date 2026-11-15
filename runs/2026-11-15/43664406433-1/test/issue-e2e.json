@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "521a248e38c8c0e6249bfdd9190b1dde1092a785",
+  "run_id": 43664406433,
+  "run_attempt": 1,
+  "plan_digest": "fab144b20da2c07c46d0fc2202cf06abef0a0b3b3a23531b2b35415e37c2ced1",
+  "artifact_digest": "sha256:56129b188459f32ecce8df1078bdef2e002033064c8e9795eebfb1789ed5326d",
+  "results": [
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 35,
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 1077
+    }
+  ]
+}
