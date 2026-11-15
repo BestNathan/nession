@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "a10db10f63bd4399403530b576adbf33f0670239",
+  "run_id": 43680073082,
+  "run_attempt": 1,
+  "plan_digest": "9f6802ae0fdf4d1282e39ef4a850d57f7c7fe5aa3277afe70a1f10f7b2ba9f7d",
+  "artifact_digest": "sha256:3a5563bae956bb0689c2f486030548d97a0171bd8ea2fbf1efa835fc26da13ff",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 220
+    },
+    {
+      "id": "session-metadata",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 38
+    }
+  ]
+}
