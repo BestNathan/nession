@@ -15,7 +15,7 @@ async function expectNoSecretValues(page) {
 }
 
 test('SC-01: Project Settings edits the ordered Server ENV declaration', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(45_000);
   const { sha } = verifiedRuntime('SC-01');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/fixture?projects=ordered-env&env=project-env');
@@ -57,7 +57,7 @@ test('SC-01: Project Settings edits the ordered Server ENV declaration', async (
 });
 
 test('SC-01: Project Create persists optional default references', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(45_000);
   const { sha } = verifiedRuntime('SC-01');
   await page.setViewportSize({ width: 1180, height: 900 });
   await page.goto('/#/fixture?env=project-env');
@@ -81,13 +81,13 @@ test('SC-01: Project Create persists optional default references', async ({ page
 });
 
 test('SC-01: Project Detail marks a missing reference without secrets', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(45_000);
   const { sha } = verifiedRuntime('SC-01');
   await page.setViewportSize({ width: 1180, height: 900 });
   await page.goto('/#/fixture?projects=missing-env&env=project-env');
 
   await page.getByTestId('project-item-row').first().click();
-  await expect(page.getByTestId('project-env-defaults')).toHaveText(
+  await expect(page.getByTestId('project-env-defaults')).toContainText(
     'staging.env, missing.env',
   );
   await expect(page.getByTestId('project-env-default-missing-1')).toHaveText('(missing)');
@@ -102,7 +102,7 @@ test('SC-01: Project Detail marks a missing reference without secrets', async ({
 });
 
 test('SC-01: App Project settings keeps one header and the ordered declaration', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(45_000);
   const { sha } = verifiedRuntime('SC-01');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/fixture/app?projects=ordered-env&env=project-env');

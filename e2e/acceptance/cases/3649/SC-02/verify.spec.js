@@ -17,7 +17,7 @@ async function openProjectCreate(page, route) {
 }
 
 test('SC-02: Web distinguishes inherit, custom and no environment', async ({ page }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(60_000);
   const { sha } = verifiedRuntime('SC-02');
   await page.setViewportSize({ width: 1440, height: 900 });
   const dialog = await openProjectCreate(page, '/#/fixture?projects=canonical&env=project-env');
@@ -67,7 +67,7 @@ test('SC-02: Web distinguishes inherit, custom and no environment', async ({ pag
 });
 
 test('SC-02: an Agent change keeps the effective Project default', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(45_000);
   const { sha } = verifiedRuntime('SC-02');
   await page.setViewportSize({ width: 1180, height: 900 });
   const dialog = await openProjectCreate(page, '/#/fixture?projects=long&env=project-env');
@@ -91,7 +91,7 @@ test('SC-02: an Agent change keeps the effective Project default', async ({ page
 });
 
 test('SC-02: a missing inherited reference blocks Create visibly', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(45_000);
   const { sha } = verifiedRuntime('SC-02');
   await page.setViewportSize({ width: 1180, height: 900 });
   const dialog = await openProjectCreate(page, '/#/fixture?projects=missing-env&env=project-env');
@@ -112,7 +112,7 @@ test('SC-02: a missing inherited reference blocks Create visibly', async ({ page
 
 for (const width of [1180, 1024]) {
   test(`SC-02: Web create modes fit at ${width}`, async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(45_000);
     const { sha } = verifiedRuntime('SC-02');
     await page.setViewportSize({ width, height: 900 });
     const dialog = await openProjectCreate(page, '/#/fixture?projects=canonical&env=project-env');
@@ -140,7 +140,7 @@ for (const width of [1180, 1024]) {
 
 for (const width of [390, 375]) {
   test(`SC-02: App keeps one header and usable modes at ${width}`, async ({ page }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(60_000);
     const { sha } = verifiedRuntime('SC-02');
     await page.setViewportSize({ width, height: 844 });
     await page.goto('/#/fixture/app?projects=canonical&env=project-env');
