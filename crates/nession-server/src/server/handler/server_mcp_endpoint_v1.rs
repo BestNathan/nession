@@ -8,7 +8,7 @@
 //! from a particular client is that client's question; the Claude MCP connect
 //! flow answers it with its own bounded handshake.
 
-use super::{current_timestamp, json, ConnectionHandler, HandlerAction, Message, ProtocolMessage};
+use super::{current_timestamp, json, ConnectionHandler, HandlerAction, ProtocolMessage, WsFrame};
 
 impl ConnectionHandler {
     /// Handle `server.mcp.endpoint` — whether this Server mounted `/mcp`, where,
@@ -17,7 +17,7 @@ impl ConnectionHandler {
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        Ok(HandlerAction::Reply(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(WsFrame::Text(
             json!({
                 "msg_type": "server.mcp.endpoint",
                 "id": msg.id,
