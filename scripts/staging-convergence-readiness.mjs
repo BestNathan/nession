@@ -16,7 +16,7 @@ const REQUIRED=[
   '.github/workflows/acceptance-case-smoke.yml',
   '.github/workflows/e2e-tests.yml',
 ];
-const DEPLOY='.github/workflows/release-staging.yml';
+const DEPLOY='.github/workflows/deploy-staging-acr.yml';
 const fail=reason=>({ready:false,reason});
 const okay=details=>({ready:true,reason:'QUALIFIED',...details});
 
@@ -94,12 +94,13 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
 
 export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],
   authenticatedNative=[],deployRuns=[],laneSha,branch='staging',
-  deployment_workflows=['release-staging.yml']}) {
+  deployment_workflows=['deploy-staging-acr.yml']}) {
   if(!SHA.test(laneSha)||!Array.isArray(firstParentCommits)||
       firstParentCommits.length===0)
     return fail('EMPTY_PROMOTION');
   const run=deployRuns.filter(r=>deployment_workflows.some(file=>r.path?.split('@')[0]==='.github/workflows/'+file) &&
-    r.head_sha===laneSha && r.head_branch===branch && r.event==='push' &&
+    r.head_sha===laneSha && r.head_branch===branch &&
+    ['push','workflow_dispatch'].includes(r.event) &&
     r.repository?.full_name===REPO && r.head_repository?.full_name===REPO);
   // GitHub run inventories are not a stable ordering guarantee; an older
   // success must not mask a later failed/in-progress deployment attempt.
@@ -637,8 +638,8 @@ function selfTest(){
     'an unavailable forged PR merge SHA must fail closed, not crash or pass');
   assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
     'actions/runs?head_sha='+a+'&event=pull_request&per_page=100');
-  assert.equal(workflowRunsRoute('actions/workflows/release-staging.yml/runs?head_sha='+b),
-    'actions/workflows/release-staging.yml/runs?head_sha='+b+'&per_page=100');
+  assert.equal(workflowRunsRoute('actions/workflows/deploy-staging-acr.yml/runs?head_sha='+b),
+    'actions/workflows/deploy-staging-acr.yml/runs?head_sha='+b+'&per_page=100');
   assert.throws(()=>workflowRunsRoute('actions/runs?actions/workflows/x.yml/runs?head_sha='+b),
     /invalid bounded workflow run route/);
   assert.throws(()=>workflowRunsRoute('actions/workflows/../runs?head_sha='+b),
