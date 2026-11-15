@@ -22,6 +22,7 @@ const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 // GitHub evaluates this step name from the original workflow_dispatch inputs;
 // target-controlled Case code cannot mutate the GitHub Jobs/Steps API metadata.
 const MANUAL_STAGING_STEP = /^Authenticate manual Staging Case ([1-9][0-9]*) (SC-[0-9]{2,}) ([0-9a-f]{40})$/;
+const MANUAL_POST_MERGE_STEP = /^Authenticate manual Post-Merge Case ([1-9][0-9]*) (SC-[0-9]{2,}) ([0-9a-f]{40})$/;
 
 function positiveInt(value, label) {
   const n = Number(value);
@@ -170,8 +171,17 @@ export function validateCaseRecord(raw) {
 // A digest of user-controlled fields alone is not an attestation.
 export function sourceRunIdentity(event, repository) {
   const run = event?.workflow_run;
-  if (!run || run.name !== 'Acceptance / Cases') {
+  // GitHub's completed workflow_run event reports the dynamic run-name in
+  // workflow_run.name, not the source workflow's static declaration name.
+  // Issue-comment requests intentionally have a comment-bound run title; do
+  // not lose their ingestion, but accept only the exact authenticated family.
+  const commentRun = /^Comment Case #([1-9][0-9]*) (SC-[0-9]{2,}) comment:([1-9][0-9]*)$/
+    .exec(run?.name ?? '');
+  if (!run || (run.name !== 'Acceptance / Cases' && !commentRun)) {
     throw new Error('expected a completed Acceptance / Cases workflow_run event');
+  }
+  if (commentRun && (run.event !== 'workflow_dispatch' || run.head_branch !== 'main')) {
+    throw new Error('comment-named Case source requires trusted main workflow_dispatch');
   }
   if (run.status !== 'completed' || !['success', 'failure'].includes(run.conclusion)) {
     throw new Error('source Acceptance / Cases run has no terminal supported conclusion');
@@ -206,7 +216,51 @@ export function sourceRunIdentity(event, repository) {
     head_sha: sourceSha,
     head_branch: branch,
     workflow_id: positiveInt(run.workflow_id, 'workflow_run.workflow_id'),
+    ...(commentRun ? { comment_case: {
+      issue: Number(commentRun[1]), criterion: commentRun[2],
+      comment_id: Number(commentRun[3]),
+    } } : {}),
   };
+}
+
+/**
+ * Convert a bot-origin explicit wake into an authenticated source event.
+ * GITHUB_TOKEN dispatches do not produce a recursive workflow_run event; the
+ * Case producer wakes us only after both source execution jobs have settled.
+ * A run ID is a locator, NEVER permission to ingest an artifact.
+ */
+export async function resolveCaseIngestSourceEvent(event, {
+  repository, token, request = githubRequest, pause = sleep,
+  actor = process.env.GITHUB_ACTOR, ref = process.env.GITHUB_REF,
+} = {}) {
+  if (event?.workflow_run) {
+    const source = sourceRunIdentity(event, repository);
+    return { event, source };
+  }
+  if (event?.repository?.full_name !== repository ||
+      actor !== 'github-actions[bot]' || ref !== 'refs/heads/main' ||
+      !event?.inputs || Object.keys(event.inputs).some(key => key !== 'source_run_id')) {
+    throw new Error('Case Ingest dispatch requires the exact bot-owned main source-run locator');
+  }
+  const runId = positiveInt(event.inputs.source_run_id, 'source_run_id');
+  let run = null;
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    run = await request('/repos/' + repository + '/actions/runs/' + runId, { token });
+    if (run?.status === 'completed') break;
+    if (attempt < 24) await pause(2000);
+  }
+  if (run?.status !== 'completed') throw new Error('comment Case source Run did not complete within the bounded readback');
+  // REST returns static workflow "name" and dynamic "display_title".
+  // The original workflow_dispatch input binds the display title; never take
+  // this name from the dispatch payload or from uploaded Case JSON.
+  const sourceEvent = { workflow_run: { ...run, name: run.display_title } };
+  const source = sourceRunIdentity(sourceEvent, repository);
+  if (source.run_id !== runId || !source.comment_case ||
+      source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
+      source.run_attempt !== 1 || run.actor?.login !== 'github-actions[bot]') {
+    throw new Error('explicit Case Ingest wake is not an authenticated comment-bound bot Run');
+  }
+  return { event: sourceEvent, source };
 }
 
 // Lane-aware proof boundary: a `when: deployed` criterion is eligible only
@@ -240,10 +294,12 @@ export function assertSourceBoundRecord(record, source) {
   // The binding is NOT taken from the Case artifact: attestCaseRecord first
   // reads its GitHub-owned pre-target step identity at this exact Run/Attempt.
   const manual = source.event === 'workflow_dispatch' &&
-    source.head_branch === 'main' && item.stage === 'staging' && !item.deployment;
+    source.head_branch === 'main' && !item.deployment &&
+    (item.stage === 'staging' ||
+      (item.stage === 'post-merge' && item.target_sha !== source.head_sha));
   if (manual) {
     const binding = source.dispatch_binding;
-    if (!binding || binding.stage !== 'staging' ||
+    if (!binding || binding.stage !== item.stage ||
         binding.target_sha !== item.target_sha ||
         binding.issue !== item.issue || binding.criterion !== item.criterion ||
         !Number.isSafeInteger(binding.job_id) || binding.job_id < 1 ||
@@ -269,6 +325,10 @@ function assertRunIdentity(record, source) {
   const item = validateCaseRecord(record);
   if (item.run_id !== source.run_id || item.run_attempt !== source.run_attempt) {
     throw new Error('Case record run identity disagrees with triggering workflow_run');
+  }
+  if (source.comment_case && (item.issue !== source.comment_case.issue ||
+      item.criterion !== source.comment_case.criterion)) {
+    throw new Error('Case record Issue/SC differs from GitHub-authenticated comment Run name');
   }
   return item;
 }
@@ -319,7 +379,9 @@ export function assertDeployedSourceRecord(record, source, deploymentRecords) {
 }
 
 /**
- * Derive the manual Staging target independently of an untrusted Case JSON.
+ * Derive manual merged-branch targets independently of untrusted Case JSON.
+ * Staging and historical Main use two separately pinned SHAs; Main-head runs
+ * preserve the old strict equality rule without requiring a new binding.
  * Unlike logs or uploaded artifacts, Jobs/Steps names are evaluated by GitHub
  * from original workflow_dispatch inputs in the trusted-main workflow. The
  * step must succeed BEFORE the exact-target checkout / untrusted execution.
@@ -329,7 +391,11 @@ export async function attestManualStagingSource(record, source, {
 } = {}) {
   const item = validateCaseRecord(record);
   if (source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
-      item.stage !== 'staging' || item.deployment) return source;
+      item.deployment || (item.stage !== 'staging' &&
+        !(item.stage === 'post-merge' && item.target_sha !== source.head_sha))) return source;
+  const manualPrefix = item.stage === 'staging'
+    ? 'Authenticate manual Staging Case ' : 'Authenticate manual Post-Merge Case ';
+  const manualPattern = item.stage === 'staging' ? MANUAL_STAGING_STEP : MANUAL_POST_MERGE_STEP;
   if (source.repository !== repository) throw new Error('manual Case repository mismatch');
   const jobs = await request('/repos/' + repository +
     '/actions/runs/' + source.run_id + '/attempts/' + source.run_attempt +
@@ -348,21 +414,31 @@ export async function attestManualStagingSource(record, source, {
       throw new Error('manual Case GitHub source job identity is unverified');
     }
     const checkoutIndex = job.steps.findIndex(step => step.name === 'Checkout exact target SHA');
+    if (source.comment_case) {
+      const commentSteps = job.steps.map((step, index) => ({ step, index })).filter(
+        ({ step }) => step.name === 'Verify original human Case comment and source-bound target');
+      if (commentSteps.length !== 1 || commentSteps[0].index >= checkoutIndex ||
+          commentSteps[0].step.status !== 'completed' ||
+          commentSteps[0].step.conclusion !== 'success') {
+        throw new Error('original human comment was not authenticated before target checkout');
+      }
+    }
     for (const [index, step] of job.steps.entries()) {
-      if (!String(step.name ?? '').startsWith('Authenticate manual Staging Case ')) continue;
-      const fields = MANUAL_STAGING_STEP.exec(step.name);
+      if (!String(step.name ?? '').startsWith(manualPrefix)) continue;
+      const fields = manualPattern.exec(step.name);
       if (!fields || index >= checkoutIndex ||
           step.status !== 'completed' || step.conclusion !== 'success' ||
           !Number.isSafeInteger(step.number) || step.number < 1) {
         throw new Error('manual Case target dispatch step is invalid or executed after target checkout');
       }
       matches.push({
-        target_sha: fields[3], stage: 'staging', issue: Number(fields[1]),
+        target_sha: fields[3], stage: item.stage, issue: Number(fields[1]),
         criterion: fields[2], job_id: job.id, step_number: step.number,
       });
     }
   }
-  if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual Staging target step');
+  if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual ' +
+    item.stage + ' target step');
   return { ...source, dispatch_binding: matches[0] };
 }
 
@@ -877,6 +953,73 @@ async function selfTest() {
     path: '.github/workflows/acceptance-cases.yml',
     id: 100, run_attempt: 1, workflow_id: 9,
   }};
+  // Dynamic comment run names are GitHub-owned dispatch metadata, never an
+  // alternative source Workflow/path/branch identity. Test both good and
+  // hostile completed workflow_run payloads with the original Case record.
+  const commentEvent = { workflow_run: {
+    ...fixtureEvent.workflow_run,
+    name: 'Comment Case #1474 SC-14 comment:999',
+    head_branch: 'main', event: 'workflow_dispatch',
+  } };
+  const commentSource = sourceRunIdentity(commentEvent, 'BestNathan/nession');
+  assert.deepEqual(commentSource.comment_case, {
+    issue: 1474, criterion: 'SC-14', comment_id: 999,
+  });
+  assert.equal(assertSourceBoundRecord({ ...valid, stage: 'post-merge' }, commentSource).issue, 1474);
+  assert.throws(() => assertSourceBoundRecord({ ...valid, stage: 'post-merge',
+    criterion: 'SC-15' }, commentSource), /GitHub-authenticated comment Run name/);
+  assert.throws(() => assertSourceBoundRecord({ ...valid, stage: 'post-merge',
+    issue: 1700 }, commentSource), /GitHub-authenticated comment Run name/);
+  for (const name of [
+    'Comment Case #1474 SC-14 comment:999 extra',
+    'Comment Case #1474 SC-14 comment:0',
+    'Comment Case #bad SC-14 comment:999',
+    'Comment Case #1474 SC-14 comment:999\\ninjected',
+    'Unrelated Workflow',
+  ]) {
+    assert.throws(() => sourceRunIdentity({
+      workflow_run: { ...commentEvent.workflow_run, name },
+    }, 'BestNathan/nession'), /expected a completed Acceptance/);
+  }
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, event: 'push',
+  } }, 'BestNathan/nession'), /trusted main workflow_dispatch/);
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, head_branch: 'staging',
+  } }, 'BestNathan/nession'), /trusted main workflow_dispatch/);
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, path: '.github/workflows/untrusted.yml',
+  } }, 'BestNathan/nession'), /unexpected source workflow definition path/);
+  assert.throws(() => sourceRunIdentity({ workflow_run: {
+    ...commentEvent.workflow_run, repository: { full_name: 'other/nession' },
+  } }, 'BestNathan/nession'), /repository mismatch/);
+  // Explicit GITHUB_TOKEN comment wakes must re-fetch GitHub's Run, not
+  // reconstruct evidence from a caller-selected display name or artifact.
+  const wakeEvent = { repository: { full_name: 'BestNathan/nession' },
+    inputs: { source_run_id: '100' } };
+  const wakeRun = { ...commentEvent.workflow_run, id: 100,
+    name: 'Acceptance / Cases', display_title: commentEvent.workflow_run.name,
+    actor: { login: 'github-actions[bot]' } };
+  const wakeOptions = { repository: 'BestNathan/nession',
+    actor: 'github-actions[bot]', ref: 'refs/heads/main',
+    request: async () => wakeRun, pause: async () => {} };
+  const verifiedWake = await resolveCaseIngestSourceEvent(wakeEvent, wakeOptions);
+  assert.equal(verifiedWake.source.comment_case.comment_id, 999);
+  for (const denied of [
+    { actor: 'attacker' }, { ref: 'refs/heads/staging' },
+    { request: async () => ({ ...wakeRun, actor: { login: 'attacker' } }) },
+    { request: async () => ({ ...wakeRun, display_title: 'Other workflow' }) },
+    { request: async () => ({ ...wakeRun, path: '.github/workflows/other.yml' }) },
+    { request: async () => ({ ...wakeRun, id: 101 }) },
+    { request: async () => ({ ...wakeRun, run_attempt: 2 }) },
+    { request: async () => ({ ...wakeRun, status: 'queued' }) },
+  ]) {
+    await assert.rejects(() => resolveCaseIngestSourceEvent(wakeEvent,
+      { ...wakeOptions, ...denied }), /Case Ingest|Case source|completed Acceptance|workflow definition|source_run_id|not an authenticated|expected a completed/);
+  }
+  await assert.rejects(() => resolveCaseIngestSourceEvent({
+    ...wakeEvent, inputs: { source_run_id: '100', other: 'payload' },
+  }, wakeOptions), /Case Ingest dispatch/);
   // Exercise the actual attest path without credentials: a fetched source commit
   // must contain the exact Case tree claimed by the immutable record.
   const sourceTree = 'f'.repeat(40);
@@ -951,6 +1094,64 @@ async function selfTest() {
     token: 'self-test', request: manualRequest,
   });
   assert.equal(manualAttested.source.dispatch_binding.issue, 1474);
+  // A historical Main merge Case also has a distinct product SHA. The source
+  // is only permitted after its *own* GitHub-owned post-merge dispatch step,
+  // not by relabeling an authenticated Staging step or trusting the artifact.
+  const historicalMain = { ...valid, stage: 'post-merge' };
+  const mainStep = { ...manualStep,
+    name: 'Authenticate manual Post-Merge Case 1474 SC-14 ' + valid.target_sha };
+  const mainJob = { ...manualJob, steps: [
+    { number: 2, name: 'Checkout trusted discovery tooling' }, mainStep,
+    { number: 4, name: 'Resolve target identity' },
+    { number: 5, name: 'Checkout exact target SHA' },
+  ] };
+  const mainJobs = { jobs: [mainJob] };
+  const historicalBound = await attestManualStagingSource(historicalMain, manualSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async () => mainJobs,
+  });
+  assert.equal(historicalBound.dispatch_binding.stage, 'post-merge');
+  assert.equal(assertSourceBoundRecord(historicalMain, historicalBound).issue, 1474);
+  assert.throws(() => assertSourceBoundRecord(historicalMain, manualSource), /not bound/);
+  const commentManualEvent = { workflow_run: {
+    ...manualEvent.workflow_run,
+    name: 'Comment Case #1474 SC-14 comment:999',
+  } };
+  const mainAttested = await attestCaseRecord(historicalMain, {
+    event: commentManualEvent, repository: 'BestNathan/nession',
+    token: 'self-test',
+    request: async p => p === manualJobPath ? mainJobs : attestationRequest(p),
+  });
+  assert.equal(mainAttested.source.dispatch_binding.stage, 'post-merge');
+  assert.equal(caseIndexRecord(enrichCaseRecord(historicalMain, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(historicalMain), source: mainAttested.source,
+  })).stage, 'post-merge');
+  assert.equal((await attestManualStagingSource(historicalMain, {
+    ...manualSource, head_sha: historicalMain.target_sha,
+  }, { repository: 'BestNathan/nession', request: async () => {
+    throw Error('historical/main-head equality must not fetch input binding');
+  } })).dispatch_binding, undefined);
+  for (const tampered of [
+    { jobs: [{ ...mainJob, steps: mainJob.steps.filter(x => x !== mainStep) }] },
+    { jobs: [{ ...mainJob, steps: [mainStep, { number: 5,
+      name: 'Checkout exact target SHA' }, mainStep] }] },
+    { jobs: [{ ...mainJob, steps: [{ ...mainStep, conclusion: 'failure' },
+      { number: 5, name: 'Checkout exact target SHA' }] }] },
+    { jobs: [{ ...mainJob, head_sha: 'f'.repeat(40) }] },
+    { jobs: [{ ...mainJob, run_attempt: 999 }] },
+  ]) {
+    await assert.rejects(() => attestManualStagingSource(historicalMain, manualSource, {
+      repository: 'BestNathan/nession', token: 'self-test',
+      request: async () => tampered,
+    }), /manual Case|missing or ambiguous/);
+  }
+  const stagingStepOnly = await assert.rejects(() => attestManualStagingSource(
+    historicalMain, manualSource, {
+      repository: 'BestNathan/nession', token: 'self-test',
+      request: async () => manualJobs,
+    }), /missing or ambiguous/);
+  void stagingStepOnly;
   assert.equal(caseIndexRecord(enrichCaseRecord(valid, {
     workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
     recordPath: recordPath(valid), source: manualAttested.source,
@@ -1303,6 +1504,24 @@ async function main() {
     process.stdout.write(caseIndexPath(record) + '\n');
     return;
   }
+  if (command === 'prepare-event') {
+    const input = process.argv[3] || process.env.GITHUB_EVENT_PATH;
+    const output = process.argv[4];
+    if (!input || !output) throw new Error('prepare-event EVENT OUT required');
+    const event = JSON.parse(fs.readFileSync(input, 'utf8'));
+    const resolved = await resolveCaseIngestSourceEvent(event, {
+      repository: process.env.GITHUB_REPOSITORY,
+      token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
+    });
+    fs.writeFileSync(output, JSON.stringify(resolved.event) + '\n', { flag: 'wx' });
+    process.stdout.write(JSON.stringify({
+      run_id: resolved.source.run_id, run_attempt: resolved.source.run_attempt,
+      source_conclusion: resolved.event.workflow_run.conclusion,
+      source_url: 'https://github.com/' + resolved.source.repository +
+        '/actions/runs/' + resolved.source.run_id,
+    }) + '\n');
+    return;
+  }
   if (command === 'attest') {
     const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     const event = JSON.parse(fs.readFileSync(process.argv[4] || process.env.GITHUB_EVENT_PATH, 'utf8'));
@@ -1341,7 +1560,7 @@ async function main() {
     process.stdout.write(JSON.stringify(result) + '\n');
     return;
   }
-  throw new Error('usage: node scripts/acceptance-case-ingest.mjs <self-test|validate FILE|attest FILE EVENT|record-path FILE|index RECORD OUTPUT|enrich IN OUT WORKFLOW_URL RECORD_PATH EVENT|apply FILE>');
+  throw new Error('usage: node scripts/acceptance-case-ingest.mjs <self-test|validate FILE|prepare-event EVENT OUT|attest FILE EVENT|record-path FILE|index RECORD OUTPUT|enrich IN OUT WORKFLOW_URL RECORD_PATH EVENT|apply FILE>');
 }
 
 if (import.meta.url === 'file://' + process.argv[1]) {

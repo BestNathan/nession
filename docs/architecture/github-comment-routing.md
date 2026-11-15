@@ -64,7 +64,24 @@ existing dual-native Case combiner withholds unpaired success. A separate
 native platform execution must supply the paired evidence.
 
 The routed `Acceptance / Cases` workflow carries `source_comment_id` and
-uses a comment-bound Run name. On the chosen platform **before target checkout**,
+uses a comment-bound Run title. GitHub's completed `workflow_run.name` can
+report the dynamic title rather than the static workflow `name`, but a
+comment Router's `GITHUB_TOKEN`-initiated `workflow_dispatch` also **does
+not emit a recursively triggered `workflow_run`**. A name glob alone
+cannot complete the Case evidence chain. The Cases workflow instead has a
+separate target-code-free, narrowly `actions: write` wake job after both
+platform artifact jobs. It explicitly dispatches `Acceptance / Case Ingest`
+on trusted Main with **only the source Run ID**. The ingester allows this path
+only for the GitHub Actions bot on Main, re-reads the completed GitHub
+Run/Attempt, canonical source workflow path, actor, comment-bound Issue/SC
+name, and successful original-comment authentication Job step **before**
+accepting any Case artifact or minting Store credentials. Comment
+`workflow_run` deliveries are excluded from the ordinary subscriber to
+avoid a second ingester. The bounded `Comment Case #*` subscription stays
+as a name compatibility contract; normal static/push and human-manual Cases
+still use the existing native `workflow_run` lane.
+
+On the chosen platform **before target checkout**,
 trusted Main independently reads the original GitHub human comment/Issue,
 rejects edits, untrusted actors, unsupported or stale targets, and recomputes
 the bound merge SHA/Case manifest. Ordinary direct Actions/UI/manual and

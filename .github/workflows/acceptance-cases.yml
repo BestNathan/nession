@@ -113,6 +113,22 @@ jobs:
           [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
           [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
           [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Staging Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
+      # Older merged Main Case source and workflow code may have different
+      # SHAs. GitHub owns this original dispatch input step before checkout;
+      # the trusted ingester verifies it just like manual Staging (#3316).
+      - name: "Authenticate manual Post-Merge Case ${{ inputs.issue_number }} ${{ inputs.criterion }} ${{ inputs.target_sha }}"
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'post-merge'
+        shell: bash
+        env:
+          DISPATCH_ISSUE: ${{ inputs.issue_number }}
+          DISPATCH_CRITERION: ${{ inputs.criterion }}
+          DISPATCH_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Manual Post-Merge Cases must dispatch from trusted main" >&2; exit 1; }
+          [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
+          [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Post-Merge Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
       - name: Resolve target identity
         id: target
         env:
@@ -600,6 +616,22 @@ jobs:
           [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
           [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
           [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Staging Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
+      # Older merged Main Case source and workflow code may have different
+      # SHAs. GitHub owns this original dispatch input step before checkout;
+      # the trusted ingester verifies it just like manual Staging (#3316).
+      - name: "Authenticate manual Post-Merge Case ${{ inputs.issue_number }} ${{ inputs.criterion }} ${{ inputs.target_sha }}"
+        if: github.event_name == 'workflow_dispatch' && inputs.stage == 'post-merge'
+        shell: bash
+        env:
+          DISPATCH_ISSUE: ${{ inputs.issue_number }}
+          DISPATCH_CRITERION: ${{ inputs.criterion }}
+          DISPATCH_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Manual Post-Merge Cases must dispatch from trusted main" >&2; exit 1; }
+          [[ "$DISPATCH_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue number" >&2; exit 1; }
+          [[ "$DISPATCH_CRITERION" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC identifier" >&2; exit 1; }
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Manual Post-Merge Cases require a lowercase exact 40-character target SHA" >&2; exit 1; }
       - name: Resolve target identity
         id: target
         env:
@@ -838,3 +870,33 @@ jobs:
           path: ${{ runner.temp }}/acceptance-case-results/
           if-no-files-found: error
           retention-days: 90
+
+  # A GITHUB_TOKEN workflow_dispatch does not emit another workflow_run.
+  # This is a separate trusted router job with no product checkout and no
+  # untrusted Case code; both platform jobs already uploaded their artifacts.
+  wake-comment-ingest:
+    needs: [execute, execute-macos]
+    if: >-
+      always() && !cancelled() &&
+      github.repository == 'BestNathan/nession' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.source_comment_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Explicitly wake source-authenticated Case Ingest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          # This is only a locator. Ingest re-reads the completed GitHub
+          # Run, path, actor, original comment identity and Case artifacts.
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/acceptance-case-ingest.yml/dispatches" \
+            -f ref=main -f source_run_id="$GITHUB_RUN_ID"
+          echo "Requested authenticated Case Ingest for source run ${GITHUB_RUN_ID}" >> "$GITHUB_STEP_SUMMARY"

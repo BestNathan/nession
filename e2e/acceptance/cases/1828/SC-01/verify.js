@@ -25,9 +25,19 @@ function validateSource(env, checkoutSha) {
     'real Actions source run ID required');
 }
 
-function validateTrustedPipeline(ingest, readback) {
-  assert.match(ingest, /workflows:\s*\["Acceptance \/ Cases"\]/,
-    'Case Ingest must only ingest its named source');
+function validateTrustedPipeline(ingest, readback, cases) {
+  assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases", "Comment Case #\*"\]\s*$/m,
+    'Case Ingest must subscribe only to the canonical source and bounded comment Run family');
+  assert.match(ingest, /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*source_run_id:/,
+    'comment Cases require a distinct authenticated source-run dispatch');
+  assert.match(ingest, /acceptance-case-ingest\.mjs prepare-event/,
+    'ingester must reconstruct source event from GitHub before using credentials');
+  assert.match(cases, /^  wake-comment-ingest:\s*$/m,
+    'a comment Case must explicitly wake its trusted ingester');
+  assert.match(cases, /needs: \[execute, execute-macos\]/,
+    'Case Ingest must be woken only after both platform artifact jobs settle');
+  assert.match(cases, /-f source_run_id="\$GITHUB_RUN_ID"/,
+    'comment wake may pass only its GitHub source Run locator');
   assert.match(ingest, /ref:\s*main\s*\n\s*path:\s*trusted/,
     'ingester tooling must use trusted main');
   assert.match(ingest, /actions\/create-github-app-token@/,
@@ -65,10 +75,14 @@ function test() {
   assert.throws(() => validateSource(env, 'c'.repeat(40)));
   const ingest = fs.readFileSync(path.join(root, '.github/workflows/acceptance-case-ingest.yml'), 'utf8');
   const readback = fs.readFileSync(path.join(root, '.github/workflows/store-receipt-readback.yml'), 'utf8');
-  validateTrustedPipeline(ingest, readback);
-  assert.throws(() => validateTrustedPipeline(ingest.replace('ref: main', 'ref: arbitrary'), readback));
-  assert.throws(() => validateTrustedPipeline(ingest.replace('run-store-cas-push.mjs', 'unsafe-push'), readback));
-  assert.throws(() => validateTrustedPipeline(ingest, readback.replace('contents: read', 'contents: write')));
+  const cases = fs.readFileSync(path.join(root, '.github/workflows/acceptance-cases.yml'), 'utf8');
+  validateTrustedPipeline(ingest, readback, cases);
+  assert.throws(() => validateTrustedPipeline(ingest.replace('Comment Case #*', 'Comment Case *'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest, readback, cases.replace('wake-comment-ingest:', 'disabled-wake:')));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Cases", "Comment Case #*"', '"Acceptance / Cases"'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('ref: main', 'ref: arbitrary'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('run-store-cas-push.mjs', 'unsafe-push'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest, readback.replace('contents: read', 'contents: write'), cases));
   console.log('Case source identity and read-only App/CAS/readback wiring negatives passed');
 }
 
@@ -79,7 +93,8 @@ async function verify() {
   validateSource(process.env, checkoutSha);
   const ingest = fs.readFileSync(path.join(root, '.github/workflows/acceptance-case-ingest.yml'), 'utf8');
   const readback = fs.readFileSync(path.join(root, '.github/workflows/store-receipt-readback.yml'), 'utf8');
-  validateTrustedPipeline(ingest, readback);
+  const cases = fs.readFileSync(path.join(root, '.github/workflows/acceptance-cases.yml'), 'utf8');
+  validateTrustedPipeline(ingest, readback, cases);
   const runtime = runtimeFromEnv();
   assert.equal(runtime.target_sha, checkoutSha, 'runtime must be exact main SHA');
   assert.equal(runtime.profile, 'full-stack-local', 'real isolated runtime required');
