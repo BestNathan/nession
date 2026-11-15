@@ -238,11 +238,15 @@ export async function resolveCaseIngestSourceEvent(event, {
     return { event, source };
   }
   if (event?.repository?.full_name !== repository ||
+      event?.action !== 'nession-comment-case-ingest' ||
+      event?.sender?.login !== 'github-actions[bot]' ||
       actor !== 'github-actions[bot]' || ref !== 'refs/heads/main' ||
-      !event?.inputs || Object.keys(event.inputs).some(key => key !== 'source_run_id')) {
+      !event?.client_payload || Array.isArray(event.client_payload) ||
+      Object.keys(event.client_payload).length !== 1 ||
+      !Object.hasOwn(event.client_payload, 'source_run_id')) {
     throw new Error('Case Ingest dispatch requires the exact bot-owned main source-run locator');
   }
-  const runId = positiveInt(event.inputs.source_run_id, 'source_run_id');
+  const runId = positiveInt(event.client_payload.source_run_id, 'source_run_id');
   let run = null;
   for (let attempt = 0; attempt < 25; attempt += 1) {
     run = await request('/repos/' + repository + '/actions/runs/' + runId, { token });
@@ -1008,7 +1012,8 @@ async function selfTest() {
   // Explicit GITHUB_TOKEN comment wakes must re-fetch GitHub's Run, not
   // reconstruct evidence from a caller-selected display name or artifact.
   const wakeEvent = { repository: { full_name: 'BestNathan/nession' },
-    inputs: { source_run_id: '100' } };
+    action: 'nession-comment-case-ingest', sender: { login: 'github-actions[bot]' },
+    client_payload: { source_run_id: '100' } };
   const wakeRun = { ...commentEvent.workflow_run, id: 100,
     name: 'Acceptance / Cases', display_title: commentEvent.workflow_run.name,
     actor: { login: 'github-actions[bot]' } };
@@ -1030,7 +1035,13 @@ async function selfTest() {
       { ...wakeOptions, ...denied }), /Case Ingest|Case source|completed Acceptance|workflow definition|source_run_id|not an authenticated|expected a completed/);
   }
   await assert.rejects(() => resolveCaseIngestSourceEvent({
-    ...wakeEvent, inputs: { source_run_id: '100', other: 'payload' },
+    ...wakeEvent, client_payload: { source_run_id: '100', other: 'payload' },
+  }, wakeOptions), /Case Ingest dispatch/);
+  await assert.rejects(() => resolveCaseIngestSourceEvent({
+    ...wakeEvent, sender: { login: 'attacker' },
+  }, wakeOptions), /Case Ingest dispatch/);
+  await assert.rejects(() => resolveCaseIngestSourceEvent({
+    ...wakeEvent, action: 'unrelated',
   }, wakeOptions), /Case Ingest dispatch/);
   // Exercise the actual attest path without credentials: a fetched source commit
   // must contain the exact Case tree claimed by the immutable record.
