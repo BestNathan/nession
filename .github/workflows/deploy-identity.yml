@@ -5,11 +5,12 @@ name: Deploy / Identity
 # the source SHA currently deployed on an isolated staging lane matches the
 # trusted build provenance and the observed ready workloads.
 on:
-  # The source is a completed, GitHub-owned Staging release, not a PR artifact.
+  # The source is a completed, GitHub-owned Staging ACR deployment,
+  # not the earlier GHCR-only build or a PR artifact.
   # The protected Main job independently checks original Run/Job/Step identity
   # before any access to the read-only Kubernetes observation credentials.
   workflow_run:
-    workflows: ["Release / Staging Artifacts", "Deploy / Staging ACR"]
+    workflows: ["Deploy / Staging ACR"]
     branches: [staging]
     types: [completed]
   workflow_dispatch:
@@ -39,21 +40,10 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         (
           github.event_name == 'workflow_run' &&
+          github.event.workflow_run.name == 'Deploy / Staging ACR' &&
           (
-            (
-              github.event.workflow_run.name == 'Release / Staging Artifacts' &&
-              (
-                github.event.workflow_run.path == '.github/workflows/release-staging.yml' ||
-                github.event.workflow_run.path == '.github/workflows/release-staging.yml@refs/heads/staging'
-              )
-            ) ||
-            (
-              github.event.workflow_run.name == 'Deploy / Staging ACR' &&
-              (
-                github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml' ||
-                github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml@refs/heads/staging'
-              )
-            )
+            github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml' ||
+            github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml@refs/heads/staging'
           ) &&
           (
             github.event.workflow_run.event == 'push' ||
