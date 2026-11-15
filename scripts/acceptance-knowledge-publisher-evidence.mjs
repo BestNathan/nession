@@ -211,10 +211,12 @@ export async function collectKnowledgePublication({repo,targetSha,stage,issue,ge
 
 export function selfTestKnowledgePublication(){
   const base='a'.repeat(40),main='b'.repeat(40),head='c'.repeat(40),
-    published='d'.repeat(40),digest='e'.repeat(64);
+    published='d'.repeat(40),digest='e'.repeat(64),target='f'.repeat(40);
   const p=KNOWLEDGE_WITNESS;
   const original={
-    targetSha:IMPLEMENTED,
+    // Exercise ancestry checks with a non-identical accepted descendant.
+    // The implementing SHA itself is an unconditional valid identity comparison.
+    targetSha:target,
     comment:{id:p.comment,user:{login:'BestNathan'},author_association:'OWNER',
       issue_url:'https://api.github.com/repos/'+REPO+'/issues/3156',
       created_at:'2026-11-10T10:00:00Z',updated_at:'2026-11-10T10:00:00Z',
@@ -238,7 +240,7 @@ export function selfTestKnowledgePublication(){
     proposalCommit:{sha:published,parents:[{sha:base}]},
     implementedToTarget:{base_commit:{sha:IMPLEMENTED},merge_base_commit:{sha:IMPLEMENTED},status:'identical'},
     implementedToPublisher:{base_commit:{sha:IMPLEMENTED},merge_base_commit:{sha:IMPLEMENTED},status:'ahead'},
-    targetToPublisher:{base_commit:{sha:IMPLEMENTED},merge_base_commit:{sha:IMPLEMENTED},status:'ahead'},
+    targetToPublisher:{base_commit:{sha:target},merge_base_commit:{sha:target},status:'ahead'},
     publisherToTarget:null,
   };
   const steps=names=>names.map(name=>({name,status:'completed',conclusion:'success'}));
