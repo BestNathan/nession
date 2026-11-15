@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "de8efb083f5a455ecbf248db3e1c178860f6cbac7e6a9dde901376a9ef5fcd35",
+  "run_id": 43706696283,
+  "run_attempt": 1,
+  "issue": 3581,
+  "criterion": "SC-03",
+  "criterion_text": ": On an actual affected PR/run attempt, the canonical updater completes or reports a precise bounded provenance denial, with original Run/Job/Step and Issue projection linked.",
+  "stage": "post-merge",
+  "target_sha": "7e3c8a77b0db26c8d810829e20749a9f1877cf7a",
+  "contract_sha256": "782377b225b65051ce57ccb31e704e6e0162d2b5b35de1c58aa8ddae5a4d5fd9",
+  "case_revision": "7e3c8a77b0db26c8d810829e20749a9f1877cf7a",
+  "case_tree_sha": "cd6bebf449a8012f9e6aeb34890b695ce4176419",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T11:02:15.508Z",
+  "finished_at": "2026-11-15T11:02:15.751Z",
+  "duration_ms": 243,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "for 'pr' stage requires immutable Store provenance with verified_source of kind 'pr-smoke', re-verifies GitHub identities, checks Issue labels and state, uses historicalCaseMayProject to prevent replay; file: .github/workflows/acceptance-case-ingest.yml:83-90 - Downloads exact Run/Attempt PR Case Smoke artifact with name 'acceptance-case-smoke-${run_id}-${run_attempt}'; file: scripts/run-record-index-contract.mjs:64-82 - PR Case index requires source_kind:'pr-smoke', event:'pull_request', and complete pr_binding with pr_number, case_job_id, artifact_id, quality_run_id, e2e_run_id; file: scripts/run-store-inventory.mjs:314 - Writer inventory validates acceptance-case-ingest.yml subscribes to both 'Acceptance / Cases' and 'Acceptance / Case Smoke'; file: e2e/acceptance/cases/1828/SC-01/verify.js:29-30 - Trust verifier independently validates Case Ingest subscribes to authenticated Cases and PR Smoke families with negative tests; summary: Complete implementation of PR Case Smoke → immutable Case Store → Issue projection for only declared when:pr,method:case SCs; no Agent substitution or manual Pass possible |\\n\" +\n  '| SC-02 | Pass | run 43705879438; ref a694d4839a5454cf416541c3508d99e5c7c6437f; source agent-qwen; file: scripts/acceptance-case-ingest.mjs:1758-1766 - Negative tests for wrong workflow path, wrong event, failure conclusion; file: scripts/acceptance-case-ingest.mjs:1821-1842 - Comprehensive negative tests: stale head SHA, wrong issue, wrong base, unmerged closure, run after merge, skipped execution, failed source job, wrong job attempt, expired artifact, wrong artifact attempt, required E2E pending, required CI wrong SHA; file: scripts/acceptance-case-ingest.mjs:1843-1846 - Pending result rejection test; file: scripts/acceptance-case-ingest.mjs:1861-1863 - Replay rejection test: second applyCaseRecord returns projected:false; file: scripts/acceptance-case-ingest.mjs:1864-1867 - Method:agent rejection test: Issue body with method:agent rejects projection; file: scripts/acceptance-case-ingest.mjs:1060-1700 - Extensive tests for existing staging/main/deployed projection remain unaffected; file: scripts/run-record-index-contract.mjs:138-147 - Negative tests for PR Case index: untrusted source_kind, wrong event, wrong issue, missing binding, wrong head_sha; file: e2e/acceptance/cases/1828/SC-01/verify.js:82-89 - Trust verifier negative tests for pipeline validation: untrusted workflow source, manual dispatch, unscoped wake, unsafe CAS; file: gates/checks/acceptance-case-ingest-selftest.sh:7 - Gate runs both self-tests: node scripts/acceptance-case-ingest.mjs self-test && node e2e/acceptance/cases/1828/SC-01/verify.js --self-test; summary: Comprehensive negative self-tests fail closed for all required scenarios; existing Staging/Main/Deployed Case projection remains unaffected |\\n' +\n  '| SC-03 | Pending | run 43706499881; ref f3214a7e2983e530480d755e4a22d5c3e7cb3338; source agent-qwen; workflow: PR #3629 merged at f3214a7e2, implements PR Case Smoke ingestion mechanism; workflow: Acceptance / Case Smoke Run #43705881350 at PR head a694d4839 completed success; workflow: Acceptance / Case Ingest Run #43706511038 at target SHA f3214a7e2 completed success; other: No verified_case_receipts, acceptance_batch_receipts, or related_issue_acceptance_receipts present in ci_evidence; other: No evidence of Issue #3424 SC-01/SC-02 projection or status reconciliation; summary: PR implements projection mechanism but no evidence that #3424 PR-head proof was actually projected to Issue SC-01/SC-02 or that Issue status was reconciled |\\n' +\n  '\\n' +\n  '## E2E Verification\\n' +\n  '### New\\n' +\n  '- none: reuse authenticated SC-01/SC-02 Chromium Case source receipts, source-bound CI/Store provenance is the defect\\n' +\n  '### Regression\\n' +\n  '- none: ensure unchanged staging/main/deployed Case ingestion via deterministic self-tests\\n' +\n  '\\n' +\n  '## E2E Report\\n' +\n  '| ID | Type | Result | Evidence |\\n' +\n  '|---|---|---|\\n' +\n  '\\n' +\n  '### Knowledge Impact\\n' +\n  '- Decision: Read\\n' +\n  '- Related knowledge: #1501 Case source binding; #3390 /case routing; #3479 CI evidence and Issue lifecycle\\n' +\n  '- Reason: Changes Release-critical Case attestation/ingestion trust boundary\\n' +\n  '- Owner and timing: Acceptance workflow owner before implementation\\n' +\n  '- Evidence: Run/Job/Artifact IDs above and '... 231 more characters",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the authenticated affected-PR runtime receipt was not established"
+        }
+      ],
+      "duration_ms": 225,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43706696283,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "7e3c8a77b0db26c8d810829e20749a9f1877cf7a",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43706696283",
+    "record_path": "runs/2026-11-15/43706696283-1/3581/SC-03.json",
+    "source_result_sha256": "b57b58620d44fe9378974be130f91abc8a21986b44a3de856d99494befc510f3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43706696283-1",
+    "sha256": "b57b58620d44fe9378974be130f91abc8a21986b44a3de856d99494befc510f3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43706696283",
+    "durability": "time-limited; object archival not configured"
+  }
+}
