@@ -3,7 +3,7 @@
 
 use super::{
     current_timestamp, info, json, AgentInfo, AgentRegisterPayload, AgentStatus, ConnectionHandler,
-    HandlerAction, Message, ProtocolMessage,
+    HandlerAction, ProtocolMessage, WsFrame,
 };
 
 impl ConnectionHandler {
@@ -19,7 +19,7 @@ impl ConnectionHandler {
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.register",
                     "id": msg.id,
@@ -48,7 +48,7 @@ impl ConnectionHandler {
                 "Agent {} rejected: {} is already registered as '{bound}'",
                 payload.agent_id, self.connection_generation
             );
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.register",
                     "id": msg.id,
@@ -85,7 +85,7 @@ impl ConnectionHandler {
         // the answer it gets says why.
         let Some(protocol_manifest) = payload.protocol_manifest.clone() else {
             info!("Agent {} rejected: no protocol manifest", payload.agent_id);
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.register",
                     "id": msg.id,
@@ -127,7 +127,7 @@ impl ConnectionHandler {
             );
             // Deliberately says nothing about the newer connection: a stale
             // peer gets the fact that it lost, not the identity of the winner.
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.register",
                     "id": msg.id,
@@ -225,7 +225,7 @@ impl ConnectionHandler {
 
         info!("Agent {} registered successfully", payload.agent_id);
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(WsFrame::Text(
             json!({
                 "msg_type": "server.agent.register",
                 "id": msg.id,

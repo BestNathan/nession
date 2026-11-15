@@ -2,8 +2,8 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    current_timestamp, json, AgentStatus, ConnectionHandler, HandlerAction, Message,
-    ProtocolMessage,
+    current_timestamp, json, AgentStatus, ConnectionHandler, HandlerAction, ProtocolMessage,
+    WsFrame,
 };
 
 impl ConnectionHandler {
@@ -19,7 +19,7 @@ impl ConnectionHandler {
             .count();
         let sessions = self.session_registry.list().await.len();
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(WsFrame::Text(
             json!({
                 "msg_type": "server.info",
                 "id": msg.id,

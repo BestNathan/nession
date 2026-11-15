@@ -2,8 +2,8 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    current_timestamp, info, json, AgentStatus, Arc, ConnectionHandler, HandlerAction, Message,
-    ProtocolMessage,
+    current_timestamp, info, json, AgentStatus, Arc, ConnectionHandler, HandlerAction,
+    ProtocolMessage, WsFrame,
 };
 use crate::registry::agent::AgentDeleteClaim;
 
@@ -15,7 +15,7 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.delete",
                     "id": msg.id,
@@ -36,7 +36,7 @@ impl ConnectionHandler {
             .unwrap_or("");
 
         if agent_id.is_empty() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.delete",
                     "id": msg.id,
@@ -61,7 +61,7 @@ impl ConnectionHandler {
         let _deletion = match self.agent_registry.begin_agent_deletion(agent_id).await {
             AgentDeleteClaim::Claimed(guard) => guard,
             AgentDeleteClaim::NotFound => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": "server.agent.delete",
                         "id": msg.id,
@@ -75,7 +75,7 @@ impl ConnectionHandler {
                 ))));
             }
             AgentDeleteClaim::NotOffline(status) => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": "server.agent.delete",
                         "id": msg.id,
@@ -109,7 +109,7 @@ impl ConnectionHandler {
             .await
         {
             tracing::error!("Failed to delete sessions for agent {}: {:?}", agent_id, e);
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.delete",
                     "id": msg.id,
@@ -125,7 +125,7 @@ impl ConnectionHandler {
 
         if let Err(e) = self.db.delete_agent(agent_id).await {
             tracing::error!("Failed to delete agent {}: {:?}", agent_id, e);
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.agent.delete",
                     "id": msg.id,
@@ -163,7 +163,7 @@ impl ConnectionHandler {
             .await;
         self.broadcast_sessions().await;
 
-        Ok(HandlerAction::Reply(Some(Message::Text(
+        Ok(HandlerAction::Reply(Some(WsFrame::Text(
             json!({
                 "msg_type": "server.agent.delete",
                 "id": msg.id,

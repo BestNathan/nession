@@ -3,7 +3,7 @@
 
 use super::{
     current_timestamp, info, json, warn, AgentStatus, ConnectionHandler, EnvSnapshot,
-    HandlerAction, Message, ProtocolMessage,
+    HandlerAction, ProtocolMessage, WsFrame,
 };
 
 impl ConnectionHandler {
@@ -17,7 +17,7 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         if !self.authenticated_client {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.session.attach",
                     "id": msg.id,
@@ -46,7 +46,7 @@ impl ConnectionHandler {
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": "server.session.attach",
                         "id": msg.id,
@@ -64,7 +64,7 @@ impl ConnectionHandler {
         // Look up the session in the registry
         let session = self.session_registry.get(session_id).await;
         if session.is_none() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.session.attach",
                     "id": msg.id,
@@ -83,7 +83,7 @@ impl ConnectionHandler {
         let agent = match agent {
             Some(a) if a.status == AgentStatus::Online => a,
             Some(_) => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": "server.session.attach",
                         "id": msg.id,
@@ -97,7 +97,7 @@ impl ConnectionHandler {
                 ))));
             }
             None => {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": "server.session.attach",
                         "id": msg.id,
@@ -132,7 +132,7 @@ impl ConnectionHandler {
             .map(nession_common::SecretString::as_str)
             .filter(|token| !token.is_empty())
         else {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.session.attach",
                     "id": msg.id,
@@ -196,7 +196,7 @@ impl ConnectionHandler {
             // Send attach response to browser BEFORE entering relay mode,
             // so the browser's requestAttach() resolves instead of timing out.
             if let Some(ref sender) = self.client_sender {
-                let response = Message::Text(
+                let response = WsFrame::Text(
                     serde_json::json!({
                         "msg_type": "server.session.attach",
                         "id": msg.id,
@@ -242,7 +242,7 @@ impl ConnectionHandler {
             // P2P mode: return the full candidate list (with probe status) plus
             // the legacy single `agent_address` for backward compatibility. The
             // client tests latency across `addresses` and falls back per-address.
-            Ok(HandlerAction::Reply(Some(Message::Text(
+            Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": "server.session.attach",
                     "id": msg.id,
