@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "426febc1f2602fa052ea8eb43177964854ca9cffa4b0b57768c7074327cfddcd",
+  "run_id": 43692885296,
+  "run_attempt": 1,
+  "issue": 3582,
+  "criterion": "SC-04",
+  "criterion_text": "With injected mount/unmount failure or an Agent restart during prepare/cleanup, recovery consults durable mount identity/generation plus actual mountinfo and live execution records; it never reports an unverified mount Ready, releases a Lower cache pin prematurely, deletes a live or uncertain upper, adopts a foreign mount, or silently falls back to Native.",
+  "stage": "staging",
+  "target_sha": "0676864406c0aa52b9d5ccf535088a1b7f11c7e9",
+  "contract_sha256": "c86ed68c23f3f70f0b37b83dbfacf375f8658e7ff80d704c6e6bc66a1880421e",
+  "case_revision": "0676864406c0aa52b9d5ccf535088a1b7f11c7e9",
+  "case_tree_sha": "e35142d167422d3352ff8eaecf03e5731df690d3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T08:08:42.652Z",
+  "finished_at": "2026-11-15T08:09:12.739Z",
+  "duration_ms": 30087,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Injected mount/unmount failures and a crash during prepare recover only from verified durable identity and mountinfo, never delete live or uncertain bytes, and never fall back",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0676864406c0aa52b9d5ccf535088a1b7f11c7e9 on Linux kernel 7.0.0-1017-azure: an injected fuse-overlayfs mount failure left a Failed state with the lower released and no mount; a helper that mounted nothing was never Ready; an injected unmount failure retained the live mount, the lower pin and the durable upper and a bounded retry released them; a crashed owner process leaving a live mount was re-adopted only from the verified durable identity and a mount that disappeared was reported unavailable rather than served"
+        }
+      ],
+      "duration_ms": 24151,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43692885296,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "555df781f8ad8ff29b951d7308ab9ad287f672e1",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "0676864406c0aa52b9d5ccf535088a1b7f11c7e9",
+        "stage": "staging",
+        "issue": 3582,
+        "criterion": "SC-04",
+        "job_id": 132747029684,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43692885296",
+    "record_path": "runs/2026-11-15/43692885296-1/3582/SC-04.json",
+    "source_result_sha256": "a56e7859e4e6a7f63b32199e4124c451ea4897e27219108c77bb9341edde94a1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43692885296-1",
+    "sha256": "a56e7859e4e6a7f63b32199e4124c451ea4897e27219108c77bb9341edde94a1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43692885296",
+    "durability": "time-limited; object archival not configured"
+  }
+}
