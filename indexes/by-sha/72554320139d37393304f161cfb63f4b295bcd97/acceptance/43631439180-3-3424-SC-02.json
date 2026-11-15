@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "mode": "acceptance",
+  "source": {
+    "repository": "BestNathan/nession",
+    "run_id": 43631439180,
+    "run_attempt": 3,
+    "event": "pull_request",
+    "head_sha": "72554320139d37393304f161cfb63f4b295bcd97",
+    "head_branch": "fix/3424-metadata-incarnation",
+    "workflow_id": 378248506,
+    "source_kind": "pr-smoke",
+    "pr_binding": {
+      "pr_number": 3554,
+      "issue": 3424,
+      "head_sha": "72554320139d37393304f161cfb63f4b295bcd97",
+      "case_job_id": 132795430321,
+      "artifact_id": 14158963297,
+      "quality_run_id": 43631439135,
+      "e2e_run_id": 43631439152
+    }
+  },
+  "record": "runs/2026-11-15/43631439180-3/3424/SC-02.json",
+  "execution_id": "1832a08ef5f93d01681da8193fe1232c2d201c33c434ed6b57909c6f96c4ce7b",
+  "target_sha": "72554320139d37393304f161cfb63f4b295bcd97",
+  "issue": 3424,
+  "criterion": "SC-02",
+  "stage": "pr",
+  "case_tree_sha": "1c3b996249b946f873f8f0d88e9716fcfb098df0",
+  "contract_sha256": "168267a24c5df9251a755822f03fa84da4a5187dc38243746097f02eed1f1245"
+}

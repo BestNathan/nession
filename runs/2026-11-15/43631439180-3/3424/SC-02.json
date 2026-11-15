@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1832a08ef5f93d01681da8193fe1232c2d201c33c434ed6b57909c6f96c4ce7b",
+  "run_id": 43631439180,
+  "run_attempt": 3,
+  "issue": 3424,
+  "criterion": "SC-02",
+  "criterion_text": ": A metadata read started for the old incarnation and resolved after the new incarnation is observed cannot restore old metadata; a fresh read for the new incarnation succeeds, while ordinary list refreshes for an unchanged incarnation do not discard valid cached metadata or an active edit draft.",
+  "stage": "pr",
+  "target_sha": "72554320139d37393304f161cfb63f4b295bcd97",
+  "contract_sha256": "168267a24c5df9251a755822f03fa84da4a5187dc38243746097f02eed1f1245",
+  "case_revision": "72554320139d37393304f161cfb63f4b295bcd97",
+  "case_tree_sha": "1c3b996249b946f873f8f0d88e9716fcfb098df0",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T11:27:26.402Z",
+  "finished_at": "2026-11-15T11:27:30.476Z",
+  "duration_ms": 4074,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=15"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 15
+      },
+      "duration_ms": 4028,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43631439180,
+      "run_attempt": 3,
+      "event": "pull_request",
+      "head_sha": "72554320139d37393304f161cfb63f4b295bcd97",
+      "head_branch": "fix/3424-metadata-incarnation",
+      "workflow_id": 378248506,
+      "source_kind": "pr-smoke",
+      "pr_binding": {
+        "pr_number": 3554,
+        "issue": 3424,
+        "head_sha": "72554320139d37393304f161cfb63f4b295bcd97",
+        "case_job_id": 132795430321,
+        "artifact_id": 14158963297,
+        "quality_run_id": 43631439135,
+        "e2e_run_id": 43631439152
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43631439180",
+    "record_path": "runs/2026-11-15/43631439180-3/3424/SC-02.json",
+    "source_result_sha256": "1713507a2c9793f46b1ac2f87eeb292141fe689fa23f3ebdd0415a4da0294d7f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43631439180-3",
+    "sha256": "1713507a2c9793f46b1ac2f87eeb292141fe689fa23f3ebdd0415a4da0294d7f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43631439180",
+    "durability": "time-limited; object archival not configured"
+  }
+}
