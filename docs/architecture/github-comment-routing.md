@@ -70,8 +70,10 @@ comment Router's `GITHUB_TOKEN`-initiated `workflow_dispatch` also **does
 not emit a recursively triggered `workflow_run`**. A name glob alone
 cannot complete the Case evidence chain. The Cases workflow instead has a
 separate target-code-free, narrowly `actions: write` wake job after both
-platform artifact jobs. It explicitly dispatches `Acceptance / Case Ingest`
-on trusted Main with **only the source Run ID**. The ingester allows this path
+platform artifact jobs. It sends a GitHub `repository_dispatch` event of exact type
+`nession-comment-case-ingest` (runs only the default-branch workflow) with
+**only the source Run ID**, rather than permitting an arbitrary-ref
+`workflow_dispatch` on a privileged Store writer. The ingester allows this path
 only for the GitHub Actions bot on Main, re-reads the completed GitHub
 Run/Attempt, canonical source workflow path, actor, comment-bound Issue/SC
 name, and successful original-comment authentication Job step **before**
