@@ -156,7 +156,7 @@ reject(x=>x.jobs.firstReview.jobs[1].conclusion='success');
 reject(x=>x.jobs.repairWorker.jobs[1].run_id=7);
 reject(x=>x.jobs.finalReview.jobs[1].conclusion='failure');
 reject(x=>x.failedArtifacts.artifacts.push(
-  artifact('reviewer-slice-43681851455-1',13,R.malformedReview[0]));
+  artifact('reviewer-slice-43681851455-1',13,R.malformedReview[0])));
 reject(x=>x.finalArtifacts.artifacts.pop());
 reject(x=>x.finalArtifacts.artifacts[2].digest='forged');
 reject(x=>x.finalArtifacts.artifacts[4].name='agent-result-forged');
