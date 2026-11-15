@@ -60,6 +60,7 @@ test('changed stable official release, invalid previous data and unverifiable co
     {...compare,base_commit:{sha:newSha}},
     {...compare,head_commit:{sha:oldSha}},
     {...compare,total_commits:100},
+    {...compare,total_commits:4},
     {...compare,ahead_by:100},
     {...compare,files:Array.from({length:300},(_,i)=>({filename:'docs/'+i+'.md'}))},
     {...compare,files:null},
