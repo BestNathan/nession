@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7e120d671e5fe5f0c8ca33409d9804d5dc1ea4d1b01272f04c447a6c167068e5",
+  "run_id": 43708503662,
+  "run_attempt": 1,
+  "issue": 3581,
+  "criterion": "SC-01",
+  "criterion_text": ": A deterministic large-response fixture reproduces the old buffer failure and the repaired trusted evidence collector processes a bounded authenticated source comparison without `ENOBUFS`.",
+  "stage": "post-merge",
+  "target_sha": "469c5a04d80cfaeeb7a0a19c513fe8a256885d3c",
+  "contract_sha256": "782377b225b65051ce57ccb31e704e6e0162d2b5b35de1c58aa8ddae5a4d5fd9",
+  "case_revision": "469c5a04d80cfaeeb7a0a19c513fe8a256885d3c",
+  "case_tree_sha": "3d02c0e0964c3988c598657e941080875973e3cf",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T11:24:16.298Z",
+  "finished_at": "2026-11-15T11:24:16.635Z",
+  "duration_ms": 337,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The GitHub evidence collector projects bounded provenance fields under an explicit child-buffer cap and processes the large-response fixture without ENOBUFS",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 469c5a04d80cfaeeb7a0a19c513fe8a256885d3c: a simulated large compare/PR response fails the historical unbounded gh call; the repaired collector requests only projected fields, caps the child buffer at 8388608 bytes, and yields the authenticated comparison/provenance without ENOBUFS"
+        }
+      ],
+      "duration_ms": 284,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43708503662,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "469c5a04d80cfaeeb7a0a19c513fe8a256885d3c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43708503662",
+    "record_path": "runs/2026-11-15/43708503662-1/3581/SC-01.json",
+    "source_result_sha256": "7303ccb3957ace2bc00058615b62aa21f5753b05c880a2cec52b9d6113d7a688"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43708503662-1",
+    "sha256": "7303ccb3957ace2bc00058615b62aa21f5753b05c880a2cec52b9d6113d7a688",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43708503662",
+    "durability": "time-limited; object archival not configured"
+  }
+}
