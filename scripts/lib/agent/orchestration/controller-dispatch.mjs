@@ -44,8 +44,9 @@ export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 act
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
 export const CONTROLLED_REPAIR_RETRY_COMMENT='/nession dispatch-repair issue=1997 action=ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
-const REVIEW_DISPATCH_PREFIX='/nession dispatch-review issue=1997 action=';
-const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=1997 action=([a-f0-9]{64})$/;
+// Owner may recover a missed Reviewer wake for any existing, authentic Store
+// action. The command never chooses a source/ref: signed Store Outbox decides.
+export const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=([1-9][0-9]*) action=([a-f0-9]{64})$/;
 // One source-scoped owner-authenticated Qwen v2 fixture dispatch; this
 // command must still match the genuinely pending Store Outbox Action ID.
 export const QWEN_V2_DISPATCH_RE=/^\/nession qwen-v2-dispatch issue=3001 action=([a-f0-9]{64})$/;
@@ -74,7 +75,15 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&issue===3001&&
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId;
-  const permitted=publisherWake||(commanded
+  const reviewCommand=commanded?
+    REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const ownerReview=commanded&&event?.action==='created'&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.issue?.number===issue&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&reviewCommand?.[1]===String(issue)&&
+    reviewCommand?.[2]===actionId;
+  const permitted=publisherWake||ownerReview||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -86,8 +95,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
         (event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT&&actionId===REPAIR_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
-        (event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
-        (REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId))&&
+        (event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT&&actionId===REPAIR_RETRY_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997))
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -260,7 +268,10 @@ async function main(){
   const commanded=env.GITHUB_EVENT_NAME==='issue_comment';
   const qwenV2CommentAction=commanded?
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
-  const issue=commanded?(qwenV2CommentAction?3001:1997):
+  const ownerReviewCommand=commanded?
+    REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const issue=commanded?(qwenV2CommentAction?3001:
+    ownerReviewCommand?Number(ownerReviewCommand[1]):1997):
     Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
@@ -277,7 +288,7 @@ async function main(){
   const dispatchingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT;
   const recoveringRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT;
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
-  const newReviewAction=commanded?REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
+  const newReviewAction=ownerReviewCommand?.[2]??null;
   const actionId=commanded?(qwenV2CommentAction??newReviewAction??
     (recoveringRepair||retryingRepair?
     REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
