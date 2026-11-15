@@ -772,18 +772,14 @@ impl OverlayMountManager {
             .join(format!("{}.json", workspace.short_id()))
     }
 
+    /// Read-only validation of an authorized workspace path and its durable
+    /// storage pair. It never writes a probe file or xattr, so it is safe to
+    /// call while a physical Overlay is mounted.
     pub(super) fn validate_workspace(&self, workspace: &OverlayWorkspaceKey) -> Result<()> {
-        self.validate_workspace_storage(workspace).map(|_| ())
+        self.validate_workspace_path(workspace).map(|_| ())
     }
 
-    /// Validate the authorized path and the durable storage pair, then probe
-    /// the actual filesystem capability.
-    ///
-    /// The capability probe writes and removes a probe file and an xattr, so
-    /// it is safe only while this process holds the durable owner lock. Every
-    /// acquire therefore performs the read-only path validation first and the
-    /// capability probe inside [`Self::mount_entry`] after taking the lock.
-    fn validate_workspace_storage(
+    fn validate_workspace_path(
         &self,
         workspace: &OverlayWorkspaceKey,
     ) -> Result<storage::OverlayStoragePaths> {
@@ -821,7 +817,21 @@ impl OverlayMountManager {
                 canonical.display()
             );
         }
-        let storage = storage::verify(&canonical)?;
+        storage::verify(&canonical)
+    }
+
+    /// Validate the authorized path and probe the actual filesystem
+    /// capability.
+    ///
+    /// The capability probe writes and removes a probe file and an xattr, so
+    /// it is safe only while this process holds the durable owner lock. It is
+    /// therefore called from [`Self::mount_entry`] after the lock is taken;
+    /// adoption and read-only lookups never probe.
+    fn validate_workspace_storage(
+        &self,
+        workspace: &OverlayWorkspaceKey,
+    ) -> Result<storage::OverlayStoragePaths> {
+        let storage = self.validate_workspace_path(workspace)?;
         let facts = self
             .inner
             .backend
