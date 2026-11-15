@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
+  REVIEWER_PREMODEL_RECOVERY_COMMENT,
   assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
@@ -232,6 +233,21 @@ for(const change of [
   {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
   {event:{...ownerReviewEvent,action:'edited'}},
 ])assert.throws(()=>assertDispatchAuthority({...ownerReview,...change}),
+  /authenticated owner\/main/);
+
+const premodelRecovery={...ownerReview,
+  event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:REVIEWER_PREMODEL_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(premodelRecovery).issue,3433);
+for(const bad of [
+  {actionId:'f'.repeat(64)},
+  {issue:1997},
+  {event:{...premodelRecovery.event,comment:{...premodelRecovery.event.comment,
+    body:REVIEWER_PREMODEL_RECOVERY_COMMENT+' '}}},
+  {event:{...premodelRecovery.event,comment:{...premodelRecovery.event.comment,
+    user:{login:'external'}}}},
+  {event:{...premodelRecovery.event,issue:{number:3434,state:'open'}}},
+])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
   /authenticated owner\/main/);
 
 const reviewRecover={...commentValid,
