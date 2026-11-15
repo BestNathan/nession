@@ -391,8 +391,13 @@ export async function attestManualStagingSource(record, source, {
 } = {}) {
   const item = validateCaseRecord(record);
   if (source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
-      item.deployment || (item.stage !== 'staging' &&
-        !(item.stage === 'post-merge' && item.target_sha !== source.head_sha))) return source;
+      item.deployment) return source;
+  const dualSha = item.stage === 'staging' ||
+    (item.stage === 'post-merge' && item.target_sha !== source.head_sha);
+  if (!dualSha && !source.comment_case) return source;
+  if (source.comment_case && !['staging', 'post-merge'].includes(item.stage)) {
+    throw new Error('comment Case must target an eligible merged stage');
+  }
   const manualPrefix = item.stage === 'staging'
     ? 'Authenticate manual Staging Case ' : 'Authenticate manual Post-Merge Case ';
   const manualPattern = item.stage === 'staging' ? MANUAL_STAGING_STEP : MANUAL_POST_MERGE_STEP;
@@ -404,6 +409,7 @@ export async function attestManualStagingSource(record, source, {
     throw new Error('manual Case GitHub source job readback is unavailable or unbounded');
   }
   const matches = [];
+  let authenticatedCommentJobs = 0;
   for (const job of jobs.jobs) {
     if (!['execute', 'execute-macos'].includes(job.name) || job.conclusion === 'skipped') continue;
     if (job.run_id !== source.run_id || job.run_attempt !== source.run_attempt ||
@@ -422,7 +428,9 @@ export async function attestManualStagingSource(record, source, {
           commentSteps[0].step.conclusion !== 'success') {
         throw new Error('original human comment was not authenticated before target checkout');
       }
+      authenticatedCommentJobs += 1;
     }
+    if (!dualSha) continue;
     for (const [index, step] of job.steps.entries()) {
       if (!String(step.name ?? '').startsWith(manualPrefix)) continue;
       const fields = manualPattern.exec(step.name);
@@ -437,6 +445,10 @@ export async function attestManualStagingSource(record, source, {
       });
     }
   }
+  if (source.comment_case && authenticatedCommentJobs === 0) {
+    throw new Error('no authenticated original human comment Case source job');
+  }
+  if (!dualSha) return source;
   if (matches.length !== 1) throw new Error('missing or ambiguous authenticated manual ' +
     item.stage + ' target step');
   return { ...source, dispatch_binding: matches[0] };
@@ -1109,6 +1121,19 @@ async function selfTest() {
     { number: 5, name: 'Checkout exact target SHA' },
   ] };
   const mainJobs = { jobs: [mainJob] };
+  const currentMainComment = await attestManualStagingSource(historicalMain, commentSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async () => ({ jobs: [{ ...mainJob, head_sha: historicalMain.target_sha }] }),
+  });
+  assert.equal(currentMainComment.dispatch_binding, undefined,
+    'current main SHA does not require a distinct historical target binding');
+  await assert.rejects(() => attestManualStagingSource(historicalMain, commentSource, {
+    repository: 'BestNathan/nession', token: 'self-test',
+    request: async () => ({ jobs: [{ ...mainJob,
+      head_sha: historicalMain.target_sha,
+      steps: mainJob.steps.filter(step =>
+        step.name !== 'Verify original human Case comment and source-bound target') }] }),
+  }), /original human comment/);
   const historicalBound = await attestManualStagingSource(historicalMain, manualSource, {
     repository: 'BestNathan/nession', token: 'self-test',
     request: async () => mainJobs,
