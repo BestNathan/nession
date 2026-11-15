@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import {REVIEWER_PREMODEL_FAILURE as F,validateDevelopmentState,
   hasOnlyRetiredReviewerForQwenRepair,acceptAttestedQwenRepairPublication}
   from './outbox.mjs';
+import {attestQwenRepairReconciliationIntent}
+  from '../publisher/qwen-repair-intent.mjs';
 
 const A=F.source_sha,B='b'.repeat(40),REPO='BestNathan/nession';
 const repairId='bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856';
@@ -85,4 +87,45 @@ assert.throws(()=>acceptAttestedQwenRepairPublication(
 assert.throws(()=>acceptAttestedQwenRepairPublication(
   state,state.version,event,{...trusted,pr_previous_sha:B},registry),
   /agent outbox/);
+// The first Publisher has already moved PR A->B, then failed before
+// projecting Store v14. Another trusted Publisher Run may ONLY use the
+// previously committed immutable Intent and GET-only readback. No second
+// Publisher write fence may be minted from its new Run identity.
+const originalIntent={
+  schema_version:1,kind:'trusted_qwen_repair_publisher_write_ahead',
+  repository:'BestNathan/nession',issue:3433,action_id:repairId,
+  worker_run_id:43677482758,worker_run_attempt:1,
+  worker_sha:'f9cc75bfe9bc05cfd3e9785090ff93273221efbb',
+  source_sha:A,original_main_sha:'3ec79d6f290d297cbdc3554c5713773033a23cce',
+  original_publisher_run_id:43607502468,
+  branch:'refs/heads/agent/3433/qwen-0945d3cc4bfacf3a',
+  checkpoint_version:2,
+  checkpoint_commit_sha:'ce70d863c14e3c665a36f656957ad85eaaa40f60',
+  checkpoint_ciphertext_sha256:'0974ea2a947a04dabc6423f9a7829f94b766c77491332e775c41484c896e1c92',
+  patch_sha256:'f0f6893ad7c19c2c67a239e172eafd01c775dd2e1743236c19adf475e20c13e7',
+  file_manifest_sha256:'c9fcde865f21925ecf6b2e5109528971341b52a938dea90f6d1bbdd44fa1a21d',
+  file_count:1,publisher_run_id:43678506569,
+  publication:'not_yet_attested',
+};
+const again={...originalIntent,publisher_run_id:43690000000};
+assert.deepEqual(attestQwenRepairReconciliationIntent(originalIntent,again),
+  originalIntent);
+assert.deepEqual(attestQwenRepairReconciliationIntent(
+  originalIntent,originalIntent),originalIntent);
+for(const change of [
+  {publisher_run_id:originalIntent.publisher_run_id-1},
+  {action_id:'0'.repeat(64)},
+  {worker_run_id:43677482759},
+  {source_sha:'9'.repeat(40)},
+  {branch:'refs/heads/agent/3433/qwen-0000000000000000'},
+  {checkpoint_commit_sha:'1'.repeat(40)},
+  {checkpoint_ciphertext_sha256:'2'.repeat(64)},
+  {patch_sha256:'3'.repeat(64)},
+  {original_publisher_run_id:originalIntent.original_publisher_run_id+1},
+  {file_manifest_sha256:'4'.repeat(64)},
+  {file_count:2},
+])assert.throws(()=>attestQwenRepairReconciliationIntent(
+  originalIntent,{...again,...change}),
+  /Qwen Repair write-ahead/);
+
 console.log('✓ signed Qwen Repair A->B: exact terminal Reviewer failure retained; active, forged, duplicate and unrelated Reviewer denied');
