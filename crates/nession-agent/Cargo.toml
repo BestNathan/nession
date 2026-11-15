@@ -52,6 +52,7 @@ async-trait.workspace = true
 futures-util.workspace = true
 tokio-rustls.workspace = true
 base64.workspace = true
+rand.workspace = true
 mime_guess.workspace = true
 # Durable EROFS cache download (#3023): bounded authenticated streaming.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }

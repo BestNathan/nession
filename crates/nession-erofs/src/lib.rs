@@ -1,24 +1,43 @@
-//! Nession's reusable EROFS infrastructure layer (#3022, #3303).
+//! Nession's reusable EROFS and OCI image infrastructure (#3022, #3303,
+//! #3494/#3496).
 //!
-//! This crate owns portable EROFS mechanics only:
+//! This crate owns portable image mechanics:
 //!
-//! - [`digest`]: byte-level `sha256:` identity and file verification;
-//! - [`store`]: a content-addressed, atomically published blob store;
+//! - [`blob::digest`]: byte-level `sha256:` identity and file verification;
+//! - [`oci`]: standard OCI Index/Manifest/Config/Descriptor model, exact-byte
+//!   import and fail-closed v1 EROFS validation (#3495);
+//! - [`blob::store`]: a content-addressed, atomically published blob store;
+//! - [`catalog`] (feature `catalog`): repository/tag/reference graph, pins,
+//!   durable GC marks and legacy digest migration over the Server's SQLite
+//!   transaction authority (#3496);
+//! - [`image`] (feature `catalog`): Manifest-addressed publish, resolve and
+//!   inspect over the catalog and CAS;
 //! - [`build`]/[`git`]: a deterministic, non-executing source snapshot and
 //!   fixed `mkfs.erofs` build;
 //! - [`cache`] (feature `cache`): a durable authenticated download/resume/
 //!   verify/pin cache;
 //! - [`mount`] (feature `mount`, Linux): an unprivileged EROFS FUSE
-//!   mount/unmount primitive with an owned handle.
+//!   mount/unmount primitive with an owned handle;
+//! - [`mount_manager`] (feature `mount`, Linux): content-addressed shared
+//!   read-only mounts with identified consumer leases (#3449);
+//! - [`overlay`] (feature `mount`, Linux): the one physical writable
+//!   `fuse-overlayfs` Merged View per managed Workspace, durable Upper
+//!   ownership fencing and recoverable consumer leases (#3582).
 //!
 //! It deliberately does not depend on `nession-protocol`: wire DTOs, image
-//! roles, registry metadata and authorization stay with their runtime owners.
+//! roles, authorization and runtime orchestration stay with their owners.
 //! Features let a consumer compile only the mechanics it uses.
 
-pub mod digest;
+pub mod blob;
+pub mod oci;
 
-#[cfg(feature = "store")]
-pub mod store;
+#[cfg(all(test, unix))]
+pub(crate) mod testing;
+
+#[cfg(feature = "catalog")]
+pub mod catalog;
+#[cfg(feature = "catalog")]
+pub mod image;
 
 #[cfg(feature = "build")]
 pub mod build;
@@ -28,11 +47,43 @@ pub mod git;
 #[cfg(feature = "cache")]
 pub mod cache;
 
+#[cfg(feature = "distribution")]
+pub mod distribution;
+
+#[cfg(feature = "registry")]
+pub mod registry;
+
 #[cfg(all(feature = "mount", target_os = "linux"))]
 pub mod mount;
 #[cfg(all(feature = "mount", target_os = "linux"))]
 pub mod mount_manager;
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub mod overlay;
 
+pub use blob::digest;
+pub use blob::digest::{
+    digest_of_bytes, file_digest, is_valid_digest, regular_file_digest, verify_file, DIGEST_PREFIX,
+};
+#[cfg(feature = "store")]
+pub use blob::store;
+#[cfg(feature = "store")]
+pub use blob::store::{BlobDigest, BlobStore, StoreUsage};
+#[cfg(feature = "sources")]
+pub use build::archive::{
+    fetch_and_extract, ArchiveFetcher, ArchiveFormat, ArchiveLimits, ArchiveReceipt, ArchiveSource,
+    ReqwestFetcher,
+};
+#[cfg(feature = "sources")]
+pub use build::import::{
+    import_raw_erofs, validate_erofs_file, ImportOutcome, RawErofsImport, EROFS_MAGIC,
+    EROFS_MAGIC_OFFSET, MAX_IMPORT_BYTES,
+};
+#[cfg(feature = "sources")]
+pub use build::oci::{
+    pinned_digest, OciConversion, OciConversionRequest, OciErofsConverter, ProcessOciConverter,
+};
+#[cfg(feature = "sources")]
+pub use build::publication::{host_platform, image_documents, publish_layer, LayerPublication};
 #[cfg(feature = "build")]
 pub use build::{
     discard_packaged_image, discard_snapshot_artifacts, manifest_tree, packaged_image_path,
@@ -42,9 +93,6 @@ pub use build::{
 };
 #[cfg(feature = "cache")]
 pub use cache::{CachedImage, DownloadGrant, ErofsCache, PinGuard};
-pub use digest::{
-    digest_of_bytes, file_digest, is_valid_digest, regular_file_digest, verify_file, DIGEST_PREFIX,
-};
 #[cfg(feature = "build")]
 pub use git::{GitCommandRunner, GitSnapshot, GitTarget, ProcessGitRunner};
 #[cfg(all(feature = "mount", target_os = "linux"))]
@@ -54,5 +102,8 @@ pub use mount_manager::{
     BlobPinGuard, BlobPinner, ConsumerRef, MountLease, MountManager, MountManagerConfig,
     MountRecoveryReport, MountState, MountStatus, VerifiedImage,
 };
-#[cfg(feature = "store")]
-pub use store::{BlobDigest, BlobStore, StoreUsage};
+#[cfg(all(feature = "mount", target_os = "linux"))]
+pub use overlay::{
+    OverlayBinding, OverlayConsumerRef, OverlayLease, OverlayMountManager,
+    OverlayMountManagerConfig, OverlayRequest, OverlayState, OverlayStatus, OverlayWorkspaceKey,
+};

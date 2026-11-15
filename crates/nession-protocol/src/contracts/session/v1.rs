@@ -8,6 +8,7 @@ use crate::contracts::sandbox::v1::{
     SandboxCurrentContext, SandboxExecutionReport, SandboxImageSelection, SandboxPolicy,
     SandboxPolicyDraft,
 };
+use crate::RedactedToken;
 
 /// The role one Managed image plays in the prepared composition.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -23,11 +24,36 @@ pub enum ManagedImageRole {
     Toolchain,
 }
 
+/// One OCI object reachable from a resolved Manifest (#3499).
+///
+/// The Server mints one of these per reachable descriptor; the Agent fetches
+/// exactly this set. A route is authorization for that object only, not for an
+/// arbitrary digest the caller happens to know.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedImageObjectGrant {
+    /// `sha256:<64 lowercase hex>` of the exact object bytes.
+    pub digest: String,
+    /// The standard OCI media type of those bytes.
+    pub media_type: String,
+    /// Exact byte count, verified by both sides.
+    pub size_bytes: u64,
+    /// Authorized route, `/images/blobs/<digest>`.
+    pub path: String,
+}
+
 /// One image the Agent must make ready in its authorized EROFS cache.
 ///
 /// `path` is the Server's authorized blob route for this digest. The Agent
 /// derives the absolute URL from its own configured Server address; the Server
 /// never guesses its public hostname.
+///
+/// A Manifest-aware grant sets `digest`/`path` to the resolved Manifest and
+/// fills `objects` with the Manifest, Config and EROFS descriptors it is
+/// allowed to fetch. A legacy grant leaves `objects` empty and its `digest` is
+/// the raw EROFS blob identity.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,11 +64,13 @@ pub struct ManagedImageGrant {
     pub digest: String,
     /// Authorized route, `/images/blobs/<digest>`.
     pub path: String,
-    /// Scoped bearer grant for exactly this digest.
-    pub token: String,
     /// `/opt/<name>` for a toolchain image; absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Reachable OCI objects of a resolved Manifest; empty for a legacy
+    /// digest-addressed EROFS grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<ManagedImageObjectGrant>,
 }
 
 /// The Server→Agent Managed creation input.
@@ -67,8 +95,13 @@ pub struct ManagedSessionImages {
 pub struct ManagedToolchainRequest {
     /// `sha256:<64 lowercase hex>` of a ready Image Manager artifact.
     pub digest: String,
-    /// `/opt/<lowercase name>`; the Sandbox owns the target rule.
-    pub target: String,
+    /// Optional user/Session override for the actual mount target.
+    ///
+    /// When absent, the resolved Manifest's advisory
+    /// `io.nession.mount.default` proposes the target; when neither exists the
+    /// create fails closed. The Sandbox owns the final target rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// Client request for a Managed EROFS-backed Session (#3062).
@@ -355,71 +388,22 @@ pub struct ClientSessionAttachResponsePayload {
     /// Clients test latency across these and fall back address-by-address.
     #[serde(default)]
     pub addresses: Vec<ProbedAddress>,
-    /// The credential for the P2P connection this reply describes (#1013).
+    /// The resolved target Agent's durable inbound token (#3440).
     ///
-    /// Present when `mode` is `"p2p"`, absent for `"relay"` — the Server dials
-    /// in relay mode, so the browser never touches the agent and has nothing to
-    /// present.
+    /// Present when `mode` is `"p2p"`; absent for `"relay"`, where the Server
+    /// dials the Agent itself and the browser never holds the token.
     ///
-    /// **Issuer:** the Server. It is the only thing that mints one.
-    ///
-    /// **Verifier:** the agent named in this reply, and only that one. A
-    /// credential is pushed to the agent over the connection *the agent itself
-    /// dialled out* — the one channel here that is already authenticated in the
-    /// direction that matters, since the agent is the client on it — and that
-    /// agent stores it before this reply is sent. So a client that dials the
-    /// instant it holds a token is correct by construction: the verifier already
-    /// has the record. The token is opaque to the agent, which looks it up and
-    /// never parses it, and that is why it is not signed — signing would mean key
-    /// delivery and rotation in the one crate that listens on a port.
-    ///
-    /// **Scope:** what the credential may do, carried beside it in the grant
-    /// (`contracts::p2p::v1::CredentialScope`). A credential for an attach is
-    /// bound to **one session** — its terminal wires are refused for any other —
-    /// and carries session management and the file sandbox; a credential for a
-    /// relay is bound to one session and carries neither. The agent checks the
-    /// scope per wire, so "the credential was valid" never implies "every
-    /// operation is allowed".
-    ///
-    /// **Expiry:** a deadline the Server sets (default 300s) and the agent
-    /// compares against its own clock. This is the real revocation: it is
-    /// deterministic and needs no round trip.
-    ///
-    /// **Replay:** time-bounded and **repeatable — not single-use**, and that is
-    /// a requirement rather than a relaxation. A browser re-presents the same
-    /// URL on every reconnect (its reconnect budget is ten attempts), and the
-    /// Server's relay leg makes two dials on one credential, attach and detach.
-    /// Spending the token on first use would break both, and single-use is
-    /// therefore a client rewrite rather than a policy choice.
-    ///
-    /// **Renewal:** the browser cannot parse the opaque token, so the Server
-    /// states the deadline beside it. Before a physical Agent socket is rebuilt
-    /// after expiry, the Session runtime re-attaches through the authenticated
-    /// `server.session.attach` operation and presents the fresh credential
-    /// (#2645). A healthy socket is never replaced just because the credential
-    /// expired; only a new upgrade needs one.
-    ///
-    /// **Transport:** the `token` query parameter on the agent URL
-    /// ([`super::super::p2p::CREDENTIAL_PARAM`]). A query parameter because a
-    /// browser cannot set a header on `new WebSocket()`. **It therefore reaches
-    /// every access log on the path** — which is why the value is opaque and
-    /// short-lived rather than a durable secret.
-    ///
-    /// Renaming this field would cost a codegen regeneration and every web
-    /// fixture for nothing a comment does not buy; the wire name and the
-    /// parameter name are independent, and only the latter is shared with the
-    /// browser.
+    /// The Server hands this to an authenticated client only after resolving
+    /// this reply's Session and Agent, and returns the token cached from that
+    /// Agent's authoritative registration generation. It is not a per-attach
+    /// grant: the Agent's own verifier accepts it for as long as it remains the
+    /// Agent's current token, so reconnects need no reissue. Sending it to a
+    /// client also grants that client the Agent's whole trusted surface — the
+    /// explicit 0.x tradeoff in #3440, not a per-Session scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connection_token: Option<String>,
-    /// RFC 3339 deadline for [`Self::connection_token`], stated by its issuer.
-    ///
-    /// The browser cannot parse the opaque token, so this is the only way a
-    /// client can know a reconnect needs a *new* credential instead of the one
-    /// it already holds (#2645). Absent on older Servers and on the relay
-    /// arm; a client that sees it must still treat the Agent's refusal as
-    /// authoritative (fail closed).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connection_token_expires_at: Option<String>,
+    #[cfg_attr(feature = "codegen", ts(type = "string"))]
+    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    pub agent_token: Option<RedactedToken>,
     /// The Server's release-selected fixed column count (#2487).
     ///
     /// The browser renders this width when its embedded build value differs,
@@ -548,6 +532,16 @@ pub struct ClientSessionEnvBindingSetPayload {
     pub session_id: String,
     #[serde(default)]
     pub profiles: Vec<EnvFileRef>,
+    /// The desired revision the caller read before this replacement.
+    ///
+    /// When present, the Server performs a durable compare-and-swap: a stored
+    /// revision that no longer matches yields a `revision_conflict` refusal
+    /// before any durable or Agent-side mutation, and the caller re-reads the
+    /// binding rather than overwriting a concurrent writer. Absent for the
+    /// legacy `apply`/`unset` adapters and for callers that predate the field;
+    /// there is deliberately no `force`/`ignore_conflict` bypass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 /// `server.session.env.binding.reapply` — re-resolve the currently desired
@@ -557,6 +551,21 @@ pub struct ClientSessionEnvBindingSetPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingReapplyPayload {
     pub session_id: String,
+    /// The desired revision the caller read before this reapply. Same
+    /// compare-and-swap contract as
+    /// [`ClientSessionEnvBindingSetPayload::expected_revision`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+}
+
+/// Why a version-aware binding mutation was refused before any durable change.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEnvBindingRefusalKind {
+    /// `expected_revision` did not match the durable desired revision.
+    RevisionConflict,
 }
 
 /// The reply shared by the three binding units above.
@@ -574,6 +583,11 @@ pub struct ClientSessionEnvBindingResponsePayload {
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A machine-readable classification for a refusal that happened *before*
+    /// any durable mutation. `None` means the ordinary `error` path: a refused
+    /// materialization may still have advanced the desired revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<SessionEnvBindingRefusalKind>,
 }
 
 // ============================================================================
@@ -1037,6 +1051,16 @@ pub struct WebSessionInfo {
     pub foreground_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    ///
+    /// A recyclable `agent_id:session_name` is not an incarnation: this id is
+    /// replaced when the name is killed and recreated. Web clients key their
+    /// name-addressed projections (Session metadata, #3424) on it, so a list
+    /// push that reports a different id invalidates the previous incarnation's
+    /// cached context. Absent only for a legacy Session that has not been asked
+    /// yet, so an absent value is not an incarnation change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     /// The focused Session's Server-owned Project membership (#3082).
     ///
     /// Absent for a Session with no Project. This is durable membership, not an
@@ -1959,6 +1983,11 @@ pub struct ServerSessionSandboxPreflightPayload {
     /// leaves cache preparation to Enter.
     #[serde(default)]
     pub images: Vec<SandboxImageSelection>,
+    /// The Project Existing Location the Server resolved for this Session on
+    /// this Agent (#3407). Only the effective `project_location`/`auto`
+    /// branch sends it; an explicit managed selection ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_location: Option<String>,
     #[serde(default)]
     pub working_dir: String,
 }
@@ -2002,6 +2031,11 @@ pub struct ServerSessionSandboxEnterPayload {
     /// a native cache path.
     #[serde(default)]
     pub images: Vec<ManagedImageGrant>,
+    /// The Project Existing Location the Server resolved for this Session on
+    /// this Agent (#3407), when the effective Workspace selection is the
+    /// Project Location. The Agent re-validates the path at use time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_location: Option<String>,
     #[serde(default)]
     pub working_dir: String,
 }

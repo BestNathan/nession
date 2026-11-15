@@ -38,6 +38,9 @@
 /// `server.auth` — the handshake, sent by [`crate::ClientConnection::connect`].
 pub const SERVER_AUTH: &str = "server.auth";
 
+/// Agent-direct authentication: the first frame on a P2P socket (#3440).
+pub const CLIENT_AUTH: &str = "client.auth";
+
 /// `server.agent.list` — every agent the Server knows about.
 pub const SERVER_AGENT_LIST: &str = "server.agent.list";
 
@@ -71,6 +74,18 @@ pub const SERVER_AGENT_RENAME: &str = "server.agent.rename";
 
 /// `server.agent.delete` — remove an offline Agent.
 pub const SERVER_AGENT_DELETE: &str = "server.agent.delete";
+
+/// Server-owned ENV file management (including Agent files routed by Server).
+pub const SERVER_ENV_LIST: &str = "server.env.list";
+pub const SERVER_ENV_GET: &str = "server.env.get";
+pub const SERVER_ENV_WRITE: &str = "server.env.write";
+pub const SERVER_ENV_DELETE: &str = "server.env.delete";
+
+/// Server-owned Session Environment Binding (#170): the durable desired
+/// selection, its observed materialization, and the two explicit mutations.
+pub const SERVER_SESSION_ENV_BINDING_GET: &str = "server.session.env.binding.get";
+pub const SERVER_SESSION_ENV_BINDING_SET: &str = "server.session.env.binding.set";
+pub const SERVER_SESSION_ENV_BINDING_REAPPLY: &str = "server.session.env.binding.reapply";
 
 // ── The agent-facing wires ──────────────────────────────────────────────────
 //

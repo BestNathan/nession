@@ -235,24 +235,21 @@ pub struct AgentConfig {
     pub server_url: String,
     /// Authentication token for the central server.
     pub auth_token: String,
-    /// The token clients present to this agent's own P2P socket (#1013).
+    /// This Agent's durable inbound token (#3440).
     ///
-    /// Used by **standalone** agents — `server_url` empty, where no Server is
-    /// there to mint a credential per attach and no outbound channel exists to
-    /// receive one on. The operator sets it, and a client reaching the agent
-    /// directly presents it. See `CredentialScope::for_standalone` for what one
-    /// shared secret has to cover.
+    /// Every inbound path verifies it: the Agent P2P listener (as the first
+    /// `client.auth` frame) and embedded MCP (as its Bearer token). It is
+    /// endpoint-owned — the Server Token never opens this Agent, and this token
+    /// never opens the Server.
     ///
-    /// **Not consulted when `server_url` is set.** There the Server issues a
-    /// credential per attach, scoped to the one session it is answering for,
-    /// and pushes it to this agent — a narrower grant than any configured token
-    /// could be. A configured token that also worked on a connected agent would
-    /// be a second, wider way in that nothing rotates.
+    /// **Operator override.** When empty, the Agent provisions a random token
+    /// once and persists it beside this config file (`<config>.token`, mode
+    /// 0600), reusing it across restarts. Rotation is a restart with a new
+    /// value. An unreadable or malformed persisted token is a startup error,
+    /// never a reason to generate another.
     ///
-    /// A standalone agent with this empty **refuses to start**, naming the key:
-    /// an empty store refuses every connection, which reads as a network fault
-    /// from the other end, and a permissive default is the anonymous socket
-    /// #1013 exists to close.
+    /// `auth_token` remains the *outbound* Server credential; the two are
+    /// different secrets and are never interchangeable.
     #[serde(default)]
     pub agent_token: String,
     /// How the agent attaches to tmux sessions.  Default: "plain".
@@ -452,8 +449,9 @@ impl AgentConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
         self.erofs.validate()?;
-        self.mcp
-            .validate_for_host(&self.agent_token, "agent_token")?;
+        // Embedded MCP's inbound token is validated against the *resolved*
+        // token in `server::mcp::build`: `agent_token` may be empty here
+        // because the runtime provisions one before the listener is built.
         Ok(())
     }
     /// Resolve the effective durable cache directory.
@@ -524,22 +522,32 @@ mod tests {
         assert_eq!(default_listen_address(), "0.0.0.0:8080");
     }
 
-    /// Agent-hosted MCP reuses `agent_token`; enabling it without one is a
-    /// startup error, including on an Agent connected to a Server where the
-    /// token would otherwise be unused.
+    /// Embedded MCP still refuses an empty inbound token, but the refusal
+    /// happens at mount, against the **resolved** token (#3440).
+    ///
+    /// `AgentConfig::validate` deliberately leaves `agent_token` alone: the
+    /// runtime resolves the durable token first (operator override, else the
+    /// persisted value, else a generated one) and only then mounts MCP. So an
+    /// empty configured value is no longer a startup error by itself, while a
+    /// mount with no token at all is still refused (fail closed).
     #[test]
-    fn mcp_enabled_requires_the_agent_token() {
+    fn mcp_enabled_requires_an_inbound_token_at_mount_time() {
         let mut config = AgentConfig::default();
         config.mcp.enabled = true;
-        let error = config
-            .validate()
-            .expect_err("an empty agent_token must refuse to start MCP");
-        assert!(error.to_string().contains("agent_token"), "{error}");
-
-        config.agent_token = "agent-secret".to_string();
         config
             .validate()
-            .expect("a configured token makes MCP startable");
+            .expect("an empty agent_token is provisioned by the runtime");
+
+        let error = config
+            .mcp
+            .validate_for_host("", "agent_token")
+            .expect_err("mounting MCP without a token must be refused");
+        assert!(error.to_string().contains("agent_token"), "{error}");
+
+        config
+            .mcp
+            .validate_for_host("agent-secret", "agent_token")
+            .expect("a resolved token makes MCP startable");
     }
 
     #[test]

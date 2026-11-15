@@ -5,22 +5,21 @@
 //! The Agent management connection against a real Agent (`#565`).
 //!
 //! `AgentConnection` is the only path that speaks `agent.session.*` directly.
-//! This proves the typed calls and the operator-credential handshake against
-//! the Agent's own P2P listener rather than a fixture that agrees with itself.
+//! This proves the typed calls and the durable-Agent-Token handshake against
+//! the Agent's own listener rather than a fixture that agrees with itself.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use nession_agent::config::AttachMode;
-use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_client::AgentConnection;
-use nession_protocol::contracts::p2p::v1::CredentialScope;
 
 const AGENT_ID: &str = "client-test-agent";
-const CREDENTIAL: &str = "client-test-operator-token";
+const AGENT_TOKEN: &str = "client-test-agent-token";
 
 struct Agent {
     _dir: tempfile::TempDir,
@@ -32,10 +31,7 @@ async fn start_agent() -> Agent {
     let dir = tempfile::tempdir().expect("tempdir");
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
-    let credentials = Arc::new(P2pCredentials::new());
-    credentials
-        .grant_configured(AGENT_ID, CREDENTIAL, CredentialScope::for_standalone())
-        .expect("grant the operator credential");
+    let auth = Arc::new(P2pAuth::new(AGENT_TOKEN));
     let server = AgentServer::new(
         "127.0.0.1:0",
         AGENT_ID,
@@ -45,7 +41,7 @@ async fn start_agent() -> Agent {
         AttachMode::Plain,
         AgentServerContext {
             resize,
-            credentials,
+            auth,
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::clone(&tmux),
             session_metadata: Arc::new(SessionMetadataStore::with_root(
@@ -71,11 +67,11 @@ fn unique_name() -> String {
 }
 
 #[tokio::test]
-async fn the_agent_connection_lists_creates_and_kills_over_the_operator_credential() {
+async fn the_agent_connection_lists_creates_and_kills_over_the_agent_token() {
     let agent = start_agent().await;
-    let mut connection = AgentConnection::connect(&agent.endpoint, CREDENTIAL)
+    let mut connection = AgentConnection::connect(&agent.endpoint, AGENT_TOKEN)
         .await
-        .expect("the operator credential authorizes the management socket");
+        .expect("the Agent Token authorizes the management socket");
 
     let listed = connection.list_sessions().await.expect("list");
     assert!(
@@ -109,13 +105,25 @@ async fn the_agent_connection_lists_creates_and_kills_over_the_operator_credenti
 }
 
 #[tokio::test]
-async fn a_wrong_operator_credential_cannot_open_the_management_socket() {
+async fn a_wrong_or_missing_agent_token_cannot_open_the_management_socket() {
     let agent = start_agent().await;
+
+    // The durable token is the only credential the listener honours: an
+    // unknown value is refused before any management frame is accepted.
     assert!(
         AgentConnection::connect(&agent.endpoint, "not-the-token")
             .await
             .is_err(),
-        "the Agent must refuse an unknown credential at the upgrade"
+        "the Agent must refuse an unknown Agent Token"
     );
+
+    // "Missing" is an empty first-frame `client.auth`, not a skipped
+    // handshake: the client still presents a token field, and the endpoint's
+    // verifier refuses it because no configured token is empty.
+    assert!(
+        AgentConnection::connect(&agent.endpoint, "").await.is_err(),
+        "the Agent must fail closed when the presented Agent Token is empty"
+    );
+
     let _ = agent.handle.shutdown().await;
 }

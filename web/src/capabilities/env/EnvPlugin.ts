@@ -121,15 +121,22 @@ export class EnvPlugin implements TransportPlugin {
    *
    * The canonical mutation: the ordered list is the complete desired selection,
    * and the server materializes it as one revision. An empty list clears the
-   * binding.
+   * binding. `expectedRevision` is the revision this client last read; the
+   * server refuses a stale value with `revision_conflict` instead of silently
+   * overwriting a concurrent writer.
    */
   async setSessionEnvBinding(
     sessionId: string,
     envFiles: EnvFileRef[],
+    expectedRevision?: number,
   ): Promise<SessionEnvBindingResponse> {
     return this.requireConnection().request<SessionEnvBindingResponse>(
       SESSION_ENV_BINDING_SET_WIRE,
-      { session_id: sessionId, profiles: envFiles },
+      {
+        session_id: sessionId,
+        profiles: envFiles,
+        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+      },
     );
   }
 
@@ -144,11 +151,18 @@ export class EnvPlugin implements TransportPlugin {
   /**
    * Re-resolve the currently desired profiles at a new revision. This is the
    * only ordinary path that applies a profile edit to an existing Session.
+   * `expectedRevision` has the same compare-and-swap meaning as `set`.
    */
-  async reapplySessionEnvBinding(sessionId: string): Promise<SessionEnvBindingResponse> {
+  async reapplySessionEnvBinding(
+    sessionId: string,
+    expectedRevision?: number,
+  ): Promise<SessionEnvBindingResponse> {
     return this.requireConnection().request<SessionEnvBindingResponse>(
       SESSION_ENV_BINDING_REAPPLY_WIRE,
-      { session_id: sessionId },
+      {
+        session_id: sessionId,
+        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+      },
     );
   }
 

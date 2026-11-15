@@ -65,7 +65,7 @@ function replaceRequired(source, pattern, replacement, label) {
   return source.replace(pattern, replacement);
 }
 
-function renderServerConfig(template, { serverPort, home, p2pTokenExpirySecs }) {
+function renderServerConfig(template, { serverPort, home }) {
   let output = String(template);
   output = replaceRequired(
     output,
@@ -79,16 +79,6 @@ function renderServerConfig(template, { serverPort, home, p2pTokenExpirySecs }) 
     `db_path = "${tomlString(path.join(requiredText(home, 'home'), 'nession.db'))}"`,
     'server db_path',
   );
-  // Profile-scoped P2P lease (#2645). The placeholder is optional so templates
-  // that do not exercise credentials keep the Server default.
-  if (/_P2P_TOKEN_EXPIRY_SECS_/.test(output)) {
-    output = replaceRequired(
-      output,
-      /^p2p_token_expiry_secs\s*=\s*_P2P_TOKEN_EXPIRY_SECS_$/m,
-      `p2p_token_expiry_secs = ${positiveSeconds(p2pTokenExpirySecs, 'p2pTokenExpirySecs')}`,
-      'server p2p_token_expiry_secs',
-    );
-  }
   return output;
 }
 
@@ -291,14 +281,6 @@ async function startFullStackRuntime(options) {
   // `not-required` E2E plan can skip the Rust build entirely.
   const webOnly = options?.webOnly === true;
   const profile = options?.profile ?? (webOnly ? 'web-only' : 'full-stack-local');
-  // #2645: the acceptance profile owns the short lease the real-stack Case
-  // needs to cross expiry without a five-minute sleep. The regression profile
-  // keeps the production 300s lease: its reconnect/restart scenarios are about
-  // transport recovery, and forcing a reissue on every dial would perturb
-  // them (#1926's Agent-restart race) without proving anything about
-  // credentials.
-  const p2pTokenExpirySecs = profile === 'e2e-regression' ? 300 : 8;
-
   const serverTemplate = path.resolve(
     options?.serverConfigTemplate ??
     path.join(repoRoot, 'e2e', 'fixtures', 'server', 'config.toml'),
@@ -324,7 +306,6 @@ async function startFullStackRuntime(options) {
     renderServerConfig(readFileSync(serverTemplate, 'utf8'), {
       serverPort,
       home,
-      p2pTokenExpirySecs,
     }),
   );
   writeFileSync(
@@ -459,7 +440,6 @@ function selfTest() {
   const serverTemplate = [
     'listen_address = "127.0.0.1:19090"',
     'db_path = "/tmp/nession-e2e/nession.db"',
-    'p2p_token_expiry_secs = _P2P_TOKEN_EXPIRY_SECS_',
   ].join('\n');
   const agentTemplate = [
     'server_url = "ws://127.0.0.1:19090/ws"',
@@ -473,11 +453,9 @@ function selfTest() {
   const server = renderServerConfig(serverTemplate, {
     serverPort: 21090,
     home,
-    p2pTokenExpirySecs: 8,
   });
   assert.match(server, /127\.0\.0\.1:21090/);
   assert.match(server, /nession-runtime-selftest\/nession\.db/);
-  assert.match(server, /p2p_token_expiry_secs = 8/);
 
   const agent = renderAgentConfig(agentTemplate, {
     serverPort: 21090,

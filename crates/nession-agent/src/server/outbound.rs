@@ -69,8 +69,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Sink, SinkExt};
+use nession_runtime::frame::WsFrame;
 use tokio::sync::{mpsc, Notify};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::debug;
 
 use nession_runtime::outbound::{Limits, Outbound};
@@ -197,7 +197,7 @@ impl P2pOutbound {
     /// (`nession_runtime::lane`), so a peer that never drains eventually fills
     /// its lane and stops the connection from reading — which is the
     /// backpressure, one lane deeper.
-    pub async fn send_reply(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub async fn send_reply(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_reply(msg).await
     }
 
@@ -213,7 +213,7 @@ impl P2pOutbound {
     /// So this waits for room, and gives up after the stall grace. `Stalled` is
     /// the caller's cue to end the connection — see this module's docs for why
     /// that is the only honest answer left, and [`Self::close`] for how.
-    pub async fn send_terminal(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub async fn send_terminal(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_terminal(msg).await
     }
 
@@ -227,7 +227,7 @@ impl P2pOutbound {
     /// resize)允许 coalesce"). A pong rides the same lane for the same reason:
     /// the peer's next ping restates the question, and a connection that cannot
     /// take a pong has nothing left to keep alive anyway.
-    pub fn try_send_state(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub fn try_send_state(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.try_send(msg).map_err(|e| match e {
             OutboundError::Saturated => self.note_no_room(),
             e => e,
@@ -334,7 +334,7 @@ impl P2pOutbound {
 /// thing.
 pub async fn run_writer<S>(mut sink: S, mut rx: mpsc::Receiver<QueuedFrame>, outbound: P2pOutbound)
 where
-    S: Sink<WsMessage> + Unpin,
+    S: Sink<WsFrame> + Unpin,
 {
     loop {
         if outbound.is_closed() {
@@ -384,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn a_state_frame_is_dropped_when_the_queue_is_full() {
         let (outbound, _rx) = P2pOutbound::new();
-        let frame = WsMessage::Text("y".repeat(OUTBOUND_BYTE_BUDGET));
+        let frame = WsFrame::Text("y".repeat(OUTBOUND_BYTE_BUDGET));
 
         assert_eq!(outbound.try_send_state(frame.clone()), Ok(()));
         assert_eq!(

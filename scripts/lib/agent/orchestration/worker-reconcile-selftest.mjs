@@ -62,6 +62,49 @@ const reader={getRun:async()=>issuer};
 const valid={run,claim,key,reader};
 const verified=await verifyWorkerClaimForAck(valid);
 assert.equal(verified.ticket_sha256.length,64);
+// #3491 actual issuer: the separate Store Ingest Run signs the Qwen Ticket.
+const source={id:8001,run_attempt:1,
+  name:'Comment Develop #1997 comment:6874914190',
+  path:'.github/workflows/acceptance-agent-controller.yml',
+  event:'workflow_dispatch',head_branch:'main',head_sha:mainSha,
+  actor:{login:'github-actions[bot]'},status:'completed',conclusion:'success',
+  repository:{full_name:'BestNathan/nession'},
+  head_repository:{full_name:'BestNathan/nession'}};
+const botIssuer={id:8002,run_attempt:1,
+  name:'Bug Developer Ingest controller:8001',
+  path:'.github/workflows/store-agent-controller-ingest.yml',
+  event:'workflow_dispatch',head_branch:'main',head_sha:mainSha,
+  actor:{login:'github-actions[bot]'},status:'completed',conclusion:'success',
+  repository:{full_name:'BestNathan/nession'},
+  head_repository:{full_name:'BestNathan/nession'}};
+const botInputs=planGitHubDispatch(state,action.id,registry,{
+  key,key_id:'main-controller',issuer_run_id:8002,now,ttl_ms:600000,
+}).inputs;
+const botClaim=createWorkerClaim(botInputs,context);
+const botReader={getRun:async id=>id===8002?botIssuer:id===8001?source:null};
+const botValid={run,claim:botClaim,key,reader:botReader};
+assert.equal((await verifyWorkerClaimForAck(botValid)).action_id,action.id);
+for(const [badIssuer,badSource] of [
+  [{...botIssuer,actor:{login:'outsider'}},source],
+  [{...botIssuer,name:'Store / Agent Controller Ingest'},source],
+  [{...botIssuer,run_attempt:2},source],
+  [{...botIssuer,conclusion:'failure'},source],
+  [{...botIssuer,event:'issue_comment'},source],
+  [{...botIssuer,status:'in_progress'},source],
+  [botIssuer,{...source,head_sha:'0'.repeat(40)}],
+  [botIssuer,{...source,event:'issue_comment'}],
+  [botIssuer,{...source,run_attempt:2}],
+  [botIssuer,{...source,status:'in_progress'}],
+  [botIssuer,{...source,head_repository:{full_name:'attacker/repo'}}],
+  [botIssuer,{...source,name:'Comment Develop #9999 comment:6874914190'}],
+  [botIssuer,{...source,actor:{login:'outsider'}}],
+  [botIssuer,{...source,conclusion:'failure'}],
+]){
+  await assert.rejects(verifyWorkerClaimForAck({...botValid,
+    reader:{getRun:async id=>id===8002?badIssuer:id===8001?badSource:null},
+  }),/issuer/);
+}
+
 assert.equal(verified.source_run_id,run.id);
 assert.equal(verified.action_id,action.id);
 await assert.rejects(()=>verifyWorkerClaimForAck({...valid,key:Buffer.alloc(32,0x36)}),/HMAC/);

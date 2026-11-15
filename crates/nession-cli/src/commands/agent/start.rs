@@ -155,7 +155,7 @@ pub(crate) async fn run_with(
         // the lifecycle lock here would block every later stop/restart/install,
         // so release it once this process has recorded its identity.
         drop(lock);
-        let result = run_agent_foreground(config).await;
+        let result = run_agent_foreground(config, selection.path.clone()).await;
 
         let _ = fs::remove_file(&state.current);
 
@@ -302,13 +302,21 @@ pub(crate) fn background_child_command(
 }
 
 /// Run the Agent runtime in foreground mode (blocks until shutdown).
-async fn run_agent_foreground(config: nession_agent::config::AgentConfig) -> Result<()> {
+async fn run_agent_foreground(
+    config: nession_agent::config::AgentConfig,
+    config_path: std::path::PathBuf,
+) -> Result<()> {
     // The composition is owned by `nession_agent::runtime` (#1014), not this
     // entrypoint. A background start re-execs this path with the readiness
     // variable set, so this one call serves both a foreground start a user
     // typed and the child of a daemon parent waiting to be told it serves
     // (#1016).
-    nession_agent::runtime::run(config, nession_common::readiness::Readiness::from_env()).await
+    nession_agent::runtime::run(
+        config,
+        config_path,
+        nession_common::readiness::Readiness::from_env(),
+    )
+    .await
 }
 
 #[cfg(test)]

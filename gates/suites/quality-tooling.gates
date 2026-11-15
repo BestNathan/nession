@@ -7,6 +7,7 @@ workflow-conventions
 requirement-acceptance-selftest
 acceptance-lifecycle-selftest
 acceptance-agent-selftest
+acceptance-executor-selftest
 acceptance-case-ingest-selftest
 run-record-artifact-evidence-selftest
 run-record-index-contract-selftest
@@ -59,6 +60,7 @@ tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
 runtime-image-tools-selftest
+acr-mirror-deadline-selftest
 compose-storage-contract-selftest
 gitops-storage-contract-selftest
 agent-provider-contract
@@ -70,3 +72,4 @@ gate-consumer-parity
 ci-pr-routing-selftest
 dev-workspace-selftest
 detector-selftest-coverage
+staging-promotion-source-selftest

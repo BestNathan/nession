@@ -204,6 +204,73 @@ fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
     NEVER_FORWARDED_ENV.contains(&key) || caller_keys.contains(&key)
 }
 
+/// Compose the create-time base environment (#3500).
+///
+/// Precedence, lowest to highest:
+///
+/// 1. the inherited Agent process environment;
+/// 2. the prepared image's bounded standard Config Env defaults;
+/// 3. the image's resolved `path.prepend` directories, composed before the
+///    inherited `PATH` (an explicit `PATH` in the overlay wins instead);
+/// 4. the explicit Session/Sandbox overlay.
+///
+/// `withheld` names overlay/adapter keys whose inherited copy must not leak
+/// into the process environment. Image default keys are withheld too, so the
+/// values above are unambiguous even on tmux versions that disagree about a
+/// duplicated `-e` key.
+fn base_session_environment(
+    inherited: Vec<(String, String)>,
+    image: &nession_sandbox::ImageRuntimeEnvironment,
+    overlay: &[(String, String)],
+    withheld: &[&str],
+) -> Vec<(String, String)> {
+    let overlay_has_path = overlay.iter().any(|(key, _)| key == "PATH");
+    let inherited_path = inherited
+        .iter()
+        .find(|(key, _)| key == "PATH")
+        .map(|(_, value)| value.clone());
+    let composed_path = if overlay_has_path {
+        None
+    } else {
+        nession_sandbox::compose_path_prepend(&image.path_prepend, inherited_path.as_deref())
+    };
+
+    let overlay_keys: Vec<&str> = overlay.iter().map(|(key, _)| key.as_str()).collect();
+    let mut filter_keys: Vec<&str> = withheld.to_vec();
+    filter_keys.extend(overlay_keys.iter().copied());
+    filter_keys.extend(image.defaults.iter().map(|(key, _)| key.as_str()));
+    if composed_path.is_some() {
+        // The composed PATH supersedes the inherited one.
+        filter_keys.push("PATH");
+    }
+
+    // Force TERM and locale first so TUI apps render correctly. Containers
+    // default to C/POSIX (no Unicode) and an unset or "dumb" TERM.
+    let mut environment: Vec<(String, String)> = vec![
+        ("TERM".to_string(), "xterm-256color".to_string()),
+        ("LANG".to_string(), "C.UTF-8".to_string()),
+    ];
+    environment.extend(
+        inherited
+            .into_iter()
+            .filter(|(key, _)| !skip_env(key, filter_keys.as_slice())),
+    );
+    environment.extend(
+        image
+            .defaults
+            .iter()
+            .filter(|(key, _)| {
+                !withheld.contains(&key.as_str()) && !overlay_keys.contains(&key.as_str())
+            })
+            .cloned(),
+    );
+    if let Some(path) = composed_path {
+        environment.push(("PATH".to_string(), path));
+    }
+    environment.extend(overlay.iter().cloned());
+    environment
+}
+
 /// How far one create attempt got, shared between the create future and the
 /// outer deadline that may drop it (#2812).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -330,6 +397,10 @@ pub struct SessionManager {
     /// creation derives its authorized blob HTTP base from this value; the
     /// Server never guesses its own public hostname.
     server_url: String,
+    /// The Server Token used as the Bearer credential for authorized image
+    /// blob reads (#3440). Empty on a standalone Agent, where there is no
+    /// Server to fetch from.
+    server_auth_token: nession_common::SecretString,
 }
 
 /// The result of one Session create.
@@ -363,6 +434,7 @@ impl SessionManager {
             sandbox: None,
             workspaces: None,
             server_url: String::new(),
+            server_auth_token: nession_common::SecretString::new(String::new()),
         }
     }
 
@@ -417,6 +489,17 @@ impl SessionManager {
     /// The central Server URL this manager was composed with, when any.
     pub fn server_url(&self) -> &str {
         &self.server_url
+    }
+
+    /// Record the Server Token used for authorized image blob reads (#3440).
+    pub fn with_server_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.server_auth_token = nession_common::SecretString::new(token);
+        self
+    }
+
+    /// The Server Token for authorized image blob reads, when configured.
+    pub fn server_auth_token(&self) -> &str {
+        self.server_auth_token.as_str()
     }
 
     /// The Sandbox runtime this manager was composed with, when any.
@@ -929,51 +1012,19 @@ impl SessionManager {
             None => ShellAdapter::unsupported(None, "no Environment Binding"),
         };
 
-        let mut caller_keys: Vec<&str> = overlay.vars.iter().map(|(k, _)| k.as_str()).collect();
-        caller_keys.extend(adapter.env.iter().map(|(k, _)| k.as_str()));
-        let has_ps1 = overlay.vars.iter().any(|(key, _)| key == "PS1");
-        // This tmux Session instance's identity (#2974), fixed before the
-        // `new-session` that creates it. The same value goes into the Session's
-        // environment, the Claude binding path, and — recorded at the end of
-        // the post-create phase — the durable `@nession_instance_id` option, so
-        // the hook, the reader and an Agent restart cannot disagree. Nothing
-        // derived from the name can fence a delete/recreate; this can.
         let instance_id = uuid::Uuid::new_v4().to_string();
         let claude_env = claude_binding_env(name, &instance_id);
-
-        // Force TERM and locale first so TUI apps render correctly. Containers
-        // default to C/POSIX (no Unicode) and an unset or "dumb" TERM.
-        let mut session_env: Vec<(String, String)> = vec![
-            ("TERM".to_string(), "xterm-256color".to_string()),
-            ("LANG".to_string(), "C.UTF-8".to_string()),
-        ];
-        session_env
-            .extend(std::env::vars().filter(|(key, _)| !skip_env(key, caller_keys.as_slice())));
-        session_env.extend(overlay.vars.iter().cloned());
-        if !has_ps1 {
-            session_env.push(("NESSON_PS1".to_string(), DEFAULT_PS1.to_string()));
-            session_env.push((
-                "PROMPT_COMMAND".to_string(),
-                r#"[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }"#.to_string(),
-            ));
-        }
-        session_env.extend(claude_env);
-        // The instance identity the binding path was built from. This is what
-        // lets a reader of the same tmux Session (including one in a restarted
-        // Agent) derive that path without the name, and what marks the Session
-        // as fenced at all (#2974).
-        session_env.push((INSTANCE_ID_ENV.to_string(), instance_id.clone()));
-        // This create's ownership fence, delivered by the `new-session` below.
-        // Profiles cannot set it: `NESSON_*` keys are reserved.
-        session_env.push((CREATE_TOKEN_ENV.to_string(), token.to_string()));
-        // Last, so the adapter's ZDOTDIR cannot be overwritten by the agent's
-        // inherited environment.
-        session_env.extend(adapter.env.iter().cloned());
 
         // Prepare the Sandbox before `new-session` starts a process. The
         // policy is the request; the runtime owns host-local facts. An
         // explicit policy without a configured runtime is refused rather than
         // silently executed as a Native Session.
+        //
+        // This happens before the final environment is assembled because the
+        // prepared composition owns the mounted toolchain directories and the
+        // bounded standard Config Env defaults (#3500). Mounts and the image
+        // environment therefore exist before the Coding Agent starts, and an
+        // already-running process never receives a retroactive change.
         let mut sandbox_prepared = match sandbox {
             Some(policy) => {
                 // Validate even an explicitly disabled policy: a payload that
@@ -1021,6 +1072,41 @@ impl SessionManager {
             }
             None => None,
         };
+        let image_environment = sandbox_prepared
+            .as_ref()
+            .map(nession_sandbox::PreparedSandbox::image_environment)
+            .unwrap_or_default();
+        let mut withheld: Vec<&str> = overlay.vars.iter().map(|(k, _)| k.as_str()).collect();
+        withheld.extend(adapter.env.iter().map(|(k, _)| k.as_str()));
+        let has_ps1 = overlay.vars.iter().any(|(key, _)| key == "PS1");
+
+        // Inherited Agent environment < bounded image defaults (and the
+        // image's resolved PATH prepend) < explicit Session/Sandbox ENV.
+        let mut session_env = base_session_environment(
+            std::env::vars().collect(),
+            &image_environment,
+            &overlay.vars,
+            &withheld,
+        );
+        if !has_ps1 {
+            session_env.push(("NESSON_PS1".to_string(), DEFAULT_PS1.to_string()));
+            session_env.push((
+                "PROMPT_COMMAND".to_string(),
+                r#"[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }"#.to_string(),
+            ));
+        }
+        session_env.extend(claude_env);
+        // The instance identity the binding path was built from. This is what
+        // lets a reader of the same tmux Session (including one in a restarted
+        // Agent) derive that path without the name, and what marks the Session
+        // as fenced at all (#2974).
+        session_env.push((INSTANCE_ID_ENV.to_string(), instance_id.clone()));
+        // This create's ownership fence, delivered by the `new-session` below.
+        // Profiles cannot set it: `NESSON_*` keys are reserved.
+        session_env.push((CREATE_TOKEN_ENV.to_string(), token.to_string()));
+        // Last, so the adapter's ZDOTDIR cannot be overwritten by the agent's
+        // inherited environment.
+        session_env.extend(adapter.env.iter().cloned());
         if let Some(prepared) = &sandbox_prepared {
             session_env.extend(prepared.env().iter().cloned());
         }
@@ -1585,6 +1671,99 @@ mod binding_create_tests {
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod image_environment_tests {
+    use super::*;
+    use nession_sandbox::ImageRuntimeEnvironment;
+
+    fn inherited() -> Vec<(String, String)> {
+        vec![
+            ("IMAGE_DEFAULT".to_string(), "agent".to_string()),
+            ("ONLY_INHERITED".to_string(), "kept".to_string()),
+            ("PATH".to_string(), "/agent/bin:/usr/bin".to_string()),
+        ]
+    }
+
+    fn image() -> ImageRuntimeEnvironment {
+        ImageRuntimeEnvironment {
+            defaults: vec![
+                ("IMAGE_DEFAULT".to_string(), "image".to_string()),
+                ("TOOL_DEFAULT".to_string(), "tool".to_string()),
+            ],
+            path_prepend: vec!["/opt/go/bin".to_string()],
+        }
+    }
+
+    fn values(environment: &[(String, String)], key: &str) -> Vec<String> {
+        environment
+            .iter()
+            .filter(|(name, _)| name == key)
+            .map(|(_, value)| value.clone())
+            .collect()
+    }
+
+    #[test]
+    fn image_defaults_sit_below_the_explicit_overlay_and_above_inherited_values() {
+        let environment = base_session_environment(
+            inherited(),
+            &image(),
+            &[("IMAGE_DEFAULT".to_string(), "session".to_string())],
+            &[],
+        );
+        assert_eq!(
+            values(&environment, "IMAGE_DEFAULT"),
+            vec!["session".to_string()],
+            "the explicit Session/Sandbox ENV wins over the image default"
+        );
+        assert_eq!(
+            values(&environment, "TOOL_DEFAULT"),
+            vec!["tool".to_string()],
+            "an image-only default reaches the process"
+        );
+        assert_eq!(
+            values(&environment, "ONLY_INHERITED"),
+            vec!["kept".to_string()],
+            "unrelated inherited environment is preserved"
+        );
+    }
+
+    #[test]
+    fn the_resolved_prepend_leads_path_and_an_explicit_path_wins() {
+        let environment = base_session_environment(inherited(), &image(), &[], &[]);
+        assert_eq!(
+            values(&environment, "PATH"),
+            vec!["/opt/go/bin:/agent/bin:/usr/bin".to_string()],
+            "the mounted executable directory is first and the inherited PATH follows"
+        );
+
+        let explicit = base_session_environment(
+            inherited(),
+            &image(),
+            &[("PATH".to_string(), "/session/bin".to_string())],
+            &[],
+        );
+        assert_eq!(
+            values(&explicit, "PATH"),
+            vec!["/session/bin".to_string()],
+            "an explicit Session PATH replaces the image prepend, not extends it"
+        );
+    }
+
+    #[test]
+    fn withheld_keys_do_not_leak_from_the_inherited_environment() {
+        let environment = base_session_environment(
+            inherited(),
+            &ImageRuntimeEnvironment::default(),
+            &[],
+            &["ONLY_INHERITED"],
+        );
+        assert!(
+            values(&environment, "ONLY_INHERITED").is_empty(),
+            "an overlay-managed key is not also inherited"
+        );
     }
 }
 

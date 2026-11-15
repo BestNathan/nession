@@ -9,11 +9,12 @@ SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:19090}"
 AGENT_ID="${AGENT_ID:-docker-agent}"
 AGENT_SERVER_URL="${AGENT_SERVER_URL:-}"
 AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
-# The token clients present to this agent's own P2P socket (#1013). Required in
-# standalone mode (AGENT_SERVER_URL empty), where no Server is there to mint a
-# credential per attach; the agent refuses to start without one, because an
-# empty store would refuse every connection. Unused when AGENT_SERVER_URL is
-# set, and the agent says so at startup rather than ignoring it silently.
+# The durable Agent Token clients present to this Agent's inbound P2P, Relay
+# and MCP surface (#3440). It belongs to the endpoint, not to one attach: the
+# Agent provisions one beside the config on first start, reuses it across
+# restarts, and accepts this environment variable as an explicit operator
+# override. The Server Token above is outbound-only and never authorizes a
+# client to this Agent.
 AGENT_TOKEN="${AGENT_TOKEN:-}"
 AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 # tmux socket. Left empty the agent uses /tmp/nession-<uid>/tmux.sock, which is
@@ -155,8 +156,10 @@ echo "=== nession-agent ==="
 echo "  Agent ID:    $AGENT_ID"
 echo "  Listen:      $AGENT_LISTEN"
 echo "  Server URL:  ${AGENT_SERVER_URL:-<standalone>}"
-if [ -z "${AGENT_SERVER_URL}" ]; then
-  echo "  P2P token:   ${AGENT_TOKEN:+set}"
+if [ -n "${AGENT_TOKEN}" ]; then
+  echo "  Agent token: operator-set"
+else
+  echo "  Agent token: provisioned beside the config"
 fi
 echo "  Terminal:    cols=$AGENT_TERMINAL_COLS"
 echo "  Config dir:  $NESSON_CONFIG_DIR"

@@ -9,6 +9,14 @@ on:
     workflows: ["Store / Agent Development Ingest"]
     branches: [main]
     types: [completed]
+  # Only the main-owned Store Ingest may request this after a bot-dispatched
+  # Worker suppressed the natural workflow_run chain.
+  workflow_dispatch:
+    inputs:
+      source_ingest_run_id:
+        description: "Original authenticated Qwen Store Ingest Run, bot/main only"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,7 +25,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: trusted-qwen-publisher-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  group: trusted-qwen-publisher-${{ github.event.workflow_run.id || inputs.source_ingest_run_id }}-${{ github.event.workflow_run.run_attempt || '1' }}
   cancel-in-progress: false
 
 jobs:
@@ -25,16 +33,22 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_run' &&
-      github.event.action == 'completed' &&
-      (github.event.workflow_run.event == 'workflow_run' ||
-       github.event.workflow_run.event == 'issue_comment') &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.run_attempt == 1 &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.path == '.github/workflows/store-agent-development-ingest.yml' &&
-      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+      (
+        (github.event_name == 'workflow_run' &&
+         github.event.action == 'completed' &&
+         (github.event.workflow_run.event == 'workflow_run' ||
+          github.event.workflow_run.event == 'issue_comment') &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.run_attempt == 1 &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.path == '.github/workflows/store-agent-development-ingest.yml' &&
+         github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+         github.event.workflow_run.head_repository.full_name == 'BestNathan/nession') ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.actor == 'github-actions[bot]' &&
+         github.run_attempt == 1 &&
+         inputs.source_ingest_run_id != '')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     outputs:
@@ -45,19 +59,29 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_INGEST_RUN: ${{ github.event.workflow_run.id }}
-          SOURCE_INGEST_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_INGEST_RUN: ${{ github.event.workflow_run.id || inputs.source_ingest_run_id }}
+          SOURCE_INGEST_SHA: ${{ github.event.workflow_run.head_sha || '' }}
         shell: bash
         run: |
           set -euo pipefail
           echo "qwen=false" >> "$GITHUB_OUTPUT"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_INGEST_RUN" \
-            > "$RUNNER_TEMP/ingest-run.json"
+          [[ "$SOURCE_INGEST_RUN" =~ ^[1-9][0-9]{0,14}$ ]]
+          for n in $(seq 1 30); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_INGEST_RUN" \
+              > "$RUNNER_TEMP/ingest-run.json"
+            [[ "$GITHUB_EVENT_NAME" != workflow_dispatch ]] && break
+            if jq -e '.status == "completed"' "$RUNNER_TEMP/ingest-run.json" >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
           jq -e --argjson id "$SOURCE_INGEST_RUN" --arg sha "$SOURCE_INGEST_SHA" '
-            .id == $id and .head_sha == $sha and
+            .id == $id and ($sha == "" or .head_sha == $sha) and
             .run_attempt == 1 and .status == "completed" and
             .conclusion == "success" and
-            (.event == "workflow_run" or .event == "issue_comment") and
+            (.event == "workflow_run" or .event == "issue_comment" or
+              ($sha == "" and .event == "workflow_dispatch" and
+               .actor.login == "github-actions[bot]")) and
             .path == ".github/workflows/store-agent-development-ingest.yml" and
             .head_branch == "main" and
             .repository.full_name == "BestNathan/nession" and
@@ -96,6 +120,9 @@ jobs:
     runs-on: ubuntu-24.04
     environment: cursor
     timeout-minutes: 22
+    outputs:
+      reviewer_issue: ${{ steps.publisher_proof.outputs.reviewer_issue }}
+      reviewer_action_id: ${{ steps.publisher_proof.outputs.reviewer_action_id }}
     steps:
       - name: Checkout exact main-owned Publisher script only
         uses: actions/checkout@v4
@@ -120,7 +147,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-          UPSTREAM: ${{ github.event.workflow_run.id }}
+          UPSTREAM: ${{ github.event.workflow_run.id || inputs.source_ingest_run_id }}
           RECEIPT_ARTIFACT: ${{ needs.detect.outputs.source_artifact }}
         shell: bash
         run: |
@@ -246,6 +273,14 @@ jobs:
             echo "- No model code or native plaintext was executed by this job."
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # A model-free job may only request Controller dispatch of the
+          # immutable Reviewer Outbox emitted by this authenticated Publisher.
+          reviewer_action="$(jq -r '.reviewer_action_id // ""' "$RUNNER_TEMP/qwen-publisher-result.json")"
+          if [[ "$reviewer_action" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "reviewer_action_id=$reviewer_action" >> "$GITHUB_OUTPUT"
+            echo "reviewer_issue=$(jq -er .issue "$RUNNER_TEMP/qwen-publisher-result.json")" >> "$GITHUB_OUTPUT"
+          fi
+
           # This proof is minted only by the previously trusted main-only
           # Publisher. A repair or replay must not forge a fresh Store writer
           # receipt. The original immutable artifact remains the authority.
@@ -269,3 +304,39 @@ jobs:
           path: ${{ runner.temp }}/qwen-publisher-result.json
           retention-days: 90
           if-no-files-found: error
+
+  # #3550: the Publisher job never gets an Actions writer. Only this separate,
+  # credential-free job asks the existing main-owned Controller to authenticate
+  # and CAS-dispatch the exact Reviewer Outbox. GitHub suppresses recursive
+  # workflow_run delivery for GITHUB_TOKEN-started workflows.
+  wake-reviewer:
+    needs: publish
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      needs.publish.result == 'success' &&
+      needs.publish.outputs.reviewer_action_id != '' &&
+      needs.publish.outputs.reviewer_issue != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Request existing signed Controller dispatch, no Store or model credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWER_ISSUE: ${{ needs.publish.outputs.reviewer_issue }}
+          REVIEWER_ACTION: ${{ needs.publish.outputs.reviewer_action_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 && "$REVIEWER_ISSUE" =~ ^[1-9][0-9]*$ ]]
+          [[ "$REVIEWER_ACTION" =~ ^[a-f0-9]{64}$ ]]
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/agent-controller-dispatch.yml/dispatches" \
+            -f ref=main \
+            -f "inputs[issue_number]=$REVIEWER_ISSUE" \
+            -f "inputs[action_id]=$REVIEWER_ACTION" \
+            -f "inputs[source_publisher_run_id]=$GITHUB_RUN_ID"

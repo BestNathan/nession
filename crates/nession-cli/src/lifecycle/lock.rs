@@ -14,7 +14,6 @@
 
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
 
 pub const LOCK_FILE_NAME: &str = "lifecycle.lock";
 
@@ -24,7 +23,11 @@ pub const LOCK_FILE_NAME: &str = "lifecycle.lock";
 /// child would try to take the same lock and deadlock against its own parent.
 pub const LOCK_HELD_BY_PARENT_ENV: &str = "NESSION_START_LOCK_HELD";
 
-/// An acquired exclusive lifecycle lock. Released by dropping it.
+/// An acquired exclusive lifecycle lock.
+///
+/// Dropping it releases the lock explicitly (see the [`Drop`] implementation),
+/// so a child that inherited the descriptor during the critical section cannot
+/// keep the advisory lock after this process is done.
 #[derive(Debug)]
 pub struct LifecycleLock {
     _file: File,
@@ -43,21 +46,52 @@ impl LifecycleLock {
     /// CLI startup uses this to recover an interrupted install only when no
     /// install is currently running; tests use it to prove exclusion.
     pub fn try_acquire() -> Result<Option<Self>> {
-        let file = open_lock_file()?;
+        Self::try_acquire_file(open_lock_file()?)
+    }
+
+    fn try_acquire_file(file: File) -> Result<Option<Self>> {
         match lock_exclusive_nonblocking(&file) {
             Ok(true) => Ok(Some(Self { _file: file })),
             Ok(false) => Ok(None),
             Err(error) => Err(error).context("failed to try the lifecycle lock"),
         }
     }
+
+    /// Try to acquire a lock rooted at an explicit directory.
+    ///
+    /// Test-only: the exclusion test must not mutate the process-global
+    /// runtime directory, because concurrent CLI tests also set it and a
+    /// foreign test's spawn can hold the lock this assertion is about.
+    #[cfg(test)]
+    fn try_acquire_in(dir: &std::path::Path) -> Result<Option<Self>> {
+        Self::try_acquire_file(open_lock_file_in(dir)?)
+    }
 }
 
-fn lock_path() -> Result<PathBuf> {
-    Ok(nession_common::paths::ensure_runtime_dir()?.join(LOCK_FILE_NAME))
+/// Release the advisory lock explicitly.
+///
+/// `flock` locks belong to the open file description, and `fork` shares that
+/// description with every child spawned while the guard is held. Closing this
+/// descriptor alone would leave the lock held by such a child until its own
+/// `exec` closes the inherited copy — so "released by dropping it" would be
+/// false for exactly the processes the lock serialises. `LOCK_UN` releases the
+/// description's lock immediately (#3628).
+#[cfg(unix)]
+impl Drop for LifecycleLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // SAFETY: `self._file` owns a valid descriptor for the duration of the call.
+        let _ = unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) };
+    }
 }
 
 fn open_lock_file() -> Result<File> {
-    let path = lock_path()?;
+    let dir = nession_common::paths::ensure_runtime_dir()?;
+    open_lock_file_in(&dir)
+}
+
+fn open_lock_file_in(dir: &std::path::Path) -> Result<File> {
+    let path = dir.join(LOCK_FILE_NAME);
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true);
     #[cfg(unix)]
@@ -153,18 +187,58 @@ mod tests {
 
     #[test]
     fn a_second_lifecycle_lock_cannot_be_acquired() {
-        let _runtime = IsolatedRuntime::new();
-        let held = LifecycleLock::try_acquire().unwrap().expect("first lock");
+        // Path-scoped rather than env-scoped: another CLI test may set the
+        // process-global runtime directory (or hold a lock in its own) while
+        // this test runs. The exclusion property is about one directory.
+        let runtime = tempfile::tempdir().unwrap();
+        let dir = runtime.path();
+        let held = LifecycleLock::try_acquire_in(dir)
+            .unwrap()
+            .expect("first lock");
 
         assert!(
-            LifecycleLock::try_acquire().unwrap().is_none(),
+            LifecycleLock::try_acquire_in(dir).unwrap().is_none(),
             "a concurrent lifecycle command must not share the lock"
         );
 
         drop(held);
         assert!(
-            LifecycleLock::try_acquire().unwrap().is_some(),
+            LifecycleLock::try_acquire_in(dir).unwrap().is_some(),
             "releasing the lock must let the next command proceed"
+        );
+    }
+
+    /// Dropping the guard must release the advisory lock even when another
+    /// descriptor still refers to the same open file description — the state a
+    /// `fork` creates for every child spawned while the guard is held.
+    ///
+    /// `flock` locks belong to the open file description, not to a single
+    /// descriptor, so closing only the guard's descriptor would leave the lock
+    /// held by the shared description (until that child's own `exec` closes its
+    /// inherited copy). `dup` reproduces that sharing deterministically
+    /// without forking the test process (#3628).
+    #[cfg(unix)]
+    #[test]
+    fn dropping_the_guard_releases_a_shared_open_file_description() {
+        use std::os::fd::AsRawFd;
+
+        let _runtime = IsolatedRuntime::new();
+        let held = LifecycleLock::try_acquire().unwrap().expect("first lock");
+        // SAFETY: `held._file` owns a valid descriptor for the duration of the call.
+        let shared = unsafe { libc::dup(held._file.as_raw_fd()) };
+        assert!(
+            shared >= 0,
+            "dup failed: {}",
+            std::io::Error::last_os_error()
+        );
+
+        drop(held);
+        let reacquired = LifecycleLock::try_acquire();
+        // SAFETY: `shared` is a descriptor this test owns and has not closed.
+        let _ = unsafe { libc::close(shared) };
+        assert!(
+            reacquired.unwrap().is_some(),
+            "dropping the guard must release the lock while a shared descriptor is open"
         );
     }
 

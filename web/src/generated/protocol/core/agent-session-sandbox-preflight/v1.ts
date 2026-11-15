@@ -27,7 +27,13 @@ export type ServerSessionSandboxPreflightPayload = { request_id: string, session
  * the role/target/digest shape to validate the composition request and
  * leaves cache preparation to Enter.
  */
-images: Array<SandboxImageSelection>, working_dir: string, };
+images: Array<SandboxImageSelection>, 
+/**
+ * The Project Existing Location the Server resolved for this Session on
+ * this Agent (#3407). Only the effective `project_location`/`auto`
+ * branch sends it; an explicit managed selection ignores it.
+ */
+project_location?: string | null, working_dir: string, };
 export type SandboxContextStatus = "inside" | "outside" | "unknown";
 export type SandboxPaneScope = { session_name: string, 
 /**
@@ -299,13 +305,31 @@ digest: string,
  */
 path: string, 
 /**
- * Scoped bearer grant for exactly this digest.
- */
-token: string, 
-/**
  * `/opt/<name>` for a toolchain image; absent otherwise.
  */
-target?: string | null, };
+target?: string | null, 
+/**
+ * Reachable OCI objects of a resolved Manifest; empty for a legacy
+ * digest-addressed EROFS grant.
+ */
+objects?: Array<ManagedImageObjectGrant>, };
+export type ManagedImageObjectGrant = { 
+/**
+ * `sha256:<64 lowercase hex>` of the exact object bytes.
+ */
+digest: string, 
+/**
+ * The standard OCI media type of those bytes.
+ */
+media_type: string, 
+/**
+ * Exact byte count, verified by both sides.
+ */
+size_bytes: number, 
+/**
+ * Authorized route, `/images/blobs/<digest>`.
+ */
+path: string, };
 export type ManagedImageRole = "base" | "workspace" | "toolchain";
 
 // ── Operations ──
@@ -317,7 +341,13 @@ export type ServerSessionSandboxPreflightCall = { request_id: string, session_na
  * the role/target/digest shape to validate the composition request and
  * leaves cache preparation to Enter.
  */
-images: Array<SandboxImageSelection>, working_dir: string, };
+images: Array<SandboxImageSelection>, 
+/**
+ * The Project Existing Location the Server resolved for this Session on
+ * this Agent (#3407). Only the effective `project_location`/`auto`
+ * branch sends it; an explicit managed selection ignores it.
+ */
+project_location?: string | null, working_dir: string, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

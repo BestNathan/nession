@@ -634,3 +634,36 @@ jobs:
         run: |
           rm -rf "$RUNNER_TEMP/qwen-native" "$RUNNER_TEMP/qwen-resume" \
             "$RUNNER_TEMP/qwen-transfer" "$RUNNER_TEMP/qwen-context"
+
+  # #3491: separate no-model job. A GITHUB_TOKEN-started Worker does not
+  # emit a downstream workflow_run, but explicit workflow_dispatch is allowed.
+  # Qwen and every model/container step retain read-only permissions. The
+  # Store owner independently waits for completed success and attests the
+  # original immutable Artifacts and Outbox before any Store App token.
+  wake-qwen-result:
+    needs: [claim, qwen-developer]
+    if: >-
+      always() &&
+      github.repository == 'BestNathan/nession' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'github-actions[bot]' &&
+      github.run_attempt == 1 &&
+      needs.claim.result == 'success' &&
+      needs.qwen-developer.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Request exact completed Qwen source Run ingestion, not a new model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_ACTOR" == 'github-actions[bot]' ]]
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/store-agent-development-ingest.yml/dispatches" \
+            -f ref=main -f "inputs[source_run_id]=$GITHUB_RUN_ID"

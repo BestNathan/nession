@@ -333,7 +333,7 @@ macro_rules! p2p_routes {
         pub(crate) fn p2p_scope(
             $msg_type: &str,
             $payload: &serde_json::Value,
-        ) -> Option<crate::p2p_credentials::WireScope> {
+        ) -> Option<crate::p2p_auth::P2pAccess> {
             match ($msg_type, crate::protocol::named_contract_version($payload)) {
                 $( ($wire, $version) => Some($scope), )*
                 _ => None,
@@ -385,6 +385,11 @@ pub(crate) use p2p_routes;
 pub fn served_descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
     let mut served = crate::connection::core_descriptors()?;
     served.extend(crate::server::websocket::p2p_descriptors()?);
+    // `client.auth` is answered by the connection's reader *before* the route
+    // table (#3440), so it has no arm for the p2p table to derive a descriptor
+    // from — but it is still a Protocol Unit this Agent serves, and the codegen
+    // catalog's join must see it.
+    served.push(descriptor("client.auth", "client.auth", 1)?);
     Ok(served)
 }
 

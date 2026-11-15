@@ -35,16 +35,17 @@ export function validateRunIndex(raw){
   // of the dispatched run's head: a workflow_dispatch reports the ref tip,
   // which is not the deployed source SHA (#2614).
   const deployedAcceptance = raw.mode === 'acceptance' && raw.deployment !== undefined;
-  // Manual Staging Cases have two independently pinned identities: trusted
+  // Manual merged Cases may have two independently pinned identities: trusted
   // workflow code on main and the target chosen by original GitHub dispatch
   // inputs. Ingestion verifies the original Jobs/Steps before writing source.
-  const manualStaging = raw.mode === 'acceptance' && !deployedAcceptance &&
+  const manualMerged = raw.mode === 'acceptance' && !deployedAcceptance &&
     source.event === 'workflow_dispatch' && source.head_branch === 'main' &&
     source.dispatch_binding !== undefined;
-  if (manualStaging) {
+  if (manualMerged) {
     const binding = source.dispatch_binding;
-    assert.equal(raw.stage, 'staging', 'manual Case dispatch must target Staging');
-    assert.equal(binding.stage, 'staging', 'manual Case stage disagrees');
+    assert.ok(['staging','post-merge'].includes(raw.stage),
+      'manual Case dispatch must target an eligible merged stage');
+    assert.equal(binding.stage, raw.stage, 'manual Case stage disagrees');
     assert.equal(binding.target_sha, raw.target_sha, 'manual Case target SHA disagrees');
     assert.equal(binding.issue, raw.issue, 'manual Case Issue disagrees');
     assert.equal(binding.criterion, raw.criterion, 'manual Case SC disagrees');
@@ -53,15 +54,31 @@ export function validateRunIndex(raw){
   } else if (source.dispatch_binding !== undefined) {
     assert.fail('manual Case dispatch binding is not applicable to this source');
   }
-  if (!deployedAcceptance && !manualStaging && raw.target_sha !== undefined) {
+  if (!deployedAcceptance && !manualMerged && raw.target_sha !== undefined) {
     assert.equal(raw.target_sha,target,'index source SHA disagrees');
   }
   if(raw.mode==='acceptance'){
     assert.ok(scalar(raw.issue));
     assert.match(raw.criterion,/^SC-\d{2,}$/);
-    assert.ok(['staging','post-merge'].includes(raw.stage));
-    if (!manualStaging) {
-      assert.equal(source.head_branch,raw.stage==='staging'?'staging':'main');
+    assert.ok(['pr','staging','post-merge'].includes(raw.stage));
+    if (raw.stage === 'pr') {
+      assert.equal(source.source_kind,'pr-smoke','PR Case index must originate from authenticated Smoke');
+      assert.equal(source.event,'pull_request','PR Case index requires PR source event');
+      assert.ok(!raw.deployment && !source.dispatch_binding,
+        'PR Case index cannot carry deployed/manual merged proof');
+      const binding=source.pr_binding;
+      assert.ok(binding && typeof binding==='object',
+        'PR Case index lacks authenticated PR/CI/Case binding');
+      assert.equal(binding.head_sha,raw.target_sha,'PR Case index source HEAD differs');
+      assert.equal(binding.issue,raw.issue,'PR Case index Issue differs');
+      for (const key of ['pr_number','case_job_id','artifact_id','quality_run_id','e2e_run_id'])
+        assert.ok(scalar(binding[key]),'PR Case index missing '+key);
+    } else {
+      assert.ok(source.source_kind!=='pr-smoke' && !source.pr_binding,
+        'merged Case index must not reuse a PR Smoke source');
+      if (!manualMerged) {
+        assert.equal(source.head_branch,raw.stage==='staging'?'staging':'main');
+      }
     }
     if (deployedAcceptance) {
       const deployment = raw.deployment;
@@ -107,6 +124,29 @@ export function selfTest(){
     issue:1499,criterion:'SC-02',stage:'staging',
     case_tree_sha:'b'.repeat(40),contract_sha256:'d'.repeat(64)};
   assert.equal(makeRunIndex(accept).mode,'acceptance');
+  // #3611: the canonical Run Store index accepts only independently certified
+  // exact-head PR Case Smoke source bindings; no implicit staging migration.
+  const prSource={...caseSource,event:'pull_request',
+    source_kind:'pr-smoke',head_branch:'fix/1474-case',
+    pr_binding:{
+      pr_number:72,case_job_id:707,artifact_id:808,
+      quality_run_id:909,e2e_run_id:910,
+      issue:1499,head_sha:caseSource.head_sha,
+    }};
+  const prIndex={...accept,stage:'pr',source:prSource};
+  assert.equal(makeRunIndex(prIndex).stage,'pr');
+  for(const invalid of [
+    {source:{...prSource,source_kind:'untrusted'}},
+    {source:{...prSource,event:'push'}},
+    {source:{...prSource,pr_binding:{...prSource.pr_binding,issue:123}}},
+    {source:{...prSource,pr_binding:{...prSource.pr_binding,quality_run_id:0}}},
+    {source:{...prSource,pr_binding:{...prSource.pr_binding,head_sha:'f'.repeat(40)}}},
+    {source:{...prSource,pr_binding:undefined}},
+    {source:{...prSource,dispatch_binding:{}}},
+    {target_sha:'f'.repeat(40)},
+  ]) assert.throws(()=>makeRunIndex({...prIndex,...invalid}));
+  assert.throws(()=>makeRunIndex({...accept,source:prSource}),
+    /merged Case index must not reuse/);
   assert.throws(()=>makeRunIndex({...accept,stage:'post-merge'}),/Expected values/);
   // #3316: trusted-main manual Staging source and product target are distinct
   // only when a GitHub Jobs/Steps input binding independently matches both.
@@ -119,6 +159,20 @@ export function selfTest(){
   };
   const boundIndex = { ...accept, source: boundSource };
   assert.equal(makeRunIndex(boundIndex).target_sha, accept.target_sha);
+  const postMergeBound = { ...boundIndex, stage: 'post-merge',
+    source: { ...boundSource, dispatch_binding: { ...boundSource.dispatch_binding,
+      stage: 'post-merge' } } };
+  assert.equal(makeRunIndex(postMergeBound).stage, 'post-merge');
+  assert.throws(() => makeRunIndex({ ...postMergeBound,
+    source: { ...postMergeBound.source, dispatch_binding: {
+      ...postMergeBound.source.dispatch_binding, stage: 'staging' } } }),
+  /manual Case stage disagrees/);
+  assert.throws(() => makeRunIndex({ ...postMergeBound, target_sha: 'f'.repeat(40) }),
+  /manual Case target SHA disagrees/);
+  // A source main-head Case remains strict without a dual-SHA binding.
+  const plainMain = { ...accept, stage: 'post-merge', source: {
+    ...caseSource, head_branch: 'main' } };
+  assert.equal(makeRunIndex(plainMain).stage, 'post-merge');
   for (const changed of [
     { target_sha: 'f'.repeat(40) },
     { issue: 1498 },

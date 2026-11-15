@@ -10,12 +10,12 @@ import {fileURLToPath} from 'node:url';
 import {readWorkerZipMember} from './worker-zip.mjs';
 import {canonicalJson} from '../harness/contract.mjs';
 import {createWorkerClaim} from './worker-claim.mjs';
-import {verifyDispatchTicket,createGitHubRunReader} from './github-dispatch.mjs';
+import {verifyDispatchTicket,createGitHubRunReader,
+  authenticatedTicketIssuer} from './github-dispatch.mjs';
 import {acknowledgeCommittedDispatch} from './dispatch-store.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
 
 const REPO='BestNathan/nession',PATH='.github/workflows/agent-develop.yml';
-const ISSUER='.github/workflows/agent-controller-dispatch.yml';
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('Agent Worker Run reconcile: '+s);}
@@ -79,12 +79,9 @@ export async function verifyWorkerClaimForAck({run,claim,key,reader}) {
     fail('downstream Run created outside signed dispatch window');
   const issuer=await reader.getRun(ticket.issuer_run_id);
   if(issuer?.id!==ticket.issuer_run_id||
-      issuer.path!==ISSUER||issuer.name!=='Agent / Controller Dispatch'||
-      !['workflow_dispatch','issue_comment'].includes(issuer.event)||issuer.head_branch!=='main'||
-      issuer.actor?.login!=='BestNathan'||issuer.run_attempt!==1||
-      issuer.repository?.full_name!==REPO||
-      issuer.head_repository?.full_name!==REPO||
-      issuer.head_sha!==run.head_sha)
+      !await authenticatedTicketIssuer(issuer,run.head_sha,reader,{
+        role:ticket.role,issue:ticket.issue,
+      }))
     fail('signed issuer does not match main-owned Controller Run');
   return Object.freeze({issue:ticket.issue,action_id:ticket.action_id,
     ticket_sha256:sha256(claim.inputs.dispatch_ticket),

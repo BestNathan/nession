@@ -39,6 +39,17 @@ export type WebSessionInfo = { session_id: string, agent_id: string, session_nam
  */
 foreground_command?: string | null, working_dir?: string | null, 
 /**
+ * Durable tmux Session instance identity (`@nession_instance_id`).
+ *
+ * A recyclable `agent_id:session_name` is not an incarnation: this id is
+ * replaced when the name is killed and recreated. Web clients key their
+ * name-addressed projections (Session metadata, #3424) on it, so a list
+ * push that reports a different id invalidates the previous incarnation's
+ * cached context. Absent only for a legacy Session that has not been asked
+ * yet, so an absent value is not an incarnation change.
+ */
+instance_id?: string | null, 
+/**
  * The focused Session's Server-owned Project membership (#3082).
  *
  * Absent for a Session with no Project. This is durable membership, not an

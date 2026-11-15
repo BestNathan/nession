@@ -129,6 +129,13 @@ export interface TerminalEmulator {
    * takes the alternate buffer (#2710 SC-09).
    */
   onBufferChange(listener: () => void): TerminalDisposable;
+  /**
+   * The application's interaction modes changed (mouse tracking or the
+   * alternate buffer). Upper-panel clearance selects its policy from this fact
+   * (#3492); a mode transition must not leave the previous policy's transform
+   * or row reservation behind.
+   */
+  onModesChange(listener: () => void): TerminalDisposable;
   onResize(listener: () => void): TerminalDisposable;
   onTitleChange(listener: (title: string) => void): TerminalDisposable;
 

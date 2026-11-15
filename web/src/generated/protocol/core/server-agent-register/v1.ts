@@ -21,7 +21,21 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type AgentRegisterPayload = { agent_id: string, hostname: string, ip_address: string, port: number, auth_token: string, metadata: AgentMetadata, 
+export type AgentRegisterPayload = { agent_id: string, hostname: string, ip_address: string, port: number, 
+/**
+ * The Server Token: this Agent's outbound control-plane credential.
+ */
+auth_token: string, 
+/**
+ * The durable inbound Agent Token (#3440).
+ *
+ * Sent only over the authenticated Server control connection. The Server
+ * caches it in memory under this registration's authoritative generation
+ * and hands it to an authenticated session attach for this Agent only.
+ * Older Agents omit it; such an Agent registers but has no P2P token until
+ * it re-registers with the field, and attach refuses P2P clearly.
+ */
+agent_token: string, metadata: AgentMetadata, 
 /**
  * Human-readable display name (set via agent config or Web UI rename).
  * When absent the UI falls back to hostname.
@@ -84,12 +98,32 @@ network_type: NetworkType,
  * `NetworkType::default_priority` when not explicitly set.
  */
 priority: number, };
-export type AgentMetadata = { tmux_version: string, os_version: string, nession_version: string, 
+export type AgentMetadata = { tmux_version: string, 
+/**
+ * Human-readable OS and CPU, for display only.
+ */
+os_version: string, nession_version: string, 
 /**
  * Docker image tag (short sha) baked in at build time.
  * "dev" when running from `cargo run`, "unknown" when not set.
  */
-image_tag: string, };
+image_tag: string, 
+/**
+ * OCI CPU architecture (`amd64`, `arm64`, ...) this Agent executes on.
+ *
+ * Empty means the Agent registered before this field existed; the Server
+ * then cannot select a platform-specific Manifest for it and keeps the
+ * legacy digest-addressed image path.
+ */
+architecture?: string, 
+/**
+ * OCI operating system (`linux`, `darwin`, ...) this Agent executes on.
+ */
+os?: string, 
+/**
+ * OCI CPU variant (`v8`, ...) when the Agent knows one.
+ */
+variant?: string | null, };
 export type ProtocolManifest = { 
 /**
  * Who offers this set — an agent id, a server, a runtime name.
@@ -127,7 +161,21 @@ export type ContractVersion = number;
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type AgentRegisterCall = { agent_id: string, hostname: string, ip_address: string, port: number, auth_token: string, metadata: AgentMetadata, 
+export type AgentRegisterCall = { agent_id: string, hostname: string, ip_address: string, port: number, 
+/**
+ * The Server Token: this Agent's outbound control-plane credential.
+ */
+auth_token: string, 
+/**
+ * The durable inbound Agent Token (#3440).
+ *
+ * Sent only over the authenticated Server control connection. The Server
+ * caches it in memory under this registration's authoritative generation
+ * and hands it to an authenticated session attach for this Agent only.
+ * Older Agents omit it; such an Agent registers but has no P2P token until
+ * it re-registers with the field, and attach refuses P2P clearly.
+ */
+agent_token: string, metadata: AgentMetadata, 
 /**
  * Human-readable display name (set via agent config or Web UI rename).
  * When absent the UI falls back to hostname.

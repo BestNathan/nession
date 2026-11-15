@@ -180,7 +180,6 @@ export function useAttachConfiguration({
   const { probe, probing } = useAgentProbe({
     agentId: isP2p ? agentId : null,
     addresses: isP2p ? candidates : [],
-    credential: attachInfo?.connection_token,
     reprobeKey: refreshNonce,
   });
 

@@ -165,16 +165,25 @@ describe('Sandbox Filesystem editor', () => {
     );
   });
 
-  it('declares an auto Workspace only under an image RootFS', async () => {
+  it('declares an auto or Project Location Workspace only under an image RootFS', async () => {
     render(<Harness />);
     await screen.findByText(/requires an image RootFS/);
     expect(screen.getByTestId('sandbox-workspace-auto')).toBeDisabled();
+    expect(screen.getByTestId('sandbox-workspace-project')).toBeDisabled();
 
     await chooseRootfs([image('base', DIGEST, 'base-runtime')]);
     await userEvent.click(screen.getByTestId('sandbox-workspace-auto'));
     expect(screen.getByTestId('sandbox-filesystem-preview-workspace')).toHaveTextContent(
       'Auto by Session name',
     );
+
+    await userEvent.click(screen.getByTestId('sandbox-workspace-project'));
+    expect(screen.getByTestId('sandbox-filesystem-preview-workspace')).toHaveTextContent(
+      'Project Location',
+    );
+    expect(screen.getByTestId('sandbox-workspace-project-selected')).toBeVisible();
+    await userEvent.click(screen.getByTestId('sandbox-workspace-project-clear'));
+    expect(screen.queryByTestId('sandbox-workspace-project-selected')).not.toBeInTheDocument();
   });
 
   it('blocks Enter-era access editing when an image root is declared', async () => {

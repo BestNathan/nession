@@ -22,6 +22,13 @@ use nession_mcp::error::ToolError;
 use nession_mcp::http::{self, Sniffed};
 use nession_mcp::service::McpService;
 use nession_mcp::ServiceConfig;
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+};
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
+    ClientSessionEnvBindingSetPayload,
+};
 use rmcp::model::{CallToolRequestParams, ContentBlock, ProtocolVersion};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::StreamableHttpClientTransport;
@@ -57,6 +64,83 @@ impl ClusterBackend for Recorder {
         Ok(json!({
             "agents": [{ "agent_id": "agent-1", "status": "online" }]
         }))
+    }
+
+    async fn env_list(&self) -> Result<Value, ToolError> {
+        self.push("cluster.env_list");
+        Ok(json!({ "files": [] }))
+    }
+
+    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+        self.push(format!(
+            "cluster.env_get:{}:{}",
+            payload.source.as_str(),
+            payload.name
+        ));
+        Ok(json!({ "success": true, "content": "PUBLIC=1\n", "in_use_by": [] }))
+    }
+
+    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+        self.push(format!(
+            "cluster.env_write:{}:{}",
+            payload.source.as_str(),
+            payload.name
+        ));
+        Ok(json!({ "success": true, "exists": false, "warnings": [] }))
+    }
+
+    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+        self.push(format!(
+            "cluster.env_delete:{}:{}",
+            payload.source.as_str(),
+            payload.name
+        ));
+        Ok(json!({ "success": true }))
+    }
+
+    async fn session_env_binding_get(
+        &self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<Value, ToolError> {
+        self.push(format!(
+            "cluster.session_env_binding_get:{}",
+            payload.session_id
+        ));
+        Ok(json!({
+            "success": true,
+            "binding": {
+                "session_id": payload.session_id,
+                "desired_revision": 3,
+                "desired_profiles": [],
+                "observed": null
+            },
+            "warnings": []
+        }))
+    }
+
+    async fn session_env_binding_set(
+        &self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<Value, ToolError> {
+        self.push(format!(
+            "cluster.session_env_binding_set:{}:{}:{}",
+            payload.session_id,
+            payload.expected_revision.unwrap_or_default(),
+            payload.profiles.len()
+        ));
+        Ok(json!({ "success": true, "binding": null, "warnings": [] }))
+    }
+
+    async fn session_env_binding_reapply(
+        &self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<Value, ToolError> {
+        self.push(format!(
+            "cluster.session_env_binding_reapply:{}:{}",
+            payload.session_id,
+            payload.expected_revision.unwrap_or_default()
+        ));
+        Ok(json!({ "success": true, "binding": null, "warnings": [] }))
     }
 }
 
@@ -366,7 +450,7 @@ async fn modern_discover_reports_both_versions_and_the_server_identity() {
 }
 
 #[tokio::test]
-async fn modern_stateless_requests_need_no_initialize_and_advertise_four_tools() {
+async fn modern_stateless_requests_need_no_initialize_and_advertise_tools() {
     let harness = start(Arc::default()).await;
     let response = modern(
         harness.addr,
@@ -390,6 +474,13 @@ async fn modern_stateless_requests_need_no_initialize_and_advertise_four_tools()
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_env_list",
+            "nession_server_env_get",
+            "nession_server_env_write",
+            "nession_server_env_delete",
+            "nession_server_session_env_binding_get",
+            "nession_server_session_env_binding_set",
+            "nession_server_session_env_binding_reapply",
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",
@@ -416,6 +507,74 @@ async fn modern_tool_calls_reach_the_semantic_backend() {
     assert_eq!(result["isError"], false);
     assert_eq!(text_of(result)["agents"][0]["agent_id"], "agent-1");
 
+    let env_list = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params("nession_server_env_list", json!({})),
+        Some("nession_server_env_list"),
+    )
+    .await;
+    assert_eq!(env_list.status, 200, "{}", env_list.body);
+    assert_eq!(env_list.json()["result"]["isError"], false);
+
+    let binding_get = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_server_session_env_binding_get",
+            json!({ "session_id": "agent-1:work" }),
+        ),
+        Some("nession_server_session_env_binding_get"),
+    )
+    .await;
+    assert_eq!(binding_get.status, 200, "{}", binding_get.body);
+    assert_eq!(binding_get.json()["result"]["isError"], false);
+
+    let binding_set = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_server_session_env_binding_set",
+            json!({
+                "session_id": "agent-1:work",
+                "expected_revision": 3,
+                "profiles": [{ "name": "common.env" }]
+            }),
+        ),
+        Some("nession_server_session_env_binding_set"),
+    )
+    .await;
+    assert_eq!(binding_set.status, 200, "{}", binding_set.body);
+    assert_eq!(binding_set.json()["result"]["isError"], false);
+
+    let binding_reapply = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_server_session_env_binding_reapply",
+            json!({ "session_id": "agent-1:work", "expected_revision": 4 }),
+        ),
+        Some("nession_server_session_env_binding_reapply"),
+    )
+    .await;
+    assert_eq!(binding_reapply.status, 200, "{}", binding_reapply.body);
+    assert_eq!(binding_reapply.json()["result"]["isError"], false);
+
+    // A version-aware mutation without its required revision is a tool-level
+    // argument error and never reaches the backend.
+    let missing_revision = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_server_session_env_binding_set",
+            json!({ "session_id": "agent-1:work", "profiles": [] }),
+        ),
+        Some("nession_server_session_env_binding_set"),
+    )
+    .await;
+    assert_eq!(missing_revision.status, 200, "{}", missing_revision.body);
+    assert_eq!(missing_revision.json()["result"]["isError"], true);
+
     let created = modern(
         harness.addr,
         "tools/call",
@@ -433,6 +592,10 @@ async fn modern_tool_calls_reach_the_semantic_backend() {
         harness.recorder.calls(),
         vec![
             "cluster.list_agents".to_string(),
+            "cluster.env_list".to_string(),
+            "cluster.session_env_binding_get:agent-1:work".to_string(),
+            "cluster.session_env_binding_set:agent-1:work:3:1".to_string(),
+            "cluster.session_env_binding_reapply:agent-1:work:4".to_string(),
             "node.create:agent-1:work:Some(\"/tmp\")".to_string(),
         ]
     );
@@ -609,7 +772,7 @@ async fn the_legacy_initialize_lifecycle_still_works() {
             .as_array()
             .expect("tools")
             .len(),
-        4
+        11
     );
 
     let call = request(
@@ -975,7 +1138,7 @@ async fn the_official_client_negotiates_modern_protocol_without_initialize() {
     assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
 
     let tools = running.list_tools(None).await.expect("tools/list");
-    assert_eq!(tools.tools.len(), 4);
+    assert_eq!(tools.tools.len(), 11);
 
     let result = running
         .call_tool(CallToolRequestParams::new("nession_server_list_agents"))
@@ -1010,7 +1173,7 @@ async fn the_official_client_keeps_the_legacy_lifecycle() {
     );
 
     let tools = running.list_tools(None).await.expect("tools/list");
-    assert_eq!(tools.tools.len(), 4);
+    assert_eq!(tools.tools.len(), 11);
     let result = running
         .call_tool(
             CallToolRequestParams::new("nession_agent_create_session").with_arguments(

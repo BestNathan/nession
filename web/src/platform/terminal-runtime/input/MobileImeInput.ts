@@ -3,6 +3,10 @@ import type {
   TerminalCellSize,
   TerminalDisposable,
 } from '../emulator';
+import {
+  KEYBOARD_AVOIDANCE_TARGET_ATTRIBUTE,
+  KEYBOARD_AVOIDANCE_TARGET_MOVED_EVENT,
+} from '@/platform/viewport/appViewport';
 
 /** Max finger movement (px) still counted as a tap rather than a scroll. */
 const TAP_MOVE_THRESHOLD = 10;
@@ -101,6 +105,9 @@ export class MobileImeInput {
     ta.setAttribute('autocomplete', 'off');
     ta.setAttribute('spellcheck', 'false');
     ta.setAttribute('aria-label', 'Terminal input');
+    // The Experience scroll owner may reveal this caret target while a soft
+    // keyboard is open (#3523); the attribute makes that contract observable.
+    ta.setAttribute(KEYBOARD_AVOIDANCE_TARGET_ATTRIBUTE, '');
     ta.className = 'nession-mobile-ime-input';
     ta.style.cssText = [
       'position:absolute',
@@ -281,6 +288,14 @@ export class MobileImeInput {
       this.element.style.top = `${cursorY * cell.height}px`;
       this.element.style.width = `${cell.width}px`;
       this.element.style.height = `${cell.height}px`;
+      // The caret moved while the user is typing. Announce the target instead
+      // of scrolling anything here: keyboard avoidance belongs to the active
+      // Experience layer, and a terminal-local scroll would compete with it.
+      if (document.activeElement === this.element && typeof CustomEvent === 'function') {
+        this.element.dispatchEvent(new CustomEvent(KEYBOARD_AVOIDANCE_TARGET_MOVED_EVENT, {
+          bubbles: true,
+        }));
+      }
     } catch {
       // Terminal not fully initialised yet — the next onRender will retry.
     }

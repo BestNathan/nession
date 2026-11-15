@@ -27,9 +27,13 @@ function renderHosting(scenario = '') {
 describe('GithubHostingView', () => {
   it('resolves the repository identity and renders the Issues list', async () => {
     renderHosting();
-    expect(await screen.findByTestId('github-repository')).toHaveTextContent(
-      'GitHub · github.com/fixture-owner/nession',
-    );
+    // The header exists on the first render with text "GitHub"; wait for
+    // the async repository identity, not merely for the element to mount.
+    await waitFor(() => {
+      expect(screen.getByTestId('github-repository')).toHaveTextContent(
+        'GitHub · github.com/fixture-owner/nession',
+      );
+    });
     expect(await screen.findByTestId('github-issue-list')).toBeInTheDocument();
     expect(await screen.findByTestId('github-issue-row-1290')).toBeInTheDocument();
   });
@@ -129,6 +133,14 @@ describe('GithubHostingView', () => {
     expect(detail).toHaveTextContent('fixture-owner:feature/git-github');
     expect(detail).toHaveTextContent('→ main');
     expect(screen.getByTestId('github-pr-detail-2229')).toHaveTextContent('read-only');
+  });
+
+  it('renders an unresolved current-branch relation without claiming absence', async () => {
+    renderHosting('relation-unknown');
+    await userEvent.click(await screen.findByTestId('github-tab-pull-requests'));
+    expect(await screen.findByTestId('github-pr-relation')).toHaveTextContent(
+      'Current branch · relation unavailable',
+    );
   });
 
   it('scopes Actions to repository or current branch and preserves run states', async () => {

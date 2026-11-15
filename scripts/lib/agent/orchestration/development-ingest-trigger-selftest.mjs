@@ -2,7 +2,7 @@
 // #2010 exact owner-only independent Ingest replay. Worker code, Issue
 // comments, untrusted Action inputs and forked runs cannot mint receipts.
 import assert from 'node:assert/strict';
-import {resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
+import {assertQwenBotWakeSource,resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
   NATIVE_RECOVERY_RUN,NATIVE_RECOVERY_SHA,NATIVE_RECOVERY_INGEST_COMMAND}
   from './development-ingest.mjs';
 const runId=39288961865;
@@ -122,6 +122,25 @@ assert.throws(()=>resolveTrustedIngestSource({environment:qwenEnv,
   event:{...qwenV2Issue,comment:{...qwenV2Issue.comment,
     body:'/nession ingest-qwen issue=3002 worker_run=42488022265'}}}),
   /exact owner\/main/);
+const recoveredRepair={...qwenV2Issue,
+  issue:{number:3433,state:'open'},
+  comment:{...qwenV2Issue.comment,
+    body:'/nession ingest-qwen issue=3433 worker_run=43677482758'}};
+assert.deepEqual(resolveTrustedIngestSource({
+  environment:qwenEnv,event:recoveredRepair}),
+  {run_id:43677482758,source:null,qwen_recovery:true,
+    issue:3433,attempt:1});
+for(const bad of [
+  {event:{...recoveredRepair,issue:{number:3434,state:'open'}}},
+  {event:{...recoveredRepair,comment:{...recoveredRepair.comment,
+    body:'/nession ingest-qwen issue=3433 worker_run=43677482759'}}},
+  {event:{...recoveredRepair,comment:{...recoveredRepair.comment,
+    body:'/nession ingest-qwen issue=3433 worker_run=43677482758 '}}},
+  {event:{...recoveredRepair,comment:{...recoveredRepair.comment,
+    user:{login:'other'}}}},
+  {environment:{...qwenEnv,GITHUB_ACTOR:'other'}},
+])assert.throws(()=>resolveTrustedIngestSource({
+  environment:qwenEnv,event:recoveredRepair,...bad}),/owner|exact|trusted|Ingest/);
 for(const bad of [
   {environment:{...qwenEnv,GITHUB_ACTOR:'fork'}},
   {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
@@ -143,4 +162,31 @@ for(const bad of [
   {event:{...qwenRepair5,issue:{number:2951}}},
 ])assert.throws(()=>resolveTrustedIngestSource({...{
   environment:qwenEnv,event:qwenEvent},...bad}));
+// #3589: the bot/main Worker wake is only a Run locator. A Developer
+// Implement uses the main source commit, but a signed Repair consumes the
+// separately published PR SHA. The complete Store and original signed ticket
+// remain authoritative in ingestQwenVerifiedCandidate.
+const workflowSha='a'.repeat(40);
+const reviewHead='b'.repeat(40);
+const wakeRun={head_sha:workflowSha};
+const qwenImplement={inputs:{agent_id:'dev-qwen-01',task:'implement',
+  input_sha:workflowSha}};
+const qwenRepair={inputs:{agent_id:'dev-qwen-01',task:'repair',
+  input_sha:reviewHead}};
+assert.deepEqual(assertQwenBotWakeSource({run:wakeRun,claim:qwenImplement}),
+  {task:'implement',source_sha:workflowSha});
+assert.deepEqual(assertQwenBotWakeSource({run:wakeRun,claim:qwenRepair}),
+  {task:'repair',source_sha:reviewHead});
+for(const claim of [
+  {...qwenImplement,inputs:{...qwenImplement.inputs,input_sha:reviewHead}},
+  {...qwenRepair,inputs:{...qwenRepair.inputs,input_sha:workflowSha}},
+  {...qwenRepair,inputs:{...qwenRepair.inputs,agent_id:'dev-cursor-01'}},
+  {...qwenRepair,inputs:{...qwenRepair.inputs,task:'review'}},
+  {...qwenRepair,inputs:{...qwenRepair.inputs,input_sha:'invalid'}},
+  {...qwenRepair,inputs:{...qwenRepair.inputs,input_sha:null}},
+])assert.throws(()=>assertQwenBotWakeSource({run:wakeRun,claim}),
+  /signed exact-SHA Qwen/);
+assert.throws(()=>assertQwenBotWakeSource({
+  run:{head_sha:'invalid'},claim:qwenRepair}),/signed exact-SHA Qwen/);
+
 console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment, manual Qwen Worker Run and event denial passed');

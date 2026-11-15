@@ -295,6 +295,114 @@ async fn test_close_frame_triggers_disconnect() {
     let (_ws2, _) = connect_async(&url).await.unwrap();
 }
 
+/// #3439 W2: an upgraded Server socket that never authenticates closes at its
+/// absolute deadline, even while it keeps sending control frames. The pre-fix
+/// loop had no first-authentication deadline at all.
+#[tokio::test]
+async fn a_server_socket_that_never_authenticates_closes_at_the_absolute_auth_deadline(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_auth_policy("test_ws_auth_deadline.db", 64, 1).await?;
+    let (ws, _) = connect_async(format!("ws://{addr}")).await?;
+    let (mut sink, mut stream) = ws.split();
+
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader_closed = std::sync::Arc::clone(&closed);
+    let reader = tokio::spawn(async move {
+        while let Some(frame) = stream.next().await {
+            if !matches!(frame, Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) {
+                reader_closed.store(true, Ordering::SeqCst);
+                return;
+            }
+        }
+        reader_closed.store(true, Ordering::SeqCst);
+    });
+
+    let started = tokio::time::Instant::now();
+    let mut writer_saw_close = false;
+    while started.elapsed() < std::time::Duration::from_secs(3) {
+        if closed.load(Ordering::SeqCst) {
+            break;
+        }
+        if sink
+            .send(tokio_tungstenite::tungstenite::Message::Ping(vec![1]))
+            .await
+            .is_err()
+        {
+            writer_saw_close = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let saw_close = writer_saw_close || closed.load(Ordering::SeqCst);
+    reader.abort();
+    assert!(
+        saw_close,
+        "an unauthenticated Server socket must close at its absolute auth deadline despite frames"
+    );
+    Ok(())
+}
+
+/// #3439 W2: the upgraded-pending-auth budget is separate from the pre-upgrade
+/// handshake budget. While one unauthenticated upgrade holds the only slot, the
+/// next upgrade is refused `503`; a successful `server.auth` returns the slot
+/// while the connection stays open.
+#[tokio::test]
+async fn the_server_pending_auth_budget_refuses_an_upgrade_and_authentication_returns_it(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_auth_policy("test_ws_auth_budget.db", 1, 30).await?;
+
+    let (mut first, _) = connect_async(format!("ws://{addr}")).await?;
+    match connect_async(format!("ws://{addr}")).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(
+                response.status(),
+                503,
+                "an upgrade beyond the pending-auth budget is refused before it is answered"
+            );
+        }
+        other => panic!("expected a 503 for an exhausted pending-auth budget, got {other:?}"),
+    }
+
+    send_json(&mut first, auth_request("auth-budget")).await?;
+    let reply = next_reply(
+        &mut first,
+        &["auth-budget"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(
+        payload_of(&reply, "server.auth")?["status"],
+        "success",
+        "the first connection authenticates"
+    );
+
+    let mut admitted = false;
+    for _ in 0..40 {
+        match connect_async(format!("ws://{addr}")).await {
+            Ok((mut ws, _)) => {
+                send_json(&mut ws, auth_request("auth-admitted")).await?;
+                let reply = next_reply(
+                    &mut ws,
+                    &["auth-admitted"],
+                    std::time::Duration::from_secs(5),
+                )
+                .await?;
+                assert_eq!(payload_of(&reply, "server.auth")?["status"], "success");
+                admitted = true;
+                break;
+            }
+            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
+        }
+    }
+    assert!(
+        admitted,
+        "a successful authentication must return the pending-auth slot without closing"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_agent_registration_with_connect_url() {
     let (_db_dir, db_path) = test_db("test_ws_connect_url.db").unwrap();
@@ -505,6 +613,21 @@ async fn start_ownership_server_with_queries(
     Ok((db_dir, addr, handle))
 }
 
+/// A server with the upgraded-WebSocket pending-auth policy set by the test
+/// (`#3439` W2).
+async fn start_ownership_server_with_auth_policy(
+    db_name: &str,
+    max_pending_ws_auth: usize,
+    ws_auth_timeout_secs: u64,
+) -> anyhow::Result<OwnershipServer> {
+    let (db_dir, db_path) = test_db(db_name)?;
+    let mut config = ownership_server_config(db_path);
+    config.max_pending_ws_auth = max_pending_ws_auth;
+    config.ws_auth_timeout_secs = ws_auth_timeout_secs;
+    let (addr, handle) = start_test_server(config).await?;
+    Ok((db_dir, addr, handle))
+}
+
 /// What these tests run their server with: no TLS, a known token, the default
 /// heartbeat cadence, and the production policy numbers unless a test says
 /// otherwise.
@@ -583,9 +706,19 @@ fn register_payload_on_port(agent_id: &str, port: u16) -> serde_json::Value {
         "ip_address": "127.0.0.1",
         "port": port,
         "auth_token": "test_token",
+        // The durable Agent Token this Agent's own listener would verify
+        // (#3440). The Server caches it and presents it as the relay's first
+        // `client.auth`.
+        "agent_token": agent_token_for(agent_id),
         "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
         "metadata": {"tmux_version": "3.3a", "os_version": "Linux", "nession_version": "0.1.0"},
     })
+}
+
+/// The Agent Token the test Agent registers and therefore the one the relay
+/// must present on its dial.
+fn agent_token_for(agent_id: &str) -> String {
+    format!("agent-token-{agent_id}")
 }
 
 /// Connect as an agent and register `agent_id` on the connection, returning it
@@ -866,6 +999,248 @@ async fn a_superseded_connection_cannot_restore_a_session() -> anyhow::Result<()
     Ok(())
 }
 
+/// A frame the Server cannot decode: the read loop's own error path, rather than
+/// a handler refusal or a close frame.
+fn malformed_text_frame() -> tokio_tungstenite::tungstenite::Message {
+    tokio_tungstenite::tungstenite::Message::Text("{not-json".to_string())
+}
+
+/// An Agent connection that dies on a malformed frame is torn down like one
+/// that closes normally (#3547).
+///
+/// The reader's error used to return through `handle_ws_stream` and skip the
+/// teardown: the broker kept its sender, so the writer task — and with it the
+/// peer's socket — stayed alive even though nothing would ever read the agent
+/// again. The peer observing its own connection end is the proof that the
+/// writer was settled, and the brokered command is the proof that the
+/// registration was released rather than left stale.
+#[tokio::test]
+async fn an_agent_that_sends_a_malformed_frame_is_torn_down_and_released() -> anyhow::Result<()> {
+    // A short grace makes "bounded" observable without waiting out the
+    // production stall number; the cleanup itself is the same.
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_grace("test_ws_malformed_agent.db", 1).await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    send_frame(&mut agent, malformed_text_frame()).await?;
+
+    assert!(
+        ends_within(&mut agent, std::time::Duration::from_secs(5)).await,
+        "an undecodable frame must end the connection, not only its reader"
+    );
+
+    let mut client = connect_client(addr).await?;
+    send_json(
+        &mut client,
+        capture_preview_request("after-malformed", "a1:dev"),
+    )
+    .await?;
+    let reply = next_reply(
+        &mut client,
+        &["after-malformed"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    let payload = payload_of(&reply, "server.session.capture-preview")?;
+    assert_eq!(
+        payload["error"], "Agent disconnected",
+        "a released registration must fail the command now rather than retaining it: {reply}"
+    );
+    Ok(())
+}
+
+/// A superseded connection's abnormal exit must not take the agent its
+/// replacement is serving (#960, #3547).
+///
+/// The teardown now runs for the error exit too, so this is the generation
+/// fence in that path: the release is owner-checked, and the cached Agent Token
+/// belongs to the current generation, so the attach the new generation serves
+/// still hands it out.
+#[tokio::test]
+async fn a_superseded_agents_abnormal_exit_leaves_the_new_generation_authoritative(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_grace("test_ws_malformed_superseded.db", 1).await?;
+
+    let mut old = connect_agent(addr, "a1").await?;
+    let mut new = connect_agent(addr, "a1").await?;
+
+    // The current generation publishes the session the attach below resolves.
+    send_json(&mut new, agent_session_update("a1", "dev", "active")).await?;
+    answered_barrier(&mut new, "barrier-1").await?;
+
+    send_frame(&mut old, malformed_text_frame()).await?;
+    assert!(
+        ends_within(&mut old, std::time::Duration::from_secs(5)).await,
+        "the malformed frame must end the superseded connection"
+    );
+
+    // The new generation still owns the agent's control channel.
+    let mut client = connect_client(addr).await?;
+    let reply = command_round_trip(&mut client, &mut new, None, "a1:dev").await?;
+    assert_eq!(
+        reply["echo"],
+        serde_json::json!("the-owner-answered"),
+        "the replacement must still be the connection the commands reach"
+    );
+
+    // And the token its registration vouched for was not cleared by the older
+    // generation's cleanup.
+    send_json(
+        &mut client,
+        session_attach_request("attach-1", "a1:dev", "p2p"),
+    )
+    .await?;
+    let attach = next_reply(
+        &mut client,
+        &["attach-1"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    let attach = payload_of(&attach, "server.session.attach")?;
+    assert_eq!(
+        attach["status"], "success",
+        "the current generation's attach must not be refused: {attach}"
+    );
+    assert_eq!(
+        attach["agent_token"], "agent-token-a1",
+        "the superseded connection's cleanup must not clear the current generation's token"
+    );
+    Ok(())
+}
+
+/// An attached client's abnormal exit retires only that physical attachment
+/// (#3547).
+///
+/// The malformed frame runs the same teardown as a normal close: the victim's
+/// connection ends within the bounded grace, a sibling attachment to the same
+/// Session keeps being served, and a fresh connection can attach again.
+#[tokio::test]
+async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attachment(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_grace("test_ws_malformed_client.db", 1).await?;
+
+    let mut agent = connect_agent(addr, "a1").await?;
+    send_json(&mut agent, agent_session_update("a1", "dev", "active")).await?;
+    answered_barrier(&mut agent, "barrier-1").await?;
+
+    // Relay-mode attach registers the client without entering the relay, so the
+    // malformed frame is decoded by the connection's own read loop.
+    let mut victim = connect_client(addr).await?;
+    send_json(
+        &mut victim,
+        session_attach_request("victim-attach", "a1:dev", "relay"),
+    )
+    .await?;
+    let reply = next_reply(
+        &mut victim,
+        &["victim-attach"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(
+        payload_of(&reply, "server.session.attach")?["status"],
+        "success"
+    );
+
+    let mut sibling = connect_client(addr).await?;
+    send_json(
+        &mut sibling,
+        session_attach_request("sibling-attach", "a1:dev", "relay"),
+    )
+    .await?;
+    let reply = next_reply(
+        &mut sibling,
+        &["sibling-attach"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(
+        payload_of(&reply, "server.session.attach")?["status"],
+        "success"
+    );
+
+    send_frame(&mut victim, malformed_text_frame()).await?;
+    assert!(
+        ends_within(&mut victim, std::time::Duration::from_secs(5)).await,
+        "the malformed frame must end the client's physical connection"
+    );
+
+    anyhow::ensure!(
+        listed_session_ids(&mut sibling)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "the sibling attachment to the same Session must keep being served"
+    );
+
+    let mut reconnect = connect_client(addr).await?;
+    send_json(
+        &mut reconnect,
+        session_attach_request("reconnect-attach", "a1:dev", "relay"),
+    )
+    .await?;
+    let reply = next_reply(
+        &mut reconnect,
+        &["reconnect-attach"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(
+        payload_of(&reply, "server.session.attach")?["status"],
+        "success",
+        "a reconnect must be able to reattach to the same Session"
+    );
+    Ok(())
+}
+
+/// An attached client whose Relay dial fails is torn down like one that closes
+/// normally (#3547).
+///
+/// `RelayEnd` distinguishes ordinary endings, and those decisions are unchanged;
+/// this is the other exit — the relay's own `Err`, which used to return past the
+/// teardown as well. Nothing can answer the client once its relay never opened,
+/// so the physical connection must end and the Session must remain served.
+#[tokio::test]
+async fn an_attached_client_whose_relay_cannot_dial_is_torn_down() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_grace("test_ws_relay_error_teardown.db", 1).await?;
+
+    // An agent advertising a loopback port with nothing listening: the relay's
+    // dial is refused, which is the Relay-error exit of the read loop.
+    let mut agent = connect_agent_on_port(addr, "a1", 1).await?;
+    send_json(&mut agent, agent_session_update("a1", "dev", "active")).await?;
+    answered_barrier(&mut agent, "barrier-1").await?;
+
+    let mut client = connect_client(addr).await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "begin-error",
+            "timestamp": current_timestamp(),
+            "payload": { "session_id": "a1:dev", "cols": 80, "rows": 24 },
+        }),
+    )
+    .await?;
+
+    assert!(
+        ends_within(&mut client, std::time::Duration::from_secs(5)).await,
+        "a failed relay dial must end the client's physical connection"
+    );
+
+    // The Session outlives the failed attachment: a fresh connection still sees
+    // it, so the failure retired only that one physical connection.
+    let mut reconnect = connect_client(addr).await?;
+    anyhow::ensure!(
+        listed_session_ids(&mut reconnect)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "the Session must still be served after a client's failed relay"
+    );
+    Ok(())
+}
+
 /// One `server.agent.session-update`, as the agent's watcher sends it.
 fn agent_session_update(agent_id: &str, session_name: &str, status: &str) -> serde_json::Value {
     serde_json::json!({
@@ -966,6 +1341,16 @@ fn capture_preview_request(id: &str, session_id: &str) -> serde_json::Value {
         "id": id,
         "timestamp": current_timestamp(),
         "payload": { "session_id": session_id, "lines": 10 },
+    })
+}
+
+/// A `server.session.attach` request in the requested mode (`p2p` or `relay`).
+fn session_attach_request(id: &str, session_id: &str, preferred_mode: &str) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": "server.session.attach",
+        "id": id,
+        "timestamp": current_timestamp(),
+        "payload": { "session_id": session_id, "preferred_mode": preferred_mode },
     })
 }
 
@@ -2710,37 +3095,6 @@ async fn start_streaming_mock_agent_endpoint(
 }
 
 /// The next frame of a given type the endpoint received, skipping others.
-/// Answer the P2P grant the Server pushes before it dials (#1013).
-///
-/// The Server will not dial until the agent that will verify the credential has
-/// acknowledged it, so any test driving a relay has to stand in for the agent
-/// here. The wait is also the assertion: a Server that dialled first would never
-/// send this frame at all, and the timeout says so.
-async fn acknowledge_grant(agent: &mut TestWs) -> anyhow::Result<()> {
-    let command = tokio::time::timeout(tokio::time::Duration::from_secs(5), next_json(agent))
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!("the server never granted a credential before dialling the agent")
-        })??;
-
-    let request_id = payload_of(&command, "agent.p2p.grant")?
-        .get("request_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("the grant carries no request id: {command}"))?
-        .to_string();
-
-    send_json(
-        agent,
-        serde_json::json!({
-            "msg_type": "server.agent.command-response",
-            "id": "grant-ack",
-            "timestamp": current_timestamp(),
-            "payload": { "request_id": request_id, "success": true },
-        }),
-    )
-    .await
-}
-
 async fn expect_frame_of_type(
     frames: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
     msg_type: &str,
@@ -3034,7 +3388,6 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
 
     // The agent answers the attach with the history first — see the endpoint.
     let attach = expect_frame_of_type(
@@ -3109,7 +3462,22 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
+    // The relay's first frame is the Agent Token handoff (#3440): the Server
+    // presents the token this Agent registered, not a minted per-attach grant.
+    let handshake = expect_frame_of_type(
+        &mut endpoint.frames,
+        "client.auth",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        handshake["payload"]["auth_token"] == serde_json::json!(agent_token_for("a1")),
+        "the relay must present the registered Agent Token: {handshake}"
+    );
+    anyhow::ensure!(
+        handshake["payload"]["client_id"] == serde_json::json!("browser-proof"),
+        "and bind the browser identity on the same frame: {handshake}"
+    );
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
@@ -3199,7 +3567,6 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
     let _attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
@@ -3301,7 +3668,6 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
 
     // The Server dials the agent and asks it to attach. Nothing is forwarded
     // until that answer arrives, so this frame is also the proof the relay is
@@ -3431,7 +3797,6 @@ async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyho
         }),
     )
     .await?;
-    acknowledge_grant(&mut agent).await?;
 
     // The relay is live: the Server has dialled the agent and been told the
     // attach succeeded, which is also the start of the stream.

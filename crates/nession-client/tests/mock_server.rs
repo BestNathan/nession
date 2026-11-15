@@ -18,7 +18,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use nession_client::{ClientConfig, ClientConnection, ClientError, P2pConnection};
+use nession_client::{
+    ClientConfig, ClientConnection, ClientError, P2pConnection, RelayBeginOutcome,
+};
 use nession_protocol::contracts::agent::v1::AgentListReply;
 use nession_protocol::Message;
 use serde_json::{json, Value};
@@ -116,6 +118,42 @@ async fn push(ws: &mut ServerSocket, wire: &str, id: &str, payload: Value) -> Te
 async fn handshake(ws: &mut ServerSocket) -> TestResult<Value> {
     let auth = next_request(ws).await?;
     answer(ws, &auth, json!({ "status": "success", "message": "ok" })).await?;
+    Ok(auth)
+}
+
+/// Answer `client.auth` the way the **Agent** does.
+///
+/// The Agent's handshake is the one place its envelope does not echo the
+/// request's wire: success is `ok` and refusal is `error` (#3440), while the
+/// Server's `server.auth` replies under its own name. A mock that echoed here
+/// would be exercising an envelope the Agent never sends.
+async fn answer_agent_auth(
+    ws: &mut ServerSocket,
+    request: &Value,
+    status: &str,
+    message: &str,
+) -> TestResult<()> {
+    let (wire, payload) = if status == "success" {
+        (
+            "ok",
+            json!({ "status": status, "message": message, "client_id": "mock-client" }),
+        )
+    } else {
+        (
+            "error",
+            json!({ "code": "invalid_token", "message": message }),
+        )
+    };
+    let reply = Message::new(wire, request["id"].as_str().unwrap_or_default(), 0, payload);
+    ws.send(WsMessage::Text(serde_json::to_string(&reply)?))
+        .await?;
+    Ok(())
+}
+
+/// Complete the Agent handshake so [`P2pConnection::connect`] returns.
+async fn agent_handshake(ws: &mut ServerSocket) -> TestResult<Value> {
+    let auth = next_request(ws).await?;
+    answer_agent_auth(ws, &auth, "success", "ok").await?;
     Ok(auth)
 }
 
@@ -579,21 +617,21 @@ async fn the_socket_can_be_handed_over() {
     server.unwrap();
 }
 
-/// The one agent-socket constructor hands back a socket that works.
+/// The one agent-socket constructor authenticates and hands back a socket.
 ///
-/// `P2pConnection::connect` wraps one call today, and this is what says so out
-/// loud: it is the seam #1013 changed to carry a server-issued credential, so
-/// the thing worth pinning is that a caller reaching an agent goes through it
-/// and gets a socket it can write an attach on.
-///
-/// The credential is passed as one of the two things a caller now hands it — a
-/// caller with no credential is the deleted direct-dial helper, not this path.
+/// `P2pConnection::connect` is the seam #3440 changed to carry the resolved
+/// Agent Token, so the thing worth pinning is that a caller reaching an Agent
+/// gets a socket it can write an attach on — and that the token was presented
+/// as `client.auth` before the attach, not presumed by the transport.
 #[tokio::test]
 async fn the_p2p_constructor_hands_back_a_usable_socket() {
     let (listener, url) = bind().await.unwrap();
 
     let server = async {
         let mut ws = accept(&listener).await?;
+        let auth = agent_handshake(&mut ws).await?;
+        assert_eq!(auth["msg_type"], "client.auth");
+        assert_eq!(auth["payload"]["auth_token"], "agent-token-abc");
         let frame = next_request(&mut ws).await?;
         assert_eq!(frame["msg_type"], "agent.attach");
         assert_eq!(frame["payload"]["session_name"], "work");
@@ -608,7 +646,7 @@ async fn the_p2p_constructor_hands_back_a_usable_socket() {
     };
 
     let (server, ()) = tokio::join!(server, async {
-        let mut socket = P2pConnection::connect(&url, "credential-abc")
+        let mut socket = P2pConnection::connect(&url, "agent-token-abc")
             .await
             .expect("the agent socket opens")
             .into_stream();
@@ -623,36 +661,69 @@ async fn the_p2p_constructor_hands_back_a_usable_socket() {
     server.unwrap();
 }
 
-/// The credential a caller hands the constructor is the one that arrives.
+/// The Agent Token travels in the first frame, never in the URL.
 ///
-/// Separate from the test above because it catches a different mistake, and the
-/// one the signature change made possible: `connect` could take a credential,
-/// document it, and never put it on the URL — and every test above would still
-/// pass, because none of them looks at the *request*. The mock can only see it
-/// at the handshake, so the handshake is where this reads it.
+/// Separate from the test above because it catches a different mistake:
+/// `connect` could take a token, document it, and never present it — every
+/// other test would still pass, because none of them looks at the *request*.
+/// The mock sees both the upgrade URI and the first frame, so this pins both
+/// halves of #3440's rule: the durable secret is presented on the authenticated
+/// channel and never placed where an access log would capture it.
 #[tokio::test]
-async fn the_p2p_constructor_puts_the_credential_on_the_url() {
+async fn the_p2p_constructor_presents_the_agent_token_on_the_auth_frame() {
     let (listener, url) = bind().await.unwrap();
 
     let server = async {
-        let (_ws, seen) = accept_capturing_uri(&listener).await?;
+        let (mut ws, seen) = accept_capturing_uri(&listener).await?;
+        let auth = next_request(&mut ws).await?;
+        assert_eq!(auth["msg_type"], "client.auth");
+        assert_eq!(auth["payload"]["auth_token"], "agent-token-abc");
         // `unwrap_or_default` rather than an unwrap: an empty string fails the
         // assertion below with the message saying the request never arrived,
         // which is more use than a panic from inside the helper.
         let uri = seen.get().cloned().unwrap_or_default();
         assert!(
-            uri.contains("token=credential-abc"),
-            "the credential must reach the agent's handshake; the request was {uri:?}"
+            !uri.contains("agent-token-abc") && !uri.contains("token="),
+            "the durable Agent Token must never ride the URL; the request was {uri:?}"
         );
+        answer_agent_auth(&mut ws, &auth, "success", "ok").await?;
         linger().await;
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
     };
 
     let (server, ()) = tokio::join!(server, async {
-        let _socket = P2pConnection::connect(&url, "credential-abc")
+        let _socket = P2pConnection::connect(&url, "agent-token-abc")
             .await
             .expect("the agent socket opens");
         linger().await;
+    });
+
+    server.unwrap();
+}
+
+/// A refused Agent Token is an auth error, not a transport failure.
+#[tokio::test]
+async fn the_p2p_constructor_reports_a_refused_agent_token() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        let auth = next_request(&mut ws).await?;
+        assert_eq!(auth["msg_type"], "client.auth");
+        answer_agent_auth(&mut ws, &auth, "error", "invalid token").await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let error = match P2pConnection::connect(&url, "wrong-agent-token").await {
+            Ok(_) => panic!("a refused Agent Token must not produce a connection"),
+            Err(error) => error,
+        };
+        match error {
+            ClientError::Auth { message } => assert_eq!(message, "invalid token"),
+            other => panic!("expected an auth error, got {other:?}"),
+        }
     });
 
     server.unwrap();
@@ -684,4 +755,155 @@ async fn a_close_mid_call_is_reported() {
     });
 
     server.unwrap();
+}
+
+// ── Relay begin ─────────────────────────────────────────────────────────────
+
+/// Only a receipt naming **this** begin request proves the relay is live, and
+/// anything that arrived before it is kept for replay.
+#[tokio::test]
+async fn relay_begin_accepts_only_its_own_receipt_and_keeps_earlier_frames() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let begin = next_request(&mut ws).await?;
+        assert_eq!(begin["msg_type"], "server.session.relay.begin");
+        let request_id = begin["id"].as_str().unwrap_or_default().to_string();
+
+        // Terminal output can precede the receipt; dropping it would lose the
+        // session's first bytes.
+        let terminal = Message::new(
+            "terminal.output",
+            "terminal-1",
+            0,
+            json!({ "data": "first bytes" }),
+        );
+        ws.send(WsMessage::Text(serde_json::to_string(&terminal)?))
+            .await?;
+
+        // A receipt for another begin cannot prove this one.
+        push(
+            &mut ws,
+            "server.session.relay.ready",
+            "ready-other",
+            json!({ "relay_request_id": "another-request" }),
+        )
+        .await?;
+
+        push(
+            &mut ws,
+            "server.session.relay.ready",
+            "ready-ours",
+            json!({ "relay_request_id": request_id }),
+        )
+        .await?;
+
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, outcome) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        client
+            .relay_begin("a1:work", 80, 24, Some(true))
+            .await
+            .expect("relay begin")
+    });
+
+    server.unwrap();
+    match outcome {
+        RelayBeginOutcome::Ready { buffered } => {
+            assert_eq!(buffered.len(), 2, "both earlier frames must be replayed");
+            assert_eq!(
+                serde_json::from_str::<Value>(&buffered[0]).unwrap()["msg_type"],
+                "terminal.output"
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(&buffered[1]).unwrap()["payload"]["relay_request_id"],
+                "another-request"
+            );
+        }
+        other => panic!("expected Ready, got {other:?}"),
+    }
+}
+
+/// A refusal travels with the sender's own sentence, in either envelope the
+/// canonical unit accepts.
+#[tokio::test]
+async fn relay_begin_reports_a_refusal() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let _ = next_request(&mut ws).await?;
+        push(
+            &mut ws,
+            "error",
+            "refusal",
+            json!({ "message": "the agent refused the relay" }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, outcome) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        client
+            .relay_begin("a1:work", 80, 24, Some(true))
+            .await
+            .expect("relay begin")
+    });
+
+    server.unwrap();
+    match outcome {
+        RelayBeginOutcome::Refused { message } => {
+            assert_eq!(message, "the agent refused the relay")
+        }
+        other => panic!("expected Refused, got {other:?}"),
+    }
+}
+
+/// The unit's own error reply is a refusal too, not buffered terminal traffic.
+#[tokio::test]
+async fn relay_begin_reports_the_units_own_refusal() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let _ = next_request(&mut ws).await?;
+        push(
+            &mut ws,
+            "server.session.relay.begin",
+            "refusal",
+            json!({ "status": "error", "message": "no relay route" }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, outcome) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        client
+            .relay_begin("a1:work", 80, 24, Some(true))
+            .await
+            .expect("relay begin")
+    });
+
+    server.unwrap();
+    match outcome {
+        RelayBeginOutcome::Refused { message } => assert_eq!(message, "no relay route"),
+        other => panic!("expected Refused, got {other:?}"),
+    }
 }

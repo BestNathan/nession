@@ -8,6 +8,7 @@ import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
 import {collectAuthenticatedQwenChain,selfTestQwenChainEvidence}
   from './acceptance-qwen-chain-evidence.mjs';
+import {collectQwen3433Recovery} from './acceptance-qwen-3433-recovery.mjs';
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { collectRoutingProof } from './acceptance-routing-proof.mjs';
@@ -31,6 +32,7 @@ import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatchReceipt,
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import { collectFullRegression } from './verification-full-regression-evidence.mjs';
+import { collectMainPeriodicFull, shouldCollectMainPeriodicFull, selfTestMainPeriodicFull } from './acceptance-main-periodic-full-evidence.mjs';
 import { FULL_NOT_REQUIRED_LOG_PREFIX } from './e2e-full-applicability.mjs';
 import {
   DEPLOYMENT_ATTESTATION_LOG_PREFIX,
@@ -211,7 +213,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -254,6 +256,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     authenticated_agent_store_disposable_fixture: authenticatedAgentStoreFixture,
     ...(authenticatedQwenChainFixture
       ? {authenticated_qwen_chain_fixture: authenticatedQwenChainFixture} : {}),
+    ...(authenticatedQwen3433Recovery
+      ? {authenticated_qwen_3433_recovery: authenticatedQwen3433Recovery} : {}),
     authenticated_run_store_cas_matrix: authenticatedRunStoreCasMatrix,
     authenticated_run_store_integrity_audit: authenticatedRunStoreIntegrityAudit,
     authenticated_run_store_external_checkpoint: verifiedRunStoreExternalCheckpoint,
@@ -280,6 +284,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     e2e_not_required_receipts: notRequiredRunReceipts,
     e2e_full_gate_provision_receipts: fullGateProvisionReceipts,
     verified_full_regression_receipts: fullRegressionReceipts,
+    verified_main_periodic_full_receipts: verifiedMainPeriodicFullReceipts,
     e2e_full_not_required_receipts: fullNotRequiredReceipts,
     verified_ci_cost_study: verifiedCiCostStudy,
     historical_browser_design_regressions: historicalBrowserDesignProof,
@@ -1716,6 +1721,10 @@ async function collectCommand(workspace, outFile) {
       metricsRoot,repo,sha:runSha,runs:[run],
     }),
   });
+  const authenticatedQwen3433Recovery=await collectQwen3433Recovery({
+    repo,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,targetSha:sha,get:githubGet,
+  });
   // SC-04 reads independently attested GitOps, anonymous ACR and VPN/K8s
   // source runs. No VPN/Kubernetes credentials enter the Acceptance Agent.
   const stagingAcrReadback=shouldCollectStagingAcr(
@@ -2020,6 +2029,15 @@ async function collectCommand(workspace, outFile) {
     process.env.ACCEPTANCE_STAGE, fullProofIssue)
       ?await collectFullRegression({repo,sha,get:githubGet,getText:githubJobLog})
       :[];
+  // Periodic Main diagnosis is observed at a later verified descendant of the
+  // implementation merge. Ordinary all-ID Full proof remains exact-SHA only.
+  const verifiedMainPeriodicFullReceipts = shouldCollectMainPeriodicFull(
+    process.env.ACCEPTANCE_STAGE, fullProofIssue)
+      ? await collectMainPeriodicFull({repo,anchorSha:sha,
+          get:githubGet,getText:githubJobLog,
+          isAncestor:(anchor,observed)=>
+            checkGitAncestor(workspace,observed,anchor).is_ancestor === true})
+      : [];
   const fullNotRequiredReceipts = process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectFullNotRequiredReceipts(repo, sha) : [];
   // SC-02 is a pre-merge criterion about the two-lane topology, so lane
@@ -2039,9 +2057,9 @@ async function collectCommand(workspace, outFile) {
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
-    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, deferredAcceptanceReplays,
+    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
-    authenticatedQwenChainFixture,
+    authenticatedQwenChainFixture,authenticatedQwen3433Recovery,
     authenticatedRunStoreCasMatrix,
     authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
     authenticatedRunStoreFiveModeReadback, verifiedKnowledgePublisherPublication, verifiedKnowledgeWriter2358, verifiedSandbox3145,
@@ -3382,6 +3400,7 @@ async function selfTest() {
   selfTestCiCostStudy();
   selfTestPrQualityCost();
   selfTestOriginalQwenReview();
+  await selfTestMainPeriodicFull();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();
   selfTestHistoricalRecovery();
@@ -3395,6 +3414,9 @@ async function selfTest() {
     body:'SC-02 A source-bound Full Regression run shows unexpected=0.'}),true);
   assert.equal(shouldCollectFullRegression('staging',{labels:[{name:'verification:full'}],body:''}),true);
   assert.equal(shouldCollectFullRegression('staging',{labels:[],body:'scoped terminal proof only'}),false);
+  assert.equal(normalizeCiEvidence({targetSha:head,
+    verifiedMainPeriodicFullReceipts:[{kind:'verified_main_periodic_full_observation'}]})
+    .verified_main_periodic_full_receipts.length,1);
   assert.equal(shouldCollectFullRegression('pre-merge',{labels:[{name:'verification:full'}],
     body:'Full Regression'}),false);
   assert.equal(selfTestQwenChainEvidence(),true);

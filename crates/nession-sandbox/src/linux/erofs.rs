@@ -7,14 +7,15 @@
 //! `/dev/fuse`, kernel FUSE support or a digest mismatch fails closed; there is
 //! no extraction fallback, kernel-loop mount or Native degradation.
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use nession_erofs::digest::file_digest;
 use nession_erofs::mount::{self, MountSettings};
 use nession_erofs::mount_manager::{MountLease, MountManager, VerifiedImage};
+use nession_erofs::overlay::{
+    OverlayBinding, OverlayLease, OverlayMountManager, OverlayRequest, OverlayWorkspaceKey,
+};
+use nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership;
 
 use crate::error::{Result, SandboxError};
 use crate::exec::SharedMountRecord;
@@ -46,31 +47,32 @@ pub struct ResolvedComposition {
     pub toolchains: Vec<(PathBuf, PathBuf)>,
 }
 
-/// One mount this execution owns, in creation order.
+/// One mount consumer this execution holds, in creation order.
 enum OwnedMount {
     /// A consumer lease over a shared physical EROFS mount (#3449). The lease
     /// cannot unmount; only the manager reclaims the physical mount.
     Shared(MountLease),
-    /// A `fuse-overlayfs` merge; the Sandbox owns its cleanup policy and the
-    /// mountpoint is execution-scoped.
-    Overlay(PathBuf),
+    /// A consumer lease over the one shared writable Merged View of a managed
+    /// Workspace (#3582). The manager owns the physical `fuse-overlayfs` mount;
+    /// the last release unmounts it without deleting durable bytes.
+    Overlay(OverlayLease),
 }
 
 impl OwnedMount {
-    fn path(&self) -> &Path {
+    fn label(&self) -> String {
         match self {
-            Self::Shared(lease) => lease.mountpoint(),
-            Self::Overlay(path) => path,
+            Self::Shared(lease) => lease.mountpoint().display().to_string(),
+            Self::Overlay(lease) => lease.mountpoint().display().to_string(),
         }
     }
 }
 
 /// Live mounts owned by one execution. Cleanup releases exactly these
-/// consumers and unmounts exactly the execution-scoped mounts.
+/// consumer identities in reverse dependency order.
 pub struct MountedComposition {
     mounts: Vec<OwnedMount>,
     shared: Vec<SharedMountRecord>,
-    fusermount: PathBuf,
+    overlay: Option<OverlayBinding>,
     resolved: ResolvedComposition,
 }
 
@@ -79,41 +81,43 @@ impl MountedComposition {
         &self.resolved
     }
 
-    /// Execution-scoped mountpoints recorded in the durable execution record.
-    pub fn mountpoints(&self) -> Vec<String> {
-        self.mounts
-            .iter()
-            .filter(|mount| matches!(mount, OwnedMount::Overlay(_)))
-            .map(|mount| mount.path().display().to_string())
-            .collect()
-    }
-
     /// Shared EROFS consumers recorded in the durable execution record.
     pub fn shared_mounts(&self) -> Vec<SharedMountRecord> {
         self.shared.clone()
     }
 
-    /// Release every shared consumer and unmount every execution-scoped
-    /// mount, eagerly rather than relying on Drop.
+    /// The durable manager-owned Overlay binding of this execution (#3582).
+    pub fn overlay(&self) -> Option<OverlayBinding> {
+        self.overlay.clone()
+    }
+
+    /// Release every consumer, eagerly rather than relying on Drop.
+    ///
+    /// The Overlay lease is released before the shared image consumers: the
+    /// Overlay depends on its read-only lower, and only the Overlay manager may
+    /// release that lower after a verified Overlay unmount. A failure keeps
+    /// every retained resource recoverable for a later reconciliation.
     pub fn unmount(&mut self, report: &mut crate::exec::CleanupReport) -> Result<()> {
         let mounts = std::mem::take(&mut self.mounts);
         self.shared.clear();
+        self.overlay = None;
         let mut failure = None;
         for mount in mounts.into_iter().rev() {
-            let path = mount.path().display().to_string();
+            let label = mount.label();
             let outcome = match mount {
                 OwnedMount::Shared(lease) => lease
                     .release()
                     .map_err(|error| SandboxError::Prepare(format!("{error:#}"))),
-                OwnedMount::Overlay(path) => mount::unmount_one(&self.fusermount, &path)
+                OwnedMount::Overlay(lease) => lease
+                    .release()
                     .map_err(|error| SandboxError::Prepare(format!("{error:#}"))),
             };
             match outcome {
-                Ok(()) => report.evidence.push(("unmounted".to_string(), path)),
+                Ok(()) => report.evidence.push(("unmounted".to_string(), label)),
                 Err(error) => {
                     report
                         .evidence
-                        .push(("unmount-failed".to_string(), format!("{path}: {error}")));
+                        .push(("unmount-failed".to_string(), format!("{label}: {error}")));
                     failure = Some(error);
                 }
             }
@@ -131,9 +135,7 @@ impl Drop for MountedComposition {
         for mount in mounts.into_iter().rev() {
             match mount {
                 OwnedMount::Shared(lease) => drop(lease),
-                OwnedMount::Overlay(path) => {
-                    let _ = mount::unmount_one(&self.fusermount, &path);
-                }
+                OwnedMount::Overlay(lease) => drop(lease),
             }
         }
     }
@@ -172,9 +174,12 @@ pub fn overlay_available(settings: &SandboxSettings) -> bool {
 }
 
 /// Verify and acquire every image in one composition.
+///
+/// The writable `/workspace` Merged View is a manager-owned shared resource
+/// (#3582); it is no longer created below the execution directory.
 pub fn mount_composition(
     composition: &CompiledComposition,
-    execution_dir: &Path,
+    _execution_dir: &Path,
     execution_id: &str,
     settings: &SandboxSettings,
 ) -> Result<MountedComposition> {
@@ -194,18 +199,10 @@ pub fn mount_composition(
             "filesystem.composition requires the Agent's shared EROFS mount manager".to_string(),
         )
     })?;
-    let mounts_dir = execution_dir.join("mounts");
-    std::fs::create_dir_all(&mounts_dir).map_err(|error| {
-        SandboxError::Prepare(format!(
-            "create EROFS mount directory {}: {error}",
-            mounts_dir.display()
-        ))
-    })?;
-
     let mut mounted = MountedComposition {
         mounts: Vec::new(),
         shared: Vec::new(),
-        fusermount: settings.fusermount_path.clone(),
+        overlay: None,
         resolved: ResolvedComposition {
             base: PathBuf::new(),
             workspace: WorkspaceMount::Bind(PathBuf::new()),
@@ -249,41 +246,36 @@ pub fn mount_composition(
                 .to_string(),
         ));
     };
-    let write = validate_workspace_write(&workspace.write, &settings.state_dir)?;
+    let write = crate::exec::validate_composition_workspace(workspace, settings)?;
     mounted.resolved.workspace = match &workspace.image {
         Some(image) => {
-            let lower = mount_image(image, &image_root, manager, execution_id, &mut mounted)?;
-            let upper = write.join("upper");
-            let work = write.join("work");
-            for directory in [&upper, &work] {
-                std::fs::create_dir_all(directory).map_err(|error| {
-                    SandboxError::Prepare(format!(
-                        "create overlay directory {}: {error}",
-                        directory.display()
-                    ))
-                })?;
+            if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
+                return Err(SandboxError::InvalidPolicy(
+                    "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
+                ));
             }
-            let merged = mounts_dir.join("workspace-merged");
-            std::fs::create_dir_all(&merged).map_err(|error| {
-                SandboxError::Prepare(format!(
-                    "create overlay mountpoint {}: {error}",
-                    merged.display()
-                ))
+            // The writable Merged View is owned by the Agent's Overlay manager
+            // (#3582). There is no per-execution `fuse-overlayfs` fallback: a
+            // host without the manager refuses the composition.
+            let overlay_manager = settings.overlay_manager.as_ref().ok_or_else(|| {
+                SandboxError::UnsupportedPolicy(
+                    "filesystem.composition requires the Agent's shared Workspace Overlay manager"
+                        .to_string(),
+                )
             })?;
-            run_fuse_overlay(
-                &settings.fuse_overlayfs_path,
-                &lower,
-                &upper,
-                &work,
-                &merged,
-            )?;
-            mounted.mounts.push(OwnedMount::Overlay(merged.clone()));
-            if !mount::is_mounted(&merged) {
-                return Err(SandboxError::Prepare(format!(
-                    "fuse-overlayfs reported success but {} is not a mount",
-                    merged.display()
-                )));
-            }
+            // The Sandbox still owns image source authorization and byte
+            // verification; the Overlay manager derives the workspace identity
+            // from its own authorized root and never accepts a caller path.
+            let source = verify_image(image, &image_root)?;
+            let verified = VerifiedImage::new(image.digest.clone(), source)
+                .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+            let key = resolve_overlay_workspace(overlay_manager, &write)?;
+            let lease = overlay_manager
+                .acquire(&OverlayRequest::new(key, verified), execution_id)
+                .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+            let merged = lease.mountpoint().to_path_buf();
+            mounted.overlay = Some(lease.binding());
+            mounted.mounts.push(OwnedMount::Overlay(lease));
             WorkspaceMount::Overlay(merged)
         }
         None => WorkspaceMount::Bind(write),
@@ -291,6 +283,31 @@ pub fn mount_composition(
 
     for toolchain in &composition.toolchains {
         let path = mount_image(toolchain, &image_root, manager, execution_id, &mut mounted)?;
+        if let Some(prepend) = &toolchain.path_prepend {
+            let executable_dir = path.join(prepend);
+            let metadata = std::fs::symlink_metadata(&executable_dir).map_err(|error| {
+                SandboxError::Prepare(format!(
+                    "toolchain image {} at {} declares io.nession.path.prepend `{}`, but \
+                     {}/{} is not an executable directory: {error}",
+                    toolchain.digest,
+                    toolchain.target.display(),
+                    prepend.display(),
+                    path.display(),
+                    prepend.display()
+                ))
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(SandboxError::Prepare(format!(
+                    "toolchain image {} at {} declares io.nession.path.prepend `{}`, but \
+                     {}/{} must be a real directory",
+                    toolchain.digest,
+                    toolchain.target.display(),
+                    prepend.display(),
+                    path.display(),
+                    prepend.display()
+                )));
+            }
+        }
         mounted
             .resolved
             .toolchains
@@ -388,159 +405,30 @@ fn verify_image(image: &CompiledImage, image_root: &Path) -> Result<PathBuf> {
     Ok(canonical)
 }
 
-fn validate_workspace_write(write: &Path, state_dir: &Path) -> Result<PathBuf> {
-    let metadata = std::fs::symlink_metadata(write).map_err(|error| {
-        SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} does not exist: {error}",
-            write.display()
-        ))
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} must be a real directory",
-            write.display()
-        )));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let euid = unsafe { libc::geteuid() };
-        use std::os::unix::fs::MetadataExt;
-        if euid != 0 && metadata.uid() != euid {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is not owned by the Agent user",
-                write.display()
-            )));
-        }
-        if metadata.permissions().mode() & 0o200 == 0 {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "workspace write directory {} is not writable",
-                write.display()
-            )));
-        }
-    }
-    let canonical_write = std::fs::canonicalize(write).map_err(|error| {
-        SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} cannot be resolved: {error}",
-            write.display()
-        ))
-    })?;
-    let canonical_state =
-        std::fs::canonicalize(state_dir).unwrap_or_else(|_| state_dir.to_path_buf());
-    if !canonical_write.starts_with(&canonical_state) {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "workspace write directory {} is outside the Agent sandbox state directory",
-            canonical_write.display()
-        )));
-    }
-    Ok(canonical_write)
-}
-
-/// Merge the Project image and the bounded writable upper/work through the
-/// unprivileged `fuse-overlayfs` helper.
+/// Resolve the composition's writable directory to the manager-authorized
+/// workspace identity.
 ///
-/// Overlay composition is Sandbox-owned; only the EROFS image mount itself is
-/// the reusable primitive.
-fn run_fuse_overlay(
-    helper: &Path,
-    lower: &Path,
-    upper: &Path,
-    work: &Path,
-    merged: &Path,
-) -> Result<()> {
-    for path in [lower, upper, work, merged] {
-        let text = path.to_string_lossy();
-        if text.contains(',') || text.contains(':') {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "overlay path {} must not contain `,` or `:`",
-                path.display()
-            )));
-        }
-    }
-    let mut command = Command::new(helper); // not-tmux: unprivileged OverlayFS FUSE helper
-    command.arg("-o").arg(format!(
-        "lowerdir={},upperdir={},workdir={}",
-        lower.display(),
-        upper.display(),
-        work.display()
-    ));
-    command.arg(merged);
-    run_mount_helper(
-        command,
-        &format!("{} for {}", helper.display(), merged.display()),
-        merged,
-    )
-}
-
-fn run_mount_helper(mut command: Command, label: &str, mountpoint: &Path) -> Result<()> {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| {
-        SandboxError::Prepare(format!(
-            "start {} for {}: {error}",
-            label,
-            mountpoint.display()
+/// The path is validated by the Agent-owned composition rules first; the
+/// Overlay manager then re-derives the identity from its own authorized roots.
+/// A directory outside those roots fails closed.
+fn resolve_overlay_workspace(
+    manager: &OverlayMountManager,
+    write: &Path,
+) -> Result<OverlayWorkspaceKey> {
+    manager.resolve_workspace(write).map_err(|error| {
+        SandboxError::InvalidPolicy(format!(
+            "the workspace write directory {} is not an authorized Overlay workspace: {error:#}",
+            write.display()
         ))
-    })?;
-    let stderr = child.stderr.take();
-    let reader = stderr.map(|mut stderr| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stderr.read_to_end(&mut bytes);
-            bytes
-        })
-    });
-    let deadline = Instant::now() + mount::PROBE_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(SandboxError::Prepare(format!(
-                    "{} did not return for {}",
-                    label,
-                    mountpoint.display()
-                )));
-            }
-            Err(error) => {
-                return Err(SandboxError::Prepare(format!("wait for {label}: {error}")));
-            }
-        }
-    };
-    let stderr = reader
-        .and_then(|reader| reader.join().ok())
-        .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
-        .unwrap_or_default();
-    if !status.success() {
-        return Err(SandboxError::Prepare(format!(
-            "{} failed for {}: {}",
-            label,
-            mountpoint.display(),
-            stderr
-        )));
-    }
-    let deadline = Instant::now() + mount::MOUNT_READY_TIMEOUT;
-    while Instant::now() < deadline {
-        if mount::is_mounted(mountpoint) {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Err(SandboxError::Prepare(format!(
-        "{} did not become a mount within {:?}",
-        mountpoint.display(),
-        mount::MOUNT_READY_TIMEOUT
-    )))
+    })
 }
 
 /// Unmount paths recorded by a previous Agent process, before removing their
 /// execution directory. Only paths that are mounts are touched.
+///
+/// This handles records written before #3582, when the writable Overlay was
+/// execution-scoped. A manager-owned Overlay mountpoint is never passed here:
+/// reconciliation releases it through the Overlay manager instead.
 pub fn unmount_recorded(
     paths: &[String],
     execution_dir: &Path,
@@ -635,6 +523,8 @@ mod tests {
             digest: nession_erofs::digest::digest_of_bytes(b"different bytes"),
             source: image,
             target: PathBuf::from("/"),
+            env: Vec::new(),
+            path_prepend: None,
         };
         let error = verify_image(&compiled, &images).unwrap_err();
         assert!(
@@ -654,6 +544,8 @@ mod tests {
             digest: nession_erofs::digest::digest_of_bytes(b"bytes"),
             source: outside,
             target: PathBuf::from("/"),
+            env: Vec::new(),
+            path_prepend: None,
         };
         let error = verify_image(&compiled, &images).unwrap_err();
         assert!(

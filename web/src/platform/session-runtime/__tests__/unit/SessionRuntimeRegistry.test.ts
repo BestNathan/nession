@@ -11,7 +11,7 @@ function makeConfig(sessionId: string): SessionRuntimeConfig {
     mode: 'p2p',
     session_id: sessionId,
     agent_address: 'ws://agent/ws',
-    connection_token: 'tok',
+    agent_token: 'tok',
   };
   return {
     sessionId,

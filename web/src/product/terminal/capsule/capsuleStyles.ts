@@ -482,6 +482,22 @@ export const capsuleProjectionDockClass = capsuleUpperDockClass;
 export const capsuleProjectionScrollClass =
   'max-h-[length:var(--nession-terminal-capsule-projection-max-height)] overflow-y-auto';
 
+/**
+ * The controlled fallback for a full-screen/mouse-owning TUI when the terminal
+ * could not reserve the Peek's height (#3492). The panel keeps its header and
+ * scrolls inside a bounded fraction of the existing ceiling, leaving the
+ * application's bottom rows visible.
+ */
+export const capsuleProjectionCompactStyle = {
+  maxHeight: 'calc(var(--nession-terminal-capsule-projection-max-height) * 0.45)',
+} as const;
+
+/** The same bounded fallback for the Context Capsule list (#3492). */
+export const contextCapsuleCompactStyle = {
+  maxHeight: 'calc(var(--nession-context-capsule-max-height) * 0.45)',
+} as const;
+
+
 export const capsuleProjectionItemClass =
   'flex w-full items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]';
 
