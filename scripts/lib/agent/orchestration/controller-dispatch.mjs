@@ -397,7 +397,14 @@ async function main(){
     // action by a no-post preflight hook inside the trusted CAS path.
     const result=await executeDurableAgentDispatch({
       remote:storeRemote,issue,actionId,registry,signer,
-      actionsToken:token,sourceVerifier:sourceStillAllowed,
+      actionsToken:token,
+      sourceVerifier:(sha,role,task,context)=>{
+        // A Review recovery command must never wake a Developer Action,
+        // even if an Owner supplies an otherwise valid signed Outbox ID.
+        if(ownerReviewCommand&&role!=='reviewer')
+          fail('review recovery command targeted non-Reviewer Outbox role');
+        return sourceStillAllowed(sha,role,task,context);
+      },
     });
     // A 204/timeout may have created a Worker: never claim completed.
     console.log(JSON.stringify({status:result.status,issue,action_id:actionId,
