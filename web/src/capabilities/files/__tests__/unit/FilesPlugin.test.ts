@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_CHUNK_SIZE,
+  FILE_CHANGED_DURING_READ_MESSAGE,
   FilesPlugin,
   base64Decode,
   base64Encode,
@@ -27,14 +28,21 @@ function emptyFile(path: string): FileData {
   return { path, content: '', mime_type: 'text/plain', offset: 0, total_size: 0, has_more: false };
 }
 
-function chunk(offset: number, text: string, hasMore: boolean): FileData {
+function chunk(
+  offset: number,
+  text: string,
+  hasMore: boolean,
+  options: { revision?: string; totalSize?: number } = {},
+): FileData {
+  const { revision, totalSize = 12 } = options;
   return {
     path: '/f.txt',
     content: base64Encode(text),
     mime_type: 'text/plain',
     offset,
-    total_size: 12,
+    total_size: totalSize,
     has_more: hasMore,
+    ...(revision === undefined ? {} : { revision }),
   };
 }
 
@@ -87,6 +95,50 @@ describe('readFileChunked', () => {
     expect(readFile).toHaveBeenCalledTimes(2);
     expect(readFile).toHaveBeenNthCalledWith(1, '/f.txt', { offset: 0, limit: DEFAULT_CHUNK_SIZE });
     expect(readFile).toHaveBeenNthCalledWith(2, '/f.txt', { offset: 6, limit: DEFAULT_CHUNK_SIZE });
+  });
+
+  it('rejects a later chunk from a different revision without publishing mixed text (SC-01)', async () => {
+    // Equal-length replacements defeat a size-only check: only the revision
+    // proves the two chunks came from the same source document.
+    const responses = [
+      chunk(0, 'AAAAAA', true, { revision: 'rev-a' }),
+      chunk(6, 'BBBBBB', false, { revision: 'rev-b' }),
+    ];
+    const readFile = vi.fn(async (_path: string, options?: { offset?: number; limit?: number }) => {
+      const want = options?.offset ?? 0;
+      return responses.find((r) => r.offset === want) ?? emptyFile('/f.txt');
+    });
+    const fileOps = stubFileOps({ readFile });
+    const progress = vi.fn();
+    let published: string | undefined;
+
+    const handle = readFileChunked(fileOps, '/f.txt', progress);
+    handle.promise.then(
+      (text) => { published = text; },
+      () => {},
+    );
+
+    await expect(handle.promise).rejects.toThrow(FILE_CHANGED_DURING_READ_MESSAGE);
+    expect(published, 'no assembled A/B document is ever published').toBeUndefined();
+    expect(readFile).toHaveBeenCalledTimes(2);
+    expect(progress).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith(6, 12);
+  });
+
+  it('uses total size as the guard when an older agent omits the revision', async () => {
+    const responses = [
+      chunk(0, 'AAAA', true, { totalSize: 8 }),
+      chunk(4, 'BBBB', false, { totalSize: 12 }),
+    ];
+    const readFile = vi.fn(async (_path: string, options?: { offset?: number; limit?: number }) => {
+      const want = options?.offset ?? 0;
+      return responses.find((r) => r.offset === want) ?? emptyFile('/f.txt');
+    });
+    const fileOps = stubFileOps({ readFile });
+
+    const handle = readFileChunked(fileOps, '/f.txt');
+
+    await expect(handle.promise).rejects.toThrow(FILE_CHANGED_DURING_READ_MESSAGE);
   });
 
   it('resolves empty text for an empty file', async () => {
@@ -176,8 +228,8 @@ describe('readFileChunked', () => {
       return btoa(binary);
     };
     const responses: FileData[] = [
-      { path: '/u.txt', content: toB64(bytes.slice(0, 4)), mime_type: 'text/plain', offset: 0, total_size: 8, has_more: true },
-      { path: '/u.txt', content: toB64(bytes.slice(4)), mime_type: 'text/plain', offset: 4, total_size: 8, has_more: false },
+      { path: '/u.txt', content: toB64(bytes.slice(0, 4)), mime_type: 'text/plain', offset: 0, total_size: 8, has_more: true, revision: 'rev-stable' },
+      { path: '/u.txt', content: toB64(bytes.slice(4)), mime_type: 'text/plain', offset: 4, total_size: 8, has_more: false, revision: 'rev-stable' },
     ];
     const readFile = vi.fn(async (_path: string, options?: { offset?: number; limit?: number }) => {
       const want = options?.offset ?? 0;
