@@ -780,7 +780,7 @@ async fn sc02_forced_relay_does_not_attempt_p2p() {
     assert_eq!(
         proxy.hits.load(Ordering::SeqCst),
         1,
-        "forced relay must open exactly one Server relay dial and no direct P2P dial"
+        "single relay endpoint: one Server dial and no CLI P2P dial are permitted"
     );
 
     let marker = format!("NESSON_2811_FORCED_RELAY_{}", unique_session_name("marker"));
