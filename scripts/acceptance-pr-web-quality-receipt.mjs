@@ -40,7 +40,7 @@ export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   for (const line of String(issueBody).split(/\r?\n/)) {
     if (/^\s*(?:#{1,6}\s+|\*\*)SC\s*(?:→|->)\s*scenario\s+mapping\b/i.test(line)) {
       inMapping = true;
-    } else if (inMapping && (/^\s*#{1,6}\s+/.test(line) || /^\s*$/.test(line))) {
+    } else if (inMapping && /^\s*#{1,6}\s+/.test(line)) {
       inMapping = false;
     }
     if (inMapping) mappingLines.push(line);
@@ -375,6 +375,9 @@ function selfTest() {
   const unitStatic = { criterion: 'SC-03', text: 'The implementation docs name the timeout owner.' };
   assert.equal(requiresWebIntegrationExecution(unit01, unitBody), true);
   assert.equal(requiresWebIntegrationExecution(unit02, unitBody), true);
+  assert.equal(requiresWebIntegrationExecution(unit02,
+    unitBody.replace('mapping\\nSC-01', 'mapping\\n\\nSC-01')), true,
+    'optional Markdown blank line after the mapping heading must not erase mandatory CI proof');
   assert.equal(requiresWebIntegrationExecution(unitStatic, unitBody), false);
   assert.equal(requiresWebIntegrationExecution(unit01,
     unitBody.replace('required for Pass', 'recorded for reference')), false);
