@@ -19,7 +19,14 @@ export function mcpSemanticDigest(catalog){
     return {name:t.name,description:t.description,inputSchema:canonical(t.inputSchema)};
   }).sort((a,b)=>a.name.localeCompare(b.name));
   const protocol_versions=[...(catalog.protocol_versions||[])].sort();
-  const payload=JSON.stringify(canonical({tools,protocol_versions}));
+  // Official immutable stable release identity contributes to the same
+  // source-derived manifest; preview drafts never count as stable changes.
+  const stable=catalog.upstream?.stable;
+  const upstream=stable?{
+    version:stable.version,sha:stable.sha,
+    changelog_sha256:stable.changelog_sha256
+  }:null;
+  const payload=JSON.stringify(canonical({tools,protocol_versions,upstream}));
   return createHash('sha256').update(payload).digest('hex');
 }
 export function mcpChanged(previous,next){
