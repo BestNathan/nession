@@ -23,6 +23,8 @@ import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-reco
 import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
+import {authenticatePublisherReviewerWake}
+  from './publisher-reviewer-wake.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V2 as QWEN_KEY_FAILURE_V2,
@@ -42,8 +44,9 @@ export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 act
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
 export const CONTROLLED_REPAIR_RETRY_COMMENT='/nession dispatch-repair issue=1997 action=ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
-const REVIEW_DISPATCH_PREFIX='/nession dispatch-review issue=1997 action=';
-const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=1997 action=([a-f0-9]{64})$/;
+// Owner may recover a missed Reviewer wake for any existing, authentic Store
+// action. The command never chooses a source/ref: signed Store Outbox decides.
+export const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=([1-9][0-9]*) action=([a-f0-9]{64})$/;
 // One source-scoped owner-authenticated Qwen v2 fixture dispatch; this
 // command must still match the genuinely pending Store Outbox Action ID.
 export const QWEN_V2_DISPATCH_RE=/^\/nession qwen-v2-dispatch issue=3001 action=([a-f0-9]{64})$/;
@@ -56,14 +59,35 @@ const REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13a
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
-export function assertDispatchAuthority({environment,event,run,issue,actionId}) {
+export function assertOwnerReviewDispatchRole(isOwnerReview,role){
+  if(isOwnerReview&&role!=='reviewer')
+    fail('review recovery command targeted non-Reviewer Outbox role');
+}
+export function assertDispatchAuthority({environment,event,run,issue,actionId,
+  publisherWakeProof=null}) {
+  // A bot input has no independent authority. A trusted-main read-only
+  // attester must first bind the exact Publisher Job + Store Reviewer Outbox.
+  const publisherWake=environment.GITHUB_ACTOR==='github-actions[bot]'&&
+    publisherWakeProof?.issue===issue&&
+    publisherWakeProof?.action_id===actionId&&
+    publisherWakeProof?.source_publisher_run_id===
+      Number(event?.inputs?.source_publisher_run_id)&&
+    [undefined,'0',0].includes(event?.inputs?.recovery_run_id);
   const commanded=environment.GITHUB_EVENT_NAME==='issue_comment';
   const qwenV2Comment=commanded&&event?.action==='created'&&
     event?.issue?.number===3001&&event.issue.state==='open'&&
     !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&issue===3001&&
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId;
-  const permitted=commanded
+  const reviewCommand=commanded?
+    REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const ownerReview=commanded&&event?.action==='created'&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.issue?.number===issue&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&reviewCommand?.[1]===String(issue)&&
+    reviewCommand?.[2]===actionId;
+  const permitted=publisherWake||ownerReview||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -75,8 +99,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT&&actionId===REPAIR_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
-        (event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
-        (REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId))&&
+        (event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT&&actionId===REPAIR_RETRY_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997))
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -84,7 +107,14 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
        Number(event?.inputs?.issue_number)===issue&&
        event?.inputs?.action_id===actionId&&
        (()=>{
-         const keys=Object.keys(event?.inputs??{}).sort().join(',');
+         // GitHub includes declared default inputs on new workflow_dispatch
+         // runs; the legacy Owner command retains its two/three-input schema.
+         // An Owner can never provide a nonzero bot Publisher locator.
+         const inputs=event?.inputs??{};
+         if(inputs.source_publisher_run_id!==undefined&&
+            String(inputs.source_publisher_run_id)!=='0')return false;
+         const keys=Object.keys(inputs).filter(k=>k!=='source_publisher_run_id')
+           .sort().join(',');
          const requested=event?.inputs?.recovery_run_id;
          if(requested===undefined)
            return keys==='action_id,issue_number';
@@ -102,13 +132,13 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
            (String(requested)===String(QWEN_KEY_FAILURE_V3.run_id)&&
             issue===QWEN_KEY_FAILURE_V3.issue&&
             actionId===QWEN_KEY_FAILURE_V3.action_id);
-       })());
+       })()));
   if(environment.GITHUB_ACTIONS!=='true'||
       environment.GITHUB_REPOSITORY!==REPO||
       environment.GITHUB_REF!=='refs/heads/main'||
       environment.GITHUB_WORKFLOW!=='Agent / Controller Dispatch'||
       !permitted||
-      environment.GITHUB_ACTOR!=='BestNathan'||
+      (environment.GITHUB_ACTOR!=='BestNathan'&&!publisherWake)||
       !HEX40.test(environment.GITHUB_SHA??'')||
       !positive(Number(environment.GITHUB_RUN_ID))||
       Number(environment.GITHUB_RUN_ATTEMPT)!==1||
@@ -119,7 +149,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
       run?.event!==environment.GITHUB_EVENT_NAME||
       run?.path!==WORKFLOW||
       run?.name!=='Agent / Controller Dispatch'||
-      run?.actor?.login!=='BestNathan'||
+      run?.actor?.login!==environment.GITHUB_ACTOR||
       run?.head_branch!=='main'||
       run?.head_sha!==environment.GITHUB_SHA||
       run?.repository?.full_name!==REPO||
@@ -242,7 +272,10 @@ async function main(){
   const commanded=env.GITHUB_EVENT_NAME==='issue_comment';
   const qwenV2CommentAction=commanded?
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
-  const issue=commanded?(qwenV2CommentAction?3001:1997):
+  const ownerReviewCommand=commanded?
+    REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const issue=commanded?(qwenV2CommentAction?3001:
+    ownerReviewCommand?Number(ownerReviewCommand[1]):1997):
     Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
@@ -259,7 +292,7 @@ async function main(){
   const dispatchingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT;
   const recoveringRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT;
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
-  const newReviewAction=commanded?REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
+  const newReviewAction=ownerReviewCommand?.[2]??null;
   const actionId=commanded?(qwenV2CommentAction??newReviewAction??
     (recoveringRepair||retryingRepair?
     REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
@@ -271,7 +304,10 @@ async function main(){
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
   const run=await api(token,'/actions/runs/'+env.GITHUB_RUN_ID);
-  assertDispatchAuthority({environment:env,event,run,issue,actionId});
+  const publisherWakeProof=env.GITHUB_ACTOR==='github-actions[bot]'?
+    await authenticatePublisherReviewerWake({environment:env,event,token}):null;
+  assertDispatchAuthority({environment:env,event,run,issue,actionId,
+    publisherWakeProof});
   const issueRecord=await api(token,'/issues/'+issue);
   if(issueRecord.number!==issue||issueRecord.state!=='open'||issueRecord.pull_request||
       issueRecord.repository_url!=='https://api.github.com/repos/'+REPO)
@@ -356,7 +392,7 @@ async function main(){
     // Only an authenticated owner/main Workflow Dispatch may bind the
     // original Qwen native Store checkpoint. The binder is a no-op for
     // every other Action; it does not POST the Worker itself.
-    if(!commanded){
+    if(!commanded&&!publisherWakeProof){
       bindQwenRepairCheckpoint({remote:storeRemote,issue,actionId});
     }
     const signer={key,key_id:'main-controller',
@@ -365,7 +401,13 @@ async function main(){
     // action by a no-post preflight hook inside the trusted CAS path.
     const result=await executeDurableAgentDispatch({
       remote:storeRemote,issue,actionId,registry,signer,
-      actionsToken:token,sourceVerifier:sourceStillAllowed,
+      actionsToken:token,
+      sourceVerifier:(sha,role,task,context)=>{
+        // A Review recovery command must never wake a Developer Action,
+        // even if an Owner supplies an otherwise valid signed Outbox ID.
+        assertOwnerReviewDispatchRole(Boolean(ownerReviewCommand),role);
+        return sourceStillAllowed(sha,role,task,context);
+      },
     });
     // A 204/timeout may have created a Worker: never claim completed.
     console.log(JSON.stringify({status:result.status,issue,action_id:actionId,

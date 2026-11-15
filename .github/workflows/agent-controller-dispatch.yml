@@ -23,6 +23,11 @@ on:
         required: false
         default: 0
         type: number
+      source_publisher_run_id:
+        description: 'Trusted Publisher bot wake only; 0 = historical owner command'
+        required: false
+        default: '0'
+        type: string
 
 permissions:
   contents: read
@@ -39,8 +44,14 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
       github.run_attempt == 1 &&
+      (
+        github.actor == 'BestNathan' ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.actor == 'github-actions[bot]' &&
+         inputs.source_publisher_run_id != '0' &&
+         inputs.recovery_run_id == 0)
+      ) &&
       (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'issue_comment' &&
@@ -50,6 +61,12 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body, '/nession qwen-v2-dispatch issue=3001 action=')) ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         startsWith(github.event.comment.body, '/nession dispatch-review issue=')) ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
          github.event.issue.number == 1997 &&
@@ -95,10 +112,17 @@ jobs:
           test "$(git rev-parse FETCH_HEAD)" = '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
           git cat-file -e '3d8e3807cc01f6082734b8d0ba458217c28f60a4^{commit}'
           # No checkout, build or execution of PR code in this privileged job.
+      # No Store signing/writer token has been minted at this point.
+      - name: Authenticate bot Publisher/Reviewer wake before Store credentials
+        if: github.actor == 'github-actions[bot]'
+        env:
+          ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/agent/orchestration/publisher-reviewer-wake.mjs preflight
       - name: Verify ticket, CAS and Worker admission negative contracts
         run: |
           set -euo pipefail
           node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
+          node scripts/lib/agent/orchestration/publisher-reviewer-wake-selftest.mjs
           node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
           ./gates/run run-store-integrity
