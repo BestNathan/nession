@@ -108,11 +108,29 @@ to the normal manual `Acceptance / Cases` workflow; the workflow
 independently verifies the original comment, Issue and immutable target
 **before checking out the Case code**. It then produces the same source-bound
 record and trusted ingester receipt as other manual Cases, with no alternate
-Acceptance authority. A comment acknowledgment is not a Case verdict.
+Acceptance authority. Since GitHub suppresses recursive `workflow_run`
+from `GITHUB_TOKEN`-origin dispatches, a separate Cases job waits until
+both platform jobs have finished uploading artifacts and emits a
+default-branch-only `repository_dispatch` of type `nession-comment-case-ingest`
+carrying only the source Run ID; the privileged ingester does not offer an
+arbitrary-ref `workflow_dispatch`. The ingester re-fetches the
+GitHub-owned completed Run/Attempt and authenticates the comment and exact
+Case tree before any Store write; ordinary Case sources retain their native
+`workflow_run` ingestion. A comment acknowledgment is not a Case verdict.
 Non-merged stages, arbitrary SHA, closed Issues and missing manifest/merge
 identity are ineligible for this shortcut; use the existing owner-controlled
 explicit Actions path for other supported manual cases.
 
+
+Manual `post-merge` Cases selected from an older authenticated Main merge
+commit have the same dual-SHA distinction: the source workflow runs trusted
+Main code, while `target_sha` names the exact historical product merge.
+The original GitHub `Authenticate manual Post-Merge Case` step is evaluated
+before checkout and independently verified during ingestion. This is not
+permission to ingest an arbitrary SHA: the existing open Issue/SC, merged
+branch ancestry, manifest tree, and immutable Store/Issue projection rules
+still apply. A manual post-merge Case targeting the current source head retains
+the ordinary equal-SHA rule without needing the historical-input exception.
 
 For a **manual Staging Case dispatched from trusted `main`**, GitHub's
 `workflow_run.head_sha` identifies the **workflow code** and intentionally

@@ -3,7 +3,9 @@
 import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
-  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE}
+  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
+  REVIEWER_PREMODEL_RECOVERY_COMMENT,
+  assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -28,6 +30,33 @@ const run={id:runId,run_attempt:1,event:'workflow_dispatch',
   head_repository:{full_name:'BestNathan/nession'}};
 const valid={environment,event,run,issue,actionId};
 assert.equal(assertDispatchAuthority(valid).issuer_run_id,runId);
+// Workflow input schema now includes a bot-only locator with default "0".
+// Existing Owner/manual dispatch must remain valid with the new default.
+assert.equal(assertDispatchAuthority({...valid,event:{...event,
+  inputs:{...event.inputs,source_publisher_run_id:'0',
+    recovery_run_id:'0'}}}).issue,issue);
+assert.throws(()=>assertDispatchAuthority({...valid,event:{...event,
+  inputs:{...event.inputs,source_publisher_run_id:'43607502468',
+    recovery_run_id:'0'}}}),/authenticated owner\/main/);
+const botWake={...valid,environment:{...environment,GITHUB_ACTOR:'github-actions[bot]'},
+  run:{...run,actor:{login:'github-actions[bot]'}},
+  issue:3433,actionId:'c'.repeat(64),
+  event:{...event,inputs:{issue_number:'3433',action_id:'c'.repeat(64),
+    source_publisher_run_id:'43607502468',recovery_run_id:'0'}}};
+const verifiedPublisherWake={issue:3433,action_id:'c'.repeat(64),
+  source_publisher_run_id:43607502468,pr_head_sha:'a'.repeat(40)};
+assert.equal(assertDispatchAuthority({...botWake,
+  publisherWakeProof:verifiedPublisherWake}).issue,3433);
+for(const bad of [
+  {publisherWakeProof:null},
+  {publisherWakeProof:{...verifiedPublisherWake,issue:3434}},
+  {publisherWakeProof:{...verifiedPublisherWake,action_id:'d'.repeat(64)}},
+  {publisherWakeProof:{...verifiedPublisherWake,source_publisher_run_id:1}},
+  {event:{...botWake.event,inputs:{...botWake.event.inputs,recovery_run_id:'1'}}},
+  {environment:{...botWake.environment,GITHUB_ACTOR:'untrusted'}},
+  {run:{...botWake.run,actor:{login:'BestNathan'}}},
+])assert.throws(()=>assertDispatchAuthority({...botWake,...bad}),
+  /authenticated owner\/main/);
 // Explicit owner/main dispatch mode: normal requests retain the original
 // two-input contract. Only the single independently attested failed Qwen
 // Run may carry an optional recovery_run_id; no arbitrary Job retry.
@@ -171,6 +200,56 @@ assert.equal(assertDispatchAuthority(nativeRecovery).action_id,nativeId);
 assert.throws(()=>assertDispatchAuthority({...nativeRecovery,actionId:continuation.actionId}),/authenticated owner\/main/);
 assert.throws(()=>assertDispatchAuthority({...nativeRecovery,event:{...nativeRecovery.event,
   comment:{...nativeRecovery.event.comment,body:CONTROLLED_NATIVE_RECOVERY_COMMENT+' '}}}),/authenticated owner\/main/);
+// #3550: a missed Publisher wake can be recovered by an exact authenticated
+// Owner comment, bound to the existing initialized Store Reviewer Outbox.
+// Parsing only a command prefix or a mismatched Issue is never authority.
+const currentReviewerAction='66a3bf916ce573adda08135524a2bb6d4db2a0a2125cab0bfdce2664e78614b6';
+const currentReviewCommand='/nession dispatch-review issue=3433 action='+currentReviewerAction;
+assert.deepEqual(REVIEW_DISPATCH_RE.exec(currentReviewCommand)?.slice(1),
+  ['3433',currentReviewerAction]);
+const ownerReviewEvent={...commentEvent,
+  issue:{number:3433,state:'open'},
+  comment:{...commentEvent.comment,body:currentReviewCommand}};
+const ownerReview={...commentValid,event:ownerReviewEvent,
+  issue:3433,actionId:currentReviewerAction};
+assert.equal(assertDispatchAuthority(ownerReview).action_id,currentReviewerAction);
+assert.doesNotThrow(()=>assertOwnerReviewDispatchRole(true,'reviewer'));
+assert.doesNotThrow(()=>assertOwnerReviewDispatchRole(false,'developer'));
+assert.throws(()=>assertOwnerReviewDispatchRole(true,'developer'),
+  /non-Reviewer Outbox role/);
+for(const change of [
+  {issue:1997},
+  {actionId:'a'.repeat(64)},
+  {event:{...ownerReviewEvent,issue:{number:3434,state:'open'}}},
+  {event:{...ownerReviewEvent,issue:{number:3433,state:'closed'}}},
+  {event:{...ownerReviewEvent,issue:{number:3433,state:'open',pull_request:{}}}},
+  {event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:currentReviewCommand+' '}}},
+  {event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:currentReviewCommand.replace('3433','03433')}}},
+  {event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    user:{login:'attacker'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'attacker'}},
+  {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
+  {event:{...ownerReviewEvent,action:'edited'}},
+])assert.throws(()=>assertDispatchAuthority({...ownerReview,...change}),
+  /authenticated owner\/main/);
+
+const premodelRecovery={...ownerReview,
+  event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:REVIEWER_PREMODEL_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(premodelRecovery).issue,3433);
+for(const bad of [
+  {actionId:'f'.repeat(64)},
+  {issue:1997},
+  {event:{...premodelRecovery.event,comment:{...premodelRecovery.event.comment,
+    body:REVIEWER_PREMODEL_RECOVERY_COMMENT+' '}}},
+  {event:{...premodelRecovery.event,comment:{...premodelRecovery.event.comment,
+    user:{login:'external'}}}},
+  {event:{...premodelRecovery.event,issue:{number:3434,state:'open'}}},
+])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
+  /authenticated owner\/main/);
+
 const reviewRecover={...commentValid,
   actionId:'555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434',
   event:{...commentEvent,comment:{...commentEvent.comment,

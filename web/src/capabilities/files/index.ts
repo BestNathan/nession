@@ -1,6 +1,7 @@
 export { FilesPlugin } from './FilesPlugin';
 export { createFilesApi } from './FilesPlugin';
 export { DEFAULT_CHUNK_SIZE } from './FilesPlugin';
+export { FILE_CHANGED_DURING_READ_MESSAGE } from './FilesPlugin';
 export { base64Decode } from './FilesPlugin';
 export { base64Encode } from './FilesPlugin';
 export { readFileChunked } from './FilesPlugin';

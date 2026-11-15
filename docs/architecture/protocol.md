@@ -1288,6 +1288,41 @@ is answered; the protocol-level authentication deadline then bounds the
 unauthenticated `client.auth` window. This remains the `#2653` admission
 boundary, distinct from the `#961` per-connection execution bound.
 
+## Server connection lifecycle
+
+A physical Server WebSocket has exactly one teardown owner: `handle_ws_stream`
+in `crates/nession-server/src/server/websocket.rs`. The read loop's outcome is
+captured, and the teardown runs **after** it for every way the loop ends — a
+normal close, a transport read error, an undecodable frame, a handler failure
+and a failed Relay. An error path that returned through `?` would skip the rest
+of this sequence; `#3547` made the sequencing explicit and its native runtime
+Cases assert it.
+
+The teardown settles, in order:
+
+1. **In-flight work** — both execution lanes are shut down within the terminal
+   stall grace. An abandoned reply task would otherwise hold a sender and keep
+   the writer alive.
+2. **The Agent's control channel** — released through the
+   **generation-fenced** broker release, and the cached Agent Token is cleared
+   only when this connection was actually the owner. A superseded connection
+   releases nothing, so a reconnect's newer generation — and the token its
+   registration vouched for — survives the old socket's exit (`#960`,
+   `#3440`).
+3. **The client attachment** — a relay-mode client is removed from the client
+   registry.
+4. **The writer** — the handler's sender clone is dropped, the writer task is
+   awaited within the terminal stall grace, and aborted if it is still parked.
+   The task is held by a Drop-abort guard, so a cancelled or panicking
+   connection future cannot leave the writer — or the socket's write half —
+   alive. The close reason is a bounded, credential-free classification
+   (`peer-closed`, `malformed-frame`, `relay-error`, …) logged for correlation
+   with the client's own close event (`#3358`).
+
+Session lifetime is not connection lifetime. A browser WebSocket ending —
+normally or through any of the error exits above — retires that physical
+attachment only; it does not kill the tmux Session the Agent owns.
+
 ## Related
 ## Related
 
