@@ -128,7 +128,7 @@ export function ProjectFormFields({
   onChange,
   agents,
   envFiles,
-  envFilesLoading,
+  envFilesState,
   disabled,
   idPrefix,
   locationsLayout = 'responsive',
@@ -137,7 +137,7 @@ export function ProjectFormFields({
   onChange: (next: ProjectDraft) => void;
   agents: Agent[];
   envFiles: EnvFileInfo[];
-  envFilesLoading: boolean;
+  envFilesState: 'loading' | 'ready' | 'error';
   disabled: boolean;
   idPrefix: string;
   locationsLayout?: 'responsive' | 'stacked';
@@ -168,7 +168,7 @@ export function ProjectFormFields({
         draft={draft}
         onChange={onChange}
         envFiles={envFiles}
-        loading={envFilesLoading}
+        envFilesState={envFilesState}
         disabled={disabled}
         idPrefix={idPrefix}
       />

@@ -86,7 +86,7 @@ export function AppProjectFormSurface({
           onChange={form.setDraft}
           agents={agents}
           envFiles={form.envFiles}
-          envFilesLoading={form.envFilesLoading}
+          envFilesState={form.envFilesState}
           disabled={form.busy}
           idPrefix={creating ? 'project-create' : 'project-settings'}
           locationsLayout="stacked"

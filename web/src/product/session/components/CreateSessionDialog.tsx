@@ -361,6 +361,7 @@ function ProjectEnvField({ form }: { form: CreateSessionForm }) {
           emptyLabel="No env files — create one in Env Files"
           listClassName="h-56"
           reorderable
+          catalogReady={form.envCatalogState === 'ready'}
         />
       ) : null}
     </div>

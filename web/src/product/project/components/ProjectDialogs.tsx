@@ -79,7 +79,7 @@ export function CreateProjectDialog({
               onChange={form.setDraft}
               agents={agents}
               envFiles={form.envFiles}
-              envFilesLoading={form.envFilesLoading}
+              envFilesState={form.envFilesState}
               disabled={form.busy}
               idPrefix="project-create"
             />
@@ -229,7 +229,7 @@ export function ProjectSettingsDialog({
               onChange={form.setDraft}
               agents={agents}
               envFiles={form.envFiles}
-              envFilesLoading={form.envFilesLoading}
+              envFilesState={form.envFilesState}
               disabled={form.busy}
               idPrefix="project-settings"
             />

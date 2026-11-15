@@ -253,6 +253,7 @@ function AppCreateEnvPage({
               emptyLabel="No env files — create one in Env Files"
               scroll={false}
               reorderable
+              catalogReady={form.envCatalogState === 'ready'}
             />
           ) : null}
         </div>

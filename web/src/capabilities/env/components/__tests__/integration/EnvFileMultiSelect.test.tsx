@@ -123,5 +123,21 @@ describe('EnvFileMultiSelect', () => {
         'missing',
       );
     });
+    it('does not call a reference missing when the catalog could not be read', () => {
+      render(
+        <EnvFileMultiSelect
+          files={[]}
+          selected={[{ name: 'staging.env', source: 'server' }]}
+          onChange={vi.fn()}
+          reorderable
+          catalogReady={false}
+        />,
+      );
+
+      expect(screen.queryByTestId('env-selected-missing')).not.toBeInTheDocument();
+      expect(screen.getByTestId('env-selected-server::staging.env')).not.toHaveTextContent(
+        'missing',
+      );
+    });
   });
 });

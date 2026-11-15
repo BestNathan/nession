@@ -40,27 +40,34 @@ export function useProjectDraftForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
-  const [envFilesLoading, setEnvFilesLoading] = useState(false);
+  const [envFilesState, setEnvFilesState] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
 
   // The Project form names Server ENV files, so it needs the same global
   // catalog the create-time chooser uses. Read on open so a file created in
-  // the Environment capability is visible without remounting the shell.
+  // the Environment capability is visible without remounting the shell. A
+  // failed read is `error`, not an empty catalog: refs must not be reported
+  // missing when the catalog simply could not be read.
   useEffect(() => {
     if (!isOpen) {
       return;
     }
     let active = true;
-    setEnvFilesLoading(true);
+    setEnvFilesState('loading');
     envApi
       .listEnvFiles()
       .then((response) => {
-        if (active) { setEnvFiles(response.files); }
+        if (active) {
+          setEnvFiles(response.files);
+          setEnvFilesState('ready');
+        }
       })
       .catch(() => {
-        if (active) { setEnvFiles([]); }
-      })
-      .finally(() => {
-        if (active) { setEnvFilesLoading(false); }
+        if (active) {
+          setEnvFiles([]);
+          setEnvFilesState('error');
+        }
       });
     return () => {
       active = false;
@@ -109,5 +116,5 @@ export function useProjectDraftForm({
     }
   }, [draft, kind, project, onChanged, onSaved, onClose]);
 
-  return { draft, setDraft, busy, error, submit, envFiles, envFilesLoading };
+  return { draft, setDraft, busy, error, submit, envFiles, envFilesState };
 }

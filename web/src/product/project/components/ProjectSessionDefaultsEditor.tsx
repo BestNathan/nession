@@ -18,14 +18,14 @@ export function ProjectSessionDefaultsEditor({
   draft,
   onChange,
   envFiles,
-  loading,
+  envFilesState,
   disabled,
   idPrefix,
 }: {
   draft: ProjectDraft;
   onChange: (next: ProjectDraft) => void;
   envFiles: EnvFileInfo[];
-  loading: boolean;
+  envFilesState: 'loading' | 'ready' | 'error';
   disabled: boolean;
   idPrefix: string;
 }) {
@@ -41,9 +41,10 @@ export function ProjectSessionDefaultsEditor({
       })),
     [draft.envProfileIds],
   );
-  const missing = selected.filter(
-    (ref) => !serverFiles.some((file) => file.name === ref.name),
-  );
+  const catalogReady = envFilesState === 'ready';
+  const missing = catalogReady
+    ? selected.filter((ref) => !serverFiles.some((file) => file.name === ref.name))
+    : [];
 
   return (
     <FormSection
@@ -76,10 +77,13 @@ export function ProjectSessionDefaultsEditor({
             })
           }
           disabled={disabled}
+          catalogReady={catalogReady}
           emptyLabel={
-            loading
+            envFilesState === 'loading'
               ? 'Loading ENV files…'
-              : 'No Server ENV files — create one in Environment'
+              : envFilesState === 'error'
+                ? 'ENV Library unavailable — reopen settings to retry'
+                : 'No Server ENV files — create one in Environment'
           }
           reorderable
           listClassName="h-40"

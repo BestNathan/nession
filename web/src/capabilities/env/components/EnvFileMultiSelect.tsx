@@ -32,16 +32,24 @@ interface EnvFileMultiSelectProps {
    * list and is marked missing rather than silently dropped.
    */
   reorderable?: boolean;
+  /**
+   * Whether `files` is a successfully read catalog (#3649). When false, a
+   * selected ref that is absent from `files` is not reported as missing: an
+   * unavailable read is unknown, not evidence that the file is gone.
+   */
+  catalogReady?: boolean;
 }
 
 function SelectedOrder({
   selected,
   files,
+  catalogReady,
   disabled,
   onChange,
 }: {
   selected: EnvFileRef[];
   files: EnvFileInfo[];
+  catalogReady: boolean;
   disabled?: boolean;
   onChange: (selected: EnvFileRef[]) => void;
 }) {
@@ -52,9 +60,9 @@ function SelectedOrder({
     next.splice(target, 0, item);
     onChange(next);
   };
-  const missing = selected.filter(
-    (ref) => !files.some((file) => refKey(file) === refKey(ref)),
-  );
+  const missing = catalogReady
+    ? selected.filter((ref) => !files.some((file) => refKey(file) === refKey(ref)))
+    : [];
 
   return (
     <div className="flex flex-col gap-2">
@@ -149,6 +157,7 @@ export function EnvFileMultiSelect({
   listClassName = 'h-40',
   scroll = true,
   reorderable = false,
+  catalogReady = true,
 }: EnvFileMultiSelectProps) {
   const [query, setQuery] = useState('');
 
@@ -178,6 +187,7 @@ export function EnvFileMultiSelect({
         <SelectedOrder
           selected={selected}
           files={files}
+          catalogReady={catalogReady}
           disabled={disabled}
           onChange={onChange}
         />
