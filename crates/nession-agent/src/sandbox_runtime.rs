@@ -273,7 +273,11 @@ impl SandboxRuntime {
     /// in-memory attachment, a mounted/leased physical Overlay, a live durable
     /// owner lock, or a failed/orphaned state. Only a complete, unmounted and
     /// unowned durable state returns `None`.
-    pub fn workspace_in_use(&self, workspace_id: &str) -> Option<String> {
+    pub fn workspace_in_use(
+        &self,
+        workspace_id: &str,
+        workspace_directory: &std::path::Path,
+    ) -> Option<String> {
         if let Ok(leases) = self.workspace_leases.lock() {
             if leases
                 .values()
@@ -285,24 +289,17 @@ impl SandboxRuntime {
         // A surviving execution record is authoritative attachment evidence:
         // even when its physical Overlay could not be adopted, the Workspace
         // it was bound to must not be deleted underneath it.
-        if let (Some(root), Ok(executions)) =
-            (&self.settings.agent_workspaces_root, self.executions.lock())
-        {
-            let directory = root.join(workspace_id);
+        if let Ok(executions) = self.executions.lock() {
             if executions
                 .values()
-                .any(|entry| record_uses_workspace(entry.record(), &directory))
+                .any(|entry| record_uses_workspace(entry.record(), workspace_directory))
             {
                 return Some("a live Sandbox execution is bound to this Workspace".to_string());
             }
         }
         #[cfg(target_os = "linux")]
-        if let (Some(manager), Some(root)) = (
-            &self.settings.overlay_manager,
-            &self.settings.agent_workspaces_root,
-        ) {
-            let directory = root.join(workspace_id);
-            if let Ok(workspace) = manager.resolve_workspace(&directory) {
+        if let Some(manager) = &self.settings.overlay_manager {
+            if let Ok(workspace) = manager.resolve_workspace(workspace_directory) {
                 if let Some(status) = manager.lookup(&workspace) {
                     if status.mounted
                         || status.consumers > 0
@@ -714,8 +711,8 @@ impl SandboxWorkspaceUse {
 }
 
 impl crate::workspace_manager::WorkspaceUseGuard for SandboxWorkspaceUse {
-    fn workspace_in_use(&self, workspace_id: &str) -> Option<String> {
-        self.runtime.workspace_in_use(workspace_id)
+    fn workspace_in_use(&self, workspace_id: &str, directory: &std::path::Path) -> Option<String> {
+        self.runtime.workspace_in_use(workspace_id, directory)
     }
 }
 

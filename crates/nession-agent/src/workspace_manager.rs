@@ -124,7 +124,10 @@ pub struct WorkspaceOverlayStorage {
 /// cannot prove that no physical Overlay is mounted.
 pub trait WorkspaceUseGuard: Send + Sync {
     /// A human-readable reason when the Workspace is still in use.
-    fn workspace_in_use(&self, workspace_id: &str) -> Option<String>;
+    ///
+    /// `directory` is the Workspace Manager's own derived durable directory,
+    /// so an observer never has to recreate the storage layout.
+    fn workspace_in_use(&self, workspace_id: &str, directory: &Path) -> Option<String>;
 }
 
 /// The Agent's durable named Workspace registry.
@@ -344,9 +347,9 @@ impl WorkspaceManager {
     }
 
     fn observed_use(&self, workspace_id: &str) -> Option<String> {
-        self.use_guard
-            .as_ref()
-            .and_then(|guard| guard.workspace_in_use(workspace_id))
+        self.use_guard.as_ref().and_then(|guard| {
+            guard.workspace_in_use(workspace_id, &self.workspace_dir(workspace_id))
+        })
     }
 
     fn status_for(&self, workspace_id: &str) -> (WorkspaceStatus, Option<String>) {
@@ -1176,7 +1179,7 @@ mod tests {
 
     struct InUseGuard;
     impl WorkspaceUseGuard for InUseGuard {
-        fn workspace_in_use(&self, workspace_id: &str) -> Option<String> {
+        fn workspace_in_use(&self, workspace_id: &str, _directory: &Path) -> Option<String> {
             (workspace_id == OBSERVED_WORKSPACE)
                 .then(|| "a physical Overlay is mounted".to_string())
         }
