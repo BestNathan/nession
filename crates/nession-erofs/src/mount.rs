@@ -276,22 +276,30 @@ pub struct MountEntry {
 
 /// The mountinfo record for exactly `path`, if it is a mountpoint.
 pub fn mount_entry(path: &Path) -> Option<MountEntry> {
-    let text = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    text.lines()
-        .find_map(|line| parse_mountinfo(line, &canonical))
+    mount_entries()
+        .into_iter()
+        .find(|entry| entry.mountpoint == canonical)
 }
 
-fn parse_mountinfo(line: &str, canonical: &Path) -> Option<MountEntry> {
+/// Every parsed `/proc/self/mountinfo` record observed by this process.
+///
+/// Storage capability validation needs the filesystem kind of an arbitrary
+/// directory, not only of a mountpoint; it therefore has to search the whole
+/// table for the longest mountpoint prefix.
+pub fn mount_entries() -> Vec<MountEntry> {
+    let Ok(text) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return Vec::new();
+    };
+    text.lines().filter_map(parse_mountinfo_line).collect()
+}
+
+fn parse_mountinfo_line(line: &str) -> Option<MountEntry> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     let point = unescape_mount_point(fields.get(4)?);
-    let mountpoint = Path::new(&point);
-    if mountpoint != canonical {
-        return None;
-    }
     let separator = fields.iter().position(|field| *field == "-")?;
     Some(MountEntry {
-        mountpoint: mountpoint.to_path_buf(),
+        mountpoint: std::path::PathBuf::from(point),
         fs_type: fields.get(separator + 1)?.to_string(),
         source: unescape_mount_point(fields.get(separator + 2)?),
     })
@@ -310,10 +318,10 @@ pub fn is_mounted(path: &Path) -> bool {
     mount_entry(path).is_some()
 }
 
-struct BoundedOutcome {
-    status: ExitStatus,
-    stderr: String,
-    stderr_stalled: bool,
+pub(crate) struct BoundedOutcome {
+    pub(crate) status: ExitStatus,
+    pub(crate) stderr: String,
+    pub(crate) stderr_stalled: bool,
 }
 
 /// Run a helper process with a hard deadline and a bounded stderr collection.
@@ -321,7 +329,7 @@ struct BoundedOutcome {
 /// A helper whose descendant keeps the stderr pipe open after the helper has
 /// exited cannot stall this call: the reader is detached and the stall is
 /// reported. The child is killed and reaped on timeout.
-fn run_bounded_helper(
+pub(crate) fn run_bounded_helper(
     mut command: Command,
     label: &str,
     timeout: Duration,
@@ -369,7 +377,7 @@ fn run_bounded_helper(
     })
 }
 
-fn stderr_detail(outcome: &BoundedOutcome) -> String {
+pub(crate) fn stderr_detail(outcome: &BoundedOutcome) -> String {
     if outcome.stderr.is_empty() {
         if outcome.stderr_stalled {
             "stderr collection stalled".to_string()

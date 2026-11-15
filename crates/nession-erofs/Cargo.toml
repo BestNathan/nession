@@ -13,7 +13,7 @@ build = ["store", "dep:tempfile"]
 # feature enables it; both consume the same Range/verify/publish mechanics.
 distribution = ["dep:futures-util", "dep:reqwest", "dep:tokio"]
 cache = ["distribution", "dep:libc"]
-mount = []
+mount = ["dep:libc"]
 # Server image catalog (#3496): schema/metadata logic over the Server's own
 # SQLite connection. It never opens a second database.
 catalog = ["store", "dep:sea-orm", "dep:tokio"]
