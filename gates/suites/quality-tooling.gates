@@ -7,6 +7,7 @@ workflow-conventions
 requirement-acceptance-selftest
 acceptance-lifecycle-selftest
 acceptance-agent-selftest
+acceptance-executor-selftest
 acceptance-case-ingest-selftest
 run-record-artifact-evidence-selftest
 run-record-index-contract-selftest
