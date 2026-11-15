@@ -16,6 +16,7 @@ import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs
 import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
 import {createHash} from 'node:crypto';
 import {reconcileMcpPublication} from './mcp-reconcile.mjs';
+import {loadStableMcpRelease} from './mcp-upstream.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -38,6 +39,15 @@ async function api(path) {
   const response=await fetch('https://api.github.com/repos/'+repo+path,{headers,signal:AbortSignal.timeout(15000)});
   if(response.status===404)return { missing:true };
   if(!response.ok)throw new Error('GitHub API request failed: HTTP '+response.status);
+  return response.json();
+}
+async function officialMcpApi(path){
+  const headers={'accept':'application/vnd.github+json',
+    'x-github-api-version':'2022-11-28','user-agent':'nession-mcp-pages-spec'};
+  if(token)headers.authorization='Bearer '+token;
+  const response=await fetch('https://api.github.com/repos/modelcontextprotocol/modelcontextprotocol'+path,
+    {headers,signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw Error('Official MCP GitHub source unavailable: HTTP '+response.status);
   return response.json();
 }
 async function optionalList(path) {
@@ -215,6 +225,10 @@ if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
     {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
   const parsed=JSON.parse(stdout);
   if(parsed.schema_version!==1)throw Error('Unexpected MCP exporter schema version');
+  // Only official stable tags are considered supported upstream revisions.
+  // An unavailable or malformed source aborts publication (last good stays live).
+  const upstream={stable:await loadStableMcpRelease({api:officialMcpApi})};
+  const catalog={...parsed,upstream};
   const prevFile=process.env.PAGES_MCP_PREVIOUS_FILE;
   const publication=process.env.PAGES_MCP_RECONCILE==='1';
   if(publication&&!prevFile&&process.env.PAGES_MCP_BOOTSTRAP!=='1')
@@ -226,7 +240,7 @@ if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
       throw Error('Invalid last-good MCP publication file');
     previous=JSON.parse(await readFile(prevFile,'utf8'));
   }
-  const reconciled=reconcileMcpPublication({catalog:parsed,mainSha,previous});
+  const reconciled=reconcileMcpPublication({catalog,mainSha,previous});
   mcp=reconciled.document;
   console.log('MCP document reconciliation:',reconciled.reason,mcp.semantic_sha256);
 
