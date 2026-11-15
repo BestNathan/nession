@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
-  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE}
+  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -198,6 +198,37 @@ assert.equal(assertDispatchAuthority(nativeRecovery).action_id,nativeId);
 assert.throws(()=>assertDispatchAuthority({...nativeRecovery,actionId:continuation.actionId}),/authenticated owner\/main/);
 assert.throws(()=>assertDispatchAuthority({...nativeRecovery,event:{...nativeRecovery.event,
   comment:{...nativeRecovery.event.comment,body:CONTROLLED_NATIVE_RECOVERY_COMMENT+' '}}}),/authenticated owner\/main/);
+// #3550: a missed Publisher wake can be recovered by an exact authenticated
+// Owner comment, bound to the existing initialized Store Reviewer Outbox.
+// Parsing only a command prefix or a mismatched Issue is never authority.
+const currentReviewerAction='66a3bf916ce573adda08135524a2bb6d4db2a0a2125cab0bfdce2664e78614b6';
+const currentReviewCommand='/nession dispatch-review issue=3433 action='+currentReviewerAction;
+assert.deepEqual(REVIEW_DISPATCH_RE.exec(currentReviewCommand)?.slice(1),
+  ['3433',currentReviewerAction]);
+const ownerReviewEvent={...commentEvent,
+  issue:{number:3433,state:'open'},
+  comment:{...commentEvent.comment,body:currentReviewCommand}};
+const ownerReview={...commentValid,event:ownerReviewEvent,
+  issue:3433,actionId:currentReviewerAction};
+assert.equal(assertDispatchAuthority(ownerReview).action_id,currentReviewerAction);
+for(const change of [
+  {issue:1997},
+  {actionId:'a'.repeat(64)},
+  {event:{...ownerReviewEvent,issue:{number:3434,state:'open'}}},
+  {event:{...ownerReviewEvent,issue:{number:3433,state:'closed'}}},
+  {event:{...ownerReviewEvent,issue:{number:3433,state:'open',pull_request:{}}}},
+  {event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:currentReviewCommand+' '}}},
+  {event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    body:currentReviewCommand.replace('3433','03433')}}},
+  {event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
+    user:{login:'attacker'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'attacker'}},
+  {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
+  {event:{...ownerReviewEvent,action:'edited'}},
+])assert.throws(()=>assertDispatchAuthority({...ownerReview,...change}),
+  /authenticated owner\\/main/);
+
 const reviewRecover={...commentValid,
   actionId:'555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434',
   event:{...commentEvent,comment:{...commentEvent.comment,
