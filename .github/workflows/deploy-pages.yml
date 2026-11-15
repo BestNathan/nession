@@ -55,6 +55,10 @@ jobs:
       public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
       documents_json_sha256: ${{ steps.public_data.outputs.documents_json_sha256 }}
       documents_protocols: ${{ steps.public_data.outputs.documents_protocols }}
+      mcp_json_sha256: ${{ steps.public_data.outputs.mcp_json_sha256 }}
+      mcp_semantic_sha256: ${{ steps.public_data.outputs.mcp_semantic_sha256 }}
+      mcp_source_sha: ${{ steps.public_data.outputs.mcp_source_sha }}
+      mcp_tools: ${{ steps.public_data.outputs.mcp_tools }}
       knowledge_sha: ${{ steps.public_data.outputs.knowledge_sha }}
       knowledge_json_sha256: ${{ steps.public_data.outputs.knowledge_json_sha256 }}
       knowledge_articles: ${{ steps.public_data.outputs.knowledge_articles }}
@@ -148,6 +152,33 @@ jobs:
       - name: Validate independent public projection
         if: steps.detect.outputs.active == 'true'
         run: cd pages && npm run check
+      - name: Resolve previously published MCP Documents (read-only, no credentials)
+        if: steps.detect.outputs.active == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compatible with main before the feature PR lands.
+          [[ -f pages/scripts/mcp-reconcile.mjs ]] || exit 0
+          previous_file="$RUNNER_TEMP/nession-mcp-last-good.json"
+          response="$(curl --silent --show-error --location --connect-timeout 10 --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            -o "$previous_file" -w '%{http_code}' \
+            'https://bestnathan.github.io/nession/data/mcp.json?reconcile=1')"
+          echo 'PAGES_MCP_RECONCILE=1' >> "$GITHUB_ENV"
+          case "$response" in
+            200)
+              test -s "$previous_file"
+              echo "PAGES_MCP_PREVIOUS_FILE=$previous_file" >> "$GITHUB_ENV"
+              ;;
+            404)
+              rm -f "$previous_file"
+              echo 'PAGES_MCP_BOOTSTRAP=1' >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::Cannot safely load previous MCP projection: HTTP $response"
+              exit 1
+              ;;
+          esac
       - name: Build sanitized static Pages artifact
         if: steps.detect.outputs.active == 'true'
         env:
@@ -175,6 +206,9 @@ jobs:
           test -s pages/dist/data/workflows.json
           test -s pages/dist/data/knowledge.json
           test -s pages/dist/data/documents.json
+          if [[ -f pages/scripts/mcp-reconcile.mjs ]]; then
+            test -s pages/dist/data/mcp.json
+          fi
           node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
       - name: Capture exact static public evidence digest and coverage
         if: steps.detect.outputs.active == 'true'
@@ -211,6 +245,23 @@ jobs:
           ' "$documents_json" >/dev/null
           echo "documents_json_sha256=$(sha256sum "$documents_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "documents_protocols=$(jq -r '.protocols | length' "$documents_json")" >> "$GITHUB_OUTPUT"
+          # MCP is a separately validated, content-addressed Documents projection.
+          # Its source SHA may remain at the last semantic change when main
+          # advances without a Tool/schema change.
+          if [[ -f pages/scripts/mcp-reconcile.mjs ]]; then
+            mcp_json=pages/dist/data/mcp.json
+            test -s "$mcp_json"
+            node --input-type=module -e "
+              import {readFileSync} from 'node:fs';
+              import {validMcpPublication} from './pages/scripts/mcp-reconcile.mjs';
+              if(!validMcpPublication(JSON.parse(readFileSync('$mcp_json','utf8'))))
+                process.exit(1);
+            "
+            echo "mcp_json_sha256=$(sha256sum "$mcp_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+            echo "mcp_semantic_sha256=$(jq -r .semantic_sha256 "$mcp_json")" >> "$GITHUB_OUTPUT"
+            echo "mcp_source_sha=$(jq -r .source.sha "$mcp_json")" >> "$GITHUB_OUTPUT"
+            echo "mcp_tools=$(jq -r '.tools | length' "$mcp_json")" >> "$GITHUB_OUTPUT"
+          fi
           echo "knowledge_sha=$(jq -r .source.sha "$knowledge_json")" >> "$GITHUB_OUTPUT"
           echo "knowledge_json_sha256=$(sha256sum "$knowledge_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "knowledge_articles=$(jq '.articles | length' "$knowledge_json")" >> "$GITHUB_OUTPUT"
@@ -296,6 +347,10 @@ jobs:
           EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
           EXPECTED_DOCUMENTS_JSON_SHA256: ${{ needs.build.outputs.documents_json_sha256 }}
           EXPECTED_DOCUMENTS_PROTOCOLS: ${{ needs.build.outputs.documents_protocols }}
+          EXPECTED_MCP_JSON_SHA256: ${{ needs.build.outputs.mcp_json_sha256 }}
+          EXPECTED_MCP_SEMANTIC_SHA256: ${{ needs.build.outputs.mcp_semantic_sha256 }}
+          EXPECTED_MCP_SOURCE_SHA: ${{ needs.build.outputs.mcp_source_sha }}
+          EXPECTED_MCP_TOOLS: ${{ needs.build.outputs.mcp_tools }}
           EXPECTED_KNOWLEDGE_SHA: ${{ needs.build.outputs.knowledge_sha }}
           EXPECTED_KNOWLEDGE_JSON_SHA256: ${{ needs.build.outputs.knowledge_json_sha256 }}
           EXPECTED_KNOWLEDGE_ARTICLES: ${{ needs.build.outputs.knowledge_articles }}
@@ -461,6 +516,35 @@ jobs:
             exit 1
           }
           echo "Public Protocol Documents verified: main_sha=$EXPECTED_SHA protocols=$EXPECTED_DOCUMENTS_PROTOCOLS json_sha256=$EXPECTED_DOCUMENTS_JSON_SHA256"
+          if [[ -n "$EXPECTED_MCP_JSON_SHA256" ]]; then
+            [[ "$EXPECTED_MCP_JSON_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$EXPECTED_MCP_SEMANTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+            [[ "$EXPECTED_MCP_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            [[ "$EXPECTED_MCP_TOOLS" =~ ^[1-9][0-9]*$ ]] || exit 1
+            mcp_readback="$(mktemp)"
+            mcp_ready=false
+            for attempt in {1..18}; do
+              if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                  -H 'Cache-Control: no-cache' "$url/data/mcp.json?revision=$EXPECTED_SHA" -o "$mcp_readback" \
+                && jq -e --arg sha "$EXPECTED_MCP_SOURCE_SHA" --arg digest "$EXPECTED_MCP_SEMANTIC_SHA256" --argjson count "$EXPECTED_MCP_TOOLS" '
+                  .schema_version == 1 and .status == "available" and
+                  .source.repository == "BestNathan/nession" and
+                  .source.branch == "main" and .source.sha == $sha and
+                  .semantic_sha256 == $digest and (.tools | length) == $count
+                ' "$mcp_readback" >/dev/null \
+                && [[ "$(sha256sum "$mcp_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_JSON_SHA256" ]]; then
+                mcp_ready=true
+                break
+              fi
+              sleep 5
+            done
+            rm -f "$mcp_readback"
+            [[ "$mcp_ready" == true ]] || {
+              echo "::error::MCP Documents public HTTPS bytes differ from validated build artifact"
+              exit 1
+            }
+            echo "MCP Documents published: tools=$EXPECTED_MCP_TOOLS source=$EXPECTED_MCP_SOURCE_SHA semantic=$EXPECTED_MCP_SEMANTIC_SHA256"
+          fi
           # This is only source observation; never infer SC acceptance or PR
           # lineage from matching bytes. The existing trusted attester rechecks
           # the published SHA-256 against the exact GitHub Run/Attempt.
@@ -483,6 +567,10 @@ jobs:
             echo "- Public Knowledge: $url/#/knowledge · source $EXPECTED_KNOWLEDGE_SHA · $EXPECTED_KNOWLEDGE_ARTICLES articles"
             echo "- Public Protocol Documents: $url/#/documents · source $EXPECTED_SHA · $EXPECTED_DOCUMENTS_PROTOCOLS Protocol Units"
             echo "- Documents JSON SHA-256: $EXPECTED_DOCUMENTS_JSON_SHA256 (exact anonymous HTTPS bytes)"
+            if [[ -n "$EXPECTED_MCP_JSON_SHA256" ]]; then
+              echo "- Public MCP Documents: $url/#/documents/mcp · $EXPECTED_MCP_TOOLS Tools · source $EXPECTED_MCP_SOURCE_SHA"
+              echo "- MCP semantic digest: $EXPECTED_MCP_SEMANTIC_SHA256; HTTPS bytes: $EXPECTED_MCP_JSON_SHA256"
+            fi
             echo "- Knowledge JSON SHA-256: $EXPECTED_KNOWLEDGE_JSON_SHA256 (anonymous HTTPS bytes)"
             echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"
             echo "- Direct HTML example: $url/prototypes/terminal-fixed-cols-2487/index.html (source link visible)"
