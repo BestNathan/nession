@@ -8,6 +8,7 @@ import {
   extractSection,
   isAcceptanceIssue,
   parseAcceptanceReport,
+  parseClosingIssueNumbers,
   parsePreMergeIssueNumbers,
   parseSuccessCriteria,
 } from './requirement-acceptance.mjs';
@@ -67,8 +68,49 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   return { action: 'close', reason: 'accepted SCs and merged implementation PRs' };
 }
 
+// /accept needs an implementation relation, not a text-only reference.
+// Preserve historical "(#N)" PR titles and explicit closing/implementing
+// declarations, but never infer implementation from "Refs #N" or a mention.
+export function explicitlyImplementsIssue(pr, issueNumber, owner, name) {
+  if (parseClosingIssueNumbers(pr.body, owner, name).includes(issueNumber) ||
+      parseClosingIssueNumbers(pr.title, owner, name).includes(issueNumber)) return true;
+  if ([...String(pr.title || '').matchAll(/\(([^)]*)\)/g)].some((match) =>
+    new RegExp('^\\s*#' + issueNumber + '(?:\\s+SC-\\d{2,})?\\s*$', 'i').test(match[1])))
+    return true;
+  const declarations = String(pr.body || '').replace(/<!--[\s\S]*?-->/g, '')
+    .split(/\r?\n/).filter(line => /^\s*(?:[-*+]\s+)?(?:implements?|addresses?)\s+/i.test(line));
+  return declarations.some(line =>
+    parsePreMergeIssueNumbers(line, owner, name).includes(issueNumber));
+}
+
+// GitHub's own commit -> PR association proves the exact source identity.
+// Neither the PR body nor a later Issue mention can attest that source SHA.
+export async function verifiedManualSourcePulls(repository, issueNumber, prs, token,
+  request = githubRequest) {
+  const { owner, name, prefix } = repoParts(repository);
+  const verified = [];
+  for (const pr of prs) {
+    if (!explicitlyImplementsIssue(pr, issueNumber, owner, name)) continue;
+    if (!SHA.test(String(pr.head?.sha || '')) ||
+        pr.head?.repo?.full_name !== repository ||
+        pr.base?.repo?.full_name !== repository ||
+        !['main', 'staging'].includes(pr.base?.ref) ||
+        (pr.state === 'closed' && !pr.merged_at)) continue;
+    const associated = await request(prefix + '/commits/' + pr.head.sha +
+      '/pulls?per_page=100', { token });
+    if (!Array.isArray(associated) || associated.length >= 100)
+      throw Error('incomplete exact-head PR source provenance for #' + pr.number);
+    if (associated.some(p => p.number === pr.number &&
+        p.head?.sha === pr.head.sha &&
+        p.head?.repo?.full_name === repository &&
+        p.base?.repo?.full_name === repository &&
+        p.base?.ref === pr.base.ref)) verified.push(pr);
+  }
+  return verified;
+}
+
 export function selectManualAgentRuns(issue, prs, {
-  verifiedStagingSha = null, verifiedMainSha = null,
+  verifiedStagingSha = null, verifiedMainSha = null, diagnostics = [],
 } = {}) {
   const success = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
@@ -90,7 +132,32 @@ export function selectManualAgentRuns(issue, prs, {
       (stage === 'post-merge' && pr.base?.ref === 'main' && pr.merged_at));
     candidates.sort((a, b) => String(b.merged_at || b.updated_at || '').localeCompare(
       String(a.merged_at || a.updated_at || '')));
-    const pr = candidates[0];
+    let pr = candidates[0];
+    if (stage === 'pr') {
+      // A previously accepted criterion anchors the shared PR-stage source;
+      // no unanchored newest-head fallback may overwrite it. Distinct heads
+      // without an anchor are ambiguous, even when both PRs really implement.
+      const acceptedRefs = new Set([...parsed.plan].filter(([criterion, entry]) =>
+        planStage(entry) === 'pr' &&
+        ['pass', 'n/a'].includes(String(report.rows.get(criterion)?.result || '').toLowerCase()) &&
+        success.criteria.get(criterion)?.checked)
+        .map(([criterion]) => /\bref ([0-9a-f]{40});/i
+          .exec(String(report.rows.get(criterion)?.evidence || ''))?.[1])
+        .filter(Boolean));
+      const heads = [...new Set(candidates.map(p => p.head?.sha)
+        .filter(sha => SHA.test(String(sha || ''))))];
+      const selected = acceptedRefs.size
+        ? (acceptedRefs.size === 1 && heads.includes([...acceptedRefs][0])
+          ? [...acceptedRefs][0] : null)
+        : (heads.length === 1 ? heads[0] : null);
+      if (!selected) {
+        diagnostics.push('PR stage: ' + (heads.length === 0
+          ? 'no source-verified implementing PR'
+          : 'ambiguous or conflicting implementing PR exact heads; preserve accepted SC source'));
+        continue;
+      }
+      pr = candidates.find(p => p.head.sha === selected);
+    }
     // The optional historic-main target is independently authenticated by
     // verifyManualPostMergeTarget; never reinterpret it as a PR or staging SHA.
     const sha = stage === 'post-merge' && SHA.test(String(verifiedMainSha || '')) &&
@@ -313,17 +380,23 @@ async function handleManual(event, repository, actor, token, request = githubReq
     return { action: 'pending', reason: 'explicit blocker prevents manual re-dispatch' };
   }
   const prs = await relatedPulls(repository, command.issueNumber, token, null, request);
+  const sourcePrs = await verifiedManualSourcePulls(repository, command.issueNumber,
+    prs, token, request);
   const verifiedMainSha = command.targetMainSha
-    ? await verifyManualPostMergeTarget(repository, command.targetMainSha, prs,
+    ? await verifyManualPostMergeTarget(repository, command.targetMainSha, sourcePrs,
       token, request) : null;
-  const directlySelected = selectManualAgentRuns(issue, prs, { verifiedMainSha });
+  const diagnostics = [];
+  if (!sourcePrs.length && prs.length)
+    diagnostics.push('reference-only or unverified PR: no source-aligned implementation');
+  const directlySelected = selectManualAgentRuns(issue, sourcePrs,
+    { verifiedMainSha, diagnostics });
   // Never invent a staging association. When the source PR was correctly
   // merged to main (e.g. scripts-only), authenticate its actual ancestry in
   // staging before scheduling the pending merged/staging Agent criterion.
   const verifiedStagingSha = directlySelected.some(run => run.stage === 'staging')
-    ? null : await verifiedStagingTargetForMainPR(repository, prs, token, request);
+    ? null : await verifiedStagingTargetForMainPR(repository, sourcePrs, token, request);
   const runs = verifiedStagingSha
-    ? selectManualAgentRuns(issue, prs, { verifiedStagingSha, verifiedMainSha })
+    ? selectManualAgentRuns(issue, sourcePrs, { verifiedStagingSha, verifiedMainSha, diagnostics })
     : directlySelected;
   for (const run of runs) {
     await request(prefix + '/actions/workflows/agent-sc-acceptance.yml/dispatches', {
@@ -335,7 +408,7 @@ async function handleManual(event, repository, actor, token, request = githubReq
     });
   }
   return { action: runs.length ? 'dispatched' : 'pending', reason: result.reason,
-    agent_runs: runs, note: 'Case/deployed proof remains with its existing trusted runner' };
+    agent_runs: runs, diagnostics, note: 'Case/deployed proof remains with its existing trusted runner' };
 }
 
 async function selfTest() {
@@ -412,6 +485,68 @@ async function selfTest() {
     { ...issue, body: body.replace('| Pass |', '| Pending |') }, [pr]),
     [{ stage: 'pr', target_ref: sha }]);
   assert.deepEqual(selectManualAgentRuns(issue, [pr]), []);
+  // #3545: PR #3529 implements the Issue, while later #3540 only mentions it.
+  const actual = {...pr,number:3529,title:'fix Hosting test (#3528)',
+    body:'Refs #3528',head:{...pr.head,sha:'7c7d36f9456d901d252abcfbbe5d2a991f202ba7'}};
+  const refOnly = {...actual,number:3540,title:'fix tooling (#3479)',
+    body:'Refs #3528',head:{...pr.head,sha:'06857762ece34cf9cbcd50c21454470ed39456f1'}};
+  assert.equal(explicitlyImplementsIssue(actual,3528,'BestNathan','nession'),true);
+  assert.equal(explicitlyImplementsIssue(refOnly,3528,'BestNathan','nession'),false);
+  const pendingPr = {...issue,number:3528,body:body.replace('| SC-01 | Pass |','| SC-01 | Pending |')};
+  assert.deepEqual(selectManualAgentRuns(pendingPr,[actual]),
+    [{stage:'pr',target_ref:actual.head.sha}]);
+  // The native GitHub commit->PR witness rejects a forged SHA even when the
+  // title claims implementation; a reference-only PR is never fetched.
+  const nativeActual = {...actual,
+    head:{...actual.head,repo:{full_name:'BestNathan/nession'}},
+    base:{...actual.base,repo:{full_name:'BestNathan/nession'}}};
+  const nativeReference = {...refOnly,
+    head:{...refOnly.head,repo:{full_name:'BestNathan/nession'}},
+    base:{...refOnly.base,repo:{full_name:'BestNathan/nession'}}};
+  let nativeCalls = 0;
+  const nativeRead = async path => {
+    nativeCalls += 1;
+    assert.equal(path,'/repos/BestNathan/nession/commits/'+nativeActual.head.sha+
+      '/pulls?per_page=100');
+    return [{number:nativeActual.number,head:nativeActual.head,base:nativeActual.base}];
+  };
+  assert.deepEqual((await verifiedManualSourcePulls('BestNathan/nession',3528,
+    [nativeReference,nativeActual],'fixture-token',nativeRead)).map(p=>p.number),[3529]);
+  assert.equal(nativeCalls,1,'reference-only PR must not be dispatched or queried');
+  assert.deepEqual(await verifiedManualSourcePulls('BestNathan/nession',3528,
+    [nativeActual],'fixture-token',async () => [{
+      number:3529,head:{...nativeActual.head,sha:'f'.repeat(40)},base:nativeActual.base,
+    }]),[],'GitHub source SHA mismatch must fail closed');
+  const ambiguous = {...actual,number:3530,head:{...actual.head,sha:'e'.repeat(40)}};
+  const reasons = [];
+  assert.deepEqual(selectManualAgentRuns(pendingPr,[actual,ambiguous],{diagnostics:reasons}),[]);
+  assert.match(reasons.join(' '),/ambiguous/);
+  // Multiple copies of one exact head are still just one dispatch.
+  assert.deepEqual(selectManualAgentRuns(pendingPr,[actual,actual]),
+    [{stage:'pr',target_ref:actual.head.sha}]);
+  // #3528: SC-01 already accepted on the source PR; SC-02 remains pending.
+  // Another strongly associated (but different) PR must not steal SC-02.
+  const twoScBody = body
+    .replace('- [x] SC-01 acceptance is proven',
+      '- [x] SC-01 acceptance is proven\n- [ ] SC-02 exact-head Quality receipt')
+    .replace('  SC-01:\n    when: pr\n    method: agent\n',
+      '  SC-01:\n    when: pr\n    method: agent\n'+
+      '  SC-02:\n    when: pr\n    method: agent\n')
+    .replace('ref '+sha+';', 'ref '+actual.head.sha+';')
+    .replace('| SC-01 | Pass | run 100; ref '+actual.head.sha+
+      '; source agent-qwen; test: exact SHA fixture |',
+      '| SC-01 | Pass | run 100; ref '+actual.head.sha+
+      '; source agent-qwen; test: exact SHA fixture |\n'+
+      '| SC-02 | Pending | awaiting independently authenticated Web Quality |');
+  const anchored = {...issue,number:3528,body:twoScBody};
+  assert.deepEqual(selectManualAgentRuns(anchored,[ambiguous,actual]),
+    [{stage:'pr',target_ref:actual.head.sha}]);
+  const unknownSource={...anchored,body:twoScBody.replace(
+    'ref '+actual.head.sha+';', 'ref '+'c'.repeat(40)+';')};
+  const ambiguousReasons=[];
+  assert.deepEqual(selectManualAgentRuns(unknownSource,[actual,ambiguous],
+    {diagnostics:ambiguousReasons}),[]);
+  assert.match(ambiguousReasons.join(' '),/conflicting/);
   const stagedBody = body.replace('when: pr\n',
     'when: merged\n    branch: staging\n').replace('| Pass |', '| Pending |');
   const mainPr = { ...pr, base: { ref: 'main' } };
@@ -532,11 +667,14 @@ async function selfTest() {
   // Exercise the real mocked REST orchestration, not merely the policy function.
   let live = { ...issue, updated_at: '2026-11-11T01:00:00Z' };
   let writes = 0, dispatches = 0;
-  let effectivePr = pr;
+  let effectivePr = {...pr, head:{...pr.head,repo:{full_name:'X/y'}},
+    base:{...pr.base,repo:{full_name:'X/y'}}};
   const mock = async (path, options = {}) => {
     if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
       items: [{ number: 21 }] };
     if (path.endsWith('/pulls/21')) return effectivePr;
+    if (path.endsWith('/commits/'+sha+'/pulls?per_page=100'))
+      return [{number:21,head:effectivePr.head,base:effectivePr.base}];
     if (path.endsWith('/branches/staging')) return { commit: { sha: stagingSha } };
     if (path.includes('/compare/')) return validCompare;
     if (path.endsWith('/issues/19/events?per_page=100')) return [];
@@ -564,7 +702,7 @@ async function selfTest() {
   // Acceptance-first: a trusted Pass arriving before merge cannot close;
   // the subsequent merge event converges using the already projected proof.
   live = { ...issue, updated_at: '2026-11-11T01:00:01Z' };
-  effectivePr = { ...pr, merged_at: null };
+  effectivePr = { ...effectivePr, merged_at: null };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
     { request: mock })).action, 'pending');
   assert.equal(writes, 1);
@@ -599,7 +737,8 @@ async function selfTest() {
   // End-to-end /accept mock: a main-only implementation reaches the exact
   // staging SHA by authenticated ancestry, not by editing the SC plan.
   live = { ...issue, body: stagedBody, updated_at: '2026-11-11T01:01:01Z' };
-  effectivePr = mainPr;
+  effectivePr = {...mainPr,head:{...mainPr.head,repo:{full_name:'X/y'}},
+    base:{...mainPr.base,repo:{full_name:'X/y'}}};
   const stagingRecovery = await handleManual(e, 'X/y', 'owner', 'fixture-token', mock);
   assert.equal(stagingRecovery.action, 'dispatched');
   assert.deepEqual(stagingRecovery.agent_runs,
@@ -613,7 +752,8 @@ async function selfTest() {
   assert.equal(refused.action, 'pending');
   assert.equal(refused.agent_runs.length, 0);
   assert.equal(dispatches, 2, 'tampered ancestry must never dispatch');
-  effectivePr = pr;
+  effectivePr = {...pr,head:{...pr.head,repo:{full_name:'X/y'}},
+    base:{...pr.base,repo:{full_name:'X/y'}}};
   live = { ...issue, body, updated_at: '2026-11-11T01:02:00Z' };
   // Distinct timestamps across successive reads force no mutation.
   let reads = 0;
