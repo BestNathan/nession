@@ -8,11 +8,9 @@ on:
         required: true
         type: string
   workflow_run:
-    # GitHub replaces completed workflow_run.name with a dynamic run-name.
-    # Comment /case runs are still the same pinned Acceptance / Cases workflow.
-    # The trusted ingester separately validates exact source workflow path,
-    # event, source branch and a bounded comment-name identity.
-    workflows: ["Acceptance / Cases", "Comment Case #*"]
+    # Native push and owner-manual Cases keep the static source name.
+    # GITHUB_TOKEN comment Cases are explicitly woken by their source Run job.
+    workflows: ["Acceptance / Cases"]
     types: [completed]
 
 permissions:
