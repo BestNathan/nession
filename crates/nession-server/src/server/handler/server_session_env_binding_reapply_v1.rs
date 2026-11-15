@@ -4,6 +4,7 @@
 use super::{
     session_env_binding_reply, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ConnectionHandler, HandlerAction, ProtocolMessage,
+    SessionEnvBindingRefusalKind,
 };
 
 impl ConnectionHandler {
@@ -25,14 +26,17 @@ impl ConnectionHandler {
                     binding: None,
                     warnings: Vec::new(),
                     error: Some(error.to_string()),
+                    refusal: None,
                 },
             )
         };
         if !self.authenticated_client {
             return Ok(refusal("Not authenticated"));
         }
-        let Ok(ClientSessionEnvBindingReapplyPayload { session_id }) =
-            serde_json::from_value(msg.payload)
+        let Ok(ClientSessionEnvBindingReapplyPayload {
+            session_id,
+            expected_revision,
+        }) = serde_json::from_value(msg.payload)
         else {
             return Ok(refusal("session_id is required"));
         };
@@ -44,7 +48,27 @@ impl ConnectionHandler {
             Ok(Some(record)) => record,
             Ok(None) => {
                 // Reapplying an empty binding is a valid no-op; there is
-                // nothing to resolve and no revision to advance.
+                // nothing to resolve and no revision to advance. A version-aware
+                // caller that read a non-zero revision has still lost a race
+                // (the binding was cleared or never existed), so it is told
+                // exactly that instead of silently succeeding.
+                if let Some(expected) = expected_revision {
+                    if expected != 0 {
+                        return Ok(session_env_binding_reply(
+                            &msg.id,
+                            "server.session.env.binding.reapply",
+                            ClientSessionEnvBindingResponsePayload {
+                                success: false,
+                                binding: None,
+                                warnings: Vec::new(),
+                                error: Some(format!(
+                                    "revision_conflict: expected revision {expected}, but the Session binding is now at revision 0; call get and retry with the current revision"
+                                )),
+                                refusal: Some(SessionEnvBindingRefusalKind::RevisionConflict),
+                            },
+                        ));
+                    }
+                }
                 let binding = self.session_binding_state(&session_id).await;
                 return Ok(session_env_binding_reply(
                     &msg.id,
@@ -54,6 +78,7 @@ impl ConnectionHandler {
                         binding: Some(binding),
                         warnings: Vec::new(),
                         error: None,
+                        refusal: None,
                     },
                 ));
             }
@@ -66,7 +91,7 @@ impl ConnectionHandler {
             .map(|profile| profile.profile.clone())
             .collect();
         match self
-            .set_session_binding(&session_id, &refs, "reapply")
+            .set_session_binding(&session_id, &refs, "reapply", expected_revision)
             .await
         {
             Ok((warnings, error, binding)) => Ok(session_env_binding_reply(
@@ -77,9 +102,20 @@ impl ConnectionHandler {
                     binding: Some(binding),
                     warnings,
                     error,
+                    refusal: None,
                 },
             )),
-            Err(error) => Ok(refusal(&error)),
+            Err(error) => Ok(session_env_binding_reply(
+                &msg.id,
+                "server.session.env.binding.reapply",
+                ClientSessionEnvBindingResponsePayload {
+                    success: false,
+                    binding: None,
+                    warnings: Vec::new(),
+                    error: Some(error.message()),
+                    refusal: error.refusal(),
+                },
+            )),
         }
     }
 }

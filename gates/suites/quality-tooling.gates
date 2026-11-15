@@ -72,3 +72,4 @@ gate-consumer-parity
 ci-pr-routing-selftest
 dev-workspace-selftest
 detector-selftest-coverage
+staging-promotion-source-selftest

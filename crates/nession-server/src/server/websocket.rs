@@ -380,6 +380,13 @@ impl WebSocketServer {
         // bound, and it exists for the same reason: a peer that sends nothing
         // must not cost a task and a socket indefinitely.
         let handshake_slots = Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_PENDING_HANDSHAKES));
+        // A separate budget for upgraded WebSockets that have not authenticated
+        // yet (#3439 W2): the handshake slot above is returned when the upgrade
+        // is answered, so this is what bounds an upgraded socket's task, queue
+        // and writer before it proves a credential.
+        let pending_auth_slots = Arc::new(tokio::sync::Semaphore::new(
+            self.config.max_pending_ws_auth.max(1),
+        ));
         let mut connections = tokio::task::JoinSet::new();
 
         loop {
@@ -421,8 +428,12 @@ impl WebSocketServer {
                             self.config.terminal_stall_grace_secs,
                         ),
                         query_concurrency: self.config.query_concurrency_per_connection,
+                        ws_auth_timeout: std::time::Duration::from_secs(
+                            self.config.ws_auth_timeout_secs,
+                        ),
                     };
                     let tls_acceptor = tls_acceptor.clone();
+                    let pending_auth = Arc::clone(&pending_auth_slots);
 
                     connections.spawn(async move {
                         if let Err(e) = handle_connection(
@@ -430,6 +441,7 @@ impl WebSocketServer {
                             tls_acceptor,
                             ctx,
                             AdmissionSlot::new(slot),
+                            pending_auth,
                         )
                         .await
                         {
@@ -512,6 +524,9 @@ struct ServerContext {
     /// here rather than read per frame so a connection's lane is fixed for its
     /// lifetime: see `nession_runtime::lane::QueryLane`.
     query_concurrency: usize,
+    /// The absolute deadline for an upgraded connection's first authentication
+    /// (`#3439` W2), fixed for the listener rather than read per frame.
+    ws_auth_timeout: std::time::Duration,
 }
 
 /// How many accepted Server connections may be mid-HTTP-request at once
@@ -542,6 +557,9 @@ struct HttpState {
     ctx: ServerContext,
     /// This connection's pre-authentication claim (#3439).
     slot: AdmissionSlot,
+    /// The listener's budget for upgraded-but-unauthenticated sockets
+    /// (#3439 W2), acquired before an upgrade is answered.
+    pending_auth: Arc<tokio::sync::Semaphore>,
 }
 
 /// Serve one accepted socket through the Server's Axum router.
@@ -550,13 +568,15 @@ async fn handle_connection(
     tls_acceptor: Option<TlsAcceptor>,
     ctx: ServerContext,
     slot: AdmissionSlot,
+    pending_auth: Arc<tokio::sync::Semaphore>,
 ) -> anyhow::Result<()> {
-    let router = http_router(ctx, slot.clone());
+    let router = http_router(ctx, slot.clone(), pending_auth);
     ingress::serve(
         move || ingress::TcpOrTls::accept(tcp_stream, tls_acceptor),
         router,
         slot,
         DEFAULT_HANDSHAKE_TIMEOUT,
+        ingress::HTTP_HEADER_READ_TIMEOUT,
     )
     .await?;
     Ok(())
@@ -572,11 +592,16 @@ async fn handle_connection(
 /// The fallback keeps two pre-existing behaviors: the Server has always
 /// accepted a WebSocket upgrade at the authority root (`ws://host:port`) as
 /// well as at `/ws`, and anything that is not an upgrade gets a plain 404.
-fn http_router(ctx: ServerContext, slot: AdmissionSlot) -> Router {
+fn http_router(
+    ctx: ServerContext,
+    slot: AdmissionSlot,
+    pending_auth: Arc<tokio::sync::Semaphore>,
+) -> Router {
     let mcp_path = ctx.mcp.as_ref().map(|mcp| mcp.path().to_string());
     let state = HttpState {
         ctx,
         slot: slot.clone(),
+        pending_auth,
     };
     let mut router = Router::new()
         .route("/ws", get(ws_upgrade))
@@ -620,13 +645,23 @@ async fn websocket_or_not_found(
 }
 
 fn finish_ws_upgrade(state: HttpState, ws: WebSocketUpgrade) -> Response {
-    // The upgrade request is the end of the unauthenticated admission window.
+    // The upgrade request is the end of the pre-authentication admission
+    // window, but not of the upgrade's *unauthenticated* window: until
+    // `server.auth` or an authenticated Agent registration, the socket holds
+    // the listener's pending-auth budget (#3439 W2). Refusing here means a
+    // peer beyond the budget costs an HTTP response, not a connection task.
+    let Ok(pending_auth) = Arc::clone(&state.pending_auth).try_acquire_owned() else {
+        debug!("refusing a WebSocket upgrade: every pending-authentication slot is occupied");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     state.slot.release();
     let ctx = state.ctx;
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
         .on_upgrade(move |socket| async move {
-            if let Err(error) = handle_ws_stream(AxumWebSocket::new(socket), ctx).await {
+            if let Err(error) =
+                handle_ws_stream(AxumWebSocket::new(socket), ctx, pending_auth).await
+            {
                 error!("Connection error: {error:#}");
             }
         })
@@ -656,7 +691,11 @@ async fn mcp_http(State(state): State<HttpState>, request: axum::extract::Reques
     }
 }
 
-async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyhow::Result<()> {
+async fn handle_ws_stream(
+    ws_stream: AxumWebSocket,
+    ctx: ServerContext,
+    pending_auth: tokio::sync::OwnedSemaphorePermit,
+) -> anyhow::Result<()> {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
 
@@ -675,6 +714,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
         terminal_web_font_size,
         terminal_stall_grace,
         query_concurrency,
+        ws_auth_timeout,
         image_manager,
         mcp: _,
         image_http: _,
@@ -783,8 +823,31 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
     // retirement and the writer wait (#3547). The block is all of the fallible
     // work and nothing else: when it ends, its borrows of `read`, `handler`,
     // `lanes` and `sender` are released and the teardown owns them again.
+    // The upgraded socket's pending-auth budget, and the one absolute deadline
+    // for its first authentication (#3439 W2). The deadline is deliberately
+    // not re-armed: a Ping, malformed JSON, a refused `server.auth` or a
+    // business frame must not extend the unauthenticated window. Once
+    // authenticated — a client auth or an authenticated Agent registration —
+    // neither applies any more.
+    let mut pending_auth = Some(pending_auth);
+    let auth_deadline = tokio::time::Instant::now() + ws_auth_timeout;
     let reader_result: anyhow::Result<()> = async {
-        while let Some(frame) = read.next().await {
+        loop {
+            if handler.is_authenticated() {
+                pending_auth.take();
+            }
+            let next = if handler.is_authenticated() {
+                read.next().await
+            } else {
+                match tokio::time::timeout_at(auth_deadline, read.next()).await {
+                    Ok(next) => next,
+                    Err(_) => {
+                        close_reason = "auth-timeout";
+                        break;
+                    }
+                }
+            };
+            let Some(frame) = next else { break };
             let frame = match frame {
                 Ok(frame) => frame,
                 Err(error) => {
