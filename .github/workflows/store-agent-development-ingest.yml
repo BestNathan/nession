@@ -63,6 +63,14 @@ jobs:
          github.ref == 'refs/heads/main' &&
          github.actor == 'BestNathan' &&
          github.event.action == 'created' &&
+         github.event.issue.number == 3433 &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession ingest-qwen issue=3433 worker_run=43677482758') ||
+        (github.event_name == 'issue_comment' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'BestNathan' &&
+         github.event.action == 'created' &&
          github.event.issue.number == 2817 &&
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
