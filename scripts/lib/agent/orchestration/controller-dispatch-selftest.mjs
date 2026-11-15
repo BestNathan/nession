@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
+  REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,
   assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
@@ -248,6 +249,42 @@ for(const bad of [
     user:{login:'external'}}}},
   {event:{...premodelRecovery.event,issue:{number:3434,state:'open'}}},
 ])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
+  /authenticated owner\/main/);
+
+const qwenRepairAction='bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856';
+const qwenRepairComment='/nession dispatch-repair issue=3433 action='+qwenRepairAction;
+assert.deepEqual(REPAIR_DISPATCH_RE.exec(qwenRepairComment)?.slice(1),
+  ['3433',qwenRepairAction]);
+const qwenRepairEvent={...commentEvent,
+  issue:{number:3433,state:'open'},
+  comment:{...commentEvent.comment,body:qwenRepairComment}};
+const qwenRepairValid={...commentValid,issue:3433,actionId:qwenRepairAction,
+  event:qwenRepairEvent};
+assert.equal(assertDispatchAuthority(qwenRepairValid).action_id,qwenRepairAction);
+assert.doesNotThrow(()=>assertOwnerQwenRepairDispatchRole(true,'developer',
+  {task:'repair',agent_id:'dev-qwen-01',resume:true}));
+for(const task of [
+  {task:'implement',agent_id:'dev-qwen-01',resume:true},
+  {task:'repair',agent_id:'dev-qwen-01',resume:false},
+  {task:'repair',agent_id:'dev-cursor-01',resume:true},
+])assert.throws(()=>assertOwnerQwenRepairDispatchRole(true,'developer',task),
+  /non-Repair Outbox action/);
+assert.throws(()=>assertOwnerQwenRepairDispatchRole(true,'reviewer',
+  {task:'review',agent_id:'review-qwen-01',resume:true}),
+  /non-Repair Outbox action/);
+for(const change of [
+  {issue:1997},
+  {actionId:'f'.repeat(64)},
+  {event:{...qwenRepairEvent,issue:{number:3434,state:'open'}}},
+  {event:{...qwenRepairEvent,issue:{number:3433,state:'closed'}}},
+  {event:{...qwenRepairEvent,issue:{number:3433,state:'open',pull_request:{}}}},
+  {event:{...qwenRepairEvent,action:'edited'}},
+  {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,
+    body:qwenRepairComment+' '}}},
+  {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,
+    user:{login:'other'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'other'}},
+])assert.throws(()=>assertDispatchAuthority({...qwenRepairValid,...change}),
   /authenticated owner\/main/);
 
 const reviewRecover={...commentValid,
