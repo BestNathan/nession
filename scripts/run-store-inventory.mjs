@@ -303,10 +303,34 @@ export function checkInventory(manifest,workflows){
         body.includes('ref: main')&&
         body.includes('node scripts/agent-telemetry-ingest.mjs stage')&&
         body.includes('run-store-cas-push.mjs');
+      // Exception for the default-branch-only Case repository_dispatch.
+      // This is an untrusted source Run locator until Main independently
+      // verifies original GitHub Run/Attempt, pre-checkout human source, and Case tree.
+      const caseIngestWake=writer.workflow==='.github/workflows/acceptance-case-ingest.yml'&&
+        /^  repository_dispatch:\s*\n    types: \[nession-comment-case-ingest\]\s*$/m.test(triggers)&&
+        /^  workflow_run:\s*\n(?:    [^\n]*\n)*?    workflows: \["Acceptance \/ Cases"\]/m.test(triggers)&&
+        !/^  workflow_dispatch:\s*$/m.test(triggers)&&
+        body.includes("github.repository == 'BestNathan/nession'")&&
+        body.includes("github.event_name == 'repository_dispatch'")&&
+        body.includes("github.event.action == 'nession-comment-case-ingest'")&&
+        body.includes("github.ref == 'refs/heads/main'")&&
+        body.includes("github.actor == 'github-actions[bot]'")&&
+        body.includes("github.event.sender.login == 'github-actions[bot]'")&&
+        body.includes('github.event.client_payload.source_run_id')&&
+        body.includes('node trusted/scripts/acceptance-case-ingest.mjs prepare-event')&&
+        body.includes('run-id: ${{ steps.source.outputs.run_id }}')&&
+        body.includes('case-source-event.json')&&
+        body.includes('run-store-cas-push.mjs acceptance-results')&&
+        typeof workflows.get('.github/workflows/acceptance-cases.yml')==='string'&&
+        workflows.get('.github/workflows/acceptance-cases.yml').includes('  wake-comment-ingest:')&&
+        workflows.get('.github/workflows/acceptance-cases.yml').includes('needs: [execute, execute-macos]')&&
+        workflows.get('.github/workflows/acceptance-cases.yml').includes('-f event_type=nession-comment-case-ingest')&&
+        workflows.get('.github/workflows/acceptance-cases.yml').includes('-f "client_payload[source_run_id]=$GITHUB_RUN_ID"');
+
       if(!/^on:\s*$/m.test(triggers)||
          !/^  (workflow_run|schedule):\s*$/m.test(triggers)||
          /^  workflow_dispatch:\s*$/m.test(triggers)||
-         (/^  repository_dispatch:\s*$/m.test(triggers)&&!reviewerWake))
+         (/^  repository_dispatch:\s*$/m.test(triggers)&&!reviewerWake&&!caseIngestWake))
         fail('untrusted manual dispatch/trigger on privileged Store writer: '+writer.workflow);
       const trustedSource=writer.workflow==='.github/workflows/metrics-repository.yml'
         ? body.includes('ref: ${{ github.sha }}')&&
@@ -512,6 +536,28 @@ function selfTest(){
   assert.notEqual(compoundPush.get(agentIngest),sources.get(agentIngest));
   assert.throws(()=>checkInventory(manifest,compoundPush),
     /direct git push in privileged Store writer not covered by CAS/);
+  // The Case Store exception is confined to one source-verified webhook.
+  const caseWakeWriter='.github/workflows/acceptance-case-ingest.yml';
+  const caseWakeSource=sources.get(caseWakeWriter);
+  assert.match(caseWakeSource,/repository_dispatch:/);
+  for(const changed of [
+    text=>text.replace('nession-comment-case-ingest','arbitrary-case-wake'),
+    text=>text.replace("github.actor == 'github-actions[bot]'","github.actor != ''"),
+    text=>text.replace("github.ref == 'refs/heads/main'","github.ref != ''"),
+    text=>text.replace('node trusted/scripts/acceptance-case-ingest.mjs prepare-event',
+      'node trusted/scripts/acceptance-case-ingest.mjs validate'),
+    text=>text.replace('  repository_dispatch:','  workflow_dispatch:'),
+  ]) {
+    const invalid=new Map(sources);
+    invalid.set(caseWakeWriter,changed(caseWakeSource));
+    assert.notEqual(invalid.get(caseWakeWriter),caseWakeSource);
+    assert.throws(()=>checkInventory(manifest,invalid),/untrusted manual dispatch\/trigger/);
+  }
+  const spoofProducer=new Map(sources);
+  spoofProducer.set('.github/workflows/acceptance-cases.yml',
+    spoofProducer.get('.github/workflows/acceptance-cases.yml')
+      .replace('needs: [execute, execute-macos]', 'needs: []'));
+  assert.throws(()=>checkInventory(manifest,spoofProducer),/untrusted manual dispatch\/trigger/);
   const unclassifiedLegacyPush=new Map(sources);
   const caseIngest='.github/workflows/acceptance-case-ingest.yml';
   unclassifiedLegacyPush.set(caseIngest,unclassifiedLegacyPush.get(caseIngest).replace(
