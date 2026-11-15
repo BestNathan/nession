@@ -49,7 +49,9 @@ export function assertPublisherReviewerWake({environment,event,sourceRun,jobs,st
      source.path!==PUB_WORKFLOW||
      source.name!=='Store / Qwen Publisher'||
      !['workflow_dispatch','workflow_run'].includes(source.event)||
-     source.actor?.login!=='github-actions[bot]'||
+     !((source.event==='workflow_dispatch'&&source.actor?.login==='github-actions[bot]')||
+       (source.event==='workflow_run'&&
+        ['BestNathan','github-actions[bot]'].includes(source.actor?.login)))||
      source.head_branch!=='main'||
      !HEX40.test(source.head_sha??'')||
      source.repository?.full_name!==REPO||
