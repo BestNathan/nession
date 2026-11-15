@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43680768461,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3439-http-ws-lifecycle",
+    "target_sha": "124712da512b5bdc6c78ebb2b905c23ebbd8c02d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43680768461",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "50900ea3696d1ace5257e1f9ff2dda0cb0b1e54e8bf1afbe225ef216a1a9a242"
+  },
+  "record": "runs/2026-11-15/43680768461-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "1263c1a4734a100ab6c4f1893fb7f73a1545460564a79c869765a0440170227f"
+}
