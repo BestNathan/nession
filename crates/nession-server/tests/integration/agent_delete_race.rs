@@ -63,6 +63,8 @@ fn config() -> ConnectionHandlerConfig {
         heartbeat_interval_secs: 30,
         terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
+        mcp_enabled: false,
+        mcp_path: "/mcp".to_string(),
     }
 }
 

@@ -17,8 +17,10 @@ import { claudeCodeConversationAdapter } from '../conversation/adapter';
 import { useTranscripts } from '../hooks/useTranscripts';
 import { useTranscriptItems } from '../hooks/useTranscriptItems';
 import { useMemory } from '../hooks/useMemory';
+import { useMcp } from '../hooks/useMcp';
 import { TranscriptView } from './TranscriptView';
 import { MemoryView } from './MemoryView';
+import { McpPane } from './McpView';
 import { formatSize } from '../format';
 
 type Scope = 'global' | 'project';
@@ -42,7 +44,7 @@ type Scope = 'global' | 'project';
  * subject is the current Session's repository, resolved agent-side, so it has
  * no Global/Project axis and no repository picker.
  */
-type View = 'conversations' | 'transcripts' | 'memory' | 'configuration';
+type View = 'conversations' | 'transcripts' | 'memory' | 'mcp' | 'configuration';
 type ConfigCategory = ClaudeCodeListResponse['categories'][number];
 type ConfigFile = ConfigCategory['files'][number];
 
@@ -566,6 +568,10 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   // opens it pays nothing. `active` is also the refresh trigger: entering the
   // tab re-resolves the Session's repository before any file is shown (#2689).
   const memory = useMemory({ agentId, sessionId, active: activeView === 'memory' });
+  // MCP is a resource view of the same Session (#3600). It reads configuration
+  // only while the tab is open; the explicit Inspect action is what contacts a
+  // server, and it lives behind the same generation guard as every other answer.
+  const mcp = useMcp({ agentId, sessionId, active: activeView === 'mcp' });
 
   const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
     agentId,
@@ -607,6 +613,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     openTranscript,
     setOpenTranscript,
     memory,
+    mcp,
   };
 }
 
@@ -627,6 +634,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
     openTranscript,
     setOpenTranscript,
     memory,
+    mcp,
   } = useClaudeCodeWorkspace(ctx);
 
   if (!agentId || !sessionId) {
@@ -666,6 +674,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
             <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
             <TabsTrigger value="memory">Memory</TabsTrigger>
+            <TabsTrigger value="mcp">MCP</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -704,6 +713,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
         />
       </main>
       <MemoryPane active={activeView === 'memory'} memory={memory} />
+      <McpWorkspacePane active={activeView === 'mcp'} mcp={mcp} experience={ctx.experience} />
       <div className={activeView === 'configuration' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
               the section that has scopes, rather than beside `Conversations` —
@@ -736,6 +746,28 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
           </div>
         </div>
     </div>
+  );
+}
+
+function McpWorkspacePane({
+  active,
+  mcp,
+  experience,
+}: {
+  active: boolean;
+  mcp: ReturnType<typeof useMcp>;
+  experience: WorkspaceContext['experience'];
+}) {
+  return (
+    <main className={active ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+      {/* Keyed by Session so a switch unmounts an open editor or confirmation
+          dialog instead of leaving a write aimed at the previous target (#3600). */}
+      <McpPane
+        key={mcp.sessionKey ?? 'no-session'}
+        mcp={mcp}
+        experience={experience}
+      />
+    </main>
   );
 }
 

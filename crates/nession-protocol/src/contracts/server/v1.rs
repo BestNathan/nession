@@ -15,7 +15,42 @@ pub(crate) fn default_build_time() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoRequest {}
 
-/// Response payload for `server.info`.
+/// Request payload for `server.mcp.endpoint` — empty (protocol marker).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerMcpEndpointRequest {}
+
+/// What this Server can state about its own embedded MCP endpoint (#3600).
+///
+/// It is deliberately small: whether `/mcp` is mounted and at which path. The
+/// inbound credential is the Server's own token, so this answer says *which
+/// authentication model* applies and never whether a particular caller holds
+/// that token. A client that needs to reach the endpoint derives the origin
+/// from the address it uses for the Server; the Server does not invent a
+/// public URL it may not know (a TLS-terminating proxy, for example).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerMcpEndpointResponse {
+    /// `[mcp] enabled = true` on this Server. Disabled is the default and
+    /// registers no route at all.
+    pub enabled: bool,
+    /// The configured HTTP path, e.g. `/mcp`.
+    pub path: String,
+    /// The endpoint's inbound authentication model.
+    pub auth: ServerMcpAuthV1,
+}
+
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServerMcpAuthV1 {
+    /// The Server's own `auth_token`; an Agent token is refused.
+    HostToken,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]

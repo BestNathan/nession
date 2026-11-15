@@ -21,6 +21,43 @@ import type {
   ConversationsResponse,
 } from '@/generated/protocol/claude-code/conversations/v1';
 import type {
+  McpApprovalV1,
+  McpHostInfoV1,
+  McpInventoryStateV1,
+  McpLoadStateV1,
+  McpScopeV1,
+  McpServerEntryV1,
+  McpServersRequest,
+  McpServersResponse,
+  McpSourceStatusV1,
+  McpTransportV1,
+} from '@/generated/protocol/claude-code/mcp-servers/v1';
+import type {
+  McpProbeResultV1,
+  McpProbeSourceV1,
+  McpProbeStatusV1,
+  McpServerRequest,
+  McpServerResponse,
+  McpToolV1,
+} from '@/generated/protocol/claude-code/mcp-server/v1';
+import type {
+  McpDefinitionV1,
+  McpKeyValueV1,
+  McpMutateRequest,
+  McpMutateResponse,
+  McpMutationStateV1,
+  McpMutationV1,
+  McpWriteScopeV1,
+} from '@/generated/protocol/claude-code/mcp-mutate/v1';
+import type {
+  McpConnectPreflightV1,
+  McpConnectRequest,
+  McpConnectResponse,
+  McpConnectStateV1,
+  McpHostingModeV1,
+  McpPrerequisiteStateV1,
+} from '@/generated/protocol/claude-code/mcp-connect/v1';
+import type {
   MemoryFileV1,
   MemoryRepositoryKindV1,
   MemoryRequest,
@@ -68,6 +105,10 @@ export type ClaudeCodeConversationsRequest = ConversationsRequest & { agent_id: 
 export type ClaudeCodeMessagesRequest = MessagesRequest & { agent_id: string };
 export type ClaudeCodeTranscriptsRequest = TranscriptsRequest & { agent_id: string };
 export type ClaudeCodeTranscriptItemsRequest = TranscriptItemsRequest & { agent_id: string };
+export type ClaudeCodeMcpServersRequest = McpServersRequest & { agent_id: string };
+export type ClaudeCodeMcpServerRequest = McpServerRequest & { agent_id: string };
+export type ClaudeCodeMcpMutateRequest = McpMutateRequest & { agent_id: string };
+export type ClaudeCodeMcpConnectRequest = McpConnectRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type ClaudeCodeListResponse = ListResponse;
@@ -78,6 +119,35 @@ export type ClaudeCodeConversationsResponse = ConversationsResponse;
 export type ClaudeCodeMessagesResponse = MessagesResponse;
 export type ClaudeCodeTranscriptsResponse = TranscriptsResponse;
 export type ClaudeCodeTranscriptItemsResponse = TranscriptItemsResponse;
+
+/** The MCP units' answers (#3600). Re-exported, never mirrored. */
+export type ClaudeCodeMcpServersResponse = McpServersResponse;
+export type ClaudeCodeMcpServerResponse = McpServerResponse;
+export type ClaudeCodeMcpMutateResponse = McpMutateResponse;
+export type ClaudeCodeMcpConnectResponse = McpConnectResponse;
+
+/** The MCP vocabulary a view switches on. */
+export type ClaudeCodeMcpEntry = McpServerEntryV1;
+export type ClaudeCodeMcpScope = McpScopeV1;
+export type ClaudeCodeMcpTransport = McpTransportV1;
+export type ClaudeCodeMcpApproval = McpApprovalV1;
+export type ClaudeCodeMcpLoadState = McpLoadStateV1;
+export type ClaudeCodeMcpInventoryState = McpInventoryStateV1;
+export type ClaudeCodeMcpSource = McpSourceStatusV1;
+export type ClaudeCodeMcpHost = McpHostInfoV1;
+export type ClaudeCodeMcpProbe = McpProbeResultV1;
+export type ClaudeCodeMcpProbeStatus = McpProbeStatusV1;
+export type ClaudeCodeMcpProbeSource = McpProbeSourceV1;
+export type ClaudeCodeMcpTool = McpToolV1;
+export type ClaudeCodeMcpDefinition = McpDefinitionV1;
+export type ClaudeCodeMcpKeyValue = McpKeyValueV1;
+export type ClaudeCodeMcpMutation = McpMutationV1;
+export type ClaudeCodeMcpMutationState = McpMutationStateV1;
+export type ClaudeCodeMcpWriteScope = McpWriteScopeV1;
+export type ClaudeCodeMcpHostingMode = McpHostingModeV1;
+export type ClaudeCodeMcpPreflight = McpConnectPreflightV1;
+export type ClaudeCodeMcpConnectState = McpConnectStateV1;
+export type ClaudeCodeMcpPrerequisiteState = McpPrerequisiteStateV1;
 
 /**
  * The two units' state names, narrowed for callers.

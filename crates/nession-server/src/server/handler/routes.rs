@@ -171,6 +171,11 @@ server_routes!(handler, msg, payload;
     "server.session.env.binding.set" => "server.session.env.binding.set" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_binding_set(msg).await,
     "server.session.env.binding.reapply" => "server.session.env.binding.reapply" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_binding_reapply(msg).await,
     "server.info" => "server.info" => 1 => Query => handler.handle_client_server_info(msg).await,
+    // The Server's own MCP endpoint metadata (#3600). A query: it reports the
+    // configuration mounted at startup and mutates nothing. It exists because
+    // a Claude client must resolve "is `/mcp` really on, and at which path?"
+    // from the host rather than invent a port or assume the default.
+    "server.mcp.endpoint" => "server.mcp.endpoint" => 1 => Query => handler.handle_client_mcp_endpoint(msg).await,
     "server.agent.rename" => "server.agent.rename" => 1 => Inline => handler.handle_client_agent_rename(msg).await,
     "server.agent.delete" => "server.agent.delete" => 1 => Inline => handler.handle_client_agent_delete(msg).await,
     "server.commands.list" => "server.commands.list" => 1 => Query => handler.handle_client_commands_list(msg).await,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ClaudeCodePlugin } from '@/capabilities/claude-code/ClaudeCodePlugin';
+import type { ClaudeCodeMcpMutateRequest } from '@/capabilities/claude-code/types';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import type { ProtocolManifest } from '@/platform/protocol';
 
@@ -25,6 +26,11 @@ const AGENT_MANIFEST: ProtocolManifest = {
     // session's subagents are reachable. Advertised for the same reason.
     'claude-code.transcripts': { versions: [1] },
     'claude-code.transcript-items': { versions: [1] },
+    // #3600: the four MCP operations.
+    'claude-code.mcp-servers': { versions: [1] },
+    'claude-code.mcp-server': { versions: [1] },
+    'claude-code.mcp-mutate': { versions: [1] },
+    'claude-code.mcp-connect': { versions: [1] },
   },
 };
 
@@ -247,6 +253,99 @@ describe('ClaudeCodePlugin', () => {
         has_more: true,
       });
     });
+
+    it('claudeCodeMcpServers addresses the inventory to the Session agent', async () => {
+      const request = { agent_id: 'a1', session_id: 'a1:work' } as const;
+      const pending = plugin.claudeCodeMcpServers(request);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.mcp-servers',
+        payload: request,
+      });
+      const response = { state: 'ready', sources: [], servers: [] };
+      surface.resolveNext('claude-code.mcp-servers', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
+    it('claudeCodeMcpServer forwards the explicit probe and stdio consent', async () => {
+      const request = {
+        agent_id: 'a1',
+        session_id: 'a1:work',
+        name: 'github',
+        scope: 'local',
+        probe: true,
+        allow_stdio: true,
+      } as const;
+      const pending = plugin.claudeCodeMcpServer(request);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.mcp-server',
+        payload: request,
+      });
+      const response = { state: 'ready', probe: { status: 'ok', tools: [] } };
+      surface.resolveNext('claude-code.mcp-server', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
+    it('claudeCodeMcpMutate forwards the operation, scope and conflict fields', async () => {
+      const request: ClaudeCodeMcpMutateRequest = {
+        agent_id: 'a1',
+        session_id: 'a1:work',
+        operation: 'update',
+        scope: 'project',
+        name: 'github',
+        definition: {
+          name: 'github',
+          transport: 'http',
+          url: 'https://example.invalid/mcp',
+          args: [],
+          env: [],
+          headers: [{ name: 'Authorization', value: null }],
+          replace_env: false,
+          replace_headers: false,
+          replace_args: false,
+        },
+        expected_fingerprint: 'deadbeef',
+        confirm_project_write: true,
+        confirm_replace: false,
+      };
+      const pending = plugin.claudeCodeMcpMutate(request);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.mcp-mutate',
+        payload: request,
+      });
+      surface.resolveNext('claude-code.mcp-mutate', {
+        state: 'ok',
+        scope: 'project',
+        servers: [],
+        reload_required: true,
+      });
+      await expect(pending).resolves.toMatchObject({ state: 'ok' });
+    });
+
+    it('claudeCodeMcpConnect carries the hosting mode and never a credential value', async () => {
+      const request = {
+        agent_id: 'a1',
+        session_id: 'a1:work',
+        mode: 'server',
+        scope: 'local',
+        name: 'nession',
+        server_endpoint: { enabled: true, path: '/mcp' },
+        confirm: false,
+        confirm_project_write: false,
+        confirm_replace: false,
+      } as const;
+      const pending = plugin.claudeCodeMcpConnect(request);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.mcp-connect',
+        payload: request,
+      });
+      expect(JSON.stringify(surface.requests[0]?.payload)).not.toContain('Bearer');
+      surface.resolveNext('claude-code.mcp-connect', {
+        state: 'preflight',
+        preflight: { mode: 'server', credential_env: 'NESSON_MCP_TOKEN', ready: false, prerequisites: [] },
+        reload_required: false,
+      });
+      await expect(pending).resolves.toMatchObject({ state: 'preflight' });
+    });
   });
 
   describe('unbound plugin', () => {
@@ -269,6 +368,40 @@ describe('ClaudeCodePlugin', () => {
       await expect(plugin.claudeCodeTranscriptItems(transcriptItemsReq)).rejects.toThrow(
         'claude-code feature is not connected',
       );
+      await expect(
+        plugin.claudeCodeMcpServers({ agent_id: 'a1', session_id: 'a1:work' }),
+      ).rejects.toThrow('claude-code feature is not connected');
+      await expect(
+        plugin.claudeCodeMcpServer({
+          agent_id: 'a1',
+          session_id: 'a1:work',
+          name: 'github',
+          probe: false,
+          allow_stdio: false,
+        }),
+      ).rejects.toThrow('claude-code feature is not connected');
+      await expect(
+        plugin.claudeCodeMcpMutate({
+          agent_id: 'a1',
+          session_id: 'a1:work',
+          operation: 'remove',
+          scope: 'local',
+          name: 'github',
+          confirm_project_write: false,
+          confirm_replace: false,
+        }),
+      ).rejects.toThrow('claude-code feature is not connected');
+      await expect(
+        plugin.claudeCodeMcpConnect({
+          agent_id: 'a1',
+          session_id: 'a1:work',
+          mode: 'agent',
+          scope: 'local',
+          confirm: false,
+          confirm_project_write: false,
+          confirm_replace: false,
+        }),
+      ).rejects.toThrow('claude-code feature is not connected');
       expect(surface.requests).toHaveLength(0);
     });
   });
