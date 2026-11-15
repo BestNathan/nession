@@ -256,7 +256,7 @@ export function resolveTrustedIngestSource({environment,event}){
     return {run_id:source.id,source};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
-     [2817,2906,2912,2946,2951,2961,3001].includes(event?.issue?.number)){
+     [2817,2906,2912,2946,2951,2961,3001,3433].includes(event?.issue?.number)){
     // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
     // The exact Worker Run is re-read and re-verified by the live Ingest
     // before any Store writer is used; this comment only locates it.
@@ -270,6 +270,10 @@ export function resolveTrustedIngestSource({environment,event}){
         !command||Number(command[1])!==event.issue.number||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual Qwen Ingest requires exact owner/main Issue comment');
+    // One authenticated recovery of the already-successful Qwen Repair:
+    // no new Provider Run, arbitrary Issue or run selection is permitted.
+    if(event.issue.number===3433&&Number(command[2])!==43677482758)
+      fail('owner Repair Ingest must bind exact completed Worker Run');
     return {run_id:Number(command[2]),source:null,qwen_recovery:true,
       issue:event.issue.number,attempt:1};
   }
@@ -385,6 +389,9 @@ async function main(){
   if(authority.qwen_recovery&&
      Number(claim.inputs?.issue_number)!==authority.issue)
     fail('owner Qwen recovery Issue does not match original signed Worker claim');
+  if(authority.qwen_recovery&&authority.issue===3433&&
+     (run.id!==43677482758||claim.inputs?.task!=='repair'))
+    fail('owner Repair Ingest differs from authenticated signed Worker action');
   if(authority.bot_qwen_wake)
     assertQwenBotWakeSource({run,claim});
   const resultZip=fs.readFileSync(process.argv[4]);
