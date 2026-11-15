@@ -37,6 +37,7 @@ export function canReusePublishedMcp({previous,stable,mainSha,comparison=null}){
      comparison.ahead_by>=BOUNDED_COMMITS||
      !Number.isSafeInteger(comparison.total_commits)||
      comparison.total_commits<1||comparison.total_commits>=BOUNDED_COMMITS||
+     comparison.ahead_by!==comparison.total_commits||
      !Array.isArray(comparison.files)||comparison.files.length>=BOUNDED_FILES)
     return false;
   return comparison.files.every(file=>
