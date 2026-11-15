@@ -519,6 +519,27 @@ export function acceptAttestedQwenPublication(state,expectedVersion,event,truste
   return validateDevelopmentState({...advanced.state,version:state.version+1,
     outbox:[...outbox,child]});
 }
+// #3592. A previously authenticated pre-model Reviewer failure is terminal,
+// not a competing live Reviewer. Keep its immutable evidence in Store, but
+// require its exact known Run/Action/failure identity. Any other Reviewer
+// still blocks a new Qwen Repair publication.
+export function hasOnlyRetiredReviewerForQwenRepair(state){
+  const entries=state?.outbox?.filter(x=>x.task?.role==='reviewer');
+  if(!Array.isArray(entries))return false;
+  if(entries.length===0)return true;
+  if(entries.length!==1||state.issue!==REVIEWER_PREMODEL_FAILURE.issue)
+    return false;
+  const old=entries[0],f=REVIEWER_PREMODEL_FAILURE;
+  return old.id===f.action_id&&old.status==='failed'&&
+    old.task.type==='dispatch'&&old.task.task==='review'&&
+    old.task.agent_id==='review-qwen-01'&&old.task.sha===f.source_sha&&
+    old.attempts===1&&old.receipt?.status==='failed'&&
+    old.receipt?.dispatch_id===f.action_id&&
+    old.receipt?.source_run_id===f.run_id&&
+    old.receipt?.source_attempt===1&&
+    old.receipt?.failure_code===f.failure_code;
+}
+
 // #2137: The separately authenticated Qwen Repair Publisher has already
 // verified the original PR and a non-force A->B update by exact GET readback.
 // This state transition may ONLY retire the existing signed Repair Action and
@@ -582,7 +603,7 @@ export function acceptAttestedQwenRepairPublication(
       tasks[0].receipt.dispatch_id!==tasks[0].id||
       state.outbox.some(x=>x!==tasks[0]&&
         ['dispatching','dispatched'].includes(x.status))||
-      state.outbox.some(x=>x.task.role==='reviewer'))
+      !hasOnlyRetiredReviewerForQwenRepair(state))
     reject('Qwen Repair lacks one completed signed Developer dispatch');
   const next=advanceWorkflow(state,event,{
     role:'publisher',workflow_run_id:event.run_id,attempt:1,
