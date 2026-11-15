@@ -773,6 +773,20 @@ impl OverlayMountManager {
     }
 
     pub(super) fn validate_workspace(&self, workspace: &OverlayWorkspaceKey) -> Result<()> {
+        self.validate_workspace_storage(workspace).map(|_| ())
+    }
+
+    /// Validate the authorized path and the durable storage pair, then probe
+    /// the actual filesystem capability.
+    ///
+    /// The capability probe writes and removes a probe file and an xattr, so
+    /// it is safe only while this process holds the durable owner lock. Every
+    /// acquire therefore performs the read-only path validation first and the
+    /// capability probe inside [`Self::mount_entry`] after taking the lock.
+    fn validate_workspace_storage(
+        &self,
+        workspace: &OverlayWorkspaceKey,
+    ) -> Result<storage::OverlayStoragePaths> {
         workspace.validate()?;
         if !self
             .inner
@@ -813,7 +827,7 @@ impl OverlayMountManager {
             .backend
             .storage_facts(&storage.upper, &storage.work)?;
         facts.validate_paths(&storage.upper, &storage.work)?;
-        Ok(())
+        Ok(storage)
     }
 
     pub(super) fn entry(&self, workspace: &OverlayWorkspaceKey) -> Option<Arc<OverlayEntry>> {
@@ -841,12 +855,12 @@ impl OverlayMountManager {
         request: &OverlayRequest,
     ) -> Result<(OverlayBinding, LowerHandle, OwnerLock)> {
         let directory = entry.workspace.directory();
-        let storage = storage::verify(&directory)?;
         // The durable owner lock is the cross-process fence. It is acquired
-        // before any durable state is read for a decision or written, so
-        // another process (or another manager root sharing the same durable
-        // bytes) cannot interleave a mount.
+        // before the capability probe (which writes a probe file/xattr), so
+        // another process sharing the same durable bytes can never observe or
+        // interleave a write, and before any durable state is read or written.
         let owner = OwnerLock::acquire(&directory)?;
+        let storage = self.validate_workspace_storage(&entry.workspace)?;
         if let Some(record) = storage::read_owner_record(&directory)? {
             if record.agent_identity != self.inner.agent_identity {
                 anyhow::bail!(
