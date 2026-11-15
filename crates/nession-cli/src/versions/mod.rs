@@ -460,15 +460,26 @@ mod tests {
     #[cfg(unix)]
     fn probe_script(dir: &std::path::Path, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
-        // An executable must not be published while its inode is open for
-        // writing. Under concurrent llvm-cov tests, executing an in-place
-        // fixture can hit Linux ETXTBSY. Stage and close the script before
-        // atomically publishing it, just like a real archived release.
-        let staging = dir.join("nession.staging");
+        // In parallel coverage tests, a fork can inherit a writable handle
+        // even after the parent closes/renames the staging inode (ETXTBSY).
+        // Have a child process install the executable: the parent never holds
+        // a writable descriptor to the inode that another test may execute.
+        // This matches the Agent integration fixture installer (#3609).
+        let source = dir.join("nession.source");
         let path = dir.join("nession");
-        std::fs::write(&staging, body).unwrap();
-        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::rename(&staging, &path).unwrap();
+        std::fs::write(&source, body).unwrap();
+        let copy = std::process::Command::new("cp")
+            .arg(&source)
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            copy.status.success(),
+            "cannot install archived CLI fixture: {}",
+            String::from_utf8_lossy(&copy.stderr)
+        );
+        std::fs::remove_file(&source).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
 
