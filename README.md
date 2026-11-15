@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| Project default ENV → Session inherit / custom / none, Web/App | [#3649](https://github.com/BestNathan/nession/issues/3649) | [Interactive HTML](project-env-3649/index.html) · [Scenario & fidelity](project-env-3649/README.md) |
+
+
 | Claude Code MCP · local/project management, Tools and one-click Nession setup · Web/App | [#3600](https://github.com/BestNathan/nession/issues/3600) | [Interactive HTML](claude-mcp-3600/index.html) · [Fidelity notes](claude-mcp-3600/README.md) |
 
 | Historical Server Images entry (global ownership remains; independent Session-less Workspace navigation superseded by #3408) | [#3181](https://github.com/BestNathan/nession/issues/3181) · [#3408](https://github.com/BestNathan/nession/issues/3408) | [Historical interactive HTML](images-3181/index.html) · [Supersession note](images-3181/README.md) |
