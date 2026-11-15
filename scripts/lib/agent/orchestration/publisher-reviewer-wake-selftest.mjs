@@ -30,6 +30,10 @@ const valid={environment,event,sourceRun,jobs,storeSource};
 assert.equal(assertPublisherReviewerWake(valid).action_id,action);
 assert.equal(assertPublisherReviewerWake({...valid,sourceRun:{...sourceRun,
   status:'completed',conclusion:'success'}}).issue,3433);
+// The Publisher's genuine workflow_run trigger may retain the initiating
+// Owner identity, while its separate wake job uses github-actions[bot].
+assert.equal(assertPublisherReviewerWake({...valid,sourceRun:{...sourceRun,
+  event:'workflow_run',actor:{login:'BestNathan'}}}).issue,3433);
 const reject=patch=>assert.throws(()=>assertPublisherReviewerWake({...valid,...patch}),
   /trusted Publisher Reviewer wake:/);
 for(const patch of [
@@ -46,6 +50,7 @@ for(const patch of [
   {sourceRun:{...sourceRun,id:1}},
   {sourceRun:{...sourceRun,run_attempt:2}},
   {sourceRun:{...sourceRun,actor:{login:'BestNathan'}}},
+  {sourceRun:{...sourceRun,event:'workflow_run',actor:{login:'external'}}},
   {sourceRun:{...sourceRun,path:'.github/workflows/agent-review.yml'}},
   {sourceRun:{...sourceRun,event:'push'}},
   {sourceRun:{...sourceRun,status:'queued'}},
