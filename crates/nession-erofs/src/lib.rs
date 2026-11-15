@@ -31,6 +31,9 @@
 pub mod blob;
 pub mod oci;
 
+#[cfg(all(test, unix))]
+pub(crate) mod testing;
+
 #[cfg(feature = "catalog")]
 pub mod catalog;
 #[cfg(feature = "catalog")]
