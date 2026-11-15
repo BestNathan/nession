@@ -693,8 +693,8 @@ function selfTest() {
     /workflows: \[[^\n]*'Release \/ Staging Artifacts'[^\n]*\]/);
   const releaseWake = {
     event: 'push',
-    name: 'Release / Staging Artifacts',
-    path: '.github/workflows/release-staging.yml',
+    name: 'Deploy / Staging ACR',
+    path: '.github/workflows/deploy-staging-acr.yml',
     head_branch: 'staging',
     conclusion: 'success',
     repository: {full_name: 'BestNathan/nession'},
@@ -715,7 +715,7 @@ function selfTest() {
     'the canonical staging push release success must re-wake convergence');
   const refusedWake = [
     {event: 'workflow_dispatch'},
-    {name: 'Release / Staging Artifacts (forged)'},
+    {name: 'Deploy / Staging ACR (forged)'},
     {path: '.github/workflows/foreign.yml'},
     {head_branch: 'main'},
     {head_branch: 'integration/staging'},
@@ -734,7 +734,7 @@ function selfTest() {
   assert.equal(acceptsWake(releaseWake, {repository:'attacker/fork'}), false,
     'the wake must not execute in an unrelated repository');
   const deploy = [
-    'name: Release / Staging Artifacts', 'on:', '  push:',
+    'name: Deploy / Staging ACR', 'on:', '  push:',
     "    branches: ['staging']", '  workflow_dispatch:',
     'jobs:', '  deploy-staging-gitops:', '    steps:',
     '      - run: ./scripts/gitops-commit.sh staging abc1234',
@@ -743,12 +743,12 @@ function selfTest() {
   assert.deepEqual(pushBranches(deploy.replace("['staging']", "\n      - staging\n      - integration/staging")),
     ['staging', 'integration/staging']);
   assert.deepEqual(discoverDeployBranches([
-    { file: 'release-staging.yml', content: deploy },
+    { file: 'deploy-staging-acr.yml', content: deploy },
     { file: 'deploy-manual.yml', content: 'on:\n  workflow_dispatch:\njobs:\n  deploy-staging-gitops:\n    steps:\n      - run: ./scripts/gitops-commit.sh staging deadbeef' },
     { file: 'test.yml', content: deploy.replace('gitops-commit.sh staging', 'gitops-commit.sh production') },
-  ]), [{ branch: 'staging', deployment_workflows: ['release-staging.yml'] }]);
+  ]), [{ branch: 'staging', deployment_workflows: ['deploy-staging-acr.yml'] }]);
   assert.deepEqual(discoverDeployBranches([
-    { file: 'release-staging.yml', content: deploy },
+    { file: 'deploy-staging-acr.yml', content: deploy },
     { file: 'deploy-staging-01.yml', content: deploy
       .replace("['staging']", "['staging-01']")
       .replace('deploy-staging-gitops:', 'deploy-staging-01:')
