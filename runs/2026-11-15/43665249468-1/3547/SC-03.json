@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9a665b84a949d23220c253a7c438ed9b626887215b26a2104ed4197d8782883b",
+  "run_id": 43665249468,
+  "run_attempt": 1,
+  "issue": 3547,
+  "criterion": "SC-03",
+  "criterion_text": "An attached client WS ending via malformed frame or Relay error retires only that physical attachment; another connection to the same Session continues and a reconnect can reattach/resume.",
+  "stage": "staging",
+  "target_sha": "611ee0f6c0320bbedf34a36525041a94e2a78a85",
+  "contract_sha256": "99d893df2561703e4298e1859e8b0cd0521e472d4fd981c9a8272b3aa0f85e8a",
+  "case_revision": "611ee0f6c0320bbedf34a36525041a94e2a78a85",
+  "case_tree_sha": "a2552db90793beaf196547c93ceb48f61492f88a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T01:58:36.959Z",
+  "finished_at": "2026-11-15T01:58:44.397Z",
+  "duration_ms": 7438,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "An attached client's abnormal exit (malformed frame or failed Relay) tears down only that physical connection; the Session remains served and a reconnect can reattach",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "611ee0f6c0320bbedf34a36525041a94e2a78a85: one of two relay-mode client attachments ended through a malformed frame within the bounded grace while its sibling kept being served and a reconnect reattached; a client whose Relay dial failed also ended within the bound while the Session remained listed for a fresh connection"
+        }
+      ],
+      "duration_ms": 1573,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43665249468,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "611ee0f6c0320bbedf34a36525041a94e2a78a85",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43665249468",
+    "record_path": "runs/2026-11-15/43665249468-1/3547/SC-03.json",
+    "source_result_sha256": "4f617e1ed2164e80c05b2d68158f52a05101bf4e22ec122b3fab40a6f24a6a6b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43665249468-1",
+    "sha256": "4f617e1ed2164e80c05b2d68158f52a05101bf4e22ec122b3fab40a6f24a6a6b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43665249468",
+    "durability": "time-limited; object archival not configured"
+  }
+}

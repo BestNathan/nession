@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4eee77b68d78075c0e8fb17cfbd070ea16030234aa752097623b1cbbcd2d968c",
+  "run_id": 43665249468,
+  "run_attempt": 1,
+  "issue": 3547,
+  "criterion": "SC-01",
+  "criterion_text": "A real registered Agent→Server WS that receives malformed JSON or suffers a WS read error closes within a bounded interval and leaves no connection-owned reader/writer/lane task or stale broker registration.",
+  "stage": "staging",
+  "target_sha": "611ee0f6c0320bbedf34a36525041a94e2a78a85",
+  "contract_sha256": "99d893df2561703e4298e1859e8b0cd0521e472d4fd981c9a8272b3aa0f85e8a",
+  "case_revision": "611ee0f6c0320bbedf34a36525041a94e2a78a85",
+  "case_tree_sha": "ee04b994f20e8bb7283135f1b63b5b5688554ce6",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T01:57:34.936Z",
+  "finished_at": "2026-11-15T01:58:30.496Z",
+  "duration_ms": 55560,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A registered Agent connection ending through a malformed frame runs the unconditional generation-fenced teardown: the socket closes within the bound and the broker releases the agent",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "611ee0f6c0320bbedf34a36525041a94e2a78a85: a registered Agent WebSocket that sent undecodable JSON closed within the bounded grace, and a brokered capture-preview was answered \"Agent disconnected\" instead of being retained"
+        }
+      ],
+      "duration_ms": 49633,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43665249468,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "611ee0f6c0320bbedf34a36525041a94e2a78a85",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43665249468",
+    "record_path": "runs/2026-11-15/43665249468-1/3547/SC-01.json",
+    "source_result_sha256": "d01600b4127765246d95ccbda233ed8d560edde85380fbbff955bffd8bbe2e44"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43665249468-1",
+    "sha256": "d01600b4127765246d95ccbda233ed8d560edde85380fbbff955bffd8bbe2e44",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43665249468",
+    "durability": "time-limited; object archival not configured"
+  }
+}
