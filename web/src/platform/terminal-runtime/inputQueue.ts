@@ -300,9 +300,6 @@ export class PendingInputQueue {
     // expired — and stale bytes must not be delivered as if the user had just
     // typed them (#3433).
     this.expire();
-    if (this.chunks.length === 0) {
-      return null;
-    }
     return this.chunks.map((chunk, index) => ({
       seq: this.cursor + 1 + index,
       data: chunk.data,
