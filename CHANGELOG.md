@@ -773,3 +773,10 @@
 - Categories: terminal, interaction, capsule, design, ownership
 - Reason: Record #3492's mode-aware upper-panel clearance: read-only policy selection from buffer/mouse state, alternate/mouse row reservation through the authorized ControlLease path, observer no-resize boundary, latched compact fallback, and exact-head browser/Agent evidence
 - Source: https://github.com/BestNathan/nession/issues/3492
+
+## 2026-11-15T08:00:27Z | update | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Document bounded GitHub provenance evidence projection: projected compare/PR fields, an explicit child-buffer cap, and fail-closed handling for oversized, truncated or incomplete evidence before Issue projection (#3581)
+- Source: https://github.com/BestNathan/nession/issues/3581
