@@ -998,8 +998,13 @@ impl OverlayMountManager {
                 .inner
                 .backend
                 .unmount(&self.inner.settings, &entry.mountpoint);
-            recovery::remove_identity(&entry.identity_path);
-            storage::remove_owner_record(&directory);
+            if rollback.is_ok() {
+                // A verified rollback removes the durable claim with the
+                // mount. If rollback failed, the identity and owner record
+                // stay so recovery can prove the surviving mount is ours.
+                recovery::remove_identity(&entry.identity_path);
+                storage::remove_owner_record(&directory);
+            }
             release_quiet(&mut lower);
             return Err(match rollback {
                 Ok(()) => anyhow::anyhow!(
@@ -1187,6 +1192,19 @@ pub(super) fn reclaim_if_unused(
     }
     state.phase = OverlayState::Unmounting;
     if inner.backend.is_overlay_mount(&entry.mountpoint) {
+        if !owns_mount(inner, entry) {
+            // A mount without this manager's durable identity may belong to
+            // another owner. Never unmount or adopt it merely because it sits
+            // at the manager-derived path.
+            let failure = format!(
+                "an unverified Overlay mount already exists at {}; it is never adopted by path",
+                entry.mountpoint.display()
+            );
+            state.phase = OverlayState::Orphaned;
+            state.failure = Some(failure.clone());
+            entry.transitioned.notify_all();
+            anyhow::bail!(failure);
+        }
         if let Err(error) = inner.backend.unmount(&inner.settings, &entry.mountpoint) {
             // Retain the mount, the lower pin, the durable identity and the
             // owner lock: the resource is still live and must stay durable.
@@ -1221,6 +1239,17 @@ pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether the durable identity proves this manager created the mount.
+fn owns_mount(inner: &ManagerInner, entry: &OverlayEntry) -> bool {
+    let Ok(identity) = recovery::read_identity(&entry.identity_path) else {
+        return false;
+    };
+    identity.workspace.identity() == entry.workspace.identity()
+        && identity.agent_identity == inner.agent_identity
+        && identity.mount_namespace == inner.mount_namespace
+        && identity.mountpoint == entry.mountpoint
 }
 
 /// A read-only set of workspace identities a live execution record protects.
@@ -1476,6 +1505,61 @@ mod tests {
 
     fn request(fixture: &Fixture, key: &OverlayWorkspaceKey, bytes: &[u8]) -> OverlayRequest {
         OverlayRequest::new(key.clone(), image(&fixture.workspace_root, bytes))
+    }
+
+    #[test]
+    fn a_foreign_mount_at_the_manager_mountpoint_is_never_unmounted_or_adopted() {
+        let fixture = fixture();
+        let key = workspace(&fixture, "ws_foreign_mount");
+        let request = request(&fixture, &key, b"lower bytes");
+
+        // Force a Failed state through an injected mount failure.
+        fixture.backend.fail_mount.store(true, Ordering::SeqCst);
+        let error = fixture
+            .manager
+            .acquire(&request, "exec-failed")
+            .expect_err("the injected mount failure must fail the acquire");
+        assert!(
+            format!("{error:#}").contains("injected Overlay mount failure"),
+            "{error:#}"
+        );
+        fixture.backend.fail_mount.store(false, Ordering::SeqCst);
+
+        // A foreign mount appears at the manager-derived mountpoint without
+        // this manager's durable identity.
+        let mountpoint = fixture.manager.mountpoint_for(&key).unwrap();
+        fixture
+            .backend
+            .mounted
+            .lock()
+            .unwrap()
+            .insert(mountpoint.clone());
+
+        let error = fixture
+            .manager
+            .acquire(&request, "exec-foreign")
+            .expect_err("a foreign mount must not be adopted");
+        assert!(
+            format!("{error:#}").contains("never adopted by path"),
+            "{error:#}"
+        );
+        assert!(
+            fixture
+                .backend
+                .mounted
+                .lock()
+                .unwrap()
+                .contains(&mountpoint),
+            "the foreign mount must not be unmounted"
+        );
+        assert_eq!(
+            fixture.backend.mounts.load(Ordering::SeqCst),
+            0,
+            "no second physical mount may be created over the foreign one"
+        );
+        let status = fixture.manager.lookup(&key).unwrap();
+        assert_eq!(status.state, OverlayState::Orphaned);
+        assert!(!status.verified);
     }
 
     #[test]
