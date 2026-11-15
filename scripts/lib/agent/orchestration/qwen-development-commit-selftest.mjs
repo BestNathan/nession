@@ -17,6 +17,8 @@ import {sourceAllowed} from './controller-dispatch.mjs';
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {writeIssueWorkflowState,readIssueWorkflowState}
   from './state-store.mjs';
+import {qwenCommittedReviewIntent,qwenReviewerPublishedSource}
+  from './qwen-reviewer-source.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
 import {prepareQwenDevelopmentSource,collectQwenDevelopmentPatch}
   from './qwen-development-source.mjs';
@@ -756,9 +758,11 @@ try {
     preflight:repairPreflight,intent:repairIntentReplay,
     sourceCheckout:repairPubCheckout,api:repairApi,...forged}),
     /Qwen Repair PR update|write-ahead/);
-  const eventB={kind:'publisher',issue,run_id:repairPublisherRun,
+  const recoveredPublisherRun=repairPublisherRun+1;
+  const eventB={kind:'publisher',issue,run_id:recoveredPublisherRun,
     run_attempt:1,target_sha:shaB,outcome:'published'};
-  const trustedB={role:'publisher',workflow_run_id:repairPublisherRun,
+  const trustedB={role:'publisher',workflow_run_id:recoveredPublisherRun,
+    write_ahead_publisher_run_id:repairPublisherRun,
     attempt:1,issue,source_sha:shaB,
     developer_action_id:originalRepair.id,developer_run_id:repairWorkerId,
     developer_attempt:1,developer_source_sha:commitSha,
@@ -808,7 +812,8 @@ try {
   // The real Store publisher handoff consumes only independently checked
   // GitHub PR-B receipt + committed WAL. It CAS-projects one Reviewer.
   const repairHandoff=applyQwenRepairPublicationToRemote({
-    remote,readback:repairReadback,intent:laterReconciler,registry});
+    remote,readback:repairReadback,intent:laterReconciler,registry,
+    authenticated_run_id:recoveredPublisherRun});
   assert.equal(repairHandoff.changed,true);
   assert.equal(repairHandoff.reviewer_agent_id,'review-qwen-01');
   assert.equal(repairHandoff.reviewer_action_id,nextReview[0].id);
@@ -822,6 +827,17 @@ try {
   assert.equal(storedB.state.target_sha,shaB);
   assert.equal(storedB.state.outbox.filter(x=>
     x.task.role==='reviewer'&&x.status==='pending').length,1);
+  const pubHistory=storedB.state.transitions.at(-1);
+  assert.equal(pubHistory.run_id,recoveredPublisherRun);
+  assert.equal(pubHistory.write_ahead_publisher_run_id,repairPublisherRun);
+  const reviewerIntent=qwenCommittedReviewIntent({
+    storeRoot:post,issue,publisherRunId:recoveredPublisherRun});
+  assert.equal(reviewerIntent.recovered,true);
+  assert.equal(reviewerIntent.record.publisher_run_id,repairPublisherRun);
+  assert.equal(reviewerIntent.publisher_run_id,recoveredPublisherRun);
+  assert.equal(qwenReviewerPublishedSource({
+    storeRoot:post,issue,actionId:nextReview[0].id,sha:shaB})
+      .publisher_run_id,recoveredPublisherRun);
   assert.equal(posts,5,'Repair update never creates a second GitHub PR');
   assert.equal(repairMutations.length,4,'Store handoff never writes GitHub');
 
