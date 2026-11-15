@@ -45,7 +45,7 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
     reject('missing, truncated or ambiguous original release jobs');
   }
   const required = [
-    ['deploy-staging-gitops', /^Run \.\/scripts\/gitops-commit\.sh staging/],
+    ['deploy-staging-gitops', run.name === DEPLOY_NAME ? /^Commit verified Staging GitOps$/ : /^Run \.\/scripts\/gitops-commit\.sh staging/],
     ['provenance', /^Emit per-registry build provenance$/],
   ];
   if (run.name === DEPLOY_NAME) {
@@ -57,7 +57,7 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
   }
   for (const [name, step] of required) {
     const selected = jobs.filter(j => j.name === name &&
-      j.run_id === run.id && j.run_attempt === run.run_attempt);
+      j.run_id === run.id && (j.run_attempt == null || j.run_attempt === run.run_attempt));
     if (selected.length !== 1 || selected[0].status !== 'completed' ||
         selected[0].conclusion !== 'success') reject('missing successful original release job ' + name);
     const matched = (selected[0].steps ?? []).filter(s => step.test(String(s.name)) &&
@@ -133,7 +133,7 @@ export function selfTest() {
   // A GHCR-only release can never pass either source's deployment check.
   const newRun = {...run, name: DEPLOY_NAME, path: DEPLOY_PATH};
   const newEvent = {...event, workflow_run: newRun};
-  const newJobs = [...jobs.jobs, {
+  const newJobs = [{...jobs.jobs[0], steps: [{...jobs.jobs[0].steps[0], name: 'Commit verified Staging GitOps'}]}, jobs.jobs[1], {
     name: 'verify-source', run_id: run.id, run_attempt: 1,
     status: 'completed', conclusion: 'success',
     steps: [{name: 'Authenticate successful exact-SHA GHCR publishing run',
