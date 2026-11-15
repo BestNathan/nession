@@ -251,6 +251,40 @@ for(const bad of [
 ])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
   /authenticated owner\/main/);
 
+const qwenRepairAction='bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856';
+const qwenRepairComment='/nession dispatch-repair issue=3433 action='+qwenRepairAction;
+assert.deepEqual(REPAIR_DISPATCH_RE.exec(qwenRepairComment)?.slice(1),
+  ['3433',qwenRepairAction]);
+const qwenRepairEvent={...commentEvent,
+  issue:{number:3433,state:'open'},
+  comment:{...commentEvent.comment,body:qwenRepairComment}};
+const qwenRepairValid={...commentValid,issue:3433,actionId:qwenRepairAction,
+  event:qwenRepairEvent};
+assert.equal(assertDispatchAuthority(qwenRepairValid).action_id,qwenRepairAction);
+assert.doesNotThrow(()=>assertOwnerQwenRepairDispatchRole(true,'developer',
+  {task:'repair',agent_id:'dev-qwen-01',resume:true}));
+for(const task of [
+  {task:'implement',agent_id:'dev-qwen-01',resume:true},
+  {task:'repair',agent_id:'dev-qwen-01',resume:false},
+  {task:'repair',agent_id:'dev-cursor-01',resume:true},
+])assert.throws(()=>assertOwnerQwenRepairDispatchRole(true,'developer',task),
+  /non-Repair Outbox action/);
+assert.throws(()=>assertOwnerQwenRepairDispatchRole(true,'reviewer',
+  {task:'review',agent_id:'review-qwen-01',resume:true}),
+  /non-Repair Outbox action/);
+for(const change of [
+  {issue:1997},
+  {actionId:'f'.repeat(64)},
+  {event:{...qwenRepairEvent,issue:{number:3434,state:'open'}}},
+  {event:{...qwenRepairEvent,issue:{number:3433,state:'closed'}}},
+  {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,
+    body:qwenRepairComment+' '}}},
+  {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,
+    user:{login:'other'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'other'}},
+])assert.throws(()=>assertDispatchAuthority({...qwenRepairValid,...change}),
+  /authenticated owner\/main/);
+
 const reviewRecover={...commentValid,
   actionId:'555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434',
   event:{...commentEvent,comment:{...commentEvent.comment,
