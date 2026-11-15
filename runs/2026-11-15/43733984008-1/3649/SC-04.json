@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "fa78c61d5a1934a75aab3f56ae5d6c864995a98bbb921a3e988bb08c550bbd75",
+  "run_id": 43733984008,
+  "run_attempt": 1,
+  "issue": 3649,
+  "criterion": "SC-04",
+  "criterion_text": "Editing/deleting a Project or editing its default ENV file does not retroactively change an existing Session's desired/materialized binding; newly created Sessions see updated Project defaults, and explicit Session reapply remains separately owned.",
+  "stage": "staging",
+  "target_sha": "d0b0c21b87e061baa93be4e1a20c77acfbf7606a",
+  "contract_sha256": "6d7815eb3eed1160037219d40362b3aeb71e2881a1b6451c9dffd8058d18c84b",
+  "case_revision": "d0b0c21b87e061baa93be4e1a20c77acfbf7606a",
+  "case_tree_sha": "6c5709733ad0230d8e74c70df103d68817550fe6",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T16:15:46.610Z",
+  "finished_at": "2026-11-15T16:16:01.927Z",
+  "duration_ms": 15317,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Project defaults edits, ENV file edits and Project deletion left existing Session bindings and tmux environments unchanged; new Sessions saw updated defaults and explicit reapply remained the only content refresh",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Session e2e-test-node:sc04-stable-10603-mwi1dngi bound [sc04-a-10603-mwi1dnet.env] at revision 1; editing Project defaults to [sc04-b-10603-mwi1dnet.env] left e2e-test-node:sc04-stable-10603-mwi1dngi desired=[sc04-a-10603-mwi1dnet.env] and tmux SC04_SHARED=first; new Session e2e-test-node:sc04-fresh-10603-mwi1dnu0 inherited the updated [sc04-b-10603-mwi1dnet.env]; editing default file sc04-a-10603-mwi1dnet.env left the existing binding revision and tmux value unchanged; explicit reapply advanced e2e-test-node:sc04-stable-10603-mwi1dngi to revision 2 and materialized SC04_SHARED=updated; explicit custom Session e2e-test-node:sc04-custom-10603-mwi1do8k stayed [sc04-a-10603-mwi1dnet.env] after the Project defaults were cleared; deleting the Project left both Session bindings and tmux state intact"
+        }
+      ],
+      "duration_ms": 9429,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43733984008,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d0b0c21b87e061baa93be4e1a20c77acfbf7606a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43733984008",
+    "record_path": "runs/2026-11-15/43733984008-1/3649/SC-04.json",
+    "source_result_sha256": "c249fb09affd3ecd2568dd060ed52b7cda89bdc2a74d09f06ddcc99b4c1eccdd"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43733984008-1",
+    "sha256": "c249fb09affd3ecd2568dd060ed52b7cda89bdc2a74d09f06ddcc99b4c1eccdd",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43733984008",
+    "durability": "time-limited; object archival not configured"
+  }
+}

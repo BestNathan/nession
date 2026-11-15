@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4e23d802c5b862057361bda6a58bb70ff843622a752f7a75f3b04a63260311e1",
+  "run_id": 43733984008,
+  "run_attempt": 1,
+  "issue": 3649,
+  "criterion": "SC-03",
+  "criterion_text": "New create requests distinguish inherit vs explicit replacement including empty list; Server materializes/saves exactly the effective Session-owned binding in declared order and fails invalid/unavailable references without environment fallback. Omitted new mode preserves legacy create behavior.",
+  "stage": "staging",
+  "target_sha": "d0b0c21b87e061baa93be4e1a20c77acfbf7606a",
+  "contract_sha256": "6d7815eb3eed1160037219d40362b3aeb71e2881a1b6451c9dffd8058d18c84b",
+  "case_revision": "d0b0c21b87e061baa93be4e1a20c77acfbf7606a",
+  "case_tree_sha": "86465363f3c180910fa99e868309a60a74f2d782",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T16:15:31.291Z",
+  "finished_at": "2026-11-15T16:15:46.609Z",
+  "duration_ms": 15318,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "inherit, explicit replacement (including the empty list) and the legacy omitted-mode payload produced the exact declared Session binding order; contradictory, unsupported, Project-less and missing-reference creates were refused",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "Project project-env-sc03-9160-mwi1dbl8 declares ordered Server references [sc03-a-9160-mwi1dbl8.env, sc03-b-9160-mwi1dbl8.env]; inherit mode created e2e-test-node:sc03-inherit-9160-mwi1dbmu with desired_revision=1 order=[sc03-a-9160-mwi1dbl8.env,sc03-b-9160-mwi1dbl8.env] and tmux SC03_SHARED=second; replace mode created e2e-test-node:sc03-custom-9160-mwi1dc0q with order=[sc03-b-9160-mwi1dbl8.env], tmux SC03_B=from-b and no SC03_A; replace mode with env_files=[] created e2e-test-node:sc03-none-9160-mwi1dceg at desired_revision=0 with no managed SC03_SHARED; omitted mode on e2e-test-node:sc03-legacy-9160-mwi1dcs4 kept the legacy inherit-on-empty order [sc03-a-9160-mwi1dbl8.env,sc03-b-9160-mwi1dbl8.env]; inherit + env_files refused: env_selection_mode 'inherit' cannot be combined with env_files; use 'replace' for an explicit selection; unsupported mode refused: env_selection_mode must be 'inherit' or 'replace'; inherit without a Project refused: env_selection_mode 'inherit' requires a Project; missing inherited reference refused: Env file not found. It may have been deleted: missing.env"
+        }
+      ],
+      "duration_ms": 9431,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43733984008,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d0b0c21b87e061baa93be4e1a20c77acfbf7606a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43733984008",
+    "record_path": "runs/2026-11-15/43733984008-1/3649/SC-03.json",
+    "source_result_sha256": "e172ce3018f2427418dde59f205cbe96c6bb4abd7f15156c1c1b6005a82e7f47"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43733984008-1",
+    "sha256": "e172ce3018f2427418dde59f205cbe96c6bb4abd7f15156c1c1b6005a82e7f47",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43733984008",
+    "durability": "time-limited; object archival not configured"
+  }
+}
