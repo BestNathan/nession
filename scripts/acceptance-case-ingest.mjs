@@ -1101,7 +1101,10 @@ async function selfTest() {
   const mainStep = { ...manualStep,
     name: 'Authenticate manual Post-Merge Case 1474 SC-14 ' + valid.target_sha };
   const mainJob = { ...manualJob, steps: [
-    { number: 2, name: 'Checkout trusted discovery tooling' }, mainStep,
+    { number: 1, name: 'Checkout trusted discovery tooling' },
+    { number: 2, name: 'Verify original human Case comment and source-bound target',
+      status: 'completed', conclusion: 'success' },
+    mainStep,
     { number: 4, name: 'Resolve target identity' },
     { number: 5, name: 'Checkout exact target SHA' },
   ] };
