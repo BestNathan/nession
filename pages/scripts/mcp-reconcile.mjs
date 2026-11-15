@@ -13,7 +13,7 @@ export function validMcpPublication(data){
      !SHA.test(data.source?.sha||'')||!DIGEST.test(data.semantic_sha256||'')||
      !Array.isArray(data.tools)||data.tools.length<1||data.tools.length>256||
      !Array.isArray(data.protocol_versions)||data.protocol_versions.length>20||
-     !data.protocol_versions.every(v=>/^\\d{4}-\\d{2}-\\d{2}$/.test(v)))return false;
+     !data.protocol_versions.every(v=>/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v)))return false;
   const names=new Set();
   for(const t of data.tools){
     if(!NAME.test(t?.name||'')||names.has(t.name)||
