@@ -15,6 +15,7 @@ import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
 import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
 import {createHash} from 'node:crypto';
+import {mcpSemanticDigest} from './mcp-semantic.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -218,7 +219,7 @@ if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
     !parsed.tools.every(t=>typeof t.name==='string'&&
       typeof t.description==='string'&&t.inputSchema?.type==='object'))
     throw Error('Invalid canonical MCP Tool catalog');
-  mcp={...parsed,status:'available',
+  mcp={...parsed,semantic_sha256:mcpSemanticDigest(parsed),status:'available',
     source:{repository:repo,branch:'main',sha:mainSha}};
 }
 
