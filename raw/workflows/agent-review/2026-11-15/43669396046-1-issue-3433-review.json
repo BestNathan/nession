@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-review",
+    "github_workflow": "Agent / Review",
+    "github_run_id": 43669396046,
+    "github_run_attempt": 1,
+    "job": "reviewer",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "43669396046-1-issue-3433-review"
+  },
+  "task": {
+    "id": "issue-3433-review",
+    "type": "review",
+    "issue": 3433,
+    "pr": 3530,
+    "target_ref": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+    "action_id": "c937131a8b8dd855d053a93aca930167199b6c4a346bc72eea17e9273ce91016",
+    "native_session_id": "cb312fcd-785a-4f91-8647-468413e5970c",
+    "native_resumed": false
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "review-qwen-01",
+    "role": "reviewer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus"
+    },
+    "run_id": null,
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "review",
+      "version": "v3",
+      "sha256": "d2e536d21ce246974e0c11b93f7271dc9cb4c20cea55516b6368b4e09507800a"
+    }
+  },
+  "execution": {
+    "turns": 17,
+    "model_requests": null,
+    "tools": {
+      "observed": true,
+      "total": 16,
+      "unique": 2,
+      "by_name": {
+        "Grep": 11,
+        "Read": 5
+      }
+    }
+  },
+  "tokens": {
+    "input": 78,
+    "output": 12235,
+    "cache_read": 261646,
+    "cache_write": 36578,
+    "reasoning": null,
+    "total": 310537
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-15T02:52:12.223Z",
+    "finished_at": "2026-11-15T02:52:12.223Z",
+    "agent_duration_ms": null,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "review-changes-requested"
+  }
+}
