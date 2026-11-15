@@ -60,6 +60,7 @@ jobs:
       mcp_semantic_sha256: ${{ steps.public_data.outputs.mcp_semantic_sha256 }}
       mcp_source_sha: ${{ steps.public_data.outputs.mcp_source_sha }}
       mcp_tools: ${{ steps.public_data.outputs.mcp_tools }}
+      mcp_ui_sha256: ${{ steps.public_data.outputs.mcp_ui_sha256 }}
       knowledge_sha: ${{ steps.public_data.outputs.knowledge_sha }}
       knowledge_json_sha256: ${{ steps.public_data.outputs.knowledge_json_sha256 }}
       knowledge_articles: ${{ steps.public_data.outputs.knowledge_articles }}
@@ -252,6 +253,8 @@ jobs:
           if [[ -f pages/scripts/mcp-reconcile.mjs ]]; then
             mcp_json=pages/dist/data/mcp.json
             test -s "$mcp_json"
+            test -s pages/dist/mcp-documents.js
+            echo "mcp_ui_sha256=$(sha256sum pages/dist/mcp-documents.js | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
             node --input-type=module -e "
               import {readFileSync} from 'node:fs';
               import {validMcpPublication} from './pages/scripts/mcp-reconcile.mjs';
@@ -352,6 +355,7 @@ jobs:
           EXPECTED_MCP_SEMANTIC_SHA256: ${{ needs.build.outputs.mcp_semantic_sha256 }}
           EXPECTED_MCP_SOURCE_SHA: ${{ needs.build.outputs.mcp_source_sha }}
           EXPECTED_MCP_TOOLS: ${{ needs.build.outputs.mcp_tools }}
+          EXPECTED_MCP_UI_SHA256: ${{ needs.build.outputs.mcp_ui_sha256 }}
           EXPECTED_KNOWLEDGE_SHA: ${{ needs.build.outputs.knowledge_sha }}
           EXPECTED_KNOWLEDGE_JSON_SHA256: ${{ needs.build.outputs.knowledge_json_sha256 }}
           EXPECTED_KNOWLEDGE_ARTICLES: ${{ needs.build.outputs.knowledge_articles }}
@@ -522,7 +526,9 @@ jobs:
             [[ "$EXPECTED_MCP_SEMANTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             [[ "$EXPECTED_MCP_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             [[ "$EXPECTED_MCP_TOOLS" =~ ^[1-9][0-9]*$ ]] || exit 1
+            [[ "$EXPECTED_MCP_UI_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             mcp_readback="$(mktemp)"
+            mcp_ui_readback="$(mktemp)"
             mcp_ready=false
             for attempt in {1..18}; do
               if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
@@ -533,13 +539,16 @@ jobs:
                   .source.branch == "main" and .source.sha == $sha and
                   .semantic_sha256 == $digest and (.tools | length) == $count
                 ' "$mcp_readback" >/dev/null \
-                && [[ "$(sha256sum "$mcp_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_JSON_SHA256" ]]; then
+                && [[ "$(sha256sum "$mcp_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_JSON_SHA256" ]] \
+                && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                  -H 'Cache-Control: no-cache' "$url/mcp-documents.js?revision=$EXPECTED_SHA" -o "$mcp_ui_readback" \
+                && [[ "$(sha256sum "$mcp_ui_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_UI_SHA256" ]]; then
                 mcp_ready=true
                 break
               fi
               sleep 5
             done
-            rm -f "$mcp_readback"
+            rm -f "$mcp_readback" "$mcp_ui_readback"
             [[ "$mcp_ready" == true ]] || {
               echo "::error::MCP Documents public HTTPS bytes differ from validated build artifact"
               exit 1
@@ -570,7 +579,7 @@ jobs:
             echo "- Documents JSON SHA-256: $EXPECTED_DOCUMENTS_JSON_SHA256 (exact anonymous HTTPS bytes)"
             if [[ -n "$EXPECTED_MCP_JSON_SHA256" ]]; then
               echo "- Public MCP Documents: $url/#/documents/mcp · $EXPECTED_MCP_TOOLS Tools · source $EXPECTED_MCP_SOURCE_SHA"
-              echo "- MCP semantic digest: $EXPECTED_MCP_SEMANTIC_SHA256; HTTPS bytes: $EXPECTED_MCP_JSON_SHA256"
+              echo "- MCP semantic digest: $EXPECTED_MCP_SEMANTIC_SHA256; HTTPS bytes: $EXPECTED_MCP_JSON_SHA256; UI JS: $EXPECTED_MCP_UI_SHA256"
             fi
             echo "- Knowledge JSON SHA-256: $EXPECTED_KNOWLEDGE_JSON_SHA256 (anonymous HTTPS bytes)"
             echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"
