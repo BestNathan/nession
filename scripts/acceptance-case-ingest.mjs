@@ -202,8 +202,10 @@ export function sourceRunIdentity(event, repository) {
   const [workflowPath, workflowRef, ...extra] = definition.split('@');
   const canonicalPath = prSmoke ? '.github/workflows/acceptance-case-smoke.yml' :
     '.github/workflows/acceptance-cases.yml';
+  const permittedRefs = prSmoke ? ['refs/heads/main', 'refs/heads/staging'] :
+    ['refs/heads/' + branch];
   if (extra.length || ![canonicalPath, repository + '/' + canonicalPath].includes(workflowPath) ||
-      (workflowRef && workflowRef !== 'refs/heads/' + branch)) {
+      (workflowRef && !permittedRefs.includes(workflowRef))) {
     throw new Error('unexpected source workflow definition path');
   }
   const sourceSha = sha(run.head_sha, 40, 'workflow_run.head_sha');
