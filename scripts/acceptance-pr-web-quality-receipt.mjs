@@ -24,7 +24,7 @@ export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   // Integration/Quality check", not "an integration test records ...".
   // This is also an executable exact-head obligation, unlike policy text
   // which merely describes when a future criterion may be accepted.
-  const gateResult = /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|complete(?:s|d)?|execut(?:e|ed)|verif(?:y|ied))\b.{0,130}\b(?:web-test-integration|web[ -]+integration(?:\/quality)?|web[ -]+quality)\b/i.test(text) ||
+  const gateResult = /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|complete(?:s|d)?|execut(?:e|ed)|verif(?:y|ies))\b.{0,130}\b(?:web-test-integration|web[ -]+integration(?:\/quality)?|web[ -]+quality)\b/i.test(text) ||
     /\b(?:web-test-integration|web[ -]+integration\/quality)\b.{0,100}\b(?:pass(?:ed)?|success|successful|green|completed|executed)\b/i.test(text);
   // #3552 / #3433: unit-test-backed behavior SCs often describe WHAT must
   // happen, while their SCN-01 mapping states HOW Pass is proved. This
@@ -32,8 +32,21 @@ export function requiresWebIntegrationExecution(criterion, issueBody = '') {
   // model inspection of source/test assertions. Keep the match narrow:
   // the same mapping line must name the SC, SCN-01, Web unit-test CI, and
   // an independent exact-SHA CI receipt REQUIRED for Pass.
+  // Only the Issue's own SC → scenario mapping can bind mandatory CI
+  // execution. Quoted contracts in Description/Reproduction (such as #3433
+  // cited by #3552) describe *another* Requirement and must not bind this one.
+  const mappingLines = [];
+  let inMapping = false;
+  for (const line of String(issueBody).split(/\r?\n/)) {
+    if (/^\s*(?:#{1,6}\s+|\*\*)SC\s*(?:→|->)\s*scenario\s+mapping\b/i.test(line)) {
+      inMapping = true;
+    } else if (inMapping && (/^\s*#{1,6}\s+/.test(line) || /^\s*$/.test(line))) {
+      inMapping = false;
+    }
+    if (inMapping) mappingLines.push(line);
+  }
   const requiredUnitReceipt = /^SC-\d{2,}$/.test(String(criterion?.criterion ?? '')) &&
-    String(issueBody).split(/\r?\n/).some(line =>
+    mappingLines.some(line =>
       (line.match(/\bSC-\d{2,}\b/g) ?? []).includes(criterion.criterion) &&
       /\bSCN-01\b/.test(line) &&
       /\bWeb\s+unit[- ]test\s+CI\b/i.test(line) &&
@@ -363,6 +376,35 @@ function selfTest() {
     unitBody.replace('required for Pass', 'recorded for reference')), false);
   assert.equal(requiresWebIntegrationExecution(unit01,
     unitBody.replace('Web unit-test CI', 'Rust unit-test CI')), false);
+  // #3552 is an Acceptance/CI classifier requirement, not a Web runtime
+  // change. A quoted #3433 unit-test proof contract must not bind #3552's
+  // own SCs, nor may "verified successful Web Quality run" be mistaken for
+  // a requirement that this tooling-only PR executes Web tests.
+  const governanceBody = '### Verified production counterexample\n' +
+    '- [#3433] SC-01 and SC-02: SCN-01. Web unit-test CI provides source ' +
+    'verification; independent exact-SHA CI receipts are required for Pass.\n\n' +
+    '**SC → scenario mapping:** SC-01/02 → SCN-01 deterministic classifier ' +
+    'fixtures + SCN-05 existing GitHub Quality proof.\n\n## Acceptance Plan';
+  const governance01 = { criterion: 'SC-01',
+    text: "#3433's exact SCN-01 Web unit-test-required contract cannot project " +
+      'Pass while its PR-head web-tests or web-check fails or remains pending.' };
+  const governance02 = { criterion: 'SC-02',
+    text: 'A verified successful exact-SHA Web Quality run allows those SCs ' +
+      'source-aligned Pass; static-only Web and Rust/governance SCs remain unaffected.' };
+  assert.equal(requiresWebIntegrationExecution(governance01, governanceBody), false);
+  assert.equal(requiresWebIntegrationExecution(governance02, governanceBody), false);
+  const governanceContext = { stage: 'pr', target_ref: sha,
+    requirement_body: governanceBody, criteria: [governance01, governance02],
+    pr_web_quality: { status: 'fail', reason: 'web-tests completed/skipped' } };
+  const governanceProposal = { criteria: [governance01, governance02].map(sc => ({
+    criterion: sc.criterion, result: 'Pass',
+    evidence: [{ type: 'source', value: 'source-aligned tooling proof' }],
+  })) };
+  assert.deepEqual(enforcePrWebQuality(governanceContext, governanceProposal),
+    governanceProposal, 'tooling-only governance SCs must not inherit Web execution');
+  assert.equal(requiresWebIntegrationExecution(unit01, unitBody), true,
+    'the genuine #3433 unit-test execution obligation remains mandatory');
+
   const unitContext = { stage: 'pr', target_ref: sha, requirement_body: unitBody,
     criteria: [unit01,unit02,unitStatic],
     pr_web_quality: { status: 'fail', reason: 'web-tests completed/failure' } };
