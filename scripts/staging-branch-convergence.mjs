@@ -712,9 +712,11 @@ function selfTest() {
         typeof value === 'string' && value.startsWith(prefix),
     }, {timeout: 1000});
   assert.equal(acceptsWake(releaseWake), true,
-    'the canonical staging push release success must re-wake convergence');
+    'successful verified ACR push must re-wake convergence');
+  assert.equal(acceptsWake({...releaseWake, event: 'workflow_dispatch'}), true,
+    'independently retried verified ACR deployment must also wake convergence');
   const refusedWake = [
-    {event: 'workflow_dispatch'},
+    {event: 'pull_request'},
     {name: 'Deploy / Staging ACR (forged)'},
     {path: '.github/workflows/foreign.yml'},
     {head_branch: 'main'},
