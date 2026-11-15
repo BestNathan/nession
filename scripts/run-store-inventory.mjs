@@ -324,6 +324,12 @@ export function checkInventory(manifest,workflows){
         typeof workflows.get('.github/workflows/acceptance-cases.yml')==='string'&&
         workflows.get('.github/workflows/acceptance-cases.yml').includes('  wake-comment-ingest:')&&
         workflows.get('.github/workflows/acceptance-cases.yml').includes('needs: [execute, execute-macos]')&&
+        /^    permissions:\s*\n      contents: write\s*$/m.test(
+          workflows.get('.github/workflows/acceptance-cases.yml').split(
+            /^  wake-comment-ingest:\s*$/m)[1]??'')&&
+        !/actions\/checkout@|RUN_STORE_WRITER|github\.event\.client_payload|\$\{\{\s*secrets\./.test(
+          workflows.get('.github/workflows/acceptance-cases.yml').split(
+            /^  wake-comment-ingest:\s*$/m)[1]??'')&&
         workflows.get('.github/workflows/acceptance-cases.yml').includes('-f event_type=nession-comment-case-ingest')&&
         workflows.get('.github/workflows/acceptance-cases.yml').includes('-f "client_payload[source_run_id]=$GITHUB_RUN_ID"');
 
@@ -553,6 +559,12 @@ function selfTest(){
     assert.notEqual(invalid.get(caseWakeWriter),caseWakeSource);
     assert.throws(()=>checkInventory(manifest,invalid),/untrusted manual dispatch\/trigger/);
   }
+  const unprivilegedWake=new Map(sources);
+  unprivilegedWake.set('.github/workflows/acceptance-cases.yml',
+    unprivilegedWake.get('.github/workflows/acceptance-cases.yml')
+      .replace('    permissions:\n      contents: write\n    steps:\n      - name: Explicitly wake',
+        '    permissions:\n      contents: read\n    steps:\n      - name: Explicitly wake'));
+  assert.throws(()=>checkInventory(manifest,unprivilegedWake),/untrusted manual dispatch\/trigger/);
   const spoofProducer=new Map(sources);
   spoofProducer.set('.github/workflows/acceptance-cases.yml',
     spoofProducer.get('.github/workflows/acceptance-cases.yml')
