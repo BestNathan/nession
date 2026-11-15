@@ -55,7 +55,7 @@ export function assertPublisherReviewerWake({environment,event,sourceRun,jobs,st
      source.repository?.full_name!==REPO||
      source.head_repository?.full_name!==REPO||
      !['in_progress','completed'].includes(source.status)||
-     (source.status==='completed'&&source.conclusion!=='success'&&source.conclusion!=='failure')||
+     (source.status==='completed'&&source.conclusion!=='success')||
      !Array.isArray(jobs?.jobs)||!positive(jobs.total_count)||
      jobs.total_count!==jobs.jobs.length||jobs.jobs.length>100||
      storeSource?.issue!==locator.issue||
