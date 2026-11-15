@@ -3,6 +3,7 @@
 // preserving its exact bytes, and never advance a cursor on malformed input.
 import {mcpSemanticDigest} from './mcp-semantic.mjs';
 const SHA=/^[a-f0-9]{40}$/;
+const VERSION=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
 const REPO='BestNathan/nession';
 const NAME=/^[a-z][a-z0-9_]{1,127}$/;
@@ -14,6 +15,18 @@ export function validMcpPublication(data){
      !Array.isArray(data.tools)||data.tools.length<1||data.tools.length>256||
      !Array.isArray(data.protocol_versions)||data.protocol_versions.length>20||
      !data.protocol_versions.every(v=>/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v)))return false;
+  const upstream=data.upstream?.stable;
+  if(!upstream||!VERSION.test(upstream.version||'')||
+     !SHA.test(upstream.sha||'')||!DIGEST.test(upstream.changelog_sha256||'')||
+     !SHA.test(upstream.changelog_blob_sha||'')||
+     ![null,undefined].includes(upstream.previous_version)&&
+       !VERSION.test(upstream.previous_version)||
+     !Array.isArray(upstream.highlights)||upstream.highlights.length>6||
+     !upstream.highlights.every(s=>typeof s==='string'&&s.length<=300)||
+     upstream.release_url!=='https://github.com/modelcontextprotocol/modelcontextprotocol/releases/tag/'+upstream.version||
+     upstream.source_url!=='https://github.com/modelcontextprotocol/modelcontextprotocol/blob/'+upstream.sha+
+       '/docs/specification/'+upstream.version+'/changelog.mdx')
+    return false;
   const names=new Set();
   for(const t of data.tools){
     if(!NAME.test(t?.name||'')||names.has(t.name)||
@@ -30,6 +43,7 @@ export function reconcileMcpPublication({catalog,mainSha,previous=null}){
   const fresh={
     schema_version:1,status:'available',tools:catalog.tools,
     protocol_versions:catalog.protocol_versions,
+    upstream:catalog.upstream,
     semantic_sha256:digest,
     source:{repository:REPO,branch:'main',sha:mainSha}
   };
