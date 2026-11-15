@@ -268,10 +268,15 @@ the workspace.
 Standard Config Env is a bounded default. Explicit Session/Sandbox ENV
 overrides it deterministically; Base Config defaults sit below enabled tool
 defaults; equal-precedence tool conflicts need an explicit deterministic rule
-and sandbox-owned security-sensitive variables stay protected. Mounts and the
-resulting environment are established before the Coding Agent process starts.
-An already running process never receives a retroactive mount or PATH change;
-adopting a new image binding requires re-enter/restart.
+and sandbox-owned security-sensitive variables stay protected. The executable
+rule is: identical tool defaults dedupe, different values fail closed; `PATH`,
+loader, shell-startup, proxy, host-control-socket and `NESSON_*` keys fail
+closed; terminal/locale/home variables are dropped because the execution owns
+them; `PATH` comes only from the resolved `path.prepend` directories below
+validated mount targets. Mounts and the resulting environment are established
+before the Coding Agent process starts. An already running process never
+receives a retroactive mount or PATH change; adopting a new image binding
+requires re-enter/restart.
 
 The physical mount manager remains keyed on the EROFS blob digest (#3449). Two
 Manifests sharing one payload share one physical mount but can have distinct

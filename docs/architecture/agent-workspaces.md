@@ -1,10 +1,12 @@
 # Agent-owned managed Workspaces
 
-Status: **Registry/API (#3407) plus managed `/workspace` attachment without a
-Project EROFS lower (#3405).** The Agent owns the registry, names, stable
-identities, durable bytes and RW leases. Project Location selection, the
-optional EROFS lower/Overlay and the Web/App inventory remain follow-up work;
-this document does not claim those.
+Status: **Registry/API (#3407), managed `/workspace` attachment (#3405) and
+one shared writable Overlay per managed Workspace (#3582).** The Agent owns
+the registry, names, stable identities, durable bytes, the durable Overlay
+upper/work, the ordered lower compatibility key and attachment leases; the
+physical Merged View is owned by `nession_erofs::overlay::OverlayMountManager`.
+Project Location selection and the Web/App inventory remain owned by their
+referenced Requirements.
 
 ## Ownership
 
@@ -14,7 +16,8 @@ this document does not claim those.
 | Project Existing Location `{agent_id, path}` | Project declaration; the Agent only validates/references it; never copied or deleted here |
 | Authenticated routing and Session target authorization | Server (`server.workspace.*` → `agent.workspace.*`) |
 | Filesystem policy selection and `/workspace` mounting | `nession-sandbox` / the follow-up #3405 implementation |
-| Sandbox execution lifecycle | `nession-sandbox`; it owns the mount, not the durable workspace bytes |
+| Physical writable Merged View per managed Workspace | `nession-erofs::overlay::OverlayMountManager` (#3582) |
+| Sandbox execution lifecycle | `nession-sandbox`; it owns execution isolation and records, not the durable workspace bytes |
 
 A managed Workspace is **not** the logical Nession Workspace, a Project, an
 EROFS image or a Sandbox execution. The logical Workspace remains the
@@ -31,6 +34,9 @@ configured durable location; the sandbox mount validation already confines
 ```text
 <root>/registry.json                 versioned metadata, atomically replaced
 <root>/workspaces/<workspace_id>/    durable user content
+  upper/                             durable Overlay writable layer
+  work/                              Overlay work directory (same filesystem)
+  .nession-overlay/                  manager-owned owner identity + advisory lock
 ```
 
 - The root must be a real directory, not a symlink, and is secured `0700`.
@@ -44,9 +50,17 @@ configured durable location; the sandbox mount validation already confines
 - An unreadable, malformed or unknown-version registry is a hard error. The
   manager reports the inventory API unavailable rather than starting empty and
   fabricating readiness.
-- A record may pin `lower_digest`: the Project source EROFS the durable
-  Overlay upper was first prepared against. It is a property of the stored
-  bytes, not a lookup alias; a changed or missing lower is refused.
+- A record pins the effective **ordered** lower Blob digest set
+  (`lower_layers`, with the legacy `lower_digest` read as a one-element set):
+  the Project source EROFS layers the durable upper was first prepared
+  against. It is a property of the stored bytes, not a lookup alias; a
+  changed or missing set is refused. Identical physical lower bytes under a
+  changed Manifest are compatible at the filesystem layer; environment
+  semantics remain a separate concern.
+- `overlay_storage` records that the durable `upper`/`work` pair was
+  initialized by this Agent. Once true, a missing, partial or symlinked pair
+  is data-loss evidence and is refused; it is never replaced with a fresh
+  empty upper. The pair is created on first lower-backed attachment.
 
 ## Identity, names and namespaces
 
@@ -70,8 +84,8 @@ The Agent reports one observed status per resource:
 
 | Status | Meaning |
 |---|---|
-| `available` | The durable directory exists and no execution holds an RW lease |
-| `in_use` | An execution holds an RW lease; deletion is refused |
+| `available` | The durable directory exists and no execution holds an attachment |
+| `in_use` | An attachment, a live physical Overlay/consumer, a durable owner lock or a surviving execution record uses it; deletion is refused |
 | `missing` | Metadata exists but the durable directory is missing; the manager never recreates it |
 | `error` | The path is a symlink/not a directory or cannot be inspected |
 
@@ -100,14 +114,26 @@ never a candidate, an explicit `project_location` without a matching
 declaration is refused, and no branch silently falls back.
 
 A managed Workspace becomes the composition's writable `/workspace`; the
-execution holds the RW lease and cleanup releases it without deleting durable
-bytes. The selected directory is Agent-owned, so it may also be the durable
-Overlay upper: when the Project pins a source EROFS image, the Server adds it
-as the workspace lower, and the Sandbox merges `lowerdir=<Project image>`
-with `upperdir=<workspace>/upper, workdir=<workspace>/work`. The first
-attachment records the lower digest in the Workspace registry; a later
-attachment with a different or missing lower is refused instead of merging a
-different Project image into the same durable upper (#3407 SC-04).
+execution holds an attachment lease and cleanup releases it without deleting
+durable bytes. The selected directory is Agent-owned, so it is also the
+durable Overlay upper: when the Project pins a source EROFS image, the Server
+adds it as the workspace lower, and the shared Overlay manager merges
+`lowerdir=<Project image>` with
+`upperdir=<workspace>/upper, workdir=<workspace>/work`. The Workspace Manager
+records the ordered lower Blob set on first attachment; a later attachment
+with a different or missing set is refused instead of merging a different
+Project image into the same durable upper (#3407 SC-04, #3582).
+
+Several Sessions may attach the same managed Workspace concurrently. They
+share one physical Merged View and see each other's writes with normal
+filesystem semantics; Nession does not merge or resolve concurrent writes.
+The Overlay manager, not the process-local lease count, owns the unique
+physical mount: it derives the mountpoint from its authorized Workspace root,
+holds a durable owner lock next to the durable bytes, and only unmounts after
+the last identified consumer. A failed unmount retains the mount, the lower
+pin and the durable upper. Another process or manager root that shares the
+durable upper is fenced by the owner lock plus mountinfo; network filesystems
+are refused, so cross-node writable use is not enabled.
 
 A Project Existing Location is bound directly, with `ownership:
 project_location`. It is external and user-owned: the Agent never writes
@@ -115,9 +141,13 @@ Overlay metadata into it, never deletes or copies it, and refuses a
 declaration that combines it with a Project EROFS lower. The per-execution
 scratch directory remains available when no Workspace is selected.
 
-Leases are in-memory. An Agent restart drops them; the durable execution
-record remains the attachment authority, and reconstructing leases from it is
-part of the follow-up.
+Attachment leases are in-memory, but they are not the only authority. A
+restart drops them; the durable execution record's Overlay binding is then
+adopted only when the manager proves the durable identity, generation, Agent
+identity, mount namespace, owner lock, mountinfo and read-only lower all
+agree. Deletion also consults those observed facts and surviving execution
+records, so unlinking a Workspace that a live or uncertain execution still
+uses is refused rather than silently destroying bytes.
 
 ## Lifetime and deletion
 

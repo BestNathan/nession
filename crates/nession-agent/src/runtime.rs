@@ -202,8 +202,14 @@ pub async fn run(
         // to an ephemeral location.
         match nession_common::paths::agent_dir() {
             Ok(agent_dir) => {
-                match crate::workspace_manager::WorkspaceManager::open(agent_dir.join("workspaces"))
-                {
+                // Deletion guards consult the observed Overlay/consumer state,
+                // not only a volatile process-local lease count (#3582).
+                let use_guard: std::sync::Arc<dyn crate::workspace_manager::WorkspaceUseGuard> =
+                    crate::sandbox_runtime::SandboxWorkspaceUse::new(Arc::clone(&sandbox));
+                match crate::workspace_manager::WorkspaceManager::open_with_guard(
+                    agent_dir.join("workspaces"),
+                    Some(use_guard),
+                ) {
                     Ok(manager) => {
                         mgr = mgr.with_workspaces(Arc::new(manager));
                     }
@@ -312,12 +318,20 @@ pub async fn run(
 
     let tmux_version = crate::tmux::util::tmux_version().await;
     let os_version = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+    let platform = nession_erofs::oci::descriptor::Platform::for_consumer(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        None,
+    );
 
     let metadata = AgentMetadata {
         tmux_version,
         os_version,
         nession_version: env!("CARGO_PKG_VERSION").to_string(),
         image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
+        architecture: platform.architecture,
+        os: platform.os,
+        variant: platform.variant,
     };
 
     // Before any session can exist, and before the server connection, so a

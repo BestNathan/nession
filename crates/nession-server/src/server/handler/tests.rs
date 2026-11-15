@@ -6,7 +6,7 @@ use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use nession_protocol::ProtocolManifest;
-use tokio_tungstenite::tungstenite::Message;
+use nession_runtime::frame::WsFrame;
 
 /// The shared services of one test Server.
 ///
@@ -126,7 +126,7 @@ fn handler_with_db(db: Arc<Database>, auth_token: &str) -> ConnectionHandler {
     TestDeps::with_db(db).handler(auth_token)
 }
 
-fn proto_msg(msg_type: &str, payload: serde_json::Value) -> Message {
+fn proto_msg(msg_type: &str, payload: serde_json::Value) -> WsFrame {
     let text = json!({
         "msg_type": msg_type,
         "id": "test-1",
@@ -134,12 +134,12 @@ fn proto_msg(msg_type: &str, payload: serde_json::Value) -> Message {
         "payload": payload,
     })
     .to_string();
-    Message::Text(text)
+    WsFrame::Text(text)
 }
 
 fn parse_reply(action: HandlerAction) -> serde_json::Value {
     match action {
-        HandlerAction::Reply(Some(Message::Text(text))) => serde_json::from_str(&text).unwrap(),
+        HandlerAction::Reply(Some(WsFrame::Text(text))) => serde_json::from_str(&text).unwrap(),
         _ => panic!("expected Reply(Some(Text))"),
     }
 }
@@ -149,7 +149,7 @@ fn parse_reply(action: HandlerAction) -> serde_json::Value {
 #[tokio::test]
 async fn close_message_returns_close() {
     let mut h = test_handler("").await;
-    let action = h.handle_message(Message::Close(None)).await.unwrap();
+    let action = h.handle_message(WsFrame::Close(None)).await.unwrap();
     assert!(matches!(action, HandlerAction::Close));
 }
 
@@ -157,7 +157,7 @@ async fn close_message_returns_close() {
 async fn binary_message_returns_empty_reply() {
     let mut h = test_handler("").await;
     let action = h
-        .handle_message(Message::Binary(vec![1, 2, 3]))
+        .handle_message(WsFrame::Binary(vec![1, 2, 3]))
         .await
         .unwrap();
     assert!(matches!(action, HandlerAction::Reply(None)));
@@ -197,6 +197,9 @@ async fn register_agent_id(
                 os_version: "Linux".to_string(),
                 nession_version: "0.1.0".to_string(),
                 image_tag: "test".to_string(),
+                architecture: "amd64".to_string(),
+                os: "linux".to_string(),
+                variant: None,
             },
             session_count: 0,
             active_sessions: 0,
@@ -781,7 +784,7 @@ async fn an_agent_without_a_manifest_reports_null_rather_than_an_empty_set() {
 #[tokio::test]
 async fn invalid_json_returns_error() {
     let mut h = test_handler("").await;
-    let result = h.handle_message(Message::Text("not json".into())).await;
+    let result = h.handle_message(WsFrame::Text("not json".into())).await;
     assert!(result.is_err());
 }
 
@@ -1316,7 +1319,7 @@ async fn claim_control_channel(
 /// site on purpose: a wire name passed through here would be invisible to
 /// `scripts/protocol-gate.mjs`, which is what catches a name that no
 /// runtime answers.
-async fn report(h: &mut ConnectionHandler, frame: Message) {
+async fn report(h: &mut ConnectionHandler, frame: WsFrame) {
     let action = h.handle_message(frame).await.unwrap();
     assert!(matches!(action, HandlerAction::Reply(None)));
 }

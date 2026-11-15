@@ -1,9 +1,9 @@
 //! Connection-scoped Server dispatch, state and shared mechanisms.
 
+use nession_runtime::frame::WsFrame;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
 use crate::env::EnvService;
@@ -56,7 +56,7 @@ const SESSION_REFRESH_TIMEOUT: Duration = Duration::from_secs(3);
 /// Action returned by the connection handler after processing a message.
 pub enum HandlerAction {
     /// Send an optional reply message back to the sender.
-    Reply(Option<Message>),
+    Reply(Option<WsFrame>),
     /// Enter relay mode: forward messages between this client and the agent.
     /// The server tries each URL in order with a fast timeout until one connects.
     Relay {
@@ -262,6 +262,18 @@ impl ConnectionHandler {
         self.registered_agent_id.as_ref()
     }
 
+    /// Whether this connection has proven a credential.
+    ///
+    /// Either half of the Server's one authentication transition: a client
+    /// `server.auth`, or an Agent registration (which authenticates with the
+    /// Server Token before it binds the agent identity). `server/websocket.rs`
+    /// uses this to end the upgraded socket's absolute pending-auth deadline
+    /// and to return its pending-auth budget (#3439 W2); it does not replace
+    /// any handler's own per-unit checks.
+    pub fn is_authenticated(&self) -> bool {
+        self.authenticated_client || self.registered_agent_id.is_some()
+    }
+
     /// Identity of the connection this handler serves.
     ///
     /// `server/websocket.rs` hands it back to the broker with every agent
@@ -365,13 +377,13 @@ impl ConnectionHandler {
     /// with the result. This method is what is left for the frames the loop does
     /// not classify — a close, a ping, a binary frame — and for the handler
     /// tests, which are about one frame answered.
-    pub async fn handle_message(&mut self, msg: Message) -> anyhow::Result<HandlerAction> {
+    pub async fn handle_message(&mut self, msg: WsFrame) -> anyhow::Result<HandlerAction> {
         match msg {
-            Message::Text(text) => {
+            WsFrame::Text(text) => {
                 let protocol_msg: ProtocolMessage<serde_json::Value> = serde_json::from_str(&text)?;
                 self.handle_protocol_message(protocol_msg).await
             }
-            Message::Close(_) => {
+            WsFrame::Close(_) => {
                 info!("Client disconnected");
                 Ok(HandlerAction::Close)
             }
@@ -1205,7 +1217,7 @@ fn env_list_reply(id: &str, payload: ClientEnvListResponsePayload) -> HandlerAct
 }
 
 fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
-    HandlerAction::Reply(Some(Message::Text(
+    HandlerAction::Reply(Some(WsFrame::Text(
         json!({
             "msg_type": msg_type,
             "id": id,
@@ -1246,6 +1258,7 @@ pub(crate) fn session_to_info(
         attached_clients: s.attached_clients,
         foreground_command: s.foreground_command.clone(),
         working_dir: s.working_dir.clone(),
+        instance_id: s.instance_id.clone(),
         project_id: project_id.map(std::string::ToString::to_string),
         last_activity: s.last_activity.to_rfc3339(),
     }

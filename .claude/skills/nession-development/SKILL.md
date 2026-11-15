@@ -19,6 +19,20 @@ Load related Skills only when needed:
 
 Always read the nearest scoped `AGENTS.md` for files you change.
 
+## 0. Issue-first hard gate — no Issue, no development, no PR
+
+**Every permanent feature, fix, refactor, engineering chore, test, documentation or workflow change must have a verified Nession Requirement/Bug Issue *before* implementation.** This covers human/AI work, direct GitHub APIs, `gh`, automation/Publisher and draft/repair PRs. A chat request, TODO, branch name, commit message, PR title or unverified `#123` mention is not an Issue.
+
+**Before any feature worktree/branch, code edit, Developer launch or implementation commit:**
+
+1. Search for an existing Issue owning the exact requested outcome; read the live Issue in `BestNathan/nession` and confirm its number, state, scope and linked implementation PRs. Never borrow an unrelated Issue merely to satisfy this gate.
+2. If no suitable Issue exists, **STOP implementation**. Load [nession-writing-requirements](../nession-writing-requirements/SKILL.md), dedupe and create the canonical Requirement/Bug Issue first. If the Issue cannot be created/verified, report the blocker; do not write code and do not create a draft or placeholder PR.
+3. Apply the `ship` / `continue` preflight below and confirm `status:in-progress` for new work before proceeding. A closed, already-owned or development-complete Issue is not permission to start an unrelated new `ship`.
+
+**Before committing, pushing or publishing *any* implementation PR**, verify the same real Issue still owns the diff and include `Refs #<issue_number>` (or a warranted `Fixes #<issue_number>`) **in the PR body**. For multi-Issue work identify every genuinely covered Issue. If the Issue is missing, unverifiable, unrelated, or the PR body is unlinked, **STOP; do not commit, push, call `gh pr create`, create a draft PR, or invoke a PR-publishing tool/Publisher**. Do not fabricate an Issue afterward to justify already-started work.
+
+This is a **developer action policy**, not a claim that GitHub's REST API technically rejects a manual PR; enforce it at every Agent/tool publication boundary. System-generated, source-pinned staging/main **release-convergence synchronization** follows its separate trusted `nession-cicd` owner and is not an implementation PR. One-off `task/*` execution publishes no PR, and standalone `prototype` artifacts follow their own Issue-backlinked Skill; neither is an implementation bypass.
+
 ## 1. Start from latest main
 
 The repository root is a read-only latest-`main` mirror.
@@ -37,14 +51,14 @@ The root must be clean. Do not edit, commit, create a feature branch, or run fea
 
 ### Issue-based development preflight (`ship`)
 
-For a **new** development request (`ship`) tied to an existing GitHub Issue, check the live Issue **before creating a worktree, changing code, or launching a Developer**:
+For **every new** development request (`ship`), the Issue-first gate above is mandatory. After resolving a real GitHub Issue, check that live Issue **before creating a worktree, changing code, or launching a Developer**:
 
 1. Read the Issue's open/closed state and labels; check its linked **open implementation PRs** (including GitHub cross-references), not just branch-name guesses.
 2. If the Issue is closed, already development-complete/awaiting Acceptance, has `status:in-progress`, **or has an open implementation PR even without the label**, **STOP the new `ship`**. Do not create another branch/worktree, restart a Developer, or silently take over. Tell the user which Issue/PR is already in progress and ask them to explicitly request `continue`/`resume` if they intend to work on that existing development. A second `ship` by the same actor also stops.
 3. Otherwise add GitHub Issue label **`status:in-progress`** before starting implementation, and confirm the update succeeded. If the repository label does not exist or the update is denied, arrange its creation/permission through the repository owner; **do not silently proceed unmarked**. Do not change requirement approval or Acceptance evidence while marking development status.
 4. An explicit `continue`/`resume` of existing work keeps the same Issue/PR development context and label; it is **not** a new `ship`. If ownership or the existing work cannot be identified, stop and report what needs resolution rather than starting duplicate work.
 
-This is a **lightweight coordination rule**, not a distributed lock. Do not introduce a Claim object, CAS protocol, Store schema, or new workflow just for this label. For work with no linked Issue, the normal worktree workflow applies.
+This is a **lightweight coordination rule**, not a distributed lock. Do not introduce a Claim object, CAS protocol, Store schema, or new workflow just for this label. **There is no issue-less worktree or PR fallback.**
 
 
 ## 2. Create an isolated worktree
@@ -152,6 +166,13 @@ Static test/tmux/protocol rules are owned by their checkers/Gates, not this Skil
 
 ## 8. Commit and PR
 
+**Mandatory publication preflight (also applies to draft, repair, direct-to-main, and API-created PRs):**
+
+1. Re-read the live Issue(s) verified before development. Check that each belongs to `BestNathan/nession`, matches the actual changes, and that this branch is the authorized new `ship` or explicit `continue/resume` of existing work.
+2. If the Issue cannot be read, was never created, does not own the scope, or conflicts with an existing implementation PR, **STOP before commit/push/PR creation**. Do not convert an issue-less branch into an implementation PR.
+3. Compose the PR body with an explicit `Refs #<issue_number>` / appropriate `Fixes #<issue_number>` for the relevant Issue(s). Missing linkage is a hard stop even if all tests pass. A PR title, label or commit message alone does not count.
+4. The same preflight applies when using GitHub MCP/API tools or an automated PR publisher, not only `gh pr create`. Do not mark Issue Acceptance passed or close an Issue as a side effect.
+
 Before commit:
 
 ```bash
@@ -165,6 +186,7 @@ Push the worktree branch and open the PR against the branch required by the curr
 
 PR evidence should state:
 
+- the verified Issue linkage (`Refs #<issue_number>` or appropriate `Fixes #<issue_number>`) in the PR body;
 - what changed;
 - which relevant Gates/tests ran;
 - UI/browser evidence when required;
@@ -200,6 +222,8 @@ When asked to handle multiple issues:
 
 Stop and resolve ownership before continuing when:
 
+- no verified, scope-matching GitHub Issue exists before work starts or publication is attempted;
+- the Issue link is missing from an implementation PR body, even for draft/direct-to-main/repair PRs;
 - the task requires editing root `main`;
 - two instruction/rule owners conflict;
 - a proposed bypass is the only way to make a Gate green;

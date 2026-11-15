@@ -323,6 +323,20 @@ describe('terminal clipboard protocol (#2598)', () => {
     expect(decodeSent(sent[sent.length - 1]).metadata).toBe('type=write:status=EPERM:id=r');
   });
 
+  it('refuses a write completed after the client loses authorization (#3507)', async () => {
+    const { protocol, effects, sent, setAuthorized } = harness();
+    const data = new TextEncoder().encode('late clipboard write');
+    const frames = writePackets('text/plain', data);
+    protocol.handleOsc5522(frames[0], LIVE);
+    protocol.handleOsc5522(frames[1], LIVE);
+    setAuthorized(false);
+    protocol.handleOsc5522(frames[2], LIVE);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(effects.writes).toHaveLength(0);
+    expect(decodeSent(sent[sent.length - 1]).metadata).toBe('type=write:status=EPERM');
+  });
+
   it('maps a refused clipboard effect to EPERM and states it truthfully', async () => {
     const { protocol, effects, sent } = harness();
     effects.failWriteClipboard = 'EPERM';

@@ -1,6 +1,6 @@
+use nession_runtime::frame::WsFrame;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
 use super::outbound::WsMessageSender;
@@ -69,7 +69,7 @@ impl ClientRegistry {
             return 0;
         };
 
-        let ws_msg = WsMessage::Text(msg);
+        let ws_msg = WsFrame::Text(msg);
         let mut sent = 0;
         for (client_id, sender) in session_clients {
             match sender.try_send_broadcast(ws_msg.clone()) {

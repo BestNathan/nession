@@ -11,9 +11,10 @@
         {
           "workflow": ".github/workflows/acceptance-case-ingest.yml",
           "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
-          "execution": "main-owned workflow_run",
+          "execution": "main-owned completed Cases/PR Smoke workflow_run plus bot/main source-attested comment Case repository_dispatch",
           "depends_on": [
-            ".github/workflows/acceptance-cases.yml"
+            ".github/workflows/acceptance-cases.yml",
+            ".github/workflows/acceptance-case-smoke.yml"
           ],
           "permissions": [
             "contents: write",

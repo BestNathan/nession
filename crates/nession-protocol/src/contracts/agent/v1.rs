@@ -167,12 +167,26 @@ pub struct ProbedAddress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMetadata {
     pub tmux_version: String,
+    /// Human-readable OS and CPU, for display only.
     pub os_version: String,
     pub nession_version: String,
     /// Docker image tag (short sha) baked in at build time.
     /// "dev" when running from `cargo run`, "unknown" when not set.
     #[serde(default = "default_image_tag")]
     pub image_tag: String,
+    /// OCI CPU architecture (`amd64`, `arm64`, ...) this Agent executes on.
+    ///
+    /// Empty means the Agent registered before this field existed; the Server
+    /// then cannot select a platform-specific Manifest for it and keeps the
+    /// legacy digest-addressed image path.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub architecture: String,
+    /// OCI operating system (`linux`, `darwin`, ...) this Agent executes on.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub os: String,
+    /// OCI CPU variant (`v8`, ...) when the Agent knows one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
 }
 
 /// The agent family's refusal, `{ status, message }`.

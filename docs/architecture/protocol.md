@@ -1139,6 +1139,37 @@ When principals do exist, this is the seam: step 1 becomes "who is this", and th
 relation belongs between steps 3 and 4, where the target and the unit are both
 already resolved.
 
+## The WebSocket frame vocabulary
+
+`#3439` made Axum the HTTP/WebSocket upgrade owner; `#3548` separates the frame
+vocabulary from both transports. `nession_runtime::frame::WsFrame` —
+`Text`/`Binary`/`Ping`/`Pong`/`Close` — is what the Server's and Agent's inbound
+dispatch, handler actions, registries/brokers and bounded outbound queues
+(`nession_runtime::outbound::QueuedFrame`) consume and produce.
+
+Conversion belongs to an adapter edge, never to a second vocabulary:
+
+- `nession_runtime::ingress::AxumWebSocket` converts Axum frames at the
+  connection the listener hands to the runtime;
+- the Server's Relay and the Agent's central Server connector dial with
+  `tokio-tungstenite` and convert through `WsFrame::from_tungstenite` /
+  `WsFrame::into_tungstenite` (the Relay wraps its Agent halves in
+  `AgentRead`/`AgentWrite`), so forwarding, classification and queue policy stay
+  transport-neutral. Those private client adapters are allowed to keep the
+  dependency;
+- `WsFrame` is a **frame** type, not a Protocol Unit. `ProtocolMessage`, the
+  control contracts, routing, authentication, close policy and the bounded
+  queues keep their existing owners, and Axum remains the only WebSocket
+  upgrade owner.
+
+The vocabulary preserves the semantics the product depends on: a Ping is
+answered with the same payload, Binary and Pong are ignored rather than fatal,
+Close is a close, `to_text` classifies exactly the frames the previous
+transport's classifier did, and the outbound byte charge is unchanged (a close
+frame charges its reason, as before). `#3548`'s native Cases assert those
+behaviors through real plain and TLS sockets and through the P2P/Relay stall,
+order and reconnect paths.
+
 ## Endpoint-owned tokens
 
 The Agent's peer-to-peer socket is a **second door** into the Agent process, and
@@ -1256,6 +1287,66 @@ socket when the budget is exhausted. The slot is released when the HTTP upgrade
 is answered; the protocol-level authentication deadline then bounds the
 unauthenticated `client.auth` window. This remains the `#2653` admission
 boundary, distinct from the `#961` per-connection execution bound.
+
+## Server connection lifecycle
+
+A physical Server WebSocket has exactly one teardown owner: `handle_ws_stream`
+in `crates/nession-server/src/server/websocket.rs`. The read loop's outcome is
+captured, and the teardown runs **after** it for every way the loop ends — a
+normal close, a transport read error, an undecodable frame, a handler failure
+and a failed Relay. An error path that returned through `?` would skip the rest
+of this sequence; `#3547` made the sequencing explicit and its native runtime
+Cases assert it.
+
+The teardown settles, in order:
+
+1. **In-flight work** — both execution lanes are shut down within the terminal
+   stall grace. An abandoned reply task would otherwise hold a sender and keep
+   the writer alive.
+2. **The Agent's control channel** — released through the
+   **generation-fenced** broker release, and the cached Agent Token is cleared
+   only when this connection was actually the owner. A superseded connection
+   releases nothing, so a reconnect's newer generation — and the token its
+   registration vouched for — survives the old socket's exit (`#960`,
+   `#3440`).
+3. **The client attachment** — a relay-mode client is removed from the client
+   registry.
+4. **The writer** — the handler's sender clone is dropped, the writer task is
+   awaited within the terminal stall grace, and aborted if it is still parked.
+   The task is held by a Drop-abort guard, so a cancelled or panicking
+   connection future cannot leave the writer — or the socket's write half —
+   alive. The close reason is a bounded, credential-free classification
+   (`peer-closed`, `malformed-frame`, `relay-error`, …) logged for correlation
+   with the client's own close event (`#3358`).
+
+Session lifetime is not connection lifetime. A browser WebSocket ending —
+normally or through any of the error exits above — retires that physical
+attachment only; it does not kill the tmux Session the Agent owns.
+
+### Upgraded sockets have their own admission bounds
+
+An HTTP admission slot ends when the request is answered or the upgrade is
+accepted; that is what keeps a long-lived WebSocket or MCP stream from being
+cut by the pre-authentication bound. The bounds after that point are separate
+owners (`#3439` W1/W2/W3):
+
+- **Every HTTP request head** has a per-request deadline (10 s), including the
+  idle keep-alive wait for a next request and a partial second request. Hyper
+  arms it when it begins reading a head and disarms it when the head is
+  complete, so a response body, a long-running tool call and a streaming
+  MCP/SSE body are **not** bounded by it (`ingress::serve`).
+- **An upgraded socket** has one **absolute** first-authentication deadline:
+  `server.auth` for a browser or an authenticated Agent registration on the
+  Server, `client.auth` on the Agent. Pings, malformed frames, refused
+  authentication and business frames do not reset it.
+- **Upgraded-but-unauthenticated sockets** have a concurrency budget separate
+  from the pre-upgrade handshake budget. An upgrade beyond it receives `503`
+  before a connection task, queue or writer is created.
+- **The Agent listener owns its upgraded tasks** in one supervisor. Listener
+  shutdown stops accepting, signals every upgraded connection, settles its
+  lanes, peer detach and writer within the shutdown grace, and only then closes
+  the terminal backends. `ServerHandle::wait_closed` is the completion barrier;
+  a tmux Session is not killed by transport shutdown.
 
 ## Related
 ## Related

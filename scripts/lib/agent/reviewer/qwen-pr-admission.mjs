@@ -26,6 +26,15 @@ const plain=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const exact=(x,keys)=>plain(x)&&Object.keys(x).length===keys.length&&
   Object.keys(x).every(k=>keys.includes(k));
 function deny(message){throw Error('Qwen Reviewer admission: '+message);}
+// Both trusted Publisher triggers already exist in the main-owned Publisher
+// workflow: workflow_run from original Ingest and bot workflow_dispatch after
+// Store Ingest's GITHUB_TOKEN suppressed an automatic workflow_run.
+// Never accept an arbitrary human/manual Publisher workflow_dispatch.
+export function authenticatedQwenPublisherTrigger(run){
+  return run?.event==='workflow_run'||
+    (run?.event==='workflow_dispatch'&&
+      run.actor?.login==='github-actions[bot]');
+}
 
 export function assertQwenReviewerAdmission(a,identity={agent_id:'review-qwen-01'}){
   if(!exact(a,ADMISSION_FIELDS)||a.schema_version!==1||
@@ -115,7 +124,7 @@ export function admitQwenPublishedReview({
       publisherRun.run_attempt!==1||
       publisherRun.name!=='Store / Qwen Publisher'||
       publisherRun.path!=='.github/workflows/store-qwen-publisher.yml'||
-      publisherRun.event!=='workflow_run'||publisherRun.head_branch!=='main'||
+      !authenticatedQwenPublisherTrigger(publisherRun)||publisherRun.head_branch!=='main'||
       publisherRun.head_sha!==record.target_main_sha||
       publisherRun.status!=='completed'||publisherRun.conclusion!=='success'||
       publisherRun.repository?.full_name!==REPO||
@@ -169,6 +178,16 @@ export function admitQwenRepairPublishedReview({
     a.task?.type==='dispatch'&&a.task.role==='reviewer');
   const publication=state.transitions.filter(t=>t.kind==='publisher'&&
     t.outcome==='published'&&t.target_sha===state.target_sha);
+  // An exact PR-B recovery is written to Store by a second successful
+  // Publisher Run. Its prior PR writer is immutable lineage, not a falsely
+  // successful source; the Store transition binds both original and current.
+  const sourcePublisher=publication.length===1?publication[0]:null;
+  const effectivePublisherRunId=sourcePublisher?.run_id;
+  const reconciled=sourcePublisher?.write_ahead_publisher_run_id!==undefined;
+  const validPublisherLineage=reconciled
+    ?sourcePublisher.write_ahead_publisher_run_id===record.publisher_run_id&&
+      effectivePublisherRunId>record.publisher_run_id
+    :effectivePublisherRunId===record.publisher_run_id;
   if(state.issue!==record.issue||state.phase!=='review'||
       state.target_sha==null||state.target_sha===record.source_sha||
       state.target_sha!==pr?.head?.sha||
@@ -179,14 +198,13 @@ export function admitQwenRepairPublishedReview({
       reviewer[0].task.agent_id!==reviewerAgentId||
       reviewer[0].task.sha!==state.target_sha||
       reviewer[0].task.task!=='review'||publication.length!==1||
-      publication[0].run_id!==record.publisher_run_id||
-      publication[0].attempt!==1)
+      !validPublisherLineage||publication[0].attempt!==1)
     deny('no exact committed Qwen Repair-to-Reviewer Outbox handoff');
-  if(publisherRun?.id!==record.publisher_run_id||
+  if(publisherRun?.id!==effectivePublisherRunId||
       publisherRun.run_attempt!==1||
       publisherRun.name!=='Store / Qwen Publisher'||
       publisherRun.path!=='.github/workflows/store-qwen-publisher.yml'||
-      publisherRun.event!=='workflow_run'||publisherRun.head_branch!=='main'||
+      !authenticatedQwenPublisherTrigger(publisherRun)||publisherRun.head_branch!=='main'||
       !SHA.test(publisherRun.head_sha??'')||
       publisherRun.status!=='completed'||publisherRun.conclusion!=='success'||
       publisherRun.repository?.full_name!==REPO||
@@ -215,7 +233,7 @@ export function admitQwenRepairPublishedReview({
     role:'reviewer',agent_id:reviewerAgentId,task:'review',
     review_action_id:actionId,pr_number:pr.number,target_sha:state.target_sha,
     base_sha_at_publication:record.original_main_sha,
-    publisher_run_id:record.publisher_run_id,publisher_attempt:1,
+    publisher_run_id:effectivePublisherRunId,publisher_attempt:1,
     publisher_intent_sha256:hash(record),publisher_branch:branch,
     original_worker_run_id:record.worker_run_id,
     native_checkpoint_commit_sha:record.checkpoint_commit_sha,

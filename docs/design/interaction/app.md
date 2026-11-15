@@ -287,6 +287,40 @@ contact after that, and the answer is: much less until release.
 
 The exact header/button implementation may evolve. The invariant is the spatial relationship and the existence of a visible alternative to gestures.
 
+### Soft keyboard and visible viewport (#3523)
+
+A soft keyboard changes the **visible** region, not the Terminal's layout height
+(composition §15 owns the four-level contract). In the App:
+
+- Focusing the Capsule composer or the Terminal's mobile IME reveals that
+  control just above the visible bottom with a real, bounded outer scroll. The
+  Session header stays put, exactly one App header remains, and the work surface
+  is **not** shrunk or re-fitted: xterm rows, PTY/tmux size, scrollback and the
+  mounted Terminal are unchanged across keyboard open/adjust/close.
+- The reveal scrolls only as far as the focused control plus a touch-safe
+  margin requires. Composer height changes remain the surface's own measured
+  occlusion; the keyboard is never counted as composer or upper-panel clearance.
+- While an avoidance range exists, a vertical drag that begins on the Terminal
+  moves the **outer page**, not xterm history, and the same delta is not
+  dispatched to both owners. At the range's end the next contact returns to the
+  Terminal's existing mode-aware history/TUI wheel routing. Horizontal edge
+  navigation, terminal selection, the long-press direction pad and multitouch
+  keep their own gestures; a tap is never turned into a scroll.
+- Leaving the Terminal layer for Sessions or Workspace blurs the covered
+  layer's focused control, so a hidden surface cannot keep the keyboard open.
+  Opening a dialog moves focus outside the App frame; the dialog owns its own
+  focus and the Terminal layer does not invent an avoidance scroll for it.
+- The header stays visible while the work surface scrolls. This is the
+  implementation's explicit choice from the Requirement's proposed ownership
+  tree; the interactive prototype must validate the alternative before final UX
+  signoff. The narrowest visible range (landscape + keyboard) still leaves a
+  bounded, reversible scroll rather than a clipped dead end.
+
+Chromium + Playwright proves the app-owned geometry, focus and scroll behavior
+with a deterministic controlled `visualViewport`/safe-area fixture. It does not
+claim native iOS/Android IME animation, which remains outside automated
+Acceptance.
+
 ## Workspace inside App
 
 Workspace is contextual depth around the logical work, not a tool lobby.

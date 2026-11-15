@@ -50,11 +50,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::frame::WsFrame;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
-/// What the WebSocket frame header costs beyond the payload `Message::len`
+/// What the WebSocket frame header costs beyond the payload `WsFrame::len`
 /// reports. Charged so a queue full of small frames is priced honestly.
 pub const FRAME_OVERHEAD: usize = 14;
 
@@ -108,7 +108,7 @@ pub struct Limits {
 /// writer drops this struct, i.e. after the frame has been handed to the socket,
 /// so `Limits::bytes` is the most that can be queued *and* not yet written.
 pub struct QueuedFrame {
-    pub message: WsMessage,
+    pub message: WsFrame,
     /// This frame's share of the byte budget. Held until the writer is done with
     /// it — dropping it early would let producers run ahead of the socket the
     /// budget exists to bound.
@@ -198,7 +198,7 @@ impl Outbound {
     /// no path through this method that loses the frame, and the cost of the
     /// guarantee is that a peer which never drains parks its producer instead of
     /// growing the heap.
-    pub async fn send_reply(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub async fn send_reply(&self, msg: WsFrame) -> Result<(), OutboundError> {
         let len = msg.len();
         let (budget, waited) = self.acquire(len).await.ok_or(OutboundError::Closed)?;
         if waited {
@@ -225,7 +225,7 @@ impl Outbound {
     /// So this waits for room, and gives up after the stall grace. `Stalled` is
     /// the caller's cue to end the connection — see this module's docs for why
     /// that is the only honest answer left.
-    pub async fn send_terminal(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub async fn send_terminal(&self, msg: WsFrame) -> Result<(), OutboundError> {
         // The grace covers *both* bounds, which is why the whole enqueue is
         // inside the timeout rather than just the byte reservation: a terminal
         // frame can be waiting on the frame count rather than on the budget, and
@@ -259,7 +259,7 @@ impl Outbound {
     /// happened — which is why this returns the verdict and stops there. See
     /// `nession-server`'s `server::outbound` and `nession-agent`'s
     /// `server::outbound` for the two answers built on it.
-    pub fn try_send(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    pub fn try_send(&self, msg: WsFrame) -> Result<(), OutboundError> {
         let Some(budget) = Arc::clone(&self.budget)
             .try_acquire_many_owned(permits(charge(msg.len(), self.limits.bytes)))
             .ok()
@@ -308,7 +308,7 @@ impl Outbound {
     }
 
     /// Reserve this frame's bytes and hand it to the queue, waiting for both.
-    async fn enqueue_reserved(&self, msg: WsMessage) -> Result<(), OutboundError> {
+    async fn enqueue_reserved(&self, msg: WsFrame) -> Result<(), OutboundError> {
         let len = msg.len();
         let (budget, _) = self.acquire(len).await.ok_or(OutboundError::Closed)?;
         self.enqueue(msg, budget).await
@@ -318,7 +318,7 @@ impl Outbound {
     /// for a free slot if the count bound is what is full.
     async fn enqueue(
         &self,
-        msg: WsMessage,
+        msg: WsFrame,
         budget: OwnedSemaphorePermit,
     ) -> Result<(), OutboundError> {
         self.tx
@@ -404,7 +404,7 @@ mod tests {
         // A frame sized so each one takes an equal share of the budget: filling
         // with these reaches both bounds at once.
         let share = LIMITS.bytes / LIMITS.frames - FRAME_OVERHEAD;
-        let frame = WsMessage::Text("x".repeat(share));
+        let frame = WsFrame::Text("x".repeat(share));
         let mut queued = 0;
         while outbound.try_send(frame.clone()).is_ok() {
             queued += 1;
@@ -416,7 +416,7 @@ mod tests {
         // The reply lane parks instead of failing...
         let waiter = tokio::spawn({
             let outbound = outbound.clone();
-            async move { outbound.send_reply(WsMessage::Text("held".into())).await }
+            async move { outbound.send_reply(WsFrame::Text("held".into())).await }
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -431,7 +431,7 @@ mod tests {
             assert_eq!(written.message, frame, "frame {n} was not the one queued");
         }
         let last = rx.recv().await.expect("the waiting reply was never queued");
-        assert_eq!(last.message, WsMessage::Text("held".into()));
+        assert_eq!(last.message, WsFrame::Text("held".into()));
         assert_eq!(waiter.await.expect("reply task panicked"), Ok(()));
     }
 
@@ -440,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn a_terminal_frame_that_never_gets_room_stalls() {
         let (outbound, _rx) = outbound();
-        let frame = WsMessage::Text("t".repeat(LIMITS.bytes));
+        let frame = WsFrame::Text("t".repeat(LIMITS.bytes));
         assert_eq!(outbound.send_terminal(frame.clone()).await, Ok(()));
 
         let started = std::time::Instant::now();
@@ -463,15 +463,15 @@ mod tests {
         drop(rx);
 
         assert_eq!(
-            outbound.send_reply(WsMessage::Text("a".into())).await,
+            outbound.send_reply(WsFrame::Text("a".into())).await,
             Err(OutboundError::Closed)
         );
         assert_eq!(
-            outbound.send_terminal(WsMessage::Text("b".into())).await,
+            outbound.send_terminal(WsFrame::Text("b".into())).await,
             Err(OutboundError::Closed)
         );
         assert_eq!(
-            outbound.try_send(WsMessage::Text("c".into())),
+            outbound.try_send(WsFrame::Text("c".into())),
             Err(OutboundError::Closed)
         );
     }
@@ -484,13 +484,13 @@ mod tests {
         assert_eq!(charge(0, LIMITS.bytes), FRAME_OVERHEAD);
 
         let (outbound, mut rx) = outbound();
-        let huge = WsMessage::Text("h".repeat(LIMITS.bytes * 2));
+        let huge = WsFrame::Text("h".repeat(LIMITS.bytes * 2));
         assert_eq!(outbound.send_reply(huge.clone()).await, Ok(()));
         assert_eq!(outbound.snapshot().queued_bytes, LIMITS.bytes);
 
         let waiter = tokio::spawn({
             let outbound = outbound.clone();
-            async move { outbound.send_reply(WsMessage::Text("after".into())).await }
+            async move { outbound.send_reply(WsFrame::Text("after".into())).await }
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -511,10 +511,7 @@ mod tests {
     #[tokio::test]
     async fn the_budget_is_released_when_the_frame_is_written() {
         let (outbound, mut rx) = outbound();
-        assert_eq!(
-            outbound.send_reply(WsMessage::Text("q".into())).await,
-            Ok(())
-        );
+        assert_eq!(outbound.send_reply(WsFrame::Text("q".into())).await, Ok(()));
         assert_eq!(outbound.snapshot().queued_bytes, charge(1, LIMITS.bytes));
 
         let frame = rx.recv().await.expect("the frame was queued");
@@ -534,7 +531,7 @@ mod tests {
     #[tokio::test]
     async fn the_frame_bound_binds_on_its_own() {
         let (outbound, _rx) = outbound();
-        let tiny = WsMessage::Text(".".into());
+        let tiny = WsFrame::Text(".".into());
         for _ in 0..LIMITS.frames {
             assert_eq!(outbound.try_send(tiny.clone()), Ok(()));
         }

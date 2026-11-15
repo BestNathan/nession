@@ -205,6 +205,9 @@ async fn register_agent(
             os_version: "Linux".to_string(),
             nession_version: "0.1.0".to_string(),
             image_tag: "test".to_string(),
+            architecture: String::new(),
+            os: String::new(),
+            variant: None,
         },
         Arc::new(SessionManager::new()),
         "/tmp".to_string(),
@@ -756,13 +759,13 @@ async fn sc02_forced_relay_does_not_attempt_p2p() {
 
     let server = TestServer::start().await;
     let agent = TestAgent::start(agent_id).await;
-    // Nothing is refused: any direct CLI dial would be visible as a count above
-    // the Server's single relay dial.
+    // #3584: one valid Relay endpoint makes this a route-policy assertion.
+    // With two candidates, the Server may legitimately retry a second relay
+    // URL after a failed first dial, which must not count as CLI P2P traffic.
+    // Multi-candidate fallback has separate tests above; with one endpoint,
+    // any extra WebSocket upgrade here is an unexpected direct client dial.
     let proxy = refuse_direct_dials(agent.addr, 0).await;
-    let addresses = vec![
-        agent_address(&format!("ws://{}/ws-a", proxy.addr), 1),
-        agent_address(&format!("ws://{}/ws-b", proxy.addr), 2),
-    ];
+    let addresses = vec![agent_address(&format!("ws://{}/ws", proxy.addr), 1)];
     let handle = register_agent(&server, &agent, agent_id, addresses).await;
     let sync = start_sync(&handle);
 
@@ -777,7 +780,7 @@ async fn sc02_forced_relay_does_not_attempt_p2p() {
     assert_eq!(
         proxy.hits.load(Ordering::SeqCst),
         1,
-        "forced relay must open exactly one Server relay dial and no direct P2P dial"
+        "single relay endpoint: one Server dial and no CLI P2P dial are permitted"
     );
 
     let marker = format!("NESSON_2811_FORCED_RELAY_{}", unique_session_name("marker"));

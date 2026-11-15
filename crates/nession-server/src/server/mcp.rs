@@ -21,8 +21,8 @@ use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::{McpService, ServiceConfig};
 use nession_protocol::Message;
+use nession_runtime::frame::WsFrame;
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::registry::{AgentRegistry, AgentStatus};
 use crate::server::execution::{
@@ -105,7 +105,7 @@ async fn dispatch_with(
         .await
         .map_err(|error| ToolError::backend(error.to_string()))?;
     match action {
-        HandlerAction::Reply(Some(WsMessage::Text(text))) => {
+        HandlerAction::Reply(Some(WsFrame::Text(text))) => {
             let envelope: Message<Value> = serde_json::from_str(&text)
                 .map_err(|error| ToolError::backend(error.to_string()))?;
             Ok(envelope.payload)

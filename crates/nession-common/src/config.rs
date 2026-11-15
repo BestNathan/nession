@@ -157,6 +157,24 @@ pub struct ServerConfig {
     /// `nession_server::server::execution`.
     #[serde(default = "default_query_concurrency")]
     pub query_concurrency_per_connection: usize,
+    /// Maximum upgraded Server WebSockets that have not authenticated yet
+    /// (#3439 W2).
+    ///
+    /// Separate from the listener's pre-upgrade handshake budget: the
+    /// pre-authentication admission slot is returned when the upgrade is
+    /// answered, so upgraded-but-unauthenticated sockets need their own bound.
+    /// An upgrade beyond it receives `503` before a connection task exists.
+    #[serde(default = "default_max_pending_ws_auth")]
+    pub max_pending_ws_auth: usize,
+    /// Absolute deadline, in seconds, for an upgraded Server WebSocket's first
+    /// successful authentication (`server.auth` for a client, or an
+    /// authenticated Agent registration) (#3439 W2).
+    ///
+    /// It starts at the upgrade and is not reset by Pings, malformed frames,
+    /// refused authentication or business frames. Once the connection is
+    /// authenticated, no such deadline applies.
+    #[serde(default = "default_ws_auth_timeout")]
+    pub ws_auth_timeout_secs: u64,
     /// The fixed column count a new Session is created at (#2487).
     ///
     /// The Server's runtime value comes from `NESSION_TERMINAL_COLS`, written by
@@ -381,6 +399,20 @@ pub const DEFAULT_TERMINAL_STALL_GRACE_SECS: u64 = 15;
 /// the machine.
 pub const DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION: usize = 8;
 
+/// How many upgraded Server WebSockets may await authentication at once
+/// (#3439 W2).
+///
+/// The same policy reasoning as the pre-upgrade budget: an upgraded socket
+/// costs a task, a bounded outbound queue and a writer, and a peer that never
+/// authenticates must not grow that without bound. Sixty-four is far beyond a
+/// browser tab burst and small enough that the wait is bounded by the absolute
+/// auth deadline.
+pub const DEFAULT_MAX_PENDING_WS_AUTH: usize = 64;
+
+/// The absolute deadline, in seconds, for an upgraded Server WebSocket's first
+/// authentication (#3439 W2). Ten matches the Agent's `P2P_AUTH_FRAME_TIMEOUT`.
+pub const DEFAULT_WS_AUTH_TIMEOUT_SECS: u64 = 10;
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -401,6 +433,8 @@ impl Default for ServerConfig {
             image_build_retention_secs: default_image_build_retention_secs(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
+            max_pending_ws_auth: default_max_pending_ws_auth(),
+            ws_auth_timeout_secs: default_ws_auth_timeout(),
             terminal_cols: default_terminal_cols(),
             terminal_web_font_size: default_terminal_web_font_size(),
             logging: LoggingConfig::default(),
@@ -423,6 +457,14 @@ fn default_terminal_stall_grace() -> u64 {
 
 fn default_query_concurrency() -> usize {
     DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
+}
+
+fn default_max_pending_ws_auth() -> usize {
+    DEFAULT_MAX_PENDING_WS_AUTH
+}
+
+fn default_ws_auth_timeout() -> u64 {
+    DEFAULT_WS_AUTH_TIMEOUT_SECS
 }
 
 fn default_heartbeat_interval() -> u64 {

@@ -2,7 +2,24 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openCapsuleCapability } from '../../helpers/capsule';
 import { openFixtureFile } from '../../helpers/fixtureVisual';
-import { shellAnchor, swipe } from '../../../e2e/acceptance/shared/swipe-2724-cases.cjs';
+import {
+  shellAnchor,
+  swipe,
+  startTouch,
+  moveTouch,
+  endTouch,
+} from '../../../e2e/acceptance/shared/swipe-2724-cases.cjs';
+import {
+  avoidanceState,
+  blurActive,
+  focusCapsuleComposer,
+  installVisualViewportFixture,
+  markTerminal,
+  resetVisualViewport,
+  setKeyboardInset,
+  terminalFacts,
+  viewportEnvironment,
+} from '../../../e2e/acceptance/shared/keyboard-avoidance-browser.cjs';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes
@@ -547,4 +564,166 @@ test('an expanded upper surface publishes scroll clearance, not fit occlusion (#
   await page.getByTestId('capsule-capability-dismiss').click();
   await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
   await expect.poll(async () => (await read())?.panel).toBe('0px');
+});
+
+/**
+ * The visible bottom in page coordinates, from the App Environment's own
+ * snapshot. Used to assert a focused control really landed above the simulated
+ * keyboard instead of trusting the scrollport's arithmetic.
+ */
+async function visibleBottomInPage(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const element = document.querySelector('[data-app-viewport-environment]');
+    if (!(element instanceof HTMLElement)) return 0;
+    const top = Number(element.dataset.appVisibleTop ?? 0);
+    const height = Number(element.dataset.appVisibleHeight ?? 0);
+    return element.getBoundingClientRect().top + top + height;
+  });
+}
+
+test.describe('App keyboard avoidance (#3523)', () => {
+  test('focus reveals the Capsule with real outer scrolling and unchanged terminal geometry', async ({ page }) => {
+    await installVisualViewportFixture(page);
+    await page.goto('/#/fixture/app');
+    await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+    await page.locator('.xterm').waitFor();
+    await expect.poll(async () => (await terminalFacts(page))?.rows ?? 0).toBeGreaterThan(0);
+    await markTerminal(page);
+
+    const before = await terminalFacts(page);
+    const headerBefore = await page.getByTestId('session-header-line').boundingBox();
+    expect((await viewportEnvironment(page))?.layoutHeight).toBe(844);
+    expect((await viewportEnvironment(page))?.keyboard).toBe('closed');
+
+    // A visual-viewport shrink with nothing editable focused is a toolbar-like
+    // change: visible geometry moves, but no avoidance range and no re-fit.
+    await setKeyboardInset(page, 300);
+    await expect.poll(async () => (await viewportEnvironment(page))?.visibleHeight).toBe(544);
+    await expect.poll(async () => (await viewportEnvironment(page))?.keyboard).toBe('closed');
+    expect((await avoidanceState(page))?.scrollable).toBe(false);
+    expect((await terminalFacts(page))?.rows).toBe(before?.rows);
+
+    await focusCapsuleComposer(page);
+    await expect.poll(async () => (await viewportEnvironment(page))?.keyboard).toBe('open');
+    await expect.poll(async () => (await avoidanceState(page))?.scrollable).toBe(true);
+    await expect.poll(async () => (await avoidanceState(page))?.scrollTop ?? 0).toBeGreaterThan(0);
+
+    const revealed = await avoidanceState(page);
+    const visibleBottom = await visibleBottomInPage(page);
+    expect(revealed?.activeTestId).toBe('capsule-ghost-input');
+    expect(revealed?.targetBottom ?? Infinity).toBeLessThanOrEqual(visibleBottom - 8);
+    expect(revealed?.targetTop ?? 0).toBeGreaterThanOrEqual(0);
+    expect((revealed?.extent ?? 0)).toBeGreaterThan(0);
+    expect(revealed?.overflowY).toBe('auto');
+
+    // The work surface is not resized: same well/host box, same xterm
+    // instance, same rows and the same number of real xterm resizes.
+    const after = await terminalFacts(page);
+    expect(after?.rows).toBe(before?.rows);
+    expect(after?.resizes).toBe(before?.resizes);
+    expect(after?.hostHeight).toBe(before?.hostHeight);
+    expect(after?.hostWidth).toBe(before?.hostWidth);
+    expect(after?.wellHeight).toBe(before?.wellHeight);
+    expect(after?.xtermCount).toBe(1);
+    expect(after?.xtermIdentity).toBe('original');
+
+    // The one App header stays visible and does not move with the work surface.
+    expect(await page.getByTestId('session-header-line').isVisible()).toBe(true);
+    expect(await page.getByTestId('session-header-line').boundingBox()).toEqual(headerBefore);
+
+    await blurActive(page);
+    await expect.poll(async () => (await avoidanceState(page))?.scrollable).toBe(false);
+    await expect.poll(async () => (await avoidanceState(page))?.scrollTop).toBe(0);
+    await expect.poll(async () => (await viewportEnvironment(page))?.keyboard).toBe('closed');
+    const closed = await terminalFacts(page);
+    expect(closed?.rows).toBe(before?.rows);
+    expect(closed?.resizes).toBe(before?.resizes);
+    await resetVisualViewport(page);
+  });
+
+  test('a keyboard-occluded vertical drag moves the outer page, not xterm history', async ({ page }) => {
+    await installVisualViewportFixture(page);
+    await page.goto('/#/fixture/app');
+    await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+    await page.locator('.xterm').waitFor();
+    await expect.poll(async () => (await terminalFacts(page))?.rows ?? 0).toBeGreaterThan(0);
+
+    await setKeyboardInset(page, 300);
+    await focusCapsuleComposer(page);
+    await expect.poll(async () => (await avoidanceState(page))?.scrollable).toBe(true);
+    const scrollTopBefore = (await avoidanceState(page))?.scrollTop ?? 0;
+    const xtermBefore = (await terminalFacts(page))?.xtermScrollTop;
+
+    const box = await page.getByTestId('fixture-terminal').boundingBox();
+    if (!box) throw new Error('the terminal viewport must be laid out');
+    // After the reveal the well has been scrolled up, so its own box can start
+    // above the visible region. Aim at a point that is actually on screen and
+    // inside the Terminal viewport, not at the capsule or the header.
+    const visibleBottom = await visibleBottomInPage(page);
+    const point = {
+      x: Math.round(box.x + box.width / 2),
+      y: Math.round(Math.max(80, Math.min(box.y + box.height / 2, visibleBottom - 48))),
+    };
+
+    // Finger down: the visible page range is spent by the outer owner.
+    await startTouch(page, point);
+    await moveTouch(page, { x: point.x, y: point.y + 60 });
+    await moveTouch(page, { x: point.x, y: point.y + 120 });
+    await endTouch(page, { x: point.x, y: point.y + 120 });
+    await expect.poll(async () => (await avoidanceState(page))?.scrollTop ?? -1)
+      .toBeLessThan(scrollTopBefore);
+    expect((await terminalFacts(page))?.xtermScrollTop, 'xterm history did not also move')
+      .toBe(xtermBefore);
+    expect((await page.getByTestId('app-layer-root').getAttribute('data-layer'))).toBe('terminal');
+
+    // Finger up at the outer range's end: no outer range exists, so the next
+    // contact belongs to the Terminal for its whole duration.
+    await page.evaluate(() => {
+      const scrollport = document.querySelector('[data-keyboard-avoidance-scrollport]');
+      if (scrollport instanceof HTMLElement) {
+        scrollport.scrollTop = scrollport.scrollHeight - scrollport.clientHeight;
+      }
+    });
+    const atEnd = (await avoidanceState(page))?.scrollTop ?? 0;
+    const xtermAtEnd = (await terminalFacts(page))?.xtermScrollTop;
+    const start = { x: point.x, y: Math.round(Math.max(80, visibleBottom - 160)) };
+    await startTouch(page, start);
+    await moveTouch(page, { x: start.x, y: start.y - 60 });
+    await moveTouch(page, { x: start.x, y: start.y - 120 });
+    await endTouch(page, { x: start.x, y: start.y - 120 });
+    expect((await avoidanceState(page))?.scrollTop, 'exhausted outer range is not claimed')
+      .toBe(atEnd);
+    expect((await terminalFacts(page))?.xtermScrollTop, 'the terminal keeps that gesture')
+      .toBe(xtermAtEnd);
+    await resetVisualViewport(page);
+  });
+
+  test('the environment maps landscape + safe area and keeps the composer reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 844, height: 390 });
+    await installVisualViewportFixture(page);
+    await page.goto('/#/fixture/app');
+    await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+    await page.locator('.xterm').waitFor();
+    await page.evaluate(() => {
+      const element = document.querySelector('[data-app-viewport-environment]');
+      if (!(element instanceof HTMLElement)) return;
+      element.style.setProperty('--nession-test-safe-area-left', '44px');
+      element.style.setProperty('--nession-test-safe-area-bottom', '21px');
+    });
+    await resetVisualViewport(page);
+
+    await expect.poll(async () => (await viewportEnvironment(page))?.safeAreaLeft).toBe(44);
+    await expect.poll(async () => (await viewportEnvironment(page))?.safeAreaBottom).toBe(21);
+    expect((await viewportEnvironment(page))?.layoutWidth).toBe(844);
+
+    await setKeyboardInset(page, 210);
+    await focusCapsuleComposer(page);
+    await expect.poll(async () => (await avoidanceState(page))?.scrollable).toBe(true);
+    const revealed = await avoidanceState(page);
+    const visibleBottom = await visibleBottomInPage(page);
+    expect(revealed?.targetBottom ?? Infinity).toBeLessThanOrEqual(visibleBottom - 8);
+    expect(revealed?.scrollTop ?? 0).toBeGreaterThan(0);
+    expect((await viewportEnvironment(page))?.visibleHeight).toBe(180);
+    await resetVisualViewport(page);
+  });
 });

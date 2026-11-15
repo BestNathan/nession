@@ -332,6 +332,17 @@ export async function authenticatedTicketIssuer(run,mainSha,reader,{role,issue}=
   if(run.name===old.get(run.path)&&
      ['workflow_dispatch','issue_comment'].includes(run.event)&&
      run.actor?.login==='BestNathan')return true;
+  // #3550: a bot-owned Publisher wake goes through the same exact trusted
+  // main Controller, with its own independently authenticated Publisher Run,
+  // successful publish Job, and immutable Store Reviewer Outbox preflight.
+  // Its HMAC ticket remains bound to one issue/action/SHA and issuer Run.
+  // Do not allow bot Controller as Developer, or any other workflow/actor.
+  if(role==='reviewer'&&positive(issue)&&
+     run.path==='.github/workflows/agent-controller-dispatch.yml'&&
+     run.name==='Agent / Controller Dispatch'&&
+     run.event==='workflow_dispatch'&&
+     run.actor?.login==='github-actions[bot]'&&run.run_attempt===1)
+    return true;
   if(role!=='developer'||!positive(issue)||
      run.path!=='.github/workflows/store-agent-controller-ingest.yml'||
      run.event!=='workflow_dispatch'||run.actor?.login!=='github-actions[bot]'||

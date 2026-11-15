@@ -40,7 +40,7 @@ export type GithubHeadRefV1 = {
  */
 owner: string, repo: string, ref: string, sha: string, };
 export type GithubBaseRefV1 = { ref: string, sha: string, };
-export type BranchRelationV1 = "matched" | "none" | "ambiguous";
+export type BranchRelationV1 = "matched" | "none" | "ambiguous" | "unknown";
 export type PullRequestStateFilterV1 = "open" | "closed" | "all";
 export type GithubUserV1 = { login: string, };
 export type GithubRepositoryRefV1 = { host: string, owner: string, repo: string, remote_name: string, 

@@ -5,6 +5,10 @@ import {
   MobileImeInput,
   type MobileImeTerminalPort,
 } from '@/platform/terminal-runtime/input/MobileImeInput';
+import {
+  KEYBOARD_AVOIDANCE_TARGET_ATTRIBUTE,
+  KEYBOARD_AVOIDANCE_TARGET_MOVED_EVENT,
+} from '@/platform/viewport/appViewport';
 
 interface FakeTerminal {
   terminal: MobileImeTerminalPort;
@@ -321,6 +325,23 @@ describe('MobileImeInput', () => {
       fake.fireRender();
       expect(ime.element.style.left).toBe('16px');
       expect(ime.element.style.top).toBe('16px');
+    });
+
+    it('marks the caret as a reveal target and announces movement only while focused', () => {
+      const { fake, ime } = mount({ width: 10, height: 20 });
+      expect(ime.element.getAttribute(KEYBOARD_AVOIDANCE_TARGET_ATTRIBUTE)).toBe('');
+      const moved = vi.fn();
+      host.addEventListener(KEYBOARD_AVOIDANCE_TARGET_MOVED_EVENT, moved);
+
+      fake.setCursor(1, 1);
+      fake.fireCursorMove();
+      expect(moved, 'an unfocused caret cannot summon keyboard avoidance').not.toHaveBeenCalled();
+
+      ime.element.focus();
+      fake.setCursor(2, 2);
+      fake.fireCursorMove();
+      expect(moved).toHaveBeenCalledTimes(1);
+      host.removeEventListener(KEYBOARD_AVOIDANCE_TARGET_MOVED_EVENT, moved);
     });
 
     it('clamps the cursor to the last column', () => {

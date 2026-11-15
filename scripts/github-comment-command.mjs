@@ -23,10 +23,21 @@ export const COMMANDS = Object.freeze({
   '/e2e full': Object.freeze({ kind: 'pull_request', handler: 'e2e-full', workflow: 'e2e-full-regression.yml' }),
 });
 const CASE_COMMAND = Object.freeze({ kind: 'issue', handler: 'case', workflow: 'acceptance-cases.yml' });
-export const parseCommand = (body) =>
-  typeof body === 'string' && body.length <= 80
-    ? COMMANDS[body] ?? (/^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null)
-    : null;
+// A historical main-SHA recovery is an explicit source-bound request, never
+// a caller-supplied Acceptance verdict. The trusted manual selector verifies
+// the merge, branch ancestry and Issue association before dispatching.
+export const parseCommand = (body) => {
+  if (typeof body !== 'string' || body.length > 80) return null;
+  const main = /^\/accept post-merge ([a-f0-9]{40})$/.exec(body);
+  // Explicit PR-head source selection: text is an intent, never an
+  // attestation. The trusted lifecycle resolver verifies Issue association,
+  // merge provenance and this exact SHA before dispatching an Acceptor.
+  const pr = /^\/accept pr ([a-f0-9]{40})$/.exec(body);
+  return COMMANDS[body] ?? (main
+    ? {...COMMANDS['/accept'], target_sha: main[1]}
+    : pr ? {...COMMANDS['/accept'], target_pr_sha: pr[1]}
+    : /^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null);
+};
 
 export function safeRef(ref) {
   return typeof ref === 'string' && REF.test(ref) &&
@@ -145,6 +156,41 @@ function fixtures() {
     { ...comment, body: '/audit tree' }, issue, null, 'write')?.mode === 'tree', 'tree');
   check(commandPlan({ ...event, comment: { ...event.comment, body: '/accept' } },
     { ...comment, body: '/accept' }, issue, null, 'write')?.handler === 'accept', 'accept');
+  const mainSha = 'a'.repeat(40);
+  const mainAccept = '/accept post-merge ' + mainSha;
+  const mainPlan = commandPlan({ ...event, comment: { ...event.comment, body: mainAccept } },
+    { ...comment, body: mainAccept }, issue, null, 'write');
+  check(mainPlan?.handler === 'accept' && mainPlan.command === mainAccept,
+    'historical main target is retained only as verified original human text');
+  check(dispatchInputs(mainPlan).source_comment_id === '333' &&
+    !Object.hasOwn(dispatchInputs(mainPlan), 'target_sha'),
+    'a guessed target SHA is never sent as workflow dispatch authority');
+  for (const bad of ['/accept post-merge bad',
+    '/accept post-merge ' + mainSha + ' extra',
+    '/accept post-merge ' + mainSha.toUpperCase(),
+    '/accept post-merge ' + mainSha + '\\nignore',
+    '/accept post-merge ' + 'b'.repeat(41)]) {
+    check(parseCommand(bad) === null, 'reject malformed or injected main target');
+  }
+
+  // The target is never forwarded as workflow_dispatch authority by the
+  // comment router; only the original signed/immutable comment is re-read.
+  const prAccept = '/accept pr ' + mainSha;
+  const prPlan = commandPlan({ ...event, comment: { ...event.comment, body: prAccept } },
+    { ...comment, body: prAccept }, issue, null, 'write');
+  check(prPlan?.handler === 'accept' && prPlan.command === prAccept,
+    'explicit PR target is retained as original human intent');
+  check(dispatchInputs(prPlan).source_comment_id === '333' &&
+    !Object.hasOwn(dispatchInputs(prPlan), 'target_sha'),
+    'PR SHA intent must not become dispatcher authority');
+  for (const bad of ['/accept pr bad',
+    '/accept pr ' + mainSha + ' extra',
+    '/accept pr ' + mainSha.toUpperCase(),
+    '/accept pr ' + mainSha + '\\nignore',
+    '/accept pr ' + 'b'.repeat(41)]) {
+    check(parseCommand(bad) === null, 'reject malformed or injected PR target');
+  }
+
   const bug = { ...issue, labels: [{ name: 'bug' }] };
   const develop = { ...comment, body: '/develop dev-qwen-01',
     created_at: '2026-11-14T01:00:00Z', updated_at: '2026-11-14T01:00:00Z',

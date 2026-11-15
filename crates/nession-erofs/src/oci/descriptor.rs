@@ -58,6 +58,38 @@ pub struct Platform {
 }
 
 impl Platform {
+    /// Map a host target triple component to its OCI architecture spelling.
+    ///
+    /// Only the two spellings that differ are renamed; an already-OCI name is
+    /// returned unchanged so a caller that knows the canonical value does not
+    /// gain a second alias.
+    pub fn normalize_architecture(architecture: &str) -> String {
+        match architecture {
+            "x86_64" => "amd64".to_string(),
+            "aarch64" => "arm64".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    /// Map a host OS name to the OCI `os` spelling.
+    pub fn normalize_os(os: &str) -> String {
+        match os {
+            "macos" => "darwin".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    /// Build the `erofs`-capable platform a consumer can select for.
+    pub fn for_consumer(os: &str, architecture: &str, variant: Option<String>) -> Self {
+        Self {
+            architecture: Self::normalize_architecture(architecture),
+            os: Self::normalize_os(os),
+            variant,
+            os_features: Some(vec!["erofs".to_string()]),
+            ..Self::default()
+        }
+    }
+
     /// Whether this platform is an exact match for a consumer target.
     ///
     /// OS and architecture must match. A target variant requires the exact

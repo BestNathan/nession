@@ -115,6 +115,11 @@ fn show_environment_args<'a>(session: &'a str, name: &'a str) -> [&'a str; 4] {
     ["show-environment", "-t", session, name]
 }
 
+/// The argument vector for the whole session environment.
+fn show_environment_all_args(session: &str) -> [&str; 3] {
+    ["show-environment", "-t", session]
+}
+
 /// The argument vector for one `set-environment -u`.
 ///
 /// `set-environment [-u] [-t target-session] name [value]` — with `-u` the
@@ -831,6 +836,41 @@ impl TmuxOps {
                 "tmux show-environment -t {session} {name} printed no NAME=VALUE line: {line:?}"
             )
         })
+    }
+
+    /// The session's whole tmux environment, as ordered `NAME=VALUE` pairs.
+    ///
+    /// `-t` binds the answer to the named session. A failed query is an error,
+    /// not an empty environment: a caller composing defaults must not mistake
+    /// "could not look" for "the session holds nothing".
+    pub async fn environment(&self, session: &str) -> Result<Vec<(String, String)>> {
+        let output = self
+            .command
+            .output(&show_environment_all_args(session))
+            .await
+            .with_context(|| {
+                format!("failed to spawn tmux show-environment for session {session}")
+            })?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux show-environment -t {session} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut environment = Vec::new();
+        for line in stdout.lines() {
+            let Some((name, value)) = line.split_once('=') else {
+                // tmux prints `-NAME` for a variable marked for removal.
+                continue;
+            };
+            if name.is_empty() {
+                anyhow::bail!("tmux show-environment -t {session} printed an empty variable name");
+            }
+            environment.push((name.to_string(), value.to_string()));
+        }
+        Ok(environment)
     }
 
     /// Remove one variable from a session's tmux environment:
@@ -1899,6 +1939,31 @@ mod tests {
             fake.calls(),
             vec![vec!["show-environment", "-t", "sess", "NESSON_MALFORMED"]],
             "the query must be the owner's grammar, run against the injected binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn environment_reads_every_session_variable_and_skips_removal_markers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake =
+            crate::testing::FakeTmux::new(dir.path(), "printf 'A=1\\nB=two=2\\n-REMOVED\\n'");
+        let environment = TmuxOps::new(fake.command())
+            .environment("sess")
+            .await
+            .expect("a successful query answers every line");
+        assert_eq!(
+            environment,
+            vec![
+                ("A".to_string(), "1".to_string()),
+                ("B".to_string(), "two=2".to_string()),
+            ],
+            "a value may contain `=` and a removal marker is not a variable"
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![vec!["show-environment", "-t", "sess"]],
+            "the query must be bound to the exact session"
         );
     }
 

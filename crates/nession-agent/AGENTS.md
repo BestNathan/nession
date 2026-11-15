@@ -47,6 +47,22 @@ Execution isolation belongs to `nession-sandbox`, not to this Agent:
 - Do not add a second isolation, cgroup or proxy owner beside
   `crates/nession-sandbox/AGENTS.md`.
 
+## Managed Workspace Overlay ownership (#3582)
+
+- The Agent Workspace Manager owns `workspace_id`, the registry, namespace,
+  the durable `<workspace>/upper` + `work` pair and the ordered lower Blob
+  digest compatibility key. It initializes the pair on first lower-backed use
+  and never recreates a missing/partial/symlinked pair after that.
+- One physical writable `fuse-overlayfs` Merged View per managed Workspace is
+  owned by `nession_erofs::overlay::OverlayMountManager`; Sessions hold
+  identified consumer leases over it. The Agent never creates a
+  per-execution Workspace Overlay.
+- Workspace deletion consults observed state (mountinfo, live consumers, the
+  durable owner lock and surviving execution records), not only a volatile
+  in-process lease count.
+- A manager-configured Workspace root is required for an Overlay. There is no
+  alternate Workspace registry, host-path API or writable-policy field.
+
 ## Sandbox context capability (#3124)
 
 - The subject is the Session's **active Pane**, resolved on this Agent's

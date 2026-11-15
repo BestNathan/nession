@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  APP_VIEWPORT_OWNER_ROOT,
+  KEYBOARD_SCROLL_OWNER_FILE,
+  KEYBOARD_SCROLL_OWNER_MARKER,
   LAYOUT_RECIPE_OWNER,
   MASTER_DETAIL_MARKER,
   SCROLL_OWNER_MARKER,
@@ -106,6 +109,52 @@ test('the shared recipes do not encode raw numeric spacing', () => {
     ),
     [],
     'a token-backed spacing role is the repair',
+  );
+});
+
+test('only the App Experience owns the keyboard-avoidance scroll ancestor', () => {
+  const marker = `data-keyboard-avoidance-scrollport=""`;
+  assert.deepEqual(
+    rules(scanLayoutSource(`<div ${marker} />`, 'web/src/capabilities/files/components/Pane.tsx')),
+    ['no-foreign-keyboard-scroll-owner'],
+  );
+  assert.deepEqual(
+    scanLayoutSource(`<div ${marker} />`, KEYBOARD_SCROLL_OWNER_FILE),
+    [],
+    'the Experience scrollport is the one owner',
+  );
+});
+
+test('only the App viewport environment reads window.visualViewport', () => {
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      'const height = window.visualViewport?.height ?? 0;',
+      'web/src/platform/terminal-runtime/view/TerminalGeometry.ts',
+    )),
+    ['no-foreign-visual-viewport'],
+  );
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      'const height = window.visualViewport?.height ?? 0;',
+      'web/src/capabilities/terminal/components/Surface.tsx',
+    )),
+    ['no-foreign-visual-viewport'],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      'const viewport = window.visualViewport;',
+      `${APP_VIEWPORT_OWNER_ROOT}AppViewportEnvironment.ts`,
+    ),
+    [],
+    'the environment is the documented read owner',
+  );
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      'const viewport = window.visualViewport;',
+      'web/src/product/terminal/capsule/hooks/useThing.ts',
+    )),
+    ['no-foreign-visual-viewport'],
+    'a second visual-viewport reader outside AppLayout is a competing owner',
   );
 });
 

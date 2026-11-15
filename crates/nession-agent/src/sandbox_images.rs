@@ -22,9 +22,69 @@ use nession_protocol::contracts::sandbox::v1::{
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 use uuid::Uuid;
 
-use crate::erofs_cache::{DownloadGrant, ErofsCache};
+use crate::erofs_cache::{
+    resolve_grant_image, ErofsCache, ResolvedGrantImage, ResolvedManifestBinding,
+};
 use crate::managed_session::blob_origin;
 use crate::workspace_manager::WorkspaceLease;
+
+/// Resolve the actual toolchain mount target (#3500).
+///
+/// An explicit grant/request target is the user/Session override and wins.
+/// Otherwise the Manifest's advisory `io.nession.mount.default` proposes it.
+/// A missing override and proposal fails closed with an actionable error; the
+/// Sandbox remains the authority that validates the chosen target.
+pub(crate) fn toolchain_target(
+    requested: Option<&str>,
+    resolved: &ResolvedGrantImage,
+) -> Result<String> {
+    if let Some(target) = requested.filter(|target| !target.is_empty()) {
+        return Ok(target.to_string());
+    }
+    if let Some(target) = resolved
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.mount_default.clone())
+    {
+        return Ok(target);
+    }
+    anyhow::bail!(
+        "toolchain image {} declares no target and no io.nession.mount.default; \
+         choose an /opt/<name> target",
+        resolved.layer_digest
+    )
+}
+
+/// Map the bounded standard Config Env suggestions into the prepared
+/// composition. A legacy digest-addressed image has no Config to read.
+pub(crate) fn image_env_defaults(
+    resolved: &ResolvedGrantImage,
+) -> Vec<nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault> {
+    resolved
+        .usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .environment
+                .iter()
+                .map(
+                    |entry| nession_protocol::contracts::sandbox::v1::SandboxImageEnvDefault {
+                        name: entry.name.clone(),
+                        value: entry.value.clone(),
+                    },
+                )
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The advisory relative executable directory of a resolved image.
+pub(crate) fn image_path_prepend(resolved: &ResolvedGrantImage) -> Option<String> {
+    resolved
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.path_prepend.clone())
+}
 
 /// The validated `/workspace` selection an Agent resolved before preparing a
 /// composition (#3407).
@@ -60,8 +120,10 @@ pub struct PreparedSandboxImages {
     /// Removes the owned workspace if the caller fails before the execution
     /// record is persisted. Disarm once the sandbox owns the record.
     pub workspace_guard: WorkspaceGuard,
-    /// `(role, digest, resolved cache path)` for diagnostics and tests.
+    /// `(role, layer digest, resolved cache path)` for diagnostics and tests.
     pub images: Vec<(ManagedImageRole, String, PathBuf)>,
+    /// The final resolved Manifest identity per Manifest-aware grant (#3499).
+    pub manifests: Vec<ResolvedManifestBinding>,
     /// The RW attachment to a selected managed Workspace, when one was used.
     /// The execution owner must hold it until cleanup.
     pub workspace_lease: Option<WorkspaceLease>,
@@ -168,24 +230,45 @@ pub async fn prepare(
     };
 
     let mut images = Vec::with_capacity(grants.len());
-    let base_ref = match fetch_image(cache, base, &origin, server_auth_token).await {
-        Ok((digest, path)) => {
-            images.push((ManagedImageRole::Base, digest.clone(), path.clone()));
-            SandboxImageRef {
-                digest,
-                source: path.display().to_string(),
-            }
+    let mut manifests = Vec::new();
+    let record = |role: ManagedImageRole, resolved: crate::erofs_cache::ResolvedGrantImage| {
+        let mut binding = None;
+        if let Some(manifest_digest) = resolved.manifest_digest.clone() {
+            binding = Some(ResolvedManifestBinding {
+                role,
+                manifest_digest,
+                layer_digest: resolved.layer_digest.clone(),
+            });
         }
-        Err(error) => {
-            guard.disarm();
-            remove_owned_workspace(&guard.root, &guard.path);
-            return Err(error);
-        }
+        ((role, resolved.layer_digest, resolved.layer_path), binding)
     };
+    let (base_ref, base_env) =
+        match resolve_grant_image(cache, base, &origin, server_auth_token).await {
+            Ok(resolved) => {
+                let base_env = image_env_defaults(&resolved);
+                let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
+                manifests.extend(binding);
+                images.push((role, digest.clone(), path.clone()));
+                (
+                    SandboxImageRef {
+                        digest,
+                        source: path.display().to_string(),
+                    },
+                    base_env,
+                )
+            }
+            Err(error) => {
+                guard.disarm();
+                remove_owned_workspace(&guard.root, &guard.path);
+                return Err(error);
+            }
+        };
     let workspace_ref = match workspace {
-        Some(grant) => match fetch_image(cache, grant, &origin, server_auth_token).await {
-            Ok((digest, path)) => {
-                images.push((ManagedImageRole::Workspace, digest.clone(), path.clone()));
+        Some(grant) => match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
+            Ok(resolved) => {
+                let ((role, digest, path), binding) = record(ManagedImageRole::Workspace, resolved);
+                manifests.extend(binding);
+                images.push((role, digest.clone(), path.clone()));
                 Some(SandboxImageRef {
                     digest,
                     source: path.display().to_string(),
@@ -201,12 +284,7 @@ pub async fn prepare(
     };
     let mut toolchain_refs = Vec::with_capacity(toolchains.len());
     for grant in toolchains {
-        let Some(target) = grant.target.clone().filter(|target| !target.is_empty()) else {
-            guard.disarm();
-            remove_owned_workspace(&guard.root, &guard.path);
-            anyhow::bail!("toolchain image {} has no /opt/<name> target", grant.digest);
-        };
-        let (digest, path) = match fetch_image(cache, grant, &origin, server_auth_token).await {
+        let resolved = match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
             Ok(value) => value,
             Err(error) => {
                 guard.disarm();
@@ -214,11 +292,25 @@ pub async fn prepare(
                 return Err(error);
             }
         };
-        images.push((ManagedImageRole::Toolchain, digest.clone(), path.clone()));
+        let target = match toolchain_target(grant.target.as_deref(), &resolved) {
+            Ok(target) => target,
+            Err(error) => {
+                guard.disarm();
+                remove_owned_workspace(&guard.root, &guard.path);
+                return Err(error);
+            }
+        };
+        let env = image_env_defaults(&resolved);
+        let path_prepend = image_path_prepend(&resolved);
+        let ((role, digest, path), binding) = record(ManagedImageRole::Toolchain, resolved);
+        manifests.extend(binding);
+        images.push((role, digest.clone(), path.clone()));
         toolchain_refs.push(SandboxToolchainImage {
             digest,
             source: path.display().to_string(),
             target,
+            env,
+            path_prepend,
         });
     }
 
@@ -230,11 +322,18 @@ pub async fn prepare(
             ownership: SandboxWorkspaceOwnership::Agent,
         }),
         toolchains: toolchain_refs,
+        base_env,
     };
     let mut workspace_lease = None;
+    #[cfg(target_os = "linux")]
+    let mut owns_scratch_workspace = true;
     if let Some(workspace_override) = workspace_override {
         // The selected directory is the durable workspace; the manager owns
         // its bytes. Remove the per-execution placeholder.
+        #[cfg(target_os = "linux")]
+        {
+            owns_scratch_workspace = false;
+        }
         guard.disarm();
         remove_owned_workspace(&guard.root, &guard.path);
         let (write, ownership) = match workspace_override {
@@ -266,10 +365,35 @@ pub async fn prepare(
             ownership,
         });
     }
+    // The durable Overlay upper/work is Agent-owned workspace state (#3582).
+    // A scratch workspace is initialized here; a selected managed Workspace
+    // must already have been initialized by its owner, so a missing pair is a
+    // data-loss refusal rather than a fresh empty upper.
+    #[cfg(target_os = "linux")]
+    if let Some(workspace) = composition
+        .workspace
+        .as_ref()
+        .filter(|workspace| workspace.image.is_some())
+    {
+        let write = workspace.write.clone();
+        let write = Path::new(&write);
+        let outcome = if owns_scratch_workspace {
+            nession_erofs::overlay::storage::initialize(write)
+        } else {
+            nession_erofs::overlay::storage::verify(write)
+        };
+        if let Err(error) = outcome {
+            return Err(error.context(format!(
+                "the Sandbox workspace {} has no usable durable Overlay storage",
+                write.display()
+            )));
+        }
+    }
     Ok(PreparedSandboxImages {
         composition,
         workspace_guard: guard,
         images,
+        manifests,
         workspace_lease,
     })
 }
@@ -321,6 +445,10 @@ pub fn preflight_composition(
                     digest: image.digest,
                     source: image.source,
                     target,
+                    // Preflight reads no image bytes; Enter resolves the
+                    // Config Env and advisory prepend from the verified cache.
+                    env: Vec::new(),
+                    path_prepend: None,
                 });
             }
         }
@@ -350,30 +478,8 @@ pub fn preflight_composition(
             ownership,
         }),
         toolchains,
+        base_env: Vec::new(),
     })
-}
-
-async fn fetch_image(
-    cache: &ErofsCache,
-    grant: &ManagedImageGrant,
-    origin: &str,
-    server_auth_token: &str,
-) -> Result<(String, PathBuf)> {
-    if !grant.path.starts_with("/images/blobs/") {
-        anyhow::bail!(
-            "authorization route '{}' is not an image blob path",
-            grant.path
-        );
-    }
-    let download = DownloadGrant {
-        url: format!("{origin}{}", grant.path),
-        token: server_auth_token.to_string(),
-    };
-    let cached = cache
-        .get_or_fetch(&grant.digest, &download)
-        .await
-        .with_context(|| format!("cannot prepare Sandbox image {}", grant.digest))?;
-    Ok((grant.digest.clone(), cached.path))
 }
 
 #[cfg(test)]
@@ -418,6 +524,7 @@ mod tests {
             digest: digest.to_string(),
             path: format!("/images/blobs/{digest}"),
             target: target.map(str::to_string),
+            objects: Vec::new(),
         }
     }
 
@@ -611,6 +718,7 @@ mod workspace_override_tests {
             digest: digest.to_string(),
             path: format!("/images/blobs/{digest}"),
             target: target.map(str::to_string),
+            objects: Vec::new(),
         }
     }
 
@@ -709,6 +817,10 @@ mod workspace_override_tests {
         let path = manager
             .workspace_directory(&workspace.workspace_id)
             .unwrap();
+        // The Agent owner initializes the durable Overlay storage before a
+        // lower-backed composition is prepared (#3582).
+        #[cfg(target_os = "linux")]
+        nession_erofs::overlay::storage::initialize(&path).unwrap();
         let prepared = prepare(
             &cache,
             &[

@@ -84,7 +84,11 @@ export function isNativePromotionPr(pr){
 export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
   const originallyPinnedMain=pr?.body?.match(/^- Planned main SHA: ([a-f0-9]{40})$/m)?.[1];
   const originallyPinnedLane=pr?.body?.match(/^- Planned lane SHA: ([a-f0-9]{40})$/m)?.[1];
-  if(!isNativePromotionPr(pr)||baseSha!==pr.base.sha||
+  if(!isNativePromotionPr(pr)||!SHA.test(baseSha??'')||
+      // A PR webhook may carry the previous protected Main SHA while the
+      // planner independently reads its live tip. Trust ancestry, never the
+      // event timestamp: both must still be reachable verified Git objects.
+      !ancestors(repoRoot,pr.base.sha,baseSha)||
       targetSha!==pr.head.sha||git(repoRoot,'rev-parse','HEAD')!==targetSha||
       !ancestors(repoRoot,baseSha,targetSha)||baseSha===targetSha||
       !ancestors(repoRoot,originallyPinnedMain,baseSha)||
@@ -477,6 +481,21 @@ export function selfTest(){
       head:{...advancedPr.head,sha:rebasedHead}};
     assert.ok(isNativePromotionPr(nextPr));
     const next=promotionE2ESelection(nextPr,root,later);
+    // pull_request webhook base may predate a protected Main update. The
+    // independently observed live Main is authoritative when it descends
+    // from the event's earlier base, and the exact Staging head contains it.
+    const staleWebhook={...nextPr,
+      base:{...nextPr.base,sha:main}};
+    assert.deepEqual(promotionE2ESelection(staleWebhook,root,later),next,
+      'legitimate stale webhook selects exact current Main and Staging sources');
+    const futureWebhook={...nextPr,
+      base:{...nextPr.base,sha:rebasedHead}};
+    assert.throws(()=>promotionE2ESelection(futureWebhook,root,later),
+      /untrusted|stale/,'future or nonancestor webhook base remains denied');
+    const unrelatedWebhook={...nextPr,
+      base:{...nextPr.base,sha:lane}};
+    assert.throws(()=>promotionE2ESelection(unrelatedWebhook,root,later),
+      /untrusted|stale/,'unrelated Main ancestry must not authorize a promotion');
     assert.equal(next.base_sha,later);
     assert.equal(next.target_sha,rebasedHead);
     assert.notEqual(next.plan_digest,advanced.plan_digest);

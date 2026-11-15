@@ -24,11 +24,36 @@ pub enum ManagedImageRole {
     Toolchain,
 }
 
+/// One OCI object reachable from a resolved Manifest (#3499).
+///
+/// The Server mints one of these per reachable descriptor; the Agent fetches
+/// exactly this set. A route is authorization for that object only, not for an
+/// arbitrary digest the caller happens to know.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedImageObjectGrant {
+    /// `sha256:<64 lowercase hex>` of the exact object bytes.
+    pub digest: String,
+    /// The standard OCI media type of those bytes.
+    pub media_type: String,
+    /// Exact byte count, verified by both sides.
+    pub size_bytes: u64,
+    /// Authorized route, `/images/blobs/<digest>`.
+    pub path: String,
+}
+
 /// One image the Agent must make ready in its authorized EROFS cache.
 ///
 /// `path` is the Server's authorized blob route for this digest. The Agent
 /// derives the absolute URL from its own configured Server address; the Server
 /// never guesses its public hostname.
+///
+/// A Manifest-aware grant sets `digest`/`path` to the resolved Manifest and
+/// fills `objects` with the Manifest, Config and EROFS descriptors it is
+/// allowed to fetch. A legacy grant leaves `objects` empty and its `digest` is
+/// the raw EROFS blob identity.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +67,10 @@ pub struct ManagedImageGrant {
     /// `/opt/<name>` for a toolchain image; absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Reachable OCI objects of a resolved Manifest; empty for a legacy
+    /// digest-addressed EROFS grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<ManagedImageObjectGrant>,
 }
 
 /// The Server→Agent Managed creation input.
@@ -66,8 +95,13 @@ pub struct ManagedSessionImages {
 pub struct ManagedToolchainRequest {
     /// `sha256:<64 lowercase hex>` of a ready Image Manager artifact.
     pub digest: String,
-    /// `/opt/<lowercase name>`; the Sandbox owns the target rule.
-    pub target: String,
+    /// Optional user/Session override for the actual mount target.
+    ///
+    /// When absent, the resolved Manifest's advisory
+    /// `io.nession.mount.default` proposes the target; when neither exists the
+    /// create fails closed. The Sandbox owns the final target rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// Client request for a Managed EROFS-backed Session (#3062).
@@ -987,6 +1021,16 @@ pub struct WebSessionInfo {
     pub foreground_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    ///
+    /// A recyclable `agent_id:session_name` is not an incarnation: this id is
+    /// replaced when the name is killed and recreated. Web clients key their
+    /// name-addressed projections (Session metadata, #3424) on it, so a list
+    /// push that reports a different id invalidates the previous incarnation's
+    /// cached context. Absent only for a legacy Session that has not been asked
+    /// yet, so an absent value is not an incarnation change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     /// The focused Session's Server-owned Project membership (#3082).
     ///
     /// Absent for a Session with no Project. This is durable membership, not an
