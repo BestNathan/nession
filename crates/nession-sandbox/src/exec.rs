@@ -1220,6 +1220,8 @@ pub fn reconcile(
     let mut protected_overlays = nession_erofs::overlay::ProtectedWorkspaces::new();
     #[cfg(target_os = "linux")]
     let mut unreadable_record = false;
+    #[cfg(target_os = "linux")]
+    let mut unreadable_overlay_record = false;
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -1281,10 +1283,15 @@ pub fn reconcile(
                         Ok(workspace) => {
                             protected_overlays.insert(workspace);
                         }
-                        Err(error) => tracing::warn!(
-                            execution = %record.execution_id,
-                            "could not protect a recorded Workspace Overlay: {error:#}"
-                        ),
+                        Err(error) => {
+                            // No consumer absence can be proven for this live
+                            // record, so overlay reclamation is skipped.
+                            unreadable_overlay_record = true;
+                            tracing::warn!(
+                                execution = %record.execution_id,
+                                "could not protect a recorded Workspace Overlay: {error:#}"
+                            );
+                        }
                     }
                     for unavailable in adopt_overlay_mount(settings, &record) {
                         tracing::warn!(
@@ -1321,16 +1328,18 @@ pub fn reconcile(
     // because no consumer absence can be proven.
     #[cfg(target_os = "linux")]
     if !unreadable_record {
-        if let Some(manager) = &settings.overlay_manager {
-            let report = manager.reclaim_orphans(&protected_overlays);
-            for workspace in &report.reclaimed {
-                tracing::info!(%workspace, "reclaimed an unrecorded shared Workspace Overlay");
-            }
-            for (workspace, reason) in &report.reclaim_failed {
-                tracing::warn!(
-                    %workspace,
-                    "could not reclaim an unrecorded shared Workspace Overlay: {reason}"
-                );
+        if !unreadable_overlay_record {
+            if let Some(manager) = &settings.overlay_manager {
+                let report = manager.reclaim_orphans(&protected_overlays);
+                for workspace in &report.reclaimed {
+                    tracing::info!(%workspace, "reclaimed an unrecorded shared Workspace Overlay");
+                }
+                for (workspace, reason) in &report.reclaim_failed {
+                    tracing::warn!(
+                        %workspace,
+                        "could not reclaim an unrecorded shared Workspace Overlay: {reason}"
+                    );
+                }
             }
         }
         if let Some(manager) = &settings.mount_manager {
