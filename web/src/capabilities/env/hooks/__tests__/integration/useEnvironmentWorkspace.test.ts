@@ -337,6 +337,49 @@ describe('useEnvironmentWorkspace', () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
+  it('does not let a stale A→B→A binding completion close the new A draft (#3444)', async () => {
+    const delayed = deferred<ReturnType<typeof bindingResponse>>();
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false,
+      pending: false,
+      refresh: vi.fn(),
+      replace: vi.fn(() => delayed.promise),
+      reapply: vi.fn(async () => bindingResponse()),
+    });
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) => useEnvironmentWorkspace(sessionId),
+      { initialProps: { sessionId: 'session-a' as string | null } },
+    );
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    act(() => {
+      result.current.startBindingDraft();
+      result.current.screen.setDraftRefs([B_REF]);
+    });
+
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.applyBinding([B_REF]); });
+    rerender({ sessionId: 'session-b' });
+    rerender({ sessionId: 'session-a' });
+    act(() => {
+      result.current.startBindingDraft();
+      result.current.screen.setDraftRefs([B_REF]);
+    });
+    expect(result.current.screen.dirty).toBe(true);
+
+    let accepted = true;
+    await act(async () => {
+      delayed.resolve({ ...bindingResponse(), warnings: ['old A warning'] });
+      accepted = await pending;
+    });
+    expect(accepted).toBe(false);
+    expect(result.current.screen.view).toBe('draft');
+    expect(result.current.screen.draft).toEqual([B_REF]);
+    expect(result.current.screen.dirty).toBe(true);
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
   it('does not apply Session A late save/delete feedback or navigation to B (#3444)', async () => {
     const oldSave = deferred<EnvWriteResponse>();
     envApi.writeEnvFile.mockReturnValueOnce(oldSave.promise);
