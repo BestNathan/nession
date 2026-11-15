@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
-  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE}
+  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
+  assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -211,6 +212,10 @@ const ownerReviewEvent={...commentEvent,
 const ownerReview={...commentValid,event:ownerReviewEvent,
   issue:3433,actionId:currentReviewerAction};
 assert.equal(assertDispatchAuthority(ownerReview).action_id,currentReviewerAction);
+assert.doesNotThrow(()=>assertOwnerReviewDispatchRole(true,'reviewer'));
+assert.doesNotThrow(()=>assertOwnerReviewDispatchRole(false,'developer'));
+assert.throws(()=>assertOwnerReviewDispatchRole(true,'developer'),
+  /non-Reviewer Outbox role/);
 for(const change of [
   {issue:1997},
   {actionId:'a'.repeat(64)},
