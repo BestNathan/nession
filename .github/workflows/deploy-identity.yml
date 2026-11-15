@@ -9,7 +9,7 @@ on:
   # The protected Main job independently checks original Run/Job/Step identity
   # before any access to the read-only Kubernetes observation credentials.
   workflow_run:
-    workflows: ["Release / Staging Artifacts"]
+    workflows: ["Release / Staging Artifacts", "Deploy / Staging ACR"]
     branches: [staging]
     types: [completed]
   workflow_dispatch:
@@ -39,10 +39,21 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         (
           github.event_name == 'workflow_run' &&
-          github.event.workflow_run.name == 'Release / Staging Artifacts' &&
           (
-            github.event.workflow_run.path == '.github/workflows/release-staging.yml' ||
-            github.event.workflow_run.path == '.github/workflows/release-staging.yml@refs/heads/staging'
+            (
+              github.event.workflow_run.name == 'Release / Staging Artifacts' &&
+              (
+                github.event.workflow_run.path == '.github/workflows/release-staging.yml' ||
+                github.event.workflow_run.path == '.github/workflows/release-staging.yml@refs/heads/staging'
+              )
+            ) ||
+            (
+              github.event.workflow_run.name == 'Deploy / Staging ACR' &&
+              (
+                github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml' ||
+                github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml@refs/heads/staging'
+              )
+            )
           ) &&
           (
             github.event.workflow_run.event == 'push' ||
@@ -194,23 +205,32 @@ jobs:
         run: |
           set -euo pipefail
           REPO="$GITHUB_REPOSITORY"
-          response=$(gh api "repos/$REPO/actions/workflows/release-staging.yml/runs?head_sha=${DEPLOYED_SHA}&per_page=100")
-          RUN_ID=$(jq -r --arg sha "$DEPLOYED_SHA" '
-            [.workflow_runs[]
-              | select((.path | split("@")[0]) == ".github/workflows/release-staging.yml")
-              # A workflow-only staging change is ignored by paths-ignore, so
-              # the trusted workflow dispatch escape hatch may be the build
-              # that produced the deployed images. Both events bind the same
-              # exact SHA/branch/workflow identity.
-              | select(.event == "push" or .event == "workflow_dispatch")
-              | select(.head_branch == "staging")
-              | select(.head_sha == $sha)
-              | select(.status == "completed")
-              | select(.conclusion == "success")
-              | .id] | sort | join(" ")' <<<"$response")
-          count=$(wc -w <<<"$RUN_ID" | tr -d ' ')
-          [[ "$count" == "1" ]] \
-            || { echo "::error::expected exactly one successful Release / Staging run for $DEPLOYED_SHA, found $count"; exit 1; }
+          # Independent ACR deploy emits dual-registry provenance; legacy
+          # successful release receipts remain readable during propagation.
+          if [[ "$ENVIRONMENT" == "staging" ]]; then
+            sources=(deploy-staging-acr.yml release-staging.yml)
+          else
+            sources=(release-staging.yml)
+          fi
+          RUN_ID=""
+          for source_workflow in "${sources[@]}"; do
+            response=$(gh api "repos/$REPO/actions/workflows/$source_workflow/runs?head_sha=${DEPLOYED_SHA}&per_page=100")
+            RUN_ID=$(jq -r --arg sha "$DEPLOYED_SHA" --arg source "$source_workflow" --arg repo "$REPO" '
+              [.workflow_runs[]
+                | select((.path | split("@")[0]) == (".github/workflows/" + $source))
+                | select(.event == "push" or .event == "workflow_dispatch")
+                | select(.head_branch == "staging" and .head_sha == $sha)
+                | select(.repository.full_name == $repo and .head_repository.full_name == $repo)
+                | select(.status == "completed" and .conclusion == "success")]
+              | sort_by(.run_number, .run_attempt, .id)
+              | last | .id // empty' <<< "$response")
+            if [[ -n "$RUN_ID" ]]; then
+              echo "Source-bound registry provenance: $source_workflow run $RUN_ID"
+              break
+            fi
+          done
+          [[ -n "$RUN_ID" ]] ||
+            { echo "::error::no trusted provenance source for $DEPLOYED_SHA"; exit 1; }
           mkdir -p "$RUNNER_TEMP/provenance"
           gh run download "$RUN_ID" -R "$REPO" -n nession-build-provenance -D "$RUNNER_TEMP/provenance"
           echo "Downloaded provenance from trusted run $RUN_ID (attempt identity is in the run URL)."
