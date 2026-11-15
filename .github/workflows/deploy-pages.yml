@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'pages/**'
+      - 'crates/nession-mcp/**' # MCP Tool/schema/transport changes trigger immediate reconciliation
       - 'automation/agents/registry.json'
       - '.github/workflows/deploy-pages.yml'
   schedule:
