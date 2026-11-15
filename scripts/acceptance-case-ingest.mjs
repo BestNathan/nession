@@ -177,14 +177,19 @@ export function sourceRunIdentity(event, repository) {
   // not lose their ingestion, but accept only the exact authenticated family.
   const commentRun = /^Comment Case #([1-9][0-9]*) (SC-[0-9]{2,}) comment:([1-9][0-9]*)$/
     .exec(run?.name ?? '');
-  if (!run || (run.name !== 'Acceptance / Cases' && !commentRun)) {
-    throw new Error('expected a completed Acceptance / Cases workflow_run event');
+  const prSmoke = run?.name === 'Acceptance / Case Smoke';
+  if (!run || (run.name !== 'Acceptance / Cases' && !commentRun && !prSmoke)) {
+    throw new Error('expected a completed Acceptance / Cases or Case Smoke workflow_run event');
+  }
+  if (prSmoke && run.event !== 'pull_request') {
+    throw new Error('PR Case Smoke source must be a pull_request event');
   }
   if (commentRun && (run.event !== 'workflow_dispatch' || run.head_branch !== 'main')) {
     throw new Error('comment-named Case source requires trusted main workflow_dispatch');
   }
-  if (run.status !== 'completed' || !['success', 'failure'].includes(run.conclusion)) {
-    throw new Error('source Acceptance / Cases run has no terminal supported conclusion');
+  if (run.status !== 'completed' || !['success', 'failure'].includes(run.conclusion) ||
+      (prSmoke && run.conclusion !== 'success')) {
+    throw new Error('Case source has no authenticated successful PR Smoke or supported terminal Cases conclusion');
   }
   if (run.repository?.full_name !== repository || run.head_repository?.full_name !== repository) {
     throw new Error('source workflow repository mismatch');
@@ -195,17 +200,20 @@ export function sourceRunIdentity(event, repository) {
   // these forms, never a suffix/substring match of attacker-controlled text.
   const definition = singleLine(run.path, 'workflow_run.path');
   const [workflowPath, workflowRef, ...extra] = definition.split('@');
-  const canonicalPath = '.github/workflows/acceptance-cases.yml';
+  const canonicalPath = prSmoke ? '.github/workflows/acceptance-case-smoke.yml' :
+    '.github/workflows/acceptance-cases.yml';
+  const permittedRefs = prSmoke ? ['refs/heads/main', 'refs/heads/staging'] :
+    ['refs/heads/' + branch];
   if (extra.length || ![canonicalPath, repository + '/' + canonicalPath].includes(workflowPath) ||
-      (workflowRef && workflowRef !== 'refs/heads/' + branch)) {
+      (workflowRef && !permittedRefs.includes(workflowRef))) {
     throw new Error('unexpected source workflow definition path');
   }
   const sourceSha = sha(run.head_sha, 40, 'workflow_run.head_sha');
   const eventName = singleLine(run.event, 'workflow_run.event');
-  if (!['push', 'workflow_dispatch'].includes(eventName)) {
+  if (prSmoke ? eventName !== 'pull_request' : !['push', 'workflow_dispatch'].includes(eventName)) {
     throw new Error('unsupported source workflow event ' + eventName);
   }
-  if (!['staging', 'main'].includes(branch)) {
+  if (!prSmoke && !['staging', 'main'].includes(branch)) {
     throw new Error('source workflow branch not eligible for ingestion: ' + branch);
   }
   return {
@@ -216,6 +224,7 @@ export function sourceRunIdentity(event, repository) {
     head_sha: sourceSha,
     head_branch: branch,
     workflow_id: positiveInt(run.workflow_id, 'workflow_run.workflow_id'),
+    ...(prSmoke ? { source_kind: 'pr-smoke' } : {}),
     ...(commentRun ? { comment_case: {
       issue: Number(commentRun[1]), criterion: commentRun[2],
       comment_id: Number(commentRun[3]),
@@ -237,6 +246,7 @@ export async function resolveCaseIngestSourceEvent(event, {
     const source = sourceRunIdentity(event, repository);
     return { event, source };
   }
+
   if (event?.repository?.full_name !== repository ||
       event?.action !== 'nession-comment-case-ingest' ||
       event?.sender?.login !== 'github-actions[bot]' ||
@@ -267,6 +277,143 @@ export async function resolveCaseIngestSourceEvent(event, {
   return { event: sourceEvent, source };
 }
 
+
+// An authenticated source-run event (or an owner-authenticated historical
+// replay) is not itself permission to project PR acceptance. Re-read the
+// immutable GitHub Run, PR, Jobs/Steps, Artifact and required exact-head CI
+// before creating a Store record. Source-controlled artifacts supply none of
+// these GitHub-side facts.
+export async function attestPrSmokeSource(record, source, {
+  repository, token, request = githubRequest,
+} = {}) {
+  const item = validateCaseRecord(record);
+  if (source.source_kind !== 'pr-smoke' || source.repository !== repository ||
+      source.event !== 'pull_request' || item.stage !== 'pr' || item.deployment ||
+      item.result !== 'Pass' || item.target_sha !== source.head_sha ||
+      item.run_id !== source.run_id || item.run_attempt !== source.run_attempt) {
+    throw new Error('PR Case requires successful, exact-head, Pass-only Smoke provenance');
+  }
+  const prefix = '/repos/' + repository;
+  const run = await request(prefix + '/actions/runs/' + source.run_id, { token });
+  const fetched = sourceRunIdentity({ workflow_run: { ...run, name: run?.name } }, repository);
+  if (fetched.source_kind !== 'pr-smoke' || fetched.run_id !== source.run_id ||
+      fetched.run_attempt !== source.run_attempt || fetched.head_sha !== source.head_sha ||
+      fetched.head_branch !== source.head_branch || fetched.workflow_id !== source.workflow_id) {
+    throw new Error('PR Case source GitHub Run/Attempt identity changed');
+  }
+
+  const linked = Array.isArray(run.pull_requests) && run.pull_requests.length
+    ? run.pull_requests
+    : await request(prefix + '/commits/' + source.head_sha + '/pulls?per_page=100', { token });
+  if (!Array.isArray(linked) || linked.length === 0 || linked.length > 100) {
+    throw new Error('PR Case has no bounded GitHub source PR association');
+  }
+  const associated = [];
+  for (const entry of linked) {
+    if (!Number.isSafeInteger(entry.number) || entry.number < 1) continue;
+    const pr = await request(prefix + '/pulls/' + entry.number, { token });
+    if (pr.head?.sha !== source.head_sha ||
+        pr.head?.repo?.full_name !== repository ||
+        pr.head?.ref !== source.head_branch ||
+        pr.base?.repo?.full_name !== repository ||
+        !['staging', 'main'].includes(pr.base?.ref) ||
+        (pr.state !== 'open' && pr.merged !== true)) continue;
+    const started = Date.parse(run.created_at ?? '');
+    const opened = Date.parse(pr.created_at ?? '');
+    const stopped = pr.merged ? Date.parse(pr.merged_at ?? '') : Infinity;
+    if (!Number.isFinite(started) || !Number.isFinite(opened) ||
+        started < opened || started > stopped) continue;
+    if (!parsePreMergeIssueNumbers(pr.body, repository.split('/')[0],
+      repository.split('/')[1], pr.title).includes(item.issue)) continue;
+    associated.push(pr);
+  }
+  if (associated.length !== 1) {
+    throw new Error('PR Case Issue/SC is not uniquely bound to an authenticated exact-head PR');
+  }
+  const pr = associated[0];
+
+  const jobs = await request(prefix + '/actions/runs/' + source.run_id +
+    '/attempts/' + source.run_attempt + '/jobs?per_page=100', { token });
+  if (!Array.isArray(jobs.jobs) || jobs.total_count > 100) {
+    throw new Error('PR Case source Job inventory unavailable or truncated');
+  }
+  const matches = jobs.jobs.filter(job => job.name === 'case-smoke');
+  if (matches.length !== 1) throw new Error('PR Case source execution Job missing or ambiguous');
+  const job = matches[0];
+  if (job.status !== 'completed' || job.conclusion !== 'success' ||
+      job.run_id !== source.run_id || job.run_attempt !== source.run_attempt ||
+      job.head_sha !== source.head_sha || !Number.isSafeInteger(job.id) || job.id < 1 ||
+      !Array.isArray(job.steps)) {
+    throw new Error('PR Case source Job is not an exact-Run/Attempt success');
+  }
+  for (const name of [
+    'Validate canonical Case contracts and generic selection',
+    'Select PR-linked Case-method proofs (trusted main policy)',
+    'Run selected source-aligned Cases through one job-scoped batch',
+    'Run actions/upload-artifact@v4',
+  ]) {
+    const steps = job.steps.filter(step => step.name === name);
+    if (steps.length !== 1 || steps[0].status !== 'completed' ||
+        steps[0].conclusion !== 'success') {
+      throw new Error('PR Case required GitHub-owned execution step did not pass: ' + name);
+    }
+  }
+
+  const artifacts = await request(prefix + '/actions/runs/' + source.run_id +
+    '/artifacts?per_page=100', { token });
+  if (!Array.isArray(artifacts.artifacts) || artifacts.total_count > 100) {
+    throw new Error('PR Case source artifact inventory unavailable or truncated');
+  }
+  const artifactsFound = artifacts.artifacts.filter(a =>
+    a.name === 'acceptance-case-smoke-' + source.run_id + '-' + source.run_attempt &&
+    a.expired === false && a.size_in_bytes > 0 &&
+    (a.workflow_run == null || (a.workflow_run.id === source.run_id &&
+      a.workflow_run.head_sha === source.head_sha)));
+  if (artifactsFound.length !== 1 || !Number.isSafeInteger(artifactsFound[0].id)) {
+    throw new Error('PR Case source artifact is absent, expired or ambiguous');
+  }
+
+  // The two independent exact-head CI families are required for PR Case
+  // projection, rather than inferring a green state from the Case artifact.
+  // GitHub clears run.pull_requests on many merged PRs; after PR identity,
+  // merge time, branch and SHA are attested above, historic run association is
+  // still source-bound without trusting any PR-authored metadata.
+  const checks = await request(prefix + '/actions/runs?head_sha=' +
+    source.head_sha + '&event=pull_request&per_page=100', { token });
+  if (!Array.isArray(checks.workflow_runs) || checks.total_count > 100) {
+    throw new Error('PR Case exact-head required CI inventory unavailable or truncated');
+  }
+  const required = [
+    '.github/workflows/ci-quality.yml',
+    '.github/workflows/e2e-tests.yml',
+  ];
+  const verified = [];
+  for (const path of required) {
+    const runs = checks.workflow_runs.filter(check =>
+      check.path?.split('@')[0] === path &&
+      check.event === 'pull_request' &&
+      check.head_sha === source.head_sha &&
+      check.head_branch === source.head_branch &&
+      check.repository?.full_name === repository &&
+      check.head_repository?.full_name === repository)
+      .sort((a, b) => (b.run_number ?? 0) - (a.run_number ?? 0) ||
+        (b.run_attempt ?? 0) - (a.run_attempt ?? 0) || (b.id ?? 0) - (a.id ?? 0));
+    const latest = runs[0];
+    if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success' ||
+        !Number.isSafeInteger(latest.id) || !Number.isSafeInteger(latest.run_attempt) ||
+        Date.parse(latest.created_at ?? '') < Date.parse(pr.created_at ?? '') ||
+        (pr.merged && Date.parse(latest.created_at ?? '') > Date.parse(pr.merged_at ?? ''))) {
+      throw new Error('PR Case lacks completed exact-head required CI: ' + path);
+    }
+    verified.push(latest.id);
+  }
+  return { ...source, pr_binding: {
+    pr_number: pr.number, issue: item.issue, head_sha: source.head_sha,
+    case_job_id: job.id, artifact_id: artifactsFound[0].id,
+    quality_run_id: verified[0], e2e_run_id: verified[1],
+  } };
+}
+
 // Lane-aware proof boundary: a `when: deployed` criterion is eligible only
 // with a deployment binding for its declared environment. Legacy branch-stage
 // criteria keep their exact behaviour and must not carry a deployment block.
@@ -294,6 +441,24 @@ export function assertDeploymentBinding(record, planEntry) {
 
 export function assertSourceBoundRecord(record, source) {
   const item = assertRunIdentity(record, source);
+  if (source.source_kind === 'pr-smoke') {
+    const binding = source.pr_binding;
+    if (source.event !== 'pull_request' || item.stage !== 'pr' ||
+        item.deployment || item.target_sha !== source.head_sha ||
+        !binding || binding.issue !== item.issue ||
+        binding.head_sha !== item.target_sha ||
+        !Number.isSafeInteger(binding.pr_number) || binding.pr_number < 1 ||
+        !Number.isSafeInteger(binding.case_job_id) || binding.case_job_id < 1 ||
+        !Number.isSafeInteger(binding.artifact_id) || binding.artifact_id < 1 ||
+        !Number.isSafeInteger(binding.quality_run_id) || binding.quality_run_id < 1 ||
+        !Number.isSafeInteger(binding.e2e_run_id) || binding.e2e_run_id < 1) {
+      throw new Error('PR Case source has no authenticated exact-head PR/CI/Case binding');
+    }
+    return assertExecutionIdentity(item);
+  }
+  if (item.stage === 'pr' || item.stage === 'pre-merge') {
+    throw new Error('PR Case record requires the authenticated Smoke source family');
+  }
   // A trusted-main workflow_dispatch can target a different Staging commit.
   // The binding is NOT taken from the Case artifact: attestCaseRecord first
   // reads its GitHub-owned pre-target step identity at this exact Run/Attempt.
@@ -462,8 +627,10 @@ async function attestCaseRecord(record, {
   event, repository, token, request = githubRequest, deploymentRecords = null,
 }) {
   const candidate = validateCaseRecord(record);
-  const source = await attestManualStagingSource(candidate, sourceRunIdentity(event, repository),
-    { repository, token, request });
+  const original = sourceRunIdentity(event, repository);
+  const source = original.source_kind === 'pr-smoke'
+    ? await attestPrSmokeSource(candidate, original, { repository, token, request })
+    : await attestManualStagingSource(candidate, original, { repository, token, request });
   const item = candidate.deployment
     ? assertDeployedSourceRecord(candidate, source, deploymentRecords)
     : assertSourceBoundRecord(candidate, source);
@@ -713,7 +880,43 @@ export async function applyCaseRecord(record, { repository, token, request = git
   if (!owner || !name) throw new Error('repository must be owner/name');
 
   if (item.stage === 'pr' || item.stage === 'pre-merge') {
-    return { projected: false, reason: 'PR Case Smoke records are evidence-only; Agent owns PR Acceptance projection' };
+    const trusted = item.provenance?.verified_source;
+    if (item.stage !== 'pr' || !trusted || trusted.source_kind !== 'pr-smoke' ||
+        item.provenance?.record_path !== recordPath(item) ||
+        item.provenance?.workflow_url !== 'https://github.com/' + repository +
+          '/actions/runs/' + item.run_id) {
+      throw new Error('PR Case projection requires its immutable trusted Store provenance');
+    }
+    // Re-read authenticated GitHub identities at the Issue-write boundary too.
+    // A crafted record on a workstation cannot become an Acceptance Pass.
+    const original = await request('/repos/' + repository +
+      '/actions/runs/' + item.run_id, { token });
+    const source = sourceRunIdentity({
+      workflow_run: { ...original, name: original.name },
+    }, repository);
+    const rebound = await attestPrSmokeSource(item, source, { repository, token, request });
+    if (JSON.stringify(rebound) !== JSON.stringify(trusted)) {
+      throw new Error('PR Case stored provenance differs from verified original Run/PR/CI');
+    }
+    assertSourceBoundRecord(item, rebound);
+    const issue = await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, { token });
+    if (!isAcceptanceIssue(issue)) throw new Error('#' + item.issue + ' must be labeled bug or requirement');
+    if (String(issue.state).toLowerCase() !== 'open') {
+      return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
+    }
+    if (!historicalCaseMayProject(issue.body, item.criterion)) {
+      return { projected: false, reason: 'PR Case cannot replay or overwrite an existing SC verdict' };
+    }
+    const context = buildAcceptanceContext(issue, 'pr', {
+      method: 'case', targetRef: item.target_sha, runId: item.run_id,
+    });
+    const normalized = normalizeAcceptanceCaseResult(context, item, 'case-runner');
+    const updatedBody = applyAcceptanceResultToBody(issue.body, normalized);
+    if (updatedBody === issue.body) return { projected: true, changed: false };
+    await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, {
+      token, method: 'PATCH', body: { body: updatedBody },
+    });
+    return { projected: true, changed: true };
   }
 
   if (item.deployment) {
@@ -1510,6 +1713,159 @@ async function selfTest() {
   assert.throws(() => caseIndexRecord(deployedEnriched), /requires trusted deployment records/);
   assert.throws(() => caseIndexRecord(deployedEnriched, { deploymentRecords: [] }),
     /missing or ambiguous/);
+
+  // #3611: historical exact-head PR Case ingestion and negative trust fixtures.
+  const smokeSha = 'b'.repeat(40);
+  const smokeIssueBody = [
+    '## Success Criteria',
+    '- [ ] SC-14 Browser Session metadata invalidates on new incarnation.',
+    '## Acceptance Plan',
+    '~~~yaml',
+    'acceptance:',
+    '  SC-14:',
+    '    when: pr',
+    '    method: case',
+    '~~~',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-14 | Pending | Awaiting exact-head browser Case |',
+  ].join('\n').replaceAll('~~~', String.fromCharCode(96).repeat(3));
+  let smokeIssue = { number: 1474, title: 'Browser metadata cache',
+    state: 'open', labels: [{ name: 'bug' }], body: smokeIssueBody };
+  const smokeContext = buildAcceptanceContext(smokeIssue, 'pr', {
+    method: 'case', targetRef: smokeSha, runId: 100,
+  });
+  const smokeRecord = fixtureRecord({ stage: 'pr', target_sha: smokeSha,
+    case_revision: smokeSha,
+    criterion_text: 'Browser Session metadata invalidates on new incarnation.',
+    contract_sha256: smokeContext.contract_sha256 });
+  smokeRecord.execution_id = crypto.createHash('sha256').update(JSON.stringify({
+    schema_version: 1, run_id: smokeRecord.run_id,
+    run_attempt: smokeRecord.run_attempt, target_sha: smokeRecord.target_sha,
+    issue: smokeRecord.issue, criterion: smokeRecord.criterion,
+    contract_sha256: smokeRecord.contract_sha256,
+    case_tree_sha: smokeRecord.case_tree_sha,
+  })).digest('hex');
+  const smokeRun = { ...fixtureEvent.workflow_run,
+    name: 'Acceptance / Case Smoke',
+    path: '.github/workflows/acceptance-case-smoke.yml',
+    event: 'pull_request', head_branch: 'fix/1474-cache',
+    head_sha: smokeSha, workflow_id: 17,
+    created_at: '2026-11-14T19:19:11Z', run_number: 1, pull_requests: [] };
+  const smokeSource = sourceRunIdentity({ workflow_run: smokeRun }, 'BestNathan/nession');
+  assert.equal(smokeSource.source_kind, 'pr-smoke');
+  for (const bad of [
+    { path: '.github/workflows/acceptance-cases.yml' },
+    { event: 'workflow_dispatch' },
+    { conclusion: 'failure' },
+  ]) {
+    assert.throws(() => sourceRunIdentity({
+      workflow_run: { ...smokeRun, ...bad },
+    }, 'BestNathan/nession'));
+  }
+  const smokePr = { number: 70, title: 'fix: metadata', body: 'Refs #1474',
+    state: 'closed', merged: true,
+    head: { sha: smokeSha, ref: smokeRun.head_branch,
+      repo: { full_name: 'BestNathan/nession' } },
+    base: { ref: 'staging', repo: { full_name: 'BestNathan/nession' } },
+    created_at: '2026-11-14T18:00:00Z', merged_at: '2026-11-14T20:00:00Z' };
+  const stepNames = ['Validate canonical Case contracts and generic selection',
+    'Select PR-linked Case-method proofs (trusted main policy)',
+    'Run selected source-aligned Cases through one job-scoped batch',
+    'Run actions/upload-artifact@v4'];
+  const smokeJob = { id: 41, name: 'case-smoke', run_id: 100,
+    run_attempt: 1, head_sha: smokeSha, status: 'completed',
+    conclusion: 'success', steps: stepNames.map((name, index) => ({
+      name, number: index + 1, status: 'completed', conclusion: 'success' })) };
+  const smokeArtifact = { id: 55, name: 'acceptance-case-smoke-100-1',
+    expired: false, size_in_bytes: 1024,
+    workflow_run: { id: 100, head_sha: smokeSha } };
+  const smokeQuality = ['ci-quality.yml', 'e2e-tests.yml'].map((name, index) => ({
+    id: 80 + index, path: '.github/workflows/' + name,
+    event: 'pull_request', head_sha: smokeSha, head_branch: smokeRun.head_branch,
+    repository: { full_name: 'BestNathan/nession' },
+    head_repository: { full_name: 'BestNathan/nession' },
+    status: 'completed', conclusion: 'success', run_attempt: 1,
+    run_number: 1, created_at: smokeRun.created_at }));
+  const smokeApi = async (path, options = {}, overrides = {}) => {
+    if (path.endsWith('/actions/runs/100')) return overrides.run ?? smokeRun;
+    if (path.endsWith('/commits/' + smokeSha + '/pulls?per_page=100'))
+      return overrides.linked ?? [{ number: 70 }];
+    if (path.endsWith('/pulls/70')) return overrides.pr ?? smokePr;
+    if (path.endsWith('/attempts/1/jobs?per_page=100'))
+      return { total_count: 1, jobs: [overrides.job ?? smokeJob] };
+    if (path.endsWith('/runs/100/artifacts?per_page=100'))
+      return { total_count: 1, artifacts: [overrides.artifact ?? smokeArtifact] };
+    if (path.includes('/actions/runs?head_sha=' + smokeSha))
+      return { total_count: 2, workflow_runs: overrides.checks ?? smokeQuality };
+    if (path.endsWith('/issues/1474')) {
+      if (options.method === 'PATCH') smokeIssue = { ...smokeIssue, body: options.body.body };
+      return smokeIssue;
+    }
+    throw Error('unmocked PR Case source: ' + path);
+  };
+  const smokeOptions = { repository: 'BestNathan/nession', token: 'offline-proof' };
+  const certifiedSmoke = await attestPrSmokeSource(smokeRecord, smokeSource, {
+    ...smokeOptions, request: smokeApi });
+  assert.equal(certifiedSmoke.pr_binding.pr_number, 70);
+  assert.equal(certifiedSmoke.pr_binding.artifact_id, 55);
+  assert.equal(assertSourceBoundRecord(smokeRecord, certifiedSmoke).stage, 'pr');
+  assert.throws(() => assertSourceBoundRecord(smokeRecord, smokeSource));
+  assert.throws(() => assertSourceBoundRecord({
+    ...smokeRecord, contract_sha256: 'f'.repeat(64),
+  }, certifiedSmoke), /execution_id/);
+  assert.throws(() => assertSourceBoundRecord({
+    ...smokeRecord, run_attempt: 2,
+  }, certifiedSmoke), /run identity/);
+  for (const [label, overrides] of [
+    ['stale head', { pr: { ...smokePr, head: { ...smokePr.head, sha: 'f'.repeat(40) } } }],
+    ['wrong issue', { pr: { ...smokePr, body: 'Refs #9000' } }],
+    ['wrong base', { pr: { ...smokePr, base: { ...smokePr.base, ref: 'unknown' } } }],
+    ['unmerged closure', { pr: { ...smokePr, merged: false, state: 'closed' } }],
+    ['run after merge', { run: { ...smokeRun, created_at: '2026-11-15T20:00:00Z' } }],
+    ['skipped execution', { job: { ...smokeJob,
+      steps: smokeJob.steps.map(step => step.name.startsWith('Run selected')
+        ? { ...step, conclusion: 'skipped' } : step) } }],
+    ['failed source job', { job: { ...smokeJob, conclusion: 'failure' } }],
+    ['wrong job attempt', { job: { ...smokeJob, run_attempt: 2 } }],
+    ['expired artifact', { artifact: { ...smokeArtifact, expired: true } }],
+    ['wrong artifact attempt', { artifact: { ...smokeArtifact, name: 'acceptance-case-smoke-100-2' } }],
+    ['required E2E pending', { checks: smokeQuality.map((run, index) =>
+      index === 1 ? { ...run, conclusion: 'skipped' } : run) }],
+    ['required CI wrong SHA', { checks: smokeQuality.map((run, index) =>
+      index === 0 ? { ...run, head_sha: 'f'.repeat(40) } : run) }],
+  ]) {
+    await assert.rejects(() => attestPrSmokeSource(smokeRecord, smokeSource, {
+      ...smokeOptions, request: (path, opts) => smokeApi(path, opts, overrides),
+    }), undefined, label + ' must fail closed');
+  }
+  await assert.rejects(() => attestPrSmokeSource({
+    ...smokeRecord, result: 'Pending',
+    verifiers: [{ ...smokeRecord.verifiers[0], result: 'Pending' }],
+  }, smokeSource, { ...smokeOptions, request: smokeApi }), /Pass-only/);
+  const smokeEnriched = enrichCaseRecord(smokeRecord, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(smokeRecord), source: certifiedSmoke });
+  const smokeIndex = caseIndexRecord(smokeEnriched);
+  assert.equal(smokeIndex.stage, 'pr');
+  assert.equal(smokeIndex.source.pr_binding.case_job_id, 41);
+  await assert.rejects(() => applyCaseRecord(smokeRecord, {
+    ...smokeOptions, request: smokeApi,
+  }), /immutable trusted Store provenance/);
+  assert.deepEqual(await applyCaseRecord(smokeEnriched, {
+    ...smokeOptions, request: smokeApi,
+  }), { projected: true, changed: true });
+  assert.match(smokeIssue.body, /- \[x\] SC-14/);
+  assert.match(smokeIssue.body, /\| SC-14 \| Pass \| run 100;/);
+  assert.equal((await applyCaseRecord(smokeEnriched, {
+    ...smokeOptions, request: smokeApi,
+  })).projected, false, 'replay cannot rewrite accepted SC');
+  smokeIssue = { ...smokeIssue, body: smokeIssueBody.replace('method: case', 'method: agent') };
+  await assert.rejects(() => applyCaseRecord(smokeEnriched, {
+    ...smokeOptions, request: smokeApi,
+  }), /contract digest|selected method/);
+
   console.log('acceptance Case ingest self-test: provenance, deployment binding and record validation passed');
 }
 
@@ -1555,6 +1911,7 @@ async function main() {
     fs.writeFileSync(output, JSON.stringify(resolved.event) + '\n', { flag: 'wx' });
     process.stdout.write(JSON.stringify({
       run_id: resolved.source.run_id, run_attempt: resolved.source.run_attempt,
+      source_kind: resolved.source.source_kind ?? 'merged-case',
       source_conclusion: resolved.event.workflow_run.conclusion,
       source_url: 'https://github.com/' + resolved.source.repository +
         '/actions/runs/' + resolved.source.run_id,
