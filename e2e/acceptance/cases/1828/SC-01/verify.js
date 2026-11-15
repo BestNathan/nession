@@ -26,8 +26,8 @@ function validateSource(env, checkoutSha) {
 }
 
 function validateTrustedPipeline(ingest, readback, cases) {
-  assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases", "Comment Case #\*"\]\s*$/m,
-    'Case Ingest must subscribe only to the canonical source and bounded comment Run family');
+  assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases"\]\s*$/m,
+    'native Case Ingest must remain restricted to the canonical static source');
   assert.match(ingest, /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*source_run_id:/,
     'comment Cases require a distinct authenticated source-run dispatch');
   assert.match(ingest, /acceptance-case-ingest\.mjs prepare-event/,
@@ -77,9 +77,8 @@ function test() {
   const readback = fs.readFileSync(path.join(root, '.github/workflows/store-receipt-readback.yml'), 'utf8');
   const cases = fs.readFileSync(path.join(root, '.github/workflows/acceptance-cases.yml'), 'utf8');
   validateTrustedPipeline(ingest, readback, cases);
-  assert.throws(() => validateTrustedPipeline(ingest.replace('Comment Case #*', 'Comment Case *'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Cases"', '"Other workflow"'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest, readback, cases.replace('wake-comment-ingest:', 'disabled-wake:')));
-  assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Cases", "Comment Case #*"', '"Acceptance / Cases"'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest.replace('ref: main', 'ref: arbitrary'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest.replace('run-store-cas-push.mjs', 'unsafe-push'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest, readback.replace('contents: read', 'contents: write'), cases));
