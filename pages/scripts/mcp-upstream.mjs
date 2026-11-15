@@ -25,17 +25,17 @@ export async function loadStableMcpRelease({api}){
   if(file?.encoding!=='base64'||!SHA.test(file.sha||'')||
      typeof file.content!=='string'||file.content.length>400_000)
     throw Error('Unverified pinned MCP changelog');
-  const bytes=Buffer.from(file.content.replace(/\\s/g,''),'base64');
+  const bytes=Buffer.from(file.content.replace(/\s/g,''),'base64');
   if(bytes.length<50||bytes.length>250_000)
     throw Error('Invalid MCP changelog size');
-  const gitBlob=createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex');
+  const gitBlob=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');
   if(gitBlob!==file.sha)throw Error('Upstream changelog Git blob SHA mismatch');
   const markdown=bytes.toString('utf8');
   if(!markdown.includes('Key Changes'))throw Error('Unexpected upstream changelog content');
-  const previous=/previous revision[^\\n]*\\[([0-9]{4}-[0-9]{2}-[0-9]{2})\\]/i.exec(markdown)?.[1]||null;
-  const major=markdown.split(/^## Major changes\\s*$/m)[1]?.split(/^## /m)[0]||'';
-  const highlights=[...major.matchAll(/^[0-9]+\\.\\s+(.+)$/gm)].slice(0,6)
-    .map(m=>m[1].replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g,'$1')
+  const previous=/previous revision[^\n]*\[([0-9]{4}-[0-9]{2}-[0-9]{2})\]/i.exec(markdown)?.[1]||null;
+  const major=markdown.split(/^## Major changes\s*$/m)[1]?.split(/^## /m)[0]||'';
+  const highlights=[...major.matchAll(/^[0-9]+\.\s+(.+)$/gm)].slice(0,6)
+    .map(m=>m[1].replace(/\[([^\]]+)\]\([^)]+\)/g,'$1')
       .replace(/[\x60*_<>]/g,'').trim().slice(0,300)).filter(Boolean);
   return {
     version,sha,previous_version:previous,
