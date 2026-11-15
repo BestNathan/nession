@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "issue": 3433,
+  "version": 13,
+  "phase": "repair",
+  "target_sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+  "repair_attempts": 1,
+  "transitions": [
+    {
+      "key": "d7d22af47d68f7ade91ee778d84c8ef784357557a693c30cc33b0c02df56fb0e",
+      "kind": "publisher",
+      "run_id": 43607502468,
+      "attempt": 1,
+      "target_sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+      "outcome": "published"
+    },
+    {
+      "key": "ea8dd832f820af3d1b7ca0a36c400c316cedc9fb13161e7e0838d922a9c3e130",
+      "kind": "reviewer",
+      "run_id": 43669396046,
+      "attempt": 1,
+      "target_sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+      "outcome": "changes_requested"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "66a3bf916ce573adda08135524a2bb6d4db2a0a2125cab0bfdce2664e78614b6",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "66a3bf916ce573adda08135524a2bb6d4db2a0a2125cab0bfdce2664e78614b6",
+        "source_run_id": 43667393107,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_publisher_trigger_pre_model_failure"
+      }
+    },
+    {
+      "id": "bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "repair",
+        "sha": "a9b3f9e1d78ef5c9ae0f97136d753da0ca6fc9ba",
+        "resume": true,
+        "agent_id": "dev-qwen-01",
+        "repair_checkpoint": {
+          "checkpoint_version": 1,
+          "checkpoint_commit_sha": "bf15fad2fb290261fe982b62e6b649b0f1678ad9",
+          "ciphertext_sha256": "a09a65e15263c389fa3d441a17e7c2e4377018efdf64bdad014f14d64928c87d",
+          "source_sha": "2e31599db8cf280f4a719616b89153ee20182eaf",
+          "source_run_id": 43578706212
+        }
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856",
+        "source_run_id": 43677482758
+      }
+    }
+  ]
+}
