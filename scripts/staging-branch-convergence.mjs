@@ -690,7 +690,7 @@ function selfTest() {
   // #3247: prove the actual workflow job-if accepts the authenticated
   // post-deployment completion, not merely a copied JS approximation.
   assert.match(workflow,
-    /workflows: \[[^\n]*'Release \/ Staging Artifacts'[^\n]*\]/);
+    /workflows: \[[^\n]*'Deploy \/ Staging ACR'[^\n]*\]/);
   const releaseWake = {
     event: 'push',
     name: 'Deploy / Staging ACR',
