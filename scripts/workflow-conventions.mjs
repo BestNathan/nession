@@ -77,6 +77,7 @@ export const CATALOG = [
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['deploy-identity', 'deploy-identity.yml', 'Deploy / Identity', 'deploy-identity.yml', 'Deploy / Identity', 'delivery'],
+  ['deploy-staging-acr', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'delivery'],
   ['deploy-oci-pull-readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'delivery'],
   ['deploy-identity-ingest', 'deploy-identity-ingest.yml', 'Deploy / Identity Ingest', 'deploy-identity-ingest.yml', 'Deploy / Identity Ingest', 'delivery'],
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
