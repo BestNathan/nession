@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "0bc13cd08f4066aea4a54912b3d5d695d8fad35e",
+  "scenario_revision": "0bc13cd08f4066aea4a54912b3d5d695d8fad35e",
+  "run_id": 43743106841,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-15T17:51:41.053Z",
+  "finished_at": "2026-11-15T17:51:50.817Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-15T17:51:49.923Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "eaaa75ada784b5ccc466993da0d4612a5b8bdf61bc7e975a6ea6ee94baec16c7",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-15T17:51:50.222Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "eaaa75ada784b5ccc466993da0d4612a5b8bdf61bc7e975a6ea6ee94baec16c7",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-15T17:51:50.746Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "eaaa75ada784b5ccc466993da0d4612a5b8bdf61bc7e975a6ea6ee94baec16c7",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43743106841,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3661-membership-cas-aba",
+    "target_sha": "0bc13cd08f4066aea4a54912b3d5d695d8fad35e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43743106841",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "c5b12df1ee23062c90b06121d1f9fb499e48ba1243eece4619a9f7cdff4a4a9f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-43743106841-1",
+    "sha256": "c5b12df1ee23062c90b06121d1f9fb499e48ba1243eece4619a9f7cdff4a4a9f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43743106841",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "ad10a6a0839768c935f03ce136e6cf1e1a5d5049c55ccfb3a8e5b4bb51b244fc"
+}
