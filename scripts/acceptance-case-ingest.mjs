@@ -223,6 +223,46 @@ export function sourceRunIdentity(event, repository) {
   };
 }
 
+/**
+ * Convert a bot-origin explicit wake into an authenticated source event.
+ * GITHUB_TOKEN dispatches do not produce a recursive workflow_run event; the
+ * Case producer wakes us only after both source execution jobs have settled.
+ * A run ID is a locator, NEVER permission to ingest an artifact.
+ */
+export async function resolveCaseIngestSourceEvent(event, {
+  repository, token, request = githubRequest, pause = sleep,
+  actor = process.env.GITHUB_ACTOR, ref = process.env.GITHUB_REF,
+} = {}) {
+  if (event?.workflow_run) {
+    const source = sourceRunIdentity(event, repository);
+    return { event, source };
+  }
+  if (event?.repository?.full_name !== repository ||
+      actor !== 'github-actions[bot]' || ref !== 'refs/heads/main' ||
+      !event?.inputs || Object.keys(event.inputs).some(key => key !== 'source_run_id')) {
+    throw new Error('Case Ingest dispatch requires the exact bot-owned main source-run locator');
+  }
+  const runId = positiveInt(event.inputs.source_run_id, 'source_run_id');
+  let run = null;
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    run = await request('/repos/' + repository + '/actions/runs/' + runId, { token });
+    if (run?.status === 'completed') break;
+    if (attempt < 24) await pause(2000);
+  }
+  if (run?.status !== 'completed') throw new Error('comment Case source Run did not complete within the bounded readback');
+  // REST returns static workflow "name" and dynamic "display_title".
+  // The original workflow_dispatch input binds the display title; never take
+  // this name from the dispatch payload or from uploaded Case JSON.
+  const sourceEvent = { workflow_run: { ...run, name: run.display_title } };
+  const source = sourceRunIdentity(sourceEvent, repository);
+  if (source.run_id !== runId || !source.comment_case ||
+      source.event !== 'workflow_dispatch' || source.head_branch !== 'main' ||
+      source.run_attempt !== 1 || run.actor?.login !== 'github-actions[bot]') {
+    throw new Error('explicit Case Ingest wake is not an authenticated comment-bound bot Run');
+  }
+  return { event: sourceEvent, source };
+}
+
 // Lane-aware proof boundary: a `when: deployed` criterion is eligible only
 // with a deployment binding for its declared environment. Legacy branch-stage
 // criteria keep their exact behaviour and must not carry a deployment block.
@@ -374,6 +414,15 @@ export async function attestManualStagingSource(record, source, {
       throw new Error('manual Case GitHub source job identity is unverified');
     }
     const checkoutIndex = job.steps.findIndex(step => step.name === 'Checkout exact target SHA');
+    if (source.comment_case) {
+      const commentSteps = job.steps.map((step, index) => ({ step, index })).filter(
+        ({ step }) => step.name === 'Verify original human Case comment and source-bound target');
+      if (commentSteps.length !== 1 || commentSteps[0].index >= checkoutIndex ||
+          commentSteps[0].step.status !== 'completed' ||
+          commentSteps[0].step.conclusion !== 'success') {
+        throw new Error('original human comment was not authenticated before target checkout');
+      }
+    }
     for (const [index, step] of job.steps.entries()) {
       if (!String(step.name ?? '').startsWith(manualPrefix)) continue;
       const fields = manualPattern.exec(step.name);
@@ -944,6 +993,33 @@ async function selfTest() {
   assert.throws(() => sourceRunIdentity({ workflow_run: {
     ...commentEvent.workflow_run, repository: { full_name: 'other/nession' },
   } }, 'BestNathan/nession'), /repository mismatch/);
+  // Explicit GITHUB_TOKEN comment wakes must re-fetch GitHub's Run, not
+  // reconstruct evidence from a caller-selected display name or artifact.
+  const wakeEvent = { repository: { full_name: 'BestNathan/nession' },
+    inputs: { source_run_id: '100' } };
+  const wakeRun = { ...commentEvent.workflow_run, id: 100,
+    name: 'Acceptance / Cases', display_title: commentEvent.workflow_run.name,
+    actor: { login: 'github-actions[bot]' } };
+  const wakeOptions = { repository: 'BestNathan/nession',
+    actor: 'github-actions[bot]', ref: 'refs/heads/main',
+    request: async () => wakeRun, pause: async () => {} };
+  const verifiedWake = await resolveCaseIngestSourceEvent(wakeEvent, wakeOptions);
+  assert.equal(verifiedWake.source.comment_case.comment_id, 999);
+  for (const denied of [
+    { actor: 'attacker' }, { ref: 'refs/heads/staging' },
+    { request: async () => ({ ...wakeRun, actor: { login: 'attacker' } }) },
+    { request: async () => ({ ...wakeRun, display_title: 'Other workflow' }) },
+    { request: async () => ({ ...wakeRun, path: '.github/workflows/other.yml' }) },
+    { request: async () => ({ ...wakeRun, id: 101 }) },
+    { request: async () => ({ ...wakeRun, run_attempt: 2 }) },
+    { request: async () => ({ ...wakeRun, status: 'queued' }) },
+  ]) {
+    await assert.rejects(() => resolveCaseIngestSourceEvent(wakeEvent,
+      { ...wakeOptions, ...denied }), /Case Ingest|Case source|completed Acceptance|workflow definition|source_run_id|not an authenticated|expected a completed/);
+  }
+  await assert.rejects(() => resolveCaseIngestSourceEvent({
+    ...wakeEvent, inputs: { source_run_id: '100', other: 'payload' },
+  }, wakeOptions), /Case Ingest dispatch/);
   // Exercise the actual attest path without credentials: a fetched source commit
   // must contain the exact Case tree claimed by the immutable record.
   const sourceTree = 'f'.repeat(40);
@@ -1428,6 +1504,23 @@ async function main() {
     process.stdout.write(caseIndexPath(record) + '\n');
     return;
   }
+  if (command === 'prepare-event') {
+    const input = process.argv[3] || process.env.GITHUB_EVENT_PATH;
+    const output = process.argv[4];
+    if (!input || !output) throw new Error('prepare-event EVENT OUT required');
+    const event = JSON.parse(fs.readFileSync(input, 'utf8'));
+    const resolved = await resolveCaseIngestSourceEvent(event, {
+      repository: process.env.GITHUB_REPOSITORY,
+      token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
+    });
+    fs.writeFileSync(output, JSON.stringify(resolved.event) + '\n', { flag: 'wx' });
+    process.stdout.write(JSON.stringify({
+      run_id: resolved.source.run_id, run_attempt: resolved.source.run_attempt,
+      source_url: 'https://github.com/' + resolved.source.repository +
+        '/actions/runs/' + resolved.source.run_id,
+    }) + '\n');
+    return;
+  }
   if (command === 'attest') {
     const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     const event = JSON.parse(fs.readFileSync(process.argv[4] || process.env.GITHUB_EVENT_PATH, 'utf8'));
@@ -1466,7 +1559,7 @@ async function main() {
     process.stdout.write(JSON.stringify(result) + '\n');
     return;
   }
-  throw new Error('usage: node scripts/acceptance-case-ingest.mjs <self-test|validate FILE|attest FILE EVENT|record-path FILE|index RECORD OUTPUT|enrich IN OUT WORKFLOW_URL RECORD_PATH EVENT|apply FILE>');
+  throw new Error('usage: node scripts/acceptance-case-ingest.mjs <self-test|validate FILE|prepare-event EVENT OUT|attest FILE EVENT|record-path FILE|index RECORD OUTPUT|enrich IN OUT WORKFLOW_URL RECORD_PATH EVENT|apply FILE>');
 }
 
 if (import.meta.url === 'file://' + process.argv[1]) {
