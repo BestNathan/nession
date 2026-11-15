@@ -8,6 +8,7 @@ const REPO = 'BestNathan/nession';
 const WORKFLOW = '.github/workflows/ci-quality.yml';
 const SHA = /^[a-f0-9]{40}$/i;
 const GATE_STEP = 'Verify Web and design Gates';
+const RUST_STEP = 'Verify Rust and Acceptance Gates';
 const CHECK_STEP = 'Enforce applicable Quality results at the stable check name';
 
 // A criterion can require executed Web Quality in two explicit ways:
@@ -70,6 +71,16 @@ export function validWebQualityReceipt(receipt, sha) {
     receipt.web_check_step === CHECK_STEP);
 }
 
+export function validRustQualityReceipt(receipt, sha) {
+  return Boolean(receipt && SHA.test(String(sha)) &&
+    receipt.kind === 'pr_rust_quality_execution_v1' &&
+    receipt.repository === REPO && receipt.workflow === WORKFLOW &&
+    receipt.head_sha === sha && receipt.result === 'success' &&
+    positiveInteger(receipt.run_id) && positiveInteger(receipt.run_attempt) &&
+    positiveInteger(receipt.rust_job_id) &&
+    receipt.rust_gate_step === RUST_STEP);
+}
+
 function successfulJob(jobs, name, step, run, attempt) {
   const matches = jobs.filter(job => job?.name === name);
   if (matches.length !== 1) return { reason: name + ' job is missing or ambiguous' };
@@ -115,6 +126,25 @@ export function requiresPrToolingEvidence(context) {
     /\bSCN-05\b/.test(String(context.requirement_body ?? '')) &&
     (context.criteria ?? []).some(item =>
       /\b(?:CI|Quality|Gate|workflow|test)\b/i.test(String(item.text ?? '')));
+}
+
+// A PR-stage criterion can make the exact-head Rust Quality job its own
+// proof obligation ("Exact-head Rust coverage/Quality ... completes
+// successfully", #3584 SC-02). The obligation is deliberately narrow: the
+// same criterion must name Rust, an exact head/SHA, a Quality/coverage/CI/
+// test boundary, and an execution outcome. Merely mentioning Rust source or
+// a policy narrative never activates collection.
+export function requiresExactHeadRustQuality(criterion) {
+  const text = String(criterion?.text ?? '');
+  return /\brust\b/i.test(text) &&
+    /\b(?:exact[- ]head|exact[- ]sha|pr[- ]head|head[- ]sha)\b/i.test(text) &&
+    /\b(?:quality|coverage|ci|test|gate)\b/i.test(text) &&
+    /\b(?:pass(?:es|ed)?|succeed(?:s|ed)?|complete(?:s|d)?|execut(?:e|ed)|run(?:s|ning)?|green)\b/i.test(text);
+}
+
+export function requiresPrRustQualityEvidence(context) {
+  return context?.stage === 'pr' &&
+    (context.criteria ?? []).some(requiresExactHeadRustQuality);
 }
 
 export function attestPrWebQuality(sha, runsPayload, jobsPayload) {
@@ -212,11 +242,21 @@ export function attestPrToolingQuality(sha, runsPayload, jobsPayload) {
   const aggregate = successfulJob(jobsPayload.jobs, 'web-check',
     CHECK_STEP, run, run.run_attempt);
   if (!tooling.id || !aggregate.id) {
-    const reason = [tooling.reason, aggregate.reason].filter(Boolean).join('; ');
+    // A path-scoped Quality job that was skipped is NOT APPLICABLE to this
+    // exact-head change (for example a Rust-only PR whose tooling Gates were
+    // not selected). It is not a failure, and must not be reported as one.
+    // The aggregate `web-check` is unconditional, so its skip stays a failure.
+    const skippedTooling = jobsPayload.jobs.some(job =>
+      job.name === 'tooling-check' && job.status === 'completed' &&
+      job.conclusion === 'skipped');
+    const reason = [tooling.reason, aggregate.reason].filter(Boolean).join('; ') +
+      (skippedTooling && !tooling.id
+        ? ' (tooling Gates were not applicable to the exact-head change)' : '');
     const fail = jobsPayload.jobs.some(job =>
       ['tooling-check', 'web-check'].includes(job.name) &&
       job.status === 'completed' &&
-      ['failure', 'timed_out', 'cancelled', 'skipped'].includes(job.conclusion));
+      (['failure', 'timed_out', 'cancelled'].includes(job.conclusion) ||
+        (job.name === 'web-check' && job.conclusion === 'skipped')));
     return { status: fail ? 'fail' : 'pending', reason };
   }
   return { status: 'pass', receipt: {
@@ -243,6 +283,64 @@ export function collectPrToolingQuality(sha, request = githubJson) {
     console.error('Trusted PR tooling Quality readback failed:',
       error instanceof Error ? error.message : String(error));
     return { status: 'pending', reason: 'authenticated GitHub tooling Quality readback unavailable' };
+  }
+}
+
+// A third typed receipt from the SAME exact-attempt PR Quality run selector.
+// It attests that the canonical Rust Quality job (including the Rust
+// coverage Gate owned by `--suite quality-rust`) actually executed and
+// passed at the exact PR head. A skipped rust-check proves inapplicability,
+// never execution; a failed/cancelled one is a real fail.
+export function attestPrRustQuality(sha, runsPayload, jobsPayload) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  const matching = matchingQualityRuns(runsPayload?.workflow_runs, sha);
+  if (!matching.length) {
+    return { status: 'pending', reason: 'no authenticated exact-HEAD PR Quality run' };
+  }
+  const run = matching[0];
+  if (run.status !== 'completed' || run.conclusion !== 'success') {
+    return { status: run.status === 'completed' ? 'fail' : 'pending',
+      reason: 'Quality workflow is ' + String(run.status ?? 'unknown') +
+        '/' + String(run.conclusion ?? 'pending') };
+  }
+  if (!Array.isArray(jobsPayload?.jobs) || jobsPayload.total_count > 100 ||
+      jobsPayload.jobs.length > 100) {
+    return { status: 'pending', reason: 'exact-attempt Quality job evidence unavailable' };
+  }
+  const rust = successfulJob(jobsPayload.jobs, 'rust-check', RUST_STEP,
+    run, run.run_attempt);
+  if (!rust.id) {
+    const rustJobs = jobsPayload.jobs.filter(job => job?.name === 'rust-check');
+    const failed = rustJobs.some(job => job.status === 'completed' &&
+      ['failure', 'timed_out', 'cancelled'].includes(job.conclusion));
+    const skipped = rustJobs.some(job => job.status === 'completed' &&
+      job.conclusion === 'skipped');
+    return { status: failed ? 'fail' : 'pending',
+      reason: rust.reason +
+        (skipped ? ' (Rust Quality was not applicable to the exact-head change)' : '') };
+  }
+  return { status: 'pass', receipt: {
+    kind: 'pr_rust_quality_execution_v1', repository: REPO,
+    workflow: WORKFLOW, head_sha: sha,
+    run_id: run.id, run_attempt: run.run_attempt, result: 'success',
+    rust_job_id: rust.id, rust_gate_step: RUST_STEP,
+    note: 'Verified exact-head Rust Quality execution only; not a Web or tooling receipt',
+  }};
+}
+
+export function collectPrRustQuality(sha, request = githubJson) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  try {
+    const q = new URLSearchParams({head_sha: sha, event: 'pull_request', per_page: '25'});
+    const runs = request('/repos/' + REPO + '/actions/workflows/ci-quality.yml/runs?' + q);
+    const candidate = matchingQualityRuns(runs?.workflow_runs, sha)[0];
+    const jobs = candidate ? request('/repos/' + REPO + '/actions/runs/' + candidate.id +
+      '/attempts/' + candidate.run_attempt + '/jobs?per_page=100') : null;
+    return attestPrRustQuality(sha, runs, jobs);
+  } catch (error) {
+    console.error('Trusted PR Rust Quality readback failed:',
+      error instanceof Error ? error.message : String(error));
+    return { status: 'pending', reason: 'authenticated GitHub Rust Quality readback unavailable' };
   }
 }
 
@@ -277,6 +375,39 @@ export function enforcePrWebQuality(context, normalized) {
   return {
     ...normalized, criteria,
     ...(receipt ? { pr_web_quality_receipt: receipt } : {}),
+  };
+}
+
+export function enforcePrRustQuality(context, normalized) {
+  if (context.stage !== 'pr') return normalized;
+  const required = new Set((context.criteria ?? [])
+    .filter(requiresExactHeadRustQuality)
+    .map(item => item.criterion));
+  if (!required.size) return normalized;
+  const observation = context.pr_rust_quality;
+  const receipt = observation?.status === 'pass' &&
+    validRustQualityReceipt(observation.receipt, context.target_ref)
+    ? observation.receipt : null;
+  const criteria = normalized.criteria.map(item => {
+    if (!required.has(item.criterion) || item.result !== 'Pass') return item;
+    if (!receipt) {
+      return {
+        ...item, result: 'Pending',
+        summary: 'Required exact-HEAD Rust Quality execution not verified: ' +
+          String(observation?.reason ?? 'missing authenticated Quality Gate receipt').slice(0,240),
+        evidence: [{ type: 'quality-gate', value: 'Pending: required Rust Quality job is not completed successfully at ' +
+          context.target_ref }],
+      };
+    }
+    return { ...item, evidence: [...item.evidence, {
+      type: 'quality-gate',
+      value: 'CI / Quality Gate run ' + receipt.run_id + '/' + receipt.run_attempt +
+        ' head ' + receipt.head_sha + ' rust-check job ' + receipt.rust_job_id + ': succeeded',
+    }] };
+  });
+  return {
+    ...normalized, criteria,
+    ...(receipt ? { pr_rust_quality_receipt: receipt } : {}),
   };
 }
 
@@ -341,6 +472,69 @@ function selfTest() {
   assert.equal(requiresPrToolingEvidence({ stage: 'pr',
     requirement_body: 'SCN-01 Web fixtures',
     criteria: [{ text: 'An exact-head Web Gate cannot Pass while pending' }] }), false);
+
+  // #3584 SC-02: the exact-head Rust Quality job is positive evidence; a
+  // skipped job is inapplicable (never a failure) and a failed one is Fail.
+  const rustJobs = { total_count: 2, jobs: [
+    job('rust-check', 13, RUST_STEP), jobs.jobs[1]] };
+  const rust = attestPrRustQuality(sha, completed, rustJobs);
+  assert.equal(rust.status, 'pass');
+  assert.equal(rust.receipt.rust_job_id, 13);
+  assert.equal(validRustQualityReceipt(rust.receipt, sha), true);
+  assert.equal(validRustQualityReceipt(rust.receipt, other), false);
+  assert.equal(validRustQualityReceipt({
+    ...rust.receipt, kind: 'pr_tooling_quality_execution_v1',
+  }, sha), false);
+  assert.equal(attestPrRustQuality(sha, completed, {
+    ...rustJobs, jobs: [{ ...rustJobs.jobs[0], conclusion: 'skipped' }, jobs.jobs[1]],
+  }).status, 'pending');
+  assert.equal(attestPrRustQuality(sha, completed, {
+    ...rustJobs, jobs: [{ ...rustJobs.jobs[0], conclusion: 'failure' }, jobs.jobs[1]],
+  }).status, 'fail');
+  assert.equal(attestPrRustQuality(sha, completed, {
+    ...rustJobs, jobs: [{ ...rustJobs.jobs[0], steps: [] }, jobs.jobs[1]],
+  }).status, 'pending');
+  assert.equal(attestPrRustQuality(sha, completed, {
+    ...rustJobs, jobs: [{ ...rustJobs.jobs[0], run_attempt: 1 }, jobs.jobs[1]],
+  }).status, 'pending');
+  assert.equal(attestPrRustQuality(other, completed, rustJobs).status, 'pending');
+  assert.equal(attestPrRustQuality(sha, { workflow_runs: [run] }, rustJobs).status,
+    'pending');
+  // A skipped path-scoped tooling job is inapplicability, not failure (#3584).
+  const skippedTooling = { ...toolingJobs,
+    jobs: [{ ...toolingJobs.jobs[0], conclusion: 'skipped' }, jobs.jobs[1]] };
+  assert.equal(attestPrToolingQuality(sha, completed, skippedTooling).status, 'pending');
+  assert.match(attestPrToolingQuality(sha, completed, skippedTooling).reason,
+    /not applicable/);
+  // Classifier: only an explicit exact-head Rust Quality execution obligation.
+  const rustSc = { criterion: 'SC-02',
+    text: 'Exact-head Rust coverage/Quality on the repair PR completes successfully; no quality or Acceptance Gate is waived.' };
+  assert.equal(requiresExactHeadRustQuality(rustSc), true);
+  assert.equal(requiresExactHeadRustQuality({ criterion: 'SC-01',
+    text: 'The Rust attach route rejects an unauthenticated P2P candidate.' }), false);
+  assert.equal(requiresExactHeadRustQuality({ criterion: 'SC-02',
+    text: 'The exact-head Web Quality check passes.' }), false);
+  assert.equal(requiresExactHeadRustQuality({ criterion: 'SC-02',
+    text: 'Rust test source at the exact head is reviewed.' }), false);
+  assert.equal(requiresPrRustQualityEvidence({ stage: 'pr', criteria: [rustSc] }), true);
+  assert.equal(requiresPrRustQualityEvidence({ stage: 'staging', criteria: [rustSc] }), false);
+  // Enforcement mirrors Web: a Pass needs the valid exact-head receipt.
+  const rustContext = { stage: 'pr', target_ref: sha, requirement_body: '',
+    criteria: [rustSc] };
+  const rustProposal = { criteria: [{ criterion: 'SC-02', result: 'Pass',
+    evidence: [{ type: 'source', value: 'source assertions only' }] }] };
+  assert.equal(enforcePrRustQuality({ ...rustContext,
+    pr_rust_quality: { status: 'pending', reason: 'rust-check in progress' } },
+    rustProposal).criteria[0].result, 'Pending');
+  const rustPassed = enforcePrRustQuality({ ...rustContext,
+    pr_rust_quality: rust }, rustProposal);
+  assert.equal(rustPassed.criteria[0].result, 'Pass');
+  assert.equal(validRustQualityReceipt(rustPassed.pr_rust_quality_receipt, sha), true);
+  assert.equal(enforcePrRustQuality({ ...rustContext,
+    pr_rust_quality: { status: 'pass', receipt: { ...rust.receipt, head_sha: other } } },
+    rustProposal).criteria[0].result, 'Pending');
+  assert.deepEqual(enforcePrRustQuality({ ...rustContext, stage: 'staging' }, rustProposal),
+    rustProposal);
 
   const body = 'Scenario mapping: SCN-01 Web integration fixtures; exact PR HEAD Quality/Web.';
   const executable = { criterion: 'SC-03', text: 'A deterministic integration test records bounded requests and checks navigation-away behavior.' };
@@ -462,7 +656,7 @@ function selfTest() {
   assert.equal(validWebQualityReceipt(enforcePrWebQuality({ ...context, pr_web_quality: pass }, result).pr_web_quality_receipt, sha), true);
   assert.equal(enforcePrWebQuality({ ...context, pr_web_quality: { status: 'pass', receipt: { ...pass.receipt, head_sha: other } } }, result).criteria[1].result, 'Pending');
   assert.deepEqual(enforcePrWebQuality({ ...context, stage: 'staging' }, result), result);
-  console.log('PR Web Quality receipt self-test: pending/fail/skip/SHA/attempt/jobs/steps and scoped Pass passed');
+  console.log('PR Web/Rust/tooling Quality receipt self-test: pending/fail/skip/SHA/attempt/jobs/steps and scoped Pass passed');
 }
 
 if (process.argv[1]?.endsWith('/acceptance-pr-web-quality-receipt.mjs') && process.argv[2] === 'self-test') {

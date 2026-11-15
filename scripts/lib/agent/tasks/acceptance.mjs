@@ -19,8 +19,11 @@ export function acceptanceModelView(context) {
     // self-tests even when Web tests are correctly inapplicable. This typed
     // receipt is never itself proof of a Web integration-test execution.
     pr_tooling_quality:context.stage==='pr' ? context.pr_tooling_quality??null : null,
-    proof_boundary:context.stage==='pr' && context.pr_tooling_quality
-      ? 'pr_tooling_quality proves exact-HEAD executed CI tooling Gates; a null pr_web_quality is expected for governance/policy SCs, not proof of their failure. Inspect deterministic negative/positive source fixtures separately. Neither receipt automatically grants SC Pass.'
+    // Exact-head Rust Quality execution (including the Rust coverage Gate)
+    // for a criterion that explicitly makes that execution its proof.
+    pr_rust_quality:context.stage==='pr' ? context.pr_rust_quality??null : null,
+    proof_boundary:context.stage==='pr' && (context.pr_tooling_quality || context.pr_rust_quality)
+      ? 'pr_tooling_quality proves exact-HEAD executed CI tooling Gates; pr_rust_quality proves the exact-HEAD rust-check Quality job executed and passed. For those two receipts, a completed/skipped path-scoped job means that Gate was NOT APPLICABLE to this change, never that it failed; a failed/cancelled job is Fail. A null pr_web_quality is expected for governance/policy SCs, not proof of their failure. Inspect deterministic negative/positive source fixtures separately. No receipt automatically grants SC Pass.'
       : null,
     acceptance_sources:context.acceptance_sources??null,
     source_manifest:context.source_manifest??null,
