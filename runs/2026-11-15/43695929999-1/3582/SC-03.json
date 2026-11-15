@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "923b58b7709c7974b38a31fa630b8c0b75461ab336bbc23f73d1d3206c6c9ad1",
+  "run_id": 43695929999,
+  "run_attempt": 1,
+  "issue": 3582,
+  "criterion": "SC-03",
+  "criterion_text": "After a Workspace is detached and an Agent is restarted, the same Workspace ID and pinned Lower reattach with its exact prior file edits intact; an altered/missing Lower, missing or symlinked upper/work, unauthorized owner, or competing independent mount refuses without creating a fresh empty upper or changing the old data.",
+  "stage": "staging",
+  "target_sha": "4a479d07603eb15e7310f99c2b1b743199b456ff",
+  "contract_sha256": "c86ed68c23f3f70f0b37b83dbfacf375f8658e7ff80d704c6e6bc66a1880421e",
+  "case_revision": "4a479d07603eb15e7310f99c2b1b743199b456ff",
+  "case_tree_sha": "2bec35cf192e24f6d424d8828405f9a52812b865",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T08:47:41.401Z",
+  "finished_at": "2026-11-15T08:48:03.655Z",
+  "duration_ms": 22254,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Restart reattach preserves the exact durable edits, and every altered/missing/foreign state refuses without creating a fresh empty upper or touching the old data",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 4a479d07603eb15e7310f99c2b1b743199b456ff on Linux kernel 7.0.0-1014-aws: a managed Workspace was detached, the Agent owners were reopened, and the same Workspace identity plus Project lower reattached with its prior edit intact; a changed lower, a missing upper, a symlinked work directory, a foreign durable owner and a competing fuse-overlayfs mount at the manager-derived mountpoint each refused while the durable upper bytes stayed unchanged"
+        }
+      ],
+      "duration_ms": 16354,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43695929999,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "1b92f4a89702fb4580a97351aa0b60e923d4a3ed",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "4a479d07603eb15e7310f99c2b1b743199b456ff",
+        "stage": "staging",
+        "issue": 3582,
+        "criterion": "SC-03",
+        "job_id": 132756334998,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43695929999",
+    "record_path": "runs/2026-11-15/43695929999-1/3582/SC-03.json",
+    "source_result_sha256": "cf33a1820841773b090a53cb7985ae1a1107de2be5e874c91df64c5a879346e3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43695929999-1",
+    "sha256": "cf33a1820841773b090a53cb7985ae1a1107de2be5e874c91df64c5a879346e3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43695929999",
+    "durability": "time-limited; object archival not configured"
+  }
+}
