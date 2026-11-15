@@ -41,6 +41,8 @@ function fixture(failCreate=false){
     }else if(a.includes('create'))process.exit(0);
     else process.exit(2);
   `);
+  // Retry delays are real in production; the fake makes the negative fixture deterministic.
+  executable(dir,'sleep',`process.exit(0);`);
   executable(dir,'jq',`
     const fs=require('node:fs');
     const a=process.argv.slice(2);
