@@ -54,6 +54,24 @@ pub struct SharedMountRecord {
     pub generation: String,
 }
 
+/// The manager-owned writable Overlay binding of one execution (#3582).
+///
+/// The field is optional: a record written before #3582 (when the writable
+/// Overlay was execution-scoped) decodes unchanged and keeps its legacy
+/// `mounts` path. No wire shape changes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OverlayBindingRecord {
+    /// The manager-authorized Workspace root.
+    pub workspace_root: String,
+    /// The validated relative identity below that root.
+    pub workspace_relative: String,
+    pub mountpoint: String,
+    pub generation: String,
+    pub lower_digest: String,
+    pub lower_mountpoint: String,
+    pub lower_generation: String,
+}
+
 /// One live execution record, durable across Agent restarts.
 ///
 /// `pane_id`/`window_id` bind the record to the tmux Pane it actually owns
@@ -94,6 +112,10 @@ pub struct ExecutionRecord {
     /// execution directory; cleanup releases these consumer identities.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_mounts: Vec<SharedMountRecord>,
+    /// The manager-owned shared writable Overlay this execution leases
+    /// (#3582). Absent on a legacy record whose Overlay was execution-scoped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayBindingRecord>,
     /// The verified-mechanism names the execution reported.
     #[serde(default)]
     pub mechanisms: Vec<String>,
@@ -944,6 +966,90 @@ fn remove_owned_composition_workspace(settings: &SandboxSettings, record: &Execu
     }
 }
 
+/// Build the manager-authorized workspace identity of a recorded Overlay.
+#[cfg(target_os = "linux")]
+fn overlay_workspace(
+    overlay: &OverlayBindingRecord,
+) -> Result<nession_erofs::overlay::OverlayWorkspaceKey> {
+    nession_erofs::overlay::OverlayWorkspaceKey::new(
+        PathBuf::from(&overlay.workspace_root),
+        PathBuf::from(&overlay.workspace_relative),
+    )
+    .map_err(|error| {
+        SandboxError::Cleanup(format!(
+            "the recorded Workspace Overlay identity is invalid: {error:#}"
+        ))
+    })
+}
+
+/// Release the shared writable Overlay consumer this record owns (#3582).
+///
+/// The Overlay manager unmounts the physical Merged View only after the last
+/// identified consumer is gone, never deletes the durable upper/work, and
+/// retains the lower cache pin when an unmount fails. A missing manager is an
+/// error: the Agent must not forget recorded state it cannot release.
+#[cfg(target_os = "linux")]
+fn release_overlay_mount(
+    settings: &SandboxSettings,
+    record: &ExecutionRecord,
+    report: &mut CleanupReport,
+) -> Result<()> {
+    let Some(overlay) = &record.overlay else {
+        return Ok(());
+    };
+    let Some(manager) = &settings.overlay_manager else {
+        return Err(SandboxError::Cleanup(
+            "the shared Workspace Overlay manager is not configured; refusing to forget recorded \
+             Overlay state"
+                .to_string(),
+        ));
+    };
+    let workspace = overlay_workspace(overlay)?;
+    manager
+        .release_consumers(&workspace, &record.execution_id, Some(&overlay.generation))
+        .map_err(|error| {
+            SandboxError::Cleanup(format!(
+                "could not release the shared Workspace Overlay at {}: {error:#}",
+                overlay.mountpoint
+            ))
+        })?;
+    report.evidence.push((
+        "released-overlay".to_string(),
+        format!("{} {}", overlay.mountpoint, overlay.generation),
+    ));
+    Ok(())
+}
+
+/// Adopt the durable Overlay consumer of a live record after an Agent restart.
+///
+/// Adoption never reports a mount ready unless the manager proved the durable
+/// identity, owner lock and mountinfo agree.
+#[cfg(target_os = "linux")]
+fn adopt_overlay_mount(settings: &SandboxSettings, record: &ExecutionRecord) -> Vec<String> {
+    let Some(overlay) = &record.overlay else {
+        return Vec::new();
+    };
+    let Some(manager) = &settings.overlay_manager else {
+        return vec!["the shared Workspace Overlay manager is not configured".to_string()];
+    };
+    let workspace = match overlay_workspace(overlay) {
+        Ok(workspace) => workspace,
+        Err(error) => return vec![format!("{error:#}")],
+    };
+    let report = manager.adopt_consumers(&[nession_erofs::overlay::OverlayConsumerRef {
+        workspace,
+        execution_id: record.execution_id.clone(),
+        generation: overlay.generation.clone(),
+        lower_digest: overlay.lower_digest.clone(),
+        lower_generation: overlay.lower_generation.clone(),
+    }]);
+    report
+        .unavailable
+        .into_iter()
+        .map(|(_, reason)| reason)
+        .collect()
+}
+
 /// Release the shared EROFS consumers this record still owns (#3449).
 ///
 /// A failed release keeps the record: the manager retains the physical mount
@@ -1020,8 +1126,11 @@ pub(crate) fn remove_owned_paths(
     record: &ExecutionRecord,
     report: &mut CleanupReport,
 ) -> Result<()> {
+    // Dependency-safe reverse cleanup: the shared writable Overlay (and its
+    // read-only lower lease) is released first, then any legacy
+    // execution-scoped mount, then the independent shared image consumers.
     #[cfg(target_os = "linux")]
-    release_shared_mounts(settings, record, report)?;
+    release_overlay_mount(settings, record, report)?;
     #[cfg(target_os = "linux")]
     crate::linux::erofs::unmount_recorded(
         &record.mounts,
@@ -1029,6 +1138,8 @@ pub(crate) fn remove_owned_paths(
         &settings.fusermount_path,
         report,
     );
+    #[cfg(target_os = "linux")]
+    release_shared_mounts(settings, record, report)?;
     let execution_dir = Path::new(&record.execution_dir);
     let state_dir =
         std::fs::canonicalize(&settings.state_dir).unwrap_or_else(|_| settings.state_dir.clone());
@@ -1106,6 +1217,8 @@ pub fn reconcile(
     #[cfg(target_os = "linux")]
     let mut protected_digests = HashSet::new();
     #[cfg(target_os = "linux")]
+    let mut protected_overlays = nession_erofs::overlay::ProtectedWorkspaces::new();
+    #[cfg(target_os = "linux")]
     let mut unreadable_record = false;
     for entry in entries {
         let entry = match entry {
@@ -1160,6 +1273,26 @@ pub fn reconcile(
                 for shared in &record.shared_mounts {
                     protected_digests.insert(shared.digest.clone());
                 }
+                if let Some(overlay) = &record.overlay {
+                    // A live record protects both the physical Overlay and its
+                    // read-only lower from orphan reclamation.
+                    protected_digests.insert(overlay.lower_digest.clone());
+                    match overlay_workspace(overlay) {
+                        Ok(workspace) => {
+                            protected_overlays.insert(workspace);
+                        }
+                        Err(error) => tracing::warn!(
+                            execution = %record.execution_id,
+                            "could not protect a recorded Workspace Overlay: {error:#}"
+                        ),
+                    }
+                    for unavailable in adopt_overlay_mount(settings, &record) {
+                        tracing::warn!(
+                            execution = %record.execution_id,
+                            "could not adopt a shared Workspace Overlay consumer: {unavailable}"
+                        );
+                    }
+                }
                 for unavailable in adopt_shared_mounts(settings, &record) {
                     tracing::warn!(
                         execution = %record.execution_id,
@@ -1188,6 +1321,18 @@ pub fn reconcile(
     // because no consumer absence can be proven.
     #[cfg(target_os = "linux")]
     if !unreadable_record {
+        if let Some(manager) = &settings.overlay_manager {
+            let report = manager.reclaim_orphans(&protected_overlays);
+            for workspace in &report.reclaimed {
+                tracing::info!(%workspace, "reclaimed an unrecorded shared Workspace Overlay");
+            }
+            for (workspace, reason) in &report.reclaim_failed {
+                tracing::warn!(
+                    %workspace,
+                    "could not reclaim an unrecorded shared Workspace Overlay: {reason}"
+                );
+            }
+        }
         if let Some(manager) = &settings.mount_manager {
             let report = manager.reclaim_orphans(&protected_digests);
             for digest in &report.reclaimed {
@@ -1255,6 +1400,7 @@ mod tests {
             effective_policy: None,
             mounts: Vec::new(),
             shared_mounts: Vec::new(),
+            overlay: None,
             channel_dir: None,
             mechanisms: Vec::new(),
             warnings: Vec::new(),
@@ -1358,6 +1504,53 @@ mod tests {
                 .to_string()
                 .contains("real directory"));
         }
+    }
+
+    /// #3582 SC-05: a record written before the shared Overlay binding keeps
+    /// its legacy execution-scoped mounts and decodes unchanged.
+    #[test]
+    fn a_legacy_execution_record_without_an_overlay_binding_decodes() {
+        let record: ExecutionRecord = serde_json::from_value(serde_json::json!({
+            "execution_id": "legacy",
+            "session_name": "session",
+            "instance_id": "instance",
+            "backend": "linux-bwrap",
+            "policy_digest": "digest",
+            "created_at": 1,
+            "mounts": ["/state/legacy/mounts/workspace-merged"],
+            "execution_dir": "/state/legacy",
+            "restricted_network": false,
+            "agent_pid": 1
+        }))
+        .expect("a pre-#3582 record decodes");
+        assert!(record.overlay.is_none());
+        assert_eq!(record.mounts.len(), 1);
+        assert!(record.shared_mounts.is_empty());
+    }
+
+    #[test]
+    fn an_overlay_binding_is_serialized_and_decoded_backward_compatibly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let binding = OverlayBindingRecord {
+            workspace_root: "/data/workspaces".to_string(),
+            workspace_relative: "ws_00000000-0000-4000-8000-000000000000".to_string(),
+            mountpoint: "/state/erofs-overlays/mounts/abc".to_string(),
+            generation: "generation-1".to_string(),
+            lower_digest: format!("sha256:{}", "a".repeat(64)),
+            lower_mountpoint: "/state/erofs-mounts/mounts/def".to_string(),
+            lower_generation: "lower-1".to_string(),
+        };
+        let mut record = record(dir.path(), "overlay", "session");
+        record.overlay = Some(binding.clone());
+        let bytes = serde_json::to_vec(&record).expect("serialize");
+        let decoded: ExecutionRecord = serde_json::from_slice(&bytes).expect("decode");
+        assert_eq!(decoded.overlay, Some(binding));
+        // An absent field stays absent on the wire, so an older reader sees a
+        // record it already understands.
+        let mut legacy = record;
+        legacy.overlay = None;
+        let bytes = serde_json::to_vec(&legacy).expect("serialize");
+        assert!(!String::from_utf8_lossy(&bytes).contains("\"overlay\":"));
     }
 
     #[test]

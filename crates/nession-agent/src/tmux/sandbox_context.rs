@@ -1198,9 +1198,23 @@ async fn resolve_managed_workspace(
     let lease = manager.lease(&workspace_id).await?;
     // A changed/missing lower on a Workspace whose durable upper was prepared
     // against a Project image is refused before any host resource is created.
-    manager
-        .pin_lower_digest(&workspace_id, lower_digest)
-        .await?;
+    // On Linux the Workspace Manager also owns the durable Overlay storage:
+    // first use initializes it, a later missing/symlinked pair refuses.
+    match lower_digest {
+        Some(digest) => {
+            #[cfg(target_os = "linux")]
+            manager
+                .ensure_overlay_storage(&workspace_id, &[digest.to_string()])
+                .await?;
+            #[cfg(not(target_os = "linux"))]
+            manager
+                .pin_lower_digest(&workspace_id, Some(digest))
+                .await?;
+        }
+        None => {
+            manager.pin_lower_digest(&workspace_id, None).await?;
+        }
+    }
     Ok(crate::sandbox_images::SandboxWorkspaceOverride::Managed { path, lease })
 }
 

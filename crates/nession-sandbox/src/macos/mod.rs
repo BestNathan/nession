@@ -244,6 +244,7 @@ pub fn prepare(
         effective_policy: Some(compiled.normalized.clone()),
         mounts: Vec::new(),
         shared_mounts: Vec::new(),
+        overlay: None,
         channel_dir: None,
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),
