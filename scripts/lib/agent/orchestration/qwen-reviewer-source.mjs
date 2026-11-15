@@ -55,6 +55,20 @@ export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
      !Number.isSafeInteger(issue)||issue<1||
      !Number.isSafeInteger(publisherRunId)||publisherRunId<1)
     fail('missing authenticated Publisher Intent lookup');
+  // The Store transition is authored by the successful Publisher
+  // reconciliation Run, while the immutable write-ahead Intent still names
+  // the earlier PR writer. Only the exact Store-persisted cross-Run link may
+  // resolve that prior Intent; mutable Issue/PR content is not a source.
+  const state=readIssueWorkflowState(storeRoot,issue).state;
+  const current=state?.transitions.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published'&&t.run_id===publisherRunId&&
+    t.target_sha===state.target_sha);
+  const transition=current?.length===1?current[0]:null;
+  const priorWriter=transition?.write_ahead_publisher_run_id??null;
+  if(priorWriter!==null&&(!Number.isSafeInteger(priorWriter)||
+      priorWriter<1||priorWriter>=publisherRunId))
+    fail('untrusted original Repair Publisher lineage');
+  const intentRunId=priorWriter??publisherRunId;
   const folder=path.join(storeRoot,'workflows/issues',String(issue),'results');
   const entries=fs.readdirSync(folder,{withFileTypes:true});
   if(entries.length>512)fail('unbounded Publisher Intent history');
@@ -68,14 +82,25 @@ export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
     let record;
     try{record=JSON.parse(fs.readFileSync(full,'utf8'));}
     catch{fail('invalid Publisher result JSON');}
-    if(record?.issue!==issue||record?.publisher_run_id!==publisherRunId)continue;
+    if(record?.issue!==issue||record?.publisher_run_id!==intentRunId)continue;
     if(record.kind==='trusted_qwen_publisher_write_ahead_intent'){
+      if(priorWriter!==null)
+        fail('cross-Run Qwen reconciliation cannot alias initial publication');
       candidates.push({repair:false,record:validateQwenPublisherIntent(record),
         branch:record.branch});
     }else if(record.kind==='trusted_qwen_repair_publisher_write_ahead'){
       const valid=validateQwenRepairPublisherIntent(record);
+      if(priorWriter!==null&&
+          (state?.phase!=='review'||
+           state.target_sha===valid.source_sha||
+           !state.transitions.some(t=>t.kind==='publisher'&&
+             t.run_id===valid.original_publisher_run_id&&
+             t.outcome==='published'&&t.target_sha===valid.source_sha)))
+        fail('cross-Run Repair Reviewer lacks original trusted PR-A publisher');
       candidates.push({repair:true,record:valid,
-        branch:valid.branch.replace(/^refs\/heads\//,'')});
+        branch:valid.branch.replace(/^refs\/heads\//,''),
+        recovered:priorWriter!==null,
+        publisher_run_id:publisherRunId});
     }
   }
   if(candidates.length!==1)
@@ -121,5 +146,5 @@ export function qwenReviewerPublishedSource({storeRoot,issue,actionId,sha}){
     fail('Publisher source branch is not immutable');
   return Object.freeze({branch:'refs/heads/'+branch,
     base_sha,review_sha:sha,issue,
-    reviewer_action_id:actionId,publisher_run_id:record.publisher_run_id});
+    reviewer_action_id:actionId,publisher_run_id:publisher[0].run_id});
 }
