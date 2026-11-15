@@ -60,7 +60,264 @@ mod helpers {
             },
         )
         .expect("open the shared EROFS mount manager");
-        settings.mount_manager = Some(manager);
+        settings.mount_manager = Some(manager.clone());
+        // The shared writable Overlay owner (#3582). Its authorized roots are
+        // the durable managed Workspace root and the execution workspace root.
+        let mut workspace_roots = vec![settings.state_dir.clone()];
+        if let Some(root) = &settings.agent_workspaces_root {
+            workspace_roots.push(root.clone());
+        }
+        let lower: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> = manager;
+        let overlay = nession_erofs::overlay::OverlayMountManager::open(
+            nession_erofs::overlay::OverlayMountManagerConfig {
+                root: dir.join("erofs-overlays"),
+                workspace_roots,
+                settings: nession_erofs::overlay::OverlaySettings::new(
+                    settings.fuse_overlayfs_path.clone(),
+                    settings.fusermount_path.clone(),
+                ),
+                lower,
+                identity: format!("sandbox-test-{}", std::process::id()),
+            },
+        )
+        .expect("open the shared Workspace Overlay manager");
+        settings.overlay_manager = Some(overlay);
+    }
+
+    /// Create a workspace directory with its durable Overlay upper/work.
+    pub(super) fn workspace_storage(path: &Path) -> nession_erofs::overlay::OverlayStoragePaths {
+        std::fs::create_dir_all(path).expect("workspace");
+        nession_erofs::overlay::storage::initialize(path)
+            .expect("initialize the durable Overlay storage")
+    }
+
+    /// How many physical `fuse-overlayfs` mounts currently exist at `path`.
+    pub(super) fn overlay_mount_count(path: &Path) -> usize {
+        nession_erofs::mount::mount_entries()
+            .iter()
+            .filter(|entry| {
+                entry.mountpoint == path && entry.fs_type.to_ascii_lowercase().contains("overlayfs")
+            })
+            .count()
+    }
+
+    pub(super) fn executable_script(path: &Path, body: &str) {
+        std::fs::write(path, body).expect("write helper script");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(path).expect("stat helper").permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(path, permissions).expect("chmod helper");
+        }
+    }
+
+    pub(super) fn project_image(
+        images: &CompositionImages,
+    ) -> nession_erofs::mount_manager::VerifiedImage {
+        nession_erofs::mount_manager::VerifiedImage::new(
+            format!("sha256:{}", images.project_digest),
+            images.project.clone(),
+        )
+        .expect("verified project image")
+    }
+
+    /// Open a fresh lower + Overlay manager pair over the same roots, as a new
+    /// Agent process would.
+    pub(super) fn reopen_managers(settings: &mut SandboxSettings, dir: &Path, identity: &str) {
+        settings.mount_manager = None;
+        settings.overlay_manager = None;
+        attach_named_managers(settings, dir, identity);
+    }
+
+    pub(super) fn attach_named_managers(
+        settings: &mut SandboxSettings,
+        dir: &Path,
+        identity: &str,
+    ) {
+        let image_root = settings
+            .erofs_image_root
+            .clone()
+            .expect("the composition fixture authorizes an image root");
+        let lower = nession_erofs::mount_manager::MountManager::open(
+            nession_erofs::mount_manager::MountManagerConfig {
+                root: dir.join("erofs-mounts"),
+                settings: nession_erofs::mount::MountSettings::new(
+                    settings.erofsfuse_path.clone(),
+                    settings.fusermount_path.clone(),
+                ),
+                authorized_roots: vec![image_root],
+                pinner: None,
+            },
+        )
+        .expect("open the shared EROFS mount manager");
+        let mut workspace_roots = vec![settings.state_dir.clone()];
+        if let Some(root) = &settings.agent_workspaces_root {
+            workspace_roots.push(root.clone());
+        }
+        let lower_provider: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> =
+            lower.clone();
+        let overlay = nession_erofs::overlay::OverlayMountManager::open(
+            nession_erofs::overlay::OverlayMountManagerConfig {
+                root: dir.join("erofs-overlays"),
+                workspace_roots,
+                settings: nession_erofs::overlay::OverlaySettings::new(
+                    settings.fuse_overlayfs_path.clone(),
+                    settings.fusermount_path.clone(),
+                ),
+                lower: lower_provider,
+                identity: identity.to_string(),
+            },
+        )
+        .expect("open the shared Workspace Overlay manager");
+        settings.mount_manager = Some(lower);
+        settings.overlay_manager = Some(overlay);
+    }
+
+    /// The child side of the crash-restart proof: acquire the shared Overlay,
+    /// write through it and exit without destructors, leaving the physical mounts
+    /// and durable identity exactly as an Agent crash would.
+    pub(super) fn overlay_crash_child(root: PathBuf) -> ! {
+        let managed = root.join("agent-workspaces").join("ws_child");
+        let image_root = root.join("images");
+        let fusermount = which("fusermount3").expect("fusermount3 for the crash fixture");
+        let lower = nession_erofs::mount_manager::MountManager::open(
+            nession_erofs::mount_manager::MountManagerConfig {
+                root: root.join("erofs-mounts"),
+                settings: nession_erofs::mount::MountSettings::new(
+                    which("erofsfuse").expect("erofsfuse for the crash fixture"),
+                    fusermount.clone(),
+                ),
+                authorized_roots: vec![image_root.clone()],
+                pinner: None,
+            },
+        )
+        .expect("open the crash lower manager");
+        let lower_provider: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> = lower;
+        let manager = nession_erofs::overlay::OverlayMountManager::open(
+            nession_erofs::overlay::OverlayMountManagerConfig {
+                root: root.join("erofs-overlays"),
+                workspace_roots: vec![root.join("agent-workspaces")],
+                settings: nession_erofs::overlay::OverlaySettings::new(
+                    which("fuse-overlayfs").expect("fuse-overlayfs for the crash fixture"),
+                    fusermount,
+                ),
+                lower: lower_provider,
+                identity: "overlay-crash".to_string(),
+            },
+        )
+        .expect("open the crash Overlay manager");
+        let key = manager
+            .resolve_workspace(&managed)
+            .expect("the crash workspace is authorized");
+        let digest = format!(
+            "sha256:{}",
+            std::fs::read_to_string(image_root.join("project.digest"))
+                .expect("the project digest")
+                .trim()
+        );
+        let image = nession_erofs::mount_manager::VerifiedImage::new(
+            digest,
+            image_root.join("project.erofs"),
+        )
+        .expect("the verified project image");
+        let lease = manager
+            .acquire(
+                &nession_erofs::overlay::OverlayRequest::new(key, image),
+                "exec-child",
+            )
+            .expect("acquire the crash Overlay");
+        std::fs::write(lease.mountpoint().join("child-edit.txt"), b"child edit\n")
+            .expect("write through the merged view");
+        let binding = serde_json::to_vec(&lease.binding()).expect("serialize the binding");
+        std::fs::write(root.join("child-binding.json"), binding).expect("write the child binding");
+        std::process::exit(0);
+    }
+
+    pub(super) fn crash_managers(
+        root: &Path,
+    ) -> (
+        std::sync::Arc<nession_erofs::mount_manager::MountManager>,
+        std::sync::Arc<nession_erofs::overlay::OverlayMountManager>,
+    ) {
+        let fusermount = which("fusermount3").expect("fusermount3");
+        let lower = nession_erofs::mount_manager::MountManager::open(
+            nession_erofs::mount_manager::MountManagerConfig {
+                root: root.join("erofs-mounts"),
+                settings: nession_erofs::mount::MountSettings::new(
+                    which("erofsfuse").expect("erofsfuse"),
+                    fusermount.clone(),
+                ),
+                authorized_roots: vec![root.join("images")],
+                pinner: None,
+            },
+        )
+        .expect("open the restarted lower manager");
+        let lower_provider: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> =
+            lower.clone();
+        let manager = nession_erofs::overlay::OverlayMountManager::open(
+            nession_erofs::overlay::OverlayMountManagerConfig {
+                root: root.join("erofs-overlays"),
+                workspace_roots: vec![root.join("agent-workspaces")],
+                settings: nession_erofs::overlay::OverlaySettings::new(
+                    which("fuse-overlayfs").expect("fuse-overlayfs"),
+                    fusermount,
+                ),
+                lower: lower_provider,
+                identity: "overlay-crash".to_string(),
+            },
+        )
+        .expect("open the restarted Overlay manager");
+        (lower, manager)
+    }
+
+    pub(super) fn prepare_crash_root(root: &Path) -> (PathBuf, String) {
+        let images = build_composition_images(root);
+        std::fs::write(root.join("images/project.digest"), &images.project_digest)
+            .expect("write the project digest");
+        let managed = root.join("agent-workspaces").join("ws_child");
+        workspace_storage(&managed);
+        (managed, format!("sha256:{}", images.project_digest))
+    }
+
+    pub(super) fn spawn_overlay_crash(root: &Path) {
+        let mut child = Command::new(std::env::current_exe().expect("the test executable")) // not-tmux: re-runs this test binary as the crash fixture
+            .args([
+                "--exact",
+                "a_crashed_overlay_owner_is_recovered_only_from_verified_identity",
+                "--nocapture",
+            ])
+            .env("NESSON_OVERLAY_CHILD_ROOT", root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn the crash fixture");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let status = loop {
+            match child.try_wait().expect("wait for the crash fixture") {
+                Some(status) => break status,
+                None if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                None => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("the crash fixture did not exit within 120s");
+                }
+            }
+        };
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        if let Some(mut pipe) = child.stdout.take() {
+            let _ = pipe.read_to_string(&mut stdout);
+        }
+        if let Some(mut pipe) = child.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        assert!(
+            status.success(),
+            "the crash fixture failed: stdout={stdout} stderr={stderr}"
+        );
     }
 
     pub(super) fn policy(workspace: &Path, with_cgroup: bool, network: &str) -> SandboxPolicy {
@@ -1190,7 +1447,7 @@ fn an_erofs_composition_runs_a_shell_with_a_writable_overlay_workspace() {
     attach_mount_manager(&mut settings, dir.path());
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let workspace_write = settings.state_dir.join("workspaces").join("composition");
-    std::fs::create_dir_all(&workspace_write).expect("workspace write");
+    workspace_storage(&workspace_write);
 
     let policy = composition_policy(
         &base_image,
@@ -1309,7 +1566,7 @@ fn a_managed_workspace_keeps_its_durable_upper_across_overlay_reentry() {
     attach_mount_manager(&mut settings, dir.path());
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let managed = durable_root.join("ws_acceptance");
-    std::fs::create_dir_all(&managed).expect("managed workspace");
+    workspace_storage(&managed);
 
     let policy = || {
         serde_json::from_value::<SandboxPolicy>(serde_json::json!({
@@ -1466,8 +1723,8 @@ fn two_compositions_share_images_and_release_only_their_own_mounts() {
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let first_write = settings.state_dir.join("workspaces").join("first");
     let second_write = settings.state_dir.join("workspaces").join("second");
-    std::fs::create_dir_all(&first_write).expect("first workspace");
-    std::fs::create_dir_all(&second_write).expect("second workspace");
+    workspace_storage(&first_write);
+    workspace_storage(&second_write);
 
     let launch_one = |write: &Path, name: &str| {
         launch(
@@ -1656,7 +1913,7 @@ fn image_config_defaults_and_the_resolved_prepend_reach_the_sandboxed_process() 
     attach_mount_manager(&mut settings, dir.path());
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let write = settings.state_dir.join("workspaces").join("image-env");
-    std::fs::create_dir_all(&write).expect("workspace");
+    workspace_storage(&write);
 
     let policy = composition_policy_with_runtime(
         &images.base,
@@ -1788,7 +2045,7 @@ fn a_missing_prepend_directory_fails_before_any_process_launches() {
     attach_mount_manager(&mut settings, dir.path());
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let write = settings.state_dir.join("workspaces").join("missing-bin");
-    std::fs::create_dir_all(&write).expect("workspace");
+    workspace_storage(&write);
     let policy = composition_policy_with_runtime(
         &images.base,
         &images.base_digest,
@@ -1855,8 +2112,8 @@ fn one_layer_in_two_sessions_keeps_distinct_targets_and_environment_without_prem
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let first_write = settings.state_dir.join("workspaces").join("node");
     let second_write = settings.state_dir.join("workspaces").join("rust");
-    std::fs::create_dir_all(&first_write).expect("first workspace");
-    std::fs::create_dir_all(&second_write).expect("second workspace");
+    workspace_storage(&first_write);
+    workspace_storage(&second_write);
 
     // The same physical EROFS layer is mounted for both Sessions, under two
     // distinct targets with two distinct bounded environments.
@@ -2039,8 +2296,8 @@ fn an_already_running_pane_keeps_its_image_environment_after_a_new_binding() {
     std::fs::create_dir_all(&settings.state_dir).expect("state dir");
     let first_write = settings.state_dir.join("workspaces").join("running-first");
     let second_write = settings.state_dir.join("workspaces").join("running-second");
-    std::fs::create_dir_all(&first_write).expect("first workspace");
-    std::fs::create_dir_all(&second_write).expect("second workspace");
+    workspace_storage(&first_write);
+    workspace_storage(&second_write);
     let first_policy = composition_policy_with_runtime(
         &images.base,
         &images.base_digest,
@@ -2149,6 +2406,754 @@ fn an_already_running_pane_keeps_its_image_environment_after_a_new_binding() {
 // ---------------------------------------------------------------------------
 // #3449 shared, recoverable EROFS mount manager
 // ---------------------------------------------------------------------------
+
+/// #3582 SC-02: two concurrently live executions over one managed Workspace
+/// share exactly one physical Overlay; ending execution A keeps B alive, and
+/// the last release unmounts without deleting the durable upper/work.
+#[test]
+fn two_executions_share_one_physical_workspace_overlay_and_release_safely() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    let durable_root = dir.path().join("agent-workspaces");
+    settings.agent_workspaces_root = Some(durable_root.clone());
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let managed = durable_root.join("ws_two_consumers");
+    workspace_storage(&managed);
+
+    let policy = || {
+        composition_policy(
+            &images.base,
+            &images.base_digest,
+            &images.project,
+            &images.project_digest,
+            &managed,
+            &images.toolchain,
+            &images.toolchain_digest,
+        )
+    };
+    let request = |name: &str, script: &str| LaunchRequest {
+        policy: policy(),
+        session_name: format!("{name}-{}", std::process::id()),
+        instance_id: format!("instance-{name}"),
+        working_dir: "/workspace".to_string(),
+        inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()],
+        tmux_socket: None,
+    };
+
+    let first_script = "\
+set -eu
+printf 'shared-write\n' > /workspace/shared.txt
+printf 'a-ready\n' > /workspace/a-ready
+n=0
+while [ ! -f /workspace/b-read ]; do n=$((n+1)); [ \"$n\" -lt 600 ] || { echo A-TIMEOUT; exit 1; }; sleep 0.1; done
+printf 'a-ended\n' > /workspace/a-ended
+echo A-OK
+";
+    let second_script = "\
+set -eu
+n=0
+while [ ! -f /workspace/a-ready ]; do n=$((n+1)); [ \"$n\" -lt 600 ] || { echo B-TIMEOUT; exit 1; }; sleep 0.1; done
+read line < /workspace/shared.txt
+[ \"$line\" = shared-write ] && echo SHARED-WRITE-OK
+printf 'b-read\n' > /workspace/b-read
+n=0
+while [ ! -f /workspace/a-ended ]; do n=$((n+1)); [ \"$n\" -lt 600 ] || { echo B-TIMEOUT-A-END; exit 1; }; sleep 0.1; done
+# Execution A has exited; the host releases its consumer during this bounded
+# wait. B must keep reading and writing the same durable view afterwards.
+sleep 5
+read line < /workspace/shared.txt
+[ \"$line\" = shared-write ] && echo SHARED-WRITE-AFTER-FIRST-RELEASE-OK
+printf 'b-after\n' > /workspace/b-after
+echo B-OK
+";
+
+    let mut first = launch(&settings, request("shared-a", first_script));
+    verify_or_report(&mut first, "execution A must verify");
+    let mut second = launch(&settings, request("shared-b", second_script));
+    verify_or_report(&mut second, "execution B must verify");
+
+    let first_binding = first
+        .prepared
+        .record()
+        .overlay
+        .clone()
+        .expect("execution A records its Overlay binding");
+    let second_binding = second
+        .prepared
+        .record()
+        .overlay
+        .clone()
+        .expect("execution B records its Overlay binding");
+    assert_eq!(
+        first_binding.mountpoint, second_binding.mountpoint,
+        "both executions bind one manager-derived mountpoint"
+    );
+    assert_eq!(first_binding.generation, second_binding.generation);
+    let merged = PathBuf::from(&first_binding.mountpoint);
+    let physical_overlays = overlay_mount_count(&merged);
+    assert_eq!(physical_overlays, 1, "exactly one physical Overlay mount");
+
+    let manager = settings
+        .overlay_manager
+        .clone()
+        .expect("the Overlay manager is configured");
+    let key = manager
+        .resolve_workspace(&managed)
+        .expect("the managed Workspace is authorized");
+    let status = manager.lookup(&key).expect("Overlay status");
+    assert!(status.mounted && status.verified);
+    assert_eq!(
+        status.consumers, 2,
+        "both executions hold identified leases"
+    );
+
+    let (first_status, first_stdout, first_stderr) = wait_for_exit(&mut first);
+    assert!(
+        first_status.success(),
+        "execution A failed: stdout={first_stdout} stderr={first_stderr}"
+    );
+    assert!(first_stdout.contains("A-OK"), "{first_stdout}");
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("release execution A");
+
+    let status = manager.lookup(&key).expect("status after execution A");
+    assert!(status.mounted, "ending A must not revoke B");
+    assert_eq!(status.consumers, 1);
+    assert!(
+        second
+            .child
+            .try_wait()
+            .expect("execution B status")
+            .is_none(),
+        "execution B is still live after A's release"
+    );
+
+    let (second_status, second_stdout, second_stderr) = wait_for_exit(&mut second);
+    assert!(
+        second_status.success(),
+        "execution B failed: stdout={second_stdout} stderr={second_stderr}"
+    );
+    for marker in [
+        "SHARED-WRITE-OK",
+        "SHARED-WRITE-AFTER-FIRST-RELEASE-OK",
+        "B-OK",
+    ] {
+        assert!(
+            second_stdout.contains(marker),
+            "execution B did not prove {marker}: {second_stdout} {second_stderr}"
+        );
+    }
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("release execution B");
+
+    assert_eq!(
+        overlay_mount_count(&merged),
+        0,
+        "the last release unmounts the physical Overlay"
+    );
+    assert_eq!(manager.lookup(&key).expect("final status").consumers, 0);
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("shared.txt"))
+            .expect("the durable upper retains the write"),
+        "shared-write\n"
+    );
+    assert!(managed.join("upper").is_dir());
+    for binding in [&first_binding, &second_binding] {
+        assert!(
+            !Path::new(&binding.mountpoint)
+                .join("workspace-merged")
+                .exists(),
+            "no execution-scoped Overlay path exists"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("b-after"))
+            .expect("B's post-release write landed in the durable upper"),
+        "b-after\n"
+    );
+    print_evidence(&serde_json::json!({
+        "workspace": managed.to_string_lossy(),
+        "physical_overlays": physical_overlays,
+        "same_mountpoint": true,
+        "same_generation": true,
+        "consumers": 2,
+        "first_release_kept_mount": true,
+        "second_live_after_first_release": true,
+        "shared_write_visible": true,
+        "durable_upper_preserved": true,
+        "unmounted_after_last_release": true,
+    }));
+}
+
+/// #3582 SC-03: a detached Workspace reattaches after an Agent restart with
+/// its prior edits; a changed lower, missing/symlinked storage, a foreign
+/// owner and a foreign competing mount all refuse without changing bytes.
+#[test]
+fn a_detached_workspace_reattaches_and_unsafe_storage_is_refused() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    let durable_root = dir.path().join("agent-workspaces");
+    settings.agent_workspaces_root = Some(durable_root.clone());
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let managed = durable_root.join("ws_reattach");
+    workspace_storage(&managed);
+
+    let policy = || {
+        composition_policy(
+            &images.base,
+            &images.base_digest,
+            &images.project,
+            &images.project_digest,
+            &managed,
+            &images.toolchain,
+            &images.toolchain_digest,
+        )
+    };
+    let request = |script: &str| LaunchRequest {
+        policy: policy(),
+        session_name: format!("reattach-{}", std::process::id()),
+        instance_id: "instance-reattach".to_string(),
+        working_dir: "/workspace".to_string(),
+        inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()],
+        tmux_socket: None,
+    };
+    let write_script = "\
+set -eu
+printf 'durable edit\n' > /workspace/edit.txt
+read lower < /workspace/project.txt
+[ \"$lower\" = project ] && echo LOWER-OK
+";
+    let read_script = "\
+set -eu
+read line < /workspace/edit.txt
+[ \"$line\" = 'durable edit' ] && echo EDIT-OK
+read lower < /workspace/project.txt
+[ \"$lower\" = project ] && echo LOWER-OK
+";
+
+    let mut first = launch(&settings, request(write_script));
+    verify_or_report(&mut first, "the first execution must verify");
+    let (first_status, first_stdout, first_stderr) = wait_for_exit(&mut first);
+    assert!(
+        first_status.success(),
+        "the first execution failed: {first_stdout} {first_stderr}"
+    );
+    assert!(first_stdout.contains("LOWER-OK"));
+    first.prepared.into_handle().cleanup().expect("detach");
+
+    let manager = settings
+        .overlay_manager
+        .clone()
+        .expect("the Overlay manager is configured");
+    let key = manager
+        .resolve_workspace(&managed)
+        .expect("the managed Workspace is authorized");
+    assert!(!manager.lookup(&key).expect("status").mounted);
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+
+    // Restart: drop this process's owners and open a new pair over the same
+    // durable roots, as a new Agent process would.
+    drop(manager);
+    reopen_managers(
+        &mut settings,
+        dir.path(),
+        &format!("reattach-{}", std::process::id()),
+    );
+    let manager = settings
+        .overlay_manager
+        .clone()
+        .expect("the reopened Overlay manager");
+    let mut second = launch(&settings, request(read_script));
+    verify_or_report(&mut second, "the reattached execution must verify");
+    let (second_status, second_stdout, second_stderr) = wait_for_exit(&mut second);
+    assert!(
+        second_status.success(),
+        "the reattached execution failed: {second_stdout} {second_stderr}"
+    );
+    for marker in ["EDIT-OK", "LOWER-OK"] {
+        assert!(
+            second_stdout.contains(marker),
+            "the reattached execution did not prove {marker}: {second_stdout} {second_stderr}"
+        );
+    }
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("detach again");
+    assert!(!manager.lookup(&key).expect("status").mounted);
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+
+    let request_lower =
+        || nession_erofs::overlay::OverlayRequest::new(key.clone(), project_image(&images));
+
+    // A changed lower while the physical Overlay is live is refused and never
+    // merges a different Project image into the same durable upper.
+    let altered_source = dir.path().join("altered-source");
+    let altered_image = dir.path().join("altered-project.erofs");
+    std::fs::create_dir_all(&altered_source).expect("altered source");
+    std::fs::write(altered_source.join("project.txt"), "altered\n").expect("altered file");
+    mkfs_erofs(&altered_source, &altered_image);
+    let altered = nession_erofs::overlay::OverlayRequest::new(
+        key.clone(),
+        nession_erofs::mount_manager::VerifiedImage::new(
+            format!("sha256:{}", sha256_file(&altered_image)),
+            altered_image,
+        )
+        .expect("verified altered image"),
+    );
+    let live = manager
+        .acquire(&request_lower(), "exec-lower-first")
+        .expect("acquire the pinned lower");
+    let error = manager
+        .acquire(&altered, "exec-lower-second")
+        .expect_err("a changed lower must be refused");
+    assert!(format!("{error:#}").contains("refusing lower"), "{error:#}");
+    assert_eq!(
+        overlay_mount_count(live.mountpoint()),
+        1,
+        "the refusal creates no second physical Overlay"
+    );
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+    live.release().expect("release the pinned lower");
+
+    // A missing durable upper after proven storage refuses; it never creates
+    // a fresh empty upper over lost bytes.
+    let upper = managed.join("upper");
+    let work = managed.join("work");
+    let upper_aside = dir.path().join("upper-aside");
+    std::fs::rename(&upper, &upper_aside).expect("move upper aside");
+    let error = manager
+        .acquire(&request_lower(), "exec-missing-upper")
+        .expect_err("a missing upper must be refused");
+    assert!(format!("{error:#}").contains("missing"), "{error:#}");
+    assert!(!upper.exists(), "no fresh empty upper is created");
+    assert_eq!(
+        std::fs::read_to_string(upper_aside.join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+    std::fs::rename(&upper_aside, &upper).expect("restore upper");
+
+    // A symlinked work directory is refused without touching the upper.
+    let work_aside = dir.path().join("work-aside");
+    let outside_work = dir.path().join("outside-work");
+    std::fs::create_dir_all(&outside_work).expect("outside work");
+    std::fs::rename(&work, &work_aside).expect("move work aside");
+    std::os::unix::fs::symlink(&outside_work, &work).expect("symlink work");
+    let error = manager
+        .acquire(&request_lower(), "exec-symlinked-work")
+        .expect_err("a symlinked work must be refused");
+    assert!(format!("{error:#}").contains("symlink"), "{error:#}");
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+    std::fs::remove_file(&work).expect("remove symlink");
+    std::fs::rename(&work_aside, &work).expect("restore work");
+
+    // A durable owner identity naming another Agent is never taken over.
+    let foreign_owner = nession_erofs::overlay::OwnerRecord {
+        agent_identity: "agent-foreign".to_string(),
+        mount_namespace: "mnt:[0]".to_string(),
+        workspace: key.identity(),
+        mountpoint: manager.mountpoint_for(&key).expect("manager mountpoint"),
+        generation: "foreign-generation".to_string(),
+        updated_at: 0,
+    };
+    nession_erofs::overlay::storage::write_owner_record(&managed, &foreign_owner)
+        .expect("write a foreign owner record");
+    let error = manager
+        .acquire(&request_lower(), "exec-foreign-owner")
+        .expect_err("a foreign owner must be refused");
+    assert!(
+        format!("{error:#}").contains("owned by Agent identity"),
+        "{error:#}"
+    );
+    nession_erofs::overlay::storage::remove_owner_record(&managed);
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+
+    // A competing physical mount at the manager-derived mountpoint is never
+    // adopted merely because a path exists.
+    let foreign_storage = dir.path().join("foreign-storage");
+    workspace_storage(&foreign_storage);
+    let mountpoint = manager.mountpoint_for(&key).expect("manager mountpoint");
+    let lower_lease = settings
+        .mount_manager
+        .clone()
+        .expect("the lower manager is configured")
+        .acquire(&project_image(&images), "foreign-lower")
+        .expect("mount the foreign lower");
+    let overlay_settings = nession_erofs::overlay::OverlaySettings::new(
+        settings.fuse_overlayfs_path.clone(),
+        settings.fusermount_path.clone(),
+    );
+    let foreign_spec = nession_erofs::overlay::OverlayMountSpec {
+        lower: lower_lease.mountpoint().to_path_buf(),
+        upper: foreign_storage.join("upper"),
+        work: foreign_storage.join("work"),
+        merged: mountpoint.clone(),
+    };
+    nession_erofs::overlay::mount::mount_overlay(&foreign_spec, &overlay_settings)
+        .expect("mount a competing Overlay");
+    let error = manager
+        .acquire(&request_lower(), "exec-competing-mount")
+        .expect_err("a competing mount must not be adopted");
+    assert!(
+        format!("{error:#}").contains("never adopted by path"),
+        "{error:#}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
+        "durable edit\n"
+    );
+    nession_erofs::overlay::mount::unmount_overlay(&overlay_settings, &mountpoint)
+        .expect("unmount the competing Overlay");
+    lower_lease.release().expect("release the foreign lower");
+
+    print_evidence(&serde_json::json!({
+        "reattach_same_upper": true,
+        "lower_visible_after_restart": true,
+        "changed_lower_refused": true,
+        "missing_upper_refused": true,
+        "symlinked_work_refused": true,
+        "foreign_owner_refused": true,
+        "competing_mount_refused": true,
+        "upper_unchanged": true,
+        "no_fresh_empty_upper": true,
+    }));
+}
+
+/// #3582 SC-04 (restart half): a process crash during prepare leaves a live
+/// physical Overlay; a new manager re-adopts it only from the verified durable
+/// identity, and a disappeared mount is reported unavailable, never served.
+#[test]
+fn a_crashed_overlay_owner_is_recovered_only_from_verified_identity() {
+    if let Some(root) = std::env::var_os("NESSON_OVERLAY_CHILD_ROOT") {
+        overlay_crash_child(PathBuf::from(root));
+    }
+    require_composition_tools();
+    let root = tempfile::tempdir().expect("tempdir");
+    let (managed, lower_digest) = prepare_crash_root(root.path());
+    spawn_overlay_crash(root.path());
+    let binding: nession_erofs::overlay::OverlayBinding = serde_json::from_slice(
+        &std::fs::read(root.path().join("child-binding.json")).expect("the child binding"),
+    )
+    .expect("parse the child binding");
+    assert_eq!(binding.workspace.directory(), managed);
+    let (lower, manager) = crash_managers(root.path());
+    let report = manager.adopt_consumers(&[binding.consumer("exec-child")]);
+    assert_eq!(report.adopted.len(), 1, "{report:?}");
+    assert!(report.unavailable.is_empty(), "{report:?}");
+    let status = manager.lookup(&binding.workspace).expect("adopted status");
+    assert!(status.mounted && status.verified);
+    assert_eq!(status.consumers, 1);
+    assert_eq!(
+        std::fs::read_to_string(binding.mountpoint.join("child-edit.txt"))
+            .expect("the crashed execution's write is readable"),
+        "child edit\n"
+    );
+    manager
+        .release_consumers(&binding.workspace, "exec-child", Some(&binding.generation))
+        .expect("release the adopted consumer");
+    assert_eq!(overlay_mount_count(&binding.mountpoint), 0);
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("child-edit.txt"))
+            .expect("the durable upper retains the crash edit"),
+        "child edit\n"
+    );
+    assert_eq!(
+        lower
+            .lookup(&lower_digest)
+            .map(|status| status.consumers)
+            .unwrap_or(0),
+        0,
+        "the verified Overlay unmount released the lower pin"
+    );
+
+    // A mount that disappeared is reported unavailable and never served.
+    let lost = tempfile::tempdir().expect("lost tempdir");
+    prepare_crash_root(lost.path());
+    spawn_overlay_crash(lost.path());
+    let binding: nession_erofs::overlay::OverlayBinding = serde_json::from_slice(
+        &std::fs::read(lost.path().join("child-binding.json")).expect("the lost binding"),
+    )
+    .expect("parse the lost binding");
+    let (lost_lower, lost_manager) = crash_managers(lost.path());
+    let unmount = Command::new(which("fusermount3").expect("fusermount3")) // not-tmux: FUSE unmount helper
+        .arg("-u")
+        .arg(&binding.mountpoint)
+        .status()
+        .expect("force the mount loss");
+    assert!(unmount.success());
+    let report = lost_manager.adopt_consumers(&[binding.consumer("exec-child")]);
+    assert!(report.adopted.is_empty(), "{report:?}");
+    assert!(
+        report
+            .unavailable
+            .iter()
+            .any(|(_, reason)| reason.contains("no longer present")),
+        "{report:?}"
+    );
+    let status = lost_manager
+        .lookup(&binding.workspace)
+        .expect("lost status");
+    assert!(!status.mounted);
+    assert!(!status.verified, "an unadopted mount is never verified");
+    assert_eq!(
+        std::fs::read_to_string(
+            binding
+                .workspace
+                .directory()
+                .join("upper")
+                .join("child-edit.txt")
+        )
+        .expect("the lost execution's durable edit"),
+        "child edit\n"
+    );
+    // The stale durable identity and lower consumer are reclaimed without
+    // touching the durable upper.
+    let reclaimed =
+        lost_manager.reclaim_orphans(&nession_erofs::overlay::ProtectedWorkspaces::new());
+    assert_eq!(reclaimed.reclaimed.len(), 1, "{reclaimed:?}");
+    let _ = lost_lower.reclaim_orphans(&std::collections::HashSet::new());
+
+    print_evidence(&serde_json::json!({
+        "restart_adopted": true,
+        "verified_after_restart": true,
+        "missing_mount_unavailable": true,
+        "durable_upper_preserved": true,
+        "lower_released_after_verified_unmount": true,
+    }));
+}
+
+/// #3582 SC-04 (failure half): injected mount/unmount failures retain the
+/// lower, the durable identity and the upper for a bounded retry; an
+/// unverified mount is never Ready and the Sandbox has no Native fallback.
+#[test]
+fn an_injected_overlay_failure_leaves_recoverable_state_without_data_loss() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    let durable_root = dir.path().join("agent-workspaces");
+    settings.agent_workspaces_root = Some(durable_root.clone());
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let managed = durable_root.join("ws_failure");
+    workspace_storage(&managed);
+    let fusermount = which("fusermount3").expect("fusermount3");
+    let real_fuse_overlayfs = which("fuse-overlayfs").expect("fuse-overlayfs");
+    let lower_manager = settings.mount_manager.clone().expect("the lower manager");
+    let project_digest = format!("sha256:{}", images.project_digest);
+    let request = |key: &nession_erofs::overlay::OverlayWorkspaceKey| {
+        nession_erofs::overlay::OverlayRequest::new(key.clone(), project_image(&images))
+    };
+    let open_manager = |root: &Path, helper: PathBuf, fusermount: PathBuf, identity: &str| {
+        let lower: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> =
+            lower_manager.clone();
+        nession_erofs::overlay::OverlayMountManager::open(
+            nession_erofs::overlay::OverlayMountManagerConfig {
+                root: root.to_path_buf(),
+                workspace_roots: vec![durable_root.clone()],
+                settings: nession_erofs::overlay::OverlaySettings::new(helper, fusermount),
+                lower,
+                identity: identity.to_string(),
+            },
+        )
+        .expect("open a failure-injection Overlay manager")
+    };
+
+    // 1. The mount helper fails.
+    let failing_helper = dir.path().join("failing-fuse-overlayfs");
+    executable_script(&failing_helper, "#!/bin/sh\nexit 1\n");
+    let failing = open_manager(
+        &dir.path().join("overlay-failing"),
+        failing_helper,
+        fusermount.clone(),
+        "failure-mount",
+    );
+    let key = failing
+        .resolve_workspace(&managed)
+        .expect("the managed Workspace is authorized");
+    let error = failing
+        .acquire(&request(&key), "exec-mount-failure")
+        .expect_err("an injected mount failure must fail the acquire");
+    assert!(format!("{error:#}").contains("failed"), "{error:#}");
+    let status = failing.lookup(&key).expect("failed status");
+    assert_eq!(status.state, nession_erofs::overlay::OverlayState::Failed);
+    assert!(!status.mounted);
+    assert!(!status.verified);
+    assert_eq!(status.consumers, 0);
+    assert_eq!(
+        lower_manager
+            .lookup(&project_digest)
+            .map(|status| status.consumers)
+            .unwrap_or(0),
+        0,
+        "a failed mount released the lower consumer"
+    );
+    assert!(!managed.join(".nession-overlay/owner.json").exists());
+
+    // 2. The helper reports success without mounting anything.
+    let silent_helper = dir.path().join("silent-fuse-overlayfs");
+    executable_script(&silent_helper, "#!/bin/sh\nexit 0\n");
+    let silent = open_manager(
+        &dir.path().join("overlay-silent"),
+        silent_helper,
+        fusermount.clone(),
+        "failure-silent",
+    );
+    let key = silent
+        .resolve_workspace(&managed)
+        .expect("the managed Workspace is authorized");
+    let error = silent
+        .acquire(&request(&key), "exec-unverified-mount")
+        .expect_err("an unverified mount must fail the acquire");
+    assert!(
+        format!("{error:#}").contains("did not become an OverlayFS mount"),
+        "{error:#}"
+    );
+    let status = silent.lookup(&key).expect("unverified status");
+    assert!(!status.mounted);
+    assert!(!status.verified, "an unverified mount is never ready");
+
+    // 3. The unmount fails once: retain the mount, the lower pin, the durable
+    //    identity and the upper; the retry succeeds.
+    let fail_once = dir.path().join("fail-once-fusermount");
+    executable_script(
+        &fail_once,
+        &format!(
+            "#!/bin/sh\nif [ ! -f \"$0.counter\" ]; then : > \"$0.counter\"; exit 1; fi\nexec {} \"$@\"\n",
+            fusermount.display()
+        ),
+    );
+    let retrying = open_manager(
+        &dir.path().join("overlay-retry"),
+        real_fuse_overlayfs,
+        fail_once,
+        "failure-unmount",
+    );
+    let key = retrying
+        .resolve_workspace(&managed)
+        .expect("the managed Workspace is authorized");
+    let lease = retrying
+        .acquire(&request(&key), "exec-unmount-failure")
+        .expect("acquire before the injected unmount failure");
+    std::fs::write(managed.join("upper").join("durable.txt"), b"durable").expect("durable write");
+    let error = lease
+        .release()
+        .expect_err("the injected unmount failure must be reported");
+    assert!(format!("{error:#}").contains("failed"), "{error:#}");
+    let status = retrying.lookup(&key).expect("failed unmount status");
+    assert_eq!(status.state, nession_erofs::overlay::OverlayState::Failed);
+    assert!(status.mounted, "the live mount is retained");
+    assert_eq!(status.consumers, 0);
+    assert!(
+        managed.join(".nession-overlay/owner.json").exists(),
+        "the durable identity is retained"
+    );
+    assert!(
+        lower_manager
+            .lookup(&project_digest)
+            .is_some_and(|status| status.mounted && status.consumers >= 1),
+        "the lower pin is never released on a failed Overlay unmount"
+    );
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("durable.txt")).expect("durable"),
+        "durable"
+    );
+    retrying
+        .release_consumers(&key, "exec-unmount-failure", None)
+        .expect("the retry succeeds");
+    let status = retrying.lookup(&key).expect("retried status");
+    assert!(!status.mounted);
+    assert_eq!(status.consumers, 0);
+    assert!(!managed.join(".nession-overlay/owner.json").exists());
+    assert_eq!(
+        lower_manager
+            .lookup(&project_digest)
+            .map(|status| status.consumers)
+            .unwrap_or(0),
+        0,
+        "the retry releases the lower"
+    );
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("durable.txt")).expect("durable"),
+        "durable"
+    );
+
+    // 4. Without the shared Overlay manager a lower-backed composition fails
+    //    closed instead of creating a per-execution Overlay or Native fallback.
+    let mut no_overlay = settings.clone();
+    no_overlay.overlay_manager = None;
+    let fallback_dir = durable_root.join("ws_no_fallback");
+    workspace_storage(&fallback_dir);
+    let error = match prepare(
+        &LaunchRequest {
+            policy: composition_policy(
+                &images.base,
+                &images.base_digest,
+                &images.project,
+                &images.project_digest,
+                &fallback_dir,
+                &images.toolchain,
+                &images.toolchain_digest,
+            ),
+            session_name: format!("no-fallback-{}", std::process::id()),
+            instance_id: "instance-no-fallback".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec!["/bin/sh".to_string()],
+            tmux_socket: None,
+        },
+        &no_overlay,
+    ) {
+        Ok(_) => panic!("a missing Overlay manager must refuse the composition"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:#}").contains("shared Workspace Overlay manager"),
+        "{error:#}"
+    );
+
+    print_evidence(&serde_json::json!({
+        "mount_failure_failed_state": true,
+        "mount_failure_not_ready": true,
+        "unverified_mount_not_ready": true,
+        "failed_unmount_retained_mount": true,
+        "lower_pin_retained": true,
+        "retry_succeeded": true,
+        "durable_upper_preserved": true,
+        "durable_identity_cleared_after_retry": true,
+        "no_native_fallback": true,
+    }));
+}
 
 fn standalone_manager(
     root: &Path,
