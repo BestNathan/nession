@@ -152,11 +152,11 @@ jobs:
             (.terminal_config.cols | type == "number") and
             (.terminal_config.web_max_font_size | type == "number") and
             (.images | keys == ["agent","server","ui"]) and
-            all(["agent","server","ui"][];
+            (. as $doc | all(["agent","server","ui"][];
               . as $role |
-              (.images[$role].tag == ($role+"-"+$short)) and
-              (.images[$role].digests[$ghcr] | test("^sha256:[a-f0-9]{64}$"))
-            )
+              ($doc.images[$role].tag == ($role+"-"+$short)) and
+              ($doc.images[$role].digests[$ghcr] | test("^sha256:[a-f0-9]{64}$"))
+            ))
           ' "$SOURCE" >/dev/null || {
             echo "::error::GHCR release artifact is not consistent with original source SHA";
             exit 1;
