@@ -23,6 +23,10 @@ use nession_mcp::{McpService, ServiceConfig};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
 };
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
+    ClientSessionEnvBindingSetPayload,
+};
 use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
 use serde_json::{json, Value};
@@ -148,6 +152,48 @@ impl ClusterBackend for ServerClusterBackend {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
         dispatch_with(self.handler.clone(), "server.env.delete", payload).await
+    }
+
+    async fn session_env_binding_get(
+        &self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(
+            self.handler.clone(),
+            "server.session.env.binding.get",
+            payload,
+        )
+        .await
+    }
+
+    async fn session_env_binding_set(
+        &self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(
+            self.handler.clone(),
+            "server.session.env.binding.set",
+            payload,
+        )
+        .await
+    }
+
+    async fn session_env_binding_reapply(
+        &self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(
+            self.handler.clone(),
+            "server.session.env.binding.reapply",
+            payload,
+        )
+        .await
     }
 }
 

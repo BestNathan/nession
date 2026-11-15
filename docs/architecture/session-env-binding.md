@@ -35,8 +35,8 @@ An empty binding is a valid state: desired revision 0, no profiles, no overlay.
 | Unit | Owner | Semantics |
 |---|---|---|
 | `server.session.env.binding.get` | Server | desired + observed state |
-| `server.session.env.binding.set` | Server | replace the whole ordered selection |
-| `server.session.env.binding.reapply` | Server | re-resolve desired profiles at a new revision |
+| `server.session.env.binding.set` | Server | replace the whole ordered selection; `expected_revision` is a durable compare-and-swap |
+| `server.session.env.binding.reapply` | Server | re-resolve desired profiles at a new revision; `expected_revision` is a durable compare-and-swap |
 | `agent.session.env.binding.set` | Agent | materialize one revision (profiles + snapshots) |
 | `agent.session.env.binding.get` | Agent | observed state for one Session |
 | `server.agent.session-env-binding` | Agent → Server | one-way reconnect report of observed state |
@@ -48,6 +48,25 @@ Attach carries no environment for canonical clients. A pre-#170 client that
 still sends `env_snapshots` on attach is translated, explicitly and with a
 warning, into a binding replacement before the attach — never into an
 attach-owned overlay.
+
+## Revision compare-and-swap
+
+`set` and `reapply` accept an optional `expected_revision`. When present, the
+Server applies it as a **durable compare-and-swap** in the database write
+(`Database::compare_and_swap_session_env_binding`), not as a preflight read: a
+concurrent Web or MCP writer that advanced the row first makes the write a
+no-op. The loser receives `success: false` with `refusal:
+"revision_conflict"` (and a sentence naming the expected and current
+revisions), **nothing is persisted, and no `agent.session.env.binding.set` is
+dispatched**. There is deliberately no `force`, `ignore_conflict` or
+automatic retry; the caller re-reads with `get` and decides.
+
+An absent `expected_revision` keeps the legacy unconditional replacement used
+by the `apply`/`unset` adapters and by older Web payloads. First-party Web
+calls send the revision they last read, so a stale tab is refused rather than
+silently overwriting another writer. A conflict is a refusal of intent, not a
+materialization failure: `binding` is absent from that reply, while an Agent
+failure after a committed revision still returns the resulting desired state.
 
 ## Runtime layers
 
@@ -196,6 +215,8 @@ its original environment — this is the honest contract.
 - `crates/nession-server/src/server/handler/tests/server_session_env_binding_v1.rs`:
   replace-whole semantics, phase preservation, desired survival on Agent
   failure, reapply content resolution, legacy unset without re-reading the
-  removed file, Session-scoped query, and reconnect report filtering.
+  removed file, Session-scoped query, reconnect report filtering, and the
+  revision compare-and-swap (a stale writer is refused with no durable change
+  and no Agent dispatch; concurrent store writers have exactly one winner).
 - `crates/nession-agent/src/extension.rs` and the protocol Gates: the manifest
   advertises the units it serves and the generated bindings do not drift.

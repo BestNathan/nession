@@ -680,14 +680,7 @@ impl Database {
 
     /// Insert or replace one Session's desired binding (replace-whole).
     pub async fn upsert_session_env_binding(&self, row: &SessionEnvBindingRow) -> Result<()> {
-        let model = session_env_bindings::ActiveModel {
-            session_id: Set(row.session_id.clone()),
-            agent_id: Set(row.agent_id.clone()),
-            desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
-            profiles_json: Set(row.profiles_json.clone()),
-            updated_at: Set(row.updated_at),
-        };
-        session_env_bindings::Entity::insert(model)
+        session_env_bindings::Entity::insert(session_env_binding_model(row))
             .on_conflict(
                 OnConflict::column(session_env_bindings::Column::SessionId)
                     .update_columns([
@@ -702,6 +695,65 @@ impl Database {
             .await
             .context("failed to upsert session env binding")?;
         Ok(())
+    }
+
+    /// Persist one Session's desired binding **only if** its stored revision is
+    /// still `expected_revision`.
+    ///
+    /// This is the durable compare-and-swap behind the binding's
+    /// version-aware mutations. Reading the revision and then writing it
+    /// unconditionally would let a caller that read revision 3 overwrite a
+    /// writer that already advanced the row to 4, so the comparison is part of
+    /// the write itself. `false` means the row was not written — the caller
+    /// lost the race — and no Agent-side mutation may follow.
+    ///
+    /// `expected_revision == 0` covers a Session whose binding has never been
+    /// persisted: the update matches nothing, and an insert guarded by its own
+    /// conflict rule decides the race instead.
+    pub async fn compare_and_swap_session_env_binding(
+        &self,
+        row: &SessionEnvBindingRow,
+        expected_revision: u64,
+    ) -> Result<bool> {
+        let expected = i64::try_from(expected_revision).unwrap_or(i64::MAX);
+        let updated = session_env_bindings::Entity::update_many()
+            .col_expr(
+                session_env_bindings::Column::AgentId,
+                Expr::value(row.agent_id.clone()),
+            )
+            .col_expr(
+                session_env_bindings::Column::DesiredRevision,
+                Expr::value(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+            )
+            .col_expr(
+                session_env_bindings::Column::ProfilesJson,
+                Expr::value(row.profiles_json.clone()),
+            )
+            .col_expr(
+                session_env_bindings::Column::UpdatedAt,
+                Expr::value(row.updated_at),
+            )
+            .filter(session_env_bindings::Column::SessionId.eq(&row.session_id))
+            .filter(session_env_bindings::Column::DesiredRevision.eq(expected))
+            .exec(&self.conn)
+            .await
+            .context("failed to compare-and-swap session env binding")?;
+        if updated.rows_affected == 1 {
+            return Ok(true);
+        }
+        if expected_revision != 0 {
+            return Ok(false);
+        }
+
+        // No row existed at revision 0. The first writer inserts; a racer that
+        // inserted first makes the guarded insert a no-op, which is a lost
+        // compare-and-swap rather than a silent overwrite.
+        let inserted = session_env_bindings::Entity::insert(session_env_binding_model(row))
+            .on_conflict_do_nothing_on([session_env_bindings::Column::SessionId])
+            .exec(&self.conn)
+            .await
+            .context("failed to insert session env binding after a compare-and-swap")?;
+        Ok(matches!(inserted, sea_orm::TryInsertResult::Inserted(_)))
     }
 
     /// Delete one Session's binding (idempotent).
@@ -1730,6 +1782,16 @@ fn session_env_binding_row_from_model(m: session_env_bindings::Model) -> Session
         desired_revision: u64::try_from(m.desired_revision).unwrap_or(0),
         profiles_json: m.profiles_json,
         updated_at: m.updated_at,
+    }
+}
+
+fn session_env_binding_model(row: &SessionEnvBindingRow) -> session_env_bindings::ActiveModel {
+    session_env_bindings::ActiveModel {
+        session_id: Set(row.session_id.clone()),
+        agent_id: Set(row.agent_id.clone()),
+        desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+        profiles_json: Set(row.profiles_json.clone()),
+        updated_at: Set(row.updated_at),
     }
 }
 

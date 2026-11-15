@@ -19,7 +19,11 @@ use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRenameReply};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
 };
-use nession_protocol::contracts::session::v1::{ClientSessionAttachReply, ServerSessionListReply};
+use nession_protocol::contracts::session::v1::{
+    ClientSessionAttachReply, ClientSessionEnvBindingGetPayload,
+    ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingSetPayload,
+    ServerSessionListReply, SessionEnvBindingRefusalKind,
+};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 
@@ -346,5 +350,80 @@ async fn a_real_server_answers_env_file_crud() {
     assert!(
         !listed.files.iter().any(|file| file.name == "fixture.env"),
         "the deleted file must not be listed"
+    );
+}
+
+/// The three Session Environment Binding methods decode the real Server's
+/// state and its structured revision conflict.
+#[tokio::test]
+async fn a_real_server_answers_session_env_binding_state_and_conflicts() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+    let session_id = "a1:absent".to_string();
+
+    // A Session with no binding still has a state: revision 0 and no profiles.
+    let state = client
+        .session_env_binding_get(ClientSessionEnvBindingGetPayload {
+            session_id: session_id.clone(),
+        })
+        .await
+        .expect("binding get");
+    assert!(state.success, "{:?}", state.error);
+    assert!(state.refusal.is_none());
+    let binding = state.binding.expect("a state is always present");
+    assert_eq!(binding.session_id, session_id);
+    assert_eq!(binding.desired_revision, 0);
+    assert!(binding.desired_profiles.is_empty());
+
+    // `set` requires a live Session. The Server's own refusal travels, and it
+    // is not a revision conflict.
+    let refused = client
+        .session_env_binding_set(ClientSessionEnvBindingSetPayload {
+            session_id: session_id.clone(),
+            profiles: Vec::new(),
+            expected_revision: Some(0),
+        })
+        .await
+        .expect("binding set refusal");
+    assert!(!refused.success);
+    assert!(refused.refusal.is_none());
+    assert!(
+        refused
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("not found")),
+        "{:?}",
+        refused.error
+    );
+
+    // Reapplying an empty binding at revision 0 is a no-op; a stale revision
+    // is the structured conflict the caller recovers from by re-reading.
+    let noop = client
+        .session_env_binding_reapply(ClientSessionEnvBindingReapplyPayload {
+            session_id: session_id.clone(),
+            expected_revision: Some(0),
+        })
+        .await
+        .expect("binding reapply");
+    assert!(noop.success, "{:?}", noop.error);
+
+    let stale = client
+        .session_env_binding_reapply(ClientSessionEnvBindingReapplyPayload {
+            session_id: session_id.clone(),
+            expected_revision: Some(3),
+        })
+        .await
+        .expect("binding reapply conflict");
+    assert!(!stale.success);
+    assert_eq!(
+        stale.refusal,
+        Some(SessionEnvBindingRefusalKind::RevisionConflict)
+    );
+    assert!(
+        stale
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("revision_conflict")),
+        "{:?}",
+        stale.error
     );
 }

@@ -1782,6 +1782,9 @@ wires: &["agent.session.capture-preview"],
                 decl_of::<
                     nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
                 >(cfg),
+                decl_of::<
+                    nession_protocol::contracts::session::v1::SessionEnvBindingRefusalKind,
+                >(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingState>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingProfileState>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
@@ -1815,6 +1818,9 @@ wires: &["agent.session.capture-preview"],
                 decl_of::<
                     nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
                 >(cfg),
+                decl_of::<
+                    nession_protocol::contracts::session::v1::SessionEnvBindingRefusalKind,
+                >(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingState>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingProfileState>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
@@ -1847,6 +1853,9 @@ wires: &["agent.session.capture-preview"],
                 >(cfg),
                 decl_of::<
                     nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >(cfg),
+                decl_of::<
+                    nession_protocol::contracts::session::v1::SessionEnvBindingRefusalKind,
                 >(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingState>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingProfileState>(cfg),

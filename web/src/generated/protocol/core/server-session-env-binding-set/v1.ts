@@ -21,14 +21,32 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ClientSessionEnvBindingSetPayload = { session_id: string, profiles: Array<EnvFileRef>, };
+export type ClientSessionEnvBindingSetPayload = { session_id: string, profiles: Array<EnvFileRef>, 
+/**
+ * The desired revision the caller read before this replacement.
+ *
+ * When present, the Server performs a durable compare-and-swap: a stored
+ * revision that no longer matches yields a `revision_conflict` refusal
+ * before any durable or Agent-side mutation, and the caller re-reads the
+ * binding rather than overwriting a concurrent writer. Absent for the
+ * legacy `apply`/`unset` adapters and for callers that predate the field;
+ * there is deliberately no `force`/`ignore_conflict` bypass.
+ */
+expected_revision?: number | null, };
 export type ClientSessionEnvBindingResponsePayload = { success: boolean, 
 /**
  * The state after the operation. Present on success and on a failed
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, };
+binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+/**
+ * A machine-readable classification for a refusal that happened *before*
+ * any durable mutation. `None` means the ordinary `error` path: a refused
+ * materialization may still have advanced the desired revision.
+ */
+refusal?: SessionEnvBindingRefusalKind | null, };
+export type SessionEnvBindingRefusalKind = "revision_conflict";
 export type SessionEnvBindingState = { session_id: string, desired_revision: number, desired_profiles: Array<SessionEnvBindingProfileState>, observed?: SessionEnvObservedState | null, 
 /**
  * Why `observed` is absent or the binding could not be read. Desired
@@ -77,7 +95,18 @@ export type EnvSource = "server" | "agent";
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionEnvBindingSetCall = { session_id: string, profiles: Array<EnvFileRef>, };
+export type SessionEnvBindingSetCall = { session_id: string, profiles: Array<EnvFileRef>, 
+/**
+ * The desired revision the caller read before this replacement.
+ *
+ * When present, the Server performs a durable compare-and-swap: a stored
+ * revision that no longer matches yields a `revision_conflict` refusal
+ * before any durable or Agent-side mutation, and the caller re-reads the
+ * binding rather than overwriting a concurrent writer. Absent for the
+ * legacy `apply`/`unset` adapters and for callers that predate the field;
+ * there is deliberately no `force`/`ignore_conflict` bypass.
+ */
+expected_revision?: number | null, };
 
 /** The payload the provider answers with. */
 export type SessionEnvBindingSetReply = { success: boolean, 
@@ -86,5 +115,11 @@ export type SessionEnvBindingSetReply = { success: boolean,
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, };
+binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+/**
+ * A machine-readable classification for a refusal that happened *before*
+ * any durable mutation. `None` means the ordinary `error` path: a refused
+ * materialization may still have advanced the desired revision.
+ */
+refusal?: SessionEnvBindingRefusalKind | null, };
 

@@ -531,7 +531,7 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 
     let session = initialize_with(mcp_addr, MCP_TOKEN).await;
     let tools = tools_of(mcp_addr, MCP_TOKEN).await;
-    assert_eq!(tools.as_array().expect("tools").len(), 8);
+    assert_eq!(tools.as_array().expect("tools").len(), 11);
 
     let agents = call_tool(
         mcp_addr,
@@ -620,6 +620,200 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
     server_task.abort();
 }
 
+/// The three binding Tools replace/get/reapply one Session through the real
+/// Server, keep the durable revision safe under a stale writer, and never put
+/// ENV values in a result.
+#[tokio::test]
+async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
+    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (mock_agent, broker) = register_and_answer(server_addr).await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut child = spawn_standalone(&config_path);
+    let mcp_addr = await_listen_addr(&mut child.0).await;
+    let session = initialize_with(mcp_addr, MCP_TOKEN).await;
+
+    // The profile's content is a known secret. The binding Tools must never
+    // surface it: they report identity, revision and status only.
+    let written = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({
+            "name": "binding-profile.env",
+            "content": "BINDING_SECRET=top-secret-value\n"
+        }),
+    )
+    .await;
+    assert_eq!(written["isError"], false, "{written}");
+
+    let name = unique_name("binding");
+    let created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": CLUSTER_AGENT, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let session_id = format!("{CLUSTER_AGENT}:{name}");
+
+    let initial = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_get",
+        json!({ "session_id": session_id }),
+    )
+    .await;
+    assert_eq!(initial["isError"], false, "{initial}");
+    let initial = text_of(&initial);
+    assert_eq!(initial["binding"]["desired_revision"], 0);
+    assert_eq!(
+        initial["binding"]["desired_profiles"],
+        json!([]),
+        "a Session that never had a binding is empty, not guessed"
+    );
+
+    let applied = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_set",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "profiles": [{ "name": "binding-profile.env" }]
+        }),
+    )
+    .await;
+    assert_eq!(applied["isError"], false, "{applied}");
+    let applied = text_of(&applied);
+    assert_eq!(applied["binding"]["desired_revision"], 1);
+    assert_eq!(
+        applied["binding"]["desired_profiles"][0]["profile"]["name"],
+        "binding-profile.env"
+    );
+    assert_eq!(applied["binding"]["desired_profiles"][0]["outdated"], false);
+
+    let binding_dispatches = |commands: &[String]| {
+        commands
+            .iter()
+            .filter(|command| command.as_str() == "agent.session.env.binding.set")
+            .count()
+    };
+    let dispatches_before = binding_dispatches(&broker.commands());
+
+    // A writer that read revision 0 loses the race. Nothing durable changes
+    // and the Agent is not asked to materialize anything.
+    let stale = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_set",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 0,
+            "profiles": []
+        }),
+    )
+    .await;
+    assert_eq!(stale["isError"], true, "{stale}");
+    let stale = text_of(&stale);
+    assert_eq!(stale["refusal"], "revision_conflict");
+    assert!(
+        stale["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("revision_conflict")),
+        "{stale}"
+    );
+    assert_eq!(
+        binding_dispatches(&broker.commands()),
+        dispatches_before,
+        "a conflict must not dispatch an Agent mutation"
+    );
+
+    let refreshed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_get",
+        json!({ "session_id": session_id }),
+    )
+    .await;
+    let refreshed = text_of(&refreshed);
+    assert_eq!(refreshed["binding"]["desired_revision"], 1);
+    assert_eq!(
+        refreshed["binding"]["desired_profiles"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let reapplied = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_reapply",
+        json!({ "session_id": session_id, "expected_revision": 1 }),
+    )
+    .await;
+    assert_eq!(reapplied["isError"], false, "{reapplied}");
+    let reapplied = text_of(&reapplied);
+    assert_eq!(reapplied["binding"]["desired_revision"], 2);
+    assert_eq!(
+        reapplied["binding"]["desired_profiles"][0]["profile"]["name"], "binding-profile.env",
+        "reapply must not change the selection"
+    );
+
+    let cleared = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_set",
+        json!({
+            "session_id": session_id,
+            "expected_revision": 2,
+            "profiles": []
+        }),
+    )
+    .await;
+    assert_eq!(cleared["isError"], false, "{cleared}");
+    let cleared = text_of(&cleared);
+    assert_eq!(cleared["binding"]["desired_revision"], 3);
+    assert_eq!(cleared["binding"]["desired_profiles"], json!([]));
+
+    // A reapply of a Session with no binding at revision 0 is a no-op, but a
+    // version-aware caller that expected a later revision is told it lost.
+    let missing = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_session_env_binding_reapply",
+        json!({ "session_id": format!("{CLUSTER_AGENT}:absent"), "expected_revision": 5 }),
+    )
+    .await;
+    assert_eq!(missing["isError"], true, "{missing}");
+    assert_eq!(text_of(&missing)["refusal"], "revision_conflict");
+
+    // No result carried the profile's raw content.
+    for result in [&applied, &refreshed, &reapplied, &cleared] {
+        let text = serde_json::to_string(result).expect("serialize");
+        assert!(
+            !text.contains("top-secret-value") && !text.contains("BINDING_SECRET"),
+            "binding results must never carry ENV values: {text}"
+        );
+    }
+
+    terminate_and_wait(&mut child.0).await;
+    mock_agent.abort();
+    server_task.abort();
+}
+
 #[tokio::test]
 async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
     let (server_addr, server_task) = start_server_with_mcp(false).await;
@@ -698,7 +892,7 @@ async fn all_three_hosts_share_one_tool_catalog() {
     let agent_tools = tools_of(agent_addr, AGENT_TOKEN).await;
     let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
 
-    assert_eq!(server_tools.as_array().expect("tools").len(), 8);
+    assert_eq!(server_tools.as_array().expect("tools").len(), 11);
     let names: Vec<_> = server_tools
         .as_array()
         .expect("tools")
@@ -713,6 +907,9 @@ async fn all_three_hosts_share_one_tool_catalog() {
             "nession_server_env_get",
             "nession_server_env_write",
             "nession_server_env_delete",
+            "nession_server_session_env_binding_get",
+            "nession_server_session_env_binding_set",
+            "nession_server_session_env_binding_reapply",
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",
@@ -726,6 +923,37 @@ async fn all_three_hosts_share_one_tool_catalog() {
         server_tools, standalone_tools,
         "Standalone must serve the same catalog as the Server"
     );
+
+    // The Agent-embedded host has no configured Server (`server_url` is empty).
+    // Its binding Tools stay advertised and fail truthfully instead of falling
+    // back to local Agent state.
+    let session = initialize_with(agent_addr, AGENT_TOKEN).await;
+    for (tool, arguments) in [
+        (
+            "nession_server_session_env_binding_get",
+            json!({ "session_id": "any-agent:work" }),
+        ),
+        (
+            "nession_server_session_env_binding_set",
+            json!({
+                "session_id": "any-agent:work",
+                "expected_revision": 0,
+                "profiles": []
+            }),
+        ),
+        (
+            "nession_server_session_env_binding_reapply",
+            json!({ "session_id": "any-agent:work", "expected_revision": 0 }),
+        ),
+    ] {
+        let result = call_tool(agent_addr, AGENT_TOKEN, &session, tool, arguments).await;
+        assert_eq!(result["isError"], true, "{tool}: {result}");
+        assert_eq!(
+            text_of(&result)["error"]["kind"],
+            "unavailable",
+            "{tool} must report the missing Server, not local state: {result}"
+        );
+    }
 
     let _ = agent_handle.shutdown().await;
     server_task.abort();

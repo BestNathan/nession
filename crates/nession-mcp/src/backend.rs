@@ -15,6 +15,10 @@ use async_trait::async_trait;
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
 };
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
+    ClientSessionEnvBindingSetPayload,
+};
 use serde_json::Value;
 
 use crate::error::ToolError;
@@ -39,6 +43,26 @@ pub trait ClusterBackend: Send + Sync {
 
     /// `nession_server_env_delete` — canonical in-use/delete protection.
     async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError>;
+
+    /// `nession_server_session_env_binding_get` — desired + observed state.
+    async fn session_env_binding_get(
+        &self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<Value, ToolError>;
+
+    /// `nession_server_session_env_binding_set` — whole ordered replacement
+    /// with the Server's durable revision compare-and-swap.
+    async fn session_env_binding_set(
+        &self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<Value, ToolError>;
+
+    /// `nession_server_session_env_binding_reapply` — re-resolve the current
+    /// selection at a new revision.
+    async fn session_env_binding_reapply(
+        &self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<Value, ToolError>;
 }
 
 /// One explicitly named Agent node's real Session state.
@@ -105,6 +129,27 @@ impl ClusterBackend for UnavailableClusterBackend {
     }
 
     async fn env_delete(&self, _payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn session_env_binding_get(
+        &self,
+        _payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn session_env_binding_set(
+        &self,
+        _payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn session_env_binding_reapply(
+        &self,
+        _payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<Value, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 }

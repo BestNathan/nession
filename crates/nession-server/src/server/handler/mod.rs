@@ -41,9 +41,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionSandboxEnterPayload, ClientSessionSandboxFocusPayload,
     ClientSessionSandboxPreflightPayload, ClientSessionSandboxReturnPayload, ProcessSnapshot,
     SandboxContextResponse, ServerSessionListPayload, ServerSessionListReply,
-    ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvQueryResponse,
-    SessionMetadata, SessionMetadataResponse, SessionProcessesResponse, SessionRefusal,
-    WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
+    ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvBindingRefusalKind,
+    SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
+    SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
     WebSessionMetadataUpdatePayload, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
@@ -214,6 +214,45 @@ pub struct ConnectionHandlerDeps {
     /// Server-owned global EROFS image manager (#3022).
     pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
+}
+
+/// Why the canonical Session binding mutation refused.
+///
+/// A conflict is deliberately distinct from an ordinary refusal: it proves the
+/// caller lost a revision race *before* any durable write and before the Agent
+/// was asked to change anything, so it is safe to retry after re-reading.
+enum BindingMutationError {
+    /// A version-aware caller's `expected_revision` was stale.
+    RevisionConflict {
+        expected: u64,
+        /// The winner's revision, when it could be re-read.
+        current: Option<u64>,
+    },
+    /// Any other refusal, reported as the Server has always reported it.
+    Refused(String),
+}
+
+impl BindingMutationError {
+    fn message(&self) -> String {
+        match self {
+            Self::RevisionConflict { expected, current } => match current {
+                Some(current) => format!(
+                    "revision_conflict: expected revision {expected}, but the Session binding is now at revision {current}; call get and retry with the current revision"
+                ),
+                None => format!(
+                    "revision_conflict: expected revision {expected}, but the Session binding changed and its current revision could not be read"
+                ),
+            },
+            Self::Refused(message) => message.clone(),
+        }
+    }
+
+    fn refusal(&self) -> Option<SessionEnvBindingRefusalKind> {
+        match self {
+            Self::RevisionConflict { .. } => Some(SessionEnvBindingRefusalKind::RevisionConflict),
+            Self::Refused(_) => None,
+        }
+    }
 }
 
 impl ConnectionHandler {
@@ -687,15 +726,25 @@ impl ConnectionHandler {
     /// materialize it: it is user intent, and a restarted Server must not lose
     /// it. A failed materialization therefore leaves a desired revision that
     /// the observed state can disagree with, which is the signal to reapply.
+    ///
+    /// `expected_revision` makes the replacement a durable compare-and-swap.
+    /// `None` is the legacy unconditional replace used by the shipped Web
+    /// client's older payloads and by the `apply`/`unset` adapters; version-aware
+    /// callers pass the revision they read, and a stale one is refused before
+    /// the Agent is touched.
     async fn set_session_binding(
         &self,
         session_id: &str,
         refs: &[EnvFileRef],
         default_phase: &str,
-    ) -> Result<(Vec<String>, Option<String>, SessionEnvBindingState), String> {
-        let (agent_id, session_name) = Self::session_agent_and_name(session_id)?;
+        expected_revision: Option<u64>,
+    ) -> Result<(Vec<String>, Option<String>, SessionEnvBindingState), BindingMutationError> {
+        let (agent_id, session_name) =
+            Self::session_agent_and_name(session_id).map_err(BindingMutationError::Refused)?;
         if self.session_registry.get(session_id).await.is_none() {
-            return Err(format!("Session '{session_id}' not found"));
+            return Err(BindingMutationError::Refused(format!(
+                "Session '{session_id}' not found"
+            )));
         }
 
         // The same profile twice in one replacement is one entry; later
@@ -716,16 +765,34 @@ impl ConnectionHandler {
             .bindings
             .get(session_id)
             .await
-            .map_err(|e| format!("could not read the Session binding: {e:#}"))?;
+            .map_err(|e| {
+                BindingMutationError::Refused(format!("could not read the Session binding: {e:#}"))
+            })?;
+        let current_revision = existing
+            .as_ref()
+            .map_or(0, |record| record.desired_revision);
+        if let Some(expected) = expected_revision {
+            if expected != current_revision {
+                return Err(BindingMutationError::RevisionConflict {
+                    expected,
+                    current: Some(current_revision),
+                });
+            }
+        }
         let previous = existing
             .as_ref()
             .map_or(&[][..], |record| record.profiles.as_slice());
         let mut materialized =
             crate::env::binding::materialized_profiles(previous, &unique_refs, default_phase);
 
-        let snapshots = self.resolve_snapshots(&agent_id, &unique_refs).await?;
+        let snapshots = self
+            .resolve_snapshots(&agent_id, &unique_refs)
+            .await
+            .map_err(BindingMutationError::Refused)?;
         if snapshots.len() != materialized.len() {
-            return Err("the resolved profile set does not match the requested set".to_string());
+            return Err(BindingMutationError::Refused(
+                "the resolved profile set does not match the requested set".to_string(),
+            ));
         }
         let warnings: Vec<String> = snapshots
             .iter()
@@ -735,9 +802,7 @@ impl ConnectionHandler {
             materialized.content_hash = Some(crate::env::binding::snapshot_hash(snapshot));
         }
 
-        let revision = existing
-            .as_ref()
-            .map_or(1, |record| record.desired_revision.saturating_add(1));
+        let revision = current_revision.saturating_add(1);
         let record = crate::env::BindingRecord {
             session_id: session_id.to_string(),
             agent_id: agent_id.clone(),
@@ -745,11 +810,38 @@ impl ConnectionHandler {
             profiles: materialized,
             updated_at: i64::try_from(current_timestamp()).unwrap_or(0),
         };
-        self.env_service
-            .bindings
-            .put(&record)
-            .await
-            .map_err(|e| format!("could not persist the Session binding: {e:#}"))?;
+        match expected_revision {
+            Some(expected) => {
+                // The read above is only a fast refusal. This write is the
+                // authority: a concurrent Web/MCP writer that advanced the row
+                // after our read makes it a no-op, and nothing reaches the
+                // Agent.
+                let won = self
+                    .env_service
+                    .bindings
+                    .compare_and_swap(&record, expected)
+                    .await
+                    .map_err(|e| {
+                        BindingMutationError::Refused(format!(
+                            "could not persist the Session binding: {e:#}"
+                        ))
+                    })?;
+                if !won {
+                    let current = match self.env_service.bindings.get(session_id).await {
+                        Ok(record) => record.map(|record| record.desired_revision),
+                        Err(_) => None,
+                    };
+                    return Err(BindingMutationError::RevisionConflict { expected, current });
+                }
+            }
+            None => {
+                self.env_service.bindings.put(&record).await.map_err(|e| {
+                    BindingMutationError::Refused(format!(
+                        "could not persist the Session binding: {e:#}"
+                    ))
+                })?;
+            }
+        }
 
         let profiles: Vec<SessionEnvProfile> = record
             .profiles

@@ -26,6 +26,7 @@ impl ConnectionHandler {
                     binding: None,
                     warnings: Vec::new(),
                     error: Some(error.to_string()),
+                    refusal: None,
                 },
             )
         };
@@ -35,6 +36,7 @@ impl ConnectionHandler {
         let Ok(ClientSessionEnvBindingSetPayload {
             session_id,
             profiles,
+            expected_revision,
         }) = serde_json::from_value(msg.payload)
         else {
             return Ok(refusal("session_id is required"));
@@ -44,7 +46,7 @@ impl ConnectionHandler {
         }
 
         match self
-            .set_session_binding(&session_id, &profiles, "attach")
+            .set_session_binding(&session_id, &profiles, "attach", expected_revision)
             .await
         {
             Ok((warnings, error, binding)) => Ok(session_env_binding_reply(
@@ -55,9 +57,20 @@ impl ConnectionHandler {
                     binding: Some(binding),
                     warnings,
                     error,
+                    refusal: None,
                 },
             )),
-            Err(error) => Ok(refusal(&error)),
+            Err(error) => Ok(session_env_binding_reply(
+                &msg.id,
+                "server.session.env.binding.set",
+                ClientSessionEnvBindingResponsePayload {
+                    success: false,
+                    binding: None,
+                    warnings: Vec::new(),
+                    error: Some(error.message()),
+                    refusal: error.refusal(),
+                },
+            )),
         }
     }
 }
