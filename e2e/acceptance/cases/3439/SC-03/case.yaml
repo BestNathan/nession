@@ -1,7 +1,7 @@
 schema_version: 1
 issue: 3439
 criterion: SC-03
-stage: pr
+stage: staging
 runtime: full-stack-local
 isolation: isolated
 verifiers:
