@@ -22,3 +22,15 @@ test('MCP Tool/schema/protocol changes produce a new semantic identity',()=>{
   ])assert.equal(mcpChanged(mcpSemanticDigest(original),mcpSemanticDigest(modified)),true);
   assert.throws(()=>mcpSemanticDigest({tools:[tool,tool]}),/duplicate/);
 });
+
+test('pinned upstream stable release update changes MCP digest, draft metadata does not',()=>{
+  const release={version:'2026-07-28',sha:'a'.repeat(40),changelog_sha256:'b'.repeat(64)};
+  const source={tools:[tool],protocol_versions:['2026-07-28'],upstream:{stable:release}};
+  const digest=mcpSemanticDigest(source);
+  assert.notEqual(mcpSemanticDigest({...source,upstream:{stable:{...release,
+    version:'2027-03-30',sha:'c'.repeat(40)}}}),digest);
+  assert.notEqual(mcpSemanticDigest({...source,upstream:{stable:{...release,
+    changelog_sha256:'d'.repeat(64)}}}),digest);
+  assert.equal(mcpSemanticDigest({...source,upstream:{stable:release,
+    draft:{title:'Unreleased SEP'}}}),digest);
+});
