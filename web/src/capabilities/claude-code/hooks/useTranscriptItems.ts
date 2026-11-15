@@ -45,24 +45,102 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to read the transcript';
 }
 
-/** Merge a ready page into the state — an older page goes in front, the newest replaces. */
-function withPage(
+/** One copy of each entry, first occurrence winning. */
+function uniqueById(entries: ClaudeCodeTranscriptEntry[]): ClaudeCodeTranscriptEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    if (seen.has(entry.id)) {
+      return false;
+    }
+    seen.add(entry.id);
+    return true;
+  });
+}
+
+/**
+ * Fold a freshly read newest page into the timeline (#3606).
+ *
+ * The page is authoritative for the entries it carries — a tool that finished
+ * between polls comes back changed — so those replace their earlier copies and
+ * move to the page's position. It is **not** authoritative for the whole
+ * timeline once a reader has paged back: entries it does not carry are still
+ * valid history, older than its oldest entry, and stay in front of it. The
+ * previous newest page's entries that have merely moved out of the window are
+ * therefore kept too; dropping them would open a gap that no cursor points at.
+ */
+function withNewestPage(
   current: TranscriptItemsState,
   response: ClaudeCodeTranscriptItemsResponse,
-  older: boolean,
+  initial: boolean,
 ): TranscriptItemsState {
+  const page = uniqueById(response.items ?? []);
+  const pageIds = new Set(page.map((entry) => entry.id));
   return {
     state: response.state,
     transcript: response.transcript ?? current.transcript,
     activity: response.activity ?? null,
-    items: older ? [...(response.items ?? []), ...current.items] : (response.items ?? []),
-    hasMore: response.has_more,
+    items: [...current.items.filter((entry) => !pageIds.has(entry.id)), ...page],
+    // `has_more` and the older cursor describe the boundary the reader has
+    // paged back to, not the newest page. A poll re-reads the newest page, so
+    // its own `has_more` says nothing about that boundary: writing it would
+    // either rewind the reader or resurrect pagination they exhausted. The
+    // initial read establishes the boundary; an older page moves it.
+    hasMore: initial ? response.has_more : current.hasMore,
     partialTail: response.partial_tail,
     stats: response.stats ?? null,
     loading: false,
+    loadingOlder: current.loadingOlder,
+    error: null,
+  };
+}
+
+/**
+ * Put an older page in front of the timeline.
+ *
+ * Identity-based like the newest merge: an id already on screen is one entry,
+ * not two. A page that is entirely present is a no-op rather than a duplicate.
+ */
+function withOlderPage(
+  current: TranscriptItemsState,
+  response: ClaudeCodeTranscriptItemsResponse,
+): TranscriptItemsState {
+  const loaded = new Set(current.items.map((entry) => entry.id));
+  const page = uniqueById(response.items ?? []).filter((entry) => !loaded.has(entry.id));
+  return {
+    state: response.state,
+    transcript: response.transcript ?? current.transcript,
+    activity: response.activity ?? null,
+    items: [...page, ...current.items],
+    hasMore: response.has_more,
+    partialTail: response.partial_tail,
+    stats: response.stats ?? null,
+    loading: current.loading,
     loadingOlder: false,
     error: null,
   };
+}
+
+type Lane = 'newest' | 'older';
+
+/** The selection and lane request an in-flight answer belongs to. */
+interface Ticket {
+  key: string;
+  selection: number;
+  lane: Lane;
+  request: number;
+}
+
+/** A response that is not a page: say why, and leave what is on screen alone. */
+function withReadState(
+  current: TranscriptItemsState,
+  response: ClaudeCodeTranscriptItemsResponse,
+  lane: Lane,
+): TranscriptItemsState {
+  const error =
+    response.state === 'error' ? (response.error ?? 'The transcript could not be read') : null;
+  return lane === 'newest'
+    ? { ...current, state: response.state, loading: false, error }
+    : { ...current, state: response.state, loadingOlder: false, error };
 }
 
 /**
@@ -77,6 +155,16 @@ function withPage(
  * Polls while the transcript is live relative to the Session, like the
  * conversation timeline and for the same reason: an execution view that did not
  * follow along would be a still frame of a running thing.
+ *
+ * ## Identity and the two request lanes (#3606)
+ *
+ * Selection identity and request arbitration are separate concerns. `generation`
+ * changes only when the selected transcript does, and no answer from an earlier
+ * selection may land after it. Within one selection, a newest-page read and an
+ * older-page read are independently arbitrated: a poll re-reads the newest page
+ * while a reader may be paging back, and neither request may silently cancel
+ * the other. Each lane keeps its own latest request id, so the newest answer in
+ * a lane wins without touching the other lane's in-flight read.
  */
 export function useTranscriptItems({
   agentId,
@@ -91,17 +179,25 @@ export function useTranscriptItems({
   const contextKey =
     agentId && sessionId && transcriptId ? `${agentId}:${sessionId}:${transcriptId}` : null;
   const contextRef = useRef<string | null>(contextKey);
-  const requestId = useRef(0);
+  /** The selection every in-flight answer must still match. */
+  const generation = useRef(0);
+  /** The latest newest-page read, and the latest older-page read, per selection. */
+  const newestRequest = useRef(0);
+  const olderRequest = useRef(0);
   /** The oldest cursor this transcript has handed out; `null` when exhausted. */
   const olderCursor = useRef<string | null>(null);
 
+  const stillCurrent = useCallback(
+    (ticket: Ticket) =>
+      contextRef.current === ticket.key &&
+      generation.current === ticket.selection &&
+      (ticket.lane === 'newest' ? newestRequest.current : olderRequest.current) ===
+        ticket.request,
+    [],
+  );
+
   const fetchPage = useCallback(
-    async (
-      key: string,
-      id: number,
-      cursor: string | undefined,
-      mode: 'initial' | 'older' | 'poll',
-    ) => {
+    async (ticket: Ticket, mode: 'initial' | 'poll' | 'older', cursor: string | undefined) => {
       const response = await claudeCodeApi.claudeCodeTranscriptItems({
         agent_id: agentId as string,
         session_id: sessionId as string,
@@ -109,64 +205,63 @@ export function useTranscriptItems({
         limit: PAGE_LIMIT,
         ...(cursor ? { cursor } : {}),
       });
-      if (contextRef.current !== key || requestId.current !== id) {
+      if (!stillCurrent(ticket)) {
         return;
       }
       if (response.state !== 'ready') {
-        setItems((current) => ({
-          ...current,
-          state: response.state,
-          loading: false,
-          loadingOlder: false,
-          error:
-            response.state === 'error'
-              ? (response.error ?? 'The transcript could not be read')
-              : null,
-        }));
+        setItems((current) => withReadState(current, response, ticket.lane));
         return;
       }
-      setItems((current) => withPage(current, response, mode === 'older'));
-      // Where the next older page starts. Recorded on the newest read as well
-      // as on an older one — a cursor kept only when paging would never be set,
-      // so `loadOlder` could not fire at all.
-      //
-      // **Not on a poll**: it re-reads the newest page, so writing this would
-      // rewind a reader who has already paged back.
-      if (mode !== 'poll') {
-        olderCursor.current = response.has_more ? (response.next_cursor ?? null) : null;
+      if (ticket.lane === 'newest') {
+        setItems((current) => withNewestPage(current, response, mode === 'initial'));
+        // Where the next older page starts. Recorded on the initial read as
+        // well as on an older one — a cursor kept only when paging would never
+        // be set, so `loadOlder` could not fire at all. **Not on a poll**: it
+        // re-reads the newest page, so writing this would either rewind a
+        // reader who has already paged back or, with `has_more`, claim pages
+        // they already exhausted.
+        if (mode === 'initial') {
+          olderCursor.current = response.has_more ? (response.next_cursor ?? null) : null;
+        }
+        return;
       }
+      setItems((current) => withOlderPage(current, response));
+      olderCursor.current = response.has_more ? (response.next_cursor ?? null) : null;
     },
-    [agentId, sessionId, transcriptId],
+    [agentId, sessionId, transcriptId, stillCurrent],
   );
 
   const failIfCurrent = useCallback(
-    (key: string, id: number, error: unknown) => {
-      if (contextRef.current !== key || requestId.current !== id) {
+    (ticket: Ticket, error: unknown) => {
+      if (!stillCurrent(ticket)) {
         return;
       }
-      setItems((current) => ({
-        ...current,
-        loading: false,
-        loadingOlder: false,
-        error: message(error),
-      }));
+      setItems((current) =>
+        ticket.lane === 'newest'
+          ? { ...current, loading: false, error: message(error) }
+          : { ...current, loadingOlder: false, error: message(error) },
+      );
     },
-    [],
+    [stillCurrent],
   );
 
   // A different transcript is a different timeline: nothing about the old one
-  // may remain, including its cursor.
+  // may remain, including its cursor, and no answer to its requests may land.
   useEffect(() => {
     contextRef.current = contextKey;
-    const id = ++requestId.current;
+    const selection = ++generation.current;
     olderCursor.current = null;
     setItems(EMPTY);
     if (!contextKey) {
       return;
     }
-    void fetchPage(contextKey, id, undefined, 'initial').catch((e: unknown) =>
-      failIfCurrent(contextKey, id, e),
-    );
+    const ticket: Ticket = {
+      key: contextKey,
+      selection,
+      lane: 'newest',
+      request: ++newestRequest.current,
+    };
+    void fetchPage(ticket, 'initial', undefined).catch((e: unknown) => failIfCurrent(ticket, e));
   }, [contextKey, fetchPage, failIfCurrent]);
 
   /** Read the page before the oldest item on screen. */
@@ -176,11 +271,14 @@ export function useTranscriptItems({
     if (!key || !cursor) {
       return;
     }
-    const id = ++requestId.current;
+    const ticket: Ticket = {
+      key,
+      selection: generation.current,
+      lane: 'older',
+      request: ++olderRequest.current,
+    };
     setItems((current) => ({ ...current, loadingOlder: true }));
-    void fetchPage(key, id, cursor, 'older').catch((e: unknown) =>
-      failIfCurrent(key, id, e),
-    );
+    void fetchPage(ticket, 'older', cursor).catch((e: unknown) => failIfCurrent(ticket, e));
   }, [failIfCurrent, fetchPage]);
 
   /** Re-read the newest page — what the poll does. */
@@ -189,8 +287,13 @@ export function useTranscriptItems({
     if (!key) {
       return;
     }
-    const id = ++requestId.current;
-    void fetchPage(key, id, undefined, 'poll').catch(() => {
+    const ticket: Ticket = {
+      key,
+      selection: generation.current,
+      lane: 'newest',
+      request: ++newestRequest.current,
+    };
+    void fetchPage(ticket, 'poll', undefined).catch(() => {
       // A failed poll is not worth a banner — the reader still has the page
       // they were reading. The initial read is whose failure must be visible.
     });

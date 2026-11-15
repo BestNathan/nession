@@ -36,7 +36,7 @@ Discovery is derived from the directory tree and manifest. There is no shared mu
 
 Choose the effective Acceptance runner stage from the trusted Requirement contract: **derive it from `Acceptance Plan.when/branch/environment` for new canonical three-column Reports**, or use the explicit Stage for historical four-column Reports. See [SC authoring format](acceptance-sc-format.md).
 
-- `pr`: PR-head tests provide independently executed CI evidence for Agent Acceptance; no separate PR Case verdict ingestion.
+- `pr`: source-aligned PR Case Smoke runs on the exact PR head. A selected `when: pr, method: case` criterion receives a formal Case verdict only after trusted main ingestion authenticates the original Run/Attempt, implementing PR/head, successful Case Job/Steps, artifact, required exact-head CI, Case Git tree and unchanged SC contract. `method: agent` remains independently evaluated; neither method substitutes for the other.
 - `staging`: evidence that needs the merged staging SHA and integration environment.
 - `post-merge`: evidence that can only be established after the main merge. A main merge alone is not evidence that production deployed.
 
@@ -201,7 +201,7 @@ Remote profile implementation is **deferred until VPN runner and deployment-iden
 
 ## Generic PR Case Smoke and staging merge-proofs
 
-The `Acceptance / Case Smoke` PR Gate is a **real-runtime regression test** over the exact PR head. The selector (`scripts/acceptance-case-smoke-select.mjs`) chooses source-aligned protocol-only and browser+protocol representative Case classes without a fixed Issue number. Historical PR-associated `method: case` Cases may still run as source-aligned CI evidence; newly authored PR SCs require `method: agent`. Do not ingest PR Smoke as a formal Case verdict or silently relabel old Case receipts. The verifier runtime never receives Issue-write credentials or GitHub tokens.
+The `Acceptance / Case Smoke` PR Gate executes source-aligned Cases at the exact PR head, alongside representative generic protocol/browser Cases on its separate main lane. The trusted selector chooses only Issue-linked, eligible `when: pr, method: case` SCs for PR runs. The read-only runner receives no Issue-write credentials. `Acceptance / Case Ingest` is the sole main-owned writer: it authenticates the original successful source Run/Attempt and Case Job/Steps, binds the PR association and exact source SHA, verifies CI / Quality Gate and E2E / Tests on that same head, attests immutable Case tree/SC digest and persists a unique Run Store record before projecting only the declared Case-method SC. Replayed/failed/skipped/expired or ambiguous evidence fails closed. Historical PR-head proof must use GitHub's native re-run of the original Case Smoke Run/job, which creates a new authenticated Run attempt and source-bound artifact. The trusted main `workflow_run` ingester independently verifies that attempt; the privileged Store writer intentionally exposes no manual dispatch. An older artifact alone cannot be manually projected. Ordinary staging/post-merge/deployed Case paths and read-only PR Agent evaluation remain separate; neither may be used to manufacture a PR Case verdict.
 
 Generic Smoke is an infrastructure check: its successful representative Cases do **not** imply every Requirement's own SC has been accepted. A Requirement's staging/production obligations are evaluated by the separate source-aligned `Acceptance / Cases` push workflow and its trusted Ingest.
 

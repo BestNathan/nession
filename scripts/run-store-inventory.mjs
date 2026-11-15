@@ -311,7 +311,7 @@ export function checkInventory(manifest,workflows){
         (triggers.match(/^  repository_dispatch:\s*$/gm)||[]).length===1&&
         (triggers.match(/^  workflow_run:\s*$/gm)||[]).length===1&&
         /^  repository_dispatch:\s*\n    types: \[nession-comment-case-ingest\]\s*$/m.test(triggers)&&
-        /^  workflow_run:\s*\n(?:    [^\n]*\n)*?    workflows: \["Acceptance \/ Cases"\]/m.test(triggers)&&
+        /^  workflow_run:\s*\n(?:    [^\n]*\n)*?    workflows: \["Acceptance \/ Cases", "Acceptance \/ Case Smoke"\]/m.test(triggers)&&
         !/^  workflow_dispatch:\s*$/m.test(triggers)&&
         body.includes("github.repository == 'BestNathan/nession'")&&
         body.includes("github.event_name == 'repository_dispatch'")&&
@@ -551,6 +551,7 @@ function selfTest(){
   assert.match(caseWakeSource,/repository_dispatch:/);
   for(const changed of [
     text=>text.replace('nession-comment-case-ingest','arbitrary-case-wake'),
+    text=>text.replace('"Acceptance / Case Smoke"','"Untrusted / arbitrary"'),
     text=>text.replace("github.actor == 'github-actions[bot]'","github.actor != ''"),
     text=>text.replace("github.ref == 'refs/heads/main'","github.ref != ''"),
     text=>text.replace('node trusted/scripts/acceptance-case-ingest.mjs prepare-event',
