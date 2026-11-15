@@ -787,7 +787,7 @@ try {
   for(const wrong of [
     {state:repairState,version:repairState.version+1},
     {event:{...eventB,target_sha:commitSha}},
-    {event:{...eventB,run_id:repairPublisherRun+1}},
+    {event:{...eventB,run_id:recoveredPublisherRun+1}},
     {trusted:{...trustedB,developer_source_sha:inputSha}},
     {trusted:{...trustedB,developer_run_id:repairWorkerId+1}},
     {trusted:{...trustedB,developer_action_id:action.id}},
