@@ -138,6 +138,64 @@ describe('TerminalController clipboard wiring (#2598)', () => {
     expect(transport.send).not.toHaveBeenCalled();
   });
 
+  it('cannot apply a pending OSC 5522 write after clipboard authority is lost (#3507)', async () => {
+    const { controller, transport, effects } = harness();
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    const begin = '\x1b]5522;type=write:id=w\x1b\\';
+    const chunk = `\x1b]5522;type=wdata:mime=${encodeBase64Text('text/plain')};${encodeBase64Text('late')}\x1b\\`;
+    const end = '\x1b]5522;type=wdata\x1b\\';
+    try {
+      // A write starts while the controller is authorized.
+      transport.onOutput!(bytes(begin), undefined, { streamEpoch: 1, streamSeq: 1 });
+      transport.onOutput!(bytes(chunk), undefined, { streamEpoch: 1, streamSeq: 2 });
+      await flush();
+
+      // Background tab: authority is gone before the final packet arrives, so
+      // the completed write must be denied instead of applied.
+      visibility = 'hidden';
+      transport.send.mockClear();
+      transport.onOutput!(bytes(end), undefined, { streamEpoch: 1, streamSeq: 3 });
+      await flush();
+      expect(effects.writeClipboard).not.toHaveBeenCalled();
+      const denied = transport.send.mock.calls.map(([data]) => data);
+      expect(denied).toHaveLength(1);
+      expect(denied[0]).toContain('type=write:status=EPERM:id=w');
+      expect(denied[0]).not.toContain('status=DONE');
+
+      // A passive observer transition must neither apply the write nor emit a
+      // reply into the pane.
+      visibility = 'visible';
+      transport.onOutput!(bytes(begin), undefined, { streamEpoch: 1, streamSeq: 4 });
+      transport.onOutput!(bytes(chunk), undefined, { streamEpoch: 1, streamSeq: 5 });
+      await flush();
+      controller.setObserverReadOnly(true);
+      transport.send.mockClear();
+      transport.onOutput!(bytes(end), undefined, { streamEpoch: 1, streamSeq: 6 });
+      await flush();
+      expect(effects.writeClipboard).not.toHaveBeenCalled();
+      expect(transport.send).not.toHaveBeenCalled();
+
+      // The authorized controller's identical write still applies.
+      controller.setObserverReadOnly(false);
+      transport.send.mockClear();
+      transport.onOutput!(bytes(begin), undefined, { streamEpoch: 1, streamSeq: 7 });
+      transport.onOutput!(bytes(chunk), undefined, { streamEpoch: 1, streamSeq: 8 });
+      transport.onOutput!(bytes(end), undefined, { streamEpoch: 1, streamSeq: 9 });
+      await flush();
+      expect(effects.writeClipboard).toHaveBeenCalledTimes(1);
+      expect(Array.from(effects.writeClipboard.mock.calls[0][0].get('text/plain') ?? []))
+        .toEqual(Array.from(bytes('late')));
+      const applied = transport.send.mock.calls.map(([data]) => data);
+      expect(applied[applied.length - 1]).toContain('type=write:status=DONE:id=w');
+    } finally {
+      delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState;
+    }
+  });
+
   it('withholds offered MIME metadata after the controller loses clipboard authority (#3395)', async () => {
     const { controller, transport, host } = harness();
     let visibility: DocumentVisibilityState = 'visible';
