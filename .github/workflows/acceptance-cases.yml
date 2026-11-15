@@ -870,3 +870,33 @@ jobs:
           path: ${{ runner.temp }}/acceptance-case-results/
           if-no-files-found: error
           retention-days: 90
+
+  # A GITHUB_TOKEN workflow_dispatch does not emit another workflow_run.
+  # This is a separate trusted router job with no product checkout and no
+  # untrusted Case code; both platform jobs already uploaded their artifacts.
+  wake-comment-ingest:
+    needs: [execute, execute-macos]
+    if: >-
+      always() && !cancelled() &&
+      github.repository == 'BestNathan/nession' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.source_comment_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Explicitly wake source-authenticated Case Ingest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          # This is only a locator. Ingest re-reads the completed GitHub
+          # Run, path, actor, original comment identity and Case artifacts.
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/acceptance-case-ingest.yml/dispatches" \
+            -f ref=main -f source_run_id="$GITHUB_RUN_ID"
+          echo "Requested authenticated Case Ingest for source run ${GITHUB_RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
