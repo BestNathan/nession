@@ -108,7 +108,13 @@ to the normal manual `Acceptance / Cases` workflow; the workflow
 independently verifies the original comment, Issue and immutable target
 **before checking out the Case code**. It then produces the same source-bound
 record and trusted ingester receipt as other manual Cases, with no alternate
-Acceptance authority. A comment acknowledgment is not a Case verdict.
+Acceptance authority. Since GitHub suppresses recursive `workflow_run`
+from `GITHUB_TOKEN`-origin dispatches, a separate Cases job waits until
+both platform jobs have finished uploading artifacts and explicitly wakes the
+trusted ingester using only the source Run ID. The ingester re-fetches the
+GitHub-owned completed Run/Attempt and authenticates the comment and exact
+Case tree before any Store write; ordinary Case sources retain their native
+`workflow_run` ingestion. A comment acknowledgment is not a Case verdict.
 Non-merged stages, arbitrary SHA, closed Issues and missing manifest/merge
 identity are ineligible for this shortcut; use the existing owner-controlled
 explicit Actions path for other supported manual cases.
