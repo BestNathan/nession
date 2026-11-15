@@ -13,9 +13,10 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
   recoverAttestedQwenPreflightV3}
   from './dispatch-store.mjs';
-import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
-import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint}
-  from './dispatch-store.mjs';
+import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
+  REVIEWER_PREMODEL_FAILURE} from './outbox.mjs';
+import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
+  recoverAttestedReviewerPremodelFailure} from './dispatch-store.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
   CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -23,6 +24,8 @@ import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-reco
 import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
+import {verifyReviewerPremodelFailureLive}
+  from './reviewer-premodel-failure.mjs';
 import {authenticatePublisherReviewerWake}
   from './publisher-reviewer-wake.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
@@ -40,6 +43,8 @@ export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95
 export const CONTROLLED_RECOVERY_COMMENT='/nession recover issue=1997 failed_run=39267659650';
 export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1997 failed_run=39376331942';
 export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
+export const REVIEWER_PREMODEL_RECOVERY_COMMENT=
+  '/nession recover-review-preflight issue=3433 run=43667393107';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
@@ -81,13 +86,21 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId;
   const reviewCommand=commanded?
     REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const recoveryComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===REVIEWER_PREMODEL_FAILURE.issue&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&
+    event.comment.body===REVIEWER_PREMODEL_RECOVERY_COMMENT&&
+    issue===REVIEWER_PREMODEL_FAILURE.issue&&
+    actionId===REVIEWER_PREMODEL_FAILURE.action_id;
   const ownerReview=commanded&&event?.action==='created'&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
     event?.issue?.number===issue&&
     event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&reviewCommand?.[1]===String(issue)&&
     reviewCommand?.[2]===actionId;
-  const permitted=publisherWake||ownerReview||(commanded
+  const permitted=publisherWake||ownerReview||recoveryComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -274,8 +287,11 @@ async function main(){
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
   const ownerReviewCommand=commanded?
     REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const reviewerPremodelRecovery=commanded&&
+    event?.comment?.body===REVIEWER_PREMODEL_RECOVERY_COMMENT;
   const issue=commanded?(qwenV2CommentAction?3001:
-    ownerReviewCommand?Number(ownerReviewCommand[1]):1997):
+    ownerReviewCommand?Number(ownerReviewCommand[1]):
+    reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.issue:1997):
     Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
@@ -294,6 +310,7 @@ async function main(){
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=ownerReviewCommand?.[2]??null;
   const actionId=commanded?(qwenV2CommentAction??newReviewAction??
+    (reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.action_id:null)??
     (recoveringRepair||retryingRepair?
     REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
     recoveringReview?REVIEW_ACTION:
@@ -323,6 +340,25 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(reviewerPremodelRecovery){
+      // Independently attest the exact completed failed original Reviewer.
+      // CAS-fail the original action, create one successor, and only dispatch
+      // the authenticated successor. Replays are reconciled, never re-POSTed.
+      const proof=await verifyReviewerPremodelFailureLive(token);
+      const recovered=recoverAttestedReviewerPremodelFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
     if(recoveringQwenKey){
       // Reconcile the exact externally attested failed Worker only; never
       // issue another Actions POST with the original dispatched Action.
