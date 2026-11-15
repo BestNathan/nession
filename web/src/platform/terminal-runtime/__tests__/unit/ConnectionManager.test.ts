@@ -952,6 +952,65 @@ describe('ConnectionManager', () => {
     });
 
     /**
+     * #3665: a quiet disconnect must not replay typed-ahead input after the
+     * five-second TTL merely because the same cursor/lease comes back.
+     * No new send() or explicit expire() is allowed to rescue this test.
+     */
+    it('drops stale P2P input once on quiet same-identity reconnect', () => {
+      const harness = makeAgentApi();
+      const onInputDrop = vi.fn();
+      let attachedNow = false;
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api,
+        isAttached: () => attachedNow, onInputDrop,
+      });
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.send('dangerous-command\\r');
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs + 1);
+      attachedNow = true;
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.flushInputBuffer();
+      cm.flushInputBuffer();
+
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      expect(onInputDrop).toHaveBeenCalledTimes(1);
+      expect(onInputDrop).toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'age', chunks: 1,
+      }));
+      cm.dispose();
+    });
+
+    it('resends only unapplied P2P input inside TTL without waiting for another send', () => {
+      const harness = makeAgentApi();
+      const onInputDrop = vi.fn();
+      let attachedNow = true;
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api,
+        isAttached: () => attachedNow, onInputDrop,
+      });
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.send('a'); // Agent received this frame before the disconnect.
+      attachedNow = false;
+      cm.send('b');
+      cm.send('c');
+      expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs - 1);
+      attachedNow = true;
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 1, controlGeneration: 2 });
+      cm.flushInputBuffer();
+
+      expect(vi.mocked(harness.api.sendInput).mock.calls).toEqual([
+        ['test', 'a', { inputEpoch: 7, seqStart: 1, seqEnd: 1 }],
+        ['test', 'bc', { inputEpoch: 7, seqStart: 2, seqEnd: 3 }],
+      ]);
+      expect(onInputDrop).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    /**
      * SC-09 at the client's end: an epoch that moved means the agent that could
      * say whether these bytes landed is gone. Re-sending them would be
      * replaying input that may already have run.
@@ -1728,6 +1787,36 @@ describe('ConnectionManager', () => {
           deliverAck: (ack) => ackHandler?.({ sessionName: 'test', ...ack }),
         };
       }
+
+      /**
+       * #3665: the relay must obey the same age bound as P2P when a quiet
+       * detach ends without new input or a changed input/control generation.
+       */
+      it('drops stale Relay input once on quiet same-identity reconnect', () => {
+        const ws = makeMockWs();
+        const onInputDrop = vi.fn();
+        let attachedNow = false;
+        const cm = new ConnectionManager({
+          mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+          isAttached: () => attachedNow, onInputDrop,
+        });
+        cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+        cm.send('dangerous-command\\r');
+        expect(ws.sendRelayInput).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs + 1);
+        attachedNow = true;
+        cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+        cm.flushInputBuffer();
+        cm.flushInputBuffer();
+
+        expect(ws.sendRelayInput).not.toHaveBeenCalled();
+        expect(onInputDrop).toHaveBeenCalledTimes(1);
+        expect(onInputDrop).toHaveBeenCalledWith(expect.objectContaining({
+          reason: 'age', chunks: 1,
+        }));
+        cm.dispose();
+      });
 
       /**
        * SC-05 on the client's half: a relay frame states its position.
