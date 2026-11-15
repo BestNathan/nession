@@ -566,14 +566,26 @@ fn prepare_inner(
         window_id: None,
         working_dir: working_dir.display().to_string(),
         effective_policy: effective_policy(compiled, cgroup_guard.as_ref()),
-        mounts: mounted
-            .as_ref()
-            .map(erofs::MountedComposition::mountpoints)
-            .unwrap_or_default(),
+        // The writable Overlay is a manager-owned shared resource (#3582); it
+        // is recorded as a durable binding rather than an execution-scoped
+        // mountpoint. `mounts` remains for records written before #3582.
+        mounts: Vec::new(),
         shared_mounts: mounted
             .as_ref()
             .map(erofs::MountedComposition::shared_mounts)
             .unwrap_or_default(),
+        overlay: mounted
+            .as_ref()
+            .and_then(erofs::MountedComposition::overlay)
+            .map(|binding| crate::exec::OverlayBindingRecord {
+                workspace_root: binding.workspace.root().display().to_string(),
+                workspace_relative: binding.workspace.relative().display().to_string(),
+                mountpoint: binding.mountpoint.display().to_string(),
+                generation: binding.generation,
+                lower_digest: binding.lower_digest,
+                lower_mountpoint: binding.lower_mountpoint.display().to_string(),
+                lower_generation: binding.lower_generation,
+            }),
         channel_dir: runtime_dir.map(|dir| dir.display().to_string()),
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),

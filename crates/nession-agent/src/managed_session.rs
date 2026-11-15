@@ -220,6 +220,17 @@ pub async fn prepare(
             workspace_dir.display()
         )
     })?;
+    // The writable Overlay storage is durable workspace state, initialized by
+    // its Agent owner before any host mount (#3582). A filesystem that cannot
+    // hold it fails the create; there is no per-execution fallback.
+    #[cfg(target_os = "linux")]
+    if let Err(error) = nession_erofs::overlay::storage::initialize(&workspace_dir) {
+        let _ = std::fs::remove_dir_all(&workspace_dir);
+        return Err(error.context(format!(
+            "cannot initialize the Managed workspace Overlay storage {}",
+            workspace_dir.display()
+        )));
+    }
 
     let policy = SandboxPolicy {
         version: SANDBOX_POLICY_VERSION,
