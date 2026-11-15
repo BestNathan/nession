@@ -97,6 +97,18 @@ export function validateDevelopmentState(state) {
     if (typeof state.assignments[role] !== 'string' ||
         !/^[a-z][a-z0-9-]{1,80}$/.test(state.assignments[role])) reject('missing agent assignment');
   }
+  // A recovered Qwen Repair PR-B may be read back and committed by a
+  // different successful Publisher Run than the original failed GitHub
+  // writer. The extra history link is permitted ONLY on its exact
+  // authenticated publisher transition; no alias for another role.
+  for(const t of state.transitions){
+    if(t.write_ahead_publisher_run_id!==undefined&&
+       (t.kind!=='publisher'||t.outcome!=='published'||
+        !positive(t.run_id)||!positive(t.write_ahead_publisher_run_id)||
+        t.write_ahead_publisher_run_id>=t.run_id||
+        !SHA.test(t.target_sha??'')))
+      reject('invalid cross-Run Repair Publisher provenance');
+  }
   const ids = new Set();
   for (const item of state.outbox) {
     onlyKeys(item, ['id','task','status','attempts','receipt'], 'outbox entry');
@@ -519,6 +531,27 @@ export function acceptAttestedQwenPublication(state,expectedVersion,event,truste
   return validateDevelopmentState({...advanced.state,version:state.version+1,
     outbox:[...outbox,child]});
 }
+// #3592. A previously authenticated pre-model Reviewer failure is terminal,
+// not a competing live Reviewer. Keep its immutable evidence in Store, but
+// require its exact known Run/Action/failure identity. Any other Reviewer
+// still blocks a new Qwen Repair publication.
+export function hasOnlyRetiredReviewerForQwenRepair(state){
+  const entries=state?.outbox?.filter(x=>x.task?.role==='reviewer');
+  if(!Array.isArray(entries))return false;
+  if(entries.length===0)return true;
+  if(entries.length!==1||state.issue!==REVIEWER_PREMODEL_FAILURE.issue)
+    return false;
+  const old=entries[0],f=REVIEWER_PREMODEL_FAILURE;
+  return old.id===f.action_id&&old.status==='failed'&&
+    old.task.type==='dispatch'&&old.task.task==='review'&&
+    old.task.agent_id==='review-qwen-01'&&old.task.sha===f.source_sha&&
+    old.attempts===1&&old.receipt?.status==='failed'&&
+    old.receipt?.dispatch_id===f.action_id&&
+    old.receipt?.source_run_id===f.run_id&&
+    old.receipt?.source_attempt===1&&
+    old.receipt?.failure_code===f.failure_code;
+}
+
 // #2137: The separately authenticated Qwen Repair Publisher has already
 // verified the original PR and a non-force A->B update by exact GET readback.
 // This state transition may ONLY retire the existing signed Repair Action and
@@ -544,7 +577,10 @@ export function acceptAttestedQwenRepairPublication(
       !positive(trusted.original_publisher_run_id)||
       !positive(trusted.pr_number)||
       trusted.pr_previous_sha!==trusted.developer_source_sha||
-      event.reviewer_agent_id!=null)
+      event.reviewer_agent_id!=null||
+      (trusted.write_ahead_publisher_run_id!==undefined&&
+        (!positive(trusted.write_ahead_publisher_run_id)||
+         trusted.write_ahead_publisher_run_id>=event.run_id)))
     reject('Qwen Repair requires signed Worker, existing PR and exact readback');
   const previous=state.transitions.find(t=>
     t.kind==='publisher'&&t.run_id===event.run_id&&t.attempt===1);
@@ -582,7 +618,7 @@ export function acceptAttestedQwenRepairPublication(
       tasks[0].receipt.dispatch_id!==tasks[0].id||
       state.outbox.some(x=>x!==tasks[0]&&
         ['dispatching','dispatched'].includes(x.status))||
-      state.outbox.some(x=>x.task.role==='reviewer'))
+      !hasOnlyRetiredReviewerForQwenRepair(state))
     reject('Qwen Repair lacks one completed signed Developer dispatch');
   const next=advanceWorkflow(state,event,{
     role:'publisher',workflow_run_id:event.run_id,attempt:1,
@@ -596,8 +632,14 @@ export function acceptAttestedQwenRepairPublication(
   const child=makeAction(state.issue,state.version+1,next.actions[0],
     state.assignments,0);
   boundRole(registry,child.task.agent_id,child.task.role,child.task.task);
+  const transitions=next.state.transitions.map((transition,index)=>
+    index===next.state.transitions.length-1&&
+      trusted.write_ahead_publisher_run_id!==undefined
+      ?{...transition,
+        write_ahead_publisher_run_id:trusted.write_ahead_publisher_run_id}
+      :transition);
   return validateDevelopmentState({...next.state,version:state.version+1,
-    outbox:[...remaining,child]});
+    transitions,outbox:[...remaining,child]});
 }
 
 // Bind an independently verified immutable Developer checkpoint to a pending

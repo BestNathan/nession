@@ -13,6 +13,35 @@ use std::sync::{Condvar, Mutex as StdMutex};
 
 // ── Test backends ───────────────────────────────────────────────────────
 
+/// Install `body` at `bin` with the file created by a **child** process.
+///
+/// `fork` copies the descriptor table, so writing the path a test executes can
+/// leave a concurrently forked child holding it writable until that child's
+/// own `exec`; an `exec` of the same inode then fails with `ETXTBSY`
+/// (#1026, #3504, #3612). The body goes to a path that is never exec'd and a
+/// child `cp` creates `bin`, so this process never holds a write descriptor on
+/// the executable. `chmod` does not open it, and `rename` is not equivalent
+/// (same inode).
+#[cfg(unix)]
+fn install_via_a_child(bin: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let staged = bin.with_extension("src");
+    std::fs::write(&staged, body).unwrap();
+    let status = std::process::Command::new("cp")
+        .arg(&staged)
+        .arg(bin)
+        .status()
+        .unwrap();
+    let _ = std::fs::remove_file(&staged);
+    assert!(
+        status.success(),
+        "installing the executable fixture: cp failed"
+    );
+    let mut permissions = std::fs::metadata(bin).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(bin, permissions).unwrap();
+}
+
 /// A deterministic gate a build backend waits on.
 #[derive(Default)]
 struct Gate {
@@ -343,21 +372,17 @@ async fn concurrent_duplicate_submissions_create_one_build() {
 #[cfg(unix)]
 #[tokio::test]
 async fn cancellation_kills_the_owned_mkfs_process_and_publishes_nothing() {
-    use std::os::unix::fs::PermissionsExt;
-
     let dir = tempfile::tempdir().unwrap();
     let source = source_tree(dir.path());
     let pid_file = dir.path().join("mkfs.pid");
     let script = dir.path().join("slow-mkfs");
-    std::fs::write(
+    install_via_a_child(
         &script,
-        format!(
+        &format!(
             "#!/bin/sh\necho $$ > '{}'\nexec sleep 30\n",
             pid_file.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let builder = real_builder(
         dir.path(),
         Arc::new(nession_erofs::ProcessMkfsRunner { binary: script }),

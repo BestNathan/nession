@@ -26,8 +26,10 @@ function validateSource(env, checkoutSha) {
 }
 
 function validateTrustedPipeline(ingest, readback, cases) {
-  assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases"\]\s*$/m,
-    'native Case Ingest must remain restricted to the canonical static source');
+  assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases", "Acceptance \/ Case Smoke"\]\s*$/m,
+    'Case Ingest may subscribe only to the authenticated Cases and PR Smoke families');
+  assert.doesNotMatch(ingest, /^  workflow_dispatch:\s*$/m,
+    'privileged Case Store writer must never expose a manual dispatch');
   assert.match(ingest, /repository_dispatch:\s*\n\s*types: \[nession-comment-case-ingest\]/,
     'comment Cases require a default-branch, source-run-scoped repository dispatch');
   assert.match(ingest, /acceptance-case-ingest\.mjs prepare-event/,
@@ -78,6 +80,8 @@ function test() {
   const cases = fs.readFileSync(path.join(root, '.github/workflows/acceptance-cases.yml'), 'utf8');
   validateTrustedPipeline(ingest, readback, cases);
   assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Cases"', '"Other workflow"'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Case Smoke"', '"Untrusted source"'), readback, cases));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('  workflow_run:', '  workflow_dispatch:\n  workflow_run:'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest.replace('nession-comment-case-ingest', 'unscoped-wake'), readback, cases));
   assert.throws(() => validateTrustedPipeline(ingest, readback, cases.replace('wake-comment-ingest:', 'disabled-wake:')));
   assert.throws(() => validateTrustedPipeline(ingest.replace('ref: main', 'ref: arbitrary'), readback, cases));

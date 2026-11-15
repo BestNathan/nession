@@ -15,6 +15,8 @@ import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
 import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
 import {createHash} from 'node:crypto';
+import {reconcileMcpPublication} from './mcp-reconcile.mjs';
+import {loadStableMcpRelease} from './mcp-upstream.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -37,6 +39,15 @@ async function api(path) {
   const response=await fetch('https://api.github.com/repos/'+repo+path,{headers,signal:AbortSignal.timeout(15000)});
   if(response.status===404)return { missing:true };
   if(!response.ok)throw new Error('GitHub API request failed: HTTP '+response.status);
+  return response.json();
+}
+async function officialMcpApi(path){
+  const headers={'accept':'application/vnd.github+json',
+    'x-github-api-version':'2022-11-28','user-agent':'nession-mcp-pages-spec'};
+  if(token)headers.authorization='Bearer '+token;
+  const response=await fetch('https://api.github.com/repos/modelcontextprotocol/modelcontextprotocol'+path,
+    {headers,signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw Error('Official MCP GitHub source unavailable: HTTP '+response.status);
   return response.json();
 }
 async function optionalList(path) {
@@ -205,6 +216,36 @@ if(validMainSha&&!process.env.PAGES_PROTOCOL_SCHEMA_FILE&&
     sha:validMainSha?mainSha:null,generatedAt,releases,sourceVersion});
 }
 if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
+// MCP is generated from the exact registered Rust Tool handlers, never a
+// hand-maintained inventory or a running authenticated MCP endpoint.
+let mcp={schema_version:1,status:'unavailable',source:null,tools:[]};
+if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
+  const {stdout}=await promisify(execFile)('cargo',
+    ['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'],
+    {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
+  const parsed=JSON.parse(stdout);
+  if(parsed.schema_version!==1)throw Error('Unexpected MCP exporter schema version');
+  // Only official stable tags are considered supported upstream revisions.
+  // An unavailable or malformed source aborts publication (last good stays live).
+  const upstream={stable:await loadStableMcpRelease({api:officialMcpApi})};
+  const catalog={...parsed,upstream};
+  const prevFile=process.env.PAGES_MCP_PREVIOUS_FILE;
+  const publication=process.env.PAGES_MCP_RECONCILE==='1';
+  if(publication&&!prevFile&&process.env.PAGES_MCP_BOOTSTRAP!=='1')
+    throw Error('MCP last-good publication state not checked');
+  let previous=null;
+  if(prevFile){
+    const stat=await (await import('node:fs/promises')).lstat(prevFile);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>2_000_000||stat.size<10)
+      throw Error('Invalid last-good MCP publication file');
+    previous=JSON.parse(await readFile(prevFile,'utf8'));
+  }
+  const reconciled=reconcileMcpPublication({catalog,mainSha,previous});
+  mcp=reconciled.document;
+  console.log('MCP document reconciliation:',reconciled.reason,mcp.semantic_sha256);
+
+}
+
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
@@ -308,11 +349,12 @@ const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
   /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
   generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js','documents.js']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js','documents.js','mcp-documents.js']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/documents.json'),JSON.stringify(documents,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/mcp.json'),JSON.stringify(mcp,null,2)+'\n',{mode:0o644});
 console.log('Public Pages artifact:',out);
 console.log(JSON.stringify({
   source_main_sha:result.source.main_sha,

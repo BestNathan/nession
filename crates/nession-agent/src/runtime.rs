@@ -202,8 +202,14 @@ pub async fn run(
         // to an ephemeral location.
         match nession_common::paths::agent_dir() {
             Ok(agent_dir) => {
-                match crate::workspace_manager::WorkspaceManager::open(agent_dir.join("workspaces"))
-                {
+                // Deletion guards consult the observed Overlay/consumer state,
+                // not only a volatile process-local lease count (#3582).
+                let use_guard: std::sync::Arc<dyn crate::workspace_manager::WorkspaceUseGuard> =
+                    crate::sandbox_runtime::SandboxWorkspaceUse::new(Arc::clone(&sandbox));
+                match crate::workspace_manager::WorkspaceManager::open_with_guard(
+                    agent_dir.join("workspaces"),
+                    Some(use_guard),
+                ) {
                     Ok(manager) => {
                         mgr = mgr.with_workspaces(Arc::new(manager));
                     }
