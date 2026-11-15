@@ -1844,6 +1844,34 @@ describe('ConnectionManager', () => {
         cm.dispose();
       });
 
+      it('resends only unapplied Relay input inside TTL as one ordered range', () => {
+        const ws = makeMockWs();
+        const onInputDrop = vi.fn();
+        let attachedNow = true;
+        const cm = new ConnectionManager({
+          mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+          isAttached: () => attachedNow, onInputDrop,
+        });
+        cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+        cm.send('a');
+        attachedNow = false;
+        cm.send('b');
+        cm.send('c');
+        expect(ws.sendRelayInput).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(INPUT_QUEUE_BOUNDS.maxAgeMs - 1);
+        attachedNow = true;
+        cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 1, controlGeneration: 2 });
+        cm.flushInputBuffer();
+
+        expect(vi.mocked(ws.sendRelayInput).mock.calls).toEqual([
+          ['test', 'a', { inputEpoch: 7, seqStart: 1, seqEnd: 1 }],
+          ['test', 'bc', { inputEpoch: 7, seqStart: 2, seqEnd: 3 }],
+        ]);
+        expect(onInputDrop).not.toHaveBeenCalled();
+        cm.dispose();
+      });
+
       /**
        * SC-05 on the client's half: a relay frame states its position.
        *
