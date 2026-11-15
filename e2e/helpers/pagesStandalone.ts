@@ -146,12 +146,14 @@ export async function startPagesFixture(options:{historicalLineage?:boolean}={})
        source_ref_sha:'d'.repeat(40),
        source_url:'https://github.com/BestNathan/nession/actions/runs/42488022265'}]}}
  }:fixture;
- const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/documents.js':'documents.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
+ const mcp={schema_version:1,status:'available',source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40)},tools:[{name:'nession_server_list_agents',description:'List agents',inputSchema:{type:'object',properties:{}}}]};
+const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/documents.js':'documents.js','/mcp-documents.js':'mcp-documents.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
   if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(selected));return;}
   if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
   if(path==='/data/knowledge.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(knowledge));return;}
+  if(path==='/data/mcp.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(mcp));return;}
   if(path==='/data/documents.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(documents));return;}
   if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}
   try {const name=allowed[path],content=await readFile(join(root,name));
