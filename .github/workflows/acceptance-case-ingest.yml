@@ -1,12 +1,8 @@
 name: Acceptance / Case Ingest
 
 on:
-  workflow_dispatch:
-    inputs:
-      source_run_id:
-        description: Bot-origin Case source Run ID; trusted ingester independently re-fetches exact GitHub identity
-        required: true
-        type: string
+  repository_dispatch:
+    types: [nession-comment-case-ingest]
   workflow_run:
     # Native push and owner-manual Cases keep the static source name.
     # GITHUB_TOKEN comment Cases are explicitly woken by their source Run job.
@@ -29,10 +25,18 @@ jobs:
     # Native workflow_run remains for ordinary push/manual Case sources only.
     if: >-
       github.repository == 'BestNathan/nession' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'workflow_run' &&
-        !startsWith(github.event.workflow_run.name, 'Comment Case #') &&
-        !startsWith(github.event.workflow_run.display_title, 'Comment Case #')))
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.event.action == 'nession-comment-case-ingest' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'github-actions[bot]' &&
+         github.event.sender.login == 'github-actions[bot]' &&
+         github.run_attempt == 1 &&
+         github.event.client_payload.source_run_id != '') ||
+        (github.event_name == 'workflow_run' &&
+         !startsWith(github.event.workflow_run.name, 'Comment Case #') &&
+         !startsWith(github.event.workflow_run.display_title, 'Comment Case #'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
