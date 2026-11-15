@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nession-image-pull-benchmark
+  annotations:
+    nession.dev/benchmark: "ghcr-vs-ocicdn"
+    nession.dev/issue: "3669"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app: nession-pull-bench
+        env: staging-ocicdn
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      # Run beside the retained staging Server, using the same cluster egress.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: nession
+                  component: server
+                  env: staging
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: probe
+          # Existing ACR-hosted runtime with Node.js; no ghcr/proxy bootstrap dependency.
+          image: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession:agent-0676864
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/node", "/probe/benchmark.cjs"]
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 384Mi
+          volumeMounts:
+            - name: probe
+              mountPath: /probe
+              readOnly: true
+      volumes:
+        - name: probe
+          configMap:
+            name: nession-image-pull-benchmark
