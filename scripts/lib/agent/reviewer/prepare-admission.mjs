@@ -78,7 +78,11 @@ export async function prepareQwenReviewAdmission({
     publisherRunId:publisher[0].run_id});
   const intent=committed.record;
   const branch=committed.branch;
-  const publisherRun=await fetcher('actions/runs/'+intent.publisher_run_id);
+  // A Store-attested Repair reconciliation is sourced from the successful
+  // current Publisher Run. The immutable Intent still keeps the earlier
+  // writer Run, which can have failed after the PR-B GitHub write.
+  const publisherRun=await fetcher('actions/runs/'+
+    (committed.publisher_run_id??intent.publisher_run_id));
   const pullRequests=await fetcher('pulls?state=all&head=BestNathan:'+
     encodeURIComponent(branch)+'&per_page=100');
   if(!Array.isArray(pullRequests)||pullRequests.length!==1||

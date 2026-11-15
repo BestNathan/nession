@@ -198,7 +198,8 @@ export async function runTrustedQwenPublication({
           published.expected_tree_sha!==readback.expected_tree_sha))
         fail('authenticated Repair Publisher response diverged from independent PR-B readback');
       const handoff=applyQwenRepairPublicationToRemote({
-        remote,readback,intent,registry});
+        remote,readback,intent,registry,
+        authenticated_run_id:Number(env.GITHUB_RUN_ID)});
       return {schema_version:1,kind:'trusted_qwen_publisher_handoff',
         issue:receipt.issue,action_id:receipt.action_id,
         developer_run_id:worker.id,publisher_run_id:Number(env.GITHUB_RUN_ID),
