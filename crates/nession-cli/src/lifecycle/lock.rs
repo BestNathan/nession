@@ -14,7 +14,6 @@
 
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
 
 pub const LOCK_FILE_NAME: &str = "lifecycle.lock";
 
@@ -43,21 +42,35 @@ impl LifecycleLock {
     /// CLI startup uses this to recover an interrupted install only when no
     /// install is currently running; tests use it to prove exclusion.
     pub fn try_acquire() -> Result<Option<Self>> {
-        let file = open_lock_file()?;
+        Self::try_acquire_file(open_lock_file()?)
+    }
+
+    fn try_acquire_file(file: File) -> Result<Option<Self>> {
         match lock_exclusive_nonblocking(&file) {
             Ok(true) => Ok(Some(Self { _file: file })),
             Ok(false) => Ok(None),
             Err(error) => Err(error).context("failed to try the lifecycle lock"),
         }
     }
-}
 
-fn lock_path() -> Result<PathBuf> {
-    Ok(nession_common::paths::ensure_runtime_dir()?.join(LOCK_FILE_NAME))
+    /// Try to acquire a lock rooted at an explicit directory.
+    ///
+    /// Test-only: the exclusion test must not mutate the process-global
+    /// runtime directory, because concurrent CLI tests also set it and a
+    /// foreign test's spawn can hold the lock this assertion is about.
+    #[cfg(test)]
+    fn try_acquire_in(dir: &std::path::Path) -> Result<Option<Self>> {
+        Self::try_acquire_file(open_lock_file_in(dir)?)
+    }
 }
 
 fn open_lock_file() -> Result<File> {
-    let path = lock_path()?;
+    let dir = nession_common::paths::ensure_runtime_dir()?;
+    open_lock_file_in(&dir)
+}
+
+fn open_lock_file_in(dir: &std::path::Path) -> Result<File> {
+    let path = dir.join(LOCK_FILE_NAME);
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true);
     #[cfg(unix)]
@@ -153,17 +166,23 @@ mod tests {
 
     #[test]
     fn a_second_lifecycle_lock_cannot_be_acquired() {
-        let _runtime = IsolatedRuntime::new();
-        let held = LifecycleLock::try_acquire().unwrap().expect("first lock");
+        // Path-scoped rather than env-scoped: another CLI test may set the
+        // process-global runtime directory (or hold a lock in its own) while
+        // this test runs. The exclusion property is about one directory.
+        let runtime = tempfile::tempdir().unwrap();
+        let dir = runtime.path();
+        let held = LifecycleLock::try_acquire_in(dir)
+            .unwrap()
+            .expect("first lock");
 
         assert!(
-            LifecycleLock::try_acquire().unwrap().is_none(),
+            LifecycleLock::try_acquire_in(dir).unwrap().is_none(),
             "a concurrent lifecycle command must not share the lock"
         );
 
         drop(held);
         assert!(
-            LifecycleLock::try_acquire().unwrap().is_some(),
+            LifecycleLock::try_acquire_in(dir).unwrap().is_some(),
             "releasing the lock must let the next command proceed"
         );
     }

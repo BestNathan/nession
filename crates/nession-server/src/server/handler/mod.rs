@@ -262,6 +262,18 @@ impl ConnectionHandler {
         self.registered_agent_id.as_ref()
     }
 
+    /// Whether this connection has proven a credential.
+    ///
+    /// Either half of the Server's one authentication transition: a client
+    /// `server.auth`, or an Agent registration (which authenticates with the
+    /// Server Token before it binds the agent identity). `server/websocket.rs`
+    /// uses this to end the upgraded socket's absolute pending-auth deadline
+    /// and to return its pending-auth budget (#3439 W2); it does not replace
+    /// any handler's own per-unit checks.
+    pub fn is_authenticated(&self) -> bool {
+        self.authenticated_client || self.registered_agent_id.is_some()
+    }
+
     /// Identity of the connection this handler serves.
     ///
     /// `server/websocket.rs` hands it back to the broker with every agent

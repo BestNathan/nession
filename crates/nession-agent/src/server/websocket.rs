@@ -68,7 +68,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, watch, Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
@@ -850,11 +850,22 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 /// under a flood of connections that never speak.
 pub const DEFAULT_P2P_MAX_PENDING_HANDSHAKES: usize = 64;
 
-/// How long an accepted socket may stay unauthenticated.
+/// How many upgraded-but-unauthenticated WebSockets may exist at once.
+///
+/// The HTTP admission slot ends at the upgrade, so this is the bound that keeps
+/// a burst of upgraded sockets from growing a task and a queue per peer before
+/// any of them proves the Agent Token (`#3439` W2). An upgrade beyond it is
+/// answered `503` without spawning a connection task.
+pub const DEFAULT_P2P_MAX_PENDING_AUTH: usize = 64;
+
+/// The absolute deadline for an upgraded socket's first successful
+/// `client.auth`.
 ///
 /// The upgrade no longer carries a credential (#3440): authentication is the
-/// first protocol frame. This is that frame's deadline, so a silent peer cannot
-/// hold a connection that has already spent its admission slot.
+/// first protocol frame. The deadline starts at the upgrade and is **not**
+/// reset by a Ping, malformed JSON, a refused authentication or a business
+/// frame, so a peer cannot keep an unauthenticated socket by feeding it frames
+/// (`#3439` W2).
 pub const P2P_AUTH_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How long one P2P connection may take to complete TLS and the WebSocket
@@ -891,6 +902,21 @@ pub struct P2pHandshakePolicy {
     pub max_pending: usize,
     /// Deadline covering both the TLS handshake and the WebSocket upgrade.
     pub timeout: Duration,
+    /// Maximum number of upgraded-but-unauthenticated WebSockets at once.
+    ///
+    /// A separate budget from [`Self::max_pending`]: the HTTP admission slot is
+    /// released when the upgrade is answered, so upgraded sockets that have not
+    /// sent `client.auth` yet need their own bound (`#3439` W2). An upgrade
+    /// beyond this budget is refused with `503` before a connection task is
+    /// started.
+    pub max_pending_auth: usize,
+    /// The **absolute** deadline for the first successful `client.auth` on an
+    /// upgraded socket.
+    ///
+    /// It starts at upgrade and is not reset by a Ping, malformed JSON, a
+    /// refused authentication or any business frame, so a peer cannot keep an
+    /// unauthenticated socket by feeding it frames.
+    pub auth_timeout: Duration,
 }
 
 impl Default for P2pHandshakePolicy {
@@ -898,6 +924,8 @@ impl Default for P2pHandshakePolicy {
         Self {
             max_pending: DEFAULT_P2P_MAX_PENDING_HANDSHAKES,
             timeout: DEFAULT_P2P_HANDSHAKE_TIMEOUT,
+            max_pending_auth: DEFAULT_P2P_MAX_PENDING_AUTH,
+            auth_timeout: P2P_AUTH_FRAME_TIMEOUT,
         }
     }
 }
@@ -1113,15 +1141,34 @@ pub struct ServerHandle {
     /// dial happens. Never taken by the handle itself; the accept loop and the
     /// pending handshake tasks are the only owners.
     handshake_slots: Arc<Semaphore>,
+    /// Set when the listener has stopped accepting, settled every upgraded
+    /// task and closed the backends (`#3439` W3).
+    closed: watch::Receiver<bool>,
 }
 
 impl ServerHandle {
     /// Request the server to stop accepting new connections and shut down.
+    ///
+    /// This is the *request*; it resolves when the listener accepted it. Use
+    /// [`Self::wait_closed`] when the caller needs the completion barrier: the
+    /// accept loop stopped, every upgraded connection settled, and the
+    /// terminal backends are closed.
     pub async fn shutdown(&self) -> Result<()> {
         self.shutdown_tx
             .send(())
             .await
             .context("failed to send shutdown signal")
+    }
+
+    /// Wait until the listener has fully settled.
+    ///
+    /// A distinct barrier rather than a stronger `shutdown`: the signal and the
+    /// settle are two facts, and a caller that only wants to request shutdown
+    /// should not be forced to wait. Late callers observe a closed listener
+    /// immediately.
+    pub async fn wait_closed(&self) {
+        let mut closed = self.closed.clone();
+        let _ = closed.wait_for(|value| *value).await;
     }
 
     /// How many unauthenticated connections this listener can still admit
@@ -1177,6 +1224,102 @@ struct P2pHttpState {
     mcp: Option<Arc<McpService>>,
     /// The pre-authentication deadline for this connection (#2653).
     deadline: Duration,
+    /// The listener's budget for upgraded-but-unauthenticated sockets
+    /// (`#3439` W2); acquired before an upgrade is answered.
+    pending_auth: Arc<Semaphore>,
+    /// The absolute deadline for the first successful `client.auth`.
+    auth_timeout: Duration,
+    /// The listener's owner of upgraded WebSocket tasks and their shutdown
+    /// signal (`#3439` W3).
+    supervisor: Arc<ConnectionSupervisor>,
+}
+
+/// Owns the upgraded WebSocket tasks this listener admitted, and the signal
+/// that ends them.
+///
+/// The accept loop tracks only the HTTP connection futures. An answered upgrade
+/// hands its socket to an Axum callback that runs outside that set, so without
+/// one owner a listener shutdown could close the terminal backends under
+/// readers that were still running and return before they settled (`#3439`
+/// W3). Every upgraded task is spawned here from the upgrade callback, wakes on
+/// the durable shutdown signal, and is drained — with a grace, then aborted —
+/// before the listener closes the backends.
+struct ConnectionSupervisor {
+    /// Durable shutdown signal. Each upgraded connection subscribes before its
+    /// first read, so a shutdown that lands before or during a read is not a
+    /// lost wake-up.
+    shutdown_tx: watch::Sender<bool>,
+    /// Set once the listener has stopped accepting, its HTTP futures are gone,
+    /// every upgraded task has settled (or been aborted), and the backends have
+    /// been closed. `ServerHandle::wait_closed` observes this.
+    closed_tx: watch::Sender<bool>,
+    tasks: Mutex<JoinSet<()>>,
+}
+
+impl ConnectionSupervisor {
+    fn new() -> Arc<Self> {
+        let (shutdown_tx, _) = watch::channel(false);
+        let (closed_tx, _) = watch::channel(false);
+        Arc::new(Self {
+            shutdown_tx,
+            closed_tx,
+            tasks: Mutex::new(JoinSet::new()),
+        })
+    }
+
+    fn subscribe(&self) -> watch::Receiver<bool> {
+        self.shutdown_tx.subscribe()
+    }
+
+    fn closed_receiver(&self) -> watch::Receiver<bool> {
+        self.closed_tx.subscribe()
+    }
+
+    /// Register one upgraded connection. While shutdown is in progress the
+    /// task is dropped instead of spawned: its socket closes with it, which is
+    /// the only answer a peer whose listener is gone can get.
+    async fn spawn(&self, task: impl std::future::Future<Output = ()> + Send + 'static) {
+        let mut tasks = self.tasks.lock().await;
+        if *self.shutdown_tx.borrow() {
+            return;
+        }
+        tasks.spawn(task);
+    }
+
+    /// Signal every upgraded connection, then drain them within the shutdown
+    /// grace. A straggler is aborted only after the grace, and the set is
+    /// joined to completion so the caller can close backends with no reader
+    /// left running.
+    async fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+        let mut tasks = self.tasks.lock().await;
+        let drained = tokio::time::timeout(SHUTDOWN_GRACE, async {
+            while tasks.join_next().await.is_some() {}
+        })
+        .await;
+        if drained.is_err() {
+            warn!(
+                "P2P upgraded connections did not settle within {:?}; aborting the remainder",
+                SHUTDOWN_GRACE
+            );
+            tasks.abort_all();
+            while tasks.join_next().await.is_some() {}
+        }
+    }
+
+    fn mark_closed(&self) {
+        let _ = self.closed_tx.send(true);
+    }
+}
+
+/// Marks the listener closed even if its task unwinds, so `wait_closed` is a
+/// completion barrier rather than a promise about a channel send.
+struct ClosedOnDrop(Arc<ConnectionSupervisor>);
+
+impl Drop for ClosedOnDrop {
+    fn drop(&mut self) {
+        self.0.mark_closed();
+    }
 }
 
 /// Build the explicit route table for one accepted P2P socket.
@@ -1224,24 +1367,46 @@ async fn p2p_upgrade_or_not_found(
     // The upgrade itself is not authentication. The socket has no business
     // frame until `client.auth` succeeds; that gate lives on the reader task,
     // where it settles once, in arrival order, before any lane (#3440).
+    //
+    // The HTTP admission slot ends here, so the upgraded socket takes the
+    // *pending-auth* budget instead (#3439 W2). Refusing before the upgrade
+    // means a peer beyond the budget costs an HTTP response, not a connection
+    // task with queues and a writer.
+    let Ok(pending_auth) = Arc::clone(&state.pending_auth).try_acquire_owned() else {
+        debug!(
+            addr = %state.addr,
+            "refusing a P2P upgrade: every pending-authentication slot is occupied"
+        );
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     state.slot.release();
     info!("WebSocket upgrade accepted from {}", state.addr);
     let auth = Arc::clone(&state.auth);
     let addr = state.addr;
+    let auth_timeout = state.auth_timeout;
     let ingress_context = state.ingress;
+    let supervisor = Arc::clone(&state.supervisor);
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
         .on_upgrade(move |socket| async move {
-            if let Err(e) = AgentServer::serve_connection(
-                AxumWebSocket::new(socket),
-                auth,
-                addr,
-                ingress_context,
-            )
-            .await
-            {
-                info!("connection error from {}: {:#}", addr, e);
-            }
+            let shutdown = supervisor.subscribe();
+            supervisor
+                .spawn(async move {
+                    if let Err(e) = AgentServer::serve_connection(
+                        AxumWebSocket::new(socket),
+                        auth,
+                        addr,
+                        ingress_context,
+                        pending_auth,
+                        auth_timeout,
+                        shutdown,
+                    )
+                    .await
+                    {
+                        info!("connection error from {}: {:#}", addr, e);
+                    }
+                })
+                .await;
         })
 }
 
@@ -3306,9 +3471,19 @@ impl AgentServer {
             .max_pending
             .clamp(1, Semaphore::MAX_PERMITS);
         let handshake_slots = Arc::new(Semaphore::new(max_pending));
+        // A second, independent budget for upgraded sockets that have not
+        // authenticated yet (#3439 W2). The HTTP slot above is returned at the
+        // upgrade, so without this bound an unauthenticated peer could hold an
+        // upgraded task and its queues for the whole auth deadline.
+        let max_pending_auth = handshake_policy
+            .max_pending_auth
+            .clamp(1, Semaphore::MAX_PERMITS);
+        let pending_auth_slots = Arc::new(Semaphore::new(max_pending_auth));
+        let supervisor = ConnectionSupervisor::new();
         let handle = ServerHandle {
             shutdown_tx: self.shutdown_tx.clone(),
             handshake_slots: Arc::clone(&handshake_slots),
+            closed: supervisor.closed_receiver(),
         };
 
         let ingress_context = AgentIngress {
@@ -3335,6 +3510,9 @@ impl AgentServer {
         let sessions = Arc::clone(&self.sessions);
 
         tokio::spawn(async move {
+            // Even a panicking listener task reports closed rather than leaving
+            // `wait_closed` waiting forever.
+            let _closed = ClosedOnDrop(Arc::clone(&supervisor));
             let shutdown_rx = Mutex::new(shutdown_rx);
             // Only the *pre-authentication* phase is tracked here. A connection
             // task ends as soon as the upgrade has been answered (Axum then
@@ -3384,6 +3562,9 @@ impl AgentServer {
                                     auth: Arc::clone(&auth),
                                     mcp: mcp.clone(),
                                     deadline: handshake_policy.timeout,
+                                    pending_auth: Arc::clone(&pending_auth_slots),
+                                    auth_timeout: handshake_policy.auth_timeout,
+                                    supervisor: Arc::clone(&supervisor),
                                 };
                                 let tls = tls_acceptor.clone();
                                 connections.spawn(async move {
@@ -3435,9 +3616,13 @@ impl AgentServer {
                         // No handshake may be admitted past this point, and a
                         // closed budget must not read as spare capacity.
                         handshake_slots.close();
-                        // Close every attached backend: the tmux Sessions
-                        // persist, but their terminal clients belong to this
-                        // process and must not outlive it.
+                        // Settle the upgraded connections *before* closing the
+                        // backends they read from (#3439 W3): signal them,
+                        // let their loops retire their peers and stop their
+                        // writers within the shutdown grace, and only then
+                        // close the terminal backends. The tmux Sessions
+                        // persist; only this process's attached clients end.
+                        supervisor.shutdown().await;
                         sessions.shutdown().await;
                         break;
                     }
@@ -3462,6 +3647,7 @@ impl AgentServer {
             router,
             slot,
             deadline,
+            ingress::HTTP_HEADER_READ_TIMEOUT,
         )
         .await?;
         Ok(())
@@ -3477,6 +3663,9 @@ impl AgentServer {
         auth: Arc<P2pAuth>,
         addr: SocketAddr,
         context: AgentIngress,
+        pending_auth: tokio::sync::OwnedSemaphorePermit,
+        auth_timeout: Duration,
+        shutdown: watch::Receiver<bool>,
     ) -> Result<()> {
         let (ws_sink, ws_stream) = ws.split();
 
@@ -3486,7 +3675,7 @@ impl AgentServer {
         // is sending, because the classes do not share a failure mode; see
         // `server::outbound`.
         let (outbound, outbound_rx) = P2pOutbound::new();
-        let writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
+        let mut writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
 
         // Both attach modes share the Agent-owned Session map.
         // Per-connection client ID (set during CLIENT_AUTH handshake)
@@ -3530,16 +3719,32 @@ impl AgentServer {
             authority: Arc::new(StdMutex::new(None)),
         });
 
-        let result = Self::run_message_loop(ws_stream, connection, mutations).await;
+        // The loop owns the connection; keep the outbound handle so the writer
+        // can be told to stop after the reader ends.
+        let outbound = connection.outbound.clone();
+        let result = Self::run_message_loop(
+            ws_stream,
+            connection,
+            mutations,
+            Some(pending_auth),
+            auth_timeout,
+            shutdown,
+        )
+        .await;
 
-        // The connection is over, so the writer goes with it — dropping the sink
-        // and closing the peer's socket. The writer also stops by itself when it
-        // is told to (`P2pOutbound::close`, which is how a stalled terminal lane
-        // ends a connection) or when the socket fails; this is the path where
-        // the *reader* ended first, and without it the task would outlive the
-        // connection it belongs to.
-        writer.abort();
-        let _ = writer.await;
+        // The connection is over, so the writer goes with it — stopping it
+        // first lets a frame it already holds reach the socket, and the grace
+        // is the ceiling for a peer that stopped reading. Only a writer still
+        // parked after the grace is aborted; either way it is joined, so the
+        // callers above can treat this connection as settled.
+        outbound.close();
+        if tokio::time::timeout(SHUTDOWN_GRACE, &mut writer)
+            .await
+            .is_err()
+        {
+            writer.abort();
+            let _ = writer.await;
+        }
 
         result
     }
@@ -3560,6 +3765,7 @@ impl AgentServer {
     async fn next_frame_or_closed<S>(
         stream: &mut S,
         outbound: &P2pOutbound,
+        shutdown: &mut watch::Receiver<bool>,
     ) -> Option<Result<WsFrame, nession_runtime::ingress::WsTransportError>>
     where
         S: futures_util::Stream<Item = Result<WsFrame, nession_runtime::ingress::WsTransportError>>
@@ -3567,6 +3773,11 @@ impl AgentServer {
     {
         tokio::select! {
             _ = outbound.wait_closed() => None,
+            // Listener shutdown is the third way a read ends (#3439 W3): the
+            // connection's own loop then runs its normal cleanup, so the peer
+            // is retired and the writer stopped before the listener closes
+            // the backends.
+            _ = shutdown.changed() => None,
             frame = stream.next() => frame,
         }
     }
@@ -3592,7 +3803,15 @@ impl AgentServer {
         mut ws_stream: futures_util::stream::SplitStream<AxumWebSocket>,
         connection: Arc<Connection>,
         mutations: Arc<KeyedLane<ResourceKey>>,
+        mut pending_auth: Option<tokio::sync::OwnedSemaphorePermit>,
+        auth_timeout: Duration,
+        mut shutdown: watch::Receiver<bool>,
     ) -> Result<()> {
+        // One absolute deadline for the first successful `client.auth`
+        // (#3439 W2). It is deliberately not re-armed below: a Ping, malformed
+        // JSON, a refused authentication or a business frame must not extend
+        // the unauthenticated window.
+        let auth_deadline = tokio::time::Instant::now() + auth_timeout;
         let addr = connection.addr;
         // The lanes this connection reads into, and the only thing that admits
         // to them. The query lane is this connection's own — it is admission,
@@ -3611,15 +3830,23 @@ impl AgentServer {
         );
 
         loop {
+            // The pending-auth budget is returned the moment this connection
+            // proves the token; it is held until then, and on every exit the
+            // permit drops with `pending_auth`.
+            if connection.is_authenticated() {
+                pending_auth.take();
+            }
             // Before authentication the connection has one job, and a peer that
             // never sends `client.auth` must not hold a socket indefinitely.
-            // Once authenticated this branch is the ordinary read.
+            // The deadline is absolute (see above): each read waits only for
+            // what is left of it. Once authenticated this is the ordinary read.
             let next = if connection.is_authenticated() {
-                Self::next_frame_or_closed(&mut ws_stream, &connection.outbound).await
+                Self::next_frame_or_closed(&mut ws_stream, &connection.outbound, &mut shutdown)
+                    .await
             } else {
-                match tokio::time::timeout(
-                    P2P_AUTH_FRAME_TIMEOUT,
-                    Self::next_frame_or_closed(&mut ws_stream, &connection.outbound),
+                match tokio::time::timeout_at(
+                    auth_deadline,
+                    Self::next_frame_or_closed(&mut ws_stream, &connection.outbound, &mut shutdown),
                 )
                 .await
                 {
@@ -3627,7 +3854,7 @@ impl AgentServer {
                     Err(_) => {
                         warn!(
                             addr = %addr,
-                            "closing a peer-to-peer connection that did not authenticate in time"
+                            "closing a peer-to-peer connection that did not authenticate before its absolute deadline"
                         );
                         break;
                     }
@@ -5706,13 +5933,14 @@ mod tests {
     #[tokio::test]
     async fn a_closed_outbound_ends_the_read_wait() {
         let (outbound, _rx) = P2pOutbound::new();
+        let (_shutdown_tx, mut shutdown) = watch::channel(false);
         let mut silent = futures_util::stream::pending::<
             Result<WsFrame, nession_runtime::ingress::WsTransportError>,
         >();
         assert!(
             tokio::time::timeout(
                 Duration::from_millis(50),
-                AgentServer::next_frame_or_closed(&mut silent, &outbound),
+                AgentServer::next_frame_or_closed(&mut silent, &outbound, &mut shutdown),
             )
             .await
             .is_err(),
@@ -5722,7 +5950,7 @@ mod tests {
         outbound.close();
         let ended = tokio::time::timeout(
             Duration::from_secs(1),
-            AgentServer::next_frame_or_closed(&mut silent, &outbound),
+            AgentServer::next_frame_or_closed(&mut silent, &outbound, &mut shutdown),
         )
         .await
         .expect("a closed outbound must end the read wait");
@@ -7628,6 +7856,7 @@ mod tests {
         let policy = P2pHandshakePolicy {
             max_pending: 1,
             timeout: Duration::from_secs(60),
+            ..Default::default()
         };
         let (addr, handle, _auth) = start_test_server_with(None, policy).await;
 
@@ -7690,6 +7919,7 @@ mod tests {
             // Generous enough that a loaded CI runner can still complete the
             // *valid* recovery dial below inside the same deadline.
             timeout: Duration::from_millis(500),
+            ..Default::default()
         };
         let (addr, handle, auth) = start_test_server_with(None, policy).await;
 
@@ -7761,6 +7991,7 @@ mod tests {
             // Generous enough that a loaded CI runner can still complete the
             // *valid* TLS dial below inside the same deadline.
             timeout: Duration::from_millis(500),
+            ..Default::default()
         };
         let (addr, handle, _auth) = start_test_server_with(Some((certs, key)), policy).await;
 
@@ -7822,6 +8053,7 @@ mod tests {
         let policy = P2pHandshakePolicy {
             max_pending: 1,
             timeout: Duration::from_secs(60),
+            ..Default::default()
         };
         let (addr, handle, auth) = start_test_server_with(None, policy).await;
 
@@ -7849,6 +8081,7 @@ mod tests {
             let policy = P2pHandshakePolicy {
                 max_pending,
                 timeout: Duration::from_secs(5),
+                ..Default::default()
             };
             let (addr, handle, auth) = start_test_server_with(None, policy).await;
 
@@ -7856,5 +8089,162 @@ mod tests {
 
             handle.shutdown().await.ok();
         }
+    }
+
+    // ── Upgraded-but-unauthenticated budget and absolute deadline (#3439 W2) ─
+
+    /// A refused authentication and continuous Ping traffic must not extend an
+    /// upgraded socket's absolute deadline. The pre-fix loop restarted the
+    /// timeout on every pre-auth frame, so this connection could stay forever
+    /// by feeding it frames.
+    #[tokio::test]
+    async fn an_upgraded_socket_closes_at_the_absolute_auth_deadline_despite_frames() {
+        let policy = P2pHandshakePolicy {
+            auth_timeout: Duration::from_secs(1),
+            ..Default::default()
+        };
+        let (addr, handle, _auth) = start_test_server_with(None, policy).await;
+        let (mut sink, mut stream) = dial_plain(addr).await;
+
+        // A refusal is a pre-auth frame; it must not re-arm the deadline.
+        let refused = new_message(
+            msg_types::CLIENT_AUTH,
+            ClientAuthPayload {
+                auth_token: OTHER_AGENT_TOKEN.into(),
+                client_id: None,
+            },
+        );
+        let response: Message<AuthResponsePayload> =
+            send_and_receive(&mut sink, &mut stream, &refused).await;
+        assert_eq!(response.payload.status, "failed");
+
+        // Keep the peer talking past the deadline: Pings are pre-auth frames
+        // too. A concurrent reader observes the closure *while* the peer is
+        // still sending, which a per-frame timeout would never allow.
+        let closed_while_sending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader_closed = Arc::clone(&closed_while_sending);
+        let reader = tokio::spawn(async move {
+            while let Some(frame) = stream.next().await {
+                if !matches!(frame, Ok(WsMessage::Pong(_))) {
+                    reader_closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return;
+                }
+            }
+            reader_closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let started = tokio::time::Instant::now();
+        let mut writer_saw_close = false;
+        while started.elapsed() < Duration::from_secs(3) {
+            if closed_while_sending.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            if sink.send(WsMessage::Ping(vec![1])).await.is_err() {
+                writer_saw_close = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let closed =
+            writer_saw_close || closed_while_sending.load(std::sync::atomic::Ordering::SeqCst);
+        reader.abort();
+        assert!(
+            closed,
+            "an upgraded socket must close at its absolute auth deadline even while sending frames"
+        );
+        handle.shutdown().await.ok();
+    }
+
+    /// The upgraded-pending-auth budget is separate from the handshake budget:
+    /// while one unauthenticated upgrade is alive, the next is refused before a
+    /// connection task is created; a successful authentication returns the
+    /// slot without waiting for the connection to end.
+    #[tokio::test]
+    async fn the_pending_auth_budget_refuses_an_upgrade_and_authentication_returns_it() {
+        let policy = P2pHandshakePolicy {
+            max_pending_auth: 1,
+            auth_timeout: Duration::from_secs(30),
+            ..Default::default()
+        };
+        let (addr, handle, _auth) = start_test_server_with(None, policy).await;
+
+        // Hold the only pending-auth slot with an upgraded, unauthenticated
+        // connection.
+        let (mut sink, mut stream) = dial_plain(addr).await;
+        match tokio_tungstenite::connect_async(format!("ws://{addr}")).await {
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                assert_eq!(
+                    response.status(),
+                    503,
+                    "an upgrade beyond the pending-auth budget is refused before it is answered"
+                );
+            }
+            other => panic!("expected a 503 for an exhausted pending-auth budget, got {other:?}"),
+        }
+
+        // Proving the token releases the budget while the connection stays up.
+        authenticate_connection(&mut sink, &mut stream, TEST_AGENT_TOKEN, None).await;
+        let mut admitted = false;
+        for _ in 0..40 {
+            match tokio_tungstenite::connect_async(format!("ws://{addr}")).await {
+                Ok((ws, _)) => {
+                    let (mut admitted_sink, mut admitted_stream) = ws.split();
+                    authenticate_connection(
+                        &mut admitted_sink,
+                        &mut admitted_stream,
+                        TEST_AGENT_TOKEN,
+                        None,
+                    )
+                    .await;
+                    admitted = true;
+                    break;
+                }
+                Err(_) => tokio::time::sleep(Duration::from_millis(25)).await,
+            }
+        }
+        assert!(
+            admitted,
+            "a successful authentication must return the pending-auth slot without closing"
+        );
+        handle.shutdown().await.ok();
+    }
+
+    /// #3439 W3: listener shutdown settles upgraded connections before
+    /// `wait_closed` returns. Both an authenticated and an upgraded-but-pending
+    /// socket observe the close, and the listener reports zero capacity.
+    #[tokio::test]
+    async fn listener_shutdown_settles_upgraded_connections_before_wait_closed() {
+        let (addr, handle, auth) = start_test_server_on(0).await;
+        let (_authed_sink, mut authed_stream) = connect_client(&auth, addr).await;
+        let (_pending_sink, mut pending_stream) = dial_plain(addr).await;
+
+        handle.shutdown().await.expect("shutdown signal");
+        handle.wait_closed().await;
+
+        assert!(
+            upgraded_stream_closed_within(&mut authed_stream, Duration::from_secs(2)).await,
+            "an authenticated upgraded socket must be settled by listener shutdown"
+        );
+        assert!(
+            upgraded_stream_closed_within(&mut pending_stream, Duration::from_secs(2)).await,
+            "a pending-auth upgraded socket must be settled by listener shutdown"
+        );
+        assert_eq!(
+            handle.available_handshake_slots(),
+            0,
+            "a closed listener reports no admission capacity"
+        );
+    }
+
+    async fn upgraded_stream_closed_within(stream: &mut WsStream, window: Duration) -> bool {
+        tokio::time::timeout(window, async {
+            while let Some(frame) = stream.next().await {
+                if matches!(frame, Ok(WsMessage::Close(_)) | Err(_)) {
+                    return true;
+                }
+            }
+            true
+        })
+        .await
+        .unwrap_or(false)
     }
 }
