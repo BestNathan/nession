@@ -147,6 +147,111 @@ async fn association_round_trips_and_projects_through_session_list() {
     assert!(h.session_registry.get(&session.session_id).await.is_some());
 }
 
+/// #3661: a client that observed revision 1 before another client removed
+/// and re-associated the Session must conflict instead of silently
+/// overwriting the newer membership. The revision also keeps advancing
+/// monotonically, and `expected_revision: None` stays last-writer-wins.
+#[tokio::test]
+async fn stale_revision_after_remove_and_reassociate_is_a_conflict() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID).await;
+    seed_project(&h, OTHER_PROJECT_ID).await;
+    let session = seed_session(&mut h, "s1").await;
+
+    let initial = set_project(
+        &mut h,
+        json!({ "session_id": session.session_id, "project_id": PROJECT_ID }),
+    )
+    .await;
+    assert_eq!(initial["payload"]["success"], true);
+    assert_eq!(initial["payload"]["revision"], 1);
+
+    let removed = set_project(
+        &mut h,
+        json!({
+            "session_id": session.session_id,
+            "project_id": null,
+            "expected_revision": 1,
+        }),
+    )
+    .await;
+    assert_eq!(removed["payload"]["success"], true);
+    assert_eq!(removed["payload"]["revision"], 0);
+
+    // A fresh client sees the Session as unassociated and associates it.
+    // The committed revision continues past the removed one instead of
+    // reusing it.
+    let reassociated = set_project(
+        &mut h,
+        json!({
+            "session_id": session.session_id,
+            "project_id": OTHER_PROJECT_ID,
+            "expected_revision": 0,
+        }),
+    )
+    .await;
+    assert_eq!(reassociated["payload"]["success"], true);
+    assert_eq!(reassociated["payload"]["project_id"], OTHER_PROJECT_ID);
+    assert_eq!(reassociated["payload"]["revision"], 3);
+
+    // The delayed client still holds revision 1. It must not match the new
+    // association, even though a membership at revision 1 once existed.
+    let stale = set_project(
+        &mut h,
+        json!({
+            "session_id": session.session_id,
+            "project_id": PROJECT_ID,
+            "expected_revision": 1,
+        }),
+    )
+    .await;
+    assert_eq!(stale["payload"]["error_kind"], "conflict");
+    let binding =
+        h.db.get_session_project_binding(&session.session_id)
+            .await
+            .unwrap()
+            .expect("the newer association remains stored");
+    assert_eq!(binding.project_id, OTHER_PROJECT_ID);
+    assert_eq!(binding.revision, 3);
+    assert_eq!(
+        project_id_for(&list_sessions(&mut h).await, &session.session_id).as_deref(),
+        Some(OTHER_PROJECT_ID)
+    );
+
+    // A client with the latest observed token can still update, and the
+    // documented `None` compatibility keeps working across a removal.
+    let updated = set_project(
+        &mut h,
+        json!({
+            "session_id": session.session_id,
+            "project_id": PROJECT_ID,
+            "expected_revision": 3,
+        }),
+    )
+    .await;
+    assert_eq!(updated["payload"]["success"], true);
+    assert_eq!(updated["payload"]["revision"], 4);
+
+    let unconditional_remove = set_project(
+        &mut h,
+        json!({ "session_id": session.session_id, "project_id": null }),
+    )
+    .await;
+    assert_eq!(unconditional_remove["payload"]["success"], true);
+    assert_eq!(unconditional_remove["payload"]["revision"], 0);
+
+    let unconditional_set = set_project(
+        &mut h,
+        json!({
+            "session_id": session.session_id,
+            "project_id": OTHER_PROJECT_ID,
+        }),
+    )
+    .await;
+    assert_eq!(unconditional_set["payload"]["success"], true);
+    assert_eq!(unconditional_set["payload"]["revision"], 6);
+}
+
 #[tokio::test]
 async fn association_is_authenticated_and_validates_entities() {
     let mut h = handler_with_online_agent().await;

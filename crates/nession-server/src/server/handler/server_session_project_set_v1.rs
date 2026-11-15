@@ -58,7 +58,9 @@ impl ConnectionHandler {
     /// `expected_revision` is the last revision the caller observed (0 for an
     /// unassociated Session); the comparison and write share one write-locked
     /// database transaction (#3509), so a concurrent update is a deterministic
-    /// conflict rather than a lost update.
+    /// conflict rather than a lost update. A removed membership keeps its
+    /// generation, so a revision observed before remove/reassociate never
+    /// matches the newer association (#3661).
     pub(super) async fn handle_client_session_project_set(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,

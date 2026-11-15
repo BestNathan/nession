@@ -1742,7 +1742,13 @@ pub struct WebSessionMetadataUpdatePayload {
 ///
 /// A whole replacement of one Session's Project membership: `project_id: Some`
 /// associates or changes it, `None` removes it. `expected_revision` guards a
-/// concurrent change; its absence is a last-writer-wins first association.
+/// concurrent change: `Some(revision)` commits only while that exact
+/// membership revision is still current, `0` is the unassociated token and
+/// matches a Session that is currently unassociated, and `None` is
+/// last-writer-wins. A revision is never reused after a removal, so a stale
+/// nonzero value is a `conflict` instead of overwriting a newer association
+/// (#3661). A fresh caller learns the token from its own last successful
+/// reply; a caller without one omits `expected_revision`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1758,7 +1764,9 @@ pub struct SessionProjectBindingUpdatePayload {
 ///
 /// `error_kind` is the actionable classification the Web renders: `invalid`,
 /// `unauthorized`, `conflict`, `not_found` or `unavailable`. `revision` is the
-/// new membership revision on success (0 means unassociated).
+/// new membership revision on success (0 means unassociated; a later
+/// association continues the stored generation instead of restarting at 1,
+/// #3661).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
