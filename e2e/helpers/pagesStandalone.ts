@@ -146,7 +146,7 @@ export async function startPagesFixture(options:{historicalLineage?:boolean}={})
        source_ref_sha:'d'.repeat(40),
        source_url:'https://github.com/BestNathan/nession/actions/runs/42488022265'}]}}
  }:fixture;
- const mcp={schema_version:1,status:'available',semantic_sha256:'f'.repeat(64),source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40)},upstream:{stable:{version:'2026-07-28',sha:'c'.repeat(40),changelog_blob_sha:'d'.repeat(40),changelog_sha256:'e'.repeat(64),
+ const mcp={schema_version:1,status:'available',semantic_sha256:'f'.repeat(64),protocol_versions:['2025-03-26','2026-07-28'],source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40)},upstream:{stable:{version:'2026-07-28',sha:'c'.repeat(40),changelog_blob_sha:'d'.repeat(40),changelog_sha256:'e'.repeat(64),
     release_url:'https://github.com/modelcontextprotocol/modelcontextprotocol/releases/tag/2026-07-28',
     source_url:'https://github.com/modelcontextprotocol/modelcontextprotocol/blob/'+'c'.repeat(40)+'/docs/specification/2026-07-28/changelog.mdx',
     previous_version:'2025-11-25',highlights:['Stateless core']}},tools:[{name:'nession_server_list_agents',description:'List agents',inputSchema:{type:'object',properties:{}}}]};
