@@ -760,7 +760,7 @@ function render(){
       else renderKnowledge(root,knowledgeSnapshot,location.hash);
     }else if(route==='/documents/mcp'){
       if(mcpSnapshotStatus==='loading')root.append(node('p','loading','Loading MCP Tools…'));
-      else renderMcpDocuments(root,mcpSnapshot);
+      else renderMcpDocuments(root,mcpSnapshot,location.hash);
     }else if(route==='/documents'){
       if(documentsSnapshotStatus==='loading')root.append(node('p','loading','Loading technical Documents…'));
       else renderDocuments(root,documentsSnapshot,location.hash);
