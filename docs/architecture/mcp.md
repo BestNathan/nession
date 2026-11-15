@@ -11,6 +11,11 @@ The semantic owner of a Tool is the owner of the authoritative state or action,
 Protocol routes behind the removed Tool projections still exist and are still
 used by the Web, CLI and Server.
 
+Client-side configuration is a different owner: Claude Code's MCP inventory,
+scoped management, explicit discovery and the one-click Nession registration
+are documented in [claude-code-mcp.md](claude-code-mcp.md). That integration
+reads and writes Claude's configuration; it does not add or change a Tool here.
+
 ```text
 MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
                                          │

@@ -30,6 +30,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::conversation;
+use crate::mcp;
 use crate::memory;
 use crate::messages;
 use crate::protocol::conversations::v1::{
@@ -37,6 +38,10 @@ use crate::protocol::conversations::v1::{
     ConversationsResponseV1, ConversationsStateV1,
 };
 use crate::protocol::list::{ListRequestV1, ListResponseV1};
+use crate::protocol::mcp_connect::v1::McpConnectRequestV1;
+use crate::protocol::mcp_mutate::v1::McpMutateRequestV1;
+use crate::protocol::mcp_server::v1::McpServerRequestV1;
+use crate::protocol::mcp_servers::v1::McpServersRequestV1;
 use crate::protocol::memory::v1::{MemoryRequestV1, MemoryResponseV1, MemoryStateV1};
 use crate::protocol::memory_read::v1::MemoryReadRequestV1;
 use crate::protocol::messages::v1::{MessagesRequestV1, MessagesResponseV1, MessagesStateV1};
@@ -50,8 +55,9 @@ use crate::protocol::transcripts::v1::{
     TranscriptsResponseV1, TranscriptsStateV1,
 };
 use crate::protocol::{
-    conversations, list, memory as memory_protocol, memory_read, messages as messages_protocol,
-    read, transcript_items, transcripts,
+    conversations, list, mcp_connect, mcp_mutate, mcp_server, mcp_servers,
+    memory as memory_protocol, memory_read, messages as messages_protocol, read, transcript_items,
+    transcripts,
 };
 use crate::scanner;
 use crate::security;
@@ -691,6 +697,85 @@ impl ClaudeCodeAgentExtension {
             error: None,
         })?)
     }
+
+    /// Answer `claude-code.mcp-servers` (#3600).
+    async fn handle_mcp_servers(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: McpServersRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(error) => {
+                return Ok(serde_json::to_value(
+                    crate::protocol::mcp_servers::v1::McpServersResponseV1::with_error(
+                        crate::protocol::mcp_servers::v1::McpInventoryStateV1::Error,
+                        format!("bad_request: {error}"),
+                    ),
+                )?)
+            }
+        };
+        Ok(serde_json::to_value(
+            mcp::servers(self.context.as_ref(), &request.session_id).await,
+        )?)
+    }
+
+    /// Answer `claude-code.mcp-server` (#3600).
+    async fn handle_mcp_server(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: McpServerRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(error) => {
+                return Ok(serde_json::to_value(
+                    crate::protocol::mcp_server::v1::McpServerResponseV1::with_error(
+                        crate::protocol::mcp_server::v1::McpServerStateV1::Error,
+                        format!("bad_request: {error}"),
+                    ),
+                )?)
+            }
+        };
+        let session_id = request.session_id.clone();
+        Ok(serde_json::to_value(
+            mcp::server(self.context.as_ref(), &session_id, request).await,
+        )?)
+    }
+
+    /// Answer `claude-code.mcp-mutate` (#3600).
+    async fn handle_mcp_mutate(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: McpMutateRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(error) => {
+                return Ok(serde_json::to_value(
+                    crate::protocol::mcp_mutate::v1::McpMutateResponseV1::with_error(
+                        crate::protocol::mcp_mutate::v1::McpMutationStateV1::Invalid,
+                        crate::protocol::mcp_mutate::v1::McpWriteScopeV1::Local,
+                        format!("bad_request: {error}"),
+                    ),
+                )?)
+            }
+        };
+        let session_id = request.session_id.clone();
+        Ok(serde_json::to_value(
+            mcp::mutate(self.context.as_ref(), &session_id, request).await,
+        )?)
+    }
+
+    /// Answer `claude-code.mcp-connect` (#3600).
+    async fn handle_mcp_connect(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: McpConnectRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(error) => {
+                return Ok(serde_json::to_value(
+                    crate::protocol::mcp_connect::v1::McpConnectResponseV1::with_error(
+                        crate::protocol::mcp_connect::v1::McpConnectStateV1::Error,
+                        crate::protocol::mcp_connect::v1::McpConnectPreflightV1::bare(
+                            crate::protocol::mcp_connect::v1::McpHostingModeV1::Agent,
+                        ),
+                        format!("bad_request: {error}"),
+                    ),
+                )?)
+            }
+        };
+        let session_id = request.session_id.clone();
+        Ok(serde_json::to_value(
+            mcp::connect(self.context.as_ref(), &session_id, request).await,
+        )?)
+    }
 }
 
 /// Why a page could not be read.
@@ -919,6 +1004,10 @@ impl AgentExtension for ClaudeCodeAgentExtension {
             transcript_items::COMMAND => self.handle_transcript_items(payload).await,
             memory_protocol::COMMAND => self.handle_memory(payload).await,
             memory_read::COMMAND => self.handle_memory_read(payload).await,
+            mcp_servers::COMMAND => self.handle_mcp_servers(payload).await,
+            mcp_server::COMMAND => self.handle_mcp_server(payload).await,
+            mcp_mutate::COMMAND => self.handle_mcp_mutate(payload).await,
+            mcp_connect::COMMAND => self.handle_mcp_connect(payload).await,
             other => anyhow::bail!("unknown claude_code command: {other}"),
         }
     }
@@ -958,6 +1047,10 @@ mod tests {
                 memory_protocol::ID,
             ),
             (memory_read::v1::WIRE, memory_read::COMMAND, memory_read::ID),
+            (mcp_servers::v1::WIRE, mcp_servers::COMMAND, mcp_servers::ID),
+            (mcp_server::v1::WIRE, mcp_server::COMMAND, mcp_server::ID),
+            (mcp_mutate::v1::WIRE, mcp_mutate::COMMAND, mcp_mutate::ID),
+            (mcp_connect::v1::WIRE, mcp_connect::COMMAND, mcp_connect::ID),
         ] {
             assert_eq!(wire, command, "the dispatch key is the wire");
             assert_eq!(wire, id, "and the wire is the protocol id");
@@ -985,6 +1078,10 @@ mod tests {
                 transcript_items::v1::WIRE.to_string(),
                 memory_protocol::v1::WIRE.to_string(),
                 memory_read::v1::WIRE.to_string(),
+                mcp_servers::v1::WIRE.to_string(),
+                mcp_server::v1::WIRE.to_string(),
+                mcp_mutate::v1::WIRE.to_string(),
+                mcp_connect::v1::WIRE.to_string(),
             ]
         );
     }
@@ -1001,6 +1098,10 @@ mod tests {
         assert_eq!(messages_protocol::ID, "claude-code.messages");
         assert_eq!(memory_protocol::ID, "claude-code.memory");
         assert_eq!(memory_read::ID, "claude-code.memory-read");
+        assert_eq!(mcp_servers::ID, "claude-code.mcp-servers");
+        assert_eq!(mcp_server::ID, "claude-code.mcp-server");
+        assert_eq!(mcp_mutate::ID, "claude-code.mcp-mutate");
+        assert_eq!(mcp_connect::ID, "claude-code.mcp-connect");
     }
 
     #[test]

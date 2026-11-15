@@ -4,6 +4,10 @@
 //! protocol/
 //!   conversations/v1
 //!   list/v1
+//!   mcp_connect/v1
+//!   mcp_mutate/v1
+//!   mcp_server/v1
+//!   mcp_servers/v1
 //!   memory/v1
 //!   memory_read/v1
 //!   messages/v1
@@ -72,6 +76,10 @@
 
 pub mod conversations;
 pub mod list;
+pub mod mcp_connect;
+pub mod mcp_mutate;
+pub mod mcp_server;
+pub mod mcp_servers;
 pub mod memory;
 pub mod memory_read;
 pub mod messages;
@@ -99,6 +107,10 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         transcript_items::descriptor()?,
         memory::descriptor()?,
         memory_read::descriptor()?,
+        mcp_servers::descriptor()?,
+        mcp_server::descriptor()?,
+        mcp_mutate::descriptor()?,
+        mcp_connect::descriptor()?,
     ])
 }
 
@@ -114,7 +126,7 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 8] = [
+    const EXPECTED_IDS: [&str; 12] = [
         "claude-code.list",
         "claude-code.read",
         "claude-code.conversations",
@@ -123,6 +135,13 @@ mod tests {
         "claude-code.transcript-items",
         "claude-code.memory",
         "claude-code.memory-read",
+        // #3600: Claude MCP inventory, detail/discovery, local/project
+        // mutation and Nession onboarding are four operations, not one unit
+        // with a mode field.
+        "claude-code.mcp-servers",
+        "claude-code.mcp-server",
+        "claude-code.mcp-mutate",
+        "claude-code.mcp-connect",
     ];
 
     #[test]

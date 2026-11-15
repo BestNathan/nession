@@ -106,6 +106,10 @@ impl TestDeps {
                 heartbeat_interval_secs: 30,
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
                 terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
+                // The handler tests exercise dispatch, not a mounted listener;
+                // the endpoint answer is still a value the handler owns.
+                mcp_enabled: true,
+                mcp_path: "/mcp".to_string(),
             },
         )
     }
@@ -458,6 +462,24 @@ async fn the_server_advertises_what_it_serves() {
         reply["payload"]["terminal_web_font_size"],
         nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE
     );
+}
+
+#[tokio::test]
+async fn the_mcp_endpoint_answer_states_the_startup_configuration() {
+    // #3600. A Claude client must learn "is /mcp mounted, and where?" from the
+    // host. The answer is the configuration applied at startup, not a probe;
+    // reachability is the caller's own bounded handshake.
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+
+    let action = h
+        .handle_message(proto_msg("server.mcp.endpoint", json!({})))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    assert_eq!(reply["payload"]["enabled"], true);
+    assert_eq!(reply["payload"]["path"], "/mcp");
+    assert_eq!(reply["payload"]["auth"], "host_token");
 }
 
 #[test]

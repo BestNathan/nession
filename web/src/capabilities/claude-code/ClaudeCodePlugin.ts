@@ -3,6 +3,27 @@ import {
   VERSION as LIST_VERSION,
   WIRE as LIST_WIRE,
 } from '@/generated/protocol/claude-code/list/v1';
+// #3600: the Claude MCP view. Four operations, each its own contract.
+import {
+  PROTOCOL as MCP_CONNECT_PROTOCOL,
+  VERSION as MCP_CONNECT_VERSION,
+  WIRE as MCP_CONNECT_WIRE,
+} from '@/generated/protocol/claude-code/mcp-connect/v1';
+import {
+  PROTOCOL as MCP_MUTATE_PROTOCOL,
+  VERSION as MCP_MUTATE_VERSION,
+  WIRE as MCP_MUTATE_WIRE,
+} from '@/generated/protocol/claude-code/mcp-mutate/v1';
+import {
+  PROTOCOL as MCP_SERVER_PROTOCOL,
+  VERSION as MCP_SERVER_VERSION,
+  WIRE as MCP_SERVER_WIRE,
+} from '@/generated/protocol/claude-code/mcp-server/v1';
+import {
+  PROTOCOL as MCP_SERVERS_PROTOCOL,
+  VERSION as MCP_SERVERS_VERSION,
+  WIRE as MCP_SERVERS_WIRE,
+} from '@/generated/protocol/claude-code/mcp-servers/v1';
 import {
   PROTOCOL as MEMORY_PROTOCOL,
   VERSION as MEMORY_VERSION,
@@ -50,6 +71,14 @@ import type {
   ClaudeCodeConversationsResponse,
   ClaudeCodeListRequest,
   ClaudeCodeListResponse,
+  ClaudeCodeMcpConnectRequest,
+  ClaudeCodeMcpConnectResponse,
+  ClaudeCodeMcpMutateRequest,
+  ClaudeCodeMcpMutateResponse,
+  ClaudeCodeMcpServerRequest,
+  ClaudeCodeMcpServerResponse,
+  ClaudeCodeMcpServersRequest,
+  ClaudeCodeMcpServersResponse,
   ClaudeCodeMemoryReadRequest,
   ClaudeCodeMemoryReadResponse,
   ClaudeCodeMemoryRequest,
@@ -82,6 +111,10 @@ const CONSUMER_REQUIREMENTS = {
   [TRANSCRIPT_ITEMS_PROTOCOL]: [TRANSCRIPT_ITEMS_VERSION],
   [MEMORY_PROTOCOL]: [MEMORY_VERSION],
   [MEMORY_READ_PROTOCOL]: [MEMORY_READ_VERSION],
+  [MCP_SERVERS_PROTOCOL]: [MCP_SERVERS_VERSION],
+  [MCP_SERVER_PROTOCOL]: [MCP_SERVER_VERSION],
+  [MCP_MUTATE_PROTOCOL]: [MCP_MUTATE_VERSION],
+  [MCP_CONNECT_PROTOCOL]: [MCP_CONNECT_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -233,6 +266,60 @@ export class ClaudeCodePlugin implements TransportPlugin {
     return this.requireConnection().request<ClaudeCodeMessagesResponse>(
       MESSAGES_WIRE,
       this.addressed(MESSAGES_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * The current Session's Claude MCP inventory (#3600).
+   *
+   * Reads configuration only. It never runs a health check, starts a stdio
+   * server or opens a discovery connection; `claudeCodeMcpServer` is the
+   * explicit, separate probe.
+   */
+  async claudeCodeMcpServers(
+    req: ClaudeCodeMcpServersRequest,
+  ): Promise<ClaudeCodeMcpServersResponse> {
+    return this.requireConnection().request<ClaudeCodeMcpServersResponse>(
+      MCP_SERVERS_WIRE,
+      this.addressed(MCP_SERVERS_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One named MCP entry, and — only with `probe: true` — bounded capability
+   * discovery. A stdio probe additionally requires `allow_stdio: true`.
+   */
+  async claudeCodeMcpServer(
+    req: ClaudeCodeMcpServerRequest,
+  ): Promise<ClaudeCodeMcpServerResponse> {
+    return this.requireConnection().request<ClaudeCodeMcpServerResponse>(
+      MCP_SERVER_WIRE,
+      this.addressed(MCP_SERVER_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /** Add, update or remove one local/project definition (#3600). */
+  async claudeCodeMcpMutate(
+    req: ClaudeCodeMcpMutateRequest,
+  ): Promise<ClaudeCodeMcpMutateResponse> {
+    return this.requireConnection().request<ClaudeCodeMcpMutateResponse>(
+      MCP_MUTATE_WIRE,
+      this.addressed(MCP_MUTATE_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * Preflight or perform the Nession MCP registration (#3600).
+   *
+   * `confirm: false` is the preflight. The Agent re-runs the same check before
+   * a confirmed write, so a stale UI cannot skip a prerequisite.
+   */
+  async claudeCodeMcpConnect(
+    req: ClaudeCodeMcpConnectRequest,
+  ): Promise<ClaudeCodeMcpConnectResponse> {
+    return this.requireConnection().request<ClaudeCodeMcpConnectResponse>(
+      MCP_CONNECT_WIRE,
+      this.addressed(MCP_CONNECT_PROTOCOL, req.agent_id, req),
     );
   }
 

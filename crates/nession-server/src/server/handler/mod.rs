@@ -181,6 +181,8 @@ impl Clone for ConnectionHandler {
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
                 terminal_cols: self.config.terminal_cols,
                 terminal_web_font_size: self.config.terminal_web_font_size,
+                mcp_enabled: self.config.mcp_enabled,
+                mcp_path: self.config.mcp_path.clone(),
             },
             authenticated_client: self.authenticated_client,
             registered_agent_id: self.registered_agent_id.clone(),
@@ -201,6 +203,10 @@ pub struct ConnectionHandlerConfig {
     pub terminal_cols: u16,
     /// The Web maximum CSS font size, mirrored for introspection (#2487).
     pub terminal_web_font_size: f64,
+    /// Whether this Server mounted its embedded MCP endpoint (#3600).
+    pub mcp_enabled: bool,
+    /// The path that endpoint is mounted at (#3600).
+    pub mcp_path: String,
 }
 
 /// Shared dependencies for a connection handler.
@@ -1368,6 +1374,7 @@ mod server_image_build_v1;
 mod server_image_get_v1;
 mod server_image_list_v1;
 mod server_info_v1;
+mod server_mcp_endpoint_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;
 mod server_project_get_v1;

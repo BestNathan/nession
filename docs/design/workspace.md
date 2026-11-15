@@ -169,6 +169,14 @@ Claude Code is running in the active Session
 
 The same pattern should be reusable for Codex, OpenCode, Git, Docker, Kubernetes, databases, and other capabilities.
 
+Claude Code's MCP resource view (`#3600`) is a section **inside** that
+capability's existing Workspace view, not a new Workspace destination: it
+reuses the `ResourceDetail`, `ConfigurationForm` and `OperationSurface`
+recipes, keeps scope selection inside the section, and adds no Agent picker or
+top-level navigation. User-scope entries are read-only there because the
+non-project AI resource manager owns their mutation. The runtime and security
+contract is [../architecture/claude-code-mcp.md](../architecture/claude-code-mcp.md).
+
 ## Files is one capability
 
 Files may use a browser/editor master-detail layout internally:

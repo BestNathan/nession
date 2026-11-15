@@ -411,6 +411,8 @@ impl WebSocketServer {
                         db: Arc::clone(&self.db),
                         mutations: Arc::clone(&self.mutations),
                         mcp: self.mcp.clone(),
+                        mcp_enabled: self.config.mcp.enabled,
+                        mcp_path: self.config.mcp.path.clone(),
                         image_manager: Arc::clone(&self.image_manager),
                         image_http: Arc::clone(&self.image_http),
                         auth_token: self.config.auth_token.clone(),
@@ -498,6 +500,12 @@ struct ServerContext {
     mutations: Arc<KeyedLane<ResourceKey>>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// Whether `[mcp] enabled = true` (#3600). Stated separately from the
+    /// mounted service so the protocol answer is the configuration that was
+    /// actually applied at startup.
+    mcp_enabled: bool,
+    /// The configured MCP path (#3600).
+    mcp_path: String,
     /// Global EROFS image manager and its authorized HTTP route (#3022).
     image_manager: Arc<ImageManager>,
     image_http: Arc<ImageHttpService>,
@@ -677,6 +685,8 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
         query_concurrency,
         image_manager,
         mcp: _,
+        mcp_enabled,
+        mcp_path,
         image_http: _,
     } = ctx;
 
@@ -705,6 +715,8 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
             heartbeat_interval_secs,
             terminal_cols,
             terminal_web_font_size,
+            mcp_enabled,
+            mcp_path,
         },
     );
     handler.set_client_sender(sender.clone());

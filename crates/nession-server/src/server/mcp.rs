@@ -57,6 +57,8 @@ pub(crate) fn build(
             heartbeat_interval_secs: config.heartbeat_interval_secs,
             terminal_cols: config.terminal_cols,
             terminal_web_font_size: config.terminal_web_font_size,
+            mcp_enabled: config.mcp.enabled,
+            mcp_path: config.mcp.path.clone(),
         },
     );
 

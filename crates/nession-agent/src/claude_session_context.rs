@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use nession_claude_code::binding::Binding;
-use nession_claude_code::session_context::{SessionClaudeConfig, SessionContext};
+use nession_claude_code::session_context::{McpHostContext, SessionClaudeConfig, SessionContext};
 
 use crate::server::websocket::extract_session_name;
 use crate::tmux::manager::{SessionManager, INSTANCE_ID_ENV};
@@ -31,6 +31,9 @@ pub struct TmuxSessionContext {
     /// [`SessionMetadataStore::with_root`](crate::session::metadata::SessionMetadataStore::with_root)
     /// gives them one for metadata.
     binding_root: Option<PathBuf>,
+    /// The host's MCP hosting facts (#3600). `None` when the Agent host did not
+    /// provide them, which the Claude view reports as "cannot answer".
+    mcp_host: Option<McpHostContext>,
 }
 
 impl TmuxSessionContext {
@@ -38,7 +41,14 @@ impl TmuxSessionContext {
         Self {
             tmux,
             binding_root: None,
+            mcp_host: None,
         }
+    }
+
+    /// Attach the host facts the Claude MCP view needs.
+    pub fn with_mcp_host(mut self, host: McpHostContext) -> Self {
+        self.mcp_host = Some(host);
+        self
     }
 
     /// A context that reads binding files under `root`, for tests and owned
@@ -47,6 +57,7 @@ impl TmuxSessionContext {
         Self {
             tmux,
             binding_root: Some(root),
+            mcp_host: None,
         }
     }
 
@@ -230,6 +241,24 @@ impl SessionContext for TmuxSessionContext {
                 None
             }
         }
+    }
+
+    /// One variable from the Session's own tmux environment (#3600).
+    async fn session_environment_variable(
+        &self,
+        session_id: &str,
+        name: &str,
+    ) -> Option<Option<String>> {
+        let session = extract_session_name(session_id);
+        if session.is_empty() {
+            return None;
+        }
+        self.session_var(&session, name).await
+    }
+
+    /// The Agent's own MCP hosting facts (#3600).
+    async fn claude_mcp_host(&self) -> Option<McpHostContext> {
+        self.mcp_host.clone()
     }
 }
 
