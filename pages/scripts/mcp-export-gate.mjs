@@ -5,7 +5,7 @@ import {validMcpPublication} from './mcp-reconcile.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const BOUNDED_FILES=300;
-const BOUNDED_COMMITS=250;
+const BOUNDED_COMMITS=100;
 const sourceInputs=new Set([
   'Cargo.toml','Cargo.lock','rust-toolchain.toml','rust-toolchain',
   'pages/scripts/build.mjs','pages/scripts/mcp-semantic.mjs',
