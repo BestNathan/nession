@@ -146,19 +146,6 @@ function apiClient(token){
     return response.json();
   };
 }
-// A cross-Run Store reconciliation records the ORIGINAL publisher that
-// actually wrote PR-B. Its new successful recovery Run must not impersonate
-// that immutable Publisher ID in a bot Reviewer-wake proof. The exact
-// pending Reviewer may instead be dispatched through the existing verified
-// Owner/main Controller command.
-export function qwenRepairReviewerWakeAction(intent,currentRunId,actionId){
-  if(!positive(currentRunId)||!positive(intent?.record?.publisher_run_id))
-    fail('missing authenticated Repair Publisher identity');
-  if(actionId!==null&&!/^[a-f0-9]{64}$/.test(actionId??''))
-    fail('invalid bound Qwen Reviewer Action');
-  return intent.record.publisher_run_id===currentRunId?actionId:null;
-}
-
 export async function runTrustedQwenPublication({
   env,event,ingester,receipt,worker,artifacts,claimZip,resultZip,
   sourceCheckout,reader,registry,api,remote,
@@ -211,13 +198,13 @@ export async function runTrustedQwenPublication({
           published.expected_tree_sha!==readback.expected_tree_sha))
         fail('authenticated Repair Publisher response diverged from independent PR-B readback');
       const handoff=applyQwenRepairPublicationToRemote({
-        remote,readback,intent,registry});
+        remote,readback,intent,registry,
+        authenticated_run_id:Number(env.GITHUB_RUN_ID)});
       return {schema_version:1,kind:'trusted_qwen_publisher_handoff',
         issue:receipt.issue,action_id:receipt.action_id,
         developer_run_id:worker.id,publisher_run_id:Number(env.GITHUB_RUN_ID),
         pull_request:readback.pull_request,pr_head_sha:readback.head_sha,
-        reviewer_action_id:qwenRepairReviewerWakeAction(intent,
-          Number(env.GITHUB_RUN_ID),handoff.reviewer_action_id??null),
+        reviewer_action_id:handoff.reviewer_action_id??null,
         status:handoff.changed?'reviewer_pending':'replayed',
         store_commit_sha:handoff.commit_sha??null};
     }
