@@ -26,8 +26,8 @@ function validateSource(env, checkoutSha) {
 }
 
 function validateTrustedPipeline(ingest, readback) {
-  assert.match(ingest, /workflows:\s*\["Acceptance \/ Cases"\]/,
-    'Case Ingest must only ingest its named source');
+  assert.match(ingest, /^\s*workflows:\s*\["Acceptance \/ Cases", "Comment Case #\*"\]\s*$/m,
+    'Case Ingest must subscribe only to the canonical source and bounded comment Run family');
   assert.match(ingest, /ref:\s*main\s*\n\s*path:\s*trusted/,
     'ingester tooling must use trusted main');
   assert.match(ingest, /actions\/create-github-app-token@/,
@@ -66,6 +66,8 @@ function test() {
   const ingest = fs.readFileSync(path.join(root, '.github/workflows/acceptance-case-ingest.yml'), 'utf8');
   const readback = fs.readFileSync(path.join(root, '.github/workflows/store-receipt-readback.yml'), 'utf8');
   validateTrustedPipeline(ingest, readback);
+  assert.throws(() => validateTrustedPipeline(ingest.replace('Comment Case #*', 'Comment Case *'), readback));
+  assert.throws(() => validateTrustedPipeline(ingest.replace('"Acceptance / Cases", "Comment Case #*"', '"Acceptance / Cases"'), readback));
   assert.throws(() => validateTrustedPipeline(ingest.replace('ref: main', 'ref: arbitrary'), readback));
   assert.throws(() => validateTrustedPipeline(ingest.replace('run-store-cas-push.mjs', 'unsafe-push'), readback));
   assert.throws(() => validateTrustedPipeline(ingest, readback.replace('contents: read', 'contents: write')));
