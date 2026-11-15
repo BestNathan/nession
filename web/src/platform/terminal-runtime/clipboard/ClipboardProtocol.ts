@@ -508,6 +508,13 @@ export class TerminalClipboardProtocol {
 
   private async finishWrite(session: WriteSession): Promise<void> {
     this.clearWriteTimer(session);
+    // A multi-packet write may outlive the authority that started it. The
+    // closing packet is effect time: losing Controller authorization, focus or
+    // visibility mid-stream must deny the write instead of applying it.
+    if (!this.options.isAuthorized()) {
+      this.failFinishedWrite('EPERM');
+      return;
+    }
     this.applying = true;
     const decoded = new Map<string, Uint8Array>();
     for (const [mime, stream] of session.streams) {
