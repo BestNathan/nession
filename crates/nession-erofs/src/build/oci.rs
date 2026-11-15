@@ -191,7 +191,6 @@ mod tests {
 
     #[cfg(unix)]
     fn fake_converter(dir: &Path, sidecar: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join("fake-oci-to-erofs");
         let magic = format!(
             "dd if=/dev/zero of=\"$out\" bs=1 count=1028 2>/dev/null\n\
@@ -202,8 +201,7 @@ mod tests {
         let script = format!(
             "#!/bin/sh\nout=\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--output\" ]; then out=$2; fi\n  shift\ndone\n{magic}"
         );
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::testing::install_via_a_child(&path, &script).unwrap();
         path
     }
 

@@ -102,13 +102,32 @@ mod helpers {
     }
 
     pub(super) fn executable_script(path: &Path, body: &str) {
-        std::fs::write(path, body).expect("write helper script");
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut permissions = std::fs::metadata(path).expect("stat helper").permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(path, permissions).expect("chmod helper");
-        }
+        install_via_a_child(path, body);
+    }
+
+    /// Install `body` at `bin` with the file created by a **child** process.
+    ///
+    /// `fork` copies this process's descriptor table, so writing the path a
+    /// test executes can leave a concurrently forked child holding it writable
+    /// until that child's own `exec`; an `exec` of the same inode then fails
+    /// with `ETXTBSY` (#1026, #3504, #3612). The body goes to a path that is
+    /// never exec'd and a child `cp` creates `bin`, so this process never
+    /// holds a write descriptor on the executable. `chmod` does not open it,
+    /// and `rename` is not equivalent (same inode).
+    fn install_via_a_child(bin: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let staged = bin.with_extension("src");
+        std::fs::write(&staged, body).expect("stage helper script");
+        let status = std::process::Command::new("cp")
+            .arg(&staged)
+            .arg(bin)
+            .status()
+            .expect("install helper script");
+        let _ = std::fs::remove_file(&staged);
+        assert!(status.success(), "installing the helper script: cp failed");
+        let mut permissions = std::fs::metadata(bin).expect("stat helper").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(bin, permissions).expect("chmod helper");
     }
 
     pub(super) fn project_image(
@@ -3307,19 +3326,12 @@ fn a_failed_shared_unmount_is_durable_bounded_and_retryable() {
     let image_root = dir.path().join("images");
     let (erofsfuse, _) = default_helpers(dir.path());
     let failing = dir.path().join("fail-once-fusermount");
-    std::fs::write(
+    executable_script(
         &failing,
         "#!/bin/sh\n\
          if [ ! -f \"$0.counter\" ]; then : > \"$0.counter\"; exit 1; fi\n\
          exec fusermount3 \"$@\"\n",
-    )
-    .expect("write failing fusermount");
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&failing).expect("stat").permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&failing, permissions).expect("chmod");
-    }
+    );
     let root = dir.path().join("standalone-mounts");
     let digest = sha256_digest(&images.base_digest);
     let manager = standalone_manager(&root, &image_root, &erofsfuse, &failing);
