@@ -168,6 +168,9 @@ export function renderDocuments(root,data,hash){
     el('h1','documents-heading','Protocol reference'),
     el('p','documents-lede',
       'Rust-generated Protocol Units, complete request/response fields, and the Nession version each field first supports.'));
+  const mcpLink=el('a','documents-back','MCP Tools →');
+  mcpLink.href='#/documents/mcp';
+  root.append(mcpLink);
   if(!validDocumentsSnapshot(data)||data.status!=='available'){
     const box=el('div','panel documents-unavailable');
     add(box,el('h3','','Protocol catalog unavailable'),

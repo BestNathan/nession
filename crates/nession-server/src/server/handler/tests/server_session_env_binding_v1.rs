@@ -415,3 +415,188 @@ async fn an_agent_binding_report_updates_only_known_sessions() {
         "a state file for a Session the registry does not know is not a live claim"
     );
 }
+
+fn binding_record(session_id: &str, revision: u64, file_name: &str) -> crate::env::BindingRecord {
+    let (agent_id, _) = session_id.split_once(':').expect("agent:name");
+    crate::env::BindingRecord {
+        session_id: session_id.to_string(),
+        agent_id: agent_id.to_string(),
+        desired_revision: revision,
+        profiles: crate::env::binding::materialized_profiles(&[], &[file(file_name)], "create"),
+        updated_at: 0,
+    }
+}
+
+/// A version-aware writer that read an older revision is refused before the
+/// Agent is touched, and the durable binding keeps the winner's value.
+#[tokio::test]
+async fn binding_set_with_a_stale_expected_revision_is_refused_before_dispatch() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    h.env_service
+        .store
+        .write("base.env", "MODE=base", false)
+        .await
+        .unwrap();
+
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let broker = Arc::clone(&h.command_broker);
+
+    let set = h.handle_message(proto_msg(
+        "server.session.env.binding.set",
+        json!({
+            "session_id": "a1:s1",
+            "profiles": [file("base.env")],
+            "expected_revision": 0
+        }),
+    ));
+    let agent = async { answer_binding_set(&mut rx, &broker, observed(1)).await };
+    let (action, _) = tokio::join!(set, agent);
+    assert_eq!(parse_reply(action.unwrap())["payload"]["success"], true);
+
+    let stale = h
+        .handle_message(proto_msg(
+            "server.session.env.binding.set",
+            json!({
+                "session_id": "a1:s1",
+                "profiles": [],
+                "expected_revision": 0
+            }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(stale);
+    assert_eq!(reply["payload"]["success"], false);
+    assert_eq!(reply["payload"]["refusal"], "revision_conflict");
+    assert!(
+        reply["payload"]["binding"].is_null(),
+        "a conflict is not a state report; the caller re-reads with get"
+    );
+    assert!(
+        reply["payload"]["error"].as_str().is_some_and(
+            |error| error.contains("revision_conflict") && error.contains("revision 1")
+        ),
+        "{reply}"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "a refused revision must not dispatch an Agent mutation"
+    );
+
+    let stored = h.env_service.bindings.get("a1:s1").await.unwrap().unwrap();
+    assert_eq!(stored.desired_revision, 1);
+    assert_eq!(stored.profiles.len(), 1);
+}
+
+/// The compare-and-swap lives in the durable write, so exactly one of two
+/// writers that read revision 0 can insert; the loser never overwrites.
+#[tokio::test]
+async fn binding_compare_and_swap_allows_exactly_one_writer_at_revision_zero() {
+    let h = handler_with_online_agent().await;
+
+    let first = binding_record("a1:s1", 1, "first.env");
+    let second = binding_record("a1:s1", 1, "second.env");
+    let (first_won, second_won) = tokio::join!(
+        h.env_service.bindings.compare_and_swap(&first, 0),
+        h.env_service.bindings.compare_and_swap(&second, 0)
+    );
+    let first_won = first_won.expect("first CAS");
+    let second_won = second_won.expect("second CAS");
+    assert_ne!(
+        first_won, second_won,
+        "exactly one writer may insert revision 0"
+    );
+
+    let stored = h
+        .env_service
+        .bindings
+        .get("a1:s1")
+        .await
+        .unwrap()
+        .expect("one writer persisted");
+    assert_eq!(stored.desired_revision, 1);
+    assert_eq!(stored.profiles.len(), 1);
+
+    // A later CAS bound to the old revision cannot overwrite the winner.
+    let later = binding_record("a1:s1", 2, "later.env");
+    assert!(!h
+        .env_service
+        .bindings
+        .compare_and_swap(&later, 0)
+        .await
+        .unwrap());
+    let stored = h.env_service.bindings.get("a1:s1").await.unwrap().unwrap();
+    assert_eq!(stored.desired_revision, 1);
+    assert!(
+        matches!(
+            stored.profiles[0].profile.name.as_str(),
+            "first.env" | "second.env"
+        ),
+        "the stored profile must belong to the winning writer: {}",
+        stored.profiles[0].profile.name
+    );
+}
+
+#[tokio::test]
+async fn binding_reapply_with_a_stale_expected_revision_is_refused_before_dispatch() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("base.env", "MODE=base", false)
+        .await
+        .unwrap();
+    bind_for_test(&h, "a1:s1", &[file("base.env")]).await;
+
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+
+    let stale = h
+        .handle_message(proto_msg(
+            "server.session.env.binding.reapply",
+            json!({ "session_id": "a1:s1", "expected_revision": 9 }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(stale);
+    assert_eq!(reply["payload"]["success"], false);
+    assert_eq!(reply["payload"]["refusal"], "revision_conflict");
+    assert!(rx.try_recv().is_err(), "nothing may reach the Agent");
+
+    let stored = h.env_service.bindings.get("a1:s1").await.unwrap().unwrap();
+    assert_eq!(stored.desired_revision, 1);
+}
+
+/// Reapplying a Session with no binding at revision 0 is a no-op; a
+/// version-aware caller that expected a later revision is told it lost.
+#[tokio::test]
+async fn binding_reapply_of_an_empty_binding_reports_a_stale_revision() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+
+    let noop = h
+        .handle_message(proto_msg(
+            "server.session.env.binding.reapply",
+            json!({ "session_id": "a1:s1", "expected_revision": 0 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(parse_reply(noop)["payload"]["success"], true);
+
+    let stale = h
+        .handle_message(proto_msg(
+            "server.session.env.binding.reapply",
+            json!({ "session_id": "a1:s1", "expected_revision": 5 }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(stale);
+    assert_eq!(reply["payload"]["success"], false);
+    assert_eq!(reply["payload"]["refusal"], "revision_conflict");
+    assert!(
+        h.env_service.bindings.get("a1:s1").await.unwrap().is_none(),
+        "a refused reapply must not create a binding"
+    );
+}

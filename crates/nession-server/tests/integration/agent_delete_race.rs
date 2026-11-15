@@ -10,6 +10,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use nession_protocol::contracts::env::v1::SessionEnvObservedState;
+use nession_runtime::frame::WsFrame;
 use nession_server::db::Database;
 use nession_server::env::{BindingRecord, EnvService};
 use nession_server::registry::agent::{AgentDeleteClaim, AgentInfo, AgentRegistry, AgentStatus};
@@ -21,7 +22,6 @@ use nession_server::server::{
     WebClientRegistry,
 };
 use serde_json::Value;
-use tokio_tungstenite::tungstenite::Message;
 
 const AGENT_ID: &str = "a1";
 
@@ -63,6 +63,8 @@ fn config() -> ConnectionHandlerConfig {
         heartbeat_interval_secs: 30,
         terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
+        mcp_enabled: false,
+        mcp_path: "/mcp".to_string(),
     }
 }
 
@@ -104,8 +106,8 @@ impl Fixture {
     }
 }
 
-fn text_message(msg_type: &str, payload: Value) -> Message {
-    Message::Text(
+fn text_message(msg_type: &str, payload: Value) -> WsFrame {
+    WsFrame::Text(
         serde_json::json!({
             "msg_type": msg_type,
             "id": format!("{msg_type}-test"),
@@ -118,7 +120,7 @@ fn text_message(msg_type: &str, payload: Value) -> Message {
 
 fn parse_reply(action: HandlerAction) -> anyhow::Result<Value> {
     match action {
-        HandlerAction::Reply(Some(Message::Text(text))) => Ok(serde_json::from_str(&text)?),
+        HandlerAction::Reply(Some(WsFrame::Text(text))) => Ok(serde_json::from_str(&text)?),
         _ => anyhow::bail!("expected Reply(Some(Text))"),
     }
 }

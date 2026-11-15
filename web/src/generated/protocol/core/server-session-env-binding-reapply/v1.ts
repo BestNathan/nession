@@ -21,14 +21,27 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ClientSessionEnvBindingReapplyPayload = { session_id: string, };
+export type ClientSessionEnvBindingReapplyPayload = { session_id: string, 
+/**
+ * The desired revision the caller read before this reapply. Same
+ * compare-and-swap contract as
+ * [`ClientSessionEnvBindingSetPayload::expected_revision`].
+ */
+expected_revision?: number | null, };
 export type ClientSessionEnvBindingResponsePayload = { success: boolean, 
 /**
  * The state after the operation. Present on success and on a failed
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, };
+binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+/**
+ * A machine-readable classification for a refusal that happened *before*
+ * any durable mutation. `None` means the ordinary `error` path: a refused
+ * materialization may still have advanced the desired revision.
+ */
+refusal?: SessionEnvBindingRefusalKind | null, };
+export type SessionEnvBindingRefusalKind = "revision_conflict";
 export type SessionEnvBindingState = { session_id: string, desired_revision: number, desired_profiles: Array<SessionEnvBindingProfileState>, observed?: SessionEnvObservedState | null, 
 /**
  * Why `observed` is absent or the binding could not be read. Desired
@@ -77,7 +90,13 @@ export type EnvSource = "server" | "agent";
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionEnvBindingReapplyCall = { session_id: string, };
+export type SessionEnvBindingReapplyCall = { session_id: string, 
+/**
+ * The desired revision the caller read before this reapply. Same
+ * compare-and-swap contract as
+ * [`ClientSessionEnvBindingSetPayload::expected_revision`].
+ */
+expected_revision?: number | null, };
 
 /** The payload the provider answers with. */
 export type SessionEnvBindingReapplyReply = { success: boolean, 
@@ -86,5 +105,11 @@ export type SessionEnvBindingReapplyReply = { success: boolean,
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, };
+binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+/**
+ * A machine-readable classification for a refusal that happened *before*
+ * any durable mutation. `None` means the ordinary `error` path: a refused
+ * materialization may still have advanced the desired revision.
+ */
+refusal?: SessionEnvBindingRefusalKind | null, };
 

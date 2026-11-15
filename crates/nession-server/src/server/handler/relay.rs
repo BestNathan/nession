@@ -2,8 +2,8 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    current_timestamp, json, warn, ConnectionHandler, HandlerAction, Message, ProtocolMessage,
-    Value,
+    current_timestamp, json, warn, ConnectionHandler, HandlerAction, ProtocolMessage, Value,
+    WsFrame,
 };
 
 impl ConnectionHandler {
@@ -46,7 +46,7 @@ impl ConnectionHandler {
                 "Rejected unauthenticated relayed request `{}` id={}",
                 msg.msg_type, msg.id
             );
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": msg.msg_type,
                     "id": msg.id,
@@ -68,7 +68,7 @@ impl ConnectionHandler {
             .unwrap_or("");
 
         if agent_id.is_empty() {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": msg.msg_type,
                     "id": msg.id,
@@ -112,7 +112,7 @@ impl ConnectionHandler {
             .await
             .and_then(|agent| agent.protocol_manifest)
         else {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": reply_wire,
                     "id": msg.id,
@@ -134,7 +134,7 @@ impl ConnectionHandler {
         };
 
         let Some(unit) = manifest.unit_for_wire(&msg.msg_type) else {
-            return Ok(HandlerAction::Reply(Some(Message::Text(
+            return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                 json!({
                     "msg_type": reply_wire,
                     "id": msg.id,
@@ -170,7 +170,7 @@ impl ConnectionHandler {
                 .unwrap_or_default();
             let known = offered.iter().any(|v| u64::from(v.get()) == named);
             if !known {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": reply_wire,
                         "id": msg.id,
@@ -215,7 +215,7 @@ impl ConnectionHandler {
                 .map(|support| support.versions.clone())
                 .unwrap_or_default();
             if offered.len() > 1 {
-                return Ok(HandlerAction::Reply(Some(Message::Text(
+                return Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": reply_wire,
                         "id": msg.id,
@@ -247,7 +247,7 @@ impl ConnectionHandler {
                 // agent_command returns { request_id, command, result }.
                 // Extract just the result for the client response.
                 let result = response.get("result").cloned().unwrap_or(response);
-                Ok(HandlerAction::Reply(Some(Message::Text(
+                Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": reply_wire,
                         "id": msg.id,
@@ -259,7 +259,7 @@ impl ConnectionHandler {
             }
             Err(e) => {
                 warn!("Extension command failed for agent {}: {}", agent_id, e);
-                Ok(HandlerAction::Reply(Some(Message::Text(
+                Ok(HandlerAction::Reply(Some(WsFrame::Text(
                     json!({
                         "msg_type": reply_wire,
                         "id": msg.id,

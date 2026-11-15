@@ -21,6 +21,7 @@
 
 use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
+use nession_claude_code::session_context::{McpHostContext, McpHostEndpoint};
 use nession_common::extension::AgentExtension;
 use nession_common::readiness::Readiness;
 use nession_common::system;
@@ -348,7 +349,11 @@ pub async fn run(
         ready.announce();
         (None, config.heartbeat_interval_secs)
     } else {
-        let ext_registry = compose_providers(&agent_id, Arc::clone(&tmux_for_client))?;
+        let ext_registry = compose_providers(
+            &agent_id,
+            Arc::clone(&tmux_for_client),
+            claude_mcp_host(&config, listen_addr),
+        )?;
 
         // Serving: the socket is bound and the provider set composed. Announced
         // *before* the central-server connection on purpose — that one is
@@ -539,6 +544,7 @@ pub async fn run(
 pub fn compose_providers(
     agent_id: &str,
     tmux: Arc<SessionManager>,
+    claude_mcp_host: McpHostContext,
 ) -> Result<Arc<ExtensionRegistry>> {
     // #750/#1290. The resolver is what keeps Git and GitHub inside the
     // Session's own working directory: the client names a session, never a
@@ -551,7 +557,7 @@ pub fn compose_providers(
         // lifecycle, so it is the only thing that can answer, and the provider
         // must not depend back on it to ask.
         Box::new(ClaudeCodeAgentExtension::new(Arc::new(
-            TmuxSessionContext::new(Arc::clone(&tmux)),
+            TmuxSessionContext::new(Arc::clone(&tmux)).with_mcp_host(claude_mcp_host),
         ))),
         Box::new(GitAgentExtension::new("git", Arc::clone(&workdir))),
         // #1290. One Git capability, two providers: local Git and the
@@ -574,6 +580,48 @@ pub fn compose_providers(
         ExtensionRegistry::new(agent_id.to_string(), extensions, served_descriptors()?)
             .context("cannot compose this agent's protocol providers")?,
     ))
+}
+
+/// What this Agent can tell the Claude MCP view about its own hosting (#3600).
+///
+/// The Agent-embedded endpoint is the P2P listener it actually bound, rendered
+/// as an HTTP(S) origin a process on this host can reach. An unspecified bind
+/// (`0.0.0.0`/`::`) is loopback for that purpose: the Session runs on this
+/// host, and the listener is the same one. The Server endpoint is not invented
+/// here — only the configured `server_url` is reported, and the connect
+/// preflight derives the MCP origin from it with the Server's own path.
+fn claude_mcp_host(config: &AgentConfig, listen_addr: std::net::SocketAddr) -> McpHostContext {
+    let server_url = (!config.server_url.trim().is_empty()).then(|| config.server_url.clone());
+    let agent = config.mcp.enabled.then(|| {
+        let tls = config
+            .tls_cert_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty())
+            && config
+                .tls_key_path
+                .as_deref()
+                .is_some_and(|path| !path.trim().is_empty());
+        let scheme = if tls { "https" } else { "http" };
+        McpHostEndpoint {
+            url: format!(
+                "{scheme}://{}:{}{}",
+                reachable_loopback_or_ip(listen_addr.ip()),
+                listen_addr.port(),
+                config.mcp.path
+            ),
+            path: config.mcp.path.clone(),
+        }
+    });
+    McpHostContext { agent, server_url }
+}
+
+fn reachable_loopback_or_ip(ip: std::net::IpAddr) -> String {
+    match ip {
+        std::net::IpAddr::V4(address) if address.is_unspecified() => "127.0.0.1".to_string(),
+        std::net::IpAddr::V4(address) => address.to_string(),
+        std::net::IpAddr::V6(address) if address.is_unspecified() => "[::1]".to_string(),
+        std::net::IpAddr::V6(address) => format!("[{address}]"),
+    }
 }
 
 /// Write the Claude Code integration plugin, register it, and prepare the
@@ -712,8 +760,12 @@ mod tests {
     /// reach every entrypoint at once, and nothing else would notice.
     #[test]
     fn the_runtime_composes_the_agent_providers() {
-        let registry = compose_providers("agent-test", Arc::new(SessionManager::new()))
-            .expect("the runtime's own providers must compose");
+        let registry = compose_providers(
+            "agent-test",
+            Arc::new(SessionManager::new()),
+            McpHostContext::default(),
+        )
+        .expect("the runtime's own providers must compose");
         let manifest = registry.manifest();
 
         for wire in ["git.status", "git.diff", "git.preview"] {

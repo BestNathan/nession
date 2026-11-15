@@ -17,6 +17,7 @@ vi.mock('@/product/session', () => ({ sessionsApi: sessionsApiMock }));
 import {
   getSessionMetadataEntry,
   loadSessionMetadata,
+  observeSessionIncarnations,
   resetSessionMetadataCache,
   saveSessionMetadata,
 } from '../../metadata';
@@ -221,5 +222,103 @@ describe('Session metadata cache ordering', () => {
       revision: 2,
       title: 'B saved',
     });
+  });
+});
+
+// #3424 — `session_id` is recyclable. An authoritative list that reports a new
+// durable tmux instance under the same public id must not leave the previous
+// incarnation's name-keyed cache entry on screen, and an old-instance answer
+// that resolves afterwards must not restore it.
+describe('Session metadata incarnation invalidation', () => {
+  beforeEach(() => {
+    resetSessionMetadataCache();
+    sessionsApiMock.getMetadata.mockReset();
+  });
+
+  function instance(id: string, instanceId: string | null) {
+    return [{ session_id: id, instance_id: instanceId }];
+  }
+
+  it('keeps a loaded entry across ordinary refreshes of the same incarnation', async () => {
+    sessionsApiMock.getMetadata.mockResolvedValue(loaded(4, 'Same incarnation'));
+
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+
+    expect(getSessionMetadataEntry(SESSION_A)).toMatchObject({
+      status: 'loaded',
+      metadata: { revision: 4, title: 'Same incarnation' },
+    });
+    // Only the explicit load asked the Agent; the refreshes did not.
+    expect(sessionsApiMock.getMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards the previous entry and reads the new instance', async () => {
+    sessionsApiMock.getMetadata
+      .mockResolvedValueOnce(loaded(4, 'Old project'))
+      .mockResolvedValueOnce(legacy());
+
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+    expect(getSessionMetadataEntry(SESSION_A).metadata?.title).toBe('Old project');
+
+    observeSessionIncarnations(instance(SESSION_A, 'instance-b'));
+
+    await vi.waitFor(() => {
+      expect(getSessionMetadataEntry(SESSION_A).status).toBe('loaded');
+    });
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 0,
+      title: null,
+    });
+    expect(sessionsApiMock.getMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('fences a read started for the old incarnation when the replacement is observed', async () => {
+    const oldRead = deferred<SessionMetadataResponse>();
+    const newRead = deferred<SessionMetadataResponse>();
+    sessionsApiMock.getMetadata
+      .mockResolvedValueOnce(loaded(4, 'Old project'))
+      .mockReturnValueOnce(oldRead.promise)
+      .mockReturnValueOnce(newRead.promise);
+
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+
+    const pendingOld = loadSessionMetadata(SESSION_A, { force: true });
+    observeSessionIncarnations(instance(SESSION_A, 'instance-b'));
+
+    // The old instance answers after the replacement was observed. Its read
+    // was fenced, so it must not publish.
+    oldRead.resolve(loaded(4, 'Old project'));
+    await pendingOld;
+    expect(getSessionMetadataEntry(SESSION_A)).toMatchObject({
+      status: 'loading',
+      metadata: null,
+    });
+
+    newRead.resolve(legacy());
+    await vi.waitFor(() => {
+      expect(getSessionMetadataEntry(SESSION_A).status).toBe('loaded');
+    });
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 0,
+      title: null,
+    });
+  });
+
+  it('treats an unreported legacy instance id as no incarnation change', async () => {
+    sessionsApiMock.getMetadata.mockResolvedValue(loaded(4, 'Legacy still current'));
+
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+    observeSessionIncarnations(instance(SESSION_A, null));
+
+    expect(getSessionMetadataEntry(SESSION_A).metadata?.title).toBe(
+      'Legacy still current',
+    );
+    expect(sessionsApiMock.getMetadata).toHaveBeenCalledTimes(1);
   });
 });
