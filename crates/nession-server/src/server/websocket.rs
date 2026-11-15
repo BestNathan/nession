@@ -1,8 +1,8 @@
 use anyhow::Context;
+use nession_runtime::frame::WsFrame;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
 use axum::extract::{FromRequestParts, Path, State, WebSocketUpgrade};
@@ -746,7 +746,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
                     }
                 }
                 _ = ping_ticker.tick() => {
-                    if write.send(tokio_tungstenite::tungstenite::Message::Ping(Vec::new())).await.is_err() {
+                    if write.send(WsFrame::Ping(Vec::new())).await.is_err() {
                         // Connection closed — expected during shutdown, no need to log.
                         break;
                     }
@@ -798,7 +798,7 @@ async fn handle_ws_stream(ws_stream: AxumWebSocket, ctx: ServerContext) -> anyho
             // barrier below*, because a slow operation must not hold the connection
             // open — the requirement names ping and close explicitly. The work
             // still in flight is ended with the connection, further down.
-            let Message::Text(text) = frame else {
+            let WsFrame::Text(text) = frame else {
                 match handler.handle_message(frame).await {
                     Ok(HandlerAction::Close) => {
                         close_reason = "client-close";
@@ -1249,19 +1249,15 @@ struct RelayRequest<'a> {
 ///
 /// Generic over the read half so a test can drive it without a socket, the same
 /// shape [`forward_client_to_agent`] has. The caller owns the deadline.
-async fn await_agent_reply<RS>(
+async fn await_agent_reply<RS, E>(
     agent_read: &mut RS,
     sender: &crate::server::outbound::WsMessageSender,
     request_id: &str,
     waiting_for: &str,
 ) -> Result<serde_json::Value, String>
 where
-    RS: futures_util::Stream<
-            Item = Result<
-                tokio_tungstenite::tungstenite::Message,
-                tokio_tungstenite::tungstenite::Error,
-            >,
-        > + Unpin,
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
 {
     use futures_util::StreamExt;
 
@@ -1336,7 +1332,7 @@ fn validate_relay_client_auth_reply(
 /// on both the pre-attach and established forwarding paths (#2089).
 pub const RELAY_SUBSCRIPTION_READY_WIRE: &str = "server.session.relay.ready";
 
-fn is_agent_forged_relay_ready(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+fn is_agent_forged_relay_ready(msg: &WsFrame) -> bool {
     // Reuse the header-only classifier. A full Value allocation per output
     // frame would punish 100k+ terminal bursts for a rare spoofed wire.
     msg.to_text()
@@ -1356,7 +1352,7 @@ fn agent_attached_relay_ready(
     session_name: &str,
     browser_client_id: &str,
     relay_request_id: &str,
-) -> Option<tokio_tungstenite::tungstenite::Message> {
+) -> Option<WsFrame> {
     if browser_client_id.is_empty() || relay_request_id.is_empty() {
         return None;
     }
@@ -1415,9 +1411,7 @@ fn agent_attached_relay_ready(
             out_payload["terminal_capabilities"] = capabilities.clone();
         }
     }
-    Some(tokio_tungstenite::tungstenite::Message::Text(
-        frame.to_string(),
-    ))
+    Some(WsFrame::text(frame.to_string()))
 }
 
 /// Validate that an Agent really accepted this Relay socket's attach before
@@ -1508,18 +1502,16 @@ fn relay_failure_reason(error: &tokio_tungstenite::tungstenite::Error) -> &'stat
     }
 }
 
-/// Relay mode using the connection's queued outbound path for client writes.
-/// Used when the write sink is managed by a relay task.
+/// The Agent side of a Relay, read as the transport-neutral vocabulary.
 ///
-/// Tries each URL in `request.agent_ws_urls` with a fast 2s connect timeout
-/// until one succeeds.  This avoids long hangs when the first address
-/// is unreachable (common in k8s where pod IPs are not routable).
-async fn relay_bidirectional_via_channel<RS>(
-    client_read: &mut RS,
-    sender: crate::server::outbound::WsMessageSender,
-    dispatch: &mut RelayDispatch<'_>,
-    request: RelayRequest<'_>,
-) -> anyhow::Result<RelayEnd>
+/// The Agent is dialled with `tokio-tungstenite`, and that is the adapter edge
+/// (`#3548`): the relay's own forwarding, classification and outbound lanes all
+/// speak [`WsFrame`], exactly as the browser connection does. A raw tungstenite
+/// frame is a write-side detail its readers never produce; if one appears it is
+/// refused rather than given an invented text or binary meaning.
+struct AgentRead<RS>(RS);
+
+impl<RS> futures_util::Stream for AgentRead<RS>
 where
     RS: futures_util::Stream<
             Item = Result<
@@ -1527,6 +1519,81 @@ where
                 tokio_tungstenite::tungstenite::Error,
             >,
         > + Unpin,
+{
+    type Item = Result<WsFrame, tokio_tungstenite::tungstenite::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.0).poll_next(cx).map(|ready| {
+            ready.map(|item| {
+                item.and_then(|message| {
+                    WsFrame::from_tungstenite(message).ok_or_else(|| {
+                        tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "a raw WebSocket frame cannot be read",
+                        ))
+                    })
+                })
+            })
+        })
+    }
+}
+
+/// The Agent side of a Relay, written from the transport-neutral vocabulary.
+///
+/// The conversion back to tungstenite happens in `start_send`, which is the
+/// same adapter edge as [`AgentRead`].
+struct AgentWrite<AS>(AS);
+
+impl<AS> futures_util::Sink<WsFrame> for AgentWrite<AS>
+where
+    AS: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
+{
+    type Error = AS::Error;
+
+    fn poll_ready(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.0).poll_ready(cx)
+    }
+
+    fn start_send(mut self: std::pin::Pin<&mut Self>, item: WsFrame) -> Result<(), Self::Error> {
+        std::pin::Pin::new(&mut self.0).start_send(item.into_tungstenite())
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.0).poll_flush(cx)
+    }
+
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.0).poll_close(cx)
+    }
+}
+
+/// Relay mode using the connection's queued outbound path for client writes.
+/// Used when the write sink is managed by a relay task.
+///
+/// Tries each URL in `request.agent_ws_urls` with a fast 2s connect timeout
+/// until one succeeds.  This avoids long hangs when the first address
+/// is unreachable (common in k8s where pod IPs are not routable).
+async fn relay_bidirectional_via_channel<RS, E>(
+    client_read: &mut RS,
+    sender: crate::server::outbound::WsMessageSender,
+    dispatch: &mut RelayDispatch<'_>,
+    request: RelayRequest<'_>,
+) -> anyhow::Result<RelayEnd>
+where
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
 {
     use futures_util::SinkExt;
     use futures_util::StreamExt;
@@ -1598,7 +1665,11 @@ where
         }
     };
 
-    let (mut agent_write, mut agent_read) = agent_ws.split();
+    let (agent_write, agent_read) = agent_ws.split();
+    // From here on the Agent socket is just another frame transport: the
+    // adapters are the only code that knows it speaks tungstenite (#3548).
+    let mut agent_write = AgentWrite(agent_write);
+    let mut agent_read = AgentRead(agent_read);
 
     // ── Step 0: Bind this relay's identity on the Agent connection (#1429) ──
     //
@@ -1631,9 +1702,7 @@ where
         "payload": { "auth_token": agent_token, "client_id": client_id },
     });
     agent_write
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            auth_msg.to_string(),
-        ))
+        .send(WsFrame::Text(auth_msg.to_string()))
         .await?;
     let auth_response = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -1717,9 +1786,7 @@ where
         "payload": attach_payload,
     });
     agent_write
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            attach_msg.to_string(),
-        ))
+        .send(WsFrame::Text(attach_msg.to_string()))
         .await?;
 
     // Wait for the reply *to this request*, forwarding anything the agent says
@@ -1769,7 +1836,7 @@ where
             session_name, err_msg
         );
         // Forward error to the browser client
-        let client_error = tokio_tungstenite::tungstenite::Message::Text(
+        let client_error = WsFrame::Text(
             serde_json::json!({
                 "msg_type": "error",
                 "id": uuid::Uuid::new_v4().to_string(),
@@ -2048,7 +2115,7 @@ struct RelayEnvelope<'a> {
 /// this relay does not recognise is forwarded rather than guessed at, which is
 /// the rule everywhere else in the tree — an unknown wire is ignored, never
 /// rejected.
-fn classify_client_frame(msg: &Message) -> ClientFrame {
+fn classify_client_frame(msg: &WsFrame) -> ClientFrame {
     let Ok(text) = msg.to_text() else {
         return ClientFrame::Other;
     };
@@ -2273,7 +2340,7 @@ fn merged_range(positions: &[InputPosition]) -> MergedRange {
 /// range** ([`MergedRange::Unmergeable`]), which is the honest answer in both
 /// cases — there is nothing to merge, and the caller forwards them in order
 /// rather than guessing which ones mattered.
-fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
+fn merge_terminal_input(frames: &[WsFrame]) -> Option<WsFrame> {
     use base64::Engine as _;
     let engine = base64::engine::general_purpose::STANDARD;
 
@@ -2310,15 +2377,15 @@ fn merge_terminal_input(frames: &[Message]) -> Option<Message> {
         payload.insert("seq_start".to_string(), serde_json::Value::from(start));
         payload.insert("seq_end".to_string(), serde_json::Value::from(end));
     }
-    Some(Message::Text(envelope.to_string()))
+    Some(WsFrame::Text(envelope.to_string()))
 }
 
 /// Forward a burst that the throttle window held, in order and losing nothing.
 ///
 /// Returns `false` when a send failed, which is how the caller learns to stop.
-async fn flush_burst<AS>(agent_write: &mut AS, burst: &mut Vec<Message>) -> bool
+async fn flush_burst<AS>(agent_write: &mut AS, burst: &mut Vec<WsFrame>) -> bool
 where
-    AS: futures_util::Sink<Message> + Unpin,
+    AS: futures_util::Sink<WsFrame> + Unpin,
     AS::Error: std::fmt::Display,
 {
     use futures_util::SinkExt as _;
@@ -2399,7 +2466,7 @@ struct RelayDispatch<'a> {
 /// A Server unit that arrived without a dispatcher is reported and dropped:
 /// forwarding it is the defect this parameter exists to remove (#1504), so the
 /// unreachable branch errs on the side of not answering the wrong runtime.
-async fn forward_client_to_agent<RS, AS>(
+async fn forward_client_to_agent<RS, AS, E>(
     client_read: &mut RS,
     agent_write: &mut AS,
     session_name: &str,
@@ -2407,8 +2474,9 @@ async fn forward_client_to_agent<RS, AS>(
     mut dispatch: Option<&mut RelayDispatch<'_>>,
 ) -> ClientToAgent
 where
-    RS: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-    AS: futures_util::Sink<Message> + Unpin,
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
+    AS: futures_util::Sink<WsFrame> + Unpin,
     AS::Error: std::fmt::Display,
 {
     use futures_util::SinkExt;
@@ -2482,7 +2550,7 @@ where
         // Every terminal-input frame the window holds, oldest first. A `Vec`
         // rather than a single `Option` because the window merges a burst
         // instead of keeping its newest — see `merge_terminal_input` (`#966`).
-        let mut burst: Vec<Message> = vec![msg];
+        let mut burst: Vec<WsFrame> = vec![msg];
         let mut end_requested = false;
 
         loop {
@@ -2754,16 +2822,14 @@ mod tests {
         ] {
             assert!(agent_attached_relay_ready(&reply, "sess", "browser-a", "begin-123").is_none());
         }
-        let spoof = tokio_tungstenite::tungstenite::Message::Text(
+        let spoof = WsFrame::Text(
             json!({"msg_type":"server.session.relay.ready", "payload":{"route_id":"forged"}})
                 .to_string(),
         );
         assert!(is_agent_forged_relay_ready(&spoof));
-        assert!(!is_agent_forged_relay_ready(
-            &tokio_tungstenite::tungstenite::Message::Text(
-                json!({"msg_type":"agent.terminal.output","data":"ordinary"}).to_string(),
-            )
-        ));
+        assert!(!is_agent_forged_relay_ready(&WsFrame::Text(
+            json!({"msg_type":"agent.terminal.output","data":"ordinary"}).to_string(),
+        )));
     }
 
     #[test]
@@ -2834,10 +2900,10 @@ mod tests {
     /// Records what the relay forwarded, in order.
     #[derive(Default)]
     struct RecordingSink {
-        sent: Vec<Message>,
+        sent: Vec<WsFrame>,
     }
 
-    impl Sink<Message> for RecordingSink {
+    impl Sink<WsFrame> for RecordingSink {
         type Error = std::convert::Infallible;
 
         fn poll_ready(
@@ -2847,7 +2913,7 @@ mod tests {
             Poll::Ready(Ok(()))
         }
 
-        fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        fn start_send(self: Pin<&mut Self>, item: WsFrame) -> Result<(), Self::Error> {
             self.get_mut().sent.push(item);
             Ok(())
         }
@@ -2868,8 +2934,8 @@ mod tests {
     }
 
     /// A frame as a client sends one.
-    fn frame_with_payload(msg_type: &str, id: &str, payload: serde_json::Value) -> Message {
-        Message::Text(
+    fn frame_with_payload(msg_type: &str, id: &str, payload: serde_json::Value) -> WsFrame {
+        WsFrame::Text(
             json!({
                 "msg_type": msg_type,
                 "id": id,
@@ -2880,7 +2946,7 @@ mod tests {
         )
     }
 
-    fn frame(msg_type: &str, id: &str) -> Message {
+    fn frame(msg_type: &str, id: &str) -> WsFrame {
         frame_with_payload(msg_type, id, json!({ "session_name": "sess" }))
     }
 
@@ -2890,7 +2956,7 @@ mod tests {
     /// its newest frame, so a test that wants to show the window was open has to
     /// say what the agent received — and `frame_data` reads it back. Deriving the
     /// bytes from the id is what makes the order visible.
-    fn terminal_input(id: &str) -> Message {
+    fn terminal_input(id: &str) -> WsFrame {
         use base64::Engine as _;
         frame_with_payload(
             TERMINAL_INPUT_WIRE,
@@ -2908,7 +2974,7 @@ mod tests {
     /// One chunk per frame, which is what `flushInputBuffer` sends: the range
     /// exists in the contract because a frame may cover several chunks, and a
     /// burst is where several frames become one.
-    fn sequenced_terminal_input(bytes: &str, epoch: u64, seq: u64) -> Message {
+    fn sequenced_terminal_input(bytes: &str, epoch: u64, seq: u64) -> WsFrame {
         use base64::Engine as _;
         frame_with_payload(
             TERMINAL_INPUT_WIRE,
@@ -2927,7 +2993,7 @@ mod tests {
     ///
     /// `None` for an unsequenced frame, which is not the same answer as zero —
     /// the whole contract keeps those apart.
-    fn frame_sequence(msg: &Message) -> (Option<u64>, Option<u64>, Option<u64>) {
+    fn frame_sequence(msg: &WsFrame) -> (Option<u64>, Option<u64>, Option<u64>) {
         let envelope: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         let payload = &envelope["payload"];
         (
@@ -2938,7 +3004,7 @@ mod tests {
     }
 
     /// The bytes a terminal-input frame carries, decoded.
-    fn frame_data(msg: &Message) -> String {
+    fn frame_data(msg: &WsFrame) -> String {
         use base64::Engine as _;
         let envelope: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         let data = envelope["payload"]["data"].as_str().unwrap();
@@ -2950,15 +3016,14 @@ mod tests {
         .unwrap()
     }
 
-    fn relay_end(id: &str) -> Message {
+    fn relay_end(id: &str) -> WsFrame {
         frame(RELAY_END_WIRE, id)
     }
 
     /// Drive the pump over frames that are already in memory and report what
     /// reached the agent, and why the loop stopped.
-    async fn drive(frames: Vec<Message>) -> (Vec<Message>, ClientToAgent) {
-        let items: Vec<Result<Message, tokio_tungstenite::tungstenite::Error>> =
-            frames.into_iter().map(Ok).collect();
+    async fn drive(frames: Vec<WsFrame>) -> (Vec<WsFrame>, ClientToAgent) {
+        let items: Vec<Result<WsFrame, std::io::Error>> = frames.into_iter().map(Ok).collect();
         let mut client_read = futures_util::stream::iter(items);
         let mut agent_write = RecordingSink::default();
 
@@ -3425,19 +3490,19 @@ mod tests {
         // Not text, not JSON, not a string `msg_type`: all `Other`, never a
         // guess.
         assert_eq!(
-            classify_client_frame(&Message::Binary(vec![1, 2, 3])),
+            classify_client_frame(&WsFrame::Binary(vec![1, 2, 3])),
             ClientFrame::Other
         );
         assert_eq!(
-            classify_client_frame(&Message::Text("{ not json".to_string())),
+            classify_client_frame(&WsFrame::Text("{ not json".to_string())),
             ClientFrame::Other
         );
         assert_eq!(
-            classify_client_frame(&Message::Text("{}".to_string())),
+            classify_client_frame(&WsFrame::Text("{}".to_string())),
             ClientFrame::Other
         );
         assert_eq!(
-            classify_client_frame(&Message::Text(r#"{"msg_type":7}"#.to_string())),
+            classify_client_frame(&WsFrame::Text(r#"{"msg_type":7}"#.to_string())),
             ClientFrame::Other
         );
     }

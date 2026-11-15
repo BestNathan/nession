@@ -264,7 +264,7 @@ async fn attach_relay_mode() {
     // The phase-1 response goes over the client sender channel and must
     // identify the session (the web client keys on attachInfo.session_id).
     let phase1 = relay_rx.try_recv().expect("phase 1 response not sent");
-    let Message::Text(phase1_text) = phase1.message else {
+    let WsFrame::Text(phase1_text) = phase1.message else {
         panic!("expected Text message");
     };
     let phase1: serde_json::Value = serde_json::from_str(&phase1_text).unwrap();

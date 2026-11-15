@@ -12,9 +12,9 @@
 //!
 //! The business handlers stay in the host crates. The only transport detail
 //! this module imposes on them is [`AxumWebSocket`], which adapts Axum's
-//! WebSocket to the frame type the Server and Agent dispatchers already speak,
-//! so the migration changed the HTTP owner without rewriting the protocol
-//! runtime behind it.
+//! WebSocket to the transport-neutral [`crate::frame::WsFrame`] the Server and
+//! Agent dispatchers speak (`#3548`), so neither the HTTP owner nor the
+//! business runtime names the other's protocol type.
 
 use std::io;
 use std::pin::Pin;
@@ -35,9 +35,9 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_rustls::server::TlsStream;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame as WireCloseFrame;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::warn;
+
+use crate::frame::{WsCloseFrame, WsFrame};
 
 /// The plain or TLS stream one accepted socket carries.
 ///
@@ -245,12 +245,13 @@ where
     }
 }
 
-/// An Axum WebSocket adapted to the frame type the protocol dispatchers speak.
+/// An Axum WebSocket adapted to the shared, transport-neutral frame vocabulary.
 ///
 /// The HTTP handshake, upgrade response and frame limits belong to Axum. This
-/// adapter is deliberately one boundary: the Server and Agent keep the same
-/// text/binary/ping/pong/close vocabulary and the same bounded outbound queues,
-/// so moving the ingress did not change the business runtime behind it.
+/// adapter is deliberately one boundary: both runtimes keep the same
+/// text/binary/ping/pong/close vocabulary ([`crate::frame::WsFrame`]) and the
+/// same bounded outbound queues, so neither the ingress nor the Relay's private
+/// tungstenite client leaks its message type into the business runtime.
 pub struct AxumWebSocket {
     inner: WebSocket,
 }
@@ -262,46 +263,60 @@ impl AxumWebSocket {
     }
 }
 
-fn adopt(message: AxumMessage) -> WsMessage {
+/// What an Axum WebSocket read or write can fail with, after this adapter.
+///
+/// The dispatchers log or return the error; none of them match on a transport's
+/// own error variants, so this carries the one fact they use — a displayable
+/// description — without re-exporting Axum's error as the runtime vocabulary.
+#[derive(Debug)]
+pub struct WsTransportError(String);
+
+impl WsTransportError {
+    fn new(error: impl std::fmt::Display) -> Self {
+        Self(error.to_string())
+    }
+}
+
+impl std::fmt::Display for WsTransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for WsTransportError {}
+
+fn adopt(message: AxumMessage) -> WsFrame {
     match message {
-        AxumMessage::Text(text) => WsMessage::Text(text.as_str().to_string()),
-        AxumMessage::Binary(data) => WsMessage::Binary(data.to_vec()),
-        AxumMessage::Ping(data) => WsMessage::Ping(data.to_vec()),
-        AxumMessage::Pong(data) => WsMessage::Pong(data.to_vec()),
-        AxumMessage::Close(frame) => WsMessage::Close(frame.map(|frame| WireCloseFrame {
-            code: frame.code.into(),
-            reason: frame.reason.as_str().to_string().into(),
+        AxumMessage::Text(text) => WsFrame::Text(text.as_str().to_string()),
+        AxumMessage::Binary(data) => WsFrame::Binary(data.to_vec()),
+        AxumMessage::Ping(data) => WsFrame::Ping(data.to_vec()),
+        AxumMessage::Pong(data) => WsFrame::Pong(data.to_vec()),
+        AxumMessage::Close(frame) => WsFrame::Close(frame.map(|frame| WsCloseFrame {
+            code: frame.code,
+            reason: frame.reason.as_str().to_string(),
         })),
     }
 }
 
-fn emit(message: WsMessage) -> Result<AxumMessage, tokio_tungstenite::tungstenite::Error> {
-    Ok(match message {
-        WsMessage::Text(text) => AxumMessage::Text(text.into()),
-        WsMessage::Binary(data) => AxumMessage::Binary(data.into()),
-        WsMessage::Ping(data) => AxumMessage::Ping(data.into()),
-        WsMessage::Pong(data) => AxumMessage::Pong(data.into()),
-        WsMessage::Close(frame) => AxumMessage::Close(frame.map(|frame| AxumCloseFrame {
-            code: frame.code.into(),
-            reason: frame.reason.into_owned().into(),
+fn emit(message: WsFrame) -> AxumMessage {
+    match message {
+        WsFrame::Text(text) => AxumMessage::Text(text.into()),
+        WsFrame::Binary(data) => AxumMessage::Binary(data.into()),
+        WsFrame::Ping(data) => AxumMessage::Ping(data.into()),
+        WsFrame::Pong(data) => AxumMessage::Pong(data.into()),
+        WsFrame::Close(frame) => AxumMessage::Close(frame.map(|frame| AxumCloseFrame {
+            code: frame.code,
+            reason: frame.reason.into(),
         })),
-        // Raw frames are a tungstenite write-side detail the dispatchers never
-        // produce; a transport that cannot express one says so.
-        WsMessage::Frame(_) => {
-            return Err(tokio_tungstenite::tungstenite::Error::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "a raw WebSocket frame cannot be sent through Axum",
-            )))
-        }
-    })
+    }
 }
 
-fn transport_error(error: axum::Error) -> tokio_tungstenite::tungstenite::Error {
-    tokio_tungstenite::tungstenite::Error::Io(io::Error::other(error))
+fn transport_error(error: axum::Error) -> WsTransportError {
+    WsTransportError::new(error)
 }
 
 impl Stream for AxumWebSocket {
-    type Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>;
+    type Item = Result<WsFrame, WsTransportError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.inner)
@@ -310,8 +325,8 @@ impl Stream for AxumWebSocket {
     }
 }
 
-impl Sink<WsMessage> for AxumWebSocket {
-    type Error = tokio_tungstenite::tungstenite::Error;
+impl Sink<WsFrame> for AxumWebSocket {
+    type Error = WsTransportError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut self.inner)
@@ -319,9 +334,9 @@ impl Sink<WsMessage> for AxumWebSocket {
             .map_err(transport_error)
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: WsMessage) -> Result<(), Self::Error> {
+    fn start_send(mut self: Pin<&mut Self>, item: WsFrame) -> Result<(), Self::Error> {
         Pin::new(&mut self.inner)
-            .start_send(emit(item)?)
+            .start_send(emit(item))
             .map_err(transport_error)
     }
 
