@@ -59,6 +59,10 @@ const REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13a
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
+export function assertOwnerReviewDispatchRole(isOwnerReview,role){
+  if(isOwnerReview&&role!=='reviewer')
+    fail('review recovery command targeted non-Reviewer Outbox role');
+}
 export function assertDispatchAuthority({environment,event,run,issue,actionId,
   publisherWakeProof=null}) {
   // A bot input has no independent authority. A trusted-main read-only
@@ -401,8 +405,7 @@ async function main(){
       sourceVerifier:(sha,role,task,context)=>{
         // A Review recovery command must never wake a Developer Action,
         // even if an Owner supplies an otherwise valid signed Outbox ID.
-        if(ownerReviewCommand&&role!=='reviewer')
-          fail('review recovery command targeted non-Reviewer Outbox role');
+        assertOwnerReviewDispatchRole(Boolean(ownerReviewCommand),role);
         return sourceStillAllowed(sha,role,task,context);
       },
     });
