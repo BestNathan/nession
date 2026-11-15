@@ -247,26 +247,6 @@ export async function resolveCaseIngestSourceEvent(event, {
     return { event, source };
   }
 
-  // Historical PR Smoke replay is an owner-only main workflow_dispatch. The
-  // input is a locator, never evidence: re-read the GitHub-owned original Run.
-  if (event?.inputs && event?.repository?.full_name === repository) {
-    const inputs = event.inputs;
-    if (actor !== 'BestNathan' || ref !== 'refs/heads/main' ||
-        !inputs || typeof inputs !== 'object' || Array.isArray(inputs) ||
-        Object.keys(inputs).some(key => !['source_run_id', 'source_run_attempt'].includes(key))) {
-      throw new Error('PR Case replay requires repository owner and trusted main');
-    }
-    const runId = positiveInt(inputs.source_run_id, 'source_run_id');
-    const runAttempt = positiveInt(inputs.source_run_attempt, 'source_run_attempt');
-    const run = await request('/repos/' + repository + '/actions/runs/' + runId, { token });
-    const sourceEvent = { workflow_run: { ...run, name: run.name } };
-    const source = sourceRunIdentity(sourceEvent, repository);
-    if (source.source_kind !== 'pr-smoke' || source.run_id !== runId ||
-        source.run_attempt !== runAttempt) {
-      throw new Error('PR Case replay source is not the exact authenticated Smoke Run/Attempt');
-    }
-    return { event: sourceEvent, source };
-  }
   if (event?.repository?.full_name !== repository ||
       event?.action !== 'nession-comment-case-ingest' ||
       event?.sender?.login !== 'github-actions[bot]' ||
@@ -1864,20 +1844,6 @@ async function selfTest() {
     ...smokeRecord, result: 'Pending',
     verifiers: [{ ...smokeRecord.verifiers[0], result: 'Pending' }],
   }, smokeSource, { ...smokeOptions, request: smokeApi }), /Pass-only/);
-  const ownerReplay = { repository: { full_name: 'BestNathan/nession' },
-    inputs: { source_run_id: '100', source_run_attempt: '1' } };
-  const replayOpts = { ...smokeOptions, actor: 'BestNathan',
-    ref: 'refs/heads/main', request: smokeApi };
-  const replayedSource = await resolveCaseIngestSourceEvent(ownerReplay, replayOpts);
-  assert.equal(replayedSource.source.run_id, 100);
-  for (const override of [
-    { actor: 'attacker' }, { ref: 'refs/heads/staging' },
-    { request: async () => ({ ...smokeRun, run_attempt: 2 }) },
-  ]) {
-    await assert.rejects(() => resolveCaseIngestSourceEvent(ownerReplay,
-      { ...replayOpts, ...override }), undefined,
-    'unauthorized or wrong-attempt replay must fail');
-  }
   const smokeEnriched = enrichCaseRecord(smokeRecord, {
     workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
     recordPath: recordPath(smokeRecord), source: certifiedSmoke });
