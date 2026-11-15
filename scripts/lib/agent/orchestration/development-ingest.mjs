@@ -256,7 +256,7 @@ export function resolveTrustedIngestSource({environment,event}){
     return {run_id:source.id,source};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
-     [2817,2906,2912,2946,2951,2961,3001].includes(event?.issue?.number)){
+     [2817,2906,2912,2946,2951,2961,3001,3433].includes(event?.issue?.number)){
     // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
     // The exact Worker Run is re-read and re-verified by the live Ingest
     // before any Store writer is used; this comment only locates it.
@@ -270,6 +270,10 @@ export function resolveTrustedIngestSource({environment,event}){
         !command||Number(command[1])!==event.issue.number||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual Qwen Ingest requires exact owner/main Issue comment');
+    // One authenticated recovery of the already-successful Qwen Repair:
+    // no new Provider Run, arbitrary Issue or run selection is permitted.
+    if(event.issue.number===3433&&Number(command[2])!==43677482758)
+      fail('owner Repair Ingest must bind exact completed Worker Run');
     return {run_id:Number(command[2]),source:null,qwen_recovery:true,
       issue:event.issue.number,attempt:1};
   }
@@ -297,6 +301,23 @@ export function resolveTrustedIngestSource({environment,event}){
       ...(REPAIR_INGEST_PATTERN.test(event.comment.body)?{repair_recovery:true}:{})};
   }
   fail('unsupported Ingest trigger');
+}
+
+// #3589: the bot only locates a verified successful Worker. The signed
+// Implement source must be main itself; a signed Repair source is the
+// independently published PR commit, intentionally different from main.
+// The canonical Store-bound authorization still runs after this preflight.
+export function assertQwenBotWakeSource({run,claim}){
+  const inputs=claim?.inputs;
+  const sha=inputs?.input_sha;
+  if(inputs?.agent_id!=='dev-qwen-01'||
+      !['implement','repair'].includes(inputs.task)||
+      !HEX40.test(run?.head_sha??'')||
+      !HEX40.test(sha??'')||
+      (inputs.task==='implement'&&run.head_sha!==sha)||
+      (inputs.task==='repair'&&run.head_sha===sha))
+    fail('bot wake is not a signed exact-SHA Qwen Implement/Repair');
+  return Object.freeze({task:inputs.task,source_sha:sha});
 }
 
 async function main(){
@@ -368,11 +389,11 @@ async function main(){
   if(authority.qwen_recovery&&
      Number(claim.inputs?.issue_number)!==authority.issue)
     fail('owner Qwen recovery Issue does not match original signed Worker claim');
-  if(authority.bot_qwen_wake &&
-     (claim.inputs?.agent_id!=='dev-qwen-01'||
-      claim.inputs?.task!=='implement'||
-      run.head_sha!==claim.inputs?.input_sha))
-    fail('bot wake is not a signed exact-SHA Qwen implementation');
+  if(authority.qwen_recovery&&authority.issue===3433&&
+     (run.id!==43677482758||claim.inputs?.task!=='repair'))
+    fail('owner Repair Ingest differs from authenticated signed Worker action');
+  if(authority.bot_qwen_wake)
+    assertQwenBotWakeSource({run,claim});
   const resultZip=fs.readFileSync(process.argv[4]);
   if(matching[0].digest!=='sha256:'+hash(resultZip))
     fail('encrypted Worker Artifact ZIP digest mismatch');

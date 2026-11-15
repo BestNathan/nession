@@ -52,6 +52,10 @@ export const CONTROLLED_REPAIR_RETRY_COMMENT='/nession dispatch-repair issue=199
 // Owner may recover a missed Reviewer wake for any existing, authentic Store
 // action. The command never chooses a source/ref: signed Store Outbox decides.
 export const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=([1-9][0-9]*) action=([a-f0-9]{64})$/;
+// An Owner request selects only an existing Store-owned Qwen Developer Repair;
+// the trusted Controller independently verifies the Issue, role, original
+// encrypted checkpoint and published PR SHA before any signed Actions POST.
+export const REPAIR_DISPATCH_RE=/^\/nession dispatch-repair issue=([1-9][0-9]*) action=([a-f0-9]{64})$/;
 // One source-scoped owner-authenticated Qwen v2 fixture dispatch; this
 // command must still match the genuinely pending Store Outbox Action ID.
 export const QWEN_V2_DISPATCH_RE=/^\/nession qwen-v2-dispatch issue=3001 action=([a-f0-9]{64})$/;
@@ -67,6 +71,11 @@ function fail(s){throw Error('trusted Controller dispatch: '+s);}
 export function assertOwnerReviewDispatchRole(isOwnerReview,role){
   if(isOwnerReview&&role!=='reviewer')
     fail('review recovery command targeted non-Reviewer Outbox role');
+}
+export function assertOwnerQwenRepairDispatchRole(isOwnerRepair,role,task){
+  if(isOwnerRepair&&(role!=='developer'||task?.task!=='repair'||
+      task?.agent_id!=='dev-qwen-01'||task?.resume!==true))
+    fail('Owner Qwen Repair command targeted non-Repair Outbox action');
 }
 export function assertDispatchAuthority({environment,event,run,issue,actionId,
   publisherWakeProof=null}) {
@@ -86,6 +95,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId;
   const reviewCommand=commanded?
     REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const repairCommand=commanded?
+    REPAIR_DISPATCH_RE.exec(event?.comment?.body??''):null;
   const recoveryComment=commanded&&event?.action==='created'&&
     event?.issue?.number===REVIEWER_PREMODEL_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
@@ -94,13 +105,19 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     event.comment.body===REVIEWER_PREMODEL_RECOVERY_COMMENT&&
     issue===REVIEWER_PREMODEL_FAILURE.issue&&
     actionId===REVIEWER_PREMODEL_FAILURE.action_id;
+  const ownerRepair=commanded&&event?.action==='created'&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.issue?.number===issue&&issue!==1997&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&repairCommand?.[1]===String(issue)&&
+    repairCommand?.[2]===actionId;
   const ownerReview=commanded&&event?.action==='created'&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
     event?.issue?.number===issue&&
     event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&reviewCommand?.[1]===String(issue)&&
     reviewCommand?.[2]===actionId;
-  const permitted=publisherWake||ownerReview||recoveryComment||(commanded
+  const permitted=publisherWake||ownerReview||ownerRepair||recoveryComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -287,10 +304,13 @@ async function main(){
     QWEN_V2_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
   const ownerReviewCommand=commanded?
     REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
+  const ownerRepairCommand=commanded?
+    REPAIR_DISPATCH_RE.exec(event?.comment?.body??''):null;
   const reviewerPremodelRecovery=commanded&&
     event?.comment?.body===REVIEWER_PREMODEL_RECOVERY_COMMENT;
   const issue=commanded?(qwenV2CommentAction?3001:
     ownerReviewCommand?Number(ownerReviewCommand[1]):
+    ownerRepairCommand?Number(ownerRepairCommand[1]):
     reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.issue:1997):
     Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
@@ -309,7 +329,8 @@ async function main(){
   const recoveringRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT;
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=ownerReviewCommand?.[2]??null;
-  const actionId=commanded?(qwenV2CommentAction??newReviewAction??
+  const newRepairAction=ownerRepairCommand?.[2]??null;
+  const actionId=commanded?(qwenV2CommentAction??newReviewAction??newRepairAction??
     (reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.action_id:null)??
     (recoveringRepair||retryingRepair?
     REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
@@ -425,10 +446,17 @@ async function main(){
       if(recovery.action_id!==actionId||!['recovered','replayed'].includes(recovery.status))
         fail('native recovery action is not the verified CAS successor');
     }
-    // Only an authenticated owner/main Workflow Dispatch may bind the
-    // original Qwen native Store checkpoint. The binder is a no-op for
-    // every other Action; it does not POST the Worker itself.
-    if(!commanded&&!publisherWakeProof){
+    // A Qwen Repair must bind its immutable original Developer checkpoint
+    // before signing a dispatch ticket. Never treat arbitrary comment inputs
+    // as a source of checkpoint/PR identity.
+    const ownerQwenRepair=commanded&&issue!==1997&&
+      Boolean(ownerRepairCommand);
+    if(ownerQwenRepair){
+      const binding=bindQwenRepairCheckpoint({remote:storeRemote,issue,actionId});
+      if(!['bound','replayed','reconcile'].includes(binding.status))
+        fail('Owner Repair was not a Store-owned Qwen Repair action');
+    }else if(!commanded&&!publisherWakeProof){
+      // Preserve existing owner/main workflow_dispatch admission behavior.
       bindQwenRepairCheckpoint({remote:storeRemote,issue,actionId});
     }
     const signer={key,key_id:'main-controller',
@@ -442,6 +470,7 @@ async function main(){
         // A Review recovery command must never wake a Developer Action,
         // even if an Owner supplies an otherwise valid signed Outbox ID.
         assertOwnerReviewDispatchRole(Boolean(ownerReviewCommand),role);
+        assertOwnerQwenRepairDispatchRole(ownerQwenRepair,role,task);
         return sourceStillAllowed(sha,role,task,context);
       },
     });
