@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "969b8b059b5e45944e70ee05358da82cdad8b1944c6b7231c2903dead151d3e1",
+  "run_id": 43680238277,
+  "run_attempt": 1,
+  "issue": 3507,
+  "criterion": "SC-01",
+  "criterion_text": "An OSC 5522 write begun while authorized but completed after `isAuthorized=false` must not invoke clipboard effects; it produces a truthful denial rather than `DONE`. An otherwise identical authorized write still applies its MIME payload and succeeds.",
+  "stage": "staging",
+  "target_sha": "a10db10f63bd4399403530b576adbf33f0670239",
+  "contract_sha256": "2a9176aaf2ec225b3973d6ad00b275f241a57862b4497644bff0570622705ff0",
+  "case_revision": "a10db10f63bd4399403530b576adbf33f0670239",
+  "case_tree_sha": "74d556669a6b4c2fb0f347dcbd2d035a0905bb20",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-15T05:17:54.214Z",
+  "finished_at": "2026-11-15T05:18:08.887Z",
+  "duration_ms": 14673,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A completed OSC 5522 write requires live authorization, refuses the closing packet after authority loss, and keeps the authorized write path intact",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a10db10f63bd4399403530b576adbf33f0670239: a chunked OSC 5522 write started while authorized and completed after isAuthorized=false invoked no clipboard effect and replied only EPERM; an authorized chunked MIME write still applied its payload and replied DONE"
+        }
+      ],
+      "duration_ms": 8777,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43680238277,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "5ae7fbf46408c81b36f62a1705de469687a91cd3",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "a10db10f63bd4399403530b576adbf33f0670239",
+        "stage": "staging",
+        "issue": 3507,
+        "criterion": "SC-01",
+        "job_id": 132709077266,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43680238277",
+    "record_path": "runs/2026-11-15/43680238277-1/3507/SC-01.json",
+    "source_result_sha256": "c6fd81c38bacfd7289d8d71ea5bbd4d540c23ff6898b41176171a870117590d9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43680238277-1",
+    "sha256": "c6fd81c38bacfd7289d8d71ea5bbd4d540c23ff6898b41176171a870117590d9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43680238277",
+    "durability": "time-limited; object archival not configured"
+  }
+}
