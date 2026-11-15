@@ -19,6 +19,7 @@ const {
   runtimeFromEnv,
   tmuxEnvironment,
   unique,
+  waitForTmuxEnvironment,
   writeProfile,
 } = require('../../../shared/project-env-3649-cases.cjs');
 
