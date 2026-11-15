@@ -1,5 +1,6 @@
 import { renderKnowledge, validKnowledgeSnapshot } from './knowledge.js';
 import { renderDocuments, validDocumentsSnapshot } from './documents.js';
+import { renderMcpDocuments, validMcpSnapshot } from './mcp-documents.js';
 // Pages deliberately has no dependency on nession/web, runtime APIs, or UI packages.
 const root = document.getElementById('main');
 const freshness = document.getElementById('freshness');
@@ -31,6 +32,8 @@ let snapshot = null;
 let siteSnapshotStatus = 'loading';
 let knowledgeSnapshot = null;
 let knowledgeSnapshotStatus = 'loading';
+let mcpSnapshot = null;
+let mcpSnapshotStatus = 'loading';
 let documentsSnapshot = null;
 let documentsSnapshotStatus = 'loading';
 
@@ -724,6 +727,7 @@ function render(){
   const agentPath=raw.startsWith('/agents/')||raw.startsWith('/agents?');
   const detail=raw.startsWith('/work/')&&!routes.has(raw);
   const route=agentPath?'/agents':match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':
+    (raw==='/documents/mcp'||raw.startsWith('/documents/mcp?'))?'/documents/mcp':
     (raw==='/documents'||raw.startsWith('/documents?'))?'/documents':routes.has(raw)?raw:detail?'/work':raw==='/'
     ?'/':'/missing';
   root.replaceChildren();
@@ -754,6 +758,9 @@ function render(){
     }else if(route==='/knowledge'){
       if(knowledgeSnapshotStatus==='loading')root.append(node('p','loading','Loading public Knowledge snapshot…'));
       else renderKnowledge(root,knowledgeSnapshot,location.hash);
+    }else if(route==='/documents/mcp'){
+      if(mcpSnapshotStatus==='loading')root.append(node('p','loading','Loading MCP Tools…'));
+      else renderMcpDocuments(root,mcpSnapshot,location.hash);
     }else if(route==='/documents'){
       if(documentsSnapshotStatus==='loading')root.append(node('p','loading','Loading technical Documents…'));
       else renderDocuments(root,documentsSnapshot,location.hash);
@@ -829,11 +836,28 @@ async function loadDocumentsCatalog(){
   }
   if(location.hash.startsWith('#/documents'))render();
 }
+async function loadMcpCatalog(){
+  try{
+    const response=await fetch(new URL('data/mcp.json',document.baseURI),
+      {cache:'no-cache',signal:AbortSignal.timeout(15000)});
+    if(!response.ok)throw Error('MCP snapshot unavailable');
+    const result=await response.json();
+    if(!validMcpSnapshot(result))throw Error('Invalid public MCP catalog');
+    mcpSnapshot=result;
+    mcpSnapshotStatus='available';
+  }catch(error){
+    console.warn('Pages MCP catalog unavailable',error);
+    mcpSnapshot=null;
+    mcpSnapshotStatus='unavailable';
+  }
+  if(location.hash.startsWith('#/documents/mcp'))render();
+}
 async function init(){
   window.addEventListener('hashchange',render);
   void loadPrototypeCatalog();
   void loadKnowledgeCatalog();
   void loadDocumentsCatalog();
+  void loadMcpCatalog();
   // Keep deep links correct even if a user navigates before site.json resolves.
   if(!location.hash.startsWith('#/knowledge')&&!location.hash.startsWith('#/prototypes')&&
     !location.hash.startsWith('#/documents'))render();
