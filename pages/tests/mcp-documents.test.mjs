@@ -4,7 +4,7 @@ import {validMcpSnapshot} from '../mcp-documents.js';
 const SHA='a'.repeat(40);
 const tool={name:'nession_agent_list_sessions',description:'List sessions',
   inputSchema:{type:'object',properties:{agent_id:{type:'string'}},required:['agent_id']}};
-const valid={schema_version:1,status:'available',
+const valid={schema_version:1,status:'available',semantic_sha256:'f'.repeat(64),
   source:{repository:'BestNathan/nession',branch:'main',sha:SHA},tools:[tool]};
 test('MCP source-generated catalog accepts pinned registered Tool schema',()=>{
   assert.equal(validMcpSnapshot(valid),true);
