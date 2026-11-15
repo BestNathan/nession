@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "2fd23cee64f871f25696c57b305edfa428bd41ed",
+  "run_id": 43723933937,
+  "run_attempt": 1,
+  "plan_digest": "3a3137df81842c42bf07e010397bc1436b7075be290561040731a32a2f97746d",
+  "artifact_digest": "sha256:33b1c019020cf9501a4a7b6bfbb89f05daa90ec5267cb1a81612b0896b924651",
+  "results": [
+    {
+      "id": "pages-mcp",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 12
+    }
+  ]
+}
