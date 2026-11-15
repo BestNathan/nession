@@ -59,6 +59,7 @@ use axum::Router;
 use futures_util::StreamExt;
 use nession_mcp::McpService;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
+use nession_runtime::frame::WsFrame;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
@@ -69,7 +70,6 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, error, info, warn};
 
 // The socket itself belongs to `crate::server::outbound`'s writer, and every
@@ -180,7 +180,7 @@ fn spawn_output_forwarder(
                 // this forwarder's to act on twice — another session's
                 // forwarder may reach it first — so the connection is closed
                 // and this task ends with it.
-                match outbound.send_terminal(WsMessage::Text(json)).await {
+                match outbound.send_terminal(WsFrame::Text(json)).await {
                     Ok(()) => {}
                     Err(OutboundError::Stalled) => {
                         outbound.close();
@@ -422,7 +422,7 @@ async fn send_terminal_resize_msg(
         return true;
     };
     !matches!(
-        outbound.try_send_state(WsMessage::Text(json)),
+        outbound.try_send_state(WsFrame::Text(json)),
         Err(OutboundError::Closed)
     )
 }
@@ -457,7 +457,7 @@ async fn send_recorded_resize_msg(
     else {
         return;
     };
-    if outbound.send_terminal(WsMessage::Text(json)).await.is_err() {
+    if outbound.send_terminal(WsFrame::Text(json)).await.is_err() {
         debug!(
             "session {session_name}: the resize at seq {} did not reach a peer that stopped \
              draining; the reply that follows carries the verdict",
@@ -579,7 +579,7 @@ async fn send_atomic_output_prefix(
     let Ok(json) = serde_json::to_string(&msg) else {
         return false;
     };
-    match outbound.send_terminal(WsMessage::Text(json)).await {
+    match outbound.send_terminal(WsFrame::Text(json)).await {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             warn!("stream cut: client stalled on atomic prefix for {session_name}");
@@ -762,7 +762,7 @@ async fn send_bootstrap(
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
     };
-    match outbound.send_terminal(WsMessage::Text(json)).await {
+    match outbound.send_terminal(WsFrame::Text(json)).await {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             // The honest verdict, and the same one the live-output task takes:
@@ -1679,7 +1679,7 @@ impl Frame {
                         )) else {
                             return true;
                         };
-                        match notice.outbound.send_terminal(WsMessage::Text(json)).await {
+                        match notice.outbound.send_terminal(WsFrame::Text(json)).await {
                             Ok(()) => true,
                             Err(_) => false,
                         }
@@ -1724,7 +1724,7 @@ fn lane_work(frame: Frame) -> Work {
 /// returned an error".
 async fn write_frame(connection: &Connection, frame: Option<String>) -> bool {
     let Some(text) = frame else { return true };
-    match connection.outbound.send_reply(WsMessage::Text(text)).await {
+    match connection.outbound.send_reply(WsFrame::Text(text)).await {
         Ok(()) => true,
         Err(e) => {
             warn!("WebSocket write to {} did not go out: {e}", connection.addr);
@@ -2858,6 +2858,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // fills it in from a later query.
                                 foreground_command: None,
                                 working_dir: None,
+                                instance_id: s.instance_id,
                                 // Project membership is Server-owned (#3082);
                                 // a direct Agent view has no authority for it.
                                 project_id: None,
@@ -3559,9 +3560,9 @@ impl AgentServer {
     async fn next_frame_or_closed<S>(
         stream: &mut S,
         outbound: &P2pOutbound,
-    ) -> Option<Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+    ) -> Option<Result<WsFrame, nession_runtime::ingress::WsTransportError>>
     where
-        S: futures_util::Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+        S: futures_util::Stream<Item = Result<WsFrame, nession_runtime::ingress::WsTransportError>>
             + Unpin,
     {
         tokio::select! {
@@ -3647,7 +3648,7 @@ impl AgentServer {
             };
 
             match msg {
-                WsMessage::Text(text) => {
+                WsFrame::Text(text) => {
                     let frame = match Frame::parse(&text, Arc::clone(&connection)) {
                         Ok(frame) => frame,
                         Err(reply) => {
@@ -3723,16 +3724,16 @@ impl AgentServer {
                         }
                     }
                 }
-                WsMessage::Close(_) => {
+                WsFrame::Close(_) => {
                     info!("Client {} sent close frame", addr);
                     break;
                 }
-                WsMessage::Ping(data) => {
+                WsFrame::Ping(data) => {
                     // A pong rides the state lane, which is allowed to drop it:
                     // the peer's next ping restates the question, and a
                     // connection that cannot take a pong has nothing left for
                     // the pong to keep alive.
-                    let _ = connection.outbound.try_send_state(WsMessage::Pong(data));
+                    let _ = connection.outbound.try_send_state(WsFrame::Pong(data));
                 }
                 // Pong, Binary, and Frame are ignored.
                 _ => {}
@@ -5227,6 +5228,74 @@ mod tests {
         }
     }
 
+    /// `#3548` SC-02: the transport-neutral frame vocabulary keeps the
+    /// transport's own external semantics at a real socket.
+    ///
+    /// Ping is answered with the same payload; binary and pong frames are
+    /// ignored rather than fatal; a text frame after them still authenticates;
+    /// and close is a close. The same helper proves the plain and the TLS
+    /// listener, which is what the Case runs.
+    async fn assert_transport_frames(
+        mut sink: WsSink,
+        mut stream: WsStream,
+        already_authenticated: bool,
+    ) {
+        sink.send(WsMessage::Ping(b"probe".to_vec()))
+            .await
+            .expect("send a ping");
+        match tokio::time::timeout(Duration::from_secs(5), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Pong(payload)))) => assert_eq!(payload, b"probe"),
+            other => panic!("expected the pong for the probe, got {other:?}"),
+        }
+
+        sink.send(WsMessage::Binary(vec![0, 1, 2]))
+            .await
+            .expect("send a binary frame");
+        sink.send(WsMessage::Pong(vec![3]))
+            .await
+            .expect("send a pong frame");
+
+        if !already_authenticated {
+            authenticate_connection(&mut sink, &mut stream, TEST_AGENT_TOKEN, Some("frames")).await;
+        }
+        let ping = new_message(msg_types::CONTROL_PING, serde_json::json!({}));
+        let pong: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &ping).await;
+        assert_eq!(pong.msg_type, msg_types::CONTROL_PONG);
+
+        sink.send(WsMessage::Close(None)).await.expect("send close");
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(frame) = stream.next().await {
+                if matches!(frame, Ok(WsMessage::Close(_)) | Err(_)) {
+                    return true;
+                }
+            }
+            true
+        });
+        assert!(
+            matches!(closed.await, Ok(true)),
+            "close must end the socket"
+        );
+    }
+
+    #[tokio::test]
+    async fn plain_transport_frames_keep_their_semantics() {
+        let (addr, handle, _auth) = start_test_server_on(0).await;
+        let (sink, stream) = dial_plain(addr).await;
+        assert_transport_frames(sink, stream, false).await;
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
+    async fn tls_transport_frames_keep_their_semantics() {
+        let (certs, key, trusted) = test_tls_identity();
+        let (addr, handle, _auth) =
+            start_test_server_with(Some((certs, key)), P2pHandshakePolicy::default()).await;
+        let (sink, stream) = connect_tls_client(addr, trusted).await;
+        assert_transport_frames(sink, stream, true).await;
+        handle.shutdown().await.ok();
+    }
+
     /// Dial and authenticate as [`TEST_AGENT_TOKEN`].
     ///
     /// A plain URL, then `client.auth`: there is no token in the URL and no
@@ -5638,7 +5707,7 @@ mod tests {
     async fn a_closed_outbound_ends_the_read_wait() {
         let (outbound, _rx) = P2pOutbound::new();
         let mut silent = futures_util::stream::pending::<
-            Result<WsMessage, tokio_tungstenite::tungstenite::Error>,
+            Result<WsFrame, nession_runtime::ingress::WsTransportError>,
         >();
         assert!(
             tokio::time::timeout(
@@ -5718,7 +5787,7 @@ mod tests {
 
         let (outbound, _rx) = P2pOutbound::with_terminal_grace(Duration::from_millis(50));
         assert_eq!(
-            outbound.try_send_state(WsMessage::Text("x".repeat(OUTBOUND_BYTE_BUDGET))),
+            outbound.try_send_state(WsFrame::Text("x".repeat(OUTBOUND_BYTE_BUDGET))),
             Ok(()),
             "the whole byte budget is one frame's worth"
         );
@@ -7093,7 +7162,7 @@ mod tests {
         // so the fan-out's send has no room and waits.
         let (outbound, _outbound_rx) = P2pOutbound::new();
         outbound
-            .try_send_state(WsMessage::Text("x".repeat(OUTBOUND_BYTE_BUDGET)))
+            .try_send_state(WsFrame::Text("x".repeat(OUTBOUND_BYTE_BUDGET)))
             .expect("the first frame fits the budget it is about to exhaust");
 
         let tmux = Arc::new(SessionManager::new());

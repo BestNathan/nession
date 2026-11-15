@@ -1,4 +1,10 @@
 import { isTouchOwned } from '@/shared/lib/touchOwnership';
+import {
+  beginTouchAxis,
+  lockTouchAxis,
+  type TouchAxisTracker,
+  type TouchScrollAxis,
+} from '@/shared/lib/touchAxis';
 import type {
   TerminalBufferSnapshot,
   TerminalDisposable,
@@ -35,23 +41,17 @@ export interface CapsuleScrollTerminalPort {
   scrollToBottom(): void;
 }
 
-/** Finger travel (px) before a gesture's axis is decided (#2659). */
-const TOUCH_AXIS_SLOP_PX = 8;
-
-export type TouchScrollAxis = 'undecided' | 'vertical' | 'horizontal';
+export type { TouchScrollAxis };
 
 /** One single-finger drag, tracked across its moves (#2659). */
-export interface TouchScrollGesture {
-  axis: TouchScrollAxis;
-  startX: number;
-  startY: number;
+export interface TouchScrollGesture extends TouchAxisTracker {
   lastY: number;
   /** Sub-cell vertical travel carried between moves. */
   accumY: number;
 }
 
 export function beginTouchScrollGesture(clientX: number, clientY: number): TouchScrollGesture {
-  return { axis: 'undecided', startX: clientX, startY: clientY, lastY: clientY, accumY: 0 };
+  return { ...beginTouchAxis(clientX, clientY), lastY: clientY, accumY: 0 };
 }
 
 export interface TouchScrollStep {
@@ -81,14 +81,12 @@ export function advanceTouchScrollGesture(
     return { claimed: false, axis: 'horizontal', lines: 0 };
   }
   if (gesture.axis === 'undecided') {
-    const dx = Math.abs(point.clientX - gesture.startX);
-    const dy = Math.abs(point.clientY - gesture.startY);
-    if (Math.max(dx, dy) < TOUCH_AXIS_SLOP_PX) {
+    const axis = lockTouchAxis(gesture, point);
+    if (axis === 'undecided') {
       gesture.lastY = point.clientY;
       return { claimed: false, axis: 'undecided', lines: 0 };
     }
-    gesture.axis = dy >= dx ? 'vertical' : 'horizontal';
-    if (gesture.axis === 'horizontal') {
+    if (axis === 'horizontal') {
       gesture.lastY = point.clientY;
       gesture.accumY = 0;
       return { claimed: false, axis: 'horizontal', lines: 0 };

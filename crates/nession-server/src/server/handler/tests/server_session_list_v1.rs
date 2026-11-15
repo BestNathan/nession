@@ -185,3 +185,56 @@ async fn force_refresh_rebuilds_registry_from_agent_reply() {
         .unwrap()
         .is_empty());
 }
+
+/// #3424: the Web projection carries the durable tmux instance identity.
+///
+/// `agent_id:session_name` is recyclable, so a browser cannot tell a same-name
+/// recreation from an ordinary refresh without this field. The Agent already
+/// reports it; the list reply (and the shared `server.sessions.changed`
+/// projection) must not drop it.
+#[tokio::test]
+async fn session_list_reports_the_durable_instance_identity() {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    h.handle_message(proto_msg(
+        "server.agent.register",
+        json!({
+            "agent_id": "a1",
+            "hostname": "host",
+            "ip_address": "1.2.3.4",
+            "port": 19091,
+            "auth_token": "",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+            "addresses": [],
+            "connect_url": null,
+            "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+        }),
+    ))
+    .await
+    .unwrap();
+    h.handle_message(proto_msg(
+        "server.agent.session-update",
+        json!({
+            "agent_id": "a1",
+            "session_name": "s1",
+            "status": "active",
+            "window_count": 1,
+            "attached_clients": 0,
+            "instance_id": "instance-b",
+        }),
+    ))
+    .await
+    .unwrap();
+
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.list",
+            json!({ "agent_id": "a1" }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    let sessions = reply["payload"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["instance_id"], "instance-b");
+}

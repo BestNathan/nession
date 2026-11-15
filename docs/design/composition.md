@@ -301,10 +301,88 @@ Rules:
 rejects capability/product page geometry, capability-local App headers, host
 chrome, duplicated master/detail or scroll-owner markers, and raw numeric
 spacing in the shared recipe owner. It accepts local flex/grid composition,
-including the Issue's control sample. `layout-ownership.test.mjs` holds the
-negative and positive fixtures. Browser evidence for the single scroll owner,
-alignment, overflow and the one App header lives in `ui-contract-web` /
+including the Issue's control sample. It also owns the keyboard-avoidance
+binding from §15: only the App Experience scrollport may publish the keyboard
+scroll owner, and only the App viewport environment may read
+`window.visualViewport`. `layout-ownership.test.mjs` holds the negative and
+positive fixtures. Browser evidence for the single scroll owner, alignment,
+overflow and the one App header lives in `ui-contract-web` /
 `ui-contract-matrix` and the SC-03 Case.
+
+## 15. App viewport environment and keyboard avoidance (#3523)
+
+The App shell's frame height is CSS layout space. A soft keyboard changes the
+**visible** region, not that layout box, and the two must not be spent by the
+same owner. This section is the composition contract; the executable owner is
+`web/src/platform/viewport/` (read/coordinate snapshots),
+`web/src/app/experiences/app/AppKeyboardAvoidanceScrollport.tsx` (the one
+Experience scroll ancestor) and `web/src/platform/terminal-runtime/view/TerminalGeometry.ts`
+(terminal rows).
+
+| Owner | Reads / writes | Must not do |
+|---|---|---|
+| **App Environment** (`platform/viewport`, mounted by `AppLayout`) | `window.visualViewport` available geometry, the shell's layout rect, editable focus, safe-area probe; publishes one shell-local snapshot (`layoutBounds`, `visibleBounds`, `safeArea`, `occludedEdges`, `keyboard`, `revision`) | Mutate terminal geometry; infer a keyboard from a viewport delta alone; write `Shell.style.height` or a global `100dvh` |
+| **Experience Layout** (`Shell`, `AppLayout`, `AppLayers`, active layer) | Frame, the one App header, active-layer scroll ancestry, the ephemeral avoidance extent, focus reveal and layer-leave blur | Resize xterm/PTY for a keyboard; make `body` scroll; own all vertical gestures |
+| **Surface Layout** (`TerminalWell`, `TerminalSurface`, Capsule) | Real header/composer heights and the existing composer/upper-panel clearances | Count the keyboard as composer/panel height; translate the shell or claim a global scroll range |
+| **Terminal Runtime** (`TerminalViewport`, `TerminalGeometry`, IME, scroll) | Actual content box and scroll mode; cursor-anchored IME; mode-aware buffer/TUI routing; ControlLease-gated rows | Resize on visual-viewport movement, focus, or avoidance-scroll offset; apply two transforms/scroll owners to one gesture |
+
+Three dimensions stay separate:
+
+1. **`layoutBounds`** — stable CSS geometry consumed by flex/grid. The
+   Terminal well and its observed content box live here.
+2. **`visibleBounds`** — the browser-visible rectangle translated into the
+   same shell-local space. Keyboard, browser toolbar, pan/zoom and orientation
+   can move it.
+3. **`surfaceOcclusion`** — measured floating internal overlap (composer vs
+   upper panel) published by the Capsule. It is not interchangeable with
+   `visibleBounds`.
+
+A keyboard avoidance session is inferred from **editable focus plus reduced
+visibility**, and always reads the real visible rectangle. Browser toolbar
+changes without focus, zoom/pan and a missing `visualViewport` API do not create
+an avoidance state, and never a terminal resize.
+
+The Terminal layer's scroll ancestor is a real browser scroller with a real
+`scrollTop`/`scrollHeight`. Its temporary bottom extent is placed **after** the
+measured work surface, so `TerminalWell`, xterm's observed box, rows, PTY and
+tmux never change while the user focus-reveals a Capsule composer or mobile-IME
+caret. The Session header stays outside the scrollport: the work surface
+scrolls, the one App header does not. On blur or keyboard close the extent is
+removed and the browser clamps the position; the Terminal stays mounted with
+its buffer and history.
+
+While a legal avoidance range exists, a vertical touch drag that begins in the
+Terminal viewport belongs to the outer scroll owner and the same delta is not
+also dispatched to `CapsuleOcclusionScroll`. Ownership is decided at axis lock
+and frozen for that contact; when no range exists in the drag direction the
+Terminal's existing mode-aware history/TUI path keeps the gesture. Horizontal
+edge navigation, selection, long-press direction pad and multitouch keep their
+own owners. Leaving the layer blurs the control that owned the keyboard.
+
+Resize policy follows from the ownership split: orientation, real container
+size, header/composer height and other layout-space changes may remeasure rows;
+keyboard/visual-viewport changes, focus and avoidance-scroll offset must not.
+Expanded-panel policy remains [#2710/#3492](design-system/patterns/terminal-surface.md):
+normal-buffer/no-mouse keeps reversible scroll clearance; alternate-screen or
+mouse-reporting TUIs keep the bounded authorized row reserve. A simultaneous
+keyboard must not add another reserve or a second resize.
+
+| Context | Expected visible/scroll behavior | May change xterm/PTY rows? |
+|---|---|---|
+| Capsule focus opens IME | Composer above the visible bottom; shell/layout intact; real bounded outer scroll | No |
+| Tap Terminal + cursor-tethered IME | Caret/control revealable; no clipped dead end | No |
+| IME hide, or candidate/toolbar height changes | Extent reconciles; no remount, no resize storm | No |
+| Browser toolbar / visual-viewport scroll / zoom without editable focus | Stable layout; no keyboard reserve, no scroll jump | No |
+| Composer 1 → multi → 1 lines | Existing composer-only measured fit changes | Only if integer rows change |
+| Open/close Peek in a normal shell | Reversible local scroll clearance; history anchor preserved | No |
+| Open/close Peek in alternate-screen/mouse TUI | Bounded authorized row reserve, or compact fallback | Only current Controller, by #3492 |
+| Keyboard + Peek in normal shell or TUI | No double-spend of keyboard and panel pixels; one owner | Panel policy only |
+| Sessions/Workspace navigation while keyboard visible | One active scroll owner; covered focus released; Terminal mounted | No |
+| Portrait/landscape + nonzero safe area | Correct mapping; focused control and controls reachable | Only true layout/orientation change |
+
+Interaction rules (touch arbitration, header visibility, layer switching) are
+in [interaction/app.md](interaction/app.md); the fixed-column terminal sizing
+boundary is in [terminal/terminal-sizing.md](terminal/terminal-sizing.md).
 
 ## Anti-patterns
 

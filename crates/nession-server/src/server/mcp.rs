@@ -25,7 +25,7 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
 };
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
+use nession_runtime::frame::WsFrame;
 
 use crate::registry::{AgentRegistry, AgentStatus};
 use crate::server::execution::{
@@ -108,7 +108,7 @@ async fn dispatch_with(
         .await
         .map_err(|error| ToolError::backend(error.to_string()))?;
     match action {
-        HandlerAction::Reply(Some(WsMessage::Text(text))) => {
+        HandlerAction::Reply(Some(WsFrame::Text(text))) => {
             let envelope: Message<Value> = serde_json::from_str(&text)
                 .map_err(|error| ToolError::backend(error.to_string()))?;
             Ok(envelope.payload)

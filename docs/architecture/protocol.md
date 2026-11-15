@@ -1139,6 +1139,37 @@ When principals do exist, this is the seam: step 1 becomes "who is this", and th
 relation belongs between steps 3 and 4, where the target and the unit are both
 already resolved.
 
+## The WebSocket frame vocabulary
+
+`#3439` made Axum the HTTP/WebSocket upgrade owner; `#3548` separates the frame
+vocabulary from both transports. `nession_runtime::frame::WsFrame` —
+`Text`/`Binary`/`Ping`/`Pong`/`Close` — is what the Server's and Agent's inbound
+dispatch, handler actions, registries/brokers and bounded outbound queues
+(`nession_runtime::outbound::QueuedFrame`) consume and produce.
+
+Conversion belongs to an adapter edge, never to a second vocabulary:
+
+- `nession_runtime::ingress::AxumWebSocket` converts Axum frames at the
+  connection the listener hands to the runtime;
+- the Server's Relay and the Agent's central Server connector dial with
+  `tokio-tungstenite` and convert through `WsFrame::from_tungstenite` /
+  `WsFrame::into_tungstenite` (the Relay wraps its Agent halves in
+  `AgentRead`/`AgentWrite`), so forwarding, classification and queue policy stay
+  transport-neutral. Those private client adapters are allowed to keep the
+  dependency;
+- `WsFrame` is a **frame** type, not a Protocol Unit. `ProtocolMessage`, the
+  control contracts, routing, authentication, close policy and the bounded
+  queues keep their existing owners, and Axum remains the only WebSocket
+  upgrade owner.
+
+The vocabulary preserves the semantics the product depends on: a Ping is
+answered with the same payload, Binary and Pong are ignored rather than fatal,
+Close is a close, `to_text` classifies exactly the frames the previous
+transport's classifier did, and the outbound byte charge is unchanged (a close
+frame charges its reason, as before). `#3548`'s native Cases assert those
+behaviors through real plain and TLS sockets and through the P2P/Relay stall,
+order and reconnect paths.
+
 ## Endpoint-owned tokens
 
 The Agent's peer-to-peer socket is a **second door** into the Agent process, and
