@@ -85,12 +85,12 @@ test('expired uploads exhaust at most three bounded attempts without publication
   assert.equal((log.match(/420s docker buildx imagetools create/g)||[]).length,3);
   assert.equal((log.match(/90s docker buildx imagetools inspect/g)||[]).length,1);
 });
-test('the release mirror builder receives the HTTP/1.1 setting used by the copy',()=>{
+test('the independently retried ACR mirror builder retains the HTTP/1.1 transport setting',()=>{
   // imagetools create copies inside buildkitd; the runner/script GODEBUG does
   // not automatically reach that container. Keep the builder opt in the
   // workflow that owns the actual upload path.
   const workflow=fs.readFileSync(
-    path.join(root,'.github/workflows/release-staging.yml'),'utf8');
+    path.join(root,'.github/workflows/deploy-staging-acr.yml'),'utf8');
   const mirrorJob=workflow.split('\n  mirror-acr:\n')[1]??'';
   const builderStep=mirrorJob.split('docker/setup-buildx-action@v3')[1]??'';
   const beforeLogin=builderStep.split('docker/login-action@v3')[0];
