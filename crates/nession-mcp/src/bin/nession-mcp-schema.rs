@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let document = serde_json::json!({
         "schema_version": 1,
         "tools": tools,
-        "protocol_versions": ["2025-03-26", "2026-07-28"]
+        "protocol_versions": nession_mcp::protocol::SUPPORTED_PROTOCOL_VERSIONS
     });
     println!("{}", serde_json::to_string(&document)?);
     Ok(())
