@@ -266,6 +266,19 @@ jobs:
               attested=true
               break
             fi
+            # #3686: the collector emits an allowlisted, bounded read-only
+            # snapshot on failure: exact source/GitOps SHA, each role's
+            # expected/live tag and digest, generation and readiness. Never
+            # print its raw stderr, pod JSON or Kubeconfig. This observation
+            # does not authorize deployment or turn a failure into Pass.
+            observation="$(grep -m1 '^DEPLOYMENT_IDENTITY_OBSERVATION_V1 ' \
+              "$RUNNER_TEMP/deployment-attempt.stderr" || true)"
+            if [[ -n "$observation" ]]; then
+              echo "$observation"
+            else
+              echo "::warning::Sanitized identity observation unavailable; refusing to infer readiness"
+            fi
+            echo "DEPLOYMENT_IDENTITY_ATTEMPT_V1 source_sha=$DEPLOYED_SHA gitops_revision=$(cat "$RUNNER_TEMP/gitops-revision") attempt=$attempt/$attempts exit_status=$status"
             if (( status != 75 )); then
               # #3318: surface only the collector's allowlisted rejection
               # receipt, never arbitrary redirected stderr. A missing or
@@ -286,7 +299,7 @@ jobs:
               exit 1
             fi
             if (( attempt == attempts )); then
-              echo "::error::Staging rollout did not reconcile within bounded read-only observation window"
+              echo "::error::Staging rollout did not reconcile after $attempts bounded read-only attempts; source_sha=$DEPLOYED_SHA gitops_revision=$(cat "$RUNNER_TEMP/gitops-revision"); see last DEPLOYMENT_IDENTITY_OBSERVATION_V1 for specific workload state"
               exit 1
             fi
             echo "Staging not ready (${attempt}/${attempts}); retrying fresh read-only metadata."
