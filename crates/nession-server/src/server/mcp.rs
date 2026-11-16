@@ -20,16 +20,23 @@ use nession_common::config::ServerConfig;
 use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::pending_mutation::PendingMutation;
+use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
+use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
 use nession_mcp::{McpService, ServiceConfig};
+use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRefusal, WebAgentsListResponse};
 use nession_protocol::contracts::env::v1::{
-    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
+    ClientEnvWriteResponsePayload,
 };
 use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingSetPayload,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionInfo,
+    SessionKillResponse,
 };
 use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use crate::registry::{AgentRegistry, AgentStatus};
@@ -129,41 +136,77 @@ async fn dispatch_with(
     }
 }
 
+/// Route one unit and require its reply to be the typed Protocol contract.
+///
+/// The MCP Tool advertises the same type (`#3735`). A Server reply that does
+/// not match it is a backend failure, never a successful untyped result.
+async fn dispatch_typed<T>(
+    handler: ConnectionHandler,
+    wire: &'static str,
+    payload: Value,
+) -> Result<T, ToolError>
+where
+    T: DeserializeOwned,
+{
+    let value = dispatch_with(handler, wire, payload).await?;
+    serde_json::from_value(value).map_err(|error| {
+        ToolError::backend(format!(
+            "the Server's `{wire}` reply does not match its typed contract: {error}"
+        ))
+    })
+}
+
 #[async_trait::async_trait]
 impl ClusterBackend for ServerClusterBackend {
-    async fn list_agents(&self) -> Result<Value, ToolError> {
-        dispatch_with(self.handler.clone(), "server.agent.list", json!({})).await
+    async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError> {
+        match dispatch_typed::<AgentListReply>(self.handler.clone(), "server.agent.list", json!({}))
+            .await?
+        {
+            AgentListReply::Listed(listed) => Ok(listed),
+            AgentListReply::Refused(AgentRefusal { status, message }) => {
+                Err(ToolError::backend(format!("{status}: {message}")))
+            }
+        }
     }
 
-    async fn env_list(&self) -> Result<Value, ToolError> {
-        dispatch_with(self.handler.clone(), "server.env.list", json!({})).await
+    async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
+        dispatch_typed(self.handler.clone(), "server.env.list", json!({})).await
     }
 
-    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+    async fn env_get(
+        &self,
+        payload: ClientEnvGetPayload,
+    ) -> Result<ClientEnvGetResponsePayload, ToolError> {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
-        dispatch_with(self.handler.clone(), "server.env.get", payload).await
+        dispatch_typed(self.handler.clone(), "server.env.get", payload).await
     }
 
-    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+    async fn env_write(
+        &self,
+        payload: ClientEnvWritePayload,
+    ) -> Result<ClientEnvWriteResponsePayload, ToolError> {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
-        dispatch_with(self.handler.clone(), "server.env.write", payload).await
+        dispatch_typed(self.handler.clone(), "server.env.write", payload).await
     }
 
-    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+    async fn env_delete(
+        &self,
+        payload: ClientEnvDeletePayload,
+    ) -> Result<ClientEnvDeleteResponsePayload, ToolError> {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
-        dispatch_with(self.handler.clone(), "server.env.delete", payload).await
+        dispatch_typed(self.handler.clone(), "server.env.delete", payload).await
     }
 
     async fn session_env_binding_get(
         &self,
         payload: ClientSessionEnvBindingGetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
-        dispatch_with(
+        dispatch_typed(
             self.handler.clone(),
             "server.session.env.binding.get",
             payload,
@@ -174,10 +217,10 @@ impl ClusterBackend for ServerClusterBackend {
     async fn session_env_binding_set(
         &self,
         payload: ClientSessionEnvBindingSetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
-        dispatch_with(
+        dispatch_typed(
             self.handler.clone(),
             "server.session.env.binding.set",
             payload,
@@ -188,10 +231,10 @@ impl ClusterBackend for ServerClusterBackend {
     async fn session_env_binding_reapply(
         &self,
         payload: ClientSessionEnvBindingReapplyPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         let payload =
             serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
-        dispatch_with(
+        dispatch_typed(
             self.handler.clone(),
             "server.session.env.binding.reapply",
             payload,
@@ -267,7 +310,7 @@ fn map_agent_error(error: String) -> ToolError {
 
 #[async_trait::async_trait]
 impl NodeBackend for ServerNodeBackend {
-    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         self.require_online(agent_id).await?;
         let response = self
             .handler
@@ -283,13 +326,17 @@ impl NodeBackend for ServerNodeBackend {
         if let Some(error) = response.get("error").and_then(Value::as_str) {
             return Err(ToolError::backend(error.to_string()));
         }
-        Ok(json!({
-            "sessions": response.get("sessions").cloned().unwrap_or(json!([])),
-            // An Agent's own answer has nothing stale: this field exists for
-            // the Server's fan-out, and the two tool families still share one
-            // result shape.
-            "stale_agents": [],
-        }))
+        let sessions: Vec<SessionInfo> =
+            serde_json::from_value(response.get("sessions").cloned().unwrap_or(json!([])))
+                .map_err(|error| {
+                    ToolError::backend(format!(
+                "the Agent's `agent.session.list` reply does not match its typed contract: {error}"
+            ))
+                })?;
+        // An Agent's own answer has nothing stale: this field exists for the
+        // Server's fan-out, and the two tool families still share one result
+        // shape.
+        Ok(SessionListOutput::from_agent_sessions(&sessions))
     }
 
     async fn create_session(
@@ -297,7 +344,7 @@ impl NodeBackend for ServerNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<SessionCreatedOutput, ToolError> {
         self.require_online(agent_id).await?;
         let handler = self.handler.clone();
         let target = agent_id.to_string();
@@ -336,16 +383,28 @@ impl NodeBackend for ServerNodeBackend {
                 .unwrap_or("the Agent refused the create");
             return Err(ToolError::backend(message.to_string()));
         }
-        Ok(json!({
-            "name": response
+        let warnings: Vec<String> =
+            serde_json::from_value(response.get("warnings").cloned().unwrap_or(json!([])))
+                .map_err(|error| {
+                    ToolError::backend(format!(
+                        "the Agent's create warnings do not match their typed contract: {error}"
+                    ))
+                })?;
+        Ok(SessionCreatedOutput {
+            name: response
                 .get("session_name")
                 .and_then(Value::as_str)
-                .unwrap_or(name),
-            "warnings": response.get("warnings").cloned().unwrap_or(json!([])),
-        }))
+                .unwrap_or(name)
+                .to_string(),
+            warnings,
+        })
     }
 
-    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
+    async fn kill_session(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
         self.require_online(agent_id).await?;
         let handler = self.handler.clone();
         let target = agent_id.to_string();
@@ -373,7 +432,9 @@ impl NodeBackend for ServerNodeBackend {
                 .unwrap_or("the Agent refused the kill");
             return Err(ToolError::backend(message.to_string()));
         }
-        Ok(json!({ "name": name }))
+        Ok(SessionKillResponse {
+            name: name.to_string(),
+        })
     }
 }
 

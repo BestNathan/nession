@@ -3,13 +3,17 @@
 //! The named Agent owns the new Session. Routing through a Server or a
 //! standalone host changes how the request reaches that Agent, never who
 //! creates the Session or which node owns it.
+//!
+//! The success reply is the stabilized MCP projection shared by every hosting
+//! mode: the created Session name and materialization warnings. Agent-specific
+//! details that only one route can report are not part of this Tool contract.
 
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::error::ToolError;
-use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{non_empty, parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 
 /// The Tool definition.
 pub struct NessionAgentCreateSession;
@@ -24,6 +28,16 @@ struct Arguments {
     /// Optional initial working directory on that Agent.
     #[serde(default)]
     working_dir: Option<String>,
+}
+
+/// The success reply of `nession_agent_create_session`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionCreatedOutput {
+    /// The created tmux Session name, as the owning Agent reports it.
+    pub name: String,
+    /// Non-fatal warnings produced while materializing the Session.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[async_trait]
@@ -41,6 +55,10 @@ impl ToolHandler for NessionAgentCreateSession {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<SessionCreatedOutput>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -49,14 +67,15 @@ impl ToolHandler for NessionAgentCreateSession {
         let arguments: Arguments = parse_arguments(arguments)?;
         non_empty(&arguments.agent_id, "agent_id")?;
         non_empty(&arguments.name, "name")?;
-        context
+        let reply = context
             .node
             .create_session(
                 &arguments.agent_id,
                 &arguments.name,
                 arguments.working_dir.as_deref(),
             )
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

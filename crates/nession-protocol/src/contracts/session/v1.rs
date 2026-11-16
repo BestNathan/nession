@@ -12,7 +12,7 @@ use crate::RedactedToken;
 
 /// The role one Managed image plays in the prepared composition.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ManagedImageRole {
@@ -30,7 +30,7 @@ pub enum ManagedImageRole {
 /// exactly this set. A route is authorization for that object only, not for an
 /// arbitrary digest the caller happens to know.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedImageObjectGrant {
@@ -55,7 +55,7 @@ pub struct ManagedImageObjectGrant {
 /// allowed to fetch. A legacy grant leaves `objects` empty and its `digest` is
 /// the raw EROFS blob identity.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedImageGrant {
@@ -80,7 +80,7 @@ pub struct ManagedImageGrant {
 /// prepared SandboxExecution. A missing cache, grant or capability refuses the
 /// create; there is no Native fallback.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedSessionImages {
@@ -89,7 +89,7 @@ pub struct ManagedSessionImages {
 
 /// One read-only toolchain artifact requested for a Managed Session.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedToolchainRequest {
@@ -113,7 +113,7 @@ pub struct ManagedToolchainRequest {
 /// cache and asks the Sandbox for the composition. There is no Native
 /// fallback when any step fails.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientManagedCreate {
@@ -127,7 +127,7 @@ pub struct ClientManagedCreate {
 // --- Server → Agent command payloads ---
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionCreatePayload {
     pub request_id: String,
@@ -172,20 +172,20 @@ pub struct ServerSessionCreatePayload {
     /// (`memory.max`) cannot be generated under the Web naming rule. The Rust
     /// contract is the wire owner; `nession-sandbox` is the validator.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
     /// Managed EROFS creation input (#3062). The Agent prepares every image
     /// from its owned durable cache and creates the Pane in a prepared
     /// SandboxExecution; absence preserves the ordinary create path.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ManagedSessionImages>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionKillPayload {
     pub request_id: String,
@@ -203,7 +203,7 @@ pub(crate) fn default_height() -> u16 {
 // --- Agent → Server command response payload ---
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentCommandResponsePayload {
     pub request_id: String,
@@ -216,7 +216,7 @@ pub struct AgentCommandResponsePayload {
     /// The sandbox mechanisms the Agent verified for a sandboxed create.
     /// Omitted from the Web projection for the same reason as the policy.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
 }
@@ -233,7 +233,7 @@ pub struct AgentCommandResponsePayload {
 /// `Replace` uses `env_files` exactly, including an empty list that means
 /// "No environment".
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EnvSelectionMode {
@@ -244,7 +244,7 @@ pub enum EnvSelectionMode {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionCreatePayload {
     pub agent_id: String,
@@ -273,7 +273,7 @@ pub struct ClientSessionCreatePayload {
     /// Optional, versioned Sandbox policy binding for this Session (#2681).
     /// The Server routes it to the Agent, which is the validating owner.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
     /// Optional Project this Session is created from (#3025).
@@ -289,13 +289,13 @@ pub struct ClientSessionCreatePayload {
     /// whose Project pins an image; the Server resolves and authorizes every
     /// artifact before handing the Agent preparation grants.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ClientManagedCreate>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionKillPayload {
     pub session_id: String,
@@ -304,7 +304,7 @@ pub struct ClientSessionKillPayload {
 // --- Server → Client session command response payloads ---
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionCreateResponsePayload {
     pub success: bool,
@@ -324,13 +324,13 @@ pub struct ClientSessionCreateResponsePayload {
     pub project_id: Option<String>,
     /// The sandbox mechanisms verified in effect, for a sandboxed create.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionKillResponsePayload {
     pub success: bool,
@@ -342,7 +342,7 @@ pub struct ClientSessionKillResponsePayload {
 
 /// `server.session.attach` — request to attach to a session.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachPayload {
     pub session_id: String,
@@ -384,7 +384,7 @@ pub(crate) fn default_attach_mode() -> String {
 /// having one. The handler was never wrong and does not change here; only the
 /// description of it does.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ClientSessionAttachReply {
@@ -394,7 +394,7 @@ pub enum ClientSessionAttachReply {
 
 /// The success arm of [`ClientSessionAttachReply`].
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionAttachResponsePayload {
     /// Always `"success"`. The refusal arm carries `"error"` under the same
@@ -431,7 +431,7 @@ pub struct ClientSessionAttachResponsePayload {
     /// explicit 0.x tradeoff in #3440, not a per-Session scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "codegen", ts(type = "string"))]
-    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub agent_token: Option<RedactedToken>,
     /// The Server's release-selected fixed column count (#2487).
     ///
@@ -452,7 +452,7 @@ pub struct ClientSessionAttachResponsePayload {
 /// `server.session.env.apply` — apply env files to an already-running session
 /// via `tmux set-environment` (attach-time).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvApplyPayload {
     pub session_id: String,
@@ -460,7 +460,7 @@ pub struct ClientSessionEnvApplyPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvUnsetPayload {
     pub session_id: String,
@@ -477,7 +477,7 @@ pub struct ClientSessionEnvUnsetPayload {
 /// this out directly: represent an empty request, do not conflate "empty" with
 /// "no shape".
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentSessionListPayload {}
 
@@ -487,14 +487,14 @@ pub struct AgentSessionListPayload {}
 /// the refusal branches carry an empty list as well. So this needs no union,
 /// unlike `ServerSessionListReply`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvActivePayload {
     pub session_id: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEnvActiveResponse {
     pub active: Vec<ActiveEnvFile>,
@@ -507,14 +507,14 @@ pub struct SessionEnvActiveResponse {
 /// Same shape as [`SessionEnvActiveResponse`]: one object with an optional
 /// error, not two disjoint halves.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvQueryPayload {
     pub session_id: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEnvQueryResponse {
     /// **Names**, not references — the handler maps the agent's array through
@@ -528,7 +528,7 @@ pub struct SessionEnvQueryResponse {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvResponsePayload {
     pub success: bool,
@@ -542,7 +542,7 @@ pub struct ClientSessionEnvResponsePayload {
 
 /// `server.session.env.binding.get` — read a Session's binding state.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingGetPayload {
     pub session_id: String,
@@ -555,7 +555,7 @@ pub struct ClientSessionEnvBindingGetPayload {
 /// deliberately no per-file apply/unset in this unit — a caller never
 /// constructs correctness from overlapping incremental operations.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingSetPayload {
     pub session_id: String,
@@ -576,7 +576,7 @@ pub struct ClientSessionEnvBindingSetPayload {
 /// `server.session.env.binding.reapply` — re-resolve the currently desired
 /// profiles and materialize a new binding revision.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingReapplyPayload {
     pub session_id: String,
@@ -589,7 +589,7 @@ pub struct ClientSessionEnvBindingReapplyPayload {
 
 /// Why a version-aware binding mutation was refused before any durable change.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEnvBindingRefusalKind {
@@ -599,17 +599,21 @@ pub enum SessionEnvBindingRefusalKind {
 
 /// The reply shared by the three binding units above.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingResponsePayload {
+    /// Whether the operation completed; a refused materialization can still
+    /// advance the desired revision.
     pub success: bool,
     /// The state after the operation. Present on success and on a failed
     /// materialization, because the desired binding is still the truth the
     /// caller needs to see.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<SessionEnvBindingState>,
+    /// Non-fatal warnings from resolving or materializing the profiles.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Why the operation failed, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// A machine-readable classification for a refusal that happened *before*
@@ -627,7 +631,7 @@ pub struct ClientSessionEnvBindingResponsePayload {
 /// Agent parses tmux control mode `%window-resize` events and sends this
 /// payload with the session id and new dimensions.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTerminalResizePayload {
     pub session_id: String,
@@ -640,7 +644,7 @@ pub struct AgentTerminalResizePayload {
 /// The `session_id` lets each client route to its per-session callback —
 /// clients may be attached to multiple sessions on the same WebSocket.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerTerminalResizePayload {
     pub session_id: String,
@@ -659,7 +663,7 @@ pub struct ServerTerminalResizePayload {
 /// notification to web clients and answers nothing. The payload is small and
 /// semantic — it does not carry `RepoStatus`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentGitInvalidatedPayload {
     pub agent_id: String,
@@ -687,7 +691,7 @@ pub struct AgentGitInvalidatedPayload {
 /// framing contract are two answers"* — and it is invisible for exactly as long
 /// as the two agree.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSessionUpdatePayload {
     pub agent_id: String,
@@ -731,7 +735,7 @@ pub struct AgentSessionUpdatePayload {
 /// by the caller — it is the correlation key the broker matches the answer on,
 /// and the arm reaches for it before it does anything else.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionReportPayload {
     pub request_id: String,
@@ -743,7 +747,7 @@ pub struct ServerSessionReportPayload {
 /// addresses but did **not** enter relay forwarding. The browser sends this once
 /// the Terminal is mounted and subscribed, and only then does data flow.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientRelayBeginPayload {
     /// `"<agent_id>:<session_name>"` — the same composite the rest of the tree
@@ -833,7 +837,7 @@ fn default_rows() -> u16 {
 /// and never returns to `handle_message`. So the shape is declared here for the
 /// wire's sake while the routing lives there.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientRelayEndPayload {
     pub session_id: String,
@@ -847,7 +851,7 @@ pub struct ClientRelayEndPayload {
 // projection of it.
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
     pub name: String,
@@ -876,7 +880,7 @@ pub struct SessionInfo {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreatePayload {
     pub name: String,
@@ -918,26 +922,26 @@ pub struct SessionCreatePayload {
     /// Optional, versioned Sandbox policy binding for this Session (#2681).
     /// The direct path and the relayed path carry the same policy type.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
     /// Managed EROFS creation input (#3062). Same payload on the Server-relayed
     /// and direct Agent projections.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ManagedSessionImages>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionKillPayload {
     pub name: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAttachPayload {
     pub session_name: String,
@@ -1015,14 +1019,14 @@ impl ClientAttachPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientDetachPayload {
     pub session_name: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCapturePreviewPayload {
     pub session_name: String,
@@ -1036,7 +1040,7 @@ pub struct SessionCapturePreviewPayload {
 /// a `session_id` and may omit `lines`. The two halves of one protocol had
 /// collided on a plausible name, which is why this is not called `…Payload`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionCapturePreviewPayload {
     pub session_id: String,
@@ -1051,7 +1055,7 @@ pub(crate) fn default_preview_lines() -> u32 {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCapturePreviewResponse {
     pub ansi_b64: String,
@@ -1062,7 +1066,7 @@ pub struct SessionCapturePreviewResponse {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionInfo {
     pub session_id: String,
@@ -1101,7 +1105,7 @@ pub struct WebSessionInfo {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionsListResponse {
     pub sessions: Vec<WebSessionInfo>,
@@ -1118,12 +1122,12 @@ pub struct WebSessionsListResponse {
 /// It reads nothing off the payload either, and `request: None` would claim the
 /// unit has no request rather than an empty one.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientSessionsListPayload {}
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionAttachPayload {
     pub session_id: String,
@@ -1132,7 +1136,7 @@ pub struct WebSessionAttachPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAttachInfo {
     pub mode: String,
@@ -1142,7 +1146,7 @@ pub struct WebAttachInfo {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionCreatePayload {
     pub agent_id: String,
@@ -1159,13 +1163,13 @@ pub struct WebSessionCreatePayload {
     pub terminal_cols: Option<u16>,
     /// Optional, versioned Sandbox policy binding for this Session (#2681).
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionCreateResponse {
     pub success: bool,
@@ -1173,20 +1177,20 @@ pub struct WebSessionCreateResponse {
     pub error: Option<String>,
     /// The sandbox mechanisms verified in effect, for a sandboxed create.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionKillPayload {
     pub session_id: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionKillResponse {
     pub success: bool,
@@ -1210,7 +1214,7 @@ pub struct WebSessionKillResponse {
 /// families refusing alike may end up with two identical types; the refusals
 /// already say different things, so that is also where a divergence would go.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRefusal {
     /// Always `"error"` today. A string rather than an enum because nothing
@@ -1221,7 +1225,7 @@ pub struct SessionRefusal {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionInfo>,
@@ -1243,7 +1247,7 @@ pub struct SessionListResponse {
 /// existed. Declaring them required would turn requests the Server accepts into
 /// refusals.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerSessionListPayload {
     /// Scope the list to one agent. Absent means all of them.
@@ -1263,7 +1267,7 @@ pub struct ServerSessionListPayload {
 /// Modelling them as one struct with optional fields would assert that
 /// `sessions` and `status` can coexist, which they never do.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ServerSessionListReply {
@@ -1277,7 +1281,7 @@ pub enum ServerSessionListReply {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreateResponse {
     pub name: String,
@@ -1286,25 +1290,26 @@ pub struct SessionCreateResponse {
     pub warnings: Vec<String>,
     /// The sandbox mechanisms verified in effect, for a sandboxed create.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
     /// The Agent-owned writable workspace for a Managed create (#3062).
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionKillResponse {
+    /// The tmux Session name that was killed.
     pub name: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAttachResponse {
     pub session_name: String,
@@ -1380,7 +1385,7 @@ pub struct ClientAttachResponse {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientDetachResponse {
     pub session_name: String,
@@ -1398,7 +1403,7 @@ pub struct ClientDetachResponse {
 
 /// How one Pane's process membership was resolved for a snapshot.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessDiscoveryMethod {
@@ -1412,7 +1417,7 @@ pub enum ProcessDiscoveryMethod {
 
 /// How much of one Pane's membership the snapshot could observe.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessCoverage {
@@ -1430,7 +1435,7 @@ pub enum ProcessCoverage {
 /// unknown and stale are separate answers so a consumer cannot render "the
 /// kernel would not tell us" as "the process used nothing".
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessMetricState {
@@ -1443,7 +1448,7 @@ pub enum ProcessMetricState {
 
 /// One process metric: a value when it was sampled, otherwise why not.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProcessMetric {
     /// The sampled value in the unit the field name states. `None` whenever
@@ -1485,7 +1490,7 @@ impl ProcessMetric {
 /// it, and why a process whose start time cannot be read is reported with
 /// `None` rather than a guessed value.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiscoveredProcess {
     pub pid: u32,
@@ -1536,7 +1541,7 @@ pub struct DiscoveredProcess {
 /// same Pane and its processes are never listed twice. `session_ids` and
 /// `session_names` are parallel and carry every Session that links this Window.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaneProcessSnapshot {
     pub session_ids: Vec<String>,
@@ -1562,7 +1567,7 @@ pub struct PaneProcessSnapshot {
 
 /// The bounds the Agent applied to one snapshot.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessDiscoveryLimits {
     pub max_processes: u32,
@@ -1572,7 +1577,7 @@ pub struct ProcessDiscoveryLimits {
 
 /// One Session's process snapshot.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProcessSnapshot {
     /// The Session this snapshot was scoped to. Panes may also belong to other
@@ -1596,7 +1601,7 @@ pub struct ProcessSnapshot {
 /// The Agent scopes the answer to the named Session on its own private tmux
 /// server; it never enumerates host-wide processes for a user-facing request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionProcessesPayload {
     /// Injected by the Server's command broker, like every `agent.*` command.
@@ -1606,7 +1611,7 @@ pub struct ServerSessionProcessesPayload {
 
 /// `server.session.processes` — a browser asks for one Session's snapshot.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionProcessesPayload {
     /// `agent_id:session_name`, the registry key the Session list already uses.
@@ -1615,7 +1620,7 @@ pub struct ClientSessionProcessesPayload {
 
 /// `server.session.processes`'s successful reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionProcessesResponse {
     pub snapshot: ProcessSnapshot,
@@ -1626,7 +1631,7 @@ pub struct SessionProcessesResponse {
 /// Untagged for the same reason `ServerSessionListReply` is: `snapshot` and
 /// `status` are disjoint, so there is nothing to discriminate on.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ServerSessionProcessesReply {
@@ -1659,7 +1664,7 @@ pub const SESSION_METADATA_TAG_LIMIT: usize = 12;
 /// tmux Session; `session_id` and the underlying tmux name are unchanged when
 /// it is edited. `created_at` is present only after metadata was first saved.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionMetadata {
     /// 0 means no metadata has been recorded (a legacy Session).
@@ -1690,7 +1695,7 @@ impl SessionMetadata {
 
 /// `agent.session.metadata.get`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMetadataGetPayload {
     pub name: String,
@@ -1702,7 +1707,7 @@ pub struct SessionMetadataGetPayload {
 /// the list. `expected_revision` is the revision the caller last read (0 for a
 /// Session with no metadata yet).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMetadataUpdatePayload {
     pub name: String,
@@ -1717,7 +1722,7 @@ pub struct SessionMetadataUpdatePayload {
 
 /// `server.session.metadata.get`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionMetadataGetPayload {
     pub session_id: String,
@@ -1725,7 +1730,7 @@ pub struct WebSessionMetadataGetPayload {
 
 /// `server.session.metadata.update`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSessionMetadataUpdatePayload {
     pub session_id: String,
@@ -1750,7 +1755,7 @@ pub struct WebSessionMetadataUpdatePayload {
 /// (#3661). A fresh caller learns the token from its own last successful
 /// reply; a caller without one omits `expected_revision`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionProjectBindingUpdatePayload {
     pub session_id: String,
@@ -1768,7 +1773,7 @@ pub struct SessionProjectBindingUpdatePayload {
 /// association continues the stored generation instead of restarting at 1,
 /// #3661).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionProjectBindingResponse {
     pub success: bool,
@@ -1788,7 +1793,7 @@ pub struct SessionProjectBindingResponse {
 /// `invalid`, `conflict`, `not_found` or `unavailable`. `error` carries the
 /// human-readable detail; `metadata` is present only on success.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionMetadataResponse {
     pub success: bool,
@@ -1935,7 +1940,7 @@ pub fn validate_session_metadata(
 /// `server.session.sandbox.context` — a browser asks for the active Pane's
 /// Sandbox context.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientSessionSandboxContextPayload {
@@ -1948,7 +1953,7 @@ pub struct ClientSessionSandboxContextPayload {
 
 /// `server.session.sandbox.context`'s reply: the context, or the refusal.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxContextResponse {
     pub success: bool,
@@ -1968,7 +1973,7 @@ pub struct SandboxContextResponse {
 
 /// `agent.session.sandbox.context` — the Server asks the Session's Agent.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionSandboxContextPayload {
     /// Injected by the Server's command broker, like every `agent.*` command.
@@ -1981,7 +1986,7 @@ pub struct ServerSessionSandboxContextPayload {
 /// `server.session.sandbox.preflight` — validate one draft against the exact
 /// context revision without creating host resources.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientSessionSandboxPreflightPayload {
@@ -2006,7 +2011,7 @@ pub struct ClientSessionSandboxPreflightPayload {
 
 /// `agent.session.sandbox.preflight` — the Server forwards the draft.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionSandboxPreflightPayload {
     pub request_id: String,
@@ -2031,7 +2036,7 @@ pub struct ServerSessionSandboxPreflightPayload {
 
 /// `server.session.sandbox.enter` — the one explicit Enter mutation.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientSessionSandboxEnterPayload {
@@ -2053,7 +2058,7 @@ pub struct ClientSessionSandboxEnterPayload {
 
 /// `agent.session.sandbox.enter` — the Server forwards the same attempt.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionSandboxEnterPayload {
     pub request_id: String,
@@ -2080,7 +2085,7 @@ pub struct ServerSessionSandboxEnterPayload {
 /// `server.session.sandbox.return-to-native` — focus the preserved Native
 /// Pane; never a teardown.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientSessionSandboxReturnPayload {
@@ -2089,7 +2094,7 @@ pub struct ClientSessionSandboxReturnPayload {
 
 /// `agent.session.sandbox.return-to-native` — the Server forwards the intent.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionSandboxReturnPayload {
     pub request_id: String,
@@ -2098,7 +2103,7 @@ pub struct ServerSessionSandboxReturnPayload {
 
 /// `server.session.sandbox.focus` — focus one existing, tracked Sandbox Pane.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientSessionSandboxFocusPayload {
@@ -2109,7 +2114,7 @@ pub struct ClientSessionSandboxFocusPayload {
 
 /// `agent.session.sandbox.focus` — the Server forwards the target Pane id.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionSandboxFocusPayload {
     pub request_id: String,

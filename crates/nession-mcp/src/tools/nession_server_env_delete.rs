@@ -3,9 +3,11 @@
 
 use super::env_target::Source;
 use crate::error::ToolError;
-use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{non_empty, parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 use async_trait::async_trait;
-use nession_protocol::contracts::env::v1::ClientEnvDeletePayload;
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -38,6 +40,10 @@ impl ToolHandler for NessionServerEnvDelete {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<ClientEnvDeleteResponsePayload>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -46,7 +52,7 @@ impl ToolHandler for NessionServerEnvDelete {
         let arguments: Arguments = parse_arguments(arguments)?;
         non_empty(&arguments.name, "name")?;
         let (source, agent_id) = arguments.source.resolve(arguments.agent_id.as_deref())?;
-        context
+        let reply = context
             .cluster
             .env_delete(ClientEnvDeletePayload {
                 name: arguments.name,
@@ -54,7 +60,8 @@ impl ToolHandler for NessionServerEnvDelete {
                 agent_id,
                 force: arguments.force,
             })
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

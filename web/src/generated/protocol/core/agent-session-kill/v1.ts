@@ -22,7 +22,11 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type SessionKillPayload = { name: string, };
-export type SessionKillResponse = { name: string, };
+export type SessionKillResponse = { 
+/**
+ * The tmux Session name that was killed.
+ */
+name: string, };
 
 // ── Operations ──
 
@@ -30,5 +34,9 @@ export type SessionKillResponse = { name: string, };
 export type SessionKillCall = { name: string, };
 
 /** The payload the provider answers with. */
-export type SessionKillReply = { name: string, };
+export type SessionKillReply = { 
+/**
+ * The tmux Session name that was killed.
+ */
+name: string, };
 

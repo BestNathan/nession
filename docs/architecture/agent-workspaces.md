@@ -4,7 +4,8 @@ Status: **Registry/API (#3407), managed `/workspace` attachment (#3405) and
 one shared writable Overlay per managed Workspace (#3582).** The Agent owns
 the registry, names, stable identities, durable bytes, the durable Overlay
 upper/work, the ordered lower compatibility key and attachment leases; the
-physical Merged View is owned by `nession_erofs::overlay::OverlayMountManager`.
+physical Merged View is owned by
+`nession_sandbox::mount::overlay::OverlayMountManager` (#3695).
 Project Location selection and the Web/App inventory remain owned by their
 referenced Requirements.
 
@@ -16,7 +17,7 @@ referenced Requirements.
 | Project Existing Location `{agent_id, path}` | Project declaration; the Agent only validates/references it; never copied or deleted here |
 | Authenticated routing and Session target authorization | Server (`server.workspace.*` → `agent.workspace.*`) |
 | Filesystem policy selection and `/workspace` mounting | `nession-sandbox` / the follow-up #3405 implementation |
-| Physical writable Merged View per managed Workspace | `nession-erofs::overlay::OverlayMountManager` (#3582) |
+| Physical writable Merged View per managed Workspace | `nession-sandbox::mount::overlay::OverlayMountManager` (#3582, moved by #3695) |
 | Sandbox execution lifecycle | `nession-sandbox`; it owns execution isolation and records, not the durable workspace bytes |
 
 A managed Workspace is **not** the logical Nession Workspace, a Project, an
@@ -54,9 +55,12 @@ configured durable location; the sandbox mount validation already confines
   (`lower_layers`, with the legacy `lower_digest` read as a one-element set):
   the Project source EROFS layers the durable upper was first prepared
   against. It is a property of the stored bytes, not a lookup alias; a
-  changed or missing set is refused. Identical physical lower bytes under a
-  changed Manifest are compatible at the filesystem layer; environment
-  semantics remain a separate concern.
+  changed or missing set is refused. The Sandbox MountPlan consumes the full
+  ordered set as ordered Overlay lowers, holding every read-only lease for
+  the shared Merged View lifetime (#3698); a reordered or missing set fails
+  closed. Identical physical lower bytes under a changed Manifest are
+  compatible at the filesystem layer; environment semantics remain a separate
+  concern.
 - `overlay_storage` records that the durable `upper`/`work` pair was
   initialized by this Agent. Once true, a missing, partial or symlinked pair
   is data-loss evidence and is refused; it is never replaced with a fresh

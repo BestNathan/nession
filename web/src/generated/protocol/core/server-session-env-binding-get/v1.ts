@@ -22,13 +22,26 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type ClientSessionEnvBindingGetPayload = { session_id: string, };
-export type ClientSessionEnvBindingResponsePayload = { success: boolean, 
+export type ClientSessionEnvBindingResponsePayload = { 
+/**
+ * Whether the operation completed; a refused materialization can still
+ * advance the desired revision.
+ */
+success: boolean, 
 /**
  * The state after the operation. Present on success and on a failed
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+binding?: SessionEnvBindingState | null, 
+/**
+ * Non-fatal warnings from resolving or materializing the profiles.
+ */
+warnings: Array<string>, 
+/**
+ * Why the operation failed, when it did.
+ */
+error?: string | null, 
 /**
  * A machine-readable classification for a refusal that happened *before*
  * any durable mutation. `None` means the ordinary `error` path: a refused
@@ -36,13 +49,38 @@ binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string
  */
 refusal?: SessionEnvBindingRefusalKind | null, };
 export type SessionEnvBindingRefusalKind = "revision_conflict";
-export type SessionEnvBindingState = { session_id: string, desired_revision: number, desired_profiles: Array<SessionEnvBindingProfileState>, observed?: SessionEnvObservedState | null, 
+export type SessionEnvBindingState = { 
+/**
+ * The canonical `agent_id:session_name` identity.
+ */
+session_id: string, 
+/**
+ * The latest desired binding revision.
+ */
+desired_revision: number, 
+/**
+ * The ordered desired profiles at `desired_revision`.
+ */
+desired_profiles: Array<SessionEnvBindingProfileState>, 
+/**
+ * The Agent-observed materialization, absent when the Agent cannot be
+ * asked.
+ */
+observed?: SessionEnvObservedState | null, 
 /**
  * Why `observed` is absent or the binding could not be read. Desired
  * state is still returned when only the Agent query failed.
  */
 error?: string | null, };
-export type SessionEnvBindingProfileState = { profile: EnvFileRef, phase: string, 
+export type SessionEnvBindingProfileState = { 
+/**
+ * The selected ENV file and its owning source.
+ */
+profile: EnvFileRef, 
+/**
+ * `create` or `attach`: when the profile entered the binding.
+ */
+phase: string, 
 /**
  * Hash captured at the binding revision the Session is on.
  */
@@ -77,8 +115,24 @@ shell?: string | null,
 /**
  * The revision the interactive shell last reported converging to.
  */
-shell_revision?: number | null, last_error?: string | null, };
-export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
+shell_revision?: number | null, 
+/**
+ * Why the last application attempt failed, when one did.
+ */
+last_error?: string | null, };
+export type EnvFileRef = { 
+/**
+ * Filename including the `.env` suffix.
+ */
+name: string, 
+/**
+ * Where the file lives.
+ */
+source: EnvSource, 
+/**
+ * For `EnvSource::Agent`, the owning agent id. `None` for server files.
+ */
+agent_id?: string | null, };
 export type EnvSource = "server" | "agent";
 
 // ── Operations ──
@@ -87,13 +141,26 @@ export type EnvSource = "server" | "agent";
 export type SessionEnvBindingGetCall = { session_id: string, };
 
 /** The payload the provider answers with. */
-export type SessionEnvBindingGetReply = { success: boolean, 
+export type SessionEnvBindingGetReply = { 
+/**
+ * Whether the operation completed; a refused materialization can still
+ * advance the desired revision.
+ */
+success: boolean, 
 /**
  * The state after the operation. Present on success and on a failed
  * materialization, because the desired binding is still the truth the
  * caller needs to see.
  */
-binding?: SessionEnvBindingState | null, warnings: Array<string>, error?: string | null, 
+binding?: SessionEnvBindingState | null, 
+/**
+ * Non-fatal warnings from resolving or materializing the profiles.
+ */
+warnings: Array<string>, 
+/**
+ * Why the operation failed, when it did.
+ */
+error?: string | null, 
 /**
  * A machine-readable classification for a refusal that happened *before*
  * any durable mutation. `None` means the ordinary `error` path: a refused

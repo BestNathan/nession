@@ -59,6 +59,19 @@ import {
   VERSION as TRANSCRIPT_ITEMS_VERSION,
   WIRE as TRANSCRIPT_ITEMS_WIRE,
 } from '@/generated/protocol/claude-code/transcript-items/v1';
+// #3726: raw record transport and bounded full-record access. The legacy
+// `transcript-items` import above stays for the compatibility window; the
+// Transcript view reads these two units instead.
+import {
+  PROTOCOL as TRANSCRIPT_RECORD_PROTOCOL,
+  VERSION as TRANSCRIPT_RECORD_VERSION,
+  WIRE as TRANSCRIPT_RECORD_WIRE,
+} from '@/generated/protocol/claude-code/transcript-record/v1';
+import {
+  PROTOCOL as TRANSCRIPT_RECORDS_PROTOCOL,
+  VERSION as TRANSCRIPT_RECORDS_VERSION,
+  WIRE as TRANSCRIPT_RECORDS_WIRE,
+} from '@/generated/protocol/claude-code/transcript-records/v1';
 import {
   PROTOCOL as TRANSCRIPTS_PROTOCOL,
   VERSION as TRANSCRIPTS_VERSION,
@@ -89,6 +102,10 @@ import type {
   ClaudeCodeReadResponse,
   ClaudeCodeTranscriptItemsRequest,
   ClaudeCodeTranscriptItemsResponse,
+  ClaudeCodeTranscriptRecordRequest,
+  ClaudeCodeTranscriptRecordResponse,
+  ClaudeCodeTranscriptRecordsRequest,
+  ClaudeCodeTranscriptRecordsResponse,
   ClaudeCodeTranscriptsRequest,
   ClaudeCodeTranscriptsResponse,
 } from './types';
@@ -109,6 +126,8 @@ const CONSUMER_REQUIREMENTS = {
   [MESSAGES_PROTOCOL]: [MESSAGES_VERSION],
   [TRANSCRIPTS_PROTOCOL]: [TRANSCRIPTS_VERSION],
   [TRANSCRIPT_ITEMS_PROTOCOL]: [TRANSCRIPT_ITEMS_VERSION],
+  [TRANSCRIPT_RECORDS_PROTOCOL]: [TRANSCRIPT_RECORDS_VERSION],
+  [TRANSCRIPT_RECORD_PROTOCOL]: [TRANSCRIPT_RECORD_VERSION],
   [MEMORY_PROTOCOL]: [MEMORY_VERSION],
   [MEMORY_READ_PROTOCOL]: [MEMORY_READ_VERSION],
   [MCP_SERVERS_PROTOCOL]: [MCP_SERVERS_VERSION],
@@ -235,12 +254,46 @@ export class ClaudeCodePlugin implements TransportPlugin {
   }
 
   /**
-   * One explicitly named transcript's execution timeline, paged (#1234).
+   * One explicitly named transcript's **raw** record page (#3726).
    *
-   * `transcript_id` is the only selection mechanism — an unknown id answers
-   * `not_found`, never the binding, the newest, or the only transcript. This is
-   * also where a subagent's transcript becomes readable: its id comes from
-   * `claudeCodeTranscripts`, and nothing here would find it by itself.
+   * The provider returns physical JSONL lines and opaque references; it does
+   * not classify them. `transcript_id` is the only selection mechanism, and a
+   * cursor from another transcript or a replaced file answers `stale_cursor`
+   * with no page.
+   */
+  async claudeCodeTranscriptRecords(
+    req: ClaudeCodeTranscriptRecordsRequest,
+  ): Promise<ClaudeCodeTranscriptRecordsResponse> {
+    return this.requireConnection().request<ClaudeCodeTranscriptRecordsResponse>(
+      TRANSCRIPT_RECORDS_WIRE,
+      this.addressed(TRANSCRIPT_RECORDS_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One raw record's full text, in bounded chunks (#3726).
+   *
+   * `record_ref` comes from a `claudeCodeTranscriptRecords` page. The same
+   * reference cannot be replayed against another transcript or a replaced
+   * file; those answer `not_found`/`stale_generation` with no bytes.
+   */
+  async claudeCodeTranscriptRecord(
+    req: ClaudeCodeTranscriptRecordRequest,
+  ): Promise<ClaudeCodeTranscriptRecordResponse> {
+    return this.requireConnection().request<ClaudeCodeTranscriptRecordResponse>(
+      TRANSCRIPT_RECORD_WIRE,
+      this.addressed(TRANSCRIPT_RECORD_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One explicitly named transcript's normalized execution timeline (#1234).
+   *
+   * **Legacy compatibility path.** The #3726 Transcript surface reads raw
+   * records through `claudeCodeTranscriptRecords`; this method stays so a
+   * client built before that migration still has a binding, and so the
+   * provider's advertised unit has a named consumer while the compatibility
+   * window is open.
    */
   async claudeCodeTranscriptItems(
     req: ClaudeCodeTranscriptItemsRequest,

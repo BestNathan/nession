@@ -22,7 +22,15 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type ClientEnvGetPayload = { name: string, source: EnvSource, agent_id?: string | null, };
-export type ClientEnvGetResponsePayload = { success: boolean, content?: string | null, 
+export type ClientEnvGetResponsePayload = { 
+/**
+ * Whether the file was read.
+ */
+success: boolean, 
+/**
+ * The file's raw contents. May contain credentials; absent on failure.
+ */
+content?: string | null, 
 /**
  * Session ids currently using this file; an empty list when nothing is.
  *
@@ -34,7 +42,11 @@ export type ClientEnvGetResponsePayload = { success: boolean, content?: string |
  * Both branches already omit it on the wire, so this states what the wire
  * does rather than changing it.
  */
-in_use_by?: Array<string> | null, error?: string | null, };
+in_use_by?: Array<string> | null, 
+/**
+ * Why the read failed, when it did.
+ */
+error?: string | null, };
 export type EnvSource = "server" | "agent";
 
 // ── Operations ──
@@ -43,7 +55,15 @@ export type EnvSource = "server" | "agent";
 export type EnvGetCall = { name: string, source: EnvSource, agent_id?: string | null, };
 
 /** The payload the provider answers with. */
-export type EnvGetReply = { success: boolean, content?: string | null, 
+export type EnvGetReply = { 
+/**
+ * Whether the file was read.
+ */
+success: boolean, 
+/**
+ * The file's raw contents. May contain credentials; absent on failure.
+ */
+content?: string | null, 
 /**
  * Session ids currently using this file; an empty list when nothing is.
  *
@@ -55,5 +75,9 @@ export type EnvGetReply = { success: boolean, content?: string | null,
  * Both branches already omit it on the wire, so this states what the wire
  * does rather than changing it.
  */
-in_use_by?: Array<string> | null, error?: string | null, };
+in_use_by?: Array<string> | null, 
+/**
+ * Why the read failed, when it did.
+ */
+error?: string | null, };
 

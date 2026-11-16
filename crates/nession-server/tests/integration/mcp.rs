@@ -523,6 +523,11 @@ async fn embedded_mcp_answers_server_owned_discovery_from_the_registry() {
     let agents = call_tool(addr, &session, "nession_server_list_agents", json!({})).await;
     assert_eq!(agents["isError"], false);
     assert_eq!(text_of(&agents)["agents"], json!([]));
+    assert_eq!(
+        agents["structuredContent"],
+        json!({ "agents": [] }),
+        "a successful Tool call carries the declared structured output"
+    );
 }
 
 #[tokio::test]
@@ -576,8 +581,13 @@ async fn embedded_mcp_node_tools_route_to_the_named_agent() {
     )
     .await;
     assert_eq!(listed["isError"], false, "{listed}");
+    let structured = listed["structuredContent"].clone();
     let listed = text_of(&listed);
     assert_eq!(listed["sessions"][0]["name"], "work");
+    assert_eq!(
+        structured, listed,
+        "structuredContent and the backwards-compatible text must be the same reply"
+    );
 
     // A different Agent is refused rather than redirected.
     let refused = call_tool(

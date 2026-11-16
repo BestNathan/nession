@@ -21,13 +21,18 @@ use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::http::{self, Sniffed};
 use nession_mcp::service::McpService;
+use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
+use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
 use nession_mcp::ServiceConfig;
+use nession_protocol::contracts::agent::v1::WebAgentsListResponse;
 use nession_protocol::contracts::env::v1::{
-    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
+    ClientEnvWriteResponsePayload,
 };
 use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingSetPayload,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
 };
 use rmcp::model::{CallToolRequestParams, ContentBlock, ProtocolVersion};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -57,56 +62,89 @@ impl Recorder {
     }
 }
 
+fn typed<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ToolError> {
+    serde_json::from_value(value).map_err(|error| ToolError::backend(error.to_string()))
+}
+
 #[async_trait]
 impl ClusterBackend for Recorder {
-    async fn list_agents(&self) -> Result<Value, ToolError> {
+    async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError> {
         self.push("cluster.list_agents");
-        Ok(json!({
-            "agents": [{ "agent_id": "agent-1", "status": "online" }]
+        typed(json!({
+            "agents": [{
+                "agent_id": "agent-1",
+                "hostname": "test-host",
+                "ip_address": "127.0.0.1",
+                "port": 8080,
+                "status": "online",
+                "session_count": 0,
+                "last_heartbeat": "2026-11-16T00:00:00Z",
+                "active_sessions": 0,
+                "registered_at": "2026-11-16T00:00:00Z",
+                "addresses": [],
+                "protocols": null,
+                "metadata": {
+                    "tmux_version": "3.5",
+                    "os_version": "test",
+                    "nession_version": "0.35.0",
+                    "image_tag": "dev",
+                    "architecture": "amd64",
+                    "os": "linux"
+                }
+            }]
         }))
     }
 
-    async fn env_list(&self) -> Result<Value, ToolError> {
+    async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
         self.push("cluster.env_list");
-        Ok(json!({ "files": [] }))
+        typed(json!({ "files": [] }))
     }
 
-    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+    async fn env_get(
+        &self,
+        payload: ClientEnvGetPayload,
+    ) -> Result<ClientEnvGetResponsePayload, ToolError> {
         self.push(format!(
             "cluster.env_get:{}:{}",
             payload.source.as_str(),
             payload.name
         ));
-        Ok(json!({ "success": true, "content": "PUBLIC=1\n", "in_use_by": [] }))
+        typed(json!({ "success": true, "content": "PUBLIC=1\n", "in_use_by": [] }))
     }
 
-    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+    async fn env_write(
+        &self,
+        payload: ClientEnvWritePayload,
+    ) -> Result<ClientEnvWriteResponsePayload, ToolError> {
         self.push(format!(
             "cluster.env_write:{}:{}",
             payload.source.as_str(),
             payload.name
         ));
-        Ok(json!({ "success": true, "exists": false, "warnings": [] }))
+        typed(json!({ "success": true, "exists": false, "warnings": [] }))
     }
 
-    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+    async fn env_delete(
+        &self,
+        payload: ClientEnvDeletePayload,
+    ) -> Result<ClientEnvDeleteResponsePayload, ToolError> {
         self.push(format!(
             "cluster.env_delete:{}:{}",
             payload.source.as_str(),
             payload.name
         ));
-        Ok(json!({ "success": true }))
+        typed(json!({ "success": true }))
     }
 
     async fn session_env_binding_get(
         &self,
         payload: ClientSessionEnvBindingGetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         self.push(format!(
             "cluster.session_env_binding_get:{}",
             payload.session_id
         ));
-        Ok(json!({
+        typed(json!({
             "success": true,
             "binding": {
                 "session_id": payload.session_id,
@@ -121,34 +159,34 @@ impl ClusterBackend for Recorder {
     async fn session_env_binding_set(
         &self,
         payload: ClientSessionEnvBindingSetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         self.push(format!(
             "cluster.session_env_binding_set:{}:{}:{}",
             payload.session_id,
             payload.expected_revision.unwrap_or_default(),
             payload.profiles.len()
         ));
-        Ok(json!({ "success": true, "binding": null, "warnings": [] }))
+        typed(json!({ "success": true, "binding": null, "warnings": [] }))
     }
 
     async fn session_env_binding_reapply(
         &self,
         payload: ClientSessionEnvBindingReapplyPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         self.push(format!(
             "cluster.session_env_binding_reapply:{}:{}",
             payload.session_id,
             payload.expected_revision.unwrap_or_default()
         ));
-        Ok(json!({ "success": true, "binding": null, "warnings": [] }))
+        typed(json!({ "success": true, "binding": null, "warnings": [] }))
     }
 }
 
 #[async_trait]
 impl NodeBackend for Recorder {
-    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         self.push(format!("node.list_sessions:{agent_id}"));
-        Ok(json!({ "sessions": [], "stale_agents": [] }))
+        typed(json!({ "sessions": [], "stale_agents": [] }))
     }
 
     async fn create_session(
@@ -156,14 +194,18 @@ impl NodeBackend for Recorder {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<SessionCreatedOutput, ToolError> {
         self.push(format!("node.create:{agent_id}:{name}:{working_dir:?}"));
-        Ok(json!({ "name": name, "warnings": [] }))
+        typed(json!({ "name": name, "warnings": [] }))
     }
 
-    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
+    async fn kill_session(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
         self.push(format!("node.kill:{agent_id}:{name}"));
-        Ok(json!({ "name": name }))
+        typed(json!({ "name": name }))
     }
 }
 
@@ -171,22 +213,34 @@ struct SlowNode;
 
 #[async_trait]
 impl NodeBackend for SlowNode {
-    async fn list_sessions(&self, _agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, _agent_id: &str) -> Result<SessionListOutput, ToolError> {
         tokio::time::sleep(Duration::from_millis(500)).await;
-        Ok(json!({ "sessions": [] }))
+        Ok(SessionListOutput {
+            sessions: Vec::new(),
+            stale_agents: Vec::new(),
+        })
     }
 
     async fn create_session(
         &self,
         _agent_id: &str,
-        _name: &str,
+        name: &str,
         _working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
-        Ok(json!({}))
+    ) -> Result<SessionCreatedOutput, ToolError> {
+        Ok(SessionCreatedOutput {
+            name: name.to_string(),
+            warnings: Vec::new(),
+        })
     }
 
-    async fn kill_session(&self, _agent_id: &str, _name: &str) -> Result<Value, ToolError> {
-        Ok(json!({}))
+    async fn kill_session(
+        &self,
+        _agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
+        Ok(SessionKillResponse {
+            name: name.to_string(),
+        })
     }
 }
 
@@ -624,6 +678,131 @@ async fn invalid_and_unknown_tool_calls_are_tool_errors_not_transport_errors() {
     assert_eq!(empty_agent.status, 200, "{}", empty_agent.body);
     assert_eq!(empty_agent.json()["result"]["isError"], true);
     assert!(harness.recorder.calls().is_empty());
+}
+
+#[tokio::test]
+async fn every_successful_tool_call_returns_declared_structured_content() {
+    let harness = start(Arc::default()).await;
+    let list = modern(
+        harness.addr,
+        "tools/list",
+        json!({ "_meta": modern_meta(MODERN) }),
+        None,
+    )
+    .await;
+    let tools = list.json()["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .clone();
+    assert_eq!(tools.len(), 11);
+    let calls = [
+        ("nession_server_list_agents", json!({})),
+        ("nession_server_env_list", json!({})),
+        ("nession_server_env_get", json!({ "name": "prod.env" })),
+        (
+            "nession_server_env_write",
+            json!({ "name": "prod.env", "content": "A=1" }),
+        ),
+        ("nession_server_env_delete", json!({ "name": "prod.env" })),
+        (
+            "nession_server_session_env_binding_get",
+            json!({ "session_id": "agent-1:dev" }),
+        ),
+        (
+            "nession_server_session_env_binding_set",
+            json!({
+                "session_id": "agent-1:dev",
+                "expected_revision": 0,
+                "profiles": []
+            }),
+        ),
+        (
+            "nession_server_session_env_binding_reapply",
+            json!({ "session_id": "agent-1:dev", "expected_revision": 0 }),
+        ),
+        (
+            "nession_agent_list_sessions",
+            json!({ "agent_id": "agent-1" }),
+        ),
+        (
+            "nession_agent_create_session",
+            json!({ "agent_id": "agent-1", "name": "dev" }),
+        ),
+        (
+            "nession_agent_kill_session",
+            json!({ "agent_id": "agent-1", "name": "dev" }),
+        ),
+    ];
+    for (name, arguments) in calls {
+        let response = modern(
+            harness.addr,
+            "tools/call",
+            tool_call_params(name, arguments),
+            Some(name),
+        )
+        .await;
+        assert_eq!(response.status, 200, "{name}: {}", response.body);
+        let result = &response.json()["result"];
+        assert_eq!(result["isError"], false, "{name}: {result}");
+        let structured = result
+            .get("structuredContent")
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| panic!("{name} returned no structuredContent: {result}"));
+        let text = text_of(result);
+        assert_eq!(
+            Value::Object(structured.clone()),
+            text,
+            "{name}: content text must faithfully represent structuredContent"
+        );
+        let tool = tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is advertised"));
+        assert_eq!(tool["outputSchema"]["type"], "object", "{name}");
+        let declared = tool["outputSchema"]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{name} advertises no output properties"));
+        for key in structured.keys() {
+            assert!(
+                declared.contains_key(key),
+                "{name} returned undeclared structured field `{key}`"
+            );
+        }
+        let no_required = Vec::new();
+        for key in tool["outputSchema"]["required"]
+            .as_array()
+            .unwrap_or(&no_required)
+            .clone()
+        {
+            let key = key.as_str().expect("required name");
+            assert!(
+                structured.contains_key(key),
+                "{name} omitted declared required field `{key}`"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_refused_argument_result_carries_no_structured_content() {
+    let harness = start(Arc::default()).await;
+    let refused = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_agent_list_sessions",
+            json!({ "agentId": "agent-1" }),
+        ),
+        Some("nession_agent_list_sessions"),
+    )
+    .await;
+    assert_eq!(refused.status, 200, "{}", refused.body);
+    let result = &refused.json()["result"];
+    assert_eq!(result["isError"], true);
+    assert!(
+        result.get("structuredContent").is_none(),
+        "an error result must not masquerade as a conforming success output"
+    );
 }
 
 #[tokio::test]

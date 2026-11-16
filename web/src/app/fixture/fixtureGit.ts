@@ -666,6 +666,9 @@ function mutationOverlapGitSurface(): PluginSurface {
  */
 function historyOverlapGitSurface(): PluginSurface {
   const firstPageRequests = new Map<string, number>();
+  // A cursor is an opaque commit OID on the wire; the fixture records which
+  // page handed it out so an older request is answered from the cursor itself.
+  const cursors = new Map<string, { session: string; generation: number }>();
   let olderRequests = 0;
   let olderSettled = false;
   let held: {
@@ -709,14 +712,21 @@ function historyOverlapGitSurface(): PluginSurface {
         if (!before) {
           const generation = (firstPageRequests.get(session) ?? 0) + 1;
           firstPageRequests.set(session, generation);
+          const cursor = historyOverlapCursorFor(session, generation);
+          cursors.set(cursor, { session, generation });
           publish();
-          return Promise.resolve(historyOverlapFirstPage(session, generation) as T);
+          return Promise.resolve(
+            historyOverlapFirstPage(session, generation, cursor) as T,
+          );
         }
+        // Answer what the *cursor* names, not merely the Session the request
+        // claims: a continuation that rolled back to another list's cursor is
+        // then visibly that list's page, which is what the Case must catch.
+        const fromCursor = cursors.get(before) ?? { session, generation: 1 };
         olderRequests += 1;
         publish();
         if (olderRequests === 1) {
           return new Promise<T>((resolve) => {
-            const fromCursor = historyOverlapCursor(before);
             held = {
               session: fromCursor.session,
               generation: fromCursor.generation,
@@ -725,15 +735,9 @@ function historyOverlapGitSurface(): PluginSurface {
             publish();
           });
         }
-        // Answer what the *cursor* names, not merely the Session the request
-        // claims: a continuation that rolled back to another list's cursor is
-        // then visibly that list's page, which is what the Case must catch.
-        {
-          const fromCursor = historyOverlapCursor(before);
-          return Promise.resolve(
-            historyOverlapOlderPage(fromCursor.session, fromCursor.generation) as T,
-          );
-        }
+        return Promise.resolve(
+          historyOverlapOlderPage(fromCursor.session, fromCursor.generation) as T,
+        );
       }
       if (type === 'git.diff') {
         return Promise.resolve(
@@ -823,6 +827,7 @@ function historyOverlapCommit(
 function historyOverlapFirstPage(
   session: string,
   generation: number,
+  cursor: string,
 ): GitLogResponse {
   const commits = Array.from({ length: HISTORY_OVERLAP_PAGE }, (_, offset) =>
     historyOverlapCommit(
@@ -840,7 +845,7 @@ function historyOverlapFirstPage(
       truncated_bytes: 0,
       truncated: false,
       end_of_history: false,
-      next_cursor: `${session}-g${generation}-cursor`,
+      next_cursor: cursor,
     },
   };
 }
@@ -869,16 +874,12 @@ function historyOverlapOlderPage(
   };
 }
 
-/** The Session and generation a cursor was handed out for. */
-function historyOverlapCursor(cursor: string): {
-  session: string;
-  generation: number;
-} {
-  const match = /^(.*)-g(\d+)-cursor$/.exec(cursor);
-  return {
-    session: match?.[1] ?? cursor,
-    generation: match ? Number(match[2]) : 1,
-  };
+/**
+ * The cursor a first page hands out: an opaque commit OID on the wire, stable
+ * for its Session and generation and distinct from the page's rows.
+ */
+function historyOverlapCursorFor(session: string, generation: number): string {
+  return historyOverlapHash(session, generation, 0);
 }
 
 /** The work tree the fixture pretends to be in — a Peek names its basename. */

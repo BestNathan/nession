@@ -566,10 +566,19 @@ fn prepare_inner(
         window_id: None,
         working_dir: working_dir.display().to_string(),
         effective_policy: effective_policy(compiled, cgroup_guard.as_ref()),
-        // The writable Overlay is a manager-owned shared resource (#3582); it
-        // is recorded as a durable binding rather than an execution-scoped
-        // mountpoint. `mounts` remains for records written before #3582.
+        // A manager-owned Workspace Overlay is recorded as a durable binding;
+        // an execution-owned transient RootFS has its own strict, disposable
+        // record. `mounts` remains only for pre-#3582 records.
         mounts: Vec::new(),
+        transient_rootfs: mounted.as_ref().and_then(|mounted| {
+            mounted.transient_rootfs().map(|(mountpoint, upper, work)| {
+                crate::exec::TransientRootfsRecord {
+                    mountpoint: mountpoint.display().to_string(),
+                    upper: upper.display().to_string(),
+                    work: work.display().to_string(),
+                }
+            })
+        }),
         shared_mounts: mounted
             .as_ref()
             .map(erofs::MountedComposition::shared_mounts)
@@ -585,6 +594,15 @@ fn prepare_inner(
                 lower_digest: binding.lower_digest,
                 lower_mountpoint: binding.lower_mountpoint.display().to_string(),
                 lower_generation: binding.lower_generation,
+                lowers: binding
+                    .lowers
+                    .iter()
+                    .map(|lower| crate::exec::OverlayLowerRecord {
+                        digest: lower.digest.clone(),
+                        mountpoint: lower.mountpoint.display().to_string(),
+                        generation: lower.generation.clone(),
+                    })
+                    .collect(),
             }),
         channel_dir: runtime_dir.map(|dir| dir.display().to_string()),
         mechanisms: report.mechanisms.clone(),

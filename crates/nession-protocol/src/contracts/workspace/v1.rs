@@ -24,7 +24,7 @@ pub const WORKSPACE_NAMESPACE_MAX_CHARS: usize = 128;
 
 /// Whether a Workspace descriptor is Agent-managed or a Project reference.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentWorkspaceKind {
@@ -37,7 +37,7 @@ pub enum AgentWorkspaceKind {
 
 /// The observed status of one Workspace resource.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentWorkspaceStatus {
@@ -58,7 +58,7 @@ pub enum AgentWorkspaceStatus {
 /// the stable managed identity (or the Project reference identity for a
 /// location).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentWorkspaceDescriptor {
@@ -111,7 +111,7 @@ impl AgentWorkspaceDescriptor {
 
 /// `server.workspace.list` request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientWorkspaceListPayload {
@@ -124,7 +124,7 @@ pub struct ClientWorkspaceListPayload {
 
 /// `server.workspace.list` reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceListResponse {
@@ -137,7 +137,7 @@ pub struct WorkspaceListResponse {
 
 /// `server.workspace.create` request: idempotent get-or-create by name.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientWorkspaceCreatePayload {
@@ -152,7 +152,7 @@ pub struct ClientWorkspaceCreatePayload {
 
 /// `server.workspace.create` reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceCreateResponse {
@@ -165,7 +165,7 @@ pub struct WorkspaceCreateResponse {
 
 /// `server.workspace.delete` request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientWorkspaceDeletePayload {
@@ -175,7 +175,7 @@ pub struct ClientWorkspaceDeletePayload {
 
 /// `server.workspace.delete` reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceDeleteResponse {
@@ -186,7 +186,7 @@ pub struct WorkspaceDeleteResponse {
 
 /// `agent.workspace.list` request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerWorkspaceListPayload {
@@ -197,7 +197,7 @@ pub struct ServerWorkspaceListPayload {
 
 /// `agent.workspace.create` request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerWorkspaceCreatePayload {
@@ -211,7 +211,7 @@ pub struct ServerWorkspaceCreatePayload {
 
 /// `agent.workspace.delete` request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerWorkspaceDeletePayload {

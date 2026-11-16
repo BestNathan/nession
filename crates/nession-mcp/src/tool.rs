@@ -1,10 +1,16 @@
-//! The one-Tool contract (`#3264`).
+//! The one-Tool contract (`#3264`, `#3735`).
 //!
-//! A Tool module owns its name, description, typed argument contract, emitted
-//! JSON Schema and execution. The registry owns lookup; the MCP service owns
-//! protocol lifecycle, transport, authentication, concurrency and deadlines.
-//! A Tool never decides which host it runs in — it receives the
-//! [`ToolContext`] the host built.
+//! A Tool module owns its name, description, typed argument contract, typed
+//! success output contract, emitted JSON Schemas and execution. The registry
+//! owns lookup; the MCP service owns protocol lifecycle, transport,
+//! authentication, concurrency and deadlines. A Tool never decides which host
+//! it runs in — it receives the [`ToolContext`] the host built.
+//!
+//! `outputSchema` is **mandatory** for every Nession-owned Tool (`#3735`):
+//! both schemas are derived from the same Rust types the host validates
+//! replies against, so a Tool cannot advertise a shape its owner does not
+//! return. The external MCP specification makes `outputSchema` optional;
+//! Nession's own Tool contract does not.
 
 use std::sync::Arc;
 
@@ -47,6 +53,13 @@ pub trait ToolHandler: Send + Sync {
     /// The JSON Schema emitted for its typed argument contract.
     fn input_schema(&self) -> Map<String, Value>;
 
+    /// The JSON Schema emitted for its typed success output contract.
+    ///
+    /// Required, with no default: a Tool without a real output contract cannot
+    /// register (`#3735`). The schema must describe an object with named
+    /// fields; the registry rejects an empty placeholder at startup.
+    fn output_schema(&self) -> Map<String, Value>;
+
     /// Validate the arguments, execute the business operation and return the
     /// owner's reply.
     ///
@@ -60,16 +73,34 @@ pub trait ToolHandler: Send + Sync {
     ) -> Result<Value, ToolError>;
 
     /// The `tools/list` definition.
+    ///
+    /// Both schemas ride on the same definition, so `tools/list`, the
+    /// source-pinned exporter and the runtime handler cannot disagree.
     fn definition(&self) -> Tool {
         Tool::new(self.name(), self.description(), self.input_schema())
+            .with_raw_output_schema(Arc::new(self.output_schema()))
     }
 }
 
-/// Turn a typed argument contract into the emitted input schema.
+/// Serialize a Tool's typed success reply into the value the service returns.
 ///
-/// The schema and the runtime validation come from the same `serde` type, so
-/// they cannot drift: `deny_unknown_fields` becomes `additionalProperties:
-/// false`, and a rejected field is rejected by both.
+/// The reply type is the one [`ToolHandler::output_schema`] describes, so the
+/// structured output and its declared contract cannot drift. A serialization
+/// failure is a backend failure, never a successful empty reply.
+pub fn reply_value<T: serde::Serialize>(reply: &T) -> Result<Value, ToolError> {
+    serde_json::to_value(reply).map_err(|error| {
+        ToolError::backend(format!(
+            "the owner's success reply could not be serialized: {error}"
+        ))
+    })
+}
+
+/// Turn a typed contract into an emitted Tool schema.
+///
+/// Used for both the argument contract and the success output contract. The
+/// schema and the runtime contract come from the same `serde` type, so they
+/// cannot drift: `deny_unknown_fields` becomes `additionalProperties: false`,
+/// and a rejected field is rejected by both.
 pub fn schema_for<T: schemars::JsonSchema>() -> Map<String, Value> {
     let schema = schemars::schema_for!(T);
     // A `schemars::Schema` has no value shape that fails JSON serialization;

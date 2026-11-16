@@ -278,7 +278,8 @@ describe('fixture git surface', () => {
       expect(first.history.commits[0]?.subject).toContain('A first page 1 commit 1');
       expect(first.history.end_of_history).toBe(false);
       const cursor = first.history.next_cursor;
-      expect(cursor).toBe(`${sessionA}-g1-cursor`);
+      // A cursor is what the agent returns: a commit OID.
+      expect(cursor).toMatch(/^[0-9a-f]{40}$/);
 
       // The first older page is held; the next one answers immediately so a
       // Case can prove a normal continuation still appends.
@@ -322,7 +323,8 @@ describe('fixture git surface', () => {
       expect(refreshed.state).toBe('ok');
       if (refreshed.state === 'ok') {
         expect(refreshed.history.commits[0]?.subject).toContain('A first page 2 commit 1');
-        expect(refreshed.history.next_cursor).toBe(`${sessionA}-g2-cursor`);
+        expect(refreshed.history.next_cursor).toMatch(/^[0-9a-f]{40}$/);
+        expect(refreshed.history.next_cursor).not.toBe(cursor);
       }
       expect(control.firstPageRequests(sessionA)).toBe(2);
 
@@ -332,7 +334,8 @@ describe('fixture git surface', () => {
       expect(sessionBFirst.state).toBe('ok');
       if (sessionBFirst.state === 'ok') {
         expect(sessionBFirst.history.commits[0]?.subject).toContain('B first page 1 commit 1');
-        expect(sessionBFirst.history.next_cursor).toBe(`${sessionB}-g1-cursor`);
+        expect(sessionBFirst.history.next_cursor).toMatch(/^[0-9a-f]{40}$/);
+        expect(sessionBFirst.history.next_cursor).not.toBe(cursor);
       }
     } finally {
       if (hadWindow) {

@@ -740,6 +740,52 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "claude-code",
+            id: "claude-code.transcript-records",
+            version: 1,
+            wires: &["claude-code.transcript-records"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_records::v1::TranscriptRecordV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptItemV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcripts::v1::TranscriptKindV1>(cfg),
+                decl_of::<nession_claude_code::protocol::conversations::v1::ConversationActivityV1>(cfg),
+            ],
+            request: Some((
+                "TranscriptRecordsRequest",
+                nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsRequestV1>,
+            )),
+            response: Some((
+                "TranscriptRecordsResponse",
+                nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::transcript_records::v1::TranscriptRecordsResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
+            id: "claude-code.transcript-record",
+            version: 1,
+            wires: &["claude-code.transcript-record"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::transcript_record::v1::TranscriptRecordRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_record::v1::TranscriptRecordResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::transcript_record::v1::TranscriptRecordStateV1>(cfg),
+            ],
+            request: Some((
+                "TranscriptRecordRequest",
+                nession_claude_code::protocol::transcript_record::v1::TranscriptRecordRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::transcript_record::v1::TranscriptRecordRequestV1>,
+            )),
+            response: Some((
+                "TranscriptRecordResponse",
+                nession_claude_code::protocol::transcript_record::v1::TranscriptRecordResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::transcript_record::v1::TranscriptRecordResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
             id: "claude-code.messages",
             version: 1,
             wires: &["claude-code.messages"],

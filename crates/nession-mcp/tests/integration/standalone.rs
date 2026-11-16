@@ -595,7 +595,7 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
             .as_array()
             .expect("sessions")
             .iter()
-            .any(|entry| entry["session_name"] == name),
+            .any(|entry| entry["name"] == name),
         "the Server-routed Agent truth is missing the created Session: {listed}"
     );
 
