@@ -680,14 +680,7 @@ impl Database {
 
     /// Insert or replace one Session's desired binding (replace-whole).
     pub async fn upsert_session_env_binding(&self, row: &SessionEnvBindingRow) -> Result<()> {
-        let model = session_env_bindings::ActiveModel {
-            session_id: Set(row.session_id.clone()),
-            agent_id: Set(row.agent_id.clone()),
-            desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
-            profiles_json: Set(row.profiles_json.clone()),
-            updated_at: Set(row.updated_at),
-        };
-        session_env_bindings::Entity::insert(model)
+        session_env_bindings::Entity::insert(session_env_binding_model(row))
             .on_conflict(
                 OnConflict::column(session_env_bindings::Column::SessionId)
                     .update_columns([
@@ -702,6 +695,65 @@ impl Database {
             .await
             .context("failed to upsert session env binding")?;
         Ok(())
+    }
+
+    /// Persist one Session's desired binding **only if** its stored revision is
+    /// still `expected_revision`.
+    ///
+    /// This is the durable compare-and-swap behind the binding's
+    /// version-aware mutations. Reading the revision and then writing it
+    /// unconditionally would let a caller that read revision 3 overwrite a
+    /// writer that already advanced the row to 4, so the comparison is part of
+    /// the write itself. `false` means the row was not written — the caller
+    /// lost the race — and no Agent-side mutation may follow.
+    ///
+    /// `expected_revision == 0` covers a Session whose binding has never been
+    /// persisted: the update matches nothing, and an insert guarded by its own
+    /// conflict rule decides the race instead.
+    pub async fn compare_and_swap_session_env_binding(
+        &self,
+        row: &SessionEnvBindingRow,
+        expected_revision: u64,
+    ) -> Result<bool> {
+        let expected = i64::try_from(expected_revision).unwrap_or(i64::MAX);
+        let updated = session_env_bindings::Entity::update_many()
+            .col_expr(
+                session_env_bindings::Column::AgentId,
+                Expr::value(row.agent_id.clone()),
+            )
+            .col_expr(
+                session_env_bindings::Column::DesiredRevision,
+                Expr::value(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+            )
+            .col_expr(
+                session_env_bindings::Column::ProfilesJson,
+                Expr::value(row.profiles_json.clone()),
+            )
+            .col_expr(
+                session_env_bindings::Column::UpdatedAt,
+                Expr::value(row.updated_at),
+            )
+            .filter(session_env_bindings::Column::SessionId.eq(&row.session_id))
+            .filter(session_env_bindings::Column::DesiredRevision.eq(expected))
+            .exec(&self.conn)
+            .await
+            .context("failed to compare-and-swap session env binding")?;
+        if updated.rows_affected == 1 {
+            return Ok(true);
+        }
+        if expected_revision != 0 {
+            return Ok(false);
+        }
+
+        // No row existed at revision 0. The first writer inserts; a racer that
+        // inserted first makes the guarded insert a no-op, which is a lost
+        // compare-and-swap rather than a silent overwrite.
+        let inserted = session_env_bindings::Entity::insert(session_env_binding_model(row))
+            .on_conflict_do_nothing_on([session_env_bindings::Column::SessionId])
+            .exec(&self.conn)
+            .await
+            .context("failed to insert session env binding after a compare-and-swap")?;
+        Ok(matches!(inserted, sea_orm::TryInsertResult::Inserted(_)))
     }
 
     /// Delete one Session's binding (idempotent).
@@ -820,12 +872,16 @@ impl Database {
 
     // ── Session Project Bindings (#3082) ─────────────────────────────
 
-    /// Read one Session's Project membership.
+    /// Read one Session's active Project membership.
+    ///
+    /// A tombstone (an unassociated Session that still carries its last
+    /// revision, #3661) is not a membership and reads as absent.
     pub async fn get_session_project_binding(
         &self,
         session_id: &str,
     ) -> Result<Option<SessionProjectBindingRow>> {
         let row = session_project_bindings::Entity::find_by_id(session_id.to_owned())
+            .filter(session_project_bindings::Column::Associated.eq(true))
             .one(&self.conn)
             .await
             .context("failed to read session project binding")?;
@@ -836,6 +892,7 @@ impl Database {
     /// incarnation; this is one read per list/broadcast projection.
     pub async fn list_session_project_bindings(&self) -> Result<Vec<SessionProjectBindingRow>> {
         let rows = session_project_bindings::Entity::find()
+            .filter(session_project_bindings::Column::Associated.eq(true))
             .order_by_asc(session_project_bindings::Column::SessionId)
             .all(&self.conn)
             .await
@@ -847,6 +904,10 @@ impl Database {
     }
 
     /// Insert or replace one Session's Project membership.
+    ///
+    /// A create-time pending membership still advances the stored revision
+    /// when one already exists (for example a tombstone left by a previous
+    /// removal), so the revision space stays monotonic (#3661).
     pub async fn upsert_session_project_binding(
         &self,
         row: &SessionProjectBindingRow,
@@ -858,6 +919,7 @@ impl Database {
             incarnation_id: Set(row.incarnation_id.clone()),
             agent_created_at: Set(row.agent_created_at),
             revision: Set(i64::try_from(row.revision).unwrap_or(i64::MAX)),
+            associated: Set(true),
             updated_at: Set(row.updated_at),
         };
         session_project_bindings::Entity::insert(model)
@@ -868,9 +930,13 @@ impl Database {
                         session_project_bindings::Column::ProjectId,
                         session_project_bindings::Column::IncarnationId,
                         session_project_bindings::Column::AgentCreatedAt,
-                        session_project_bindings::Column::Revision,
+                        session_project_bindings::Column::Associated,
                         session_project_bindings::Column::UpdatedAt,
                     ])
+                    .value(
+                        session_project_bindings::Column::Revision,
+                        Expr::col(session_project_bindings::Column::Revision).add(1),
+                    )
                     .to_owned(),
             )
             .exec(&self.conn)
@@ -884,10 +950,16 @@ impl Database {
     /// The revision comparison and the write run in one `BEGIN IMMEDIATE`
     /// transaction, so a concurrent set or remove cannot slip between them.
     /// `Some(revision)` commits only while the stored row still carries that
-    /// revision; revision `0` also matches an absent row (an unassociated
-    /// Session), so a first association may insert. `None` keeps the
-    /// documented last-writer-wins behavior and still advances the stored
-    /// revision monotonically.
+    /// revision. Revision `0` is the unassociated token: it matches an absent
+    /// row or a tombstone (an unassociated Session that kept its last
+    /// revision), but never an active membership. `None` keeps the documented
+    /// last-writer-wins behavior and still advances the stored revision
+    /// monotonically.
+    ///
+    /// A removed membership leaves a tombstone instead of deleting its row
+    /// (#3661). The tombstone carries the old revision and is invisible to
+    /// membership reads, so a stale nonzero revision can never match the
+    /// newer association after remove/reassociate.
     ///
     /// The returned row is read in the transaction that committed it, so its
     /// revision is the committed value.
@@ -917,17 +989,33 @@ impl Database {
                 Expr::value(set.agent_created_at),
             )
             .col_expr(
+                session_project_bindings::Column::Associated,
+                Expr::value(true),
+            )
+            .col_expr(
                 session_project_bindings::Column::UpdatedAt,
                 Expr::value(set.updated_at),
             )
             .filter(session_project_bindings::Column::SessionId.eq(set.session_id.clone()));
         update = match expected {
+            // The caller observed an unassociated Session. A tombstone is the
+            // durable form of that state and may be associated again, keeping
+            // its generation; an active membership is a conflict.
+            Some(0) => update
+                .filter(session_project_bindings::Column::Associated.eq(false))
+                .col_expr(
+                    session_project_bindings::Column::Revision,
+                    Expr::col(session_project_bindings::Column::Revision).add(1),
+                ),
+            // A nonzero revision names one exact active membership. A
+            // tombstone never matches, so remove/reassociate cannot reuse it.
             Some(expected) => update
+                .filter(session_project_bindings::Column::Associated.eq(true))
+                .filter(session_project_bindings::Column::Revision.eq(expected))
                 .col_expr(
                     session_project_bindings::Column::Revision,
                     Expr::value(expected.saturating_add(1)),
-                )
-                .filter(session_project_bindings::Column::Revision.eq(expected)),
+                ),
             None => update.col_expr(
                 session_project_bindings::Column::Revision,
                 Expr::col(session_project_bindings::Column::Revision).add(1),
@@ -939,8 +1027,8 @@ impl Database {
             .context("failed to compare-and-set session project binding")?;
 
         // An absent row is only the caller's expected state at revision 0 or
-        // when no expectation was given. Otherwise a removed row must not be
-        // resurrected at a revision the caller never observed.
+        // when no expectation was given. Otherwise a removed Session must not
+        // be resurrected at a revision the caller never observed.
         let absent_matches = expected.is_none() || expected == Some(0);
         if updated.rows_affected == 0 {
             if absent_matches {
@@ -951,6 +1039,7 @@ impl Database {
                     incarnation_id: Set(set.incarnation_id.clone()),
                     agent_created_at: Set(set.agent_created_at),
                     revision: Set(1),
+                    associated: Set(true),
                     updated_at: Set(set.updated_at),
                 };
                 // A row may still exist at another revision (for example a
@@ -998,11 +1087,16 @@ impl Database {
 
     /// Atomically compare-and-remove one Session's Project membership (#3509).
     ///
-    /// The revision predicate and the delete are one statement. `Some(revision)`
-    /// removes only a row that still carries that revision (revision `0` also
-    /// matches the absent state, so removing an unassociated Session is
-    /// idempotent); `None` removes unconditionally. A concurrent set or remove
-    /// that commits first is reported as a conflict instead of being erased.
+    /// The revision predicate and the write are one statement. `Some(revision)`
+    /// removes only an active membership that still carries that revision;
+    /// revision `0` is the unassociated token, so removing an unassociated
+    /// Session (absent or tombstone) is idempotent. `None` removes any active
+    /// membership unconditionally. A concurrent set or remove that commits
+    /// first is reported as a conflict instead of being erased.
+    ///
+    /// Removal keeps the row as an unassociated tombstone with its revision
+    /// advanced (#3661), so a later association can never reuse a revision
+    /// that a client may still hold.
     pub async fn remove_session_project_binding_if_revision(
         &self,
         session_id: &str,
@@ -1012,29 +1106,57 @@ impl Database {
             begin_immediate_transaction(&self.conn, "session project binding removal").await?;
         let expected =
             expected_revision.map(|revision| i64::try_from(revision).unwrap_or(i64::MAX));
-        let mut delete = session_project_bindings::Entity::delete_many()
-            .filter(session_project_bindings::Column::SessionId.eq(session_id.to_owned()));
-        if let Some(expected) = expected {
-            delete = delete.filter(session_project_bindings::Column::Revision.eq(expected));
-        }
-        let removed = delete
-            .exec(&txn)
-            .await
-            .context("failed to compare-and-remove session project binding")?;
-        if removed.rows_affected == 0 {
+        // Revision 0 already means "unassociated": there is nothing to write,
+        // only the current state to check.
+        let removal = match expected {
+            Some(0) => None,
+            _ => {
+                let mut update = session_project_bindings::Entity::update_many()
+                    .col_expr(
+                        session_project_bindings::Column::Associated,
+                        Expr::value(false),
+                    )
+                    .col_expr(
+                        session_project_bindings::Column::ProjectId,
+                        Expr::value(String::new()),
+                    )
+                    .col_expr(
+                        session_project_bindings::Column::Revision,
+                        Expr::col(session_project_bindings::Column::Revision).add(1),
+                    )
+                    .col_expr(
+                        session_project_bindings::Column::UpdatedAt,
+                        Expr::value(chrono::Utc::now().timestamp()),
+                    )
+                    .filter(session_project_bindings::Column::SessionId.eq(session_id.to_owned()))
+                    .filter(session_project_bindings::Column::Associated.eq(true));
+                if let Some(expected) = expected {
+                    update = update.filter(session_project_bindings::Column::Revision.eq(expected));
+                }
+                Some(
+                    update
+                        .exec(&txn)
+                        .await
+                        .context("failed to compare-and-remove session project binding")?,
+                )
+            }
+        };
+        let removed = removal.is_some_and(|result| result.rows_affected > 0);
+        if !removed {
             let current = session_project_bindings::Entity::find_by_id(session_id.to_owned())
                 .one(&txn)
                 .await
                 .context("failed to read the current session project binding")?;
-            // A stale `0` is still a conflict when a newer binding appeared.
-            // A stale non-zero expectation always is, even if the row is now
-            // gone: another writer changed the membership first.
+            // A stale `0` is still a conflict when a membership appeared.
+            // A stale non-zero expectation always is: another writer changed
+            // the membership first, even if the row is now a tombstone.
             let conflict = match expected_revision {
                 None => false,
-                Some(0) => current.is_some(),
+                Some(0) => current.as_ref().is_some_and(|binding| binding.associated),
                 Some(_) => true,
             };
             let current_revision = current
+                .filter(|binding| binding.associated)
                 .map(|binding| u64::try_from(binding.revision).unwrap_or(0))
                 .unwrap_or(0);
             txn.commit()
@@ -1081,6 +1203,11 @@ impl Database {
         else {
             return Ok(None);
         };
+        // A tombstone is generation history, not a membership: it never adopts
+        // an incarnation and never resurrects a Project (#3661).
+        if !model.associated {
+            return Ok(None);
+        }
         let observed = incarnation_id.filter(|id| !id.is_empty());
         if let Some(observed) = observed {
             if model.incarnation_id.is_empty() {
@@ -1503,8 +1630,29 @@ impl Database {
             .begin()
             .await
             .context("failed to begin project deletion")?;
-        session_project_bindings::Entity::delete_many()
+        // Deleting a Project unbinds its Sessions without deleting them. The
+        // bindings become tombstones so their revisions stay non-reusable; a
+        // client holding an old revision cannot overwrite a later association
+        // (#3661).
+        session_project_bindings::Entity::update_many()
+            .col_expr(
+                session_project_bindings::Column::Associated,
+                Expr::value(false),
+            )
+            .col_expr(
+                session_project_bindings::Column::ProjectId,
+                Expr::value(String::new()),
+            )
+            .col_expr(
+                session_project_bindings::Column::Revision,
+                Expr::col(session_project_bindings::Column::Revision).add(1),
+            )
+            .col_expr(
+                session_project_bindings::Column::UpdatedAt,
+                Expr::value(chrono::Utc::now().timestamp()),
+            )
             .filter(session_project_bindings::Column::ProjectId.eq(project_id))
+            .filter(session_project_bindings::Column::Associated.eq(true))
             .exec(&txn)
             .await
             .context("failed to clear project session bindings")?;
@@ -1569,6 +1717,7 @@ async fn current_session_project_binding_revision(
         .await
         .context("failed to read the current session project binding revision")?;
     Ok(current
+        .filter(|binding| binding.associated)
         .map(|binding| u64::try_from(binding.revision).unwrap_or(0))
         .unwrap_or(0))
 }
@@ -1576,6 +1725,10 @@ async fn current_session_project_binding_revision(
 fn session_project_binding_row_from_model(
     model: session_project_bindings::Model,
 ) -> SessionProjectBindingRow {
+    debug_assert!(
+        model.associated,
+        "only an active membership maps to a SessionProjectBindingRow"
+    );
     SessionProjectBindingRow {
         session_id: model.session_id,
         agent_id: model.agent_id,
@@ -1730,6 +1883,16 @@ fn session_env_binding_row_from_model(m: session_env_bindings::Model) -> Session
         desired_revision: u64::try_from(m.desired_revision).unwrap_or(0),
         profiles_json: m.profiles_json,
         updated_at: m.updated_at,
+    }
+}
+
+fn session_env_binding_model(row: &SessionEnvBindingRow) -> session_env_bindings::ActiveModel {
+    session_env_bindings::ActiveModel {
+        session_id: Set(row.session_id.clone()),
+        agent_id: Set(row.agent_id.clone()),
+        desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+        profiles_json: Set(row.profiles_json.clone()),
+        updated_at: Set(row.updated_at),
     }
 }
 
@@ -2641,6 +2804,29 @@ mod tests {
         assert_eq!(committed.revision, 2);
     }
 
+    /// #3661: a create-time upsert must not reset an existing row's revision,
+    /// otherwise it could re-open a revision a stale client still holds.
+    #[tokio::test]
+    async fn create_time_upsert_advances_an_existing_revision() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 10))
+            .await
+            .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 11))
+            .await
+            .unwrap();
+
+        let stored = session_project_bindings::Entity::find_by_id("a1:s1".to_owned())
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .expect("the membership row is present");
+        assert!(stored.associated);
+        assert_eq!(stored.revision, 2);
+        assert_eq!(stored.agent_created_at, 11);
+    }
+
     #[tokio::test]
     async fn conditional_binding_set_accepts_a_pending_create_binding() {
         let db = new_db().await;
@@ -2728,6 +2914,175 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(again, SessionProjectBindingRemoveOutcome::Removed);
+    }
+
+    /// #3661: removal leaves a tombstone that keeps the Session's revision
+    /// generation. The sequential associate → remove → re-associate sequence
+    /// must never make a stale revision match the newer membership.
+    #[tokio::test]
+    async fn removed_membership_revision_is_never_reused() {
+        let db = new_db().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+
+        let initial = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_a, 10), Some(0))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(initial) = initial else {
+            panic!("the unassociated Session accepts its first association");
+        };
+        assert_eq!(initial.revision, 1);
+
+        let removed = db
+            .remove_session_project_binding_if_revision("a1:s1", Some(1))
+            .await
+            .unwrap();
+        assert_eq!(removed, SessionProjectBindingRemoveOutcome::Removed);
+        assert!(db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .is_none());
+        let tombstone = session_project_bindings::Entity::find_by_id("a1:s1".to_owned())
+            .one(&db.conn)
+            .await
+            .unwrap()
+            .expect("removal keeps the generation row");
+        assert!(!tombstone.associated);
+        assert_eq!(tombstone.revision, 2);
+        assert_eq!(tombstone.project_id, "");
+
+        // The removed revision no longer matches anything, even before a new
+        // association exists.
+        let stale_before_reassociation = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_a, 10), Some(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            stale_before_reassociation,
+            SessionProjectBindingSetOutcome::Conflict {
+                current_revision: 0
+            }
+        );
+
+        // A fresh client sees an unassociated Session (token 0) and may
+        // intentionally associate it; the revision continues from the
+        // tombstone instead of resetting to 1.
+        let reassociated = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_b, 10), Some(0))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(reassociated) = reassociated else {
+            panic!("an unassociated Session can be associated again");
+        };
+        assert_eq!(reassociated.project_id, project_b);
+        assert_eq!(reassociated.revision, 3);
+
+        // The stale client that observed revision 1 before the removal is
+        // told the membership changed and cannot overwrite project B.
+        let stale = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_a, 10), Some(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            stale,
+            SessionProjectBindingSetOutcome::Conflict {
+                current_revision: 3
+            }
+        );
+        let stored = db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .expect("the newer association remains stored");
+        assert_eq!(stored.project_id, project_b);
+        assert_eq!(stored.revision, 3);
+
+        // Last-writer-wins (`None`) still advances monotonically, and the
+        // latest observed token can update and remove.
+        let overwritten = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_a, 10), None)
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(overwritten) = overwritten else {
+            panic!("an unconditional set still commits");
+        };
+        assert_eq!(overwritten.revision, 4);
+        let updated = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_b, 10), Some(4))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(updated) = updated else {
+            panic!("the latest observed token updates the membership");
+        };
+        assert_eq!(updated.revision, 5);
+        assert_eq!(
+            db.remove_session_project_binding_if_revision("a1:s1", Some(5))
+                .await
+                .unwrap(),
+            SessionProjectBindingRemoveOutcome::Removed
+        );
+        assert_eq!(
+            db.remove_session_project_binding_if_revision("a1:s1", Some(0))
+                .await
+                .unwrap(),
+            SessionProjectBindingRemoveOutcome::Removed,
+            "removing an unassociated Session at token 0 is idempotent"
+        );
+        assert!(db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    /// #3661: deleting a Project is another removal path, so it must also keep
+    /// the Session's revision generation instead of deleting the binding row.
+    #[tokio::test]
+    async fn deleted_project_revision_is_never_reused() {
+        let db = new_db().await;
+        let project_a = "project-123e4567-e89b-42d3-a456-426614174000";
+        let project_b = "project-123e4567-e89b-42d3-a456-426614174001";
+        db.insert_project(&project_row(project_a)).await.unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_a, 10))
+            .await
+            .unwrap();
+
+        assert!(db.delete_project(project_a).await.unwrap());
+        assert!(db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .is_none());
+
+        let reassociated = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_b, 10), Some(0))
+            .await
+            .unwrap();
+        let SessionProjectBindingSetOutcome::Applied(reassociated) = reassociated else {
+            panic!("the unbinding Project deletion leaves an unassociated Session");
+        };
+        assert_eq!(reassociated.revision, 3);
+
+        let stale = db
+            .set_session_project_binding_if_revision(&binding_set("a1:s1", project_a, 10), Some(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            stale,
+            SessionProjectBindingSetOutcome::Conflict {
+                current_revision: 3
+            }
+        );
+        assert_eq!(
+            db.get_session_project_binding("a1:s1")
+                .await
+                .unwrap()
+                .expect("the newer association remains stored")
+                .project_id,
+            project_b
+        );
     }
 
     #[tokio::test]

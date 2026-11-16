@@ -6,10 +6,7 @@ const envApi = vi.hoisted(() => ({
   listEnvFiles: vi.fn(),
 }));
 
-vi.mock('@/capabilities/env', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/capabilities/env')>()),
-  envApi,
-}));
+vi.mock('@/capabilities/env/envApi', () => ({ envApi }));
 
 import { useEnvironmentProfiles } from '@/capabilities/env/hooks/useEnvironmentProfiles';
 

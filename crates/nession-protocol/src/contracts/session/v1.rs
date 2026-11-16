@@ -223,6 +223,26 @@ pub struct AgentCommandResponsePayload {
 
 // --- Client → Server session command payloads ---
 
+/// How a create resolves its environment selection against Project Session
+/// defaults (#3649).
+///
+/// The field that carries this on [`ClientSessionCreatePayload`] is optional.
+/// Absent preserves the legacy precedence: a non-empty `env_files` replaces,
+/// an empty one inherits the named Project's defaults. `Inherit` asks for the
+/// Project defaults explicitly and refuses a simultaneous explicit selection;
+/// `Replace` uses `env_files` exactly, including an empty list that means
+/// "No environment".
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvSelectionMode {
+    /// Resolve the named Project's declared defaults at create time.
+    Inherit,
+    /// Use `env_files` as the complete replacement, even when it is empty.
+    Replace,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,6 +261,15 @@ pub struct ClientSessionCreatePayload {
     /// having to notice it.
     #[serde(default)]
     pub env_files: Vec<EnvFileRef>,
+    /// Explicit create-time ENV intent (#3649).
+    ///
+    /// `inherit` resolves the Project's ordered Server ENV references and
+    /// refuses an explicit `env_files` selection; `replace` uses `env_files`
+    /// exactly, including an empty list that explicitly binds no environment.
+    /// Absent keeps the legacy behavior: empty `env_files` with a Project
+    /// inherits its defaults, while non-empty `env_files` overrides them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_selection_mode: Option<EnvSelectionMode>,
     /// Optional, versioned Sandbox policy binding for this Session (#2681).
     /// The Server routes it to the Agent, which is the validating owner.
     #[cfg_attr(feature = "codegen", ts(skip))]
@@ -532,6 +561,16 @@ pub struct ClientSessionEnvBindingSetPayload {
     pub session_id: String,
     #[serde(default)]
     pub profiles: Vec<EnvFileRef>,
+    /// The desired revision the caller read before this replacement.
+    ///
+    /// When present, the Server performs a durable compare-and-swap: a stored
+    /// revision that no longer matches yields a `revision_conflict` refusal
+    /// before any durable or Agent-side mutation, and the caller re-reads the
+    /// binding rather than overwriting a concurrent writer. Absent for the
+    /// legacy `apply`/`unset` adapters and for callers that predate the field;
+    /// there is deliberately no `force`/`ignore_conflict` bypass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 /// `server.session.env.binding.reapply` — re-resolve the currently desired
@@ -541,6 +580,21 @@ pub struct ClientSessionEnvBindingSetPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionEnvBindingReapplyPayload {
     pub session_id: String,
+    /// The desired revision the caller read before this reapply. Same
+    /// compare-and-swap contract as
+    /// [`ClientSessionEnvBindingSetPayload::expected_revision`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+}
+
+/// Why a version-aware binding mutation was refused before any durable change.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEnvBindingRefusalKind {
+    /// `expected_revision` did not match the durable desired revision.
+    RevisionConflict,
 }
 
 /// The reply shared by the three binding units above.
@@ -558,6 +612,11 @@ pub struct ClientSessionEnvBindingResponsePayload {
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A machine-readable classification for a refusal that happened *before*
+    /// any durable mutation. `None` means the ordinary `error` path: a refused
+    /// materialization may still have advanced the desired revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<SessionEnvBindingRefusalKind>,
 }
 
 // ============================================================================
@@ -1021,6 +1080,16 @@ pub struct WebSessionInfo {
     pub foreground_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    ///
+    /// A recyclable `agent_id:session_name` is not an incarnation: this id is
+    /// replaced when the name is killed and recreated. Web clients key their
+    /// name-addressed projections (Session metadata, #3424) on it, so a list
+    /// push that reports a different id invalidates the previous incarnation's
+    /// cached context. Absent only for a legacy Session that has not been asked
+    /// yet, so an absent value is not an incarnation change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
     /// The focused Session's Server-owned Project membership (#3082).
     ///
     /// Absent for a Session with no Project. This is durable membership, not an
@@ -1673,7 +1742,13 @@ pub struct WebSessionMetadataUpdatePayload {
 ///
 /// A whole replacement of one Session's Project membership: `project_id: Some`
 /// associates or changes it, `None` removes it. `expected_revision` guards a
-/// concurrent change; its absence is a last-writer-wins first association.
+/// concurrent change: `Some(revision)` commits only while that exact
+/// membership revision is still current, `0` is the unassociated token and
+/// matches a Session that is currently unassociated, and `None` is
+/// last-writer-wins. A revision is never reused after a removal, so a stale
+/// nonzero value is a `conflict` instead of overwriting a newer association
+/// (#3661). A fresh caller learns the token from its own last successful
+/// reply; a caller without one omits `expected_revision`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1689,7 +1764,9 @@ pub struct SessionProjectBindingUpdatePayload {
 ///
 /// `error_kind` is the actionable classification the Web renders: `invalid`,
 /// `unauthorized`, `conflict`, `not_found` or `unavailable`. `revision` is the
-/// new membership revision on success (0 means unassociated).
+/// new membership revision on success (0 means unassociated; a later
+/// association continues the stored generation instead of restarting at 1,
+/// #3661).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

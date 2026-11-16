@@ -2066,6 +2066,7 @@ dependencies = [
  "dirs",
  "nession-common",
  "nession-protocol",
+ "reqwest 0.12.28",
  "schemars",
  "serde",
  "serde_json",
@@ -2074,6 +2075,7 @@ dependencies = [
  "tracing",
  "ts-rs",
  "unicode-normalization",
+ "url",
 ]
 
 [[package]]

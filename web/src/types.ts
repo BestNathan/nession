@@ -52,6 +52,16 @@ export interface Session {
   foreground_command?: string | null;
   /** Live cwd when the agent last reported the session (force refresh). */
   working_dir?: string | null;
+  /**
+   * Durable tmux Session instance identity (`@nession_instance_id`).
+   *
+   * `session_id` is recyclable: killing and recreating the same name yields a
+   * new instance under the same public id. Name-addressed Web projections
+   * (Session metadata, #3424) compare this value to invalidate the previous
+   * incarnation's cached context. Absent for a legacy Session that has not
+   * been asked yet — absence is not an incarnation change.
+   */
+  instance_id?: string | null;
   /** Server-owned explicit Project membership (#3082); absent when unbound. */
   project_id?: string | null;
   last_activity: string; // ISO 8601 timestamp

@@ -189,6 +189,11 @@ export class PendingInputQueue {
     identity: InputIdentity,
     appliedThrough?: number,
   ): 'bound' | 'epoch-changed' | 'generation-changed' {
+    // Expire aged input before reconciliation. A quiet reconnect can reach
+    // this through `seedInputCursor()` without a fresh `send()` — which is the
+    // only path that previously expired — and stale bytes must not be kept
+    // pending or delivered as if the user had just typed them (#3433).
+    this.expire();
     const previous = this.identity;
     let verdict: 'bound' | 'epoch-changed' | 'generation-changed' = 'bound';
     if (previous && previous.inputEpoch !== identity.inputEpoch) {
@@ -290,6 +295,11 @@ export class PendingInputQueue {
     if (!this.identity) {
       return null;
     }
+    // Expire aged input before offering bytes. A quiet reconnect can reach this
+    // without a fresh `send()` — which is the only path that previously
+    // expired — and stale bytes must not be delivered as if the user had just
+    // typed them (#3433).
+    this.expire();
     return this.chunks.map((chunk, index) => ({
       seq: this.cursor + 1 + index,
       data: chunk.data,
@@ -311,6 +321,14 @@ export class PendingInputQueue {
    */
   outboundFrame(): { data: string; seqStart: number; seqEnd: number } | null {
     if (!this.identity || this.chunks.length === 0) {
+      return null;
+    }
+    // Expire aged input before offering bytes. A quiet reconnect can reach this
+    // through `flushInputBuffer()` without a fresh `send()` — which is the only
+    // path that previously expired — and stale bytes must not be delivered as
+    // if the user had just typed them (#3433).
+    this.expire();
+    if (this.chunks.length === 0) {
       return null;
     }
     return {

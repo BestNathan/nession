@@ -50,6 +50,18 @@ pub struct ResolvedRoot {
     pub kind: ObjectKind,
 }
 
+/// The verified referenced Composite closure of one Manifest (#3697).
+#[derive(Debug, Clone)]
+pub struct ResolvedComposite {
+    pub descriptor: crate::oci::composite::CompositeDescriptor,
+    /// The Manifest layer descriptor naming the descriptor JSON.
+    pub descriptor_object: Descriptor,
+    /// The primary metadata EROFS device.
+    pub metadata: Descriptor,
+    /// Ordered backing EROFS devices.
+    pub devices: Vec<Descriptor>,
+}
+
 /// One fully verified image identity pinned to a Manifest.
 #[derive(Debug, Clone)]
 pub struct ResolvedTarget {
@@ -64,6 +76,8 @@ pub struct ResolvedTarget {
     pub manifest: Manifest,
     pub config: ImageConfig,
     pub usage: NessionUsage,
+    /// Present when the Manifest is a referenced Composite Image.
+    pub composite: Option<ResolvedComposite>,
 }
 
 /// Resolve a Tag only when it names a Manifest or Index.
@@ -235,8 +249,79 @@ pub async fn resolve_root_for_platform(
     let layer = manifest
         .layers
         .first()
-        .context("resolved Manifest has no EROFS layer")?
+        .context("resolved Manifest has no layer")?
         .clone();
+    if layer.media_type == crate::oci::MEDIA_TYPE_COMPOSITE {
+        let composite_object =
+            verified_object(conn, store, &layer.digest, ObjectKind::Composite).await?;
+        if composite_object.media_type != layer.media_type
+            || composite_object.size_bytes != layer.size
+        {
+            anyhow::bail!(
+                "Composite descriptor {} is stale in the catalog",
+                layer.digest
+            );
+        }
+        let bytes = store.read(&layer.digest)?;
+        if crate::digest::digest_of_bytes(&bytes) != layer.digest {
+            anyhow::bail!("Composite descriptor bytes do not match their digest");
+        }
+        let composite = crate::oci::composite::parse_composite(&bytes)?;
+        let mut closure = Vec::new();
+        for descriptor in composite.closure()? {
+            let object =
+                verified_object(conn, store, &descriptor.digest, ObjectKind::Erofs).await?;
+            if object.media_type != descriptor.media_type || object.size_bytes != descriptor.size {
+                anyhow::bail!(
+                    "Composite device {} is stale in the catalog",
+                    descriptor.digest
+                );
+            }
+            closure.push(descriptor);
+        }
+        crate::oci::composite::validate_composite_manifest_config(
+            &manifest, &config, &composite, &layer,
+        )?;
+        let platform = Platform {
+            architecture: config.architecture.clone(),
+            os: config.os.clone(),
+            os_version: config.os_version.clone(),
+            os_features: config.os_features.clone(),
+            variant: config.variant.clone(),
+            ..Platform::default()
+        };
+        if !platform.matches(target) {
+            anyhow::bail!(
+                "image {manifest_digest} targets {}/{} variant {:?}, not the requesting {}/{} variant {:?}",
+                platform.os,
+                platform.architecture,
+                platform.variant,
+                target.os,
+                target.architecture,
+                target.variant
+            );
+        }
+        let usage = NessionUsage::from_annotations(manifest.annotations.as_ref())?;
+        let metadata = closure
+            .first()
+            .cloned()
+            .context("Composite closure has no metadata device")?;
+        return Ok(ResolvedTarget {
+            index_digest: (root.kind == ObjectKind::Index).then(|| root.digest.clone()),
+            manifest_digest,
+            config_digest: manifest.config.digest.clone(),
+            layer: metadata.clone(),
+            manifest,
+            config,
+            usage,
+            composite: Some(ResolvedComposite {
+                descriptor: composite,
+                descriptor_object: layer,
+                metadata,
+                devices: closure.into_iter().skip(1).collect(),
+            }),
+        });
+    }
     let layer_object = verified_object(conn, store, &layer.digest, ObjectKind::Erofs).await?;
     if layer_object.size_bytes != layer.size || layer_object.media_type != layer.media_type {
         anyhow::bail!(
@@ -273,6 +358,7 @@ pub async fn resolve_root_for_platform(
         manifest,
         config,
         usage,
+        composite: None,
     })
 }
 
@@ -319,6 +405,7 @@ fn media_type_for(kind: ObjectKind) -> String {
         ObjectKind::Manifest => crate::oci::MEDIA_TYPE_MANIFEST.to_string(),
         ObjectKind::Config => crate::oci::MEDIA_TYPE_CONFIG.to_string(),
         ObjectKind::Erofs => crate::oci::MEDIA_TYPE_EROFS.to_string(),
+        ObjectKind::Composite => crate::oci::MEDIA_TYPE_COMPOSITE.to_string(),
     }
 }
 

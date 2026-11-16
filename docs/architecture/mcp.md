@@ -11,6 +11,11 @@ The semantic owner of a Tool is the owner of the authoritative state or action,
 Protocol routes behind the removed Tool projections still exist and are still
 used by the Web, CLI and Server.
 
+Client-side configuration is a different owner: Claude Code's MCP inventory,
+scoped management, explicit discovery and the one-click Nession registration
+are documented in [claude-code-mcp.md](claude-code-mcp.md). That integration
+reads and writes Claude's configuration; it does not add or change a Tool here.
+
 ```text
 MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
                                          │
@@ -23,11 +28,18 @@ MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
 
 ## Tools
 
-The advertised catalog is exactly four Tools:
+The advertised catalog has eleven Tools:
 
 | Semantic owner | Tool | Operation |
 |---|---|---|
 | Server | `nession_server_list_agents` | `server.agent.list` (registry discovery) |
+| Server | `nession_server_env_list` | `server.env.list` (Server and online-Agent file metadata) |
+| Server | `nession_server_env_get` | `server.env.get` (read raw file content) |
+| Server | `nession_server_env_write` | `server.env.write` (create/overwrite with in-use guards) |
+| Server | `nession_server_env_delete` | `server.env.delete` (delete with in-use guards) |
+| Server | `nession_server_session_env_binding_get` | `server.session.env.binding.get` (desired + observed state) |
+| Server | `nession_server_session_env_binding_set` | `server.session.env.binding.set` (whole ordered replacement, revision CAS) |
+| Server | `nession_server_session_env_binding_reapply` | `server.session.env.binding.reapply` (re-resolve at a new revision) |
 | Agent | `nession_agent_list_sessions` | the named Agent's live Session state |
 | Agent | `nession_agent_create_session` | `agent.session.create` on the named Agent |
 | Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent |
@@ -75,6 +87,14 @@ crates/nession-mcp/src/
     ├── nession_agent_list_sessions.rs
     ├── nession_agent_create_session.rs
     └── nession_agent_kill_session.rs
+    ├── env_target.rs           # shared source/agent target and Session identity validation
+    ├── nession_server_env_list.rs
+    ├── nession_server_env_get.rs
+    ├── nession_server_env_write.rs
+    ├── nession_server_env_delete.rs
+    ├── nession_server_session_env_binding_get.rs
+    ├── nession_server_session_env_binding_set.rs
+    └── nession_server_session_env_binding_reapply.rs
 ```
 
 Every Tool is **one file named exactly like the MCP Tool**, flat under
@@ -99,12 +119,37 @@ arguments and executes the business operation through the injected
 
 ## Backend and routing contract
 
-| Hosting mode | `nession_server_list_agents` | `nession_agent_*` |
+| Hosting mode | Server-owned discovery, ENV and binding tools | `nession_agent_*` |
 |---|---|---|
 | Server embedded | Server registry via the real `server_routes!` dispatch | the unnamed target is routed to the named Agent through the Server's command broker |
 | Agent embedded | the configured Server (or an explicit "standalone Agent" unavailable error) | this Agent's local `SessionManager`, refusing any other `agent_id` |
 | Standalone, Server routing (default) | configured Server | **through the Server's canonical Agent route**, after the Server registry confirms the target is online |
 | Standalone, direct Agent (explicit) | configured Server | the one configured Agent's P2P endpoint, refusing any other `agent_id` |
+
+ENV is managed through the Server's canonical `server.env.*` routes. The
+`source` argument defaults to `server`; for `source=agent` an explicit
+`agent_id` is required. The Server's existing rules protect files bound to
+running Sessions; writes are create-only by default (`overwrite=false`),
+and forced overwrite/deletion requires `force=true`. The `get` operation
+returns raw file contents, which may contain credentials: MCP callers must
+treat them as secrets and not put them into logs or unrelated prompts.
+Agent-embedded MCP without a configured Server returns an unavailable error
+for Server-owned ENV tools; it never silently substitutes local Agent state.
+
+Session Environment Binding is its own Server-owned capability. The three
+binding Tools route through the same `server.session.env.binding.*` units the
+Web uses, never through an Agent-local tmux path. `get` reports the desired
+revision, the ordered profiles with outdated flags, the Agent-observed
+revision/status and the managed key **names** — never values or snapshots.
+`set` replaces the whole ordered selection (an empty list clears it) and
+`reapply` re-resolves the current selection at a new revision; both require
+`expected_revision`, which the Server applies as a durable compare-and-swap. A
+stale value is refused with `revision_conflict` before any durable or
+Agent-side mutation, and there is no `force`/`ignore_conflict` bypass: the
+caller re-reads with `get`. Saving an ENV file never changes a running
+Session's materialized revision; only an explicit reapply or a replacement
+does. Agent-embedded MCP without a Server fails these Tools with an
+unavailable error rather than mutating local tmux through a second path.
 
 The Agent owns Session lifecycle and live state even when a caller reaches it
 through the Server. The Server owns Agent discovery, authorization and routing.
@@ -166,6 +211,10 @@ route. The listener's HTTP grammar, routing and WebSocket Upgrade belong to
 Axum; the MCP endpoint keeps its own path check, Bearer authentication, Origin
 and Host policy. The standalone `nession-mcp` binary owns its own listener and
 still drives the shared service through hyper.
+
+### Abandoned MCP mutation requests
+
+The MCP service bounds request execution, but a timeout is **not** proof that a remote Session mutation was rolled back. Agent- and Server-embedded Session create/kill share their owner's keyed mutation lane. The request/worker pair uses a one-way admission guard: dropping an MCP request while its operation is queued atomically marks it abandoned, so the queued work skips the side effect when it reaches its turn. Once the worker has claimed execution, a later MCP timeout cannot retract the already-started business operation. The caller receives a timeout with explicit readback-before-retry guidance; it must inspect current Agent Session state rather than assume a failed write or automatically repeat it. The guard does not add a Session state owner, retry daemon or new Tool. Remote backend timeouts are likewise not evidence of rollback.
 
 ## Hosting modes
 
@@ -286,3 +335,31 @@ management, quick commands, terminal previews or attach flows. It claims only
 the base semantics of the two protocol versions above and does not advertise
 optional capabilities it does not implement. No MCP Tool mints or returns a P2P
 credential.
+
+### OCI image defaults (#3705)
+
+The Server and Agent OCI image entrypoints mount their **existing embedded**
+MCP endpoint at `/mcp` by default. Native host configs still default to
+disabled. A single `deploy/render-mcp-config.sh` emits the OCI-only table.
+
+Set `NESSION_MCP_ENABLED=false` in the container environment, Compose or
+GitOps for emergency rollback; only literal `true` and `false` are valid.
+The Server requires an operator-managed inbound `SERVER_AUTH_TOKEN` when MCP
+is on, or exits before nginx starts. The Agent MCP endpoint reuses its durable
+inbound Agent Token (operator `AGENT_TOKEN` or runtime-provisioned); the
+outbound `AGENT_AUTH_TOKEN` does **not** authorize inbound MCP calls.
+No token is embedded in the image or printed in logs.
+
+The image's nginx `:10080/mcp`, and configured Server TLS `:443/mcp`,
+forward to the same embedded service, without Web HTML fallback. Authorization,
+Origin, MCP-Protocol-Version and Mcp-Session-Id are passed through, with SSE
+buffering disabled. A smoke probe initializes via POST /mcp, calls tools/list
+and a safe read; unauthorized calls must return 401. Public exposure requires
+TLS or a trusted TLS-terminating proxy. The source and prebuilt image paths
+copy the same entrypoint, nginx template and renderer; no separate MCP
+process or listener is launched.
+
+Compose intentionally carries no published Agent default bearer token. Set
+`AGENT_TOKEN` to a unique secret to select your own, or leave it unset to use
+the Agent's durable token provisioned under `NESSION_HOME` (`/data` in Compose).
+Never publish a shared fixture token on an exposed MCP port.

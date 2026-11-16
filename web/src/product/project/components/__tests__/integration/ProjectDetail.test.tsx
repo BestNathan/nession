@@ -67,7 +67,8 @@ describe('ProjectDetailContent', () => {
     expect(screen.getAllByTestId('project-location-status').map((node) => node.textContent))
       .toEqual(['Online', 'Offline']);
     expect(screen.getByText('/bin/zsh')).toBeInTheDocument();
-    expect(screen.getByText('dev, prod')).toBeInTheDocument();
+    // #3649: the ordered declaration, not a re-sorted or de-duplicated set.
+    expect(screen.getByTestId('project-env-defaults')).toHaveTextContent('dev, prod');
     expect(screen.getByText('sandbox/default')).toBeInTheDocument();
     expect(screen.getByTestId('project-image-digest')).toHaveTextContent('sha256:');
   });

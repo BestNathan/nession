@@ -3,6 +3,10 @@ import {
   TERMINAL_CAPSULE_OCCLUSION_EVENT,
   TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT,
 } from '@/platform/terminal-runtime/capsule/occlusionScroll';
+import {
+  APP_VIEWPORT_ENVIRONMENT_ATTRIBUTE,
+  APP_VIEWPORT_SNAPSHOT_EVENT,
+} from '@/platform/viewport/appViewport';
 
 /**
  * Publishes the dock's two different clearances on the nearest
@@ -81,16 +85,20 @@ export function useCapsuleDockClearance(
 
     // Portrait/landscape, safe area and the soft keyboard are viewport events,
     // not dock resizes in every browser; the safe-area/edge case still has to
-    // republish. `visualViewport` is absent in jsdom, so both are guarded.
-    const viewport = typeof window === 'undefined' ? null : window.visualViewport;
+    // republish. The App's environment is the single viewport reader (#3523),
+    // so this hook consumes its snapshot event rather than opening a second
+    // `visualViewport` listener with its own interpretation of the geometry.
+    // That event is absent on Web (which has no App environment), so the
+    // window fallback stays.
+    const environment = shell.closest(`[${APP_VIEWPORT_ENVIRONMENT_ATTRIBUTE}]`);
     window.addEventListener('resize', update);
-    viewport?.addEventListener('resize', update);
+    environment?.addEventListener(APP_VIEWPORT_SNAPSHOT_EVENT, update);
     update();
 
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', update);
-      viewport?.removeEventListener('resize', update);
+      environment?.removeEventListener(APP_VIEWPORT_SNAPSHOT_EVENT, update);
       host.style.removeProperty('--nession-local-terminal-capsule-occlusion');
       host.style.removeProperty('--nession-local-terminal-capsule-panel-clearance');
     };

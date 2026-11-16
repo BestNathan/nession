@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import type { TerminalChrome } from '@/app/ShellMain';
 import { FIXTURE_CLIENT_SESSION_ID, FIXTURE_SELECTED_ID } from '@/app/fixture/fixtureData';
+import { envApi } from '@/capabilities/env';
 import { gitApi, githubApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
@@ -20,6 +21,7 @@ import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureGithubSurface } from './fixtureGithub';
+import { fixtureEnvSurface } from './fixtureEnv';
 import { useFixtureImages } from './fixtureImages';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
@@ -173,6 +175,9 @@ export function FixtureShell() {
   // second depth had no Web baseline at all (#1102).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
   useEffect(() => githubApi.install(fixtureGithubSurface(search)), [search]);
+  // Project Session defaults (#3649) need the same ENV catalog the shipped
+  // shell reads, so the Web fixture can show availability and offer choices.
+  useEffect(() => envApi.install(fixtureEnvSurface(search)), [search]);
   useFixtureImages(search);
 
   const {

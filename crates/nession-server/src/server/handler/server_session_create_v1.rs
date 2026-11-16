@@ -9,8 +9,8 @@ use super::{
 use nession_erofs::oci::descriptor::Platform;
 use nession_protocol::contracts::image::v1::normalize_image_digest;
 use nession_protocol::contracts::session::v1::{
-    ClientManagedCreate, ManagedImageGrant, ManagedImageObjectGrant, ManagedImageRole,
-    ManagedSessionImages,
+    ClientManagedCreate, EnvSelectionMode, ManagedImageGrant, ManagedImageObjectGrant,
+    ManagedImageRole, ManagedSessionImages,
 };
 
 use crate::image::{agent_platform, ImageResolution};
@@ -64,6 +64,23 @@ impl ConnectionHandler {
             return Ok(session_create_reply(&msg.id, refusal("Not authenticated")));
         }
 
+        // Pre-read the explicit selection mode so an unsupported value names
+        // itself. The typed parse below remains the single owner of the shape;
+        // this only prevents it from collapsing every malformed field into the
+        // generic "agent_id and name are required" refusal.
+        let env_selection_mode = match msg.payload.get("env_selection_mode") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => match serde_json::from_value::<EnvSelectionMode>(value.clone()) {
+                Ok(mode) => Some(mode),
+                Err(_) => {
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal("env_selection_mode must be 'inherit' or 'replace'"),
+                    ));
+                }
+            },
+        };
+
         // `env_files` is declared now. The handler read it off the payload after
         // this parse would have moved it, so the compiler showed the contract
         // was missing a field rather than a reviewer having to notice.
@@ -72,6 +89,7 @@ impl ConnectionHandler {
             name,
             working_dir,
             env_files: env_refs,
+            env_selection_mode: _,
             sandbox,
             project_id,
             managed,
@@ -189,14 +207,17 @@ impl ConnectionHandler {
             None
         };
 
-        // Precedence (#3025 SC-03): an explicit request selection wins; only
-        // when the request selects none do the Project's declared ENV profile
-        // ids apply, resolved as Server env files by name. The resolved set
-        // becomes the Session's own binding below, so a later Project edit
+        // Precedence (#3025 SC-03, #3649): an explicit selection mode states
+        // the caller's intent. `replace` uses the request exactly, including an
+        // empty list that deliberately binds no environment. `inherit` resolves
+        // the named Project's declared ENV profile ids and refuses a
+        // simultaneous explicit selection. Absent keeps the legacy precedence:
+        // a non-empty request selection wins; only when the request selects
+        // none do the Project's declared ENV profile ids apply. The resolved
+        // set becomes the Session's own binding below, so a later Project edit
         // cannot mutate an existing Session's environment.
-        let env_refs: Vec<EnvFileRef> = if env_refs.is_empty() {
+        let inherited_refs = |project: Option<&crate::db::ProjectRow>| -> Vec<EnvFileRef> {
             project
-                .as_ref()
                 .and_then(|project| project.session_defaults.as_ref())
                 .map(|defaults| {
                     defaults
@@ -210,8 +231,33 @@ impl ConnectionHandler {
                         .collect()
                 })
                 .unwrap_or_default()
-        } else {
-            env_refs
+        };
+        let env_refs: Vec<EnvFileRef> = match env_selection_mode {
+            Some(EnvSelectionMode::Inherit) => {
+                if !env_refs.is_empty() {
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal(
+                            "env_selection_mode 'inherit' cannot be combined with env_files; use 'replace' for an explicit selection",
+                        ),
+                    ));
+                }
+                if project.is_none() {
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal("env_selection_mode 'inherit' requires a Project"),
+                    ));
+                }
+                inherited_refs(project.as_ref())
+            }
+            Some(EnvSelectionMode::Replace) => env_refs,
+            None => {
+                if env_refs.is_empty() {
+                    inherited_refs(project.as_ref())
+                } else {
+                    env_refs
+                }
+            }
         };
 
         // `env_refs` is the effective create-time binding selection — the

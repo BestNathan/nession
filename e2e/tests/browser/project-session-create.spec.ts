@@ -34,6 +34,16 @@ test.describe('Project Existing-location Session creation', () => {
 
     const sessionDialog = page.getByRole('dialog').filter({ hasText: 'Create Session in' });
     await expect(sessionDialog).toBeVisible();
+    // #3649: a Project create defaults to inheriting the declaration. This
+    // Project declares no ENV defaults, so the effective preview is explicitly
+    // empty rather than silently absent.
+    await expect(
+      sessionDialog.getByTestId('env-mode-inherit').getByRole('radio'),
+    ).toBeChecked();
+    await expect(sessionDialog.getByTestId('env-effective-origin')).toHaveText(
+      'From Project defaults',
+    );
+    await expect(sessionDialog.getByTestId('env-effective-empty')).toBeVisible();
     const sessionName = `e2e-project-session-${Date.now()}`;
     await sessionDialog.locator('#name').fill(sessionName);
     await sessionDialog.getByTestId('create-session-submit').click();
@@ -212,4 +222,150 @@ test.describe('Project Existing-location Session creation', () => {
     await expect(dialog.getByTestId('project-location-trigger')).toHaveCount(0);
     await expect(dialog.getByTestId('create-session-submit')).toBeDisabled();
   });
+
+  // #3649 SC-01 — the declaration is editable in Project settings, ordered,
+  // and persisted through the Project update unit. The canonical fixture has
+  // one Server ENV; removing and re-adding exercises both directions.
+  test('Project settings edits the ordered default ENV references', async ({ page }) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-item-row').first().click();
+    await page.getByTestId('project-detail-settings').click();
+
+    const dialog = page.getByTestId('project-settings-dialog');
+    await expect(dialog).toBeVisible();
+    const staged = dialog.getByTestId('env-selected-server::staging.env');
+    await expect(staged).toContainText('staging.env');
+
+    await dialog.getByTestId('env-selected-remove-server::staging.env').click();
+    await expect(dialog.getByTestId('env-selected-server::staging.env')).toHaveCount(0);
+    // The picker still offers the file; add it back as the sole ordered ref.
+    await dialog.getByText('staging.env').click();
+    await expect(dialog.getByTestId('env-selected-server::staging.env')).toContainText(
+      'staging.env',
+    );
+
+    await dialog.getByTestId('project-settings-submit').click();
+    await expect(page.getByTestId('project-settings-dialog')).not.toBeVisible();
+    await expect(page.getByTestId('project-env-defaults')).toContainText('staging.env');
+  });
+
+  // #3649 SC-01/SC-02 — a missing reference is visible in the declaration and
+  // in the create preview, and create refuses instead of falling back.
+  test('a missing inherited ENV reference fails visibly', async ({ page }) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    await page.goto('/#/fixture?projects=missing-env');
+    await page.getByTestId('project-item-row').first().click();
+    await expect(page.getByTestId('project-env-default-missing-1')).toHaveText('(missing)');
+
+    await page.getByTestId('project-detail-settings').click();
+    const settings = page.getByTestId('project-settings-dialog');
+    await expect(settings.getByTestId('project-settings-env-defaults-missing')).toContainText(
+      'missing.env is not in the ENV Library',
+    );
+    await page.keyboard.press('Escape');
+    await expect(settings).not.toBeVisible();
+
+    await page.getByTestId('project-detail-create-session').click();
+    const dialog = page.getByTestId('create-session-dialog');
+    await dialog.locator('#name').fill('missing-default');
+    await expect(dialog.getByTestId('env-effective-missing-1')).toBeVisible();
+    await dialog.getByTestId('create-session-submit').click();
+    await expect(dialog.getByTestId('create-session-error')).toContainText(
+      'Cannot create Session: missing.env unavailable',
+    );
+  });
+
+  // #3649 SC-02 — the three choices and their effective previews on Web. The
+  // custom order is the picker's selection order; switching modes never mutates
+  // the Project declaration.
+  test('create Session distinguishes inherit, custom and no environment', async ({ page }) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-item-row').first().click();
+    await page.getByTestId('project-detail-create-session').click();
+
+    const dialog = page.getByTestId('create-session-dialog');
+    await expect(dialog.getByTestId('env-mode-inherit').getByRole('radio')).toBeChecked();
+    await expect(dialog.getByTestId('env-effective-origin')).toHaveText(
+      'From Project defaults',
+    );
+    await expect(dialog.getByTestId('env-effective-list')).toContainText('staging.env');
+
+    await dialog.getByTestId('env-mode-custom').click();
+    await expect(dialog.getByTestId('env-effective-origin')).toHaveText(
+      'Explicit replacement',
+    );
+    await expect(dialog.getByTestId('env-effective-empty')).toBeVisible();
+    await dialog.getByText('prod.env').click();
+    await expect(dialog.getByTestId('env-effective-item-0')).toContainText('prod.env');
+    await dialog.getByText('local.env').click();
+    await expect(dialog.getByTestId('env-effective-item-1')).toContainText('local.env');
+    // Reordering is the declaration order the Session will materialize.
+    await dialog.getByTestId('env-selected-up-agent:devbox-01:local.env').click();
+    await expect(dialog.getByTestId('env-effective-item-0')).toContainText('local.env');
+    await expect(dialog.getByTestId('env-effective-item-1')).toContainText('prod.env');
+
+    await dialog.getByTestId('env-mode-none').click();
+    await expect(dialog.getByTestId('env-effective-origin')).toHaveText('Explicit empty');
+    await expect(dialog.getByTestId('env-effective-empty')).toBeVisible();
+
+    await dialog.getByTestId('env-mode-inherit').click();
+    await expect(dialog.getByTestId('env-effective-origin')).toHaveText(
+      'From Project defaults',
+    );
+    await expect(dialog.getByTestId('env-effective-list')).toContainText('staging.env');
+  });
+
+  // #3649 SC-02 — App keeps one current-depth header/Back at 390 and 375 and
+  // the mode choices stay touch-sized inside the viewport.
+  for (const width of [390, 375]) {
+    test(`App create Session environment modes stay usable at ${width}`, async ({ page }) => {
+      test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto('/#/fixture/app?projects=canonical');
+      await page.getByTestId('app-header-sessions').first().click();
+      await page.getByTestId('project-item-row').first().click();
+      const detail = page.getByTestId('app-project-detail');
+      await expect(detail).toBeVisible();
+      await expect(detail.getByTestId('app-page-header')).toHaveCount(1);
+
+      await page.getByTestId('project-detail-create-session').click();
+      const formPage = page.getByTestId('app-create-session-page');
+      await expect(formPage).toBeVisible();
+      await expect(formPage.getByTestId('app-page-header')).toHaveCount(1);
+      await expect(page.getByTestId('app-session-env')).toContainText(
+        'Use Project defaults',
+      );
+      await expect(page.getByTestId('app-session-env')).toContainText('staging.env');
+
+      await page.getByTestId('app-session-env').click();
+      const envPage = page.getByTestId('app-create-env-page');
+      await expect(envPage).toBeVisible();
+      await expect(envPage.getByTestId('app-page-header')).toHaveCount(1);
+      await expect(
+        page.getByTestId('app-env-mode-inherit').getByRole('radio'),
+      ).toBeChecked();
+      await expect(page.getByTestId('app-env-effective-preview')).toContainText(
+        'From Project defaults',
+      );
+      await expect(page.getByTestId('app-env-effective-preview')).toContainText('staging.env');
+
+      for (const id of ['app-env-mode-inherit', 'app-env-mode-custom', 'app-env-mode-none']) {
+        const box = await page.getByTestId(id).boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+        expect(box!.x).toBeGreaterThanOrEqual(-0.5);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width + 0.5);
+      }
+
+      await page.getByTestId('app-env-mode-none').click();
+      await expect(page.getByTestId('app-env-effective-preview')).toContainText(
+        'Explicit empty',
+      );
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width + 1,
+      );
+    });
+  }
 });

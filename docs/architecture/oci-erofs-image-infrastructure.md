@@ -117,6 +117,71 @@ non-raw layers, multi-device EROFS, chunk-index/lazy variants, multiple layers,
 and Overlay/role variants. Original input bytes are preserved where the storage
 or import policy allows so a future version can adopt them.
 
+### Image Compose (#3696)
+
+A Compose build (`representation = "flattened"`, the default) consumes one to
+sixteen **catalog** source Images and produces one new ordinary single-layer
+EROFS Image. `representation = "referenced"` produces the multi-blob form
+described in [Referenced multi-blob Composite](#referenced-multi-blob-composite-3697). Each source names its Repository, a
+Tag or immutable digest, and a validated absolute destination prefix; the
+Server resolves each reference to an immutable Manifest/Config/layer **once at
+submission** and pins it for the build. Execution re-verifies those exact
+identities, extracts each source with the pinned `fsck.erofs --extract`, merges
+the trees under disjoint destinations with fail-closed duplicate/shadowing,
+whiteout and symlink checks, scans the result once, and packages it with the
+fixed `mkfs.erofs` argv. The result layer digest is a new physical identity;
+the source layer digests are provenance, not the result. Config Env merges by
+name with conflicts failing; commands/working directory are retained only when
+every defining source agrees; conflicting advisory annotations fail. The
+Manifest carries `io.nession.compose.format` and
+`io.nession.compose.sources` provenance annotations (`io.nession.*` values are
+advisory; they never authorize a mount). Whether the result is later referenced
+by source blobs is a separate format owned by #3697, not a v1 Manifest-layer
+shortcut.
+
+### Referenced multi-blob Composite (#3697)
+
+A referenced Composite reuses the pinned source EROFS bytes instead of copying
+them. `mkfs.erofs` rebuild mode produces one **metadata EROFS** whose chunk
+indexes reference the source images as external devices in the declared device
+order. The immutable image identity is a standard OCI Manifest with exactly
+one layer descriptor of media type
+`application/vnd.nession.erofs.composite.v1+json`; that JSON names the
+metadata device, the ordered backing devices, the platform and the pinned
+packer identity (`erofs-rebuild-v1`, 4096-byte block/chunk, `mkfs.erofs`).
+
+The Config is a documented Nession rootfs form:
+`rootfs.type = "erofs-composite"` and `rootfs.diff_ids` equals the metadata
+digest followed by the backing device digests. The Manifest still has one
+layer descriptor, so this is not a multi-layer OCI claim; the descriptor
+closure is verified against catalog rows and CAS bytes before any publication
+or mount.
+
+Rules:
+
+- every source must be block-addressed (no inline file data); an unsupported
+  source layout makes the pinned rebuild fail closed with an explicit
+  compatibility diagnostic;
+- every source tree layers at the composed root; destination prefixes are
+  refused for this representation;
+- a path owned by two sources, a file-vs-directory mismatch, special files,
+  overlay whiteouts and escaping symlinks fail before publication;
+- the metadata image must carry `chunked_file` + `device_table` and declare
+  exactly the expected extra-device count;
+- catalog edges are `manifest → composite → metadata/device`; GC retains every
+  reachable backing blob while a Tag or live pin reaches the Manifest;
+- Server→Agent grants carry the whole closure; the Agent cache verifies and
+  pins the metadata and every device for the physical mount lifetime;
+- `nession-erofs::mount_manager` keys the physical view by the Composite
+  descriptor digest (never a data Blob digest), passes `erofsfuse
+  --device=<path>` in closure order and records that closure in the durable
+  mount identity;
+- Sandbox runtime composition of a Composite is explicitly out of scope for
+  #3697 (not a prerequisite for runtime multi-lower work); selecting one in the
+  current Sandbox composition fails closed.
+
+v1 single-layer images remain unchanged and supported.
+
 Validation verifies the object schema, media types, digest and size, the
 Manifest's Config descriptor, `rootfs.diff_ids` equality with the EROFS layer
 digest, and Index child descriptors. A validation failure never produces a
@@ -184,6 +249,11 @@ optional annotation:
 
 - Git and local directory sources keep the existing non-executing snapshot and
   deterministic `mkfs.erofs` path;
+- catalog Image Compose (#3696/#3697) is an explicit source adapter: it
+  resolves and pins Repository references, and publishes either a fresh
+  flattened single-EROFS Manifest (`fsck.erofs --extract` staging) or a
+  referenced metadata EROFS plus its verified backing closure (`mkfs.erofs`
+  rebuild); it never treats a digest as authorization;
 - archive/HTTPS/GitHub Release inputs are bounded downloads with checksum
   verification and path-safe extraction (no traversal, escaping links, devices
   or hardlink escapes) and never run install scripts;
@@ -349,7 +419,9 @@ Agent: cache/distribution/mount; Sandbox: mount).
 No Dockerfile, generic software installer or container runtime; no execution of
 OCI `Entrypoint`/`Cmd`; no full `/v2/` OCI Registry server; no tar layer
 unpacking; no new background job queue; no second image database or mirrored
-state; no compressed/multi-device/chunk-index/lazy EROFS variants in v1; no
+state; no compressed/chunk-index/lazy EROFS variants in v1; the referenced
+multi-blob Composite is its own descriptor layer and is never expressed as an
+arbitrary OCI `Manifest.layers[]` union; no
 registry credentials in images, EROFS, Agent grants or logs; no automatic
 re-mount of a running process.
 

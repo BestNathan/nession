@@ -26,6 +26,11 @@ NESSION_TERMINAL_WEB_FONT_SIZE="${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
 NESSON_CONFIG_DIR="${NESSON_CONFIG_DIR:-/etc/nession}"
 mkdir -p "${NESSON_CONFIG_DIR}"
 
+# Generate validated Server config before nginx starts; no anonymous MCP.
+export SERVER_LISTEN SERVER_AUTH_TOKEN TLS_CERT_PATH TLS_KEY_PATH
+export SERVER_HEARTBEAT_INTERVAL SERVER_HEARTBEAT_TIMEOUT
+"$(dirname "$0")/render-server-config.sh" "${NESSON_CONFIG_DIR}/config.toml"
+
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
   < /etc/nginx/templates/default.conf.template \
@@ -44,7 +49,7 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     location /health { return 200 'ok'; add_header Content-Type text/plain; }
     location /ws {
-        proxy_pass http://${SERVER_BACKEND};
+        proxy_pass https://${SERVER_BACKEND};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -52,7 +57,27 @@ server {
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
-    location /api { proxy_pass http://${SERVER_BACKEND}; proxy_set_header Host \$host; }
+    location /api { proxy_pass https://${SERVER_BACKEND}; proxy_set_header Host \$host; }
+
+    # MCP Streamable HTTP is never the Web SPA fallback. Keep the original
+    # bearer, protocol, session and Origin headers; disable SSE buffering.
+    location = /mcp {
+        proxy_pass https://${SERVER_BACKEND};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header Authorization \$http_authorization;
+        proxy_set_header MCP-Protocol-Version \$http_mcp_protocol_version;
+        proxy_set_header Mcp-Session-Id \$http_mcp_session_id;
+        proxy_set_header Origin \$http_origin;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+    }
+
     location / { root /usr/share/nginx/html; index index.html; try_files \$uri \$uri/ /index.html; }
 }
 NGINX
@@ -60,12 +85,6 @@ fi
 
 nginx -t
 nginx -g 'daemon off;' &
-
-# Generate server config. The projection itself lives in the one renderer
-# script so a Case can exercise it without nginx or a listener (#2487 SC-08).
-export SERVER_LISTEN SERVER_AUTH_TOKEN TLS_CERT_PATH TLS_KEY_PATH
-export SERVER_HEARTBEAT_INTERVAL SERVER_HEARTBEAT_TIMEOUT
-"$(dirname "$0")/render-server-config.sh" "${NESSON_CONFIG_DIR}/config.toml"
 
 echo "=== nession-server ==="
 echo "  Listen:       $SERVER_LISTEN"

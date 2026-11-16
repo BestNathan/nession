@@ -405,6 +405,18 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
     .expect("HTTP answer");
     assert_eq!(anonymous.status, 401);
     assert_eq!(anonymous.header("WWW-Authenticate"), Some("Bearer"));
+    // An Agent-owned token cannot authorize Server MCP writes or reads.
+    let wrong_host_token = send(
+        addr,
+        "POST",
+        "/mcp",
+        Some("durable-agent-token"),
+        None,
+        &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }).to_string(),
+    )
+    .await
+    .expect("wrong host token receives HTTP response");
+    assert_eq!(wrong_host_token.status, 401);
 
     let session = initialize(addr).await;
     let body = json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }).to_string();
@@ -424,6 +436,13 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_env_list",
+            "nession_server_env_get",
+            "nession_server_env_write",
+            "nession_server_env_delete",
+            "nession_server_session_env_binding_get",
+            "nession_server_session_env_binding_set",
+            "nession_server_session_env_binding_reapply",
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",

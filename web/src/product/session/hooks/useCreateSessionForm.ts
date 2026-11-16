@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
+import {
+  createEnvRequest,
+  useCreateSessionEnvCatalog,
+  useProjectEnvSelection,
+} from '@/product/session/hooks/useCreateSessionEnv';
+import { validateCreateSession } from '@/product/session/model/createSessionValidation';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
-import { agentDisplayName } from '@/shared/lib/format';
-import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
+import type { Agent, EnvFileRef } from '@/types';
 import type { Project, ProjectLocation } from '@/product/project/types';
-
-function validateName(name: string): string | null {
-  if (!name.trim()) {return 'Session name is required';}
-  if (!/^[a-zA-Z0-9_\-.]+$/.test(name.trim())) {
-    return 'Only letters, digits, underscores, hyphens, and dots allowed';
-  }
-  return null;
-}
+import type { CreateEnvSelectionMode } from '@/product/session/model/envSelection';
 
 interface CreateSessionFormOptions {
   isOpen: boolean;
@@ -21,6 +18,14 @@ interface CreateSessionFormOptions {
   project?: Project | null;
   onCreated: (sessionId?: string) => void;
   onClose: () => void;
+}
+
+/** The form-event wrapper around the one submit action. */
+function preventDefaultSubmit(submit: () => Promise<void>) {
+  return (event: React.FormEvent) => {
+    event.preventDefault();
+    void submit();
+  };
 }
 
 /**
@@ -43,8 +48,16 @@ export function useCreateSessionForm({
   const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
+  const { envFiles, envCatalogState } = useCreateSessionEnvCatalog(isOpen);
   const [selectedEnv, setSelectedEnv] = useState<EnvFileRef[]>([]);
+  /**
+   * The Project branch starts on `inherit`: the Server's legacy behavior is
+   * exactly what a user reading "Use Project defaults" expects. The mode is
+   * page state, not copied ENV state, so switching the Project while the dialog
+   * is open recomputes the effective preview from the new declaration.
+   */
+  const [envSelectionMode, setEnvSelectionMode] =
+    useState<CreateEnvSelectionMode>('inherit');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const onlineAgents = useMemo(() => agents.filter((a) => a.status === 'online'), [agents]);
@@ -66,18 +79,23 @@ export function useCreateSessionForm({
     setLoading(false);
     setError(null);
     setSelectedEnv([]);
+    setEnvSelectionMode('inherit');
   }, [preselectedAgentId]);
   useDialogReset(isOpen, resetState);
 
   useEffect(() => {
     if (isOpen) {
-      envApi
-        .listEnvFiles()
-        .then((resp) => setEnvFiles(resp.files))
-        .catch(() => setEnvFiles([]));
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
   }, [isOpen]);
+
+  const { effectiveEnv, unavailableEnv } = useProjectEnvSelection({
+    project,
+    envFiles,
+    envCatalogState,
+    selectedEnv,
+    envSelectionMode,
+  });
 
   /**
    * The one create action. It is exposed without a form-event dependency so a
@@ -85,37 +103,37 @@ export function useCreateSessionForm({
    * page, #3089) runs the same validation and submission.
    */
   const submit = async () => {
-    const nameError = validateName(sessionName);
-    if (nameError) {
-      setError(nameError);
-      return;
-    }
-    if (project) {
-      if (!selectedLocation) {
-        setError('This Project has no Existing Location. Add one in Project settings.');
-        return;
-      }
-      if (selectedLocationAgent?.status !== 'online') {
-        setError(
-          `Agent '${selectedLocationAgent ? agentDisplayName(selectedLocationAgent) : selectedLocation.agent_id}' is offline`,
-        );
-        return;
-      }
-    }
-    if (!project && !agentId) {
-      setError('Please select an agent');
+    const invalid = validateCreateSession({
+      sessionName,
+      agentId,
+      project,
+      selectedLocation,
+      selectedLocationAgent,
+      envSelectionMode,
+      selectedEnv,
+      unavailableEnv,
+    });
+    if (invalid) {
+      setError(invalid);
       return;
     }
 
     setLoading(true);
     setError(null);
     try {
+      const envRequest = createEnvRequest(project, envSelectionMode, selectedEnv);
       const result = project && selectedLocation
-        ? await sessionsApi.createSession(selectedLocation.agent_id, sessionName.trim(), selectedEnv, {
-            workingDir: selectedLocation.path,
-            projectId: project.project_id,
-          })
-        : await sessionsApi.createSession(agentId, sessionName.trim(), selectedEnv);
+        ? await sessionsApi.createSession(
+            selectedLocation.agent_id,
+            sessionName.trim(),
+            envRequest.files,
+            {
+              workingDir: selectedLocation.path,
+              projectId: project.project_id,
+              envSelectionMode: envRequest.envSelectionMode,
+            },
+          )
+        : await sessionsApi.createSession(agentId, sessionName.trim(), envRequest.files);
       if (result.success) {
         onCreated(result.session_id);
         onClose();
@@ -129,10 +147,7 @@ export function useCreateSessionForm({
     }
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    void submit();
-  };
+  const handleSubmit = preventDefaultSubmit(submit);
 
   return {
     submit,
@@ -146,8 +161,13 @@ export function useCreateSessionForm({
     loading,
     error,
     envFiles,
+    envCatalogState,
     selectedEnv,
     setSelectedEnv,
+    envSelectionMode,
+    setEnvSelectionMode,
+    effectiveEnv,
+    unavailableEnv,
     nameInputRef,
     onlineAgents,
     locations,

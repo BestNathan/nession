@@ -26,14 +26,15 @@ services:
       AGENT_ID: agent-docker
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: ""   # standalone, no server
-      # Required by the line above: with no Server there is nothing to mint a
-      # credential, so the agent refuses to start without one rather than
-      # binding a socket that refuses every connection (#1013).
-      AGENT_TOKEN: "change-me-standalone"
+      # Never ship a published default bearer token. An explicit AGENT_TOKEN
+      # is accepted; otherwise the Agent provisions one on its durable /data
+      # volume before mounting MCP (#3440).
+      AGENT_TOKEN: "${AGENT_TOKEN:-}"
       # Fixed terminal columns (#2487). The same value the Web image was
       # built with; the Agent validates it and uses it for new Sessions.
       NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
       LISTEN_PORT: "10080"
+      NESSION_MCP_ENABLED: "${NESSION_MCP_ENABLED:-true}"
       SERVER_BACKEND: "127.0.0.1:19090"
       # Durable Agent state and EROFS cache (#3179). /data is the named
       # volume below; the cache is an explicit durable declaration, so the
@@ -67,7 +68,9 @@ services:
     environment:
       SERVER_LISTEN: "0.0.0.0:18080"
       LISTEN_PORT: "10080"
+      NESSION_MCP_ENABLED: "${NESSION_MCP_ENABLED:-true}"
       SERVER_BACKEND: "127.0.0.1:18080"
+      # Required for image-default MCP; empty is an intentional fail-closed startup.
       SERVER_AUTH_TOKEN: "${SERVER_AUTH_TOKEN:-}"
       # The canonical Server data root (#3179). `server-data` is mounted at
       # this exact path below, so the metadata DB, image blobs and build
@@ -105,6 +108,7 @@ services:
       AGENT_ID: agent-remote
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: "ws://server:18080"
+      NESSION_MCP_ENABLED: "${NESSION_MCP_ENABLED:-true}"
       NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
       # Distinct durable Agent state and EROFS cache (#3179).
       NESSION_HOME: "/data"

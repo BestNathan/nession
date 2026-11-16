@@ -13,6 +13,13 @@ export interface ProjectDraft {
   description?: string;
   source?: ProjectSource;
   locations: ProjectLocation[];
+  /**
+   * Ordered Server ENV references inherited by a new Session (#3649).
+   *
+   * Names only: the global ENV Library owns contents, and the Project never
+   * copies a file or its values. An empty list is a valid declaration.
+   */
+  envProfileIds: string[];
   image_digest?: string;
 }
 

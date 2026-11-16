@@ -64,6 +64,7 @@ const draft: ProjectDraft = {
   name: 'Nession',
   source: { repository_url: 'https://github.com/BestNathan/nession', ref: 'main' },
   locations: [],
+  envProfileIds: [],
   image_digest: undefined,
 };
 

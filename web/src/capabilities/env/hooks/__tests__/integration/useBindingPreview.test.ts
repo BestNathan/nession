@@ -7,10 +7,7 @@ const envApi = vi.hoisted(() => ({
   getEnvFile: vi.fn(),
 }));
 
-vi.mock('@/capabilities/env', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/capabilities/env')>()),
-  envApi,
-}));
+vi.mock('@/capabilities/env/envApi', () => ({ envApi }));
 
 import { useBindingPreview } from '@/capabilities/env/hooks/useBindingPreview';
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { EnvFileInfo } from '@/types';
-import { envApi } from '@/capabilities/env';
+import { envApi } from '../envApi';
 
 export interface EnvironmentProfiles {
   profiles: EnvFileInfo[];

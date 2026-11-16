@@ -82,7 +82,8 @@ RUN printf 'set -g mouse on\nsetw -g mode-keys vi\nset -g focus-events on\n' > /
 # Stable files first — rarely change, always cache-hit
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/entrypoint-agent.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY deploy/render-mcp-config.sh /render-mcp-config.sh
+RUN chmod +x /entrypoint.sh /render-mcp-config.sh
 # Durable Agent data root (#3023). A Kubernetes deployment mounts its
 # existing PVC at /data and sets the EROFS cache under it. An OCI `VOLUME` is
 # NOT a PVC: without an explicitly mounted durable volume, /data (and therefore

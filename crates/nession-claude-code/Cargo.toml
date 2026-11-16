@@ -17,6 +17,14 @@ dirs = "5"
 # Claude Code project-directory keys are NFC-normalised upstream; a decomposed
 # macOS path would otherwise key a different directory than Claude uses.
 unicode-normalization = "0.1"
+# MCP endpoint and URL validation for the Claude MCP inventory/mutation/probe
+# units (#3600). Argument-vector process invocation stays in `tokio::process`;
+# this is only for parsing endpoints a user configured.
+url.workspace = true
+# Bounded HTTP capability discovery against an explicitly inspected MCP
+# endpoint (#3600). `rustls` keeps the probe portable and `stream` lets the
+# response be capped while it arrives instead of buffered whole.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 # Codegen only — see nession-protocol/Cargo.toml.
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true, features = ["derive"] }

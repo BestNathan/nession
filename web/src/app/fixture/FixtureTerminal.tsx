@@ -253,6 +253,12 @@ function startFixtureTerminal(
   let frame = 0;
   let remaining = 0;
   let fittedWidth = -1;
+  // Observable grid facts for browser Cases (#3523). Keyboard/short-viewport
+  // Cases assert that the grid and the number of real xterm resizes do not
+  // move; reading `emulator.rows` alone would hide a re-fit that returned to
+  // the same row count.
+  let resizeCount = 0;
+  host.dataset.terminalResizes = '0';
   // Fit the font for this width once; the cell is re-read each frame so a
   // renderer that settles later still yields the final grid.
   const fitFont = () => {
@@ -288,6 +294,11 @@ function startFixtureTerminal(
       const grid = rows === null ? null : { cols: fixed.cols, rows };
       if (grid !== null && (emulator.cols !== grid.cols || emulator.rows !== grid.rows)) {
         emulator.resize(grid.cols, grid.rows);
+        resizeCount += 1;
+        host.dataset.terminalResizes = String(resizeCount);
+      }
+      if (grid !== null) {
+        host.dataset.terminalRows = String(grid.rows);
       }
       // Written once the grid is right, rather than before sizing it. A write
       // at xterm's 80x24 default followed by a resize leaves the buffer to

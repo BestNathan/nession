@@ -297,6 +297,7 @@ fn test_client_session_create_payload() {
         name: "new-session".to_string(),
         working_dir: None,
         env_files: Vec::new(),
+        env_selection_mode: None,
         sandbox: None,
         project_id: None,
         managed: None,
@@ -346,6 +347,39 @@ fn test_client_session_create_env_files_are_part_of_the_contract() {
     let decoded: ClientSessionCreatePayload = serde_json::from_value(json).unwrap();
     assert_eq!(decoded.env_files.len(), 1);
     assert_eq!(decoded.env_files.first().unwrap().name, "staging.env");
+}
+
+#[test]
+fn test_client_session_create_env_selection_mode_is_optional_and_typed() {
+    // #3649: absence preserves the old inherit/explicit precedence. The two
+    // supported values are the only wire spellings; an unknown value must fail
+    // decoding rather than degrade into a different selection.
+    let legacy: ClientSessionCreatePayload =
+        serde_json::from_value(serde_json::json!({ "agent_id": "a", "name": "n" })).unwrap();
+    assert!(legacy.env_selection_mode.is_none());
+
+    for (wire, expected) in [
+        ("inherit", EnvSelectionMode::Inherit),
+        ("replace", EnvSelectionMode::Replace),
+    ] {
+        let decoded: ClientSessionCreatePayload = serde_json::from_value(serde_json::json!({
+            "agent_id": "a",
+            "name": "n",
+            "env_selection_mode": wire,
+        }))
+        .unwrap();
+        assert_eq!(decoded.env_selection_mode, Some(expected));
+    }
+
+    let invalid = serde_json::from_value::<ClientSessionCreatePayload>(serde_json::json!({
+        "agent_id": "a",
+        "name": "n",
+        "env_selection_mode": "append",
+    }));
+    assert!(
+        invalid.is_err(),
+        "an unsupported env_selection_mode must not decode"
+    );
 }
 
 #[test]

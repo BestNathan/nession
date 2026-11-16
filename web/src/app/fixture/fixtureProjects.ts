@@ -25,7 +25,7 @@ function seedProjects(): Project[] {
       locations: [{ agent_id: 'macbook', path: '/Users/nathan/code/nession' }],
       session_defaults: {
         shell: '/bin/zsh',
-        env_profile_ids: ['dev'],
+        env_profile_ids: ['staging.env'],
         sandbox_policy_ref: 'sandbox/default',
       },
       image_digest: `sha256:${'a'.repeat(64)}`,
@@ -68,6 +68,28 @@ function longLocationProjects(): Project[] {
   return projects;
 }
 
+/** A declared Server reference the ENV Library no longer contains (#3649). */
+function missingEnvProjects(): Project[] {
+  const projects = seedProjects();
+  projects[0].session_defaults = {
+    shell: '/bin/zsh',
+    env_profile_ids: ['staging.env', 'missing.env'],
+    sandbox_policy_ref: 'sandbox/default',
+  };
+  return projects;
+}
+
+/** Two ordered Server ENV references for the #3649 reorder/edit Case. */
+function orderedEnvProjects(): Project[] {
+  const projects = seedProjects();
+  projects[0].session_defaults = {
+    shell: '/bin/zsh',
+    env_profile_ids: ['staging.env', 'shared.env'],
+    sandbox_policy_ref: 'sandbox/default',
+  };
+  return projects;
+}
+
 export type FixtureProjectsScenario =
   | 'canonical'
   | 'empty'
@@ -75,6 +97,8 @@ export type FixtureProjectsScenario =
   | 'loading'
   | 'offline'
   | 'long'
+  | 'missing-env'
+  | 'ordered-env'
   | 'stale-list';
 
 export function fixtureProjectsScenario(search: string): FixtureProjectsScenario {
@@ -85,6 +109,8 @@ export function fixtureProjectsScenario(search: string): FixtureProjectsScenario
     value === 'loading' ||
     value === 'offline' ||
     value === 'long' ||
+    value === 'missing-env' ||
+    value === 'ordered-env' ||
     value === 'stale-list'
   ) {
     return value;
@@ -263,7 +289,11 @@ export function createFixtureProjectHarness(search: string): {
         ? offlineProjects()
         : scenario === 'long'
           ? longLocationProjects()
-          : seedProjects(),
+          : scenario === 'missing-env'
+            ? missingEnvProjects()
+            : scenario === 'ordered-env'
+              ? orderedEnvProjects()
+              : seedProjects(),
     lists: 0,
     creates: [],
     updates: [],

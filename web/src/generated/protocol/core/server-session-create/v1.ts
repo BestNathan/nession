@@ -37,6 +37,16 @@ working_dir?: string | null,
  */
 env_files: Array<EnvFileRef>, 
 /**
+ * Explicit create-time ENV intent (#3649).
+ *
+ * `inherit` resolves the Project's ordered Server ENV references and
+ * refuses an explicit `env_files` selection; `replace` uses `env_files`
+ * exactly, including an empty list that explicitly binds no environment.
+ * Absent keeps the legacy behavior: empty `env_files` with a Project
+ * inherits its defaults, while non-empty `env_files` overrides them.
+ */
+env_selection_mode?: EnvSelectionMode | null, 
+/**
  * Optional Project this Session is created from (#3025).
  *
  * When present, `agent_id` and `working_dir` must name one of the
@@ -59,6 +69,7 @@ warnings: Array<string>,
  * validated. The Agent never sees this field; the Server owns the link.
  */
 project_id?: string | null, };
+export type EnvSelectionMode = "inherit" | "replace";
 export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
 export type EnvSource = "server" | "agent";
 
@@ -80,6 +91,16 @@ working_dir?: string | null,
  * having to notice it.
  */
 env_files: Array<EnvFileRef>, 
+/**
+ * Explicit create-time ENV intent (#3649).
+ *
+ * `inherit` resolves the Project's ordered Server ENV references and
+ * refuses an explicit `env_files` selection; `replace` uses `env_files`
+ * exactly, including an empty list that explicitly binds no environment.
+ * Absent keeps the legacy behavior: empty `env_files` with a Project
+ * inherits its defaults, while non-empty `env_files` overrides them.
+ */
+env_selection_mode?: EnvSelectionMode | null, 
 /**
  * Optional Project this Session is created from (#3025).
  *
