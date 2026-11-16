@@ -6,5 +6,9 @@ runtime: full-stack-local
 isolation: shared
 verifiers:
   - type: runtime
-    entry: verify.cjs
+    entry: mcp.cjs
+  - type: runtime
+    entry: server.cjs
+  - type: runtime
+    entry: agent.cjs
 result_policy: all-pass
