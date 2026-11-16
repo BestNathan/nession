@@ -5,7 +5,8 @@
 // or invoke an Agent with privileged credentials.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
-import {armProtectedAutoMerge,publishQualificationStatus,QUALIFICATION_CONTEXT}
+import {armProtectedAutoMerge,publishQualificationStatus,isStrictQualificationRequired,
+  QUALIFICATION_CONTEXT}
   from './staging-convergence-automerge.mjs';
 import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
 import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
@@ -643,6 +644,8 @@ function reconcile(plan) {
           (sync&&!pinnedAncestor)||(!sync&&liveMain!==plan.main_sha)) {
         reject('stale or divergent sources before qualification: '+lane.branch);
       }
+      if(!isStrictQualificationRequired(repo,base))
+        reject('strict GitHub qualification protection changed before status success');
       publishQualificationStatus(repo,expectedHead,'success',
         'Exact-head CI, source/Issue acceptance and deployment qualified');
       record.outcome='AUTO_MERGE_QUALIFIED';
@@ -731,7 +734,6 @@ function selfTest() {
     {path: '.github/workflows/foreign.yml'},
     {head_branch: 'main'},
     {head_branch: 'integration/staging'},
-    {conclusion: 'failure'},
     {conclusion: 'skipped'},
     {head_repository: {full_name: 'attacker/fork'}},
     {repository: {full_name: 'attacker/fork'}},
@@ -741,6 +743,13 @@ function selfTest() {
       'untrusted Staging release wake must not start convergence: '+
         JSON.stringify(mutation));
   }
+  // #3689: failure/cancellation wakes revoke a previously green exact-HEAD
+  // qualification after source evidence changes. The source filter remains.
+  const revocationWakeEnabled=jobIf[1].includes("conclusion == 'failure'");
+  assert.equal(acceptsWake({...releaseWake,conclusion:'failure'}),
+    revocationWakeEnabled, 'failure wake migration must be deliberate');
+  assert.equal(acceptsWake({...releaseWake,conclusion:'cancelled'}),
+    revocationWakeEnabled, 'cancellation must invalidate stale readiness');
   assert.equal(acceptsWake(releaseWake, {ref:'refs/heads/staging'}), false,
     'only protected main may run the release controller');
   assert.equal(acceptsWake(releaseWake, {repository:'attacker/fork'}), false,
