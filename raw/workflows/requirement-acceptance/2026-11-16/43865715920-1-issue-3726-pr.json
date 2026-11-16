@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 43865715920,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "43865715920-1-issue-3726-pr"
+  },
+  "task": {
+    "id": "issue-3726-pr",
+    "type": "acceptance",
+    "issue": 3726,
+    "stage": "pr",
+    "target_ref": "64ec49a03d7b6e8f37d251ad812fc4421e93f48d",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "92db291d-330f-424f-ada0-7fac817b4145",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v4",
+      "sha256": "09498d24b940bca834ccfcb04ce32f6e8f5a77649d848618afc5d744db790d06"
+    }
+  },
+  "execution": {
+    "turns": 57,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 138,
+    "output": 11324,
+    "cache_read": 1562139,
+    "cache_write": 94760,
+    "reasoning": null,
+    "total": 1668361
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-16T12:21:44.669Z",
+    "finished_at": "2026-11-16T12:30:43.594Z",
+    "agent_duration_ms": 538441,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 7,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "valid",
+      "error": null,
+      "started_at": "2026-11-16T12:21:44.668Z",
+      "finished_at": "2026-11-16T12:30:43.595Z",
+      "turns": 57,
+      "tokens": {
+        "input": 138,
+        "output": 11324,
+        "cache_read": 1562139,
+        "cache_write": 94760,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
