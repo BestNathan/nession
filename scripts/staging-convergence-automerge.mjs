@@ -53,6 +53,12 @@ function policyFor(repo,base) {
   return hasStrictQualificationProtection(graphql,branch);
 }
 
+export function isStrictQualificationRequired(repo,base) {
+  if(repo!==REPO || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(base))
+    throw Error('invalid strict convergence qualification target');
+  return policyFor(repo,base);
+}
+
 export function publishQualificationStatus(repo,headSha,state,reason) {
   if(repo!==REPO || !SHA.test(headSha) || !['pending','success','failure'].includes(state))
     throw Error('invalid source-bound convergence status publication');
