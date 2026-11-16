@@ -38,11 +38,14 @@ use nession_erofs::mount_manager::{ConsumerRef, MountLease, MountManager, Verifi
 use super::mount::{self, OverlayMountSpec, OverlaySettings};
 use super::probe;
 use super::recovery::{self, OverlayIdentityFile};
-use super::state::{OverlayBinding, OverlayState, OverlayStatus};
+use super::state::{OverlayBinding, OverlayLowerBinding, OverlayState, OverlayStatus};
 use super::storage::{self, OverlayWorkspaceKey, OwnerLock, OwnerRecord};
 
 /// How long an acquire waits for another same-workspace transition to finish.
 pub const ACQUIRE_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The maximum ordered immutable EROFS lowers one Overlay may merge.
+pub const MAX_OVERLAY_LOWERS: usize = 16;
 
 /// A physical Overlay exists at the manager-derived mountpoint but this
 /// manager cannot prove it created it. It is never adopted by path.
@@ -208,15 +211,54 @@ impl OverlayMountBackend for RealMountBackend {
 }
 
 /// One request to acquire the shared Merged View of an authorized Workspace.
+///
+/// `lowers` is ordered: the first entry has the highest priority. A legacy
+/// caller that has one lower uses [`Self::single`], which produces the same
+/// one-element ordered set.
 #[derive(Debug, Clone)]
 pub struct OverlayRequest {
     pub workspace: OverlayWorkspaceKey,
-    pub lower: VerifiedImage,
+    pub lowers: Vec<VerifiedImage>,
 }
 
 impl OverlayRequest {
-    pub fn new(workspace: OverlayWorkspaceKey, lower: VerifiedImage) -> Self {
-        Self { workspace, lower }
+    pub fn new(workspace: OverlayWorkspaceKey, lowers: Vec<VerifiedImage>) -> Self {
+        Self { workspace, lowers }
+    }
+
+    pub fn single(workspace: OverlayWorkspaceKey, lower: VerifiedImage) -> Self {
+        Self {
+            workspace,
+            lowers: vec![lower],
+        }
+    }
+
+    fn ordered_digests(&self) -> Vec<String> {
+        self.lowers
+            .iter()
+            .map(|image| image.digest().to_string())
+            .collect()
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.lowers.is_empty() {
+            anyhow::bail!("an Overlay request needs at least one read-only lower");
+        }
+        if self.lowers.len() > MAX_OVERLAY_LOWERS {
+            anyhow::bail!(
+                "an Overlay request carries more than {MAX_OVERLAY_LOWERS} ordered lowers"
+            );
+        }
+        let mut seen = HashSet::new();
+        for image in &self.lowers {
+            if !seen.insert(image.digest()) {
+                anyhow::bail!(
+                    "the ordered Overlay lower set repeats digest {}",
+                    image.digest()
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -231,30 +273,53 @@ pub(super) enum LowerHandle {
         lease: Box<dyn LowerLease>,
         digest: String,
         generation: String,
+        consumer_id: String,
     },
     /// A lower consumer reconstructed from a durable execution record after a
     /// restart. Released through the manager by identity.
-    Adopted { digest: String, generation: String },
+    Adopted {
+        digest: String,
+        generation: String,
+        consumer_id: String,
+    },
 }
 
 impl LowerHandle {
-    pub(super) fn release(self, provider: &dyn LowerProvider, consumer_id: &str) -> Result<()> {
+    pub(super) fn release(self, provider: &dyn LowerProvider) -> Result<()> {
         match self {
-            Self::Leased { lease, .. } => lease.release(),
-            Self::Adopted { digest, generation } => {
-                provider.release_lower(&digest, consumer_id, Some(&generation))
+            Self::Leased {
+                lease, consumer_id, ..
+            } => {
+                // The lease is the physical consumer; the provider release is
+                // reached only after a restart (Adopted), so the lease path
+                // must not double-release.
+                let _ = consumer_id;
+                lease.release()
             }
+            Self::Adopted {
+                digest,
+                generation,
+                consumer_id,
+            } => provider.release_lower(&digest, &consumer_id, Some(&generation)),
         }
     }
 
     pub(super) fn retry_handle(&self) -> Self {
         match self {
             Self::Leased {
-                digest, generation, ..
+                digest,
+                generation,
+                consumer_id,
+                ..
             }
-            | Self::Adopted { digest, generation } => Self::Adopted {
+            | Self::Adopted {
+                digest,
+                generation,
+                consumer_id,
+            } => Self::Adopted {
                 digest: digest.clone(),
                 generation: generation.clone(),
+                consumer_id: consumer_id.clone(),
             },
         }
     }
@@ -266,7 +331,7 @@ pub(super) struct EntryState {
     pub(super) consumers: HashMap<u64, Consumer>,
     pub(super) next_token: u64,
     pub(super) failure: Option<String>,
-    pub(super) lower: Option<LowerHandle>,
+    pub(super) lower: Option<Vec<LowerHandle>>,
     pub(super) owner: Option<OwnerLock>,
 }
 
@@ -511,6 +576,7 @@ impl OverlayMountManager {
         if execution_id.trim().is_empty() {
             anyhow::bail!("a shared Overlay consumer needs a non-empty execution id");
         }
+        request.validate()?;
         self.validate_workspace(&request.workspace)?;
         let entry = self.entry_or_create(&request.workspace)?;
         let deadline = std::time::Instant::now() + ACQUIRE_WAIT_TIMEOUT;
@@ -523,12 +589,15 @@ impl OverlayMountManager {
                         drop(state);
                         continue;
                     };
-                    if binding.lower_digest != request.lower.digest() {
+                    let expected = binding.ordered_lower_digests();
+                    let requested = request.ordered_digests();
+                    if expected != requested {
                         anyhow::bail!(
-                            "the shared Overlay of {} is merged with lower {}; refusing lower {}",
+                            "the shared Overlay of {} is merged with ordered lowers [{}]; \
+                             refusing ordered lowers [{}]",
                             entry.workspace.identity(),
-                            binding.lower_digest,
-                            request.lower.digest()
+                            expected.join(", "),
+                            requested.join(", ")
                         );
                     }
                     if !self.inner.backend.is_overlay_mount(&entry.mountpoint) {
@@ -713,11 +782,14 @@ impl OverlayMountManager {
             return None;
         }
         let mounted = self.inner.backend.is_overlay_mount(&identity.mountpoint);
-        let lower_mounted = self
-            .inner
-            .lower
-            .lower_status(&identity.lower_digest)
-            .is_some_and(|status| status.mounted);
+        let lower_digests = identity.binding().ordered_lower_digests();
+        let lower_mounted = !lower_digests.is_empty()
+            && lower_digests.iter().all(|digest| {
+                self.inner
+                    .lower
+                    .lower_status(digest)
+                    .is_some_and(|status| status.mounted)
+            });
         Some(OverlayStatus {
             workspace: workspace.clone(),
             mountpoint: identity.mountpoint,
@@ -730,7 +802,8 @@ impl OverlayMountManager {
             mounted,
             verified: false,
             consumers: 0,
-            lower_digest: Some(identity.lower_digest),
+            lower_digest: lower_digests.first().cloned(),
+            lower_digests,
             lower_mounted,
             failure: None,
         })
@@ -864,7 +937,7 @@ impl OverlayMountManager {
         &self,
         entry: &OverlayEntry,
         request: &OverlayRequest,
-    ) -> Result<(OverlayBinding, LowerHandle, OwnerLock)> {
+    ) -> Result<(OverlayBinding, Vec<LowerHandle>, OwnerLock)> {
         let directory = entry.workspace.directory();
         // The durable owner lock is the cross-process fence. It is acquired
         // before the capability probe (which writes a probe file/xattr), so
@@ -930,23 +1003,47 @@ impl OverlayMountManager {
             }));
         }
 
-        let consumer_id = lower_consumer_id(&entry.workspace);
-        let mut lower = Some(
-            self.inner
-                .lower
-                .acquire_lower(&request.lower, &consumer_id)?,
-        );
-        let generation = uuid::Uuid::new_v4().to_string();
-        let Some(lower_lease) = lower.as_ref() else {
-            anyhow::bail!("the lower lease disappeared before the Overlay mount");
+        let mut lowers: Vec<LowerHandle> = Vec::with_capacity(request.lowers.len());
+        let mut binding_lowers: Vec<OverlayLowerBinding> = Vec::with_capacity(request.lowers.len());
+        let release_quiet = |lowers: &mut Vec<LowerHandle>| {
+            for lower in lowers.drain(..).rev() {
+                let _ = lower.release(&*self.inner.lower);
+            }
         };
+        for (index, image) in request.lowers.iter().enumerate() {
+            let consumer_id = lower_consumer_id(&entry.workspace, index);
+            let lease = match self.inner.lower.acquire_lower(image, &consumer_id) {
+                Ok(lease) => lease,
+                Err(error) => {
+                    release_quiet(&mut lowers);
+                    return Err(error);
+                }
+            };
+            binding_lowers.push(OverlayLowerBinding {
+                digest: lease.digest(),
+                mountpoint: lease.mountpoint(),
+                generation: lease.generation(),
+            });
+            lowers.push(LowerHandle::Leased {
+                digest: lease.digest(),
+                generation: lease.generation(),
+                consumer_id,
+                lease,
+            });
+        }
+        let Some(first_lower) = binding_lowers.first() else {
+            release_quiet(&mut lowers);
+            anyhow::bail!("the lower set disappeared before the Overlay mount");
+        };
+        let generation = uuid::Uuid::new_v4().to_string();
         let binding = OverlayBinding {
             workspace: entry.workspace.clone(),
             mountpoint: entry.mountpoint.clone(),
             generation: generation.clone(),
-            lower_digest: request.lower.digest().to_string(),
-            lower_mountpoint: lower_lease.mountpoint(),
-            lower_generation: lower_lease.generation(),
+            lower_digest: first_lower.digest.clone(),
+            lower_mountpoint: first_lower.mountpoint.clone(),
+            lower_generation: first_lower.generation.clone(),
+            lowers: binding_lowers.clone(),
         };
         let owner_record = OwnerRecord {
             agent_identity: self.inner.agent_identity.clone(),
@@ -962,25 +1059,22 @@ impl OverlayMountManager {
             &self.inner.mount_namespace,
         );
 
-        fn release_quiet(lower: &mut Option<Box<dyn LowerLease>>) {
-            if let Some(lease) = lower.take() {
-                let _ = lease.release();
-            }
-        }
-
         // Publish the durable identity before mounting so a crash between the
         // physical mount and its record has no unknown window.
         if let Err(error) = recovery::write_identity(&entry.identity_path, &identity) {
-            release_quiet(&mut lower);
+            release_quiet(&mut lowers);
             return Err(error);
         }
         if let Err(error) = storage::write_owner_record(&directory, &owner_record) {
             recovery::remove_identity(&entry.identity_path);
-            release_quiet(&mut lower);
+            release_quiet(&mut lowers);
             return Err(error);
         }
         let spec = OverlayMountSpec {
-            lower: binding.lower_mountpoint.clone(),
+            lowers: binding_lowers
+                .iter()
+                .map(|lower| lower.mountpoint.clone())
+                .collect(),
             upper: storage.upper,
             work: storage.work,
             merged: entry.mountpoint.clone(),
@@ -988,7 +1082,7 @@ impl OverlayMountManager {
         if let Err(error) = self.inner.backend.mount(&spec, &self.inner.settings) {
             recovery::remove_identity(&entry.identity_path);
             storage::remove_owner_record(&directory);
-            release_quiet(&mut lower);
+            release_quiet(&mut lowers);
             return Err(error.context(format!(
                 "mount the shared Workspace Overlay for {}",
                 entry.workspace.identity()
@@ -1006,7 +1100,7 @@ impl OverlayMountManager {
                 recovery::remove_identity(&entry.identity_path);
                 storage::remove_owner_record(&directory);
             }
-            release_quiet(&mut lower);
+            release_quiet(&mut lowers);
             return Err(match rollback {
                 Ok(()) => anyhow::anyhow!(
                     "the Overlay helper reported success but {} is not a fuse-overlayfs mount",
@@ -1019,20 +1113,20 @@ impl OverlayMountManager {
                 ),
             });
         }
-        let Some(lease) = lower else {
-            anyhow::bail!("the lower lease disappeared during the Overlay mount");
-        };
-        let handle = LowerHandle::Leased {
-            digest: lease.digest(),
-            generation: lease.generation(),
-            lease,
-        };
-        Ok((binding, handle, owner))
+        Ok((binding, lowers, owner))
     }
 }
 
-pub(super) fn lower_consumer_id(workspace: &OverlayWorkspaceKey) -> String {
-    format!("overlay:{}", workspace.short_id())
+/// The deterministic lower consumer identity of one ordered overlay lower.
+///
+/// The first lower keeps the pre-#3698 identity so a legacy durable record can
+/// be released or adopted without rewriting it. Later lowers add their index.
+pub(super) fn lower_consumer_id(workspace: &OverlayWorkspaceKey, index: usize) -> String {
+    if index == 0 {
+        format!("overlay:{}", workspace.short_id())
+    } else {
+        format!("overlay:{}:{index}", workspace.short_id())
+    }
 }
 
 pub(super) fn adopt_token(state: &mut EntryState, execution_id: &str, generation: &str) -> u64 {
@@ -1051,14 +1145,19 @@ pub(super) fn adopt_token(state: &mut EntryState, execution_id: &str, generation
 pub(super) fn status_of(inner: &ManagerInner, entry: &OverlayEntry) -> OverlayStatus {
     let state = lock(&entry.state);
     let mounted = inner.backend.is_overlay_mount(&entry.mountpoint);
-    let lower_digest = state
+    let lower_digests = state
         .binding
         .as_ref()
-        .map(|binding| binding.lower_digest.clone());
-    let lower_mounted = lower_digest
-        .as_deref()
-        .and_then(|digest| inner.lower.lower_status(digest))
-        .is_some_and(|status| status.mounted);
+        .map(OverlayBinding::ordered_lower_digests)
+        .unwrap_or_default();
+    let lower_digest = lower_digests.first().cloned();
+    let lower_mounted = !lower_digests.is_empty()
+        && lower_digests.iter().all(|digest| {
+            inner
+                .lower
+                .lower_status(digest)
+                .is_some_and(|status| status.mounted)
+        });
     OverlayStatus {
         workspace: entry.workspace.clone(),
         mountpoint: entry.mountpoint.clone(),
@@ -1071,6 +1170,7 @@ pub(super) fn status_of(inner: &ManagerInner, entry: &OverlayEntry) -> OverlaySt
         verified: mounted && state.binding.is_some() && state.phase == OverlayState::Mounted,
         consumers: state.consumers.len(),
         lower_digest,
+        lower_digests,
         lower_mounted,
         failure: state.failure.clone(),
     }
@@ -1215,10 +1315,17 @@ pub(super) fn reclaim_if_unused(
             return Err(error);
         }
     }
-    if let Some(lower) = state.lower.take() {
-        let consumer_id = lower_consumer_id(&entry.workspace);
-        let retry = lower.retry_handle();
-        if let Err(error) = lower.release(&*inner.lower, &consumer_id) {
+    if let Some(lowers) = state.lower.take() {
+        let mut retry = Vec::new();
+        let mut failure = None;
+        for lower in lowers {
+            let handle = lower.retry_handle();
+            if let Err(error) = lower.release(&*inner.lower) {
+                retry.push(handle);
+                failure.get_or_insert(error);
+            }
+        }
+        if let Some(error) = failure {
             state.lower = Some(retry);
             state.phase = OverlayState::Failed;
             state.failure = Some(format!("{error:#}"));
@@ -1320,7 +1427,6 @@ mod tests {
     struct FakeLowerState {
         acquired: Mutex<HashSet<String>>,
         released: Mutex<Vec<String>>,
-        mountpoint: Mutex<Option<PathBuf>>,
         fail_release: AtomicBool,
     }
 
@@ -1329,16 +1435,12 @@ mod tests {
         consumer_id: String,
         digest: String,
         generation: String,
+        mountpoint: PathBuf,
     }
 
     impl LowerLease for FakeLower {
         fn mountpoint(&self) -> PathBuf {
-            self.state
-                .mountpoint
-                .lock()
-                .unwrap()
-                .clone()
-                .expect("fake lower mountpoint")
+            self.mountpoint.clone()
         }
 
         fn digest(&self) -> String {
@@ -1379,7 +1481,6 @@ mod tests {
                 .join("lower")
                 .join(image.digest().replace(':', "-"));
             std::fs::create_dir_all(&mountpoint).unwrap();
-            self.state.mountpoint.lock().unwrap().replace(mountpoint);
             self.state
                 .acquired
                 .lock()
@@ -1390,6 +1491,7 @@ mod tests {
                 consumer_id: consumer_id.to_string(),
                 digest: image.digest().to_string(),
                 generation: "lower-generation".to_string(),
+                mountpoint,
             }))
         }
 
@@ -1437,8 +1539,8 @@ mod tests {
             Ok(())
         }
 
-        fn lower_status(&self, _digest: &str) -> Option<LowerStatus> {
-            let mountpoint = self.state.mountpoint.lock().unwrap().clone()?;
+        fn lower_status(&self, digest: &str) -> Option<LowerStatus> {
+            let mountpoint = self.root.join("lower").join(digest.replace(':', "-"));
             Some(LowerStatus {
                 mountpoint,
                 mounted: true,
@@ -1505,7 +1607,7 @@ mod tests {
     }
 
     fn request(fixture: &Fixture, key: &OverlayWorkspaceKey, bytes: &[u8]) -> OverlayRequest {
-        OverlayRequest::new(key.clone(), image(&fixture.workspace_root, bytes))
+        OverlayRequest::single(key.clone(), image(&fixture.workspace_root, bytes))
     }
 
     #[test]
@@ -1591,6 +1693,44 @@ mod tests {
             1,
             "the lower is released exactly when the last consumer leaves"
         );
+    }
+
+    #[test]
+    fn ordered_lowers_are_all_held_and_reordering_or_dropping_one_is_refused() {
+        let fixture = fixture();
+        let key = workspace(&fixture, "ws_ordered");
+        let lower_a = image(&fixture.workspace_root, b"lower a");
+        let lower_b = image(&fixture.workspace_root, b"lower b");
+        let request = OverlayRequest::new(key.clone(), vec![lower_a.clone(), lower_b.clone()]);
+        let lease = fixture.manager.acquire(&request, "exec-a").unwrap();
+        assert_eq!(
+            lease.binding().ordered_lower_digests(),
+            vec![lower_a.digest().to_string(), lower_b.digest().to_string()]
+        );
+        let status = fixture.manager.lookup(&key).unwrap();
+        assert_eq!(
+            status.lower_digests,
+            vec![lower_a.digest().to_string(), lower_b.digest().to_string()]
+        );
+        assert_eq!(fixture.lower_state.acquired.lock().unwrap().len(), 2);
+
+        let reordered = OverlayRequest::new(key.clone(), vec![lower_b, lower_a.clone()]);
+        let error = fixture
+            .manager
+            .acquire(&reordered, "exec-b")
+            .expect_err("a reordered lower set must not be merged into the same upper");
+        assert!(format!("{error:#}").contains("ordered lowers"), "{error:#}");
+
+        let missing = OverlayRequest::new(key, vec![lower_a]);
+        let error = fixture
+            .manager
+            .acquire(&missing, "exec-c")
+            .expect_err("a missing lower must not be merged into the same upper");
+        assert!(format!("{error:#}").contains("ordered lowers"), "{error:#}");
+
+        lease.release().unwrap();
+        assert_eq!(fixture.lower_state.released.lock().unwrap().len(), 2);
+        assert!(fixture.lower_state.acquired.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1864,7 +2004,7 @@ mod tests {
     }
 
     fn request_for_root(root: &Path, key: &OverlayWorkspaceKey) -> OverlayRequest {
-        OverlayRequest::new(key.clone(), image(root, b"lower bytes"))
+        OverlayRequest::single(key.clone(), image(root, b"lower bytes"))
     }
 
     #[test]

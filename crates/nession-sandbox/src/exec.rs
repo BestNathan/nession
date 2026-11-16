@@ -67,9 +67,29 @@ pub struct OverlayBindingRecord {
     pub workspace_relative: String,
     pub mountpoint: String,
     pub generation: String,
+    /// The first lower, kept for records written before #3698.
     pub lower_digest: String,
     pub lower_mountpoint: String,
     pub lower_generation: String,
+    /// The ordered lower set (#3698). Absent means the legacy one-lower set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lowers: Vec<OverlayLowerRecord>,
+}
+
+/// One ordered lower in a durable execution record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OverlayLowerRecord {
+    pub digest: String,
+    pub mountpoint: String,
+    pub generation: String,
+}
+
+/// The execution-owned transient writable RootFS of one record (#3698).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransientRootfsRecord {
+    pub mountpoint: String,
+    pub upper: String,
+    pub work: String,
 }
 
 /// One live execution record, durable across Agent restarts.
@@ -116,6 +136,11 @@ pub struct ExecutionRecord {
     /// (#3582). Absent on a legacy record whose Overlay was execution-scoped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay: Option<OverlayBindingRecord>,
+    /// The execution-owned transient writable RootFS (#3698). Its Merged View
+    /// must be strictly unmounted before its disposable upper/work and
+    /// read-only base consumer are released.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transient_rootfs: Option<TransientRootfsRecord>,
     /// The verified-mechanism names the execution reported.
     #[serde(default)]
     pub mechanisms: Vec<String>,
@@ -703,9 +728,7 @@ fn validate_composition_paths(
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut images = vec![&composition.base];
     if let Some(workspace) = &composition.workspace {
-        if let Some(image) = &workspace.image {
-            images.push(image);
-        }
+        images.extend(workspace.lowers.iter());
     }
     images.extend(composition.toolchains.iter());
     for image in images {
@@ -815,7 +838,7 @@ pub(crate) fn validate_composition_workspace(
             }
         }
         SandboxWorkspaceOwnership::ProjectLocation => {
-            if workspace.image.is_some() {
+            if workspace.has_lowers() {
                 return Err(SandboxError::InvalidPolicy(
                     "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
                 ));
@@ -982,6 +1005,96 @@ fn overlay_workspace(
     })
 }
 
+/// Strictly unmount one execution-owned transient RootFS and remove its
+/// disposable upper/work (#3698).
+///
+/// The base lower is only released by the subsequent shared-consumer release,
+/// so a failed unmount keeps it pinned and the record retryable.
+#[cfg(target_os = "linux")]
+fn release_transient_rootfs(
+    settings: &SandboxSettings,
+    record: &ExecutionRecord,
+    report: &mut CleanupReport,
+) -> Result<()> {
+    let Some(rootfs) = &record.transient_rootfs else {
+        return Ok(());
+    };
+    let execution_root = std::fs::canonicalize(&record.execution_dir)
+        .unwrap_or_else(|_| PathBuf::from(&record.execution_dir));
+    let mountpoint = Path::new(&rootfs.mountpoint);
+    let canonical_mount =
+        std::fs::canonicalize(mountpoint).unwrap_or_else(|_| mountpoint.to_path_buf());
+    if !canonical_mount.starts_with(&execution_root) {
+        return Err(SandboxError::Cleanup(format!(
+            "the recorded transient RootFS mountpoint {} is outside the execution directory",
+            mountpoint.display()
+        )));
+    }
+    if crate::mount::overlay::mount::is_overlay_mount(mountpoint) {
+        let overlay_settings = crate::mount::overlay::OverlaySettings::new(
+            settings.fuse_overlayfs_path.clone(),
+            settings.fusermount_path.clone(),
+        );
+        crate::mount::overlay::mount::unmount_overlay(&overlay_settings, mountpoint).map_err(
+            |error| {
+                SandboxError::Cleanup(format!(
+                    "could not strictly unmount the transient RootFS at {}: {error:#}",
+                    mountpoint.display()
+                ))
+            },
+        )?;
+    } else if nession_erofs::mount::is_mounted(mountpoint) {
+        return Err(SandboxError::Cleanup(format!(
+            "the recorded transient RootFS path {} is a foreign mount; refusing to unmount it",
+            mountpoint.display()
+        )));
+    }
+    for path in [&rootfs.upper, &rootfs.work] {
+        let path = Path::new(path);
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if !canonical.starts_with(&execution_root) {
+            return Err(SandboxError::Cleanup(format!(
+                "the recorded transient RootFS directory {} is outside the execution directory",
+                path.display()
+            )));
+        }
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(SandboxError::Cleanup(format!(
+                    "refusing to remove symlinked transient RootFS path {}",
+                    path.display()
+                )))
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                std::fs::remove_dir_all(path).map_err(|error| {
+                    SandboxError::Cleanup(format!(
+                        "could not remove the transient RootFS directory {}: {error}",
+                        path.display()
+                    ))
+                })?
+            }
+            Ok(_) => {
+                return Err(SandboxError::Cleanup(format!(
+                    "the transient RootFS path {} is not a directory",
+                    path.display()
+                )))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(SandboxError::Cleanup(format!(
+                    "could not inspect the transient RootFS path {}: {error}",
+                    path.display()
+                )))
+            }
+        }
+    }
+    report.evidence.push((
+        "unmounted-transient-rootfs".to_string(),
+        rootfs.mountpoint.clone(),
+    ));
+    Ok(())
+}
+
 /// Release the shared writable Overlay consumer this record owns (#3582).
 ///
 /// The Overlay manager unmounts the physical Merged View only after the last
@@ -1042,6 +1155,21 @@ fn adopt_overlay_mount(settings: &SandboxSettings, record: &ExecutionRecord) -> 
         generation: overlay.generation.clone(),
         lower_digest: overlay.lower_digest.clone(),
         lower_generation: overlay.lower_generation.clone(),
+        lowers: if overlay.lowers.is_empty() {
+            vec![crate::mount::overlay::OverlayLowerRef {
+                digest: overlay.lower_digest.clone(),
+                generation: overlay.lower_generation.clone(),
+            }]
+        } else {
+            overlay
+                .lowers
+                .iter()
+                .map(|lower| crate::mount::overlay::OverlayLowerRef {
+                    digest: lower.digest.clone(),
+                    generation: lower.generation.clone(),
+                })
+                .collect()
+        },
     }]);
     report
         .unavailable
@@ -1126,9 +1254,12 @@ pub(crate) fn remove_owned_paths(
     record: &ExecutionRecord,
     report: &mut CleanupReport,
 ) -> Result<()> {
-    // Dependency-safe reverse cleanup: the shared writable Overlay (and its
-    // read-only lower lease) is released first, then any legacy
-    // execution-scoped mount, then the independent shared image consumers.
+    // Dependency-safe reverse cleanup: the execution-owned RootFS Overlay is
+    // strictly unmounted before its lower consumer, then the shared Workspace
+    // Overlay (and its lower lease), any legacy execution-scoped mount, and
+    // finally the independent shared image consumers.
+    #[cfg(target_os = "linux")]
+    release_transient_rootfs(settings, record, report)?;
     #[cfg(target_os = "linux")]
     release_overlay_mount(settings, record, report)?;
     #[cfg(target_os = "linux")]
@@ -1410,6 +1541,7 @@ mod tests {
             mounts: Vec::new(),
             shared_mounts: Vec::new(),
             overlay: None,
+            transient_rootfs: None,
             channel_dir: None,
             mechanisms: Vec::new(),
             warnings: Vec::new(),
@@ -1432,7 +1564,7 @@ mod tests {
         let outside_workspace = outside.path().join("workspace");
         std::fs::create_dir_all(&outside_workspace).expect("outside workspace");
         let compiled = crate::policy::CompiledWorkspace {
-            image: None,
+            lowers: Vec::new(),
             write: outside_workspace,
             ownership: SandboxWorkspaceOwnership::Agent,
         };
@@ -1445,7 +1577,7 @@ mod tests {
         let managed = dir.path().join("agent-workspaces").join("ws_acceptance");
         std::fs::create_dir_all(&managed).expect("managed workspace");
         let compiled = crate::policy::CompiledWorkspace {
-            image: None,
+            lowers: Vec::new(),
             write: managed.clone(),
             ownership: SandboxWorkspaceOwnership::Agent,
         };
@@ -1463,7 +1595,7 @@ mod tests {
         let location = tempfile::tempdir().expect("location");
         let canonical = std::fs::canonicalize(location.path()).unwrap();
         let compiled = crate::policy::CompiledWorkspace {
-            image: None,
+            lowers: Vec::new(),
             write: canonical.clone(),
             ownership: SandboxWorkspaceOwnership::ProjectLocation,
         };
@@ -1473,7 +1605,7 @@ mod tests {
         );
 
         let missing = crate::policy::CompiledWorkspace {
-            image: None,
+            lowers: Vec::new(),
             write: location.path().join("missing"),
             ownership: SandboxWorkspaceOwnership::ProjectLocation,
         };
@@ -1490,7 +1622,7 @@ mod tests {
             .join("workspace-00000000-0000-4000-8000-000000000000");
         std::fs::create_dir_all(&owned).expect("owned workspace");
         let inside = crate::policy::CompiledWorkspace {
-            image: None,
+            lowers: Vec::new(),
             write: std::fs::canonicalize(&owned).unwrap(),
             ownership: SandboxWorkspaceOwnership::ProjectLocation,
         };
@@ -1504,7 +1636,7 @@ mod tests {
             let link = location.path().join("link");
             std::os::unix::fs::symlink(&canonical, &link).unwrap();
             let linked = crate::policy::CompiledWorkspace {
-                image: None,
+                lowers: Vec::new(),
                 write: link,
                 ownership: SandboxWorkspaceOwnership::ProjectLocation,
             };
@@ -1548,6 +1680,7 @@ mod tests {
             lower_digest: format!("sha256:{}", "a".repeat(64)),
             lower_mountpoint: "/state/erofs-mounts/mounts/def".to_string(),
             lower_generation: "lower-1".to_string(),
+            lowers: Vec::new(),
         };
         let mut record = record(dir.path(), "overlay", "session");
         record.overlay = Some(binding.clone());

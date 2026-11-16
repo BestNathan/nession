@@ -244,7 +244,7 @@ mod helpers {
         .expect("the verified project image");
         let lease = manager
             .acquire(
-                &nession_sandbox::mount::overlay::OverlayRequest::new(key, image),
+                &nession_sandbox::mount::overlay::OverlayRequest::single(key, image),
                 "exec-child",
             )
             .expect("acquire the crash Overlay");
@@ -1574,6 +1574,316 @@ done < /proc/self/mountinfo
     }));
 }
 
+/// #3698 SC-01: an ordered multi-lower Workspace merges deterministically.
+/// The first lower shadows later ones, both remain visible where they do not
+/// conflict, and the durable upper receives writes.
+#[test]
+fn ordered_multi_lower_workspace_merges_by_declared_priority() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = dir.path().join("images");
+    let base_source = dir.path().join("base-source");
+    let top_source = dir.path().join("top-source");
+    let bottom_source = dir.path().join("bottom-source");
+    for path in [&images, &base_source, &top_source, &bottom_source] {
+        std::fs::create_dir_all(path).expect("fixture directory");
+    }
+    build_base_runtime(
+        &base_source,
+        Path::new(env!("CARGO_BIN_EXE_nession-sandbox-bridge")),
+    );
+    std::fs::write(top_source.join("shadow.txt"), "top\n").expect("top shadow");
+    std::fs::write(top_source.join("only-top.txt"), "top\n").expect("top file");
+    std::fs::write(bottom_source.join("shadow.txt"), "bottom\n").expect("bottom shadow");
+    std::fs::write(bottom_source.join("only-bottom.txt"), "bottom\n").expect("bottom file");
+    let base_image = images.join("base.erofs");
+    let top_image = images.join("top.erofs");
+    let bottom_image = images.join("bottom.erofs");
+    mkfs_erofs(&base_source, &base_image);
+    mkfs_erofs(&top_source, &top_image);
+    mkfs_erofs(&bottom_source, &bottom_image);
+    let base_digest = sha256_file(&base_image);
+    let top_digest = sha256_file(&top_image);
+    let bottom_digest = sha256_file(&bottom_image);
+
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(images);
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let workspace_write = settings.state_dir.join("workspaces").join("multi-lower");
+    workspace_storage(&workspace_write);
+
+    let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "enabled": true,
+        "filesystem": {
+            "access": { "read": [], "write": [] },
+            "composition": {
+                "base": {
+                    "digest": format!("sha256:{base_digest}"),
+                    "source": base_image.to_string_lossy()
+                },
+                "workspace": {
+                    "lowers": [
+                        {
+                            "digest": format!("sha256:{top_digest}"),
+                            "source": top_image.to_string_lossy()
+                        },
+                        {
+                            "digest": format!("sha256:{bottom_digest}"),
+                            "source": bottom_image.to_string_lossy()
+                        }
+                    ],
+                    "write": workspace_write.to_string_lossy()
+                },
+                "toolchains": []
+            }
+        },
+        "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+        "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+        "enforcement": "required"
+    }))
+    .expect("multi-lower composition policy");
+    let script = "\
+set -eu
+read shadow < /workspace/shadow.txt
+[ \"$shadow\" = top ] && echo SHADOW-TOP
+[ \"$(cat /workspace/only-top.txt)\" = top ] && echo TOP-VISIBLE
+[ \"$(cat /workspace/only-bottom.txt)\" = bottom ] && echo BOTTOM-VISIBLE
+printf 'upper\\n' > /workspace/upper-proof.txt
+[ \"$(cat /workspace/upper-proof.txt)\" = upper ] && echo UPPER-WRITE
+";
+    let mut running = launch(
+        &settings,
+        LaunchRequest {
+            policy,
+            session_name: format!("multi-lower-{}", std::process::id()),
+            instance_id: "instance-multi-lower".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()],
+            tmux_socket: None,
+        },
+    );
+    verify_or_report(&mut running, "the multi-lower launch barrier must verify");
+    let record = running.prepared.record().clone();
+    let (status, stdout, stderr) = wait_for_exit(&mut running);
+    assert!(
+        status.success(),
+        "the multi-lower shell failed: status={status:?} stdout={stdout} stderr={stderr}"
+    );
+    for marker in ["SHADOW-TOP", "TOP-VISIBLE", "BOTTOM-VISIBLE", "UPPER-WRITE"] {
+        assert!(
+            stdout.contains(marker),
+            "the multi-lower shell did not prove {marker}: stdout={stdout} stderr={stderr}"
+        );
+    }
+    let overlay = record.overlay.clone().expect("a Workspace Overlay record");
+    assert_eq!(
+        overlay
+            .lowers
+            .iter()
+            .map(|lower| lower.digest.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            format!("sha256:{top_digest}"),
+            format!("sha256:{bottom_digest}")
+        ]
+    );
+    let physical = overlay_mount_count(Path::new(&overlay.mountpoint));
+    assert_eq!(physical, 1, "one physical Multi-Lower Overlay");
+    let shared = record.shared_mounts.clone();
+    running
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the multi-lower composition");
+    assert!(
+        workspace_write
+            .join("upper")
+            .join("upper-proof.txt")
+            .exists(),
+        "the write must land in the durable Workspace upper"
+    );
+    for consumer in &shared {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(&consumer.mountpoint)),
+            "the last consumer must release {}",
+            consumer.mountpoint
+        );
+    }
+    assert_cleaned(&settings, &record);
+    print_evidence(&serde_json::json!({
+        "shadow_top": true,
+        "both_lowers_visible": true,
+        "durable_upper_write": true,
+        "ordered_lowers": overlay.lowers.len(),
+        "physical_overlays": physical,
+        "lowers_released": true,
+    }));
+}
+
+/// #3698 SC-02: a writable RootFS merges the immutable Base with an
+/// execution-owned transient upper/work. Writes disappear with the execution
+/// and never reach the image or another execution.
+#[test]
+fn a_writable_rootfs_is_transient_and_never_mutates_the_image() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = dir.path().join("images");
+    let base_source = dir.path().join("base-source");
+    for path in [&images, &base_source] {
+        std::fs::create_dir_all(path).expect("fixture directory");
+    }
+    build_base_runtime(
+        &base_source,
+        Path::new(env!("CARGO_BIN_EXE_nession-sandbox-bridge")),
+    );
+    std::fs::write(base_source.join("whiteout.txt"), "base file\n").expect("base marker");
+    let base_image = images.join("base.erofs");
+    mkfs_erofs(&base_source, &base_image);
+    let base_digest = sha256_file(&base_image);
+    let base_bytes = std::fs::read(&base_image).expect("base bytes");
+
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(images);
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let workspace_write = settings.state_dir.join("workspaces").join("rootfs-bind");
+    std::fs::create_dir_all(&workspace_write).expect("bind workspace");
+
+    let launch_rootfs = |session: &str, script: String, settings: &SandboxSettings| {
+        let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": {
+                    "kind": "image",
+                    "digest": format!("sha256:{base_digest}"),
+                    "writable": true
+                },
+                "composition": {
+                    "base": {
+                        "digest": format!("sha256:{base_digest}"),
+                        "source": base_image.to_string_lossy()
+                    },
+                    "base_writable": true,
+                    "workspace": {
+                        "write": workspace_write.to_string_lossy()
+                    },
+                    "toolchains": []
+                }
+            },
+            "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+            "enforcement": "required"
+        }))
+        .expect("writable RootFS policy");
+        launch(
+            settings,
+            LaunchRequest {
+                policy,
+                session_name: format!("{session}-{}", std::process::id()),
+                instance_id: format!("instance-{session}"),
+                working_dir: "/workspace".to_string(),
+                inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), script],
+                tmux_socket: None,
+            },
+        )
+    };
+
+    let first_script = "\
+set -eu
+printf 'transient\\n' > /transient-proof.txt
+[ \"$(cat /transient-proof.txt)\" = transient ] && echo TRANSIENT-WRITE
+[ \"$(cat /whiteout.txt)\" = 'base file' ] && echo BASE-VISIBLE
+rm /whiteout.txt
+[ ! -e /whiteout.txt ] && echo WHITEOUT-OK
+[ ! -e /etc/shadow ] && echo HIDDEN-OK
+";
+    let mut first = launch_rootfs("rootfs-writable", first_script.to_string(), &settings);
+    verify_or_report(&mut first, "the writable RootFS launch barrier must verify");
+    let record = first.prepared.record().clone();
+    let transient = record
+        .transient_rootfs
+        .clone()
+        .expect("a transient RootFS record");
+    let (status, stdout, stderr) = wait_for_exit(&mut first);
+    assert!(
+        status.success(),
+        "the writable RootFS shell failed: status={status:?} stdout={stdout} stderr={stderr}"
+    );
+    assert!(stdout.contains("TRANSIENT-WRITE"), "{stdout}");
+    assert!(stdout.contains("BASE-VISIBLE"), "{stdout}");
+    assert!(stdout.contains("WHITEOUT-OK"), "{stdout}");
+    assert!(stdout.contains("HIDDEN-OK"), "{stdout}");
+    assert!(
+        Path::new(&transient.upper).is_dir(),
+        "the transient upper exists while the execution is live"
+    );
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the writable RootFS");
+    assert!(
+        !Path::new(&transient.mountpoint).exists()
+            || !nession_sandbox::linux::erofs::is_mounted(Path::new(&transient.mountpoint)),
+        "the transient RootFS is unmounted"
+    );
+    assert!(
+        !Path::new(&transient.upper).exists(),
+        "the transient upper is removed"
+    );
+    assert!(
+        !Path::new(&transient.work).exists(),
+        "the transient work is removed"
+    );
+    assert_eq!(
+        std::fs::read(&base_image).expect("base bytes after"),
+        base_bytes,
+        "the immutable Base image bytes must not change"
+    );
+    assert_cleaned(&settings, &record);
+
+    let second_script = "\
+set -eu
+[ ! -e /transient-proof.txt ] && echo ISOLATED
+[ \"$(cat /whiteout.txt)\" = 'base file' ] && echo WHITEOUT-ISOLATED
+";
+    let mut second = launch_rootfs("rootfs-second", second_script.to_string(), &settings);
+    verify_or_report(
+        &mut second,
+        "the second writable RootFS launch barrier must verify",
+    );
+    let (status, stdout, stderr) = wait_for_exit(&mut second);
+    assert!(
+        status.success(),
+        "the second writable RootFS shell failed: status={status:?} stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("ISOLATED"),
+        "a later execution must not see the earlier transient write: {stdout}"
+    );
+    assert!(
+        stdout.contains("WHITEOUT-ISOLATED"),
+        "the deleted lower file must reappear in a later execution: {stdout}"
+    );
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the second writable RootFS");
+    print_evidence(&serde_json::json!({
+        "transient_write_visible": true,
+        "whiteout_isolated": true,
+        "transient_upper_removed": true,
+        "base_image_unchanged": true,
+        "later_execution_isolated": true,
+        "transient_recorded": true,
+    }));
+}
+
 #[test]
 fn a_managed_workspace_keeps_its_durable_upper_across_overlay_reentry() {
     require_composition_tools();
@@ -2617,6 +2927,146 @@ echo B-OK
     }));
 }
 
+/// #3698 SC-03: a managed Workspace keeps its ordered lower identity across
+/// an Agent-owner restart, and reordered/missing lowers are refused without
+/// losing the durable upper.
+#[test]
+fn a_managed_workspace_keeps_ordered_lowers_across_restart_and_refuses_reordering() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = dir.path().join("images");
+    let top_source = dir.path().join("top-source");
+    let bottom_source = dir.path().join("bottom-source");
+    for path in [&images, &top_source, &bottom_source] {
+        std::fs::create_dir_all(path).expect("fixture directory");
+    }
+    std::fs::write(top_source.join("top.txt"), "top\n").expect("top file");
+    std::fs::write(bottom_source.join("bottom.txt"), "bottom\n").expect("bottom file");
+    let top_image = images.join("top.erofs");
+    let bottom_image = images.join("bottom.erofs");
+    mkfs_erofs(&top_source, &top_image);
+    mkfs_erofs(&bottom_source, &bottom_image);
+    let top_digest = sha256_file(&top_image);
+    let bottom_digest = sha256_file(&bottom_image);
+
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(images);
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    attach_named_managers(&mut settings, dir.path(), "multi-restart-1");
+    let managed = settings
+        .state_dir
+        .join("workspaces")
+        .join("ws_ordered_restart");
+    workspace_storage(&managed);
+
+    let image = |path: &Path, digest: &str| {
+        nession_erofs::mount_manager::VerifiedImage::new(
+            format!("sha256:{digest}"),
+            path.to_path_buf(),
+        )
+        .expect("verified lower")
+    };
+    let manager = settings
+        .overlay_manager
+        .clone()
+        .expect("the Overlay manager is configured");
+    let key = manager
+        .resolve_workspace(&managed)
+        .expect("authorized workspace");
+    let ordered = nession_sandbox::mount::overlay::OverlayRequest::new(
+        key.clone(),
+        vec![
+            image(&top_image, &top_digest),
+            image(&bottom_image, &bottom_digest),
+        ],
+    );
+    let first = manager
+        .acquire(&ordered, "exec-first")
+        .expect("acquire the ordered lowers");
+    std::fs::write(
+        first.mountpoint().join("restart-edit.txt"),
+        b"restart edit\n",
+    )
+    .expect("write through the merged view");
+    assert_eq!(
+        first.binding().ordered_lower_digests(),
+        vec![
+            format!("sha256:{top_digest}"),
+            format!("sha256:{bottom_digest}")
+        ]
+    );
+    let second = manager
+        .acquire(&ordered, "exec-peer")
+        .expect("a second execution shares the ordered Overlay");
+    assert_eq!(first.mountpoint(), second.mountpoint());
+    assert_eq!(first.generation(), second.generation());
+    first.release().expect("release the first execution");
+    assert_eq!(
+        std::fs::read_to_string(second.mountpoint().join("restart-edit.txt"))
+            .expect("the peer still sees the durable edit"),
+        "restart edit\n"
+    );
+    second.release().expect("release the peer execution");
+
+    // A fresh Agent owner sees the same durable upper and the same ordered
+    // compatibility key.
+    reopen_managers(&mut settings, dir.path(), "multi-restart-2");
+    let manager = settings
+        .overlay_manager
+        .clone()
+        .expect("the restarted Overlay manager is configured");
+    let reattached = manager
+        .acquire(&ordered, "exec-second")
+        .expect("the ordered lowers reattach");
+    assert_eq!(
+        std::fs::read_to_string(reattached.mountpoint().join("restart-edit.txt"))
+            .expect("the durable edit"),
+        "restart edit\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(reattached.mountpoint().join("top.txt")).expect("top lower"),
+        "top\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(reattached.mountpoint().join("bottom.txt")).expect("bottom lower"),
+        "bottom\n"
+    );
+
+    let reordered = nession_sandbox::mount::overlay::OverlayRequest::new(
+        key.clone(),
+        vec![
+            image(&bottom_image, &bottom_digest),
+            image(&top_image, &top_digest),
+        ],
+    );
+    let error = manager
+        .acquire(&reordered, "exec-reordered")
+        .expect_err("a reordered ordered lower set must be refused");
+    assert!(format!("{error:#}").contains("ordered lowers"), "{error:#}");
+    let missing = nession_sandbox::mount::overlay::OverlayRequest::new(
+        key,
+        vec![image(&top_image, &top_digest)],
+    );
+    let error = manager
+        .acquire(&missing, "exec-missing")
+        .expect_err("a missing lower must be refused");
+    assert!(format!("{error:#}").contains("ordered lowers"), "{error:#}");
+    reattached.release().expect("release the second execution");
+    assert_eq!(
+        std::fs::read_to_string(managed.join("upper").join("restart-edit.txt"))
+            .expect("the durable upper edit"),
+        "restart edit\n"
+    );
+    print_evidence(&serde_json::json!({
+        "ordered_reattach": true,
+        "two_consumers_shared": true,
+        "ordered_lowers": 2,
+        "reordered_refused": true,
+        "missing_lower_refused": true,
+        "durable_upper_preserved": true,
+    }));
+}
+
 /// #3582 SC-03: a detached Workspace reattaches after an Agent restart with
 /// its prior edits; a changed lower, missing/symlinked storage, a foreign
 /// owner and a foreign competing mount all refuse without changing bytes.
@@ -2727,7 +3177,10 @@ read lower < /workspace/project.txt
     );
 
     let request_lower = || {
-        nession_sandbox::mount::overlay::OverlayRequest::new(key.clone(), project_image(&images))
+        nession_sandbox::mount::overlay::OverlayRequest::new(
+            key.clone(),
+            vec![project_image(&images)],
+        )
     };
 
     // A changed lower while the physical Overlay is live is refused and never
@@ -2739,11 +3192,11 @@ read lower < /workspace/project.txt
     mkfs_erofs(&altered_source, &altered_image);
     let altered = nession_sandbox::mount::overlay::OverlayRequest::new(
         key.clone(),
-        nession_erofs::mount_manager::VerifiedImage::new(
+        vec![nession_erofs::mount_manager::VerifiedImage::new(
             format!("sha256:{}", sha256_file(&altered_image)),
             altered_image,
         )
-        .expect("verified altered image"),
+        .expect("verified altered image")],
     );
     let live = manager
         .acquire(&request_lower(), "exec-lower-first")
@@ -2837,7 +3290,7 @@ read lower < /workspace/project.txt
         settings.fusermount_path.clone(),
     );
     let foreign_spec = nession_sandbox::mount::overlay::OverlayMountSpec {
-        lower: lower_lease.mountpoint().to_path_buf(),
+        lowers: vec![lower_lease.mountpoint().to_path_buf()],
         upper: foreign_storage.join("upper"),
         work: foreign_storage.join("work"),
         merged: mountpoint.clone(),
@@ -2996,7 +3449,10 @@ fn an_injected_overlay_failure_leaves_recoverable_state_without_data_loss() {
     let lower_manager = settings.mount_manager.clone().expect("the lower manager");
     let project_digest = format!("sha256:{}", images.project_digest);
     let request = |key: &nession_sandbox::mount::overlay::OverlayWorkspaceKey| {
-        nession_sandbox::mount::overlay::OverlayRequest::new(key.clone(), project_image(&images))
+        nession_sandbox::mount::overlay::OverlayRequest::new(
+            key.clone(),
+            vec![project_image(&images)],
+        )
     };
     let open_manager = |root: &Path, helper: PathBuf, fusermount: PathBuf, identity: &str| {
         let lower: std::sync::Arc<dyn nession_sandbox::mount::overlay::LowerProvider> =

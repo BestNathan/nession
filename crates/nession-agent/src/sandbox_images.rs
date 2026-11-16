@@ -191,7 +191,7 @@ pub async fn prepare(
 ) -> Result<PreparedSandboxImages> {
     let origin = blob_origin(server_url)?;
     let mut base: Option<&ManagedImageGrant> = None;
-    let mut workspace: Option<&ManagedImageGrant> = None;
+    let mut workspaces: Vec<&ManagedImageGrant> = Vec::new();
     let mut toolchains: Vec<&ManagedImageGrant> = Vec::new();
     for grant in grants {
         match grant.role {
@@ -201,14 +201,12 @@ pub async fn prepare(
                 }
                 base = Some(grant);
             }
-            ManagedImageRole::Workspace => {
-                if workspace.is_some() {
-                    anyhow::bail!("a Sandbox composition has more than one workspace image");
-                }
-                workspace = Some(grant);
-            }
+            ManagedImageRole::Workspace => workspaces.push(grant),
             ManagedImageRole::Toolchain => toolchains.push(grant),
         }
+    }
+    if workspaces.len() > 16 {
+        anyhow::bail!("a Sandbox composition has more than 16 ordered workspace lowers");
     }
     let base =
         base.ok_or_else(|| anyhow::anyhow!("a composition requires a Base Runtime image"))?;
@@ -277,30 +275,29 @@ pub async fn prepare(
                 return Err(error);
             }
         };
-    let workspace_ref = match workspace {
-        Some(grant) => match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
-            Ok(resolved) => {
-                if let Err(error) = reject_referenced_composite(&resolved) {
-                    guard.disarm();
-                    remove_owned_workspace(&guard.root, &guard.path);
-                    return Err(error);
-                }
-                let ((role, digest, path), binding) = record(ManagedImageRole::Workspace, resolved);
-                manifests.extend(binding);
-                images.push((role, digest.clone(), path.clone()));
-                Some(SandboxImageRef {
-                    digest,
-                    source: path.display().to_string(),
-                })
-            }
+    let mut workspace_refs = Vec::with_capacity(workspaces.len());
+    for grant in workspaces {
+        let resolved = match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
+            Ok(resolved) => resolved,
             Err(error) => {
                 guard.disarm();
                 remove_owned_workspace(&guard.root, &guard.path);
                 return Err(error);
             }
-        },
-        None => None,
-    };
+        };
+        if let Err(error) = reject_referenced_composite(&resolved) {
+            guard.disarm();
+            remove_owned_workspace(&guard.root, &guard.path);
+            return Err(error);
+        }
+        let ((role, digest, path), binding) = record(ManagedImageRole::Workspace, resolved);
+        manifests.extend(binding);
+        images.push((role, digest.clone(), path.clone()));
+        workspace_refs.push(SandboxImageRef {
+            digest,
+            source: path.display().to_string(),
+        });
+    }
     let mut toolchain_refs = Vec::with_capacity(toolchains.len());
     for grant in toolchains {
         let resolved = match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
@@ -340,8 +337,10 @@ pub async fn prepare(
 
     let mut composition = SandboxFilesystemComposition {
         base: base_ref,
+        base_writable: false,
         workspace: Some(SandboxWorkspace {
-            image: workspace_ref,
+            image: None,
+            lowers: workspace_refs,
             write: workspace_dir.display().to_string(),
             ownership: SandboxWorkspaceOwnership::Agent,
         }),
@@ -369,8 +368,7 @@ pub async fn prepare(
                 if composition
                     .workspace
                     .as_ref()
-                    .and_then(|workspace| workspace.image.as_ref())
-                    .is_some()
+                    .is_some_and(SandboxWorkspace::has_lowers)
                 {
                     anyhow::bail!(
                         "a Project Location cannot be combined with a Project EROFS lower"
@@ -379,12 +377,14 @@ pub async fn prepare(
                 (path, SandboxWorkspaceOwnership::ProjectLocation)
             }
         };
-        let lower = composition
+        let lowers = composition
             .workspace
             .take()
-            .and_then(|workspace| workspace.image);
+            .map(|workspace| workspace.lowers)
+            .unwrap_or_default();
         composition.workspace = Some(SandboxWorkspace {
-            image: lower,
+            image: None,
+            lowers,
             write: write.display().to_string(),
             ownership,
         });
@@ -397,7 +397,7 @@ pub async fn prepare(
     if let Some(workspace) = composition
         .workspace
         .as_ref()
-        .filter(|workspace| workspace.image.is_some())
+        .filter(|workspace| workspace.has_lowers())
     {
         let write = workspace.write.clone();
         let write = Path::new(&write);
@@ -436,7 +436,7 @@ pub fn preflight_composition(
     project_location: Option<&str>,
 ) -> Result<SandboxFilesystemComposition> {
     let mut base = None;
-    let mut workspace = None;
+    let mut lowers = Vec::new();
     let mut toolchains = Vec::new();
     for selection in selections {
         let source = cache
@@ -453,9 +453,10 @@ pub fn preflight_composition(
                 }
             }
             SandboxImageRole::Workspace => {
-                if workspace.replace(image).is_some() {
-                    anyhow::bail!("a Sandbox composition has more than one workspace image");
+                if lowers.len() >= 16 {
+                    anyhow::bail!("a Sandbox composition has more than 16 workspace lowers");
                 }
+                lowers.push(image);
             }
             SandboxImageRole::Toolchain => {
                 let Some(target) = selection.target.clone().filter(|target| !target.is_empty())
@@ -479,7 +480,7 @@ pub fn preflight_composition(
     }
     let base =
         base.ok_or_else(|| anyhow::anyhow!("a composition requires a Base Runtime image"))?;
-    if project_location.is_some() && workspace.is_some() {
+    if project_location.is_some() && !lowers.is_empty() {
         anyhow::bail!("a Project Location cannot be combined with a Project EROFS lower");
     }
     let (write, ownership) = match project_location {
@@ -496,8 +497,10 @@ pub fn preflight_composition(
     };
     Ok(SandboxFilesystemComposition {
         base,
+        base_writable: false,
         workspace: Some(SandboxWorkspace {
-            image: workspace,
+            image: None,
+            lowers,
             write,
             ownership,
         }),
@@ -601,8 +604,8 @@ mod tests {
                 .workspace
                 .as_ref()
                 .unwrap()
-                .image
-                .as_ref()
+                .lowers
+                .first()
                 .unwrap()
                 .digest,
             workspace
@@ -676,8 +679,8 @@ mod tests {
                 .workspace
                 .as_ref()
                 .unwrap()
-                .image
-                .as_ref()
+                .lowers
+                .first()
                 .unwrap()
                 .digest,
             workspace
@@ -798,8 +801,8 @@ mod workspace_override_tests {
             .workspace
             .as_ref()
             .unwrap()
-            .image
-            .is_none());
+            .lowers
+            .is_empty());
         assert!(prepared.workspace_lease.is_some());
         let scratch = state_dir.path().join("sandbox-workspaces");
         let leftovers = std::fs::read_dir(&scratch)
@@ -861,7 +864,7 @@ mod workspace_override_tests {
         let composition = prepared.composition.workspace.as_ref().unwrap();
         assert_eq!(composition.ownership, SandboxWorkspaceOwnership::Agent);
         assert_eq!(
-            composition.image.as_ref().unwrap().digest,
+            composition.lowers.first().unwrap().digest,
             workspace_digest,
             "the Project source EROFS stays the pinned lower"
         );
@@ -906,7 +909,7 @@ mod workspace_override_tests {
             SandboxWorkspaceOwnership::ProjectLocation
         );
         assert_eq!(composition.write, path.display().to_string());
-        assert!(composition.image.is_none());
+        assert!(composition.lowers.is_empty());
         assert!(prepared.workspace_lease.is_none());
         assert!(
             path.is_dir(),

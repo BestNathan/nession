@@ -17,9 +17,10 @@ use anyhow::{Context as _, Result};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCatalogStatus,
     SandboxContextStatus, SandboxCurrentContext, SandboxExecutionView, SandboxFieldError,
-    SandboxFilesystemWorkspace, SandboxImageSelection, SandboxImplementationSupport,
-    SandboxNativePane, SandboxPaneRef, SandboxPaneScope, SandboxPolicyDraft,
-    SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS, SANDBOX_CATALOG_VERSION,
+    SandboxFilesystemRoot, SandboxFilesystemWorkspace, SandboxImageSelection,
+    SandboxImplementationSupport, SandboxNativePane, SandboxPaneRef, SandboxPaneScope,
+    SandboxPolicyDraft, SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS,
+    SANDBOX_CATALOG_VERSION,
 };
 use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 use nession_sandbox::{
@@ -324,7 +325,10 @@ impl SessionManager {
                 );
             };
             match crate::sandbox_images::preflight_composition(cache, images, project_location) {
-                Ok(composition) => Some(composition),
+                Ok(mut composition) => {
+                    composition.base_writable = draft_writable_rootfs(draft);
+                    Some(composition)
+                }
                 Err(error) => {
                     return SandboxPreflightResult {
                         ok: false,
@@ -560,10 +564,11 @@ impl SessionManager {
         // Location is selected; otherwise the Session-name managed Workspace
         // is allocated. An explicit Project Location without a matching
         // declaration fails closed; it never falls back silently.
-        let lower_digest = images
+        let lower_digests: Vec<&str> = images
             .iter()
-            .find(|grant| grant.role == ManagedImageRole::Workspace)
-            .map(|grant| grant.digest.as_str());
+            .filter(|grant| grant.role == ManagedImageRole::Workspace)
+            .map(|grant| grant.digest.as_str())
+            .collect();
         let selected_workspace = draft
             .filesystem
             .as_ref()
@@ -584,7 +589,7 @@ impl SessionManager {
                         workspace_id: workspace_id.as_deref(),
                         name: name.as_deref(),
                         session_name,
-                        lower_digest,
+                        lower_digests: &lower_digests,
                     },
                 )
                 .await
@@ -604,7 +609,7 @@ impl SessionManager {
                 }
             }
             Some(SandboxFilesystemWorkspace::ProjectLocation) => {
-                match resolve_project_location(project_location, lower_digest) {
+                match resolve_project_location(project_location, &lower_digests) {
                     Ok(path) => Some(
                         crate::sandbox_images::SandboxWorkspaceOverride::ProjectLocation { path },
                     ),
@@ -624,7 +629,7 @@ impl SessionManager {
             }
             Some(SandboxFilesystemWorkspace::Auto) => {
                 if let Some(path) = project_location {
-                    match resolve_project_location(Some(path), lower_digest) {
+                    match resolve_project_location(Some(path), &lower_digests) {
                         Ok(path) => Some(
                             crate::sandbox_images::SandboxWorkspaceOverride::ProjectLocation {
                                 path,
@@ -657,7 +662,7 @@ impl SessionManager {
                             workspace_id: None,
                             name: None,
                             session_name,
-                            lower_digest,
+                            lower_digests: &lower_digests,
                         },
                     )
                     .await
@@ -711,7 +716,10 @@ impl SessionManager {
             )
             .await
             {
-                Ok(prepared) => Some(prepared),
+                Ok(mut prepared) => {
+                    prepared.composition.base_writable = draft_writable_rootfs(draft);
+                    Some(prepared)
+                }
                 Err(error) => {
                     return refusal(
                         SandboxActionErrorKind::Failed,
@@ -1152,12 +1160,26 @@ impl SessionManager {
     }
 }
 
+/// Whether the draft explicitly asks for a transient writable RootFS.
+fn draft_writable_rootfs(draft: &SandboxPolicyDraft) -> bool {
+    matches!(
+        draft
+            .filesystem
+            .as_ref()
+            .and_then(|filesystem| filesystem.rootfs.as_ref()),
+        Some(SandboxFilesystemRoot::Image {
+            writable: Some(true),
+            ..
+        })
+    )
+}
+
 /// One managed Workspace resolution request (#3407).
 struct ManagedWorkspaceRequest<'a> {
     workspace_id: Option<&'a str>,
     name: Option<&'a str>,
     session_name: &'a str,
-    lower_digest: Option<&'a str>,
+    lower_digests: &'a [&'a str],
 }
 
 /// Resolve one managed Workspace, acquire its RW lease and pin the Project
@@ -1174,7 +1196,7 @@ async fn resolve_managed_workspace(
         workspace_id,
         name,
         session_name,
-        lower_digest,
+        lower_digests,
     } = request;
     let workspace_id = match (workspace_id, name) {
         (Some(workspace_id), None) => workspace_id.to_string(),
@@ -1200,20 +1222,21 @@ async fn resolve_managed_workspace(
     // against a Project image is refused before any host resource is created.
     // On Linux the Workspace Manager also owns the durable Overlay storage:
     // first use initializes it, a later missing/symlinked pair refuses.
-    match lower_digest {
-        Some(digest) => {
-            #[cfg(target_os = "linux")]
-            manager
-                .ensure_overlay_storage(&workspace_id, &[digest.to_string()])
-                .await?;
-            #[cfg(not(target_os = "linux"))]
-            manager
-                .pin_lower_digest(&workspace_id, Some(digest))
-                .await?;
-        }
-        None => {
-            manager.pin_lower_digest(&workspace_id, None).await?;
-        }
+    if lower_digests.is_empty() {
+        manager.pin_lower_digest(&workspace_id, None).await?;
+    } else {
+        let layers: Vec<String> = lower_digests
+            .iter()
+            .map(|digest| (*digest).to_string())
+            .collect();
+        #[cfg(target_os = "linux")]
+        manager
+            .ensure_overlay_storage(&workspace_id, &layers)
+            .await?;
+        #[cfg(not(target_os = "linux"))]
+        manager
+            .pin_lower_layers(&workspace_id, Some(&layers))
+            .await?;
     }
     Ok(crate::sandbox_images::SandboxWorkspaceOverride::Managed { path, lease })
 }
@@ -1224,13 +1247,13 @@ async fn resolve_managed_workspace(
 /// directory and is never created, canonicalized behind a symlink, or deleted.
 /// A Project Location cannot carry a Project EROFS lower because the Overlay
 /// would have to keep upper/work inside the user's directory.
-fn resolve_project_location(path: Option<&str>, lower_digest: Option<&str>) -> Result<PathBuf> {
+fn resolve_project_location(path: Option<&str>, lower_digests: &[&str]) -> Result<PathBuf> {
     let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
         anyhow::bail!(
             "this Session's Project declares no Existing Location on this Agent; add one for this Agent or choose a managed Workspace"
         );
     };
-    if lower_digest.is_some() {
+    if !lower_digests.is_empty() {
         anyhow::bail!(
             "a Project Location cannot be combined with a Project EROFS lower; choose a managed Workspace"
         );
@@ -1588,25 +1611,22 @@ mod tests {
         let location = tempfile::tempdir().unwrap();
         let canonical = std::fs::canonicalize(location.path()).unwrap();
         assert_eq!(
-            resolve_project_location(canonical.to_str(), None).unwrap(),
+            resolve_project_location(canonical.to_str(), &[]).unwrap(),
             canonical
         );
 
         let missing = location.path().join("missing");
-        let error = resolve_project_location(missing.to_str(), None).unwrap_err();
+        let error = resolve_project_location(missing.to_str(), &[]).unwrap_err();
         assert!(format!("{error:#}").contains("not available on this Agent"));
 
-        let relative = resolve_project_location(Some("work/project"), None).unwrap_err();
+        let relative = resolve_project_location(Some("work/project"), &[]).unwrap_err();
         assert!(format!("{relative:#}").contains("absolute"));
 
-        let error = resolve_project_location(
-            canonical.to_str(),
-            Some(&format!("sha256:{}", "a".repeat(64))),
-        )
-        .unwrap_err();
+        let lower = format!("sha256:{}", "a".repeat(64));
+        let error = resolve_project_location(canonical.to_str(), &[lower.as_str()]).unwrap_err();
         assert!(format!("{error:#}").contains("Project EROFS lower"));
 
-        let error = resolve_project_location(None, None).unwrap_err();
+        let error = resolve_project_location(None, &[]).unwrap_err();
         assert!(format!("{error:#}").contains("no Existing Location on this Agent"));
     }
 
@@ -1617,7 +1637,7 @@ mod tests {
         let target = std::fs::canonicalize(location.path()).unwrap();
         let link = location.path().join("link");
         std::os::unix::fs::symlink(&target, &link).unwrap();
-        let error = resolve_project_location(link.to_str(), None).unwrap_err();
+        let error = resolve_project_location(link.to_str(), &[]).unwrap_err();
         assert!(format!("{error:#}").contains("must be a real directory"));
     }
 
@@ -1635,7 +1655,7 @@ mod tests {
                 workspace_id: Some(&unknown),
                 name: None,
                 session_name: "fix-terminal",
-                lower_digest: None,
+                lower_digests: &[],
             },
         )
         .await
@@ -1648,7 +1668,7 @@ mod tests {
                 workspace_id: Some("../escape"),
                 name: None,
                 session_name: "fix-terminal",
-                lower_digest: None,
+                lower_digests: &[],
             },
         )
         .await
@@ -1671,7 +1691,7 @@ mod tests {
                 workspace_id: None,
                 name: None,
                 session_name: "fix-terminal",
-                lower_digest: Some(&first_lower),
+                lower_digests: &[first_lower.as_str()],
             },
         )
         .await
@@ -1695,7 +1715,7 @@ mod tests {
                 workspace_id: None,
                 name: None,
                 session_name: "fix-terminal",
-                lower_digest: Some(&other_lower),
+                lower_digests: &[other_lower.as_str()],
             },
         )
         .await
@@ -1707,7 +1727,7 @@ mod tests {
                 workspace_id: None,
                 name: None,
                 session_name: "fix-terminal",
-                lower_digest: None,
+                lower_digests: &[],
             },
         )
         .await
@@ -1721,7 +1741,7 @@ mod tests {
                 workspace_id: Some(workspace_id.as_str()),
                 name: None,
                 session_name: "fix-terminal",
-                lower_digest: Some(&first_lower),
+                lower_digests: &[first_lower.as_str()],
             },
         )
         .await

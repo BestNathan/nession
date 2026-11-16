@@ -55,9 +55,12 @@ configured durable location; the sandbox mount validation already confines
   (`lower_layers`, with the legacy `lower_digest` read as a one-element set):
   the Project source EROFS layers the durable upper was first prepared
   against. It is a property of the stored bytes, not a lookup alias; a
-  changed or missing set is refused. Identical physical lower bytes under a
-  changed Manifest are compatible at the filesystem layer; environment
-  semantics remain a separate concern.
+  changed or missing set is refused. The Sandbox MountPlan consumes the full
+  ordered set as ordered Overlay lowers, holding every read-only lease for
+  the shared Merged View lifetime (#3698); a reordered or missing set fails
+  closed. Identical physical lower bytes under a changed Manifest are
+  compatible at the filesystem layer; environment semantics remain a separate
+  concern.
 - `overlay_storage` records that the durable `upper`/`work` pair was
   initialized by this Agent. Once true, a missing, partial or symlinked pair
   is data-loss evidence and is refused; it is never replaced with a fresh

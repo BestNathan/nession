@@ -56,7 +56,9 @@ Execution isolation belongs to `nession-sandbox`, not to this Agent:
 - One physical writable `fuse-overlayfs` Merged View per managed Workspace is
   owned by `nession_sandbox::mount::overlay::OverlayMountManager`; Sessions
   hold identified consumer leases over it. The Agent never creates a
-  per-execution Workspace Overlay.
+  per-execution Workspace Overlay. The full ordered `lower_layers` set is
+  passed to the Sandbox MountPlan (#3698); the Agent never narrows it to the
+  first lower.
 - Workspace deletion consults observed state (mountinfo, live consumers, the
   durable owner lock and surviving execution records), not only a volatile
   in-process lease count.
