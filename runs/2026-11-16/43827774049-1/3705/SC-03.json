@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b3863ca4de2eac9462c721f18123ac34a5d19ccc05d24c655076672faa5b2afb",
+  "run_id": 43827774049,
+  "run_attempt": 1,
+  "issue": 3705,
+  "criterion": "SC-03",
+  "criterion_text": "From the image's nginx HTTP/TLS entrypoints, an authorized independent MCP client completes protocol discovery/`tools/list` and a safe Tool read, while malformed/unauthorized requests are rejected without frontend fallback; legacy and modern MCP eras still work.",
+  "stage": "staging",
+  "target_sha": "2dd583bb24ed58da2bce461402d82b50a54f262c",
+  "contract_sha256": "15fa805a198403b41e3feb8bb5e2d4e4e9e2d14b95f77b2ea442903ac7ca7471",
+  "case_revision": "2dd583bb24ed58da2bce461402d82b50a54f262c",
+  "case_tree_sha": "1904c2cf4f2cb0c2379ed8a561fa674211e7dbb8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T08:04:34.505Z",
+  "finished_at": "2026-11-16T08:05:34.334Z",
+  "duration_ms": 59829,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "node scripts/mcp-image-ingress.test.mjs failed (exit 1): node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: modern Tool read: {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"Invalid params: request _meta is missing or has malformed required fields: io.modelcontextprotocol/protocolVersion, io.modelcontextprotocol/clientCapabilities\"}}\n\n400 !== 200\n\n    at exercise (file:///home/runner/work/nession/nession/workspace/scripts/mcp-image-ingress.test.mjs:222:10)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async file:///home/runner/work/nession/nession/workspace/scripts/mcp-image-ingress.test.mjs:246:3 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: 400,\n  expected: 200,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v24.22.2",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 59806,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43827774049,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2dd583bb24ed58da2bce461402d82b50a54f262c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43827774049",
+    "record_path": "runs/2026-11-16/43827774049-1/3705/SC-03.json",
+    "source_result_sha256": "737c84f1d05ebf069d478a6be4ecdd767ee2f0f340b9a0193b8c98dcad35c58d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43827774049-1",
+    "sha256": "737c84f1d05ebf069d478a6be4ecdd767ee2f0f340b9a0193b8c98dcad35c58d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43827774049",
+    "durability": "time-limited; object archival not configured"
+  }
+}
