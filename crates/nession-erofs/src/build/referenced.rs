@@ -197,6 +197,9 @@ impl ErofsReferencedComposer {
         }
         let metadata_result = self.blobs.put_file(&image)?;
         self.blobs.verify(&metadata_result.digest)?;
+        // The durable CAS copy is authoritative; the build-directory partial
+        // is scratch and is released after a successful publication.
+        let _ = fs::remove_file(&image);
         let metadata_blob = metadata_result.clone();
         let metadata = Descriptor {
             media_type: MEDIA_TYPE_EROFS.to_string(),
