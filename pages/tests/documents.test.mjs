@@ -11,7 +11,7 @@ import {releaseProtocolHistory,sortedReleases}
 import {taggedProtocolSchema,cachedTaggedProtocolSchema}
   from '../scripts/protocol-git-history.mjs';
 import {documentsHref,documentsRoute,validDocumentsSnapshot,
-  filterDocuments,renderDocuments} from '../documents.js';
+  filterDocuments,renderDocuments,renderDocumentsIndex} from '../documents.js';
 import {NAV_ITEMS} from '../navigation.js';
 
 const SHA='a'.repeat(40), OLD_SHA='b'.repeat(40);
@@ -278,8 +278,10 @@ test('credentialed Pages publisher never runs historical Rust codegen',async()=>
   assert.match(producer,/taggedProtocolSchema/);
 });
 test('deep links and search work with contract versions and paths',()=>{
-  assert.equal(documentsHref('git.status',2),'#/documents?protocol=git.status&v=2');
-  assert.equal(documentsHref('../../secret'),'#/documents');
+  assert.equal(documentsHref('git.status',2),'#/documents/protocol?protocol=git.status&v=2');
+  assert.equal(documentsHref('../../secret'),'#/documents/protocol');
+  assert.deepEqual(documentsRoute('#/documents/protocol?protocol=git.status&v=2'),
+    {id:'git.status',version:2,invalid:false});
   assert.deepEqual(documentsRoute('#/documents?protocol=git.status&v=2'),
     {id:'git.status',version:2,invalid:false});
   assert.equal(documentsRoute('#/documents?protocol=../../secret').invalid,true);
@@ -289,7 +291,7 @@ test('deep links and search work with contract versions and paths',()=>{
   assert.ok(NAV_ITEMS.some(x=>x.route==='/documents'));
 });
 class Element{
-  constructor(tag){this.tagName=tag.toUpperCase();this.nodes=[];this.attrs={};this.text='';}
+  constructor(tag){this.tagName=tag.toUpperCase();this.nodes=[];this.attrs={};this.dataset={};this.text='';}
   set textContent(value){this.text=String(value);this.nodes=[];}
   get textContent(){return this.text+this.nodes.map(x=>x.textContent||'').join('');}
   set className(value){this.classes=value;}
@@ -317,5 +319,23 @@ test('Protocol reference renders one since-version column, not a matrix',()=>{
     assert.equal(elements.some(x=>x.tagName==='TD'&&x.textContent==='?'),false);
     assert.ok(elements.some(x=>x.tagName==='DETAILS'));
     assert.equal(elements.some(x=>x.tagName==='SCRIPT'),false);
+  }finally{globalThis.document=original;}
+});
+
+test('Documents index presents independent Protocol and MCP destinations with source availability',()=>{
+  const original=globalThis.document;
+  globalThis.document={createElement:t=>new Element(t)};
+  try{
+    const ui=new Element('main');
+    renderDocumentsIndex(ui,{protocolCount:130,protocolStatus:'available',
+      mcpCount:11,mcpStatus:'available'});
+    const links=descendants(ui).filter(x=>x.tagName==='A');
+    assert.deepEqual(links.map(x=>x.href),['#/documents/protocol','#/documents/mcp']);
+    assert.ok(ui.textContent.includes('130 protocol units'));
+    assert.ok(ui.textContent.includes('11 registered tools'));
+    const fallback=new Element('main');
+    renderDocumentsIndex(fallback,{protocolStatus:'unavailable',mcpStatus:'loading'});
+    assert.ok(fallback.textContent.includes('Catalog unavailable'));
+    assert.ok(fallback.textContent.includes('Loading public catalog'));
   }finally{globalThis.document=original;}
 });
