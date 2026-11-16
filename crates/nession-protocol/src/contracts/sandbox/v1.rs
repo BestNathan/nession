@@ -28,6 +28,11 @@ const fn default_policy_version() -> u32 {
     SANDBOX_POLICY_VERSION
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// One optional Sandbox policy bound to one Session.
 ///
 /// `enabled` is explicit because the policy travels as a payload: absence of
@@ -88,8 +93,16 @@ pub enum SandboxEnforcement {
 pub enum SandboxFilesystemRoot {
     /// The backend's host-root baseline ("Local" in the editor).
     Local,
-    /// One immutable Base Runtime EROFS image mounted read-only at `/`.
-    Image { digest: String },
+    /// One immutable Base Runtime EROFS image at `/`.
+    ///
+    /// `writable` asks the Agent to merge the image with an execution-owned
+    /// transient upper/work. The immutable image bytes never change and the
+    /// transient pair is discarded after verified execution cleanup (#3698).
+    Image {
+        digest: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writable: Option<bool>,
+    },
 }
 
 /// One authorized additional image source (#3405).
@@ -202,8 +215,13 @@ pub struct SandboxImageRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemComposition {
-    /// The minimal glibc Base Runtime image mounted read-only at `/`.
+    /// The minimal glibc Base Runtime image mounted at `/`.
     pub base: SandboxImageRef,
+    /// Whether the Agent prepared an execution-owned transient writable
+    /// upper/work over `base` (#3698). It must agree with the client's
+    /// `filesystem.rootfs` `writable` selection.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub base_writable: bool,
     /// The Project source image and/or the bounded writable workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<SandboxWorkspace>,
@@ -259,14 +277,39 @@ pub enum SandboxWorkspaceOwnership {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxWorkspace {
-    /// Read-only Project source EROFS, when the Project has one.
+    /// The legacy single read-only Project source EROFS, when the Project has
+    /// one. A prepared composition that carries `lowers` must leave this
+    /// absent; an older payload that carries only `image` is read as a
+    /// one-element ordered lower set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<SandboxImageRef>,
+    /// Ordered immutable Project source EROFS lowers (#3698). The first entry
+    /// has the highest priority; later entries are lower layers. Movable
+    /// artifacts use the reserved `.wh.` name in a lower; higher layers,
+    /// including the writable upper, shadow them deterministically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lowers: Vec<SandboxImageRef>,
     /// Absolute writable directory bound at `/workspace`.
     pub write: String,
     /// Who owns `write`. Absent (older records) is Agent-owned.
     #[serde(default)]
     pub ownership: SandboxWorkspaceOwnership,
+}
+
+impl SandboxWorkspace {
+    /// The ordered lower set of this prepared workspace. The legacy `image`
+    /// field is read as a one-element set only when `lowers` is absent.
+    pub fn effective_lowers(&self) -> Vec<&SandboxImageRef> {
+        if self.lowers.is_empty() {
+            self.image.iter().collect()
+        } else {
+            self.lowers.iter().collect()
+        }
+    }
+
+    pub fn has_lowers(&self) -> bool {
+        self.image.is_some() || !self.lowers.is_empty()
+    }
 }
 
 /// One read-only toolchain EROFS and its `/opt/<name>` mount target.
@@ -628,6 +671,7 @@ pub fn validate_image_selections(
 ) -> Result<(), Vec<SandboxFieldError>> {
     let mut errors = Vec::new();
     let mut base = 0;
+    let mut workspace_digests = std::collections::BTreeSet::new();
     let mut workspace = 0;
     for (index, selection) in selections.iter().enumerate() {
         if !crate::contracts::image::v1::is_valid_image_digest(&selection.digest) {
@@ -661,6 +705,13 @@ pub fn validate_image_selections(
             }
             SandboxImageRole::Workspace => {
                 workspace += 1;
+                if !workspace_digests.insert(selection.digest.as_str()) {
+                    errors.push(field_error(
+                        &format!("images[{index}].digest"),
+                        "duplicate-lower",
+                        "the ordered workspace lower set must not repeat a digest",
+                    ));
+                }
                 if selection.mode != SandboxImageMode::Overlay {
                     errors.push(field_error(
                         &format!("images[{index}].mode"),
@@ -713,11 +764,11 @@ pub fn validate_image_selections(
             "a Sandbox composition has at most one Base Runtime image",
         ));
     }
-    if workspace > 1 {
+    if workspace > 16 {
         errors.push(field_error(
             "images.workspace",
-            "duplicate-role",
-            "a Sandbox composition has at most one workspace image",
+            "too-many-lowers",
+            "a Sandbox Workspace Overlay accepts at most 16 ordered EROFS lowers",
         ));
     }
     if !selections.is_empty() && base == 0 {
@@ -1578,5 +1629,81 @@ mod tests {
         missing_base.clear();
         validate_image_selections(&missing_base)
             .expect("no selection is the existing Native policy");
+    }
+
+    #[test]
+    fn ordered_workspace_selections_are_accepted_in_order_and_duplicates_are_refused() {
+        let digest = |hex: char| format!("sha256:{}", hex.to_string().repeat(64));
+        let selection = |hex: char| SandboxImageSelection {
+            role: SandboxImageRole::Workspace,
+            digest: digest(hex),
+            target: None,
+            mode: SandboxImageMode::Overlay,
+        };
+        let ordered = vec![
+            SandboxImageSelection {
+                role: SandboxImageRole::Base,
+                digest: digest('a'),
+                target: None,
+                mode: SandboxImageMode::ReadOnly,
+            },
+            selection('b'),
+            selection('c'),
+        ];
+        validate_image_selections(&ordered).expect("two ordered lowers are a valid transport");
+
+        let duplicate = vec![
+            SandboxImageSelection {
+                role: SandboxImageRole::Base,
+                digest: digest('a'),
+                target: None,
+                mode: SandboxImageMode::ReadOnly,
+            },
+            selection('b'),
+            selection('b'),
+        ];
+        let errors = validate_image_selections(&duplicate).unwrap_err();
+        assert!(errors.iter().any(|error| error.code == "duplicate-lower"));
+    }
+
+    #[test]
+    fn legacy_single_lower_and_read_only_rootfs_payloads_still_decode() {
+        let image = serde_json::json!({
+            "digest": format!("sha256:{}", "a".repeat(64)),
+            "source": "/cache/project.erofs"
+        });
+        let workspace: SandboxWorkspace = serde_json::from_value(serde_json::json!({
+            "image": image,
+            "write": "/state/workspace"
+        }))
+        .expect("the pre-#3698 workspace shape decodes");
+        assert!(workspace.lowers.is_empty());
+        assert_eq!(workspace.effective_lowers().len(), 1);
+
+        let rootfs: SandboxFilesystemRoot = serde_json::from_value(serde_json::json!({
+            "kind": "image",
+            "digest": format!("sha256:{}", "b".repeat(64))
+        }))
+        .expect("the legacy read-only RootFS decodes");
+        assert!(matches!(
+            rootfs,
+            SandboxFilesystemRoot::Image { writable: None, .. }
+        ));
+
+        let composition: SandboxFilesystemComposition = serde_json::from_value(serde_json::json!({
+            "base": {
+                "digest": format!("sha256:{}", "c".repeat(64)),
+                "source": "/cache/base.erofs"
+            },
+            "workspace": {
+                "lowers": [{
+                    "digest": format!("sha256:{}", "d".repeat(64)),
+                    "source": "/cache/top.erofs"
+                }],
+                "write": "/state/workspace"
+            }
+        }))
+        .expect("a composition without base_writable decodes");
+        assert!(!composition.base_writable);
     }
 }

@@ -1,95 +1,168 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { TranscriptTimeline } from '../../TranscriptTimeline';
-import type { ClaudeCodeTranscriptEntry } from '../../../types';
+import type { ClaudeCodeTranscriptRecord } from '../../../types';
 
-/**
- * The collapsed line is the transcript's *summary* of a record, and the one
- * thing it must never do is make a bounded body look like a whole one.
- *
- * These tests exist because the view already said so in prose — "a truncated
- * body still says so on the collapsed line" — while the code only said it for
- * tools. Measured, the bodies that actually exceed their ceiling are the
- * *other* kinds: reasoning runs to 126 KB and an attachment to 1.2 MB, both cut
- * to 8 KB before they reach the page. A reader looking at a 1.2 MB attachment
- * rendered as 8 KB with no marker is being told the session recorded less than
- * it did, which is the failure the disclosure model was built to avoid.
- */
+function raw(value: unknown): string {
+  return JSON.stringify(value);
+}
 
-function attachment(overrides: { truncated: boolean }): ClaudeCodeTranscriptEntry {
-  return {
-    kind: 'attachment',
-    id: 'a1',
-    timestamp: '2026-09-30T10:00:00.000Z',
-    attachment_type: 'file',
-    payload: { text: 'first 8 KB of a much larger file', kind: 'text', truncated: overrides.truncated },
+function wire(
+  ref: string,
+  value: unknown,
+  overrides: Partial<ClaudeCodeTranscriptRecord> = {},
+): ClaudeCodeTranscriptRecord {
+  const text = raw(value);
+  return { record_ref: ref, offset: 0, size_bytes: text.length, raw: text, ...overrides };
+}
+
+const UNKNOWN = wire('r-unknown', {
+  type: 'new-runtime-diagnostic',
+  subtype: 'probe',
+  detail: 'a future record type',
+});
+const INVALID: ClaudeCodeTranscriptRecord = {
+  record_ref: 'r-invalid',
+  offset: 100,
+  size_bytes: 20,
+  raw: 'this is not json',
+};
+const OVERSIZED: ClaudeCodeTranscriptRecord = {
+  record_ref: 'r-large',
+  offset: 200,
+  size_bytes: 1_200_000,
+};
+const ASSISTANT = wire('r-assistant', {
+  type: 'assistant',
+  timestamp: '2026-10-01T00:00:01Z',
+  message: {
+    role: 'assistant',
+    content: [
+      { type: 'thinking', thinking: 'weighing' },
+      { type: 'text', text: 'answer' },
+      { type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'ls' } },
+    ],
+  },
+});
+const TOOL_RESULT = wire('r-result', {
+  type: 'user',
+  message: {
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'a.rs' }],
+  },
+});
+
+function renderTimeline(
+  records: ClaudeCodeTranscriptRecord[],
+  overrides: Partial<Parameters<typeof TranscriptTimeline>[0]> = {},
+) {
+  const props: Parameters<typeof TranscriptTimeline>[0] = {
+    records,
+    layout: 'master-detail',
+    expandedRef: null,
+    onToggleRecord: vi.fn(),
+    onOpenRecord: vi.fn(),
+    onOpenRaw: vi.fn(),
+    ...overrides,
   };
+  return { ...render(<TranscriptTimeline {...props} />), props };
 }
 
-function reasoning(overrides: { truncated: boolean }): ClaudeCodeTranscriptEntry {
-  return {
-    kind: 'reasoning',
-    id: 'r1',
-    timestamp: '2026-09-30T10:00:00.000Z',
-    reasoning_type: 'thinking',
-    text: { text: 'a long thought', kind: 'text', truncated: overrides.truncated },
-  };
-}
+describe('TranscriptTimeline complete record rendering', () => {
+  it('draws one persistent row for every physical record, including unknown, malformed and oversized', () => {
+    renderTimeline([UNKNOWN, INVALID, OVERSIZED]);
 
-function tool(overrides: { truncated: boolean }): ClaudeCodeTranscriptEntry {
-  return {
-    kind: 'tool',
-    id: 't1',
-    timestamp: '2026-09-30T10:00:00.000Z',
-    tool: {
-      call_id: 'call-1',
-      name: 'Bash',
-      status: 'success',
-      summary: 'cargo test',
-      input: { text: '{}', kind: 'json', truncated: false },
-      output: { text: 'ok', kind: 'text', truncated: overrides.truncated },
-    },
-  };
-}
-
-/** The collapsed line's whole text, which is what a reader sees without clicking. */
-function collapsedLine(): string {
-  return screen.getByTestId('transcript-item').textContent ?? '';
-}
-
-describe('TranscriptTimeline truncated bodies', () => {
-  it('says a cut attachment body is cut', () => {
-    render(<TranscriptTimeline items={[attachment({ truncated: true })]} />);
-    expect(collapsedLine()).toContain('truncated');
+    expect(screen.getAllByTestId('transcript-record')).toHaveLength(3);
+    expect(screen.getByTestId('transcript-record-count').textContent).toBe('3');
   });
 
-  it('says a cut reasoning body is cut', () => {
-    render(<TranscriptTimeline items={[reasoning({ truncated: true })]} />);
-    expect(collapsedLine()).toContain('truncated');
+  it('names an unknown record by its upstream type instead of a parser-status badge', () => {
+    renderTimeline([UNKNOWN]);
+
+    const row = screen.getByTestId('transcript-record');
+    expect(row.textContent).toContain('new-runtime-diagnostic · probe');
+    expect(row.textContent?.toLowerCase()).not.toContain('unrecognized');
+    expect(row.textContent?.toLowerCase()).not.toContain('unknown');
   });
 
-  // The companion counterexample: a marker that is always on says nothing. If
-  // the rule were "attachments carry a status", these two would pass while the
-  // reader learned nothing about which bodies were actually cut.
-  it('says nothing about a whole attachment body', () => {
-    render(<TranscriptTimeline items={[attachment({ truncated: false })]} />);
-    expect(collapsedLine()).not.toContain('truncated');
+  it('shows the original text preview of a malformed line', () => {
+    renderTimeline([INVALID]);
+
+    expect(screen.getByTestId('transcript-record').textContent).toContain('this is not json');
   });
 
-  it('says nothing about a whole reasoning body', () => {
-    render(<TranscriptTimeline items={[reasoning({ truncated: false })]} />);
-    expect(collapsedLine()).not.toContain('truncated');
+  it('shows an oversized record as a reference row with its size', () => {
+    renderTimeline([OVERSIZED]);
+
+    const row = screen.getByTestId('transcript-record');
+    expect(row.textContent).toContain('1.1 MB');
+    expect(row.textContent).toContain('open Raw');
+    expect(screen.getByTestId('transcript-raw-open')).toBeTruthy();
   });
 
-  it('still carries the tool status alongside the cut', () => {
-    render(<TranscriptTimeline items={[tool({ truncated: true })]} />);
-    expect(collapsedLine()).toContain('success');
-    expect(collapsedLine()).toContain('truncated');
+  it('offers an independent Raw action on every row', () => {
+    const { props } = renderTimeline([UNKNOWN, INVALID, ASSISTANT]);
+
+    const buttons = screen.getAllByTestId('transcript-raw-open');
+    expect(buttons).toHaveLength(3);
+    fireEvent.click(buttons[1] as HTMLElement);
+    expect(props.onOpenRaw).toHaveBeenCalledWith(INVALID);
   });
 
-  it('leaves a tool status alone when nothing was cut', () => {
-    render(<TranscriptTimeline items={[tool({ truncated: false })]} />);
-    expect(collapsedLine()).toContain('success');
-    expect(collapsedLine()).not.toContain('truncated');
+  it('keeps a tool_use and its tool_result as two independently visible rows, visually linked', () => {
+    // #3726 forbids backend pairing: the call and the answer are different
+    // source lines and both remain reachable. The shared call id is the link,
+    // not a shared row.
+    renderTimeline([ASSISTANT, TOOL_RESULT], { expandedRef: 'r-result' });
+
+    expect(screen.getAllByTestId('transcript-record')).toHaveLength(2);
+    expect(screen.getAllByTestId('transcript-call-id').map((node) => node.textContent)).toEqual([
+      'call-1',
+      'call-1',
+    ]);
+    const resultDetail = screen.getByTestId('transcript-record-detail');
+    expect(within(resultDetail).getByTestId('transcript-block')).toHaveAttribute(
+      'data-kind',
+      'tool_result',
+    );
+  });
+
+  it('reveals native detail for a recognized row, including every block', () => {
+    renderTimeline([ASSISTANT], { expandedRef: 'r-assistant' });
+
+    const detail = screen.getByTestId('transcript-record-detail');
+    expect(detail.textContent).toContain('weighing');
+    expect(detail.textContent).toContain('answer');
+    expect(detail.textContent).toContain('Bash');
+    expect(within(detail).getAllByTestId('transcript-block').map((node) => node.dataset.kind)).toEqual([
+      'thinking',
+      'tool_use',
+    ]);
+  });
+
+  it('reveals native detail for a system, metadata or unknown row rather than only Raw', () => {
+    const metadata = wire('r-meta', { type: 'ai-title', aiTitle: 'a title' });
+    renderTimeline([UNKNOWN, metadata], { expandedRef: 'r-meta' });
+
+    expect(screen.getByTestId('transcript-record-detail').textContent).toContain('a title');
+  });
+
+  it('pushes instead of expanding on App', () => {
+    const { props } = renderTimeline([ASSISTANT, TOOL_RESULT], { layout: 'push' });
+
+    fireEvent.click(screen.getAllByTestId('transcript-record-open')[0] as HTMLElement);
+    expect(props.onOpenRecord).toHaveBeenCalledWith(ASSISTANT);
+    expect(props.onToggleRecord).not.toHaveBeenCalled();
+  });
+
+  it('keeps the paging and partial-tail signals the provider reported', () => {
+    renderTimeline([UNKNOWN], {
+      onLoadOlder: vi.fn(),
+      loadingOlder: true,
+      partialTail: true,
+    });
+
+    expect(screen.getByTestId('transcript-load-older').textContent).toContain('Loading');
+    expect(screen.getByTestId('transcript-partial')).toBeTruthy();
   });
 });

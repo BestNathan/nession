@@ -224,7 +224,7 @@ pub async fn prepare(
     // its Agent owner before any host mount (#3582). A filesystem that cannot
     // hold it fails the create; there is no per-execution fallback.
     #[cfg(target_os = "linux")]
-    if let Err(error) = nession_erofs::overlay::storage::initialize(&workspace_dir) {
+    if let Err(error) = nession_sandbox::mount::overlay::storage::initialize(&workspace_dir) {
         let _ = std::fs::remove_dir_all(&workspace_dir);
         return Err(error.context(format!(
             "cannot initialize the Managed workspace Overlay storage {}",
@@ -242,8 +242,10 @@ pub async fn prepare(
             workspace: None,
             composition: Some(SandboxFilesystemComposition {
                 base: base_ref,
+                base_writable: false,
                 workspace: Some(SandboxWorkspace {
-                    image: Some(workspace_ref),
+                    image: None,
+                    lowers: vec![workspace_ref],
                     write: workspace_dir.display().to_string(),
                     ownership:
                         nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,
@@ -378,8 +380,8 @@ mod tests {
                 .workspace
                 .as_ref()
                 .unwrap()
-                .image
-                .as_ref()
+                .lowers
+                .first()
                 .unwrap()
                 .digest,
             workspace_digest
@@ -731,8 +733,8 @@ mod tests {
                 .workspace
                 .as_ref()
                 .unwrap()
-                .image
-                .as_ref()
+                .lowers
+                .first()
                 .unwrap()
                 .digest,
             layer_digest

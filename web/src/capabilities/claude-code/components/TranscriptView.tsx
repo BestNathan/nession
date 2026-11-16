@@ -1,12 +1,19 @@
+import { useMemo } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { formatSize } from '../format';
+import { parseTranscriptRecord } from '../model/transcriptRecord';
+import { useTranscriptViewState } from '../hooks/useTranscriptViewState';
+import { TranscriptRawInspector } from './TranscriptRawInspector';
+import { TranscriptRecordDetail } from './TranscriptRecordDetail';
 import { TranscriptTimeline } from './TranscriptTimeline';
-import type { ClaudeCodeTranscriptItem } from '../types';
-import type { TranscriptItemsState } from '../hooks/useTranscriptItems';
+import type { TranscriptRecordsState } from '../hooks/useTranscriptRecords';
 import type { TranscriptsListState } from '../hooks/useTranscripts';
+import type { ClaudeCodeTranscriptItem, ClaudeCodeTranscriptRecord } from '../types';
 
 /**
  * What to call a transcript in the list.
@@ -16,8 +23,7 @@ import type { TranscriptsListState } from '../hooks/useTranscripts';
  * for one is path-shaped, `<session-uuid>/agent-<id>`, and behind `truncate`
  * the tail that distinguishes one subagent from another is the first thing
  * lost, leaving rows that read alike. `agent_id` is on the contract for
- * precisely that job ("the subagent's own id, for a sidechain"), so it is the
- * fallback before the id; a primary transcript has none and keeps its id.
+ * precisely that job, so it is the fallback before the id.
  */
 function labelOf(transcript: ClaudeCodeTranscriptItem): string {
   return transcript.title ?? transcript.agent_id ?? transcript.id;
@@ -33,28 +39,43 @@ function TranscriptList({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-list">
       {list.loading ? (
-        <p className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-list-loading">
+        <p
+          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="transcript-list-loading"
+        >
           Loading transcripts…
         </p>
       ) : null}
       {/* `unavailable` is not an empty list: nothing has been claimed about the
           directory, so saying "none" would be a claim the provider did not make. */}
       {!list.loading && list.state === 'unavailable' ? (
-        <p className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-unavailable">
+        <p
+          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="transcript-unavailable"
+        >
           This Session&rsquo;s working directory cannot be established, so its transcripts cannot be listed.
         </p>
       ) : null}
       {list.error ? (
-        <p className={cn('px-3 py-4 text-destructive', chromeSansRole('secondary'))} data-testid="transcript-error">
+        <p
+          className={cn('px-3 py-4 text-destructive', chromeSansRole('secondary'))}
+          data-testid="transcript-error"
+        >
           {list.error}
         </p>
       ) : null}
       {!list.loading && !list.error && list.state === 'ready' && list.transcripts.length === 0 ? (
-        <p className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-none">
+        <p
+          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="transcript-none"
+        >
           No transcripts at this working directory.
         </p>
       ) : null}
-      <ul className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)} data-testid="transcript-list-scroll">
+      <ul
+        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+        data-testid="transcript-list-scroll"
+      >
         {list.transcripts.map((transcript: ClaudeCodeTranscriptItem) => (
           <li key={transcript.id}>
             <button
@@ -68,14 +89,16 @@ function TranscriptList({
                   {labelOf(transcript)}
                 </span>
                 {transcript.kind === 'sidechain' ? (
-                  // Said in words, not only in styling: a subagent's transcript
-                  // is a different kind of thing from the session's own, and the
-                  // reader has to be able to tell which one they are opening.
-                  <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))} data-testid="transcript-sidechain">
+                  <span
+                    className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}
+                    data-testid="transcript-sidechain"
+                  >
                     subagent
                   </span>
                 ) : null}
-                <span className={cn('ml-auto shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>
+                <span
+                  className={cn('ml-auto shrink-0 text-muted-foreground', chromeSansRole('metadata'))}
+                >
                   {formatClockTime(transcript.updated_at) ?? ''}
                 </span>
               </div>
@@ -87,81 +110,254 @@ function TranscriptList({
   );
 }
 
-function TranscriptDetail({
-  items,
-  onLoadOlder,
+/**
+ * The App's pushed record depth.
+ *
+ * One record's native detail plus its Raw layer. Raw is shown in this same
+ * depth — not a second overlay — so the App keeps exactly one Back per depth
+ * and never compresses a desktop split into 390 px.
+ */
+function PushedRecord({
+  record,
+  rawOpen,
+  onBack,
+  onShowRaw,
+  agentId,
+  sessionId,
 }: {
-  items: TranscriptItemsState;
-  onLoadOlder: () => void;
+  record: ClaudeCodeTranscriptRecord;
+  rawOpen: boolean;
+  onBack: () => void;
+  onShowRaw: () => void;
+  agentId: string | undefined;
+  sessionId: string | undefined;
 }) {
+  const parsed = useMemo(
+    () => (typeof record.raw === 'string' ? parseTranscriptRecord(record.raw) : null),
+    [record.raw],
+  );
+  const label = parsed?.label ?? 'Record';
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-detail-view">
-      {items.state === 'not_found' ? (
-        // Final. The provider never substitutes another transcript for the id
-        // that was asked for, and neither does this view.
-        <p className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-not-found">
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-record-push">
+      <button
+        type="button"
+        className={cn(
+          'flex shrink-0 items-center gap-1 border-b px-3 py-2 text-muted-foreground',
+          chromeSansRole('metadata'),
+        )}
+        onClick={() => onBack()}
+        data-testid="transcript-record-back"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+        Transcript
+      </button>
+      <div
+        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+        data-testid="transcript-record-push-scroll"
+      >
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <span className={cn('min-w-0 truncate', chromeSansRole('secondary'))}>{label}</span>
+          <span className={cn('ml-auto shrink-0 text-muted-foreground', chromeMonoRole('caption'))}>
+            byte {record.offset} · {formatSize(record.size_bytes)}
+          </span>
+        </div>
+        <div className="px-3 py-2">
+          <TranscriptRecordDetail parsed={parsed} record={record} />
+          <div className="mt-3 border-t pt-2">
+            {rawOpen ? (
+              <TranscriptRawInspector
+                agentId={agentId}
+                sessionId={sessionId}
+                record={record}
+                variant="pushed"
+              />
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onShowRaw()}
+                data-testid="transcript-raw-open"
+              >
+                Raw
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TranscriptDetail({
+  records,
+  layout,
+  expandedRef,
+  onToggleRecord,
+  onOpenRecord,
+  onOpenRaw,
+  onLoadOlder,
+  onReload,
+  rawRecord,
+  onCloseRaw,
+  agentId,
+  sessionId,
+}: {
+  records: TranscriptRecordsState;
+  layout: 'master-detail' | 'push';
+  expandedRef: string | null;
+  onToggleRecord: (recordRef: string) => void;
+  onOpenRecord: (record: ClaudeCodeTranscriptRecord) => void;
+  onOpenRaw: (record: ClaudeCodeTranscriptRecord) => void;
+  onLoadOlder: () => void;
+  onReload: () => void;
+  rawRecord: ClaudeCodeTranscriptRecord | null;
+  onCloseRaw: () => void;
+  agentId: string | undefined;
+  sessionId: string | undefined;
+}) {
+  const showRecords = records.state === 'ready' || records.records.length > 0;
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col" data-testid="transcript-detail-view">
+      {records.state === 'not_found' ? (
+        <p
+          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="transcript-not-found"
+        >
           That transcript is no longer here.
         </p>
       ) : null}
-      {items.error ? (
-        <p className={cn('px-3 py-4 text-destructive', chromeSansRole('secondary'))} data-testid="transcript-items-error">
-          {items.error}
+      {records.state === 'unavailable' ? (
+        <p
+          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="transcript-items-unavailable"
+        >
+          This Session&rsquo;s working directory cannot be established, so the transcript cannot be read.
         </p>
       ) : null}
-      {items.stats ? (
-        // The transcript view's "is this everything?", in its own words. One
-        // numbered count could not separate "understood and not drawn" from
-        // "could not be read", which is why the contract replaces it.
-        <p className={cn('px-3 py-1 text-muted-foreground', chromeSansRole('metadata'))} data-testid="transcript-stats">
-          {items.stats.raw_records} records
-          {items.stats.unknown_records > 0 ? ` · ${items.stats.unknown_records} unrecognised` : ''}
-          {items.stats.invalid_records > 0 ? ` · ${items.stats.invalid_records} unreadable` : ''}
+      {records.error ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-2"
+          data-testid="transcript-items-error"
+        >
+          <p className={cn('text-destructive', chromeSansRole('secondary'))}>{records.error}</p>
+          <Button type="button" variant="outline" size="sm" onClick={() => onReload()}>
+            Reload
+          </Button>
+        </div>
+      ) : null}
+      {records.loading && records.records.length === 0 ? (
+        <p
+          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="transcript-items-loading"
+        >
+          Loading the transcript…
         </p>
       ) : null}
-      <TranscriptTimeline
-        items={items.items}
-        onLoadOlder={items.hasMore ? onLoadOlder : undefined}
-        loadingOlder={items.loadingOlder}
-        partialTail={items.partialTail}
-      />
+      {showRecords ? (
+        <TranscriptTimeline
+          records={records.records}
+          layout={layout}
+          expandedRef={expandedRef}
+          onToggleRecord={onToggleRecord}
+          onOpenRecord={onOpenRecord}
+          onOpenRaw={onOpenRaw}
+          onLoadOlder={records.hasMore ? onLoadOlder : undefined}
+          loadingOlder={records.loadingOlder}
+          partialTail={records.partialTail}
+        />
+      ) : null}
+      {layout === 'master-detail' && rawRecord ? (
+        <div
+          className="absolute inset-y-0 right-0 z-10 flex w-[min(var(--nession-overlay-standard-max-width),100%)] flex-col border-l bg-background shadow-[var(--nession-elevation-floating)]"
+          data-testid="transcript-raw-drawer"
+        >
+          <TranscriptRawInspector
+            agentId={agentId}
+            sessionId={sessionId}
+            record={rawRecord}
+            variant="drawer"
+            onClose={onCloseRaw}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
 
 /**
- * The Transcripts view (#1234): which transcripts exist, and what one did.
+ * The Transcripts view (#1234, revised by #3726): which transcripts exist, and
+ * the complete raw record timeline of one.
  *
  * Master-detail on Web and push on App, the same split `ConversationView` makes
- * from the same field for the same reason — the experience decides how much room
- * there is, and a phone has to show one thing at a time.
+ * from the same field for the same reason — the experience decides how much
+ * room there is, and a phone shows one thing at a time.
  *
  * ## The list is not a conversation list
  *
  * It carries the subagents too, marked as such, and it does **not** auto-open
- * anything. A transcript is chosen, never inferred: opening the session's own
- * transcript because it happens to be first would make a subagent reachable only
- * by accident, which is the selection-by-heuristic the provider's contracts
- * forbid one layer down.
+ * anything. A transcript is chosen, never inferred.
+ *
+ * ## Selection changes close stale detail and Raw
+ *
+ * Opening a different transcript — or changing Session/Agent — clears the
+ * expanded row, the pushed depth and the Raw inspector. An answer about the
+ * previous transcript must not remain readable under the new transcript's
+ * header.
  */
 export function TranscriptView({
   list,
-  items,
+  records,
   open,
   layout,
+  agentId,
+  sessionId,
   onSelect,
   onLoadOlder,
+  onReload,
   onBack,
 }: {
   list: TranscriptsListState;
-  items: TranscriptItemsState;
+  records: TranscriptRecordsState;
   open: string | null;
   layout: 'master-detail' | 'push';
+  agentId: string | undefined;
+  sessionId: string | undefined;
   onSelect: (id: string) => void;
   onLoadOlder: () => void;
+  onReload: () => void;
   onBack: () => void;
 }) {
+  const view = useTranscriptViewState({ open, agentId, sessionId });
+
   const renderList = () => <TranscriptList list={list} onSelect={onSelect} />;
-  const renderDetail = () => <TranscriptDetail items={items} onLoadOlder={onLoadOlder} />;
+  const renderDetail = () =>
+    view.pushedRecord && layout === 'push' ? (
+      <PushedRecord
+        record={view.pushedRecord}
+        rawOpen={view.pushedRawOpen}
+        onBack={view.closePushedRecord}
+        onShowRaw={view.showPushedRaw}
+        agentId={agentId}
+        sessionId={sessionId}
+      />
+    ) : (
+      <TranscriptDetail
+        records={records}
+        layout={layout}
+        expandedRef={view.expandedRef}
+        onToggleRecord={view.toggleRecord}
+        onOpenRecord={view.openRecord}
+        onOpenRaw={(record) => view.openRaw(record, layout)}
+        onLoadOlder={onLoadOlder}
+        onReload={onReload}
+        rawRecord={view.rawRecord}
+        onCloseRaw={view.closeRaw}
+        agentId={agentId}
+        sessionId={sessionId}
+      />
+    );
 
   if (layout === 'push') {
     const showingDetail = open !== null;
@@ -169,15 +365,20 @@ export function TranscriptView({
       <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-push">
         {showingDetail ? (
           <>
-            <button
-              type="button"
-              className={cn('flex items-center gap-1 px-3 py-2 text-muted-foreground', chromeSansRole('metadata'))}
-              onClick={() => onBack()}
-              data-testid="transcript-back"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-              Transcripts
-            </button>
+            {view.pushedRecord === null ? (
+              <button
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 px-3 py-2 text-muted-foreground',
+                  chromeSansRole('metadata'),
+                )}
+                onClick={() => onBack()}
+                data-testid="transcript-back"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                Transcripts
+              </button>
+            ) : null}
             {renderDetail()}
           </>
         ) : (
@@ -192,11 +393,27 @@ export function TranscriptView({
       <div className="flex w-72 shrink-0 flex-col border-r border-border">{renderList()}</div>
       <div className="flex min-h-0 flex-1 flex-col">
         {open === null ? (
-          <p className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-nothing-open">
+          <p
+            className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+            data-testid="transcript-nothing-open"
+          >
             Choose a transcript to read what the session did.
           </p>
         ) : (
-          renderDetail()
+          <TranscriptDetail
+            records={records}
+            layout={layout}
+            expandedRef={view.expandedRef}
+            onToggleRecord={view.toggleRecord}
+            onOpenRecord={view.openRecord}
+            onOpenRaw={(record) => view.openRaw(record, layout)}
+            onLoadOlder={onLoadOlder}
+            onReload={onReload}
+            rawRecord={view.rawRecord}
+            onCloseRaw={view.closeRaw}
+            agentId={agentId}
+            sessionId={sessionId}
+          />
         )}
       </div>
     </div>

@@ -68,21 +68,44 @@ pub struct CompiledImage {
 }
 
 /// The compiled `/workspace` view.
+///
+/// `lowers` is the ordered immutable lower set: the first entry has the
+/// highest priority. An older single-lower composition is compiled into a
+/// one-element list, so the runtime has exactly one compatibility key shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledWorkspace {
-    pub image: Option<CompiledImage>,
+    pub lowers: Vec<CompiledImage>,
     pub write: PathBuf,
     pub ownership: SandboxWorkspaceOwnership,
+}
+
+impl CompiledWorkspace {
+    pub fn has_lowers(&self) -> bool {
+        !self.lowers.is_empty()
+    }
+
+    pub fn ordered_lower_digests(&self) -> Vec<String> {
+        self.lowers
+            .iter()
+            .map(|image| image.digest.clone())
+            .collect()
+    }
 }
 
 /// The compiled minimal composable root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledComposition {
     pub base: CompiledImage,
+    /// Whether the Base Runtime is merged with an execution-owned transient
+    /// upper/work (#3698).
+    pub base_writable: bool,
     pub workspace: Option<CompiledWorkspace>,
     /// Sorted by target, so the mount order is deterministic.
     pub toolchains: Vec<CompiledImage>,
 }
+
+/// The maximum ordered EROFS lower set one Workspace Overlay accepts.
+pub const MAX_WORKSPACE_LOWERS: usize = 16;
 
 impl CompiledFilesystem {
     /// Whether `path` is visible in the sandbox.
@@ -534,7 +557,7 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
             }
             return Ok(());
         }
-        Some(SandboxFilesystemRoot::Image { digest }) => {
+        Some(SandboxFilesystemRoot::Image { digest, writable }) => {
             validate_image_digest(digest)?;
             let Some(composition) = composition else {
                 return Err(SandboxError::InvalidPolicy(
@@ -548,11 +571,24 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
                     composition.base.digest
                 )));
             }
+            let writable = writable.unwrap_or(false);
+            if composition.base_writable != writable {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.rootfs writable={writable} does not match the prepared Base Runtime writable={}",
+                    composition.base_writable
+                )));
+            }
         }
         None => {
             if composition.is_none() {
                 return Err(SandboxError::InvalidPolicy(
                     "filesystem mounts/workspace require an image RootFS prepared by the Agent"
+                        .to_string(),
+                ));
+            }
+            if composition.is_some_and(|composition| composition.base_writable) {
+                return Err(SandboxError::InvalidPolicy(
+                    "a writable RootFS requires an explicit filesystem.rootfs image selection"
                         .to_string(),
                 ));
             }
@@ -652,11 +688,33 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
                 .to_string(),
         ));
     };
-    let image = workspace_config
-        .image
-        .as_ref()
+    if workspace_config.image.is_some() && !workspace_config.lowers.is_empty() {
+        return Err(SandboxError::InvalidPolicy(
+            "filesystem.composition.workspace carries both a legacy image and an ordered lower \
+             set; use exactly one representation"
+                .to_string(),
+        ));
+    }
+    let requested_lowers = workspace_config.effective_lowers();
+    if requested_lowers.len() > MAX_WORKSPACE_LOWERS {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "filesystem.composition.workspace accepts at most {MAX_WORKSPACE_LOWERS} ordered lowers"
+        )));
+    }
+    let mut lowers = requested_lowers
+        .into_iter()
         .map(|image| compile_image(image, Path::new("/workspace"), Vec::new()))
-        .transpose()?;
+        .collect::<Result<Vec<_>>>()?;
+    let mut seen = std::collections::BTreeSet::new();
+    for lower in &lowers {
+        if !seen.insert(lower.digest.clone()) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "filesystem.composition.workspace repeats the lower digest {}",
+                lower.digest
+            )));
+        }
+    }
+    lowers.shrink_to_fit();
     let write = validate_path(&workspace_config.write)?;
     if write == Path::new("/") {
         return Err(SandboxError::InvalidPolicy(
@@ -665,7 +723,9 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
                 .to_string(),
         ));
     }
-    if workspace_config.ownership == SandboxWorkspaceOwnership::ProjectLocation && image.is_some() {
+    if workspace_config.ownership == SandboxWorkspaceOwnership::ProjectLocation
+        && !lowers.is_empty()
+    {
         return Err(SandboxError::InvalidPolicy(
             "filesystem.composition.workspace cannot combine a Project Location with a \
              Project EROFS lower; the writable upper of a Project Location is user-owned"
@@ -673,7 +733,7 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
         ));
     }
     let workspace = Some(CompiledWorkspace {
-        image,
+        lowers,
         write,
         ownership: workspace_config.ownership,
     });
@@ -721,6 +781,7 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
     validate_tool_env_precedence(&toolchains)?;
     Ok(CompiledComposition {
         base,
+        base_writable: composition.base_writable,
         workspace,
         toolchains,
     })
@@ -1004,11 +1065,13 @@ fn invalid_toolchain_target(raw: &str) -> SandboxError {
 fn normalize_composition(composition: &CompiledComposition) -> SandboxFilesystemComposition {
     SandboxFilesystemComposition {
         base: normalized_image(&composition.base),
+        base_writable: composition.base_writable,
         workspace: composition
             .workspace
             .as_ref()
             .map(|workspace| SandboxWorkspace {
-                image: workspace.image.as_ref().map(normalized_image),
+                image: None,
+                lowers: workspace.lowers.iter().map(normalized_image).collect(),
                 write: workspace.write.to_string_lossy().into_owned(),
                 ownership: workspace.ownership,
             }),
@@ -1327,7 +1390,7 @@ mod tests {
         let filesystem = compiled.filesystem.expect("filesystem");
         let composition = filesystem.composition.expect("composition");
         assert_eq!(composition.base.target, PathBuf::from("/"));
-        assert!(composition.workspace.as_ref().unwrap().image.is_some());
+        assert!(composition.workspace.as_ref().unwrap().has_lowers());
         assert_eq!(
             composition
                 .toolchains
@@ -1349,6 +1412,79 @@ mod tests {
                 .target
                 == "/opt/node"
         );
+    }
+
+    #[test]
+    fn an_ordered_multi_lower_workspace_keeps_its_declared_order() {
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["workspace"]["image"] = serde_json::Value::Null;
+        value["filesystem"]["composition"]["workspace"]["lowers"] = serde_json::json!([
+            {
+                "digest": format!("sha256:{}", "e".repeat(64)),
+                "source": "/data/erofs/sha256/top"
+            },
+            {
+                "digest": format!("sha256:{}", "f".repeat(64)),
+                "source": "/data/erofs/sha256/bottom"
+            }
+        ]);
+        let compiled = compile(&policy(value)).expect("valid multi-lower composition");
+        let composition = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition");
+        let workspace = composition.workspace.expect("workspace");
+        assert_eq!(
+            workspace.ordered_lower_digests(),
+            vec![
+                format!("sha256:{}", "e".repeat(64)),
+                format!("sha256:{}", "f".repeat(64))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_legacy_image_and_an_ordered_lower_set_cannot_both_define_the_workspace() {
+        let mut value = composition_policy();
+        value["filesystem"]["composition"]["workspace"]["lowers"] = serde_json::json!([
+            {
+                "digest": format!("sha256:{}", "e".repeat(64)),
+                "source": "/data/erofs/sha256/top"
+            }
+        ]);
+        let error = compile(&policy(value)).unwrap_err();
+        assert!(error.to_string().contains("both a legacy image"), "{error}");
+    }
+
+    #[test]
+    fn a_writable_rootfs_requires_an_explicit_matching_selection() {
+        let mut value = declaration_policy();
+        value["filesystem"]["rootfs"]["writable"] = serde_json::json!(true);
+        let error = compile(&policy(value)).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("prepared Base Runtime writable=false"),
+            "{error}"
+        );
+
+        let mut value = declaration_policy();
+        value["filesystem"]["rootfs"]["writable"] = serde_json::json!(true);
+        value["filesystem"]["composition"]["base_writable"] = serde_json::json!(true);
+        let compiled = compile(&policy(value)).expect("writable RootFS compiles");
+        let composition = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition");
+        assert!(composition.base_writable);
+        assert!(compiled
+            .normalized
+            .filesystem
+            .as_ref()
+            .and_then(|filesystem| filesystem.composition.as_ref())
+            .is_some_and(|composition| composition.base_writable));
     }
 
     #[test]
@@ -1389,7 +1525,7 @@ mod tests {
             workspace.ownership,
             SandboxWorkspaceOwnership::ProjectLocation
         );
-        assert!(workspace.image.is_none());
+        assert!(!workspace.has_lowers());
     }
 
     fn declaration_policy() -> serde_json::Value {

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::mount;
+use nession_erofs::mount;
 
 /// How one backing filesystem may be used for an Overlay upper/work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

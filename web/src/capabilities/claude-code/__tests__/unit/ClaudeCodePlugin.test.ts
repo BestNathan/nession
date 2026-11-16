@@ -26,6 +26,9 @@ const AGENT_MANIFEST: ProtocolManifest = {
     // session's subagents are reachable. Advertised for the same reason.
     'claude-code.transcripts': { versions: [1] },
     'claude-code.transcript-items': { versions: [1] },
+    // `#3726`: raw record transport and bounded full-record lookup.
+    'claude-code.transcript-records': { versions: [1] },
+    'claude-code.transcript-record': { versions: [1] },
     // #3600: the four MCP operations.
     'claude-code.mcp-servers': { versions: [1] },
     'claude-code.mcp-server': { versions: [1] },
@@ -72,6 +75,19 @@ const transcriptItemsReq = {
   session_id: 'a1:work',
   transcript_id: 's1/agent-a',
   limit: 200,
+} as const;
+
+const transcriptRecordsReq = {
+  agent_id: 'a1',
+  session_id: 'a1:work',
+  transcript_id: 's1/agent-a',
+  limit: 200,
+} as const;
+
+const transcriptRecordReq = {
+  agent_id: 'a1',
+  session_id: 'a1:work',
+  record_ref: 'tr1:6162:0:0123456789abcdef',
 } as const;
 
 const messagesReq = {
@@ -205,6 +221,44 @@ describe('ClaudeCodePlugin', () => {
 
       const response = { state: 'ready', items: [], has_more: false, partial_tail: false };
       surface.resolveNext('claude-code.transcript-items', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
+    it('claudeCodeTranscriptRecords forwards the whole raw-record request', async () => {
+      // The raw unit's only selection mechanism is the transcript id. If it
+      // did not survive addressing, the page would name nothing.
+      const pending = plugin.claudeCodeTranscriptRecords(transcriptRecordsReq);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.transcript-records',
+        payload: transcriptRecordsReq,
+      });
+
+      const response = {
+        state: 'ready',
+        records: [{ record_ref: 'tr1:6162:0:0123456789abcdef', offset: 0, size_bytes: 4, raw: 'line' }],
+        has_more: false,
+        partial_tail: false,
+      };
+      surface.resolveNext('claude-code.transcript-records', response);
+      await expect(pending).resolves.toEqual(response);
+    });
+
+    it('claudeCodeTranscriptRecord forwards the resource-scoped reference', async () => {
+      const pending = plugin.claudeCodeTranscriptRecord(transcriptRecordReq);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'claude-code.transcript-record',
+        payload: transcriptRecordReq,
+      });
+
+      const response = {
+        state: 'ready',
+        record_ref: transcriptRecordReq.record_ref,
+        raw: 'line',
+        offset: 0,
+        size_bytes: 4,
+        has_more: false,
+      };
+      surface.resolveNext('claude-code.transcript-record', response);
       await expect(pending).resolves.toEqual(response);
     });
 
@@ -368,6 +422,12 @@ describe('ClaudeCodePlugin', () => {
       await expect(plugin.claudeCodeTranscriptItems(transcriptItemsReq)).rejects.toThrow(
         'claude-code feature is not connected',
       );
+      await expect(
+        plugin.claudeCodeTranscriptRecords(transcriptRecordsReq),
+      ).rejects.toThrow('claude-code feature is not connected');
+      await expect(
+        plugin.claudeCodeTranscriptRecord(transcriptRecordReq),
+      ).rejects.toThrow('claude-code feature is not connected');
       await expect(
         plugin.claudeCodeMcpServers({ agent_id: 'a1', session_id: 'a1:work' }),
       ).rejects.toThrow('claude-code feature is not connected');
