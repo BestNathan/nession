@@ -64,8 +64,10 @@ chunked_copy() {
 
   # The same target ACR hostname, the Docker login already established; never
   # transmit credentials to an unrelated registry or mirror.
+  # Force even moderately sized changed layers down the resumable path;
+  # the failed UI blob need not be 64MiB to suffer a monolithic timeout.
   regctl registry set "${destination_image%%/*}" \
-    --blob-max 67108864 --blob-chunk 16777216
+    --blob-max 1048576 --blob-chunk 4194304
 
   local arch digest source_ref dest_ref copied
   for arch in amd64 arm64; do
