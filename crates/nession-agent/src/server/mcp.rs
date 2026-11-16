@@ -278,7 +278,9 @@ mod mcp_cancellation_tests {
             }),
         )
         .await;
-        started_receiver.await.expect("the first mutation claimed this key");
+        started_receiver
+            .await
+            .expect("the first mutation claimed this key");
 
         let (request, admission) = PendingMutation::new();
         let executed = Arc::new(AtomicBool::new(false));

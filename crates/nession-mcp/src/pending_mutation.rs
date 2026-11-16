@@ -39,12 +39,9 @@ impl Drop for PendingMutation {
     fn drop(&mut self) {
         // A caller cannot revoke a mutation which has already started. The
         // running worker is responsible for settling the underlying action.
-        let _ = self.state.compare_exchange(
-            QUEUED,
-            ABANDONED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
+        let _ = self
+            .state
+            .compare_exchange(QUEUED, ABANDONED, Ordering::AcqRel, Ordering::Acquire);
     }
 }
 
@@ -52,12 +49,7 @@ impl MutationAdmission {
     /// True only if the caller still owns the pending request at worker start.
     pub fn try_begin(&self) -> bool {
         self.state
-            .compare_exchange(
-                QUEUED,
-                STARTED,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
+            .compare_exchange(QUEUED, STARTED, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
 }

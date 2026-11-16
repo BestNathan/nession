@@ -483,7 +483,9 @@ mod tests {
     fn execution_timeout_does_not_report_a_confirmed_failed_mutation() {
         let error = execution_timeout("nession_agent_create_session");
         assert_eq!(error.kind, crate::error::ToolErrorKind::Timeout);
-        assert!(error.message.contains("inspect the affected state before retrying"));
+        assert!(error
+            .message
+            .contains("inspect the affected state before retrying"));
         assert!(error.message.contains("does not imply rollback"));
         let reply = tool_error_result(&error);
         assert_eq!(reply.is_error, Some(true));
