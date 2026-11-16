@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "mode": "deployment",
+  "source": {
+    "repository": "BestNathan/nession",
+    "run_id": 43873154835,
+    "run_attempt": 2,
+    "workflow_id": 395306893,
+    "head_sha": "e23a8d84a8431f9a2111cb1ba9d41abbe9367a65",
+    "head_branch": "main"
+  },
+  "target_sha": "3d3641dd5d440bbe1d65b8293b438605fb1a1266",
+  "environment_id": "staging",
+  "gitops_revision": "449855395316494d88078d6620199b343ed876b2",
+  "remote_profile": "remote-staging",
+  "record": "runs/2026-11-16/43873154835-2/deployment/staging.json",
+  "execution_id": "ee9ae8113be07302b949f5fec0a1de18ce6d958bc6f222d411ff81f1fd61eeeb"
+}
