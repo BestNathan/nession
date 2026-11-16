@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43923731147,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3757-mcp-credential-env",
+    "target_sha": "9920dd73a1449cfc8756878db15239a35ea59305",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43923731147",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "b748898c471b68a9832dd21d5ab4f6914b22442a5752b8d3304834720585d7b2"
+  },
+  "record": "runs/2026-11-16/43923731147-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "8d1cbe6a1b09da6cc4e22b26d80100e97075e6230bf9a74ca47bcc2c9b3b62b7"
+}
