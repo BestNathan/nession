@@ -219,6 +219,9 @@ jobs:
           DISPATCH_GITHUB_TOKEN: ${{ github.token }}
           ISSUE_GITHUB_TOKEN: ${{ github.token }}
           STATUS_GITHUB_TOKEN: ${{ github.token }}
+          # The legacy qualified merge remains the default until both
+          # protected targets enforce strict required qualification.
+          NESSION_CONVERGENCE_NATIVE_AUTO_MERGE: ${{ vars.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
@@ -227,9 +230,14 @@ jobs:
             echo '### Pull requests'
             jq -r '.[] | "- " + .direction + ": " + .url + " (" + .action + "; " + .outcome + (if .reason then "; " + .reason else "" end) + (if .issue_number then "; Issue #" + (.issue_number|tostring) else "" end) + (if .integration_head then "; integration " + .integration_head else "" end) + ")"' "$RUNNER_TEMP/convergence-results.json"
             echo
-            echo 'GitHub Auto-merge requires strict branch protection on the exact qualification status, source-bound Quality/Case/E2E, and applicable Staging/Issue acceptance; protected GitHub merges only. Main Full remains nonblocking (#3465).'
+            if [[ "${NESSION_CONVERGENCE_NATIVE_AUTO_MERGE}" == 'true' ]]; then
+              echo 'Native Auto-merge requested: strict required qualification on both protected targets must be proven. GitHub owns the merge.'
+            else
+              echo 'Migration not activated: retaining independently qualified merge-commit Controller until strict protected native Auto-merge is configured.'
+            fi
+            echo 'Main Full remains nonblocking (#3465).'
           } >> "$GITHUB_STEP_SUMMARY"
-          blocked="$(jq '[.[] | select(.outcome != "AUTO_MERGE_QUALIFIED")] | length' "$RUNNER_TEMP/convergence-results.json")"
+          blocked="$(jq '[.[] | select(.outcome != "AUTO_MERGE_QUALIFIED" and .outcome != "MERGED")] | length' "$RUNNER_TEMP/convergence-results.json")"
           if [[ "$blocked" -gt 0 ]]; then
             echo "::warning::Staging convergence has ${blocked} outstanding item(s); see the Job Summary for exact reasons"
           fi
