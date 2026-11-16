@@ -360,18 +360,62 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
 .documents-raw code{white-space:pre}
 @media(max-width:900px){.documents-release-note{margin-bottom:14px}}
 
-/* MCP reuses the same bounded catalog/detail shell as Nession Protocol. */
-.documents-mcp-upstream{padding:19px 21px;margin-bottom:20px;min-width:0}
-.documents-mcp-upstream h2{font-size:28px;margin:8px 0 12px}
-.documents-mcp-upstream h3{font-size:15px;margin:18px 0 6px}
-.documents-mcp-upstream .documents-source{display:inline-block;font-size:12px;
-  margin:4px 18px 4px 0;overflow-wrap:anywhere}
-.documents-mcp-highlights{padding-left:22px;line-height:1.65;font-size:13px;max-width:1050px}
-.documents-mcp-highlights li{margin-bottom:7px;overflow-wrap:anywhere}
+/* MCP: method and field contracts lead; protocol provenance is quiet (#3733). */
 .documents-mcp-side .documents-entry{display:block;overflow-wrap:anywhere}
 .documents-mcp-side .documents-entry .eyebrow{display:block}
 .documents-mcp-reader{min-width:0;overflow-wrap:anywhere}
 .documents-mcp-reader h2{overflow-wrap:anywhere}
+.documents-mcp-tool-detail>.eyebrow{margin:2px 0 8px}
+.documents-mcp-tool-detail>h2{margin:0 0 12px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:clamp(18px,2.25vw,27px);font-weight:650;letter-spacing:-.5px;line-height:1.35}
+.documents-mcp-method-description{font:14px/1.7 "DM Sans",sans-serif;
+  color:var(--text);margin:0 0 14px;max-width:850px}
+.documents-mcp-inline-meta{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;
+  padding:10px 0 18px;border-bottom:1px solid var(--line);font-size:10px;color:var(--muted)}
+.documents-mcp-inline-meta .documents-source{display:inline;color:var(--accent);font-size:11px;
+  margin:0;font-weight:600;text-decoration:underline}
+.documents-mcp-contract{min-width:0;margin:25px 0 29px}
+.documents-mcp-section-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 13px;
+  margin-bottom:12px}
+.documents-mcp-section-head h3{margin:0;font:400 28px/1.2 "Instrument Serif",Georgia,serif;
+  color:var(--ink)}
+.documents-mcp-section-note{font:11px/1.5 "DM Sans",sans-serif;color:var(--muted)}
+.documents-mcp-fields{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.documents-mcp-field{padding:13px 16px;border-bottom:1px solid var(--line);
+  background:var(--surface);min-width:0}
+.documents-mcp-field:last-child{border-bottom:0}
+.documents-mcp-field-meta{display:flex;gap:6px 12px;align-items:baseline;flex-wrap:wrap;
+  min-width:0}
+.documents-mcp-field-name{font:600 12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;
+  color:var(--ink);overflow-wrap:anywhere}
+.documents-mcp-type{font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
+  color:var(--muted);overflow-wrap:anywhere}
+.documents-mcp-required{font:600 10px/1.45 "DM Sans",sans-serif;color:var(--muted)}
+.documents-mcp-required.is-required{color:var(--accent)}
+.documents-mcp-field-description{font:12px/1.65 "DM Sans",sans-serif;
+  color:var(--text);margin:5px 0 0;overflow-wrap:anywhere}
+.documents-mcp-values{font:11px/1.5 ui-monospace,Consolas,monospace;
+  margin:6px 0 0;color:var(--muted);overflow-wrap:anywhere}
+.documents-mcp-missing{border:1px dashed var(--line);border-radius:11px;background:var(--tint);
+  color:var(--muted);padding:15px;font:12px/1.7 "DM Sans",sans-serif;margin:0}
+.documents-mcp-raw{margin:12px 0 0}
 .documents-mcp-reader .documents-raw pre{max-width:100%;overflow:auto}
-.documents-mcp-reader .documents-source{display:inline-block;margin-top:15px;overflow-wrap:anywhere}
-@media(max-width:900px){.documents-mcp-upstream{padding:17px}}
+.documents-mcp-spec{border-top:1px solid var(--line);margin:25px 0 0;padding:18px 0 0;
+  color:var(--muted)}
+.documents-mcp-spec>summary{cursor:pointer;font:600 12px/1.5 "DM Sans",sans-serif;
+  color:var(--muted)}
+.documents-mcp-spec>summary:hover{color:var(--ink)}
+.documents-mcp-spec-content{padding-top:14px}
+.documents-mcp-spec-content>p{font:12px/1.7 "DM Sans",sans-serif;color:var(--muted)}
+.documents-mcp-spec-links{display:flex;flex-wrap:wrap;gap:9px 19px}
+.documents-mcp-spec-links a{display:inline-block;font-size:12px;margin:0;overflow-wrap:anywhere}
+.documents-mcp-spec-source{overflow-wrap:anywhere}
+.documents-mcp-spec-content h4{font-size:13px;color:var(--ink);margin:16px 0 8px}
+.documents-mcp-highlights{padding-left:22px;line-height:1.65;font-size:12px;
+  max-width:1050px;margin-bottom:4px}
+.documents-mcp-highlights li{margin-bottom:6px;overflow-wrap:anywhere}
+@media(max-width:600px){
+  .documents-mcp-field{padding:12px 13px}
+  .documents-mcp-method-description{font-size:13px}
+  .documents-mcp-section-head h3{font-size:25px}
+}
