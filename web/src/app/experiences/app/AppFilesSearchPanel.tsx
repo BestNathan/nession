@@ -14,6 +14,8 @@ export interface AppFilesSearchPanelProps {
   status: AppFilesSearchStatus;
   error: string | null;
   results: FileEntry[];
+  /** True when the scan stopped before covering the whole Workspace. */
+  incomplete: boolean;
   onSelectFile: (entry: FileEntry) => void;
   onRetry: () => void;
 }
@@ -24,6 +26,7 @@ export function AppFilesSearchPanel({
   status,
   error,
   results,
+  incomplete,
   onSelectFile,
   onRetry,
 }: AppFilesSearchPanelProps) {
@@ -51,8 +54,16 @@ export function AppFilesSearchPanel({
         <p className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', chromeLabelRole())}>
           Files
         </p>
+        {status === 'ready' && incomplete ? (
+          <p
+            className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', secondaryAppClass)}
+            data-testid="files-search-incomplete"
+          >
+            Showing partial results — this Workspace was not scanned completely.
+          </p>
+        ) : null}
         {status === 'loading' ? (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2" data-testid="files-search-loading">
             {Array.from({ length: 5 }, (_, i) => (
               <Skeleton key={i} className="h-14 w-full rounded-[var(--nession-shell-session-row-radius)]" />
             ))}
@@ -67,8 +78,13 @@ export function AppFilesSearchPanel({
           </div>
         ) : null}
         {status === 'ready' && query.trim().length > 0 && results.length === 0 ? (
-          <p className={cn('text-muted-foreground', secondaryAppClass)}>
-            {`No files match "${query.trim()}".`}
+          <p
+            className={cn('text-muted-foreground', secondaryAppClass)}
+            data-testid="files-search-empty"
+          >
+            {incomplete
+              ? `No files match "${query.trim()}" in the scanned part of this Workspace.`
+              : `No files match "${query.trim()}".`}
           </p>
         ) : null}
         {status === 'ready' ? (
