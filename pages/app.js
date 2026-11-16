@@ -1,5 +1,5 @@
 import { renderKnowledge, validKnowledgeSnapshot } from './knowledge.js';
-import { renderDocuments, validDocumentsSnapshot } from './documents.js';
+import { renderDocuments, renderDocumentsIndex, validDocumentsSnapshot } from './documents.js';
 import { renderMcpDocuments, validMcpSnapshot } from './mcp-documents.js';
 // Pages deliberately has no dependency on nession/web, runtime APIs, or UI packages.
 const root = document.getElementById('main');
@@ -726,10 +726,17 @@ function render(){
   const agentMatch=raw.match(/^\/agents\/(developer|reviewer|acceptor|auditor)\/([a-z][a-z0-9-]{0,62})(?:\?(?:window=(?:7d|30d)|outcome=[a-z_]+|[a-z_]+=[a-z0-9_-]+)(?:&[a-z_]+=[a-z0-9_-]+)*)?$/);
   const agentPath=raw.startsWith('/agents/')||raw.startsWith('/agents?');
   const detail=raw.startsWith('/work/')&&!routes.has(raw);
+  const protocolPath=raw==='/documents/protocol'||raw.startsWith('/documents/protocol?')||
+    raw.startsWith('/documents?protocol=')||raw.startsWith('/documents?v=');
   const route=agentPath?'/agents':match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':
     (raw==='/documents/mcp'||raw.startsWith('/documents/mcp?'))?'/documents/mcp':
+    protocolPath?'/documents/protocol':
     (raw==='/documents'||raw.startsWith('/documents?'))?'/documents':routes.has(raw)?raw:detail?'/work':raw==='/'
     ?'/':'/missing';
+  // Preserve the independent catalog scroll when only the selected detail changes.
+  const previousWorkspace=root.querySelector('.documents-workspace');
+  const previousSection=previousWorkspace?.dataset.section;
+  const previousListScroll=previousWorkspace?.querySelector('.documents-list-scroll')?.scrollTop||0;
   root.replaceChildren();
   // A hashchange may arrive while the independent site.json request is still
   // pending. Only these routes need that snapshot; Prototypes, Knowledge and Documents
@@ -761,12 +768,26 @@ function render(){
     }else if(route==='/documents/mcp'){
       if(mcpSnapshotStatus==='loading')root.append(node('p','loading','Loading MCP Tools…'));
       else renderMcpDocuments(root,mcpSnapshot,location.hash);
-    }else if(route==='/documents'){
+    }else if(route==='/documents/protocol'){
       if(documentsSnapshotStatus==='loading')root.append(node('p','loading','Loading technical Documents…'));
       else renderDocuments(root,documentsSnapshot,location.hash);
+    }else if(route==='/documents'){
+      renderDocumentsIndex(root,{
+        protocolStatus:documentsSnapshotStatus,
+        protocolCount:documentsSnapshotStatus==='available'&&validDocumentsSnapshot(documentsSnapshot)
+          ?documentsSnapshot.protocols.length:null,
+        mcpStatus:mcpSnapshotStatus,
+        mcpCount:mcpSnapshotStatus==='available'&&validMcpSnapshot(mcpSnapshot)
+          ?mcpSnapshot.tools.length:null
+      });
     }
     else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
     else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
+    const nextWorkspace=root.querySelector('.documents-workspace');
+    if(nextWorkspace?.dataset.section===previousSection){
+      const nextList=nextWorkspace.querySelector('.documents-list-scroll');
+      if(nextList)nextList.scrollTop=previousListScroll;
+    }
     document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
   } catch(error){
     console.error('Pages render failure',error);
@@ -850,7 +871,7 @@ async function loadMcpCatalog(){
     mcpSnapshot=null;
     mcpSnapshotStatus='unavailable';
   }
-  if(location.hash.startsWith('#/documents/mcp'))render();
+  if(location.hash.startsWith('#/documents'))render();
 }
 async function init(){
   window.addEventListener('hashchange',render);
