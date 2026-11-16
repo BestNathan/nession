@@ -1839,22 +1839,31 @@ esac"#,
             .expect("apply authorized credential profile");
 
         assert!(
-            outcome.warnings.iter().any(|warning| {
-                warning.contains("NESSION_RUNTIME_SESSION_INSTANCE_ID")
-            }),
+            outcome
+                .warnings
+                .iter()
+                .any(|warning| { warning.contains("NESSION_RUNTIME_SESSION_INSTANCE_ID") }),
             "forged runtime identity must be refused"
         );
         assert_eq!(
-            manager.get_session_env(session.name(), "NESSION_MCP_TOKEN")
-                .await.expect("observable tmux environment").as_deref(),
+            manager
+                .get_session_env(session.name(), "NESSION_MCP_TOKEN")
+                .await
+                .expect("observable tmux environment")
+                .as_deref(),
             Some("fixture-token")
         );
         assert_eq!(
-            manager.session_instance_id(session.name()).await
+            manager
+                .session_instance_id(session.name())
+                .await
                 .expect("identity remains anchored"),
             instance
         );
-        manager.kill_session(session.name()).await.expect("cleanup tmux Session");
+        manager
+            .kill_session(session.name())
+            .await
+            .expect("cleanup tmux Session");
     }
 
     // ── the shell adapter, against a real shell ──────────────────────────────
@@ -2057,12 +2066,14 @@ esac"#,
         )
         .await
         .unwrap();
-        let (mut child, mut stdin, mut lines) =
-            spawn_adapter_shell(shell, &adapter, &home).await;
+        let (mut child, mut stdin, mut lines) = spawn_adapter_shell(shell, &adapter, &home).await;
         let first = write_and_wait(
-            &mut stdin, &mut lines,
-            "echo \"LEGACY1:$NESSION_TEST\"", "LEGACY1:",
-        ).await;
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY1:$NESSION_TEST\"",
+            "LEGACY1:",
+        )
+        .await;
         assert!(first.contains("LEGACY1:one"), "{first}");
 
         mgr.write_runtime_files(
@@ -2076,15 +2087,26 @@ esac"#,
         )
         .await
         .unwrap();
-        let _ = write_and_wait(&mut stdin, &mut lines, "echo \"LEGACY_SYNC\"", "LEGACY_SYNC").await;
+        let _ = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY_SYNC\"",
+            "LEGACY_SYNC",
+        )
+        .await;
         let second = write_and_wait(
-            &mut stdin, &mut lines,
-            "echo \"LEGACY2:$NESSION_TEST\"", "LEGACY2:",
-        ).await;
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY2:$NESSION_TEST\"",
+            "LEGACY2:",
+        )
+        .await;
         assert!(second.contains("LEGACY2:two"), "{second}");
         assert_eq!(
             tokio::fs::read_to_string(session_dir.join(SHELL_REVISION_FILE))
-                .await.unwrap().trim(),
+                .await
+                .unwrap()
+                .trim(),
             "2"
         );
         drop(stdin);

@@ -821,8 +821,7 @@ mod tests {
         let response = connect_with_cli(&context, "agent:s", request, &cli).await;
         assert_eq!(response.state, McpConnectStateV1::Blocked);
         assert!(response.preflight.prerequisites.iter().any(|entry| {
-            entry.id == "credential_verified"
-                && entry.state == McpPrerequisiteStateV1::Missing
+            entry.id == "credential_verified" && entry.state == McpPrerequisiteStateV1::Missing
         }));
         assert!(
             !temp.path().join("home/.claude.json").exists(),
