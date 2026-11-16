@@ -1,5 +1,7 @@
 #!/bin/sh
 set -e
+# Generated agent-config.toml can contain the inbound/outbound credentials.
+umask 077
 
 # Agent entrypoint — starts nginx + nession-agent (with tmux)
 

@@ -13,6 +13,8 @@
 # the listener binds. An invalid `NESSION_TERMINAL_COLS` therefore fails the
 # process, not a shell regex that could drift from the Rust rule.
 set -eu
+# Generated config includes the Server token; never write it world-readable.
+umask 077
 
 out="${1:?usage: render-server-config.sh <config.toml path>}"
 
