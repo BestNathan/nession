@@ -48,6 +48,7 @@ function harness(hash='#/work',fetcher=async()=>{throw Error('fixture offline');
     renderKnowledge(root){root.append(new TestElement('section'));root.append(new TestElement('p'));root.nodes.at(-1).textContent='Knowledge independent';},
     validKnowledgeSnapshot:()=>true,
     renderDocuments(root){const e=new TestElement('section');e.textContent='Documents independent';root.append(e);},
+    renderDocumentsIndex(root){const e=new TestElement('section');e.textContent='Documents index';root.append(e);},
     validDocumentsSnapshot:()=>true,
     console:{error:(...args)=>errors.push(args),warn(){}},
   });
@@ -89,6 +90,8 @@ test('Knowledge, Documents and Prototypes remain independent of an unavailable s
   assert.match(h.main.textContent,/Knowledge independent/);
   assert.doesNotMatch(h.main.textContent,/Engineering snapshot unavailable/);
   h.run("location.hash='#/documents'; render()");
+  assert.match(h.main.textContent,/Documents index/);
+  h.run("location.hash='#/documents/protocol'; render()");
   assert.match(h.main.textContent,/Loading technical Documents/);
   h.run("documentsSnapshotStatus='available'; render()");
   assert.match(h.main.textContent,/Documents independent/);
