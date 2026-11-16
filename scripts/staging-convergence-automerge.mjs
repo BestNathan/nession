@@ -2,9 +2,11 @@
 // #3689: GitHub-native convergence auto-merge admission. Never substitute this
 // script's verdict for GitHub's *effective strict required* status protection.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {execFileSync} from 'node:child_process';
 
 export const QUALIFICATION_CONTEXT = 'nession/convergence-qualification';
+const UNIVERSAL_REQUIRED=['rust-check','web-check',QUALIFICATION_CONTEXT];
 const SHA = /^[0-9a-f]{40}$/;
 const REPO = 'BestNathan/nession';
 const PUBLISHER = 'nession-publisher[bot]';
@@ -24,10 +26,11 @@ export function hasStrictQualificationProtection(graphql, branch) {
   const rule=graphql?.data?.repository?.ref?.branchProtectionRule;
   return branch?.protected===true &&
     branch?.protection?.required_status_checks?.enforcement_level==='everyone' &&
-    branch.protection.required_status_checks.contexts?.includes(QUALIFICATION_CONTEXT) &&
+    UNIVERSAL_REQUIRED.every(context=>
+      branch.protection.required_status_checks.contexts?.includes(context)) &&
     rule?.requiresStatusChecks===true &&
     rule?.requiresStrictStatusChecks===true &&
-    rule?.requiredStatusCheckContexts?.includes(QUALIFICATION_CONTEXT)===true;
+    UNIVERSAL_REQUIRED.every(context=>rule?.requiredStatusCheckContexts?.includes(context)===true);
 }
 
 export function isTrustedConvergencePr(pr,{repo,base,headSha}) {
@@ -39,6 +42,48 @@ export function isTrustedConvergencePr(pr,{repo,base,headSha}) {
     pr.body?.startsWith('Staging Convergence automated proposal') &&
     (base==='main' ? pr.head.ref==='staging' :
       /^chore\/staging-sync-[a-zA-Z0-9-]+$/.test(pr.head.ref));
+}
+
+// Required checks apply to ALL PRs targeting a protected branch.
+// Ordinary PRs are not native convergence proposals and need a trusted
+// success/not-applicable qualification; source Quality checks remain required.
+// Publisher-owned convergence-shaped PRs may ONLY be qualified by the
+// independent canonical Controller after source/deploy/Issue verification.
+export function classifyPrQualification(pr) {
+  const base=pr?.base?.ref;
+  const head=pr?.head?.ref;
+  const publisher=pr?.user?.login===PUBLISHER;
+  const nativeShape=(base==='main'&&head==='staging') ||
+    (base!=='main'&&/^chore\/staging-sync-[a-zA-Z0-9-]+$/.test(head??''));
+  const marker=pr?.body?.startsWith('Staging Convergence automated proposal');
+  if(!['main','staging'].includes(base) ||
+     pr?.base?.repo?.full_name!==REPO ||
+     !SHA.test(pr?.head?.sha??'') ||
+     pr?.head?.repo?.full_name!==REPO)
+    return {state:'failure',reason:'Invalid or foreign PR identity'};
+  if(publisher&&(nativeShape||marker)){
+    if(nativeShape&&marker&&pr.state==='open'&&!pr.draft)
+      return {state:'pending',reason:'Awaiting canonical Convergence qualification'};
+    return {state:'failure',reason:'Publisher proposal requires trusted Convergence identity'};
+  }
+  return {state:'success',reason:'Not a native Convergence PR; ordinary Quality checks apply'};
+}
+
+function qualifyPullRequestEvent() {
+  if(process.env.GITHUB_REPOSITORY!==REPO)throw Error('untrusted GitHub repository');
+  const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+  if(!['opened','reopened','synchronize','ready_for_review'].includes(event.action) ||
+      !Number.isSafeInteger(event.number)||event.number<=0)
+    throw Error('invalid pull_request_target qualification wake');
+  const pr=api(process.env.READ_GITHUB_TOKEN,
+    ['repos/'+REPO+'/pulls/'+event.number]);
+  if(pr.number!==event.number||
+      pr.head?.sha!==event.pull_request?.head?.sha||
+      pr.base?.ref!==event.pull_request?.base?.ref)
+    throw Error('stale/foreign event HEAD cannot certify qualification');
+  const {state,reason}=classifyPrQualification(pr);
+  publishQualificationStatus(REPO,pr.head.sha,state,reason);
+  console.log(JSON.stringify({pr:pr.number,head_sha:pr.head.sha,state,reason}));
 }
 
 function policyFor(repo,base) {
@@ -125,11 +170,11 @@ function selfTest(){
   const sample={
     data:{repository:{ref:{branchProtectionRule:{
       requiresStatusChecks:true,requiresStrictStatusChecks:true,
-      requiredStatusCheckContexts:[QUALIFICATION_CONTEXT,'rust-check'],
+      requiredStatusCheckContexts:[...UNIVERSAL_REQUIRED],
     }}}},
   };
   const branch={protected:true,protection:{required_status_checks:{
-    enforcement_level:'everyone',contexts:[QUALIFICATION_CONTEXT,'web-check'],
+    enforcement_level:'everyone',contexts:[...UNIVERSAL_REQUIRED],
   }}};
   assert.equal(hasStrictQualificationProtection(sample,branch),true);
   assert.equal(hasStrictQualificationProtection(sample,{...branch,protected:false}),false);
@@ -141,6 +186,29 @@ function selfTest(){
     ...sample.data.repository.ref.branchProtectionRule,requiresStrictStatusChecks:false}}}}},branch),false);
   assert.equal(hasStrictQualificationProtection({data:{repository:{ref:null}}},branch),false);
 
+  const normal={state:'open',draft:false,user:{login:'BestNathan'},
+    base:{ref:'main',repo:{full_name:REPO}},head:{
+      ref:'fix/safe',sha:'a'.repeat(40),repo:{full_name:REPO}},
+    body:'Refs #3689'};
+  assert.equal(classifyPrQualification(normal).state,'success',
+    'ordinary PR must receive a required not-applicable status');
+  assert.equal(classifyPrQualification({...normal,base:{
+    ref:'staging',repo:{full_name:REPO}}}).state,'success');
+  assert.equal(classifyPrQualification({...normal,user:{login:PUBLISHER},
+    head:{...normal.head,ref:'staging'},
+    body:'Staging Convergence automated proposal (source: main)'}).state,'pending');
+  assert.equal(classifyPrQualification({...normal,user:{login:PUBLISHER},
+    head:{...normal.head,ref:'staging'},
+    body:'not a qualified convergence PR'}).state,'failure');
+  assert.equal(classifyPrQualification({...normal,head:{
+    ...normal.head,repo:{full_name:'attacker/fork'}}}).state,'failure');
+  assert.equal(classifyPrQualification({...normal,user:{login:PUBLISHER},
+    body:'Staging Convergence automated proposal (forged)',
+    head:{...normal.head,ref:'fix/not-a-sync'}}).state,'failure');
+  const requiredOnly={...branch,protection:{required_status_checks:{
+    enforcement_level:'everyone',contexts:[QUALIFICATION_CONTEXT,'web-check']}}};
+  assert.equal(hasStrictQualificationProtection(sample,requiredOnly),false,
+    'normal PR Quality checks must be required alongside qualification');
   const created={id:108,context:QUALIFICATION_CONTEXT,state:'pending'};
   const previous={id:107,context:QUALIFICATION_CONTEXT,state:'success'};
   assert.equal(matchesQualificationReadback(created,[created,previous],'pending'),true);
@@ -172,5 +240,6 @@ function selfTest(){
 
 if(process.argv[1]?.endsWith('/staging-convergence-automerge.mjs')){
   if(process.argv[2]==='self-test')selfTest();
-  else throw Error('usage: self-test');
+  else if(process.argv[2]==='classify')qualifyPullRequestEvent();
+  else throw Error('usage: self-test | classify');
 }
