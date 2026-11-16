@@ -33,7 +33,8 @@ const TOKEN: &str = "server-token";
 
 fn mode(path: &Path, value: u32) {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(value)).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(value))
+        .expect("set fixture mode");
 }
 
 fn config() -> ImageConfig {
@@ -63,8 +64,8 @@ fn config() -> ImageConfig {
 }
 
 fn source(image: &Path, destination: &str) -> ComposeSourceInput {
-    let digest = nession_erofs::file_digest(image).unwrap();
-    let size = std::fs::metadata(image).unwrap().len();
+    let digest = nession_erofs::file_digest(image).expect("fixture digest");
+    let size = std::fs::metadata(image).expect("fixture metadata").len();
     ComposeSourceInput {
         path: image.to_path_buf(),
         layer: Descriptor {

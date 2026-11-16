@@ -33,7 +33,8 @@ const TOKEN: &str = "server-token";
 
 fn mode(path: &Path, value: u32) {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(value)).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(value))
+        .expect("set fixture mode");
 }
 
 fn config() -> ImageConfig {
@@ -60,12 +61,12 @@ fn config() -> ImageConfig {
 }
 
 fn source(path: &Path, reference: &str) -> ReferencedSourceInput {
-    let size = std::fs::metadata(path).unwrap().len();
+    let size = std::fs::metadata(path).expect("fixture metadata").len();
     ReferencedSourceInput {
         path: path.to_path_buf(),
         layer: Descriptor {
             media_type: MEDIA_TYPE_EROFS.to_string(),
-            digest: nession_erofs::file_digest(path).unwrap(),
+            digest: nession_erofs::file_digest(path).expect("fixture digest"),
             size,
             urls: None,
             annotations: None,
