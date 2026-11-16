@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -12,6 +12,9 @@ import type { ProjectDraft } from '../../../types';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const BUILT = `sha256:${'b'.repeat(64)}`;
+const SOURCE_A = 'https://github.com/BestNathan/nession';
+const SOURCE_B = 'https://github.com/BestNathan/other';
+const BUILD_B_ID = 'build-223e4567-e89b-42d3-a456-426614174000';
 
 function image(digest = DIGEST, alias = 'workspace-runtime'): ImageDescriptor {
   return {
@@ -226,6 +229,367 @@ describe('Project image reference field', () => {
     await screen.findByTestId('project-image-build-progress');
     expect(screen.getByTestId('project-image-build-progress')).toHaveTextContent(
       'Packaging with mkfs.erofs',
+    );
+  });
+
+  it('hides the previous source build and preserves the pinned digest after a source switch', async () => {
+    let changed: ProjectDraft | null = null;
+    const { rerender } = render(
+      <ProjectImageReferenceField
+        draft={{ ...draft, image_digest: DIGEST }}
+        onChange={(next) => {
+          changed = next;
+        }}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await userEvent.click(screen.getByTestId('project-image-build'));
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: build(),
+    });
+    await screen.findByTestId('project-image-build-progress');
+    surface.pushMessage('server.image.build.updated', {
+      build: build({
+        status: 'succeeded',
+        stage: null,
+        digest: BUILT,
+        size_bytes: 4096,
+      }),
+    });
+    await waitFor(() =>
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.get'),
+      ).toBe(true),
+    );
+    surface.resolveNext('server.image.get', {
+      success: true,
+      image: image(BUILT, 'nession-web-build'),
+    });
+    await screen.findByTestId('project-image-build-result');
+
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' }, image_digest: DIGEST }}
+        onChange={(next) => {
+          changed = next;
+        }}
+        disabled={false}
+      />,
+    );
+
+    // The old source's result and its explicit Use action disappear in the
+    // same render as the source change; the pinned Project digest stays.
+    expect(screen.queryByTestId('project-image-build-result')).toBeNull();
+    expect(screen.queryByTestId('project-image-use-build')).toBeNull();
+    expect(screen.getByTestId('project-image-digest-field')).toHaveTextContent(DIGEST);
+    expect(changed).toBeNull();
+
+    // The new source keeps its own build path.
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await userEvent.click(screen.getByTestId('project-image-build'));
+    const submitted = surface.requests.find(
+      (request) => request.type === 'server.image.build.submit',
+    );
+    expect(submitted?.payload).toEqual({
+      source: { kind: 'github', repository_url: SOURCE_B, ref: 'main' },
+    });
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: build({
+        build_id: BUILD_B_ID,
+        source: { kind: 'github', repository_url: SOURCE_B, ref: 'main' },
+      }),
+    });
+    await screen.findByTestId('project-image-build-progress');
+    expect(screen.getByTestId('project-image-build-progress')).toHaveAttribute(
+      'data-build-id',
+      BUILD_B_ID,
+    );
+  });
+
+  it('ignores a submit that settles after the source changed', async () => {
+    let changed: ProjectDraft | null = null;
+    const { rerender } = render(
+      <ProjectImageReferenceField
+        draft={draft}
+        onChange={(next) => {
+          changed = next;
+        }}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await userEvent.click(screen.getByTestId('project-image-build'));
+
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' } }}
+        onChange={(next) => {
+          changed = next;
+        }}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+
+    // A's deferred submission settles only after B owns the field.
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: build(),
+    });
+    await act(async () => {});
+    expect(screen.queryByTestId('project-image-build-progress')).toBeNull();
+    expect(screen.queryByTestId('project-image-build-result')).toBeNull();
+    expect(screen.queryByTestId('project-image-build-submit-error')).toBeNull();
+    expect(
+      surface.requests.some((request) => request.type === 'server.image.get'),
+    ).toBe(false);
+    expect(screen.getByTestId('project-image-build')).toHaveTextContent(
+      'Build from Git Source',
+    );
+
+    // B's own submission still works after the stale completion.
+    await userEvent.click(screen.getByTestId('project-image-build'));
+    const submitted = surface.requests.find(
+      (request) => request.type === 'server.image.build.submit',
+    );
+    expect(submitted?.payload).toEqual({
+      source: { kind: 'github', repository_url: SOURCE_B, ref: 'main' },
+    });
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: build({
+        build_id: BUILD_B_ID,
+        source: { kind: 'github', repository_url: SOURCE_B, ref: 'main' },
+      }),
+    });
+    await screen.findByTestId('project-image-build-progress');
+    expect(screen.getByTestId('project-image-build-progress')).toHaveAttribute(
+      'data-build-id',
+      BUILD_B_ID,
+    );
+    expect(changed).toBeNull();
+  });
+
+  it('ignores a recovery that settles after the source changed', async () => {
+    const { rerender } = render(
+      <ProjectImageReferenceField draft={draft} onChange={() => undefined} disabled={false} />,
+    );
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' } }}
+        onChange={() => undefined}
+        disabled={false}
+      />,
+    );
+
+    // The first pending list belongs to A and must not be shown under B.
+    surface.resolveNext('server.image.build.list', {
+      builds: [
+        build({
+          status: 'succeeded',
+          stage: null,
+          digest: BUILT,
+          size_bytes: 4096,
+        }),
+      ],
+      total: 1,
+    });
+    await act(async () => {});
+    expect(screen.queryByTestId('project-image-build-result')).toBeNull();
+    expect(screen.queryByTestId('project-image-build-loading')).toBeNull();
+    expect(
+      surface.requests.some((request) => request.type === 'server.image.get'),
+    ).toBe(false);
+
+    // B recovers its own durable build independently.
+    surface.resolveNext('server.image.build.list', {
+      builds: [
+        build({
+          build_id: BUILD_B_ID,
+          source: { kind: 'github', repository_url: SOURCE_B, ref: 'main' },
+        }),
+      ],
+      total: 1,
+    });
+    await screen.findByTestId('project-image-build-progress');
+    expect(screen.getByTestId('project-image-build-progress')).toHaveAttribute(
+      'data-build-id',
+      BUILD_B_ID,
+    );
+  });
+
+  it('ignores an image descriptor that settles after the source changed', async () => {
+    let changed: ProjectDraft | null = null;
+    const { rerender } = render(
+      <ProjectImageReferenceField
+        draft={{ ...draft, image_digest: DIGEST }}
+        onChange={(next) => {
+          changed = next;
+        }}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await userEvent.click(screen.getByTestId('project-image-build'));
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: build({
+        status: 'succeeded',
+        stage: null,
+        digest: BUILT,
+        size_bytes: 4096,
+      }),
+    });
+    await screen.findByTestId('project-image-build-loading');
+
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' }, image_digest: DIGEST }}
+        onChange={(next) => {
+          changed = next;
+        }}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+
+    // A's descriptor arrives after the switch and must not offer its digest.
+    surface.resolveNext('server.image.get', {
+      success: true,
+      image: image(BUILT, 'nession-web-build'),
+    });
+    await act(async () => {});
+    expect(screen.queryByTestId('project-image-build-result')).toBeNull();
+    expect(screen.queryByTestId('project-image-use-build')).toBeNull();
+    expect(screen.getByTestId('project-image-digest-field')).toHaveTextContent(DIGEST);
+    expect(changed).toBeNull();
+  });
+
+  it('ignores a cancel completion that settles after the source changed', async () => {
+    const { rerender } = render(
+      <ProjectImageReferenceField draft={draft} onChange={() => undefined} disabled={false} />,
+    );
+    surface.resolveNext('server.image.build.list', {
+      builds: [build()],
+      total: 1,
+    });
+    await screen.findByTestId('project-image-build-progress');
+    await userEvent.click(screen.getByTestId('project-image-build-cancel'));
+
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' } }}
+        onChange={() => undefined}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+
+    surface.resolveNext('server.image.build.cancel', {
+      success: true,
+      build: build({ status: 'canceled', stage: null }),
+    });
+    await act(async () => {});
+    expect(screen.queryByTestId('project-image-build-progress')).toBeNull();
+    expect(screen.queryByTestId('project-image-build-submit-error')).toBeNull();
+  });
+
+  it('ignores a retry completion that settles after the source changed', async () => {
+    const { rerender } = render(
+      <ProjectImageReferenceField draft={draft} onChange={() => undefined} disabled={false} />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await userEvent.click(screen.getByTestId('project-image-build'));
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: build(),
+    });
+    await screen.findByTestId('project-image-build-progress');
+    surface.pushMessage('server.image.build.updated', {
+      build: build({
+        status: 'failed',
+        stage: null,
+        error: 'source could not be packaged',
+      }),
+    });
+    await screen.findByTestId('project-image-build-error');
+    await userEvent.click(screen.getByTestId('project-image-build-retry'));
+
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' } }}
+        onChange={() => undefined}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+
+    surface.resolveNext('server.image.build.retry', {
+      success: true,
+      build: build(),
+    });
+    await act(async () => {});
+    expect(screen.queryByTestId('project-image-build-progress')).toBeNull();
+    expect(screen.queryByTestId('project-image-build-submit-error')).toBeNull();
+  });
+
+  it('ignores a pushed update for the previous source build', async () => {
+    const { rerender } = render(
+      <ProjectImageReferenceField draft={draft} onChange={() => undefined} disabled={false} />,
+    );
+    surface.resolveNext('server.image.build.list', {
+      builds: [build()],
+      total: 1,
+    });
+    await screen.findByTestId('project-image-build-progress');
+
+    rerender(
+      <ProjectImageReferenceField
+        draft={{ ...draft, source: { repository_url: SOURCE_B, ref: 'main' } }}
+        onChange={() => undefined}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+
+    surface.pushMessage('server.image.build.updated', {
+      build: build({
+        status: 'succeeded',
+        stage: null,
+        digest: BUILT,
+        size_bytes: 4096,
+      }),
+    });
+    await act(async () => {});
+    expect(screen.queryByTestId('project-image-build-result')).toBeNull();
+    expect(screen.queryByTestId('project-image-build-loading')).toBeNull();
+    expect(
+      surface.requests.some((request) => request.type === 'server.image.get'),
+    ).toBe(false);
+  });
+
+  it('recovers a durable build for an equivalent normalized source spelling', async () => {
+    render(
+      <ProjectImageReferenceField
+        draft={{
+          ...draft,
+          source: { repository_url: `${SOURCE_A}.git/`, ref: ' main ' },
+        }}
+        onChange={() => undefined}
+        disabled={false}
+      />,
+    );
+    surface.resolveNext('server.image.build.list', {
+      builds: [build()],
+      total: 1,
+    });
+    await screen.findByTestId('project-image-build-progress');
+    expect(screen.getByTestId('project-image-build-progress')).toHaveAttribute(
+      'data-build-id',
+      build().build_id,
     );
   });
 });
