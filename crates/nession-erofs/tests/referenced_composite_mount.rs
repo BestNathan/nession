@@ -248,8 +248,13 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         .unwrap();
     assert_eq!(fetched.manifest_digest, referenced.manifest_digest);
     assert_eq!(fetched.device_paths.len(), 2);
-    for source in &sources {
-        assert!(!cache.blob_path(&source.layer.digest).unwrap().is_file());
+    for (source, bytes) in sources.iter().zip(device_bytes.iter()) {
+        assert!(!source.path.exists(), "the build-host source file is gone");
+        assert_eq!(
+            &std::fs::read(cache.blob_path(&source.layer.digest).unwrap()).unwrap(),
+            bytes,
+            "the cache holds the verified closure device bytes"
+        );
     }
 
     let mountpoint = root.path().join("mount");
