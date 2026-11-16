@@ -367,7 +367,10 @@ async fn abandoned_queued_call(
         json!({ "agent_id": TEST_AGENT_ID, "name": name }),
     )
     .await;
-    assert_eq!(result["isError"], true, "a blocked tool must time out: {result}");
+    assert_eq!(
+        result["isError"], true,
+        "a blocked tool must time out: {result}"
+    );
     let error = text_of(&result);
     assert_eq!(error["error"]["kind"], "timeout", "{error}");
     let message = error["error"]["message"].as_str().expect("timeout message");
