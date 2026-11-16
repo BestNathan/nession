@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// #3689: GitHub-native convergence auto-merge admission. Never substitute this
-// script's verdict for GitHub's *effective strict required* status protection.
+// #3689: GitHub-native Auto-merge admission. GitHub owns merge requirements;
+// Nession only verifies that its canonical qualification is a required status.
+// Do not invent extra strict-mode / constituent-CI branch policy.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {execFileSync} from 'node:child_process';
 
 export const QUALIFICATION_CONTEXT = 'nession/convergence-qualification';
-const UNIVERSAL_REQUIRED=['rust-check','web-check',QUALIFICATION_CONTEXT];
 const SHA = /^[0-9a-f]{40}$/;
 const REPO = 'BestNathan/nession';
 const PUBLISHER = 'nession-publisher[bot]';
@@ -19,18 +19,16 @@ function api(token, args) {
   }));
 }
 
-// Classic branch protection must require this exact context, and strict mode
-// must invalidate otherwise-successful HEAD checks when the base advances.
-// Ruleset-only or unreadable configurations are intentionally NOT inferred.
-export function hasStrictQualificationProtection(graphql, branch) {
-  const rule=graphql?.data?.repository?.ref?.branchProtectionRule;
+// One GitHub-required qualification status is enough: the trusted qualifier
+// already verifies exact-head Quality, Case, E2E, deployment and Issue evidence.
+// Do not force strict-base mode or make every underlying check a second required
+// context. Without an enforced qualification check, arming before qualification
+// could merge immediately, so fail closed.
+export function hasRequiredQualificationCheck(branch) {
+  const checks=branch?.protection?.required_status_checks;
   return branch?.protected===true &&
-    branch?.protection?.required_status_checks?.enforcement_level==='everyone' &&
-    UNIVERSAL_REQUIRED.every(context=>
-      branch.protection.required_status_checks.contexts?.includes(context)) &&
-    rule?.requiresStatusChecks===true &&
-    rule?.requiresStrictStatusChecks===true &&
-    UNIVERSAL_REQUIRED.every(context=>rule?.requiredStatusCheckContexts?.includes(context)===true);
+    checks?.enforcement_level==='everyone' &&
+    checks?.contexts?.includes(QUALIFICATION_CONTEXT)===true;
 }
 
 export function isTrustedConvergencePr(pr,{repo,base,headSha}) {
@@ -108,20 +106,14 @@ function qualifyPullRequestEvent() {
 }
 
 function policyFor(repo,base) {
-  const readToken=process.env.READ_GITHUB_TOKEN;
-  const [owner,name]=repo.split('/');
-  const branch=api(readToken,['repos/'+repo+'/branches/'+encodeURIComponent(base)]);
-  const query='query($owner:String!,$name:String!,$ref:String!){'+
-    'repository(owner:$owner,name:$name){ref(qualifiedName:$ref){'+
-    'branchProtectionRule{requiresStatusChecks requiresStrictStatusChecks requiredStatusCheckContexts}}}}';
-  const graphql=api(readToken,['graphql','-f','query='+query,
-    '-f','owner='+owner,'-f','name='+name,'-f','ref=refs/heads/'+base]);
-  return hasStrictQualificationProtection(graphql,branch);
+  const branch=api(process.env.READ_GITHUB_TOKEN,
+    ['repos/'+repo+'/branches/'+encodeURIComponent(base)]);
+  return hasRequiredQualificationCheck(branch);
 }
 
-export function isStrictQualificationRequired(repo,base) {
+export function isQualificationRequired(repo,base) {
   if(repo!==REPO || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(base))
-    throw Error('invalid strict convergence qualification target');
+    throw Error('invalid convergence qualification target');
   return policyFor(repo,base);
 }
 
@@ -160,7 +152,7 @@ export function publishQualificationStatus(repo,headSha,state,reason) {
 // Called by the trusted controller for a specific planner-authenticated PR.
 // Publish a pending HEAD status BEFORE arming the merge; GitHub cannot merge
 // until the independent qualifier publishes a success for that same HEAD.
-export function armProtectedAutoMerge({repo,prNumber,base,headSha}) {
+export function armNativeAutoMerge({repo,prNumber,base,headSha}) {
   if(repo!==REPO || !Number.isSafeInteger(prNumber)||prNumber<=0 ||
      !SHA.test(headSha) || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(base))
     throw Error('invalid convergence PR for auto-merge');
@@ -169,7 +161,7 @@ export function armProtectedAutoMerge({repo,prNumber,base,headSha}) {
   if(!isTrustedConvergencePr(pr,{repo,base,headSha}))
     return {armed:false,reason:'UNTRUSTED_AUTO_MERGE_PR'};
   if(!policyFor(repo,base))
-    return {armed:false,reason:'STRICT_REQUIRED_QUALIFICATION_NOT_CONFIGURED'};
+    return {armed:false,reason:'GITHUB_REQUIRED_QUALIFICATION_NOT_CONFIGURED'};
   if(pr.auto_merge && pr.auto_merge.merge_method!=='merge')
     return {armed:false,reason:'AUTO_MERGE_METHOD_NOT_MERGE'};
 
@@ -188,24 +180,21 @@ export function armProtectedAutoMerge({repo,prNumber,base,headSha}) {
 }
 
 function selfTest(){
-  const sample={
-    data:{repository:{ref:{branchProtectionRule:{
-      requiresStatusChecks:true,requiresStrictStatusChecks:true,
-      requiredStatusCheckContexts:[...UNIVERSAL_REQUIRED],
-    }}}},
-  };
-  const branch={protected:true,protection:{required_status_checks:{
-    enforcement_level:'everyone',contexts:[...UNIVERSAL_REQUIRED],
-  }}};
-  assert.equal(hasStrictQualificationProtection(sample,branch),true);
-  assert.equal(hasStrictQualificationProtection(sample,{...branch,protected:false}),false);
-  assert.equal(hasStrictQualificationProtection(sample,{...branch,protection:{
-    required_status_checks:{...branch.protection.required_status_checks,contexts:['web-check']}}}),false);
-  assert.equal(hasStrictQualificationProtection(sample,{...branch,protection:{
-    required_status_checks:{...branch.protection.required_status_checks,enforcement_level:'off'}}}),false);
-  assert.equal(hasStrictQualificationProtection({data:{repository:{ref:{branchProtectionRule:{
-    ...sample.data.repository.ref.branchProtectionRule,requiresStrictStatusChecks:false}}}}},branch),false);
-  assert.equal(hasStrictQualificationProtection({data:{repository:{ref:null}}},branch),false);
+  const checks={enforcement_level:'everyone',
+    contexts:[QUALIFICATION_CONTEXT]};
+  const branch={protected:true,protection:{required_status_checks:checks}};
+  assert.equal(hasRequiredQualificationCheck(branch),true);
+  assert.equal(hasRequiredQualificationCheck({...branch,protected:false}),false);
+  assert.equal(hasRequiredQualificationCheck({...branch,protection:{
+    required_status_checks:{...checks,contexts:['rust-check','web-check']}}}),false);
+  assert.equal(hasRequiredQualificationCheck({...branch,protection:{
+    required_status_checks:{...checks,enforcement_level:'off'}}}),false);
+  assert.equal(hasRequiredQualificationCheck({...branch,protection:{
+    required_status_checks:{...checks,strict:false}}}),true,
+    'GitHub base-up-to-date strict mode is not required by native Auto-merge');
+  assert.equal(hasRequiredQualificationCheck({...branch,protection:{
+    required_status_checks:{...checks,contexts:[QUALIFICATION_CONTEXT]}}}),true,
+    'constituent CI contexts are evaluated by the canonical qualification owner');
 
   const normal={state:'open',draft:false,user:{login:'BestNathan'},
     base:{ref:'main',repo:{full_name:REPO}},head:{
@@ -238,10 +227,6 @@ function selfTest(){
   assert.equal(classifyPrQualification({...normal,user:{login:PUBLISHER},
     body:'Staging Convergence automated proposal (forged)',
     head:{...normal.head,ref:'fix/not-a-sync'}}).state,'failure');
-  const requiredOnly={...branch,protection:{required_status_checks:{
-    enforcement_level:'everyone',contexts:[QUALIFICATION_CONTEXT,'web-check']}}};
-  assert.equal(hasStrictQualificationProtection(sample,requiredOnly),false,
-    'normal PR Quality checks must be required alongside qualification');
   const created={id:108,context:QUALIFICATION_CONTEXT,state:'pending'};
   const previous={id:107,context:QUALIFICATION_CONTEXT,state:'success'};
   assert.equal(matchesQualificationReadback(created,[created,previous],'pending'),true);
