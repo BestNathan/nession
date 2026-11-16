@@ -44,7 +44,7 @@ if (!capabilities.backend) {
     );
     const facts = runtimeEvidence(output);
     assert.equal(facts.transient_write_visible, true, 'the write is visible inside the execution');
-    assert.equal(facts.whiteout_isolated, true, 'a deleted lower file reappears in a later execution');
+    assert.equal(facts.copyup_isolated, true, 'a copy-up edit is invisible to a later execution');
     assert.equal(facts.transient_recorded, true, 'the execution records its transient RootFS');
     assert.equal(facts.transient_upper_removed, true, 'cleanup removes the transient upper/work');
     assert.equal(facts.base_image_unchanged, true, 'the immutable Base image bytes are unchanged');

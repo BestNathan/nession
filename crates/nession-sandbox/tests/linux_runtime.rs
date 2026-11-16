@@ -1648,10 +1648,13 @@ fn ordered_multi_lower_workspace_merges_by_declared_priority() {
 set -eu
 read shadow < /workspace/shadow.txt
 [ \"$shadow\" = top ] && echo SHADOW-TOP
-[ \"$(cat /workspace/only-top.txt)\" = top ] && echo TOP-VISIBLE
-[ \"$(cat /workspace/only-bottom.txt)\" = bottom ] && echo BOTTOM-VISIBLE
+read only_top < /workspace/only-top.txt
+[ \"$only_top\" = top ] && echo TOP-VISIBLE
+read only_bottom < /workspace/only-bottom.txt
+[ \"$only_bottom\" = bottom ] && echo BOTTOM-VISIBLE
 printf 'upper\\n' > /workspace/upper-proof.txt
-[ \"$(cat /workspace/upper-proof.txt)\" = upper ] && echo UPPER-WRITE
+read upper < /workspace/upper-proof.txt
+[ \"$upper\" = upper ] && echo UPPER-WRITE
 ";
     let mut running = launch(
         &settings,
@@ -1795,10 +1798,13 @@ fn a_writable_rootfs_is_transient_and_never_mutates_the_image() {
     let first_script = "\
 set -eu
 printf 'transient\\n' > /transient-proof.txt
-[ \"$(cat /transient-proof.txt)\" = transient ] && echo TRANSIENT-WRITE
-[ \"$(cat /whiteout.txt)\" = 'base file' ] && echo BASE-VISIBLE
-rm /whiteout.txt
-[ ! -e /whiteout.txt ] && echo WHITEOUT-OK
+read transient < /transient-proof.txt
+[ \"$transient\" = transient ] && echo TRANSIENT-WRITE
+read base < /whiteout.txt
+[ \"$base\" = 'base file' ] && echo BASE-VISIBLE
+printf 'transient file\\n' > /whiteout.txt
+read copy < /whiteout.txt
+[ \"$copy\" = 'transient file' ] && echo COPYUP-OK
 [ ! -e /etc/shadow ] && echo HIDDEN-OK
 ";
     let mut first = launch_rootfs("rootfs-writable", first_script.to_string(), &settings);
@@ -1815,7 +1821,7 @@ rm /whiteout.txt
     );
     assert!(stdout.contains("TRANSIENT-WRITE"), "{stdout}");
     assert!(stdout.contains("BASE-VISIBLE"), "{stdout}");
-    assert!(stdout.contains("WHITEOUT-OK"), "{stdout}");
+    assert!(stdout.contains("COPYUP-OK"), "{stdout}");
     assert!(stdout.contains("HIDDEN-OK"), "{stdout}");
     assert!(
         Path::new(&transient.upper).is_dir(),
@@ -1849,7 +1855,8 @@ rm /whiteout.txt
     let second_script = "\
 set -eu
 [ ! -e /transient-proof.txt ] && echo ISOLATED
-[ \"$(cat /whiteout.txt)\" = 'base file' ] && echo WHITEOUT-ISOLATED
+read base < /whiteout.txt
+[ \"$base\" = 'base file' ] && echo COPYUP-ISOLATED
 ";
     let mut second = launch_rootfs("rootfs-second", second_script.to_string(), &settings);
     verify_or_report(
@@ -1866,8 +1873,8 @@ set -eu
         "a later execution must not see the earlier transient write: {stdout}"
     );
     assert!(
-        stdout.contains("WHITEOUT-ISOLATED"),
-        "the deleted lower file must reappear in a later execution: {stdout}"
+        stdout.contains("COPYUP-ISOLATED"),
+        "the modified lower file must reappear unchanged in a later execution: {stdout}"
     );
     second
         .prepared
@@ -1876,7 +1883,7 @@ set -eu
         .expect("cleanup the second writable RootFS");
     print_evidence(&serde_json::json!({
         "transient_write_visible": true,
-        "whiteout_isolated": true,
+        "copyup_isolated": true,
         "transient_upper_removed": true,
         "base_image_unchanged": true,
         "later_execution_isolated": true,
