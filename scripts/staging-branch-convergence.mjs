@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// #2926: trusted-main deployment-eligible branch discovery and PR convergence.
-// Do not execute workflow files from source branches. This planner cannot merge,
-// push branch refs, waive Gates, or invoke an Agent with privileged credentials.
+// #2926/#3689: trusted-main deployment-eligible branch discovery and PR convergence.
+// Do not execute workflow files from source branches. GitHub's strict required
+// qualification + native Auto-merge own final merge; never push, bypass Gates,
+// or invoke an Agent with privileged credentials.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
+import {armProtectedAutoMerge,publishQualificationStatus,QUALIFICATION_CONTEXT}
+  from './staging-convergence-automerge.mjs';
 import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
 import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
   convergenceApproval} from './staging-convergence-pr.mjs';
@@ -577,6 +580,19 @@ function reconcile(plan) {
         results.push(record);
         continue;
       }
+      // The protected GitHub qualification status, not this Controller, owns
+      // the final merge. Never arm a generated PR without strict required
+      // qualification enforcement on its current target branch.
+      const expectedHead=sync?integration.sha:lane.sha;
+      const auto=armProtectedAutoMerge({repo,prNumber:receipt.number,
+        base,headSha:expectedHead});
+      if(!auto.armed){
+        record.outcome='BLOCKED';
+        record.reason=auto.reason;
+        results.push(record);
+        continue;
+      }
+      record.auto_merge='armed';
       if(sync){
         let approval;
         if(legacy)approval=issueApproval(batch,batchIssueNumber);
@@ -613,11 +629,9 @@ function reconcile(plan) {
         results.push(record);
         continue;
       }
-      // Never use `--auto`: acceptance might become stale before delayed merge.
-      // Revalidate current refs and emit one exact-head merge request at a time.
-      // Main can advance without invalidating the checked integration.
-      // Its pinned second parent must remain an ancestor of Main; the Staging
-      // first parent must match exactly. No head rewrite or approval reuse.
+      // GitHub Auto-merge has already been armed with MERGE, and the strict
+      // required context is pending. Recheck live refs before granting the
+      // current exact-HEAD success; never issue an imperative Merge API call.
       const liveMain=gitRemoteHead('main');
       let pinnedAncestor=false;
       if(sync){
@@ -627,19 +641,15 @@ function reconcile(plan) {
       }
       if (gitRemoteHead(lane.branch)!==lane.sha ||
           (sync&&!pinnedAncestor)||(!sync&&liveMain!==plan.main_sha)) {
-        reject('stale or divergent sources before merge: '+lane.branch);
+        reject('stale or divergent sources before qualification: '+lane.branch);
       }
-      const expectedHead = sync ? integration.sha : lane.sha;
-      const merge = gh(['--method','PUT','repos/' + repo + '/pulls/' + receipt.number + '/merge',
-        '-f','merge_method=merge','-f','sha=' + expectedHead]);
-      if (merge.merged !== true || !SHA.test(merge.sha)) {
-        reject('GitHub declined an independently qualified merge: ' + receipt.number);
-      }
-      record.outcome = 'MERGED';
-      record.merge_sha = merge.sha;
+      publishQualificationStatus(repo,expectedHead,'success',
+        'Exact-head CI, source/Issue acceptance and deployment qualified');
+      record.outcome='AUTO_MERGE_QUALIFIED';
+      record.required_context=QUALIFICATION_CONTEXT;
       results.push(record);
-      // Main may now differ from the pinned plan. Never use another lane's
-      // old comparison in the same run; a fresh scheduled pass will re-plan.
+      // GitHub owns the merge commit. Do not claim MERGED until its event
+      // and actual PR/branch state prove it independently.
       if (action === 'promote-lane-to-main') return results;
     }
   }
