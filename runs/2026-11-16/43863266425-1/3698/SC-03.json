@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "731da23973afd172f3a7c762d9d99d687808b285b2f8520b51e64476831477a5",
+  "run_id": 43863266425,
+  "run_attempt": 1,
+  "issue": 3698,
+  "criterion": "SC-03",
+  "criterion_text": "A managed persistent Workspace reused by two Sessions retains one physical writable view, survives restart and refuses reordered/different/missing Lower without data loss; Project Location Direct Bind ownership remains unchanged.",
+  "stage": "staging",
+  "target_sha": "5434c99158330729032ecb28b804baf863be8992",
+  "contract_sha256": "7924108fed66744783de994dc2ed4ee1dbafa303867166207a938056523009d4",
+  "case_revision": "5434c99158330729032ecb28b804baf863be8992",
+  "case_tree_sha": "26a7d56cf4bfc1aebc9946e60811b37826705399",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T12:07:48.004Z",
+  "finished_at": "2026-11-16T12:08:42.918Z",
+  "duration_ms": 54914,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "a Project Location remains an external Bind and refuses an Overlay lower",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 49064,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43863266425,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5434c99158330729032ecb28b804baf863be8992",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43863266425",
+    "record_path": "runs/2026-11-16/43863266425-1/3698/SC-03.json",
+    "source_result_sha256": "db8d696b62f4d8d1e4c05a2257a413f26b8e2c21c2c09d3d91f035f0cf3cb587"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43863266425-1",
+    "sha256": "db8d696b62f4d8d1e4c05a2257a413f26b8e2c21c2c09d3d91f035f0cf3cb587",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43863266425",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "3e82467061704d10b80b061a0dc2bc808e81a2ae86cb57905d9d1496f051d3b4",
+  "run_id": 43863266425,
+  "run_attempt": 1,
+  "issue": 3698,
+  "criterion": "SC-02",
+  "criterion_text": "When a writable RootFS is explicitly selected, writes remain confined to its transient Upper and are removed only after verified execution cleanup; immutable backing Image bytes and other Sessions remain unchanged.",
+  "stage": "staging",
+  "target_sha": "5434c99158330729032ecb28b804baf863be8992",
+  "contract_sha256": "7924108fed66744783de994dc2ed4ee1dbafa303867166207a938056523009d4",
+  "case_revision": "5434c99158330729032ecb28b804baf863be8992",
+  "case_tree_sha": "b9fd9ac47bce7d6e4ae8f138d130e32a1af19f3f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T12:07:39.418Z",
+  "finished_at": "2026-11-16T12:07:48.004Z",
+  "duration_ms": 8586,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo test -p nession-sandbox --test linux_runtime a_writable_rootfs_is_transient_and_never_mutates_the_image -- --nocapture failed (exit 101): \u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 0.09s\n\u001b[1m\u001b[92m     Running\u001b[0m tests/linux_runtime.rs (target/debug/deps/linux_runtime-161f8ef26dae58a0)\n\nthread 'a_writable_rootfs_is_transient_and_never_mutates_the_image' (5168) panicked at crates/nession-sandbox/tests/linux_runtime.rs:1812:5:\nthe writable RootFS shell failed: status=ExitStatus(unix_wait_status(32512)) stdout= stderr=/bin/sh: 3: cat: not found\n/bin/sh: 4: cat: not found\n/bin/sh: 5: rm: not found\n\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n   1: core::panicking::panic_fmt\n   2: linux_runtime::a_writable_rootfs_is_transient_and_never_mutates_the_image\n   3: linux_runtime::a_writable_rootfs_is_transient_and_never_mutates_the_image::{{closure}}\n   4: core::ops::function::FnOnce::call_once\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-sandbox --test linux_runtime`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 2733,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43863266425,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5434c99158330729032ecb28b804baf863be8992",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43863266425",
+    "record_path": "runs/2026-11-16/43863266425-1/3698/SC-02.json",
+    "source_result_sha256": "b1660bf4bc6652249e2df4dce7693aa32d1096d7b7b74b6067eedbc6c64b8502"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43863266425-1",
+    "sha256": "b1660bf4bc6652249e2df4dce7693aa32d1096d7b7b74b6067eedbc6c64b8502",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43863266425",
+    "durability": "time-limited; object archival not configured"
+  }
+}

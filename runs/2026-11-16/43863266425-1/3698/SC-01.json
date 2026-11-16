@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "98b2b434f67b5a41f190439bc11f9084d76a4353acfe500c0e1468017b64d179",
+  "run_id": 43863266425,
+  "run_attempt": 1,
+  "issue": 3698,
+  "criterion": "SC-01",
+  "criterion_text": "Given an ordered set of two or more verified read-only EROFS sources, a Sandbox obtains a correct deterministic merged view, and invalid ordering/path overlap/unsupported backend fails before launch.",
+  "stage": "staging",
+  "target_sha": "5434c99158330729032ecb28b804baf863be8992",
+  "contract_sha256": "7924108fed66744783de994dc2ed4ee1dbafa303867166207a938056523009d4",
+  "case_revision": "5434c99158330729032ecb28b804baf863be8992",
+  "case_tree_sha": "ca6bbda4f0270d5757a17e19f0f5dae01559d6ec",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T12:07:15.189Z",
+  "finished_at": "2026-11-16T12:07:39.418Z",
+  "duration_ms": 24229,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo test -p nession-sandbox --test linux_runtime ordered_multi_lower_workspace_merges_by_declared_priority -- --nocapture failed (exit 101): \u001b[1m\u001b[92m   Compiling\u001b[0m nession-sandbox v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-sandbox)\n\u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 0.72s\n\u001b[1m\u001b[92m     Running\u001b[0m tests/linux_runtime.rs (target/debug/deps/linux_runtime-161f8ef26dae58a0)\n\nthread 'ordered_multi_lower_workspace_merges_by_declared_priority' (4623) panicked at crates/nession-sandbox/tests/linux_runtime.rs:1670:5:\nthe multi-lower shell failed: status=ExitStatus(unix_wait_status(256)) stdout=SHADOW-TOP\n stderr=/bin/sh: 4: cat: not found\n/bin/sh: 5: cat: not found\n/bin/sh: 7: cat: not found\n\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n   1: core::panicking::panic_fmt\n   2: linux_runtime::ordered_multi_lower_workspace_merges_by_declared_priority\n   3: linux_runtime::ordered_multi_lower_workspace_merges_by_declared_priority::{{closure}}\n   4: core::ops::function::FnOnce::call_once\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-sandbox --test linux_runtime`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 18336,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43863266425,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5434c99158330729032ecb28b804baf863be8992",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43863266425",
+    "record_path": "runs/2026-11-16/43863266425-1/3698/SC-01.json",
+    "source_result_sha256": "e6982479029527a66a93ef98a7d60b763ae39ad71537e68c6b0ac678a4e95c3c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43863266425-1",
+    "sha256": "e6982479029527a66a93ef98a7d60b763ae39ad71537e68c6b0ac678a4e95c3c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43863266425",
+    "durability": "time-limited; object archival not configured"
+  }
+}
