@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "dad5486297e6c22f6ea62bcb75e6427e8204a87d074de029ccc857357f4233a3",
+  "run_id": 43877231534,
+  "run_attempt": 1,
+  "issue": 3698,
+  "criterion": "SC-02",
+  "criterion_text": "When a writable RootFS is explicitly selected, writes remain confined to its transient Upper and are removed only after verified execution cleanup; immutable backing Image bytes and other Sessions remain unchanged.",
+  "stage": "staging",
+  "target_sha": "5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e",
+  "contract_sha256": "7924108fed66744783de994dc2ed4ee1dbafa303867166207a938056523009d4",
+  "case_revision": "5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e",
+  "case_tree_sha": "b44e885eff07a8854dff1bbb4314dbf93e5e4f52",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T13:39:15.205Z",
+  "finished_at": "2026-11-16T13:39:24.348Z",
+  "duration_ms": 9143,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Writable RootFS writes stay in a disposable execution-owned upper, never mutate the immutable image, and disappear after verified cleanup",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e on Linux kernel 7.0.0-1014-aws: a writable RootFS wrote through an execution-owned transient upper, the write was recorded and visible only in that execution; cleanup strictly unmounted and removed the transient upper/work, the Base image bytes stayed identical, and a later execution was isolated"
+        }
+      ],
+      "duration_ms": 3294,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43877231534,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43877231534",
+    "record_path": "runs/2026-11-16/43877231534-1/3698/SC-02.json",
+    "source_result_sha256": "7208913922dba857766eba9d2c2f79d4f717ef66da59b62bf21401fa1d83a275"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43877231534-1",
+    "sha256": "7208913922dba857766eba9d2c2f79d4f717ef66da59b62bf21401fa1d83a275",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43877231534",
+    "durability": "time-limited; object archival not configured"
+  }
+}

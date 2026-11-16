@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cccc1d4fa68d5e303028d734bff050ae76f2faa6b8a75e31daa8809a1e5011d9",
+  "run_id": 43877231534,
+  "run_attempt": 1,
+  "issue": 3698,
+  "criterion": "SC-01",
+  "criterion_text": "Given an ordered set of two or more verified read-only EROFS sources, a Sandbox obtains a correct deterministic merged view, and invalid ordering/path overlap/unsupported backend fails before launch.",
+  "stage": "staging",
+  "target_sha": "5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e",
+  "contract_sha256": "7924108fed66744783de994dc2ed4ee1dbafa303867166207a938056523009d4",
+  "case_revision": "5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e",
+  "case_tree_sha": "ca6bbda4f0270d5757a17e19f0f5dae01559d6ec",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T13:38:47.700Z",
+  "finished_at": "2026-11-16T13:39:15.205Z",
+  "duration_ms": 27505,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Ordered EROFS lowers produce one deterministic merged Workspace view with declared priority, durable writes and correct lease release",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e on Linux kernel 7.0.0-1014-aws: two verified EROFS lowers were merged in declared order (top shadows bottom; both non-conflicting files visible); the write reached the durable upper, exactly one physical fuse-overlayfs view existed, and both lower leases were released after cleanup"
+        }
+      ],
+      "duration_ms": 21604,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43877231534,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43877231534",
+    "record_path": "runs/2026-11-16/43877231534-1/3698/SC-01.json",
+    "source_result_sha256": "8e255499171de782188dd2e6a06310f27fd853e4dd60f5da562612fb28cfea10"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43877231534-1",
+    "sha256": "8e255499171de782188dd2e6a06310f27fd853e4dd60f5da562612fb28cfea10",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43877231534",
+    "durability": "time-limited; object archival not configured"
+  }
+}
