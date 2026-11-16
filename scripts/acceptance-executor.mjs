@@ -9,6 +9,7 @@ import { validateAcceptancePlan, isProofEligible, deploymentProofEligible, canon
 import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
+import {enforceLiveFullFailure,requiresLiveFullFailureProof} from './acceptance-main-full-failure-bug-evidence.mjs';
 import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
@@ -631,7 +632,10 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
   const normalized = verifiedIssueAuditCriterion(
     context, normalizeAcceptanceResult(context, raw, source));
-  const gated = enforcePrRustQuality(context, enforcePrWebQuality(context, normalized));
+  // The trusted normalizer—not the model—decides whether a claimed live
+  // failed-Full publication has authenticated source/Store/Bug receipts.
+  const gated = enforceLiveFullFailure(context,
+    enforcePrRustQuality(context, enforcePrWebQuality(context, normalized)));
   fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
 }
 
@@ -1226,6 +1230,18 @@ function selfTest() {
   assert.match(applyAcceptanceResultToBody(rustBody, rustDowngraded),
     /\| SC-01 \| pr \| Pending \|/);
 
+  // A green publisher job must never be projected as a live failure->Bug Pass.
+  const failureText='Full Regression failed exact-Main-SHA observations enter deduplicated Bug repair flow';
+  assert.equal(requiresLiveFullFailureProof(failureText),true);
+  const failureContext={stage:'post-merge',criteria:[{criterion:'SC-03',text:failureText}],
+    ci_evidence:{verified_live_main_full_failure_publication:{status:'Pending',
+      reason:'missing authenticated failed Main Full source'}}};
+  const fakePublisher={criteria:[{criterion:'SC-03',result:'Pass',
+    evidence:[{type:'workflow',value:'successful Acceptance / E2E Failure Bug push run'}],
+    summary:'live publication proved'}]};
+  assert.equal(enforceLiveFullFailure(failureContext,fakePublisher).criteria[0].result,'Pending');
+  assert.equal(enforceLiveFullFailure({...failureContext,ci_evidence:null},fakePublisher)
+    .criteria[0].result,'Pending');
   // Existing acceptance-executor-selftest Gate also exercises the exact-PR
   // collector. These fixtures run without GitHub secrets or network calls.
   execFileSync(process.execPath,
