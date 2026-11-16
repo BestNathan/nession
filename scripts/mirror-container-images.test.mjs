@@ -97,7 +97,7 @@ test('a stalled Buildx copy falls back to chunked per-arch OCI transfer',()=>{
   assert.match(run.stdout,/chunked regctl fallback/);
   assert.match(run.stdout,/Verified both linux\/amd64 and linux\/arm64/);
   assert.equal((log.match(/90s docker buildx imagetools create/g)||[]).length,1);
-  assert.match(log,/regctl registry set crpi.example.cn --blob-max 67108864 --blob-chunk 16777216/);
+  assert.match(log,/regctl registry set crpi.example.cn --blob-max 1048576 --blob-chunk 4194304/);
   assert.equal((log.match(/360s regctl image copy/g)||[]).length,2);
   assert.match(log,/image copy ghcr.io\/bestnathan\/nession@sha256:aaaa crpi.example.cn\/n_public\/nession:agent-0123456-amd64/);
   assert.match(log,/image copy ghcr.io\/bestnathan\/nession@sha256:bbbb crpi.example.cn\/n_public\/nession:agent-0123456-arm64/);
