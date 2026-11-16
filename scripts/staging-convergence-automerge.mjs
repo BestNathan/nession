@@ -59,6 +59,19 @@ export function isStrictQualificationRequired(repo,base) {
   return policyFor(repo,base);
 }
 
+// A create-status response does not prove the commit it was written for:
+// the endpoint is source-SHA scoped, while the returned status object itself
+// need not carry a SHA. Re-read the exact SHA and bind its newest matching
+// context to the unique created status id. Foreign/replayed status is denied.
+export function matchesQualificationReadback(created,inventory,state) {
+  if(!created || !Number.isSafeInteger(created.id) || created.id<=0 ||
+      created.context!==QUALIFICATION_CONTEXT || created.state!==state ||
+      !Array.isArray(inventory) || inventory.length>=100) return false;
+  const latest=inventory.find(item=>item.context===QUALIFICATION_CONTEXT);
+  return latest?.id===created.id && latest.state===state &&
+    latest.context===QUALIFICATION_CONTEXT;
+}
+
 export function publishQualificationStatus(repo,headSha,state,reason) {
   if(repo!==REPO || !SHA.test(headSha) || !['pending','success','failure'].includes(state))
     throw Error('invalid source-bound convergence status publication');
@@ -69,9 +82,12 @@ export function publishQualificationStatus(repo,headSha,state,reason) {
     '-f','description='+description];
   if(/^[1-9][0-9]*$/.test(run??''))
     args.push('-f','target_url=https://github.com/'+repo+'/actions/runs/'+run);
-  const status=api(process.env.STATUS_GITHUB_TOKEN,args);
-  if(status.state!==state || status.context!==QUALIFICATION_CONTEXT ||
-      status.sha!==headSha)throw Error('GitHub status readback does not match exact HEAD');
+  const token=process.env.STATUS_GITHUB_TOKEN;
+  const status=api(token,args);
+  const statuses=api(process.env.READ_GITHUB_TOKEN,
+    ['repos/'+repo+'/commits/'+headSha+'/statuses?per_page=100']);
+  if(!matchesQualificationReadback(status,statuses,state))
+    throw Error('GitHub status readback does not match exact HEAD and latest context');
   return status;
 }
 
@@ -124,6 +140,17 @@ function selfTest(){
   assert.equal(hasStrictQualificationProtection({data:{repository:{ref:{branchProtectionRule:{
     ...sample.data.repository.ref.branchProtectionRule,requiresStrictStatusChecks:false}}}}},branch),false);
   assert.equal(hasStrictQualificationProtection({data:{repository:{ref:null}}},branch),false);
+
+  const created={id:108,context:QUALIFICATION_CONTEXT,state:'pending'};
+  const previous={id:107,context:QUALIFICATION_CONTEXT,state:'success'};
+  assert.equal(matchesQualificationReadback(created,[created,previous],'pending'),true);
+  assert.equal(matchesQualificationReadback(created,[previous,created],'pending'),false,
+    'newer green source must not be mistaken for our pending write');
+  assert.equal(matchesQualificationReadback(created,[{...created,id:109}], 'pending'),false);
+  assert.equal(matchesQualificationReadback(created,[created],'success'),false);
+  assert.equal(matchesQualificationReadback(created,Array.from({length:100},
+    (_,i)=>({...created,id:i+1})), 'pending'),false,
+    'truncated remote status inventory must fail closed');
 
   const pr={state:'open',draft:false,user:{login:PUBLISHER},
     base:{ref:'main',repo:{full_name:REPO}},head:{ref:'staging',
