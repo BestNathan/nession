@@ -131,7 +131,12 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         .clone();
     assert_eq!(referenced.devices.len(), 2);
 
-    // Every source payload is gone before the result is offered.
+    // The Server CAS holds each source blob; capture that exact byte set,
+    // then remove the build-host source files before serving the result.
+    let device_bytes = sources
+        .iter()
+        .map(|source| std::fs::read(&source.path).unwrap())
+        .collect::<Vec<_>>();
     for source in &sources {
         std::fs::remove_file(&source.path).unwrap();
     }
@@ -180,15 +185,9 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         );
         served.push(path);
     }
-    for device in &referenced.devices {
+    for (device, bytes) in referenced.devices.iter().zip(device_bytes.iter()) {
         let path = format!("{ROUTE_PREFIX}{}", device.digest);
-        let bytes = std::fs::read(
-            nession_erofs::BlobStore::new(root.path().join("server-blobs"))
-                .unwrap()
-                .path_for(&device.digest)
-                .unwrap(),
-        )
-        .unwrap();
+        let bytes = bytes.clone();
         server.expect(
             Expectation::matching(request::method_path("GET", path.clone()))
                 .times(1)
