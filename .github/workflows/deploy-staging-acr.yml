@@ -93,12 +93,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/login-action@v3
+      # Aliyun dockerauth intermittently resets/TLS-times-out from hosted runners.
+      # The bounded script retries transport only and redacts raw auth URLs.
+      - name: Log in to ACR with bounded transport retries
         if: steps.credentials.outputs.configured == 'true'
-        with:
-          registry: ${{ env.ACR_REGISTRY }}
-          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
-          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        shell: bash
+        env:
+          ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        run: bash scripts/ci/acr-registry-login.sh "$ACR_REGISTRY"
       - name: Install pinned regctl chunked-OCI fallback
         if: steps.credentials.outputs.configured == 'true'
         shell: bash

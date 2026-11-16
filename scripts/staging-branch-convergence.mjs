@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // #2926/#3689: trusted-main deployment-eligible branch discovery and PR convergence.
 // Never execute source-branch workflow code or bypass Gates. GitHub owns native
-// Auto-merge when strict required checks are enabled; the old qualified merge
-// path remains active until an explicit audited cutover.
+// Auto-merge when GitHub requires the canonical qualification status; the
+// old qualified merge path remains active until an explicit audited cutover.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
-import {armProtectedAutoMerge,publishQualificationStatus,isStrictQualificationRequired,
+import {armNativeAutoMerge,publishQualificationStatus,isQualificationRequired,
   QUALIFICATION_CONTEXT}
   from './staging-convergence-automerge.mjs';
 import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
@@ -604,14 +604,14 @@ function reconcile(plan) {
         results.push(record);
         continue;
       }
-      // Roll out GitHub-native Auto-merge only after protected required
-      // qualification has been configured and proven effective on both
-      // target branches. Until then retain the existing qualified immediate
-      // merge path so convergence is not suspended by an incomplete migration.
+      // Use GitHub native Auto-merge when its canonical qualification status is
+      // required by the target branch. Do not impose unrelated constituent
+      // checks or strict-base policy. Legacy qualified merges remain the
+      // off-by-default path until this native admission is activated.
       const expectedHead=sync?integration.sha:lane.sha;
       const nativeAuto=process.env.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE==='true';
       if(nativeAuto){
-        const auto=armProtectedAutoMerge({repo,prNumber:receipt.number,
+        const auto=armNativeAutoMerge({repo,prNumber:receipt.number,
           base,headSha:expectedHead});
         if(!auto.armed){
           record.outcome='BLOCKED';
@@ -662,8 +662,8 @@ function reconcile(plan) {
         continue;
       }
       // Revalidate both remote heads before publishing qualification or
-      // performing a legacy merge. Strict protected GitHub Auto-merge becomes
-      // the sole merge owner once NESSION_CONVERGENCE_NATIVE_AUTO_MERGE=true.
+      // performing a legacy merge. GitHub native Auto-merge becomes the sole
+      // merge owner once NESSION_CONVERGENCE_NATIVE_AUTO_MERGE=true.
       const liveMain=gitRemoteHead('main');
       let pinnedAncestor=false;
       if(sync){
@@ -676,8 +676,8 @@ function reconcile(plan) {
         reject('stale or divergent sources before qualification: '+lane.branch);
       }
       if(nativeAuto){
-        if(!isStrictQualificationRequired(repo,base))
-          reject('strict GitHub qualification protection changed before status success');
+        if(!isQualificationRequired(repo,base))
+          reject('GitHub required qualification removed before status success');
         publishQualificationStatus(repo,expectedHead,'success',
           'Exact-head CI, source/Issue acceptance and deployment qualified');
         record.outcome='AUTO_MERGE_QUALIFIED';
