@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "798dce99efc9e5fa1df7c367fb0cd6e36e81e8e00cb0f7372b9999a6ef555bfe",
+  "run_id": 43816564626,
+  "run_attempt": 1,
+  "issue": 3696,
+  "criterion": "SC-03",
+  "criterion_text": "An async compose build survives permitted cancel/retry/restart paths, publishes an authorized result via the existing Image Manager and transfers to an Agent whose cache can mount it without consulting the original sources.",
+  "stage": "staging",
+  "target_sha": "47507cf4368dce4ece012a7b10088146b8133f6d",
+  "contract_sha256": "73cd5f0abd74b1f942fc572d5912b9124e55283c299508fd7d48bfe089dd9e76",
+  "case_revision": "47507cf4368dce4ece012a7b10088146b8133f6d",
+  "case_tree_sha": "557f5c663b893afd7e0bb84d28decb95a45d8c83",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T06:27:43.258Z",
+  "finished_at": "2026-11-16T06:28:54.426Z",
+  "duration_ms": 71168,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "a Compose build survives the durable cancel/retry/restart lifecycle, publishes one authorized result, and the Agent cache mounts it after every source is gone",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 47507cf4368dce4ece012a7b10088146b8133f6d: two real mkfs.erofs sources composed through fsck.erofs staging into one deterministic flattened layer; a verified compose snapshot resumed packaging; the shared async build lifecycle cancel/retry/restart tests passed; after deleting every source payload, the Server-authorized Manifest/Config/layer transferred into the Agent cache and erofsfuse mounted the complete tree with source-independent reads"
+        }
+      ],
+      "duration_ms": 65278,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43816564626,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "47507cf4368dce4ece012a7b10088146b8133f6d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43816564626",
+    "record_path": "runs/2026-11-16/43816564626-1/3696/SC-03.json",
+    "source_result_sha256": "bef173151ded76029ecd0fc00981f4bf88c487524ccda488a9a210927bbd5410"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43816564626-1",
+    "sha256": "bef173151ded76029ecd0fc00981f4bf88c487524ccda488a9a210927bbd5410",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43816564626",
+    "durability": "time-limited; object archival not configured"
+  }
+}
