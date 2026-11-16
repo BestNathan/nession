@@ -784,7 +784,7 @@ function render(){
     else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
     else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
     const nextWorkspace=root.querySelector('.documents-workspace');
-    if(nextWorkspace?.dataset.section===previousSection){
+    if(nextWorkspace&&nextWorkspace.dataset.section===previousSection){
       const nextList=nextWorkspace.querySelector('.documents-list-scroll');
       if(nextList)nextList.scrollTop=previousListScroll;
     }
