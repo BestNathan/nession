@@ -211,7 +211,7 @@ export function enforceLiveFullFailure(context,result){
   });
   return {...result,criteria};
 }
-async function selfTest(){
+export async function selfTestLiveFullFailure(){
   const sha='a'.repeat(40),digest='b'.repeat(64),key='e2e1:'+digest;
   const run={id:501,run_attempt:2,workflow_id:9,path:FULL,event:'schedule',
     head_branch:'main',head_sha:sha,status:'completed',conclusion:'failure',
@@ -319,4 +319,4 @@ async function selfTest(){
     '### Success Criteria\n- [ ] SC-03 '+text+'\n\n## Acceptance Plan'}),true);
   console.log('live Main Full failure->Bug evidence: positive, reuse, green publisher/Full and identity-mismatch negatives passed');
 }
-if(process.argv[2]==='self-test')await selfTest();
+if(process.argv[2]==='self-test')await selfTestLiveFullFailure();
