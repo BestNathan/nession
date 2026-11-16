@@ -219,7 +219,7 @@ export function renderDocuments(root,data,hash){
   const validRoute=!route.invalid&&(!route.id||
     data.protocols.some(p=>p.id===route.id)&&
       (!route.version||selectedGroup.versions.some(v=>v.version===route.version)));
-  const exact=!!route.id&&validRoute;
+  const exact=route.invalid||route.id!==null;
   const snapshot=el('div','documents-snapshot mono');
   add(snapshot,el('span','','RUST CONTRACTS / MAIN'),
     el('strong','',data.source.sha.slice(0,12)),
