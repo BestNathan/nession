@@ -227,12 +227,16 @@ impl TransientRootfsLease {
     /// the read-only base consumer. A failed unmount retains everything.
     pub(super) fn release(mut self) -> Result<()> {
         if overlay::mount::is_overlay_mount(&self.mountpoint) {
-            overlay::mount::unmount_overlay(&self.settings, &self.mountpoint).map_err(|error| {
-                SandboxError::Cleanup(format!(
-                    "could not unmount the transient RootFS at {}: {error:#}",
-                    self.mountpoint.display()
-                ))
-            })?;
+            if let Err(error) = overlay::mount::unmount_overlay(&self.settings, &self.mountpoint) {
+                let mountpoint = self.mountpoint.display().to_string();
+                // The live Merged View still depends on the read-only lower.
+                // Keep the consumer registered for record reconciliation
+                // instead of dropping the lease (which would release it).
+                std::mem::forget(self);
+                return Err(SandboxError::Cleanup(format!(
+                    "could not unmount the transient RootFS at {mountpoint}: {error:#}"
+                )));
+            }
         } else if nession_erofs::mount::is_mounted(&self.mountpoint) {
             return Err(SandboxError::Cleanup(format!(
                 "the transient RootFS path {} is a foreign mount; refusing to unmount it",
