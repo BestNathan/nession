@@ -800,6 +800,103 @@ mod tests {
         assert!(config.rootfs.diff_ids[1..].contains(&node.layer.digest));
     }
 
+    /// SC-01 fixture: the referenced format carries the source descriptors and
+    /// metadata only. It does not copy the source payload bytes into the
+    /// result, and it never rewrites the source blobs.
+    #[test]
+    fn a_referenced_composite_references_source_bytes_without_copying_them() {
+        let root = tempdir().unwrap();
+        let payload = b"SOURCE-PAYLOAD-".repeat(4096);
+        let mut sources = Vec::new();
+        for (name, marker) in [
+            ("node.erofs", b"NODE".as_slice()),
+            ("dsh.erofs", b"DSH!".as_slice()),
+        ] {
+            let path = root.path().join(name);
+            let mut bytes = vec![0_u8; 2048];
+            bytes[crate::build::import::EROFS_MAGIC_OFFSET
+                ..crate::build::import::EROFS_MAGIC_OFFSET + 4]
+                .copy_from_slice(&crate::build::import::EROFS_MAGIC_BYTES);
+            bytes.extend_from_slice(marker);
+            bytes.extend_from_slice(&payload);
+            fs::write(&path, &bytes).unwrap();
+            let size = bytes.len() as u64;
+            sources.push(ReferencedSourceInput {
+                path: path.clone(),
+                layer: Descriptor {
+                    media_type: MEDIA_TYPE_EROFS.to_string(),
+                    digest: crate::digest::file_digest(&path).unwrap(),
+                    size,
+                    urls: None,
+                    annotations: None,
+                    platform: None,
+                    artifact_type: None,
+                    data: None,
+                    extra: Map::new(),
+                },
+                repository: "nession/test".to_string(),
+                reference: name.to_string(),
+                manifest_digest: format!("sha256:{}", "a".repeat(64)),
+                platform: Platform::for_consumer("linux", "amd64", None),
+                config: config("PATH=/usr/bin"),
+            });
+        }
+        let source_digests = sources
+            .iter()
+            .map(|source| source.layer.digest.clone())
+            .collect::<Vec<_>>();
+        let source_bytes = sources
+            .iter()
+            .map(|source| std::fs::read(&source.path).unwrap())
+            .collect::<Vec<_>>();
+        let (composer, _extractor, mkfs) = composer(root.path());
+        *mkfs.devices.lock().unwrap() = 2;
+        let packaging = Packaging::default();
+        let control = ProcessControl::new();
+        let built = composer
+            .run(ReferencedBuildRequest {
+                build_dir: &root.path().join("build"),
+                sources: &sources,
+                packaging: &packaging,
+                control: &control,
+                observer: &NoopObserver,
+            })
+            .unwrap();
+        assert_eq!(
+            built
+                .descriptor_doc
+                .devices
+                .iter()
+                .map(|device| device.digest.clone())
+                .collect::<Vec<_>>(),
+            source_digests,
+            "the closure names the exact source blobs"
+        );
+        assert!(
+            built.metadata.size_bytes < payload.len() as u64,
+            "the metadata image does not embed the source payload"
+        );
+        let metadata_bytes = std::fs::read(&built.metadata.path).unwrap();
+        assert!(
+            !metadata_bytes
+                .windows(payload.len())
+                .any(|window| window == payload.as_slice()),
+            "no source payload bytes were repackaged into the result"
+        );
+        for (source, original) in sources.iter().zip(source_bytes.iter()) {
+            assert_eq!(
+                &std::fs::read(&source.path).unwrap(),
+                original,
+                "the source blob is reused in place, never rewritten"
+            );
+        }
+        assert_eq!(
+            composer.blobs.usage().unwrap().blobs,
+            2,
+            "only the metadata image and Composite descriptor are CAS objects"
+        );
+    }
+
     #[test]
     fn conflicting_paths_and_unsupported_layouts_fail_before_publication() {
         let root = tempdir().unwrap();

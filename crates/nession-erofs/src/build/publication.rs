@@ -425,8 +425,10 @@ mod tests {
     use crate::oci::validation::select_platform;
     use tempfile::tempdir;
 
-    fn layer(store: &BlobStore, _hex: char) -> Descriptor {
-        let stored = store.put_bytes(b"verified erofs bytes").unwrap();
+    fn layer(store: &BlobStore, hex: char) -> Descriptor {
+        let stored = store
+            .put_bytes(format!("verified erofs bytes {hex}").as_bytes())
+            .unwrap();
         Descriptor {
             media_type: MEDIA_TYPE_EROFS.to_string(),
             digest: stored.digest,
@@ -527,5 +529,165 @@ mod tests {
             select_platform(&index, &host_platform()).unwrap().digest,
             manifest.digest()
         );
+    }
+
+    fn composite_documents(
+        store: &BlobStore,
+        metadata: &Descriptor,
+        devices: &[Descriptor],
+        composite_descriptor: &Descriptor,
+    ) -> (RawDocument, RawDocument) {
+        use crate::oci::composite::{CompositeDescriptor, COMPOSITE_ROOTFS_TYPE};
+        let composite = CompositeDescriptor::new(&host_platform(), metadata, devices).unwrap();
+        let closure = composite.closure().unwrap();
+        let config = ImageConfig {
+            created: None,
+            author: None,
+            architecture: "amd64".to_string(),
+            os: "linux".to_string(),
+            os_version: None,
+            os_features: Some(vec!["erofs".to_string()]),
+            variant: None,
+            config: RuntimeConfig::default(),
+            rootfs: RootFs {
+                fs_type: COMPOSITE_ROOTFS_TYPE.to_string(),
+                diff_ids: closure
+                    .iter()
+                    .map(|descriptor| descriptor.digest.clone())
+                    .collect(),
+                extra: Map::new(),
+            },
+            history: Vec::new(),
+            extra: Map::new(),
+        };
+        let config_document = RawDocument::from_bytes(to_bytes(&config).unwrap());
+        store.put_bytes(config_document.bytes()).unwrap();
+        let manifest = Manifest {
+            schema_version: 2,
+            media_type: Some(MEDIA_TYPE_MANIFEST.to_string()),
+            config: Descriptor {
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                digest: config_document.digest().to_string(),
+                size: config_document.size().unwrap(),
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: Map::new(),
+            },
+            layers: vec![composite_descriptor.clone()],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+            extra: Map::new(),
+        };
+        let manifest_document = RawDocument::from_bytes(to_bytes(&manifest).unwrap());
+        store.put_bytes(manifest_document.bytes()).unwrap();
+        (manifest_document, config_document)
+    }
+
+    #[tokio::test]
+    async fn a_referenced_composite_publishes_its_whole_closure_and_gc_retains_every_device() {
+        use crate::oci::composite::CompositeDescriptor;
+        let dir = tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let conn = memory_connection().await;
+        crate::catalog::sqlite::migrate(&conn).await.unwrap();
+        let metadata = layer(&store, 'm');
+        let first = layer(&store, 'n');
+        let second = layer(&store, 'o');
+        let composite = CompositeDescriptor::new(
+            &host_platform(),
+            &metadata,
+            &[first.clone(), second.clone()],
+        )
+        .unwrap();
+        let composite_document = composite.to_document().unwrap();
+        let stored = store.put_bytes(composite_document.bytes()).unwrap();
+        let composite_descriptor = Descriptor {
+            media_type: MEDIA_TYPE_COMPOSITE.to_string(),
+            digest: stored.digest,
+            size: stored.size_bytes,
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: Map::new(),
+        };
+        let (manifest, config) = composite_documents(
+            &store,
+            &metadata,
+            &[first.clone(), second.clone()],
+            &composite_descriptor,
+        );
+        let outcome = publish_composite(
+            &conn,
+            &store,
+            &CompositePublication {
+                repository: "nession/composite".to_string(),
+                tag: Some("latest".to_string()),
+                expectation: TagExpectation::Absent,
+                composite: composite_descriptor.clone(),
+                metadata: metadata.clone(),
+                devices: vec![first.clone(), second.clone()],
+                config,
+                manifest,
+            },
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tag::get_tag(&conn, "nession/composite", "latest")
+                .await
+                .unwrap(),
+            Some(outcome.manifest_digest.clone())
+        );
+        let reachable = crate::catalog::reference::reachable(
+            &conn,
+            std::slice::from_ref(&outcome.manifest_digest),
+        )
+        .await
+        .unwrap();
+        for digest in [
+            &outcome.config_digest,
+            &composite_descriptor.digest,
+            &metadata.digest,
+            &first.digest,
+            &second.digest,
+        ] {
+            assert!(reachable.contains(digest), "{digest} must be reachable");
+        }
+        let protected = crate::catalog::protected_digests(&conn, 2).await.unwrap();
+        assert!(protected.contains(&first.digest));
+        assert!(protected.contains(&second.digest));
+
+        // Moving the only Tag away leaves the closure reclaimable after the
+        // bounded mark/grace path.
+        crate::catalog::tag::set_tag(
+            &conn,
+            "nession/composite",
+            "latest",
+            &format!("sha256:{}", "f".repeat(64)),
+            &TagExpectation::Exact(outcome.manifest_digest.clone()),
+            10,
+        )
+        .await
+        .unwrap();
+        let policy = crate::catalog::gc::GcPolicy {
+            grace_seconds: 0,
+            max_deletions: 64,
+            max_bytes: u64::MAX,
+        };
+        crate::catalog::gc::sweep(&conn, &store, 20, &policy, &[])
+            .await
+            .unwrap();
+        crate::catalog::gc::sweep(&conn, &store, 21, &policy, &[])
+            .await
+            .unwrap();
+        assert!(!store.contains(&first.digest).unwrap());
+        assert!(!store.contains(&second.digest).unwrap());
     }
 }
