@@ -24,7 +24,7 @@ use nession_erofs::oci::config::{ImageConfig, RootFs, RuntimeConfig};
 use nession_erofs::oci::descriptor::{Descriptor, Platform};
 use nession_erofs::oci::to_bytes;
 use nession_erofs::{
-    host_platform, image_documents_with_runtime, BlobStore, BuildObserver, NoopObserver, Packaging,
+    host_platform, image_documents_with_runtime, BlobStore, MkfsRunner, NoopObserver, Packaging,
     ProcessControl, ProcessMkfsRunner, ResumePoint,
 };
 use serde_json::Map;
@@ -210,7 +210,7 @@ async fn a_compose_result_transfers_to_the_agent_cache_and_mounts_without_source
         served.push(path);
     }
 
-    let cache = ErofsCache::open(root.path().join("agent-cache"), "agent-1", false)
+    let cache = ErofsCache::open(&root.path().join("agent-cache"), "agent-1", false)
         .await
         .unwrap();
     let grants = vec![
@@ -233,19 +233,14 @@ async fn a_compose_result_transfers_to_the_agent_cache_and_mounts_without_source
             path: served[2].clone(),
         },
     ];
-    let fetched = fetch_manifest_image(
-        &cache,
-        &grants,
-        server
-            .url("/")
-            .to_string()
-            .trim_end_matches('/')
-            .to_string(),
-        TOKEN,
-        ROUTE_PREFIX,
-    )
-    .await
-    .unwrap();
+    let origin = server
+        .url("/")
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+    let fetched = fetch_manifest_image(&cache, &grants, &origin, TOKEN, ROUTE_PREFIX)
+        .await
+        .unwrap();
     assert_eq!(fetched.manifest_digest, manifest_document.digest());
     assert_eq!(fetched.layer.digest, layer.digest);
     // The cache holds exactly the result objects, never a source descriptor.
