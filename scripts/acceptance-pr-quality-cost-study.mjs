@@ -271,16 +271,22 @@ export function selfTestPrQualityCost(){
     {...mixedJobs.jobs[0],steps:[{name:'Run E2E tests',conclusion:'success'}]}]}));
   const workflow=readFileSync(new URL('../.github/workflows/agent-sc-acceptance.yml',
     import.meta.url),'utf8');
-  assert.ok(workflow.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195'))"),
-    'only three explicitly allowlisted PR-stage CI collectors are permitted');
+  assert.ok(workflow.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '3700'))"),
+    'only four explicitly allowlisted PR-stage CI collectors are permitted');
   assert.ok(workflow.includes('scripts/acceptance-ci-evidence.mjs collect-pr-quality'),
     'trusted pre-merge CI evidence command is not routed');
   assert.ok(workflow.includes('scripts/acceptance-pr-pages-e2e-evidence.mjs collect'),
     'trusted Pages evidence collector is not routed');
   assert.ok(workflow.includes('scripts/acceptance-ci-evidence.mjs collect-pr-fixture'),
     'trusted source-fixture CI evidence command is not routed');
-  assert.ok(workflow.includes('[[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 ]]'),
-    'prepare stage must only pass the three approved Issues scoped CI evidence');
+  assert.ok(workflow.includes('3700) node scripts/acceptance-3700-git-ci-proof.mjs self-test'),
+    'bounded merge-repair Git/Actions attestation must run its negative self-test');
+  assert.ok(workflow.includes('node scripts/acceptance-3700-git-ci-proof.mjs collect'),
+    'bounded merge-repair PR proof must use trusted main-owned reader');
+  assert.ok(workflow.includes('*) echo "Unsupported PR-stage collector Issue:'),
+    'non-allowlisted PR-stage CI readback must remain fail-closed');
+  assert.ok(workflow.includes('[[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 3700 ]]'),
+    'prepare stage must only pass the four approved Issues scoped CI evidence');
 
   console.log('PR Quality timing: exact Run/Attempt/SHA, required job steps, skip, source change and negative fixture contracts passed');
 }
