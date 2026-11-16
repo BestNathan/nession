@@ -1134,6 +1134,8 @@ mod tests {
         }
         assert!(reserved_key_reason("PATH").is_none());
         assert!(reserved_key_reason("ANTHROPIC_API_KEY").is_none());
+        // Integration credentials are user-provisioned, not internal runtime state.
+        assert!(reserved_key_reason("NESSION_MCP_TOKEN").is_none());
     }
 
     // ── the binding engine, against a fake tmux ──────────────────────────────

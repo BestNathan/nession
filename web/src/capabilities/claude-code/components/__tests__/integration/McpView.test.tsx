@@ -84,7 +84,7 @@ const inventory = {
       enabled: true,
       url: 'http://127.0.0.1:19091/mcp',
       path: '/mcp',
-      token_env_var: 'NESSON_MCP_TOKEN',
+      token_env_var: 'NESSION_MCP_TOKEN',
     },
     server_configured: true,
   },
@@ -198,7 +198,7 @@ describe('MCP view', () => {
       preflight: {
         mode: 'agent',
         endpoint_url: 'http://127.0.0.1:19091/mcp',
-        credential_env: 'NESSON_MCP_TOKEN',
+        credential_env: 'NESSION_MCP_TOKEN',
         credential_present: false,
         credential_verified: false,
         claude_version: '2.1.325',
@@ -206,7 +206,7 @@ describe('MCP view', () => {
         prerequisites: [
           {
             id: 'credential_present',
-            label: 'NESSON_MCP_TOKEN is available in this Session environment',
+            label: 'NESSION_MCP_TOKEN is available in this Session environment',
             state: 'missing',
             detail: 'set it through the Session environment binding',
           },

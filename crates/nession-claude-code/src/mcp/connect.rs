@@ -12,7 +12,7 @@
 //!
 //! ## The entry is a reference, never a token
 //!
-//! The written header is `Authorization: Bearer ${NESSON_MCP_TOKEN}`. The
+//! The written header is `Authorization: Bearer ${NESSION_MCP_TOKEN}`. The
 //! variable's value is read from the Session to verify the endpoint and never
 //! leaves the process. A project `.mcp.json` therefore contains a reference a
 //! teammate's environment must also provide, not a shared secret.
@@ -96,7 +96,7 @@ pub(crate) async fn connect_with_cli(
             push(
                 &mut preflight,
                 "hosting_mode",
-                "An actual Nession MCP endpoint is reachable in this hosting mode",
+                "A Nession MCP endpoint is resolved for this hosting mode",
                 McpPrerequisiteStateV1::Met,
                 None,
             );
@@ -114,7 +114,7 @@ pub(crate) async fn connect_with_cli(
             push(
                 &mut preflight,
                 "hosting_mode",
-                "An actual Nession MCP endpoint is reachable in this hosting mode",
+                "A Nession MCP endpoint is resolved for this hosting mode",
                 state,
                 Some(detail),
             );
@@ -696,7 +696,7 @@ mod tests {
         assert_eq!(value["type"], "http");
         assert_eq!(
             value["headers"]["Authorization"],
-            "Bearer ${NESSON_MCP_TOKEN}"
+            "Bearer ${NESSION_MCP_TOKEN}"
         );
     }
 
@@ -921,7 +921,7 @@ mod tests {
         let document: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state_file).unwrap()).unwrap();
         let written = serde_json::to_string(&document).unwrap();
-        assert!(written.contains("Bearer ${NESSON_MCP_TOKEN}"), "{written}");
+        assert!(written.contains("Bearer ${NESSION_MCP_TOKEN}"), "{written}");
         assert!(
             !written.contains("secret-token"),
             "the token leaked: {written}"
@@ -1097,7 +1097,7 @@ mod tests {
         );
         let project = temp.path().join("project").join(".mcp.json");
         let written = std::fs::read_to_string(project).unwrap();
-        assert!(written.contains("Bearer ${NESSON_MCP_TOKEN}"), "{written}");
+        assert!(written.contains("Bearer ${NESSION_MCP_TOKEN}"), "{written}");
         assert!(!written.contains("secret-token"));
     }
 
