@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::RedactedToken;
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAuthPayload {
     /// The endpoint-owned token presented to whichever endpoint answers.
@@ -15,7 +15,7 @@ pub struct ClientAuthPayload {
     /// authenticates to the Server.
     #[serde(default)]
     #[cfg_attr(feature = "codegen", ts(type = "string"))]
-    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub auth_token: RedactedToken,
     #[serde(default)]
     pub client_id: Option<String>,
@@ -37,7 +37,7 @@ pub struct ClientAuthPayload {
 /// required field allows. Relaxed rather than removed, because `client.auth`'s
 /// success branch genuinely has one.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthResponsePayload {
     pub status: String,

@@ -5,11 +5,12 @@
 //! local tmux server.
 
 use async_trait::async_trait;
+use nession_protocol::contracts::session::v1::SessionKillResponse;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::error::ToolError;
-use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{non_empty, parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 
 /// The Tool definition.
 pub struct NessionAgentKillSession;
@@ -38,6 +39,10 @@ impl ToolHandler for NessionAgentKillSession {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<SessionKillResponse>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -46,10 +51,11 @@ impl ToolHandler for NessionAgentKillSession {
         let arguments: Arguments = parse_arguments(arguments)?;
         non_empty(&arguments.agent_id, "agent_id")?;
         non_empty(&arguments.name, "name")?;
-        context
+        let reply = context
             .node
             .kill_session(&arguments.agent_id, &arguments.name)
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

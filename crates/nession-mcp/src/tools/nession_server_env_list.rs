@@ -2,8 +2,9 @@
 //! Routes through the same Server API as Web/CLI; does not access arbitrary host files.
 
 use crate::error::ToolError;
-use crate::tool::{parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 use async_trait::async_trait;
+use nession_protocol::contracts::env::v1::ClientEnvListResponsePayload;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -28,13 +29,18 @@ impl ToolHandler for NessionServerEnvList {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<ClientEnvListResponsePayload>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
         arguments: Map<String, Value>,
     ) -> Result<Value, ToolError> {
         let _: Arguments = parse_arguments(arguments)?;
-        context.cluster.env_list().await
+        let reply = context.cluster.env_list().await?;
+        reply_value(&reply)
     }
 }
 

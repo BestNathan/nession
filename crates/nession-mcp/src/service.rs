@@ -372,14 +372,21 @@ fn execution_timeout(name: &str) -> ToolError {
 /// The stable `tools/call` result shape.
 ///
 /// The owner's reply is rendered as pretty JSON in a text block; a delivered
-/// refusal sets `isError`. This is the same shape in every hosting mode.
+/// refusal sets `isError`. A **successful** reply also carries the same value
+/// as MCP `structuredContent`, which is the shape the Tool's mandatory
+/// `outputSchema` describes (`#3735`). An error or refusal never carries
+/// `structuredContent`: the output schema describes success only, and an error
+/// must not masquerade as a conforming success result. This is the same shape
+/// in every hosting mode.
 fn tool_result(value: &Value) -> CallToolResult {
     let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
     let content = vec![ContentBlock::text(text)];
     if reply_is_error(value) {
         CallToolResult::error(content)
     } else {
-        CallToolResult::success(content)
+        let mut result = CallToolResult::success(content);
+        result.structured_content = Some(value.clone());
+        result
     }
 }
 
@@ -498,5 +505,30 @@ mod tests {
         assert!(!verifier.verify("abd"));
         assert!(!verifier.verify("ab"));
         assert!(!verifier.verify(""));
+    }
+
+    #[test]
+    fn a_successful_reply_is_structured_but_a_refusal_is_not() {
+        let success = tool_result(&json!({ "agents": [] }));
+        assert_eq!(success.is_error, Some(false));
+        assert_eq!(success.structured_content, Some(json!({ "agents": [] })));
+        let text = match success.content.first().expect("text") {
+            ContentBlock::Text(text) => text.text.clone(),
+            other => panic!("unexpected content {other:?}"),
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).expect("text is the same JSON"),
+            json!({ "agents": [] })
+        );
+
+        for refusal in [
+            json!({ "success": false, "error": "no" }),
+            json!({ "status": "error", "message": "no" }),
+            json!({ "error": "no" }),
+        ] {
+            let result = tool_result(&refusal);
+            assert_eq!(result.is_error, Some(true), "{refusal}");
+            assert_eq!(result.structured_content, None, "{refusal}");
+        }
     }
 }

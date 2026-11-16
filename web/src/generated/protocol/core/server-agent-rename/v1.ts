@@ -30,12 +30,48 @@ export type AgentRenameResponse = {
  */
 success: boolean, agent: WebAgentInfo, };
 export type AgentRenameFailure = { success: boolean, error: string, };
-export type WebAgentInfo = { agent_id: string, hostname: string, ip_address: string, port: number, status: string, session_count: number, last_heartbeat: string, 
+export type WebAgentInfo = { 
+/**
+ * The Agent's stable registry identity.
+ */
+agent_id: string, 
+/**
+ * The hostname the Agent reported at registration.
+ */
+hostname: string, 
+/**
+ * The primary IP address the Agent reported at registration.
+ */
+ip_address: string, 
+/**
+ * The Agent's P2P WebSocket port.
+ */
+port: number, 
+/**
+ * Registry status: `online`, `offline` or `degraded`.
+ */
+status: string, 
+/**
+ * Number of Sessions the Server's registry associates with this Agent.
+ */
+session_count: number, 
+/**
+ * Time of the last accepted heartbeat, as an RFC 3339 timestamp.
+ */
+last_heartbeat: string, 
 /**
  * Human-readable name, set by config or a Web UI rename. The UI falls back
  * to the hostname when absent.
  */
-display_name?: string | null, active_sessions: number, registered_at: string, 
+display_name?: string | null, 
+/**
+ * Number of Sessions currently active (attached) on the Agent.
+ */
+active_sessions: number, 
+/**
+ * Time the Agent first registered, as an RFC 3339 timestamp.
+ */
+registered_at: string, 
 /**
  * The server's probe results, so the item type is `ProbedAddress` and not
  * `AgentAddress` — the obvious guess, and the wrong one.
@@ -51,8 +87,16 @@ addresses: Array<ProbedAddress>,
  * absent key cannot say which. Written with the attribute first, having
  * quoted the rule in this very comment while adding it.
  */
-protocols: ProtocolManifest | null, metadata: AgentMetadata, };
-export type ProbedAddress = { status: AddressStatus, 
+protocols: ProtocolManifest | null, 
+/**
+ * What the Agent reported about its runtime and build.
+ */
+metadata: AgentMetadata, };
+export type ProbedAddress = { 
+/**
+ * The server's latest TCP probe result for the endpoint.
+ */
+status: AddressStatus, 
 /**
  * Round-trip time of the last successful probe, in milliseconds.
  */
@@ -94,11 +138,19 @@ network_type: NetworkType,
 priority: number, };
 export type NetworkType = "lan" | "vpn" | "tunnel" | "public" | "custom";
 export type AddressStatus = "unknown" | "reachable" | "unreachable";
-export type AgentMetadata = { tmux_version: string, 
+export type AgentMetadata = { 
+/**
+ * The tmux version the Agent runs.
+ */
+tmux_version: string, 
 /**
  * Human-readable OS and CPU, for display only.
  */
-os_version: string, nession_version: string, 
+os_version: string, 
+/**
+ * The Nession version the Agent runs.
+ */
+nession_version: string, 
 /**
  * Docker image tag (short sha) baked in at build time.
  * "dev" when running from `cargo run`, "unknown" when not set.
@@ -124,7 +176,11 @@ export type ProtocolManifest = {
 /**
  * Who offers this set — an agent id, a server, a runtime name.
  */
-provider: string, protocols: { [key in ProtocolId]: ContractSupport }, 
+provider: string, 
+/**
+ * The Protocol Units this provider serves, keyed by canonical unit id.
+ */
+protocols: { [key in ProtocolId]: ContractSupport }, 
 /**
  * Diagnostics only.
  *

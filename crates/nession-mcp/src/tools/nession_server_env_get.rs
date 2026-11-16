@@ -3,9 +3,9 @@
 
 use super::env_target::Source;
 use crate::error::ToolError;
-use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{non_empty, parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 use async_trait::async_trait;
-use nession_protocol::contracts::env::v1::ClientEnvGetPayload;
+use nession_protocol::contracts::env::v1::{ClientEnvGetPayload, ClientEnvGetResponsePayload};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -36,6 +36,10 @@ impl ToolHandler for NessionServerEnvGet {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<ClientEnvGetResponsePayload>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -44,14 +48,15 @@ impl ToolHandler for NessionServerEnvGet {
         let arguments: Arguments = parse_arguments(arguments)?;
         non_empty(&arguments.name, "name")?;
         let (source, agent_id) = arguments.source.resolve(arguments.agent_id.as_deref())?;
-        context
+        let reply = context
             .cluster
             .env_get(ClientEnvGetPayload {
                 name: arguments.name,
                 source,
                 agent_id,
             })
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

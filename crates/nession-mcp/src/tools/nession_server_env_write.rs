@@ -3,9 +3,9 @@
 
 use super::env_target::Source;
 use crate::error::ToolError;
-use crate::tool::{non_empty, parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{non_empty, parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 use async_trait::async_trait;
-use nession_protocol::contracts::env::v1::ClientEnvWritePayload;
+use nession_protocol::contracts::env::v1::{ClientEnvWritePayload, ClientEnvWriteResponsePayload};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -41,6 +41,10 @@ impl ToolHandler for NessionServerEnvWrite {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<ClientEnvWriteResponsePayload>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -49,7 +53,7 @@ impl ToolHandler for NessionServerEnvWrite {
         let arguments: Arguments = parse_arguments(arguments)?;
         non_empty(&arguments.name, "name")?;
         let (source, agent_id) = arguments.source.resolve(arguments.agent_id.as_deref())?;
-        context
+        let reply = context
             .cluster
             .env_write(ClientEnvWritePayload {
                 name: arguments.name,
@@ -59,7 +63,8 @@ impl ToolHandler for NessionServerEnvWrite {
                 overwrite: arguments.overwrite,
                 force: arguments.force,
             })
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

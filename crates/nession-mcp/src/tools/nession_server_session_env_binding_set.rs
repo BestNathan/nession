@@ -7,10 +7,12 @@
 //! concurrent Web or MCP writer.
 
 use crate::error::ToolError;
-use crate::tool::{parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 use crate::tools::env_target::{canonical_session_id, env_file_ref, Source};
 use async_trait::async_trait;
-use nession_protocol::contracts::session::v1::ClientSessionEnvBindingSetPayload;
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -50,6 +52,10 @@ impl ToolHandler for NessionServerSessionEnvBindingSet {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<ClientSessionEnvBindingResponsePayload>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -62,14 +68,15 @@ impl ToolHandler for NessionServerSessionEnvBindingSet {
             .into_iter()
             .map(|profile| env_file_ref(profile.name, profile.source, profile.agent_id))
             .collect::<Result<Vec<_>, _>>()?;
-        context
+        let reply = context
             .cluster
             .session_env_binding_set(ClientSessionEnvBindingSetPayload {
                 session_id: arguments.session_id,
                 profiles,
                 expected_revision: Some(arguments.expected_revision),
             })
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

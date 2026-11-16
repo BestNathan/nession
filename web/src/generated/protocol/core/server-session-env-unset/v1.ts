@@ -28,7 +28,19 @@ export type ClientSessionEnvUnsetPayload = { session_id: string,
  */
 env_files: Array<EnvFileRef>, };
 export type ClientSessionEnvResponsePayload = { success: boolean, error?: string | null, warnings: Array<string>, };
-export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
+export type EnvFileRef = { 
+/**
+ * Filename including the `.env` suffix.
+ */
+name: string, 
+/**
+ * Where the file lives.
+ */
+source: EnvSource, 
+/**
+ * For `EnvSource::Agent`, the owning agent id. `None` for server files.
+ */
+agent_id?: string | null, };
 export type EnvSource = "server" | "agent";
 
 // ── Operations ──

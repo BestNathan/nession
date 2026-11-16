@@ -45,12 +45,24 @@ overwrite: boolean,
  * never named here.
  */
 force: boolean, };
-export type ClientEnvWriteResponsePayload = { success: boolean, 
+export type ClientEnvWriteResponsePayload = { 
+/**
+ * Whether the file was written.
+ */
+success: boolean, 
 /**
  * True when the write was refused because the file already exists and
  * `overwrite` was false (UI prompts for confirmation).
  */
-exists: boolean, error?: string | null, warnings: Array<string>, 
+exists: boolean, 
+/**
+ * Why the write failed, when it did.
+ */
+error?: string | null, 
+/**
+ * Non-fatal warnings from parsing or re-sourcing the file.
+ */
+warnings: Array<string>, 
 /**
  * Sessions holding the file, on the refusal that names them.
  *
@@ -101,12 +113,24 @@ overwrite: boolean,
 force: boolean, };
 
 /** The payload the provider answers with. */
-export type EnvWriteReply = { success: boolean, 
+export type EnvWriteReply = { 
+/**
+ * Whether the file was written.
+ */
+success: boolean, 
 /**
  * True when the write was refused because the file already exists and
  * `overwrite` was false (UI prompts for confirmation).
  */
-exists: boolean, error?: string | null, warnings: Array<string>, 
+exists: boolean, 
+/**
+ * Why the write failed, when it did.
+ */
+error?: string | null, 
+/**
+ * Non-fatal warnings from parsing or re-sourcing the file.
+ */
+warnings: Array<string>, 
 /**
  * Sessions holding the file, on the refusal that names them.
  *

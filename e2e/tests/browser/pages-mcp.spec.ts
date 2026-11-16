@@ -119,15 +119,31 @@ test('MCP detail prioritizes Tool identity, named input/output fields and compac
   }finally{await site.close();}
 });
 
-test('MCP output without an advertised schema is explicitly unknown, not an invented response table',async({page})=>{
+test('MCP output fields expose requiredness from the declared schema',async({page})=>{
   const site=await startPagesFixture();
   try{
     await page.goto(site.origin+'/#/documents/mcp?tool=nession_server_list_agents');
-    await expect(page.getByRole('heading',{name:'nession_server_list_agents'})).toBeVisible();
     await expect(page.getByRole('heading',{name:'Output fields'})).toBeVisible();
-    await expect(page.locator('.documents-mcp-missing').last()).toContainText(
-      'No structured output schema is declared');
+    const output=page.locator('.documents-mcp-contract').nth(1);
+    await expect(output.locator('.documents-mcp-field-name')).toContainText([
+      'agents','agents[].agent_id']);
+    await expect(output.locator('.documents-mcp-field').first()).toContainText('Required');
     await expect(page.locator('.documents-mcp-spec')).not.toHaveAttribute('open');
-    await expect(page.getByText('Input JSON Schema')).toBeVisible();
+  }finally{await site.close();}
+});
+
+test('MCP catalog without a real output schema fails closed instead of inventing fields',async({page})=>{
+  const site=await startPagesFixture();
+  try{
+    await page.route('**/data/mcp.json',async route=>{
+      const response=await route.fetch();
+      const data=await response.json();
+      delete data.tools[0].outputSchema;
+      await route.fulfill({response,json:data});
+    });
+    await page.goto(site.origin+'/#/documents/mcp?tool=nession_server_list_agents');
+    await expect(page.getByText('MCP catalog unavailable or unverified.'))
+      .toBeVisible();
+    await expect(page.getByRole('heading',{name:'Output fields'})).toHaveCount(0);
   }finally{await site.close();}
 });
