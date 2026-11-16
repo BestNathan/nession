@@ -10,7 +10,7 @@ import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
 import https from 'node:https';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,6 +18,8 @@ const token = 'nession-3705-test-server-token';
 const tag = 'nession-3705-nginx-test:' + process.pid;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-3705-ingress-'));
 let running = null;
+let serverProcess = null;
+let serverOutput = '';
 const results = [];
 
 function command(name, args, timeout = 120000) {
@@ -79,6 +81,50 @@ function decoded(response) {
 function rpc(method, params, id = 1) {
   return { jsonrpc: '2.0', id, method, ...(params ? { params } : {}) };
 }
+async function startHostServer(backend, tls) {
+  const out = path.join(dir, tls ? 'server-tls.toml' : 'server-plain.toml');
+  const cfgEnv = {
+    ...process.env, SERVER_AUTH_TOKEN: token,
+    SERVER_LISTEN: '127.0.0.1:' + backend,
+    NESSION_HOME: path.join(dir, 'host-data'),
+    NESSION_MCP_ENABLED: 'true',
+    TLS_CERT_PATH: tls ? path.join(dir, 'cert.pem') : '',
+    TLS_KEY_PATH: tls ? path.join(dir, 'key.pem') : '',
+  };
+  const render = spawnSync('sh', [path.join(root, 'deploy/render-server-config.sh'), out], {
+    cwd: root, encoding: 'utf8', env: cfgEnv, timeout: 15000,
+  });
+  assert.equal(render.status, 0, 'host Server config: ' + render.stderr);
+  serverOutput = '';
+  serverProcess = spawn(path.join(root, 'target/debug/nession-server'), [out], {
+    cwd: dir, env: cfgEnv, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  for (const stream of [serverProcess.stdout, serverProcess.stderr]) {
+    stream.on('data', (buffer) => {
+      serverOutput = (serverOutput + buffer.toString('utf8')).slice(-4000);
+    });
+  }
+  for (let i = 0; i < 100; i++) {
+    if (serverProcess.exitCode !== null) {
+      throw new Error('host Server exited: ' + serverOutput);
+    }
+    try {
+      const response = await request(backend, 'POST', rpc('tools/list'), {
+        Authorization: 'Bearer invalid',
+      }, tls);
+      if (response.status === 401) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error('host Server did not start: ' + serverOutput);
+}
+function stopHostServer() {
+  if (!serverProcess) return;
+  assert.equal(serverOutput.includes(token), false, 'Server logs leaked bearer token');
+  serverProcess.kill('SIGTERM');
+  serverProcess = null;
+}
+
 function logTail() {
   if (!running) return '';
   const x = spawnSync('docker', ['logs', running], { encoding: 'utf8', timeout: 20000 });
@@ -97,7 +143,7 @@ async function startContainer(front, backend, tls = false, disable = false) {
   ];
   if (tls) env.push('-e', 'TLS_CERT_PATH=/certs/cert.pem', '-e', 'TLS_KEY_PATH=/certs/key.pem');
   const sourceDir = path.join(root, 'deploy');
-  const binary = path.join(root, 'target/debug/nession-server');
+  const binary = path.join(dir, 'server-stub.sh');
   const args = ['run', '-d', '--rm', '--network', 'host',
     '-w', '/etc/nession', '-v', sourceDir + ':/mcp-deploy:ro',
     '-v', binary + ':/usr/local/bin/nession-server:ro',
@@ -174,16 +220,20 @@ async function exercise(port, tls) {
 }
 try {
   command('cargo', ['build', '-p', 'nession-server', '--bin', 'nession-server'], 900000);
+  const stub = path.join(dir, 'server-stub.sh');
+  fs.writeFileSync(stub, '#!/bin/sh\nexec sleep 300\n', { mode: 0o755 });
   command('docker', [
     'build', '--target', 'runtime-tools', '-f', 'Dockerfile.server.prebuilt', '-t', tag, '.',
   ], 900000);
 
   const plain = await ephemeralPort();
   const plainBackend = await ephemeralPort();
+  await startHostServer(plainBackend, false);
   await startContainer(plain, plainBackend);
   await exercise(plain, false);
   logTail();
   stopContainer();
+  stopHostServer();
 
   command('openssl', [
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
@@ -192,14 +242,17 @@ try {
   ]);
   const tlsFront = await ephemeralPort();
   const tlsBackend = await ephemeralPort();
+  await startHostServer(tlsBackend, true);
   await startContainer(tlsFront, tlsBackend, true);
   await exercise(443, true);
   logTail();
   stopContainer();
+  stopHostServer();
 
   console.log('MCP_IMAGE_INGRESS_TEST PASS: ' + results.join(' | '));
 } finally {
   try { stopContainer(); } catch {}
+  try { stopHostServer(); } catch {}
   try { command('docker', ['image', 'rm', '-f', tag], 20000); } catch {}
   fs.rmSync(dir, { recursive: true, force: true });
 }
