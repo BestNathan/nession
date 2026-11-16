@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "mode": "acceptance",
+  "source": {
+    "repository": "BestNathan/nession",
+    "run_id": 43922180133,
+    "run_attempt": 2,
+    "event": "pull_request",
+    "head_sha": "28265624b930a59d3707685134b919a345bd2199",
+    "head_branch": "fix/3751-git-history-pagination-fencing",
+    "workflow_id": 378248506,
+    "source_kind": "pr-smoke",
+    "pr_binding": {
+      "pr_number": 3763,
+      "issue": 3751,
+      "head_sha": "28265624b930a59d3707685134b919a345bd2199",
+      "case_job_id": 133499638298,
+      "artifact_id": 14254998618,
+      "quality_run_id": 43922180224,
+      "e2e_run_id": 43922180162
+    }
+  },
+  "record": "runs/2026-11-16/43922180133-2/3751/SC-02.json",
+  "execution_id": "791a7710373abe0b10a277e2c88fbee9f79b4ea9ec6b6e28933e0b9abb8ddaa9",
+  "target_sha": "28265624b930a59d3707685134b919a345bd2199",
+  "issue": 3751,
+  "criterion": "SC-02",
+  "stage": "pr",
+  "case_tree_sha": "4979330825dafe0ab149607d4afde7293d2b0829",
+  "contract_sha256": "167af8149adb0f07aa31512fa7df9fc87ee33505c80792ab84eb2ebfcce00a91"
+}
