@@ -74,20 +74,28 @@ pub use build::archive::{
     ReqwestFetcher,
 };
 #[cfg(feature = "sources")]
+pub use build::compose::{
+    compose_mkfs_command, ComposeBuildRequest, ComposeSourceInput, ComposedImage, ErofsComposer,
+    ErofsExtractor, ProcessErofsExtractor, MAX_COMPOSE_SOURCES, SOURCE_ANNOTATIONS_KEY,
+};
+#[cfg(feature = "sources")]
 pub use build::import::{
     import_raw_erofs, validate_erofs_file, ImportOutcome, RawErofsImport, EROFS_MAGIC,
-    EROFS_MAGIC_OFFSET, MAX_IMPORT_BYTES,
+    EROFS_MAGIC_BYTES, EROFS_MAGIC_OFFSET, MAX_IMPORT_BYTES,
 };
 #[cfg(feature = "sources")]
 pub use build::oci::{
     pinned_digest, OciConversion, OciConversionRequest, OciErofsConverter, ProcessOciConverter,
 };
 #[cfg(feature = "sources")]
-pub use build::publication::{host_platform, image_documents, publish_layer, LayerPublication};
+pub use build::publication::{
+    host_platform, image_documents, image_documents_with_runtime, publish_layer, LayerPublication,
+};
 #[cfg(feature = "build")]
 pub use build::{
     discard_packaged_image, discard_snapshot_artifacts, manifest_tree, packaged_image_path,
     snapshot_dir, verify_snapshot, BuildObserver, BuildRequest, BuildSource, BuiltImage,
+    ComposeImageMetadata, ComposeRuntime, ComposeSnapshotSource, ComposeSourceProvenance,
     ErofsBuilder, MkfsRunner, NoopObserver, Packaging, ProcessControl, ProcessMkfsRunner,
     ResumePoint, SnapshotCheckpoint, SnapshotSource, Stage, TreeManifest, TreeStats,
 };

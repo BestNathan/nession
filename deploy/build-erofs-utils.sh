@@ -4,16 +4,18 @@
 #
 # Debian bookworm packages erofs-utils 1.5, whose mkfs.erofs has no `-b`
 # (block size) option and therefore cannot run the V1 packaging argv, and it
-# packages no erofsfuse at all. Both images therefore build the two tools from
-# this one pinned upstream release.
+# packages no erofsfuse at all. Both images therefore build the tools from this
+# one pinned upstream release. The Server also needs `fsck.erofs --extract`
+# for the flattened Compose source staging (#3696), which needs no FUSE or
+# privileges.
 #
 # Compression support is disabled deliberately: the V1 image contract builds
 # uncompressed images (`compression = "none"`), and the resulting erofsfuse
 # then links only libfuse3 and libc. A future compressor is a protocol change
 # owned by `nession-protocol`, not an image-build flag.
 #
-# The binaries are installed at /usr/local/bin/{mkfs.erofs,erofsfuse}. Only the
-# binary a role needs is copied into that role's final runtime stage.
+# The binaries are installed at /usr/local/bin/{mkfs.erofs,erofsfuse,fsck.erofs}.
+# Only the binary a role needs is copied into that role's final runtime stage.
 #
 # Source supply chain (#3386): the GitHub Actions image runners cannot reach
 # git.kernel.org, so the source comes from the erofs-utils GitHub tag archive
@@ -111,8 +113,9 @@ cd "${source_dir}"
 make -j"$(nproc)"
 install -m 0755 mkfs/mkfs.erofs /usr/local/bin/mkfs.erofs
 install -m 0755 fuse/erofsfuse /usr/local/bin/erofsfuse
+install -m 0755 fsck/fsck.erofs /usr/local/bin/fsck.erofs
 
-for binary in mkfs.erofs erofsfuse; do
+for binary in mkfs.erofs erofsfuse fsck.erofs; do
     if [ ! -x "/usr/local/bin/${binary}" ]; then
         echo "build-erofs-utils: ${binary} was not installed" >&2
         exit 1
@@ -137,6 +140,15 @@ case "${erofsfuse_version}" in
         ;;
     *)
         echo "build-erofs-utils: installed erofsfuse does not report the pinned version: ${erofsfuse_version}" >&2
+        exit 6
+        ;;
+esac
+fsck_version="$(fsck.erofs --version 2>/dev/null | head -n 1 || true)"
+case "${fsck_version}" in
+    *"${EROFS_UTILS_VERSION}"*)
+        ;;
+    *)
+        echo "build-erofs-utils: installed fsck.erofs does not report the pinned version: ${fsck_version}" >&2
         exit 6
         ;;
 esac

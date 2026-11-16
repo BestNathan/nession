@@ -19,6 +19,12 @@ pub const ANNOTATION_KIND: &str = "io.nession.kind";
 pub const ANNOTATION_MOUNT_DEFAULT: &str = "io.nession.mount.default";
 /// Advisory executable directory below the actual mountpoint.
 pub const ANNOTATION_PATH_PREPEND: &str = "io.nession.path.prepend";
+/// The deterministic Compose format identity recorded on a composed Manifest.
+pub const ANNOTATION_COMPOSE_FORMAT: &str = "io.nession.compose.format";
+/// The pinned source-vs-result provenance of a composed Manifest.
+pub const ANNOTATION_COMPOSE_SOURCES: &str = "io.nession.compose.sources";
+/// The only flattened Compose format this build writes.
+pub const COMPOSE_FORMAT_FLATTENED_V1: &str = "flattened-v1";
 
 /// The three advisory Nession image kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -55,9 +55,10 @@ RUN cargo build --release --bin nession-server
 # Stage 5: Build the pinned EROFS helper tools (#3178)
 #
 # Debian bookworm's erofs-utils 1.5 cannot run the V1 packaging argv (it has no
-# block-size option) and packages no erofsfuse at all. Both binaries therefore
-# come from one pinned upstream build in `deploy/build-erofs-utils.sh`. They are
-# linked against this bookworm base, which the runtime stages below also use.
+# block-size option) and packages no erofsfuse at all. The packaging, FUSE and
+# extraction helpers therefore come from one pinned upstream build in
+# `deploy/build-erofs-utils.sh`. They are linked against this bookworm base,
+# which the runtime stages below also use.
 FROM debian:bookworm-slim AS erofs-utils-builder
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -72,9 +73,10 @@ RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
 #
 # Both Server image paths (`Dockerfile.server` and
 # `Dockerfile.server.prebuilt`) extend this stage, so the EROFS Image Manager's
-# host tools have one packaging definition. `git` and `mkfs.erofs` are runtime
-# dependencies of `crates/nession-erofs/src/build.rs`; the probe below fails
-# the image build if either executable is absent.
+# host tools have one packaging definition. `git`, `mkfs.erofs` and
+# `fsck.erofs` are runtime dependencies of `crates/nession-erofs/src/build.rs`
+# (the last one stages flattened Compose sources, #3696); the probe below fails
+# the image build if any executable is absent.
 #
 # bookworm, not bullseye: Debian 11 reached end of LTS on 2026-08-31 and
 # `deb.debian.org/debian-security` stopped carrying bullseye packages, so the
@@ -90,7 +92,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 COPY --from=erofs-utils-builder /usr/local/bin/mkfs.erofs /usr/local/bin/mkfs.erofs
-RUN command -v git mkfs.erofs
+COPY --from=erofs-utils-builder /usr/local/bin/fsck.erofs /usr/local/bin/fsck.erofs
+RUN command -v git mkfs.erofs fsck.erofs
 
 # Stage 7: Server runtime (no tmux needed)
 FROM runtime-tools AS runtime

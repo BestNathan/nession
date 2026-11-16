@@ -196,6 +196,141 @@ fn image_list_pagination_defaults_keep_the_legacy_bound_and_reports_next_offset(
 #[test]
 fn access_requires_exactly_one_consumer_and_keeps_project_compatibility() {}
 
+#[test]
+fn compose_sources_normalize_and_pin_digest_references() {
+    let digest = format!("sha256:{}", "d".repeat(64));
+    let source = ImageSource::Compose {
+        sources: vec![
+            ImageComposeSource {
+                repository: "nession/tools".to_string(),
+                reference: "go".to_string(),
+                destination: "/opt/go/".to_string(),
+            },
+            ImageComposeSource {
+                repository: "nession/base".to_string(),
+                reference: digest.clone(),
+                destination: "/".to_string(),
+            },
+        ],
+    };
+    // The trailing slash is invalid; `/` normalizes to the composed root.
+    assert_eq!(
+        normalize_image_source(&source).unwrap_err().message(),
+        "a compose destination must be `/`-free normalized absolute prefix or empty"
+    );
+
+    let source = ImageSource::Compose {
+        sources: vec![
+            ImageComposeSource {
+                repository: "nession/tools".to_string(),
+                reference: "go".to_string(),
+                destination: "/opt/go".to_string(),
+            },
+            ImageComposeSource {
+                repository: "nession/base".to_string(),
+                reference: digest.clone(),
+                destination: String::new(),
+            },
+        ],
+    };
+    // One root source plus prefixed sources is allowed: the staging merge
+    // still fails closed if the root tree actually owns a prefixed path.
+    let mixed = normalize_image_source(&source).unwrap();
+    assert_eq!(mixed.kind(), "compose");
+
+    let source = ImageSource::Compose {
+        sources: vec![
+            ImageComposeSource {
+                repository: "nession/tools".to_string(),
+                reference: "go".to_string(),
+                destination: "/opt/go".to_string(),
+            },
+            ImageComposeSource {
+                repository: "nession/base".to_string(),
+                reference: digest.clone(),
+                destination: "/opt/node".to_string(),
+            },
+        ],
+    };
+    let normalized = normalize_image_source(&source).unwrap();
+    assert_eq!(normalized.kind(), "compose");
+    assert_eq!(normalized.source(), source);
+    let NormalizedImageSource::Compose { sources } = &normalized else {
+        panic!("expected a compose source");
+    };
+    assert_eq!(sources.len(), 2);
+    assert_eq!(
+        sources[1].requested_digest.as_deref(),
+        Some(digest.as_str())
+    );
+}
+
+#[test]
+fn compose_rejects_empty_ambiguous_or_unsafe_sources() {
+    let compose = |sources: Vec<ImageComposeSource>| ImageSource::Compose { sources };
+    let valid = |destination: &str| ImageComposeSource {
+        repository: "nession/base".to_string(),
+        reference: "latest".to_string(),
+        destination: destination.to_string(),
+    };
+    assert_eq!(
+        normalize_image_source(&compose(Vec::new()))
+            .unwrap_err()
+            .message(),
+        "a compose build requires at least one source Image"
+    );
+    for source in [
+        ImageComposeSource {
+            repository: "Nession/base".to_string(),
+            ..valid("/a")
+        },
+        ImageComposeSource {
+            repository: "nession/../base".to_string(),
+            ..valid("/a")
+        },
+        ImageComposeSource {
+            repository: "nession/base".to_string(),
+            reference: "sha256:short".to_string(),
+            destination: "/a".to_string(),
+        },
+        ImageComposeSource {
+            repository: "nession/base".to_string(),
+            reference: "Latest".to_string(),
+            destination: "/a".to_string(),
+        },
+    ] {
+        assert!(normalize_image_source(&compose(vec![source])).is_err());
+    }
+    for destination in ["relative", "/a/../b", "/a//b", "/a/", "/a\\b"] {
+        assert!(
+            normalize_image_source(&compose(vec![valid(destination)])).is_err(),
+            "destination {destination:?} must be refused"
+        );
+    }
+    assert_eq!(
+        normalize_image_source(&compose(vec![valid("/opt"), valid("/opt/go")]))
+            .unwrap_err()
+            .message(),
+        "compose destinations must not overlap or both name the composed root"
+    );
+    // Two sources cannot both claim the composed root.
+    assert_eq!(
+        normalize_image_source(&compose(vec![valid(""), valid("/")]))
+            .unwrap_err()
+            .message(),
+        "compose destinations must not overlap or both name the composed root"
+    );
+    let too_many = (0..=IMAGE_COMPOSE_MAX_SOURCES)
+        .map(|index| valid(&format!("/prefix-{index}")))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        normalize_image_source(&compose(too_many))
+            .unwrap_err()
+            .message(),
+        format!("a compose build accepts at most {IMAGE_COMPOSE_MAX_SOURCES} source Images")
+    );
+}
+
 // ── Asynchronous build lifecycle (#3334) ────────────────────────────────
 
 #[test]

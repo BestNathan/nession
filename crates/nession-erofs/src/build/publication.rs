@@ -32,6 +32,10 @@ pub struct LayerPublication {
     pub platform: Platform,
     /// Standard Config `Env` defaults (`KEY=VALUE`).
     pub env: Vec<String>,
+    /// Standard runtime projection. A Compose build supplies the merged Env,
+    /// Entrypoint, Cmd and WorkingDir here; other callers use the default and
+    /// the `env` field above.
+    pub runtime: RuntimeConfig,
     /// Advisory Manifest annotations; only `io.nession.*` values are read.
     pub annotations: BTreeMap<String, String>,
 }
@@ -47,12 +51,29 @@ pub fn image_documents(
     env: &[String],
     annotations: &BTreeMap<String, String>,
 ) -> Result<(RawDocument, RawDocument)> {
+    image_documents_with_runtime(layer, platform, env, &RuntimeConfig::default(), annotations)
+}
+
+/// Build the exact Config and Manifest documents with an explicit runtime
+/// projection. `env` is the legacy envelope and is superseded by
+/// `runtime.env` when that is present.
+pub fn image_documents_with_runtime(
+    layer: &Descriptor,
+    platform: &Platform,
+    env: &[String],
+    runtime: &RuntimeConfig,
+    annotations: &BTreeMap<String, String>,
+) -> Result<(RawDocument, RawDocument)> {
     if layer.media_type != MEDIA_TYPE_EROFS {
         anyhow::bail!("layer media type must be {MEDIA_TYPE_EROFS}");
     }
     let mut os_features = platform.os_features.clone().unwrap_or_default();
     if !os_features.iter().any(|feature| feature == "erofs") {
         os_features.push("erofs".to_string());
+    }
+    let mut runtime = runtime.clone();
+    if runtime.env.is_none() && !env.is_empty() {
+        runtime.env = Some(env.to_vec());
     }
     let config = ImageConfig {
         created: None,
@@ -62,10 +83,7 @@ pub fn image_documents(
         os_version: platform.os_version.clone(),
         os_features: Some(os_features),
         variant: platform.variant.clone(),
-        config: RuntimeConfig {
-            env: (!env.is_empty()).then(|| env.to_vec()),
-            ..RuntimeConfig::default()
-        },
+        config: runtime,
         rootfs: RootFs {
             fs_type: "layers".to_string(),
             diff_ids: vec![layer.digest.clone()],
@@ -112,10 +130,11 @@ pub async fn publish_layer(
     store
         .verify_named_size(&publication.layer.digest, publication.layer.size)
         .context("EROFS layer is not a verified CAS object")?;
-    let (config, manifest) = image_documents(
+    let (config, manifest) = image_documents_with_runtime(
         &publication.layer,
         &publication.platform,
         &publication.env,
+        &publication.runtime,
         &publication.annotations,
     )?;
     match &publication.tag {
@@ -218,6 +237,7 @@ mod tests {
                 layer,
                 platform: host_platform(),
                 env: vec!["PATH=/usr/bin".to_string()],
+                runtime: RuntimeConfig::default(),
                 annotations,
             },
         )

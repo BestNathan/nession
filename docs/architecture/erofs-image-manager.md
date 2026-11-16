@@ -56,7 +56,7 @@ Session orchestration.
 
 ## Sources
 
-V1 accepts exactly two source shapes:
+V1 accepts three source shapes:
 
 1. **Public GitHub HTTPS repository** — `https://github.com/<owner>/<repo>`
    with a branch name or a full 40-character commit SHA. The canonical
@@ -67,6 +67,26 @@ V1 accepts exactly two source shapes:
 2. **Validated local directory or bundle** — an absolute path with no `..` or
    control characters. The tree is copied without following symlinks, scanned,
    and built from the private copy.
+3. **Flattened Compose of catalog Images** (#3696) — one to sixteen sources,
+   each naming a catalog `repository`, a Tag or immutable digest, and a
+   disjoint absolute destination prefix (at most one source may name the
+   composed root, `/`). The Server resolves and pins each source Manifest,
+   Config and EROFS layer **once at submission**; a digest alone is not a
+   source declaration, and a later Tag move does not change the build. Each
+   pinned source is re-verified against those identities before extraction.
+   `fsck.erofs --extract` stages every source without FUSE or privilege, the
+   trees are merged with fail-closed duplicate, shadowing, whiteout and
+   escaping-symlink checks, and the merged tree is scanned and packaged by the
+   existing fixed `mkfs.erofs` argv (plus `--all-root` and
+   `-E noinline_data`). The result is one ordinary raw EROFS layer with a
+   standard Config/Manifest identity and no runtime dependency on the source
+   blobs. Env values merge by name (identical dedupes, different values fail);
+   Entrypoint/Cmd/WorkingDir are retained only when every defining source
+   agrees; conflicting advisory kind/mount/path annotations fail. The Manifest
+   records `io.nession.compose.format` and `io.nession.compose.sources`
+   provenance (repository, reference, Manifest/layer digest, size,
+   destination). The build reuses the #3334 cancel/retry/restart lifecycle and
+   releases its source pins on every terminal state.
 
 A branch is resolved **once** by the shallow clone; the resolved commit is
 recorded as `source_sha`. Git runs with no system/global config, no prompt, no
@@ -403,7 +423,8 @@ is required.
 
 ## Runtime prerequisites
 
-- `mkfs.erofs` on the build host. Both Server and Agent images ship a pinned
+- `mkfs.erofs` on the build host; flattened Compose additionally requires
+  `fsck.erofs` for source staging (#3696). Both Server and Agent images ship a pinned
   build of `erofs-utils` (`deploy/build-erofs-utils.sh`) because Debian
   bookworm's 1.5 package cannot run the V1 argv; Ubuntu CI test hosts install
   `erofs-utils` for the acceptance Case, and the ordinary Rust gates use a
@@ -414,7 +435,9 @@ is required.
   top-level directory and the `VERSION` file before building, and reports
   network, integrity and revision failures as distinct states. The
   `runtime-image-tools` guard covers both the from-source and prebuilt image
-  paths (#3178) and its self-test exercises those three failure states.
+  paths (#3178) and its self-test exercises those three failure states. The
+  Server image carries `mkfs.erofs` and `fsck.erofs`; the Agent carries
+  `erofsfuse`.
 - Git with normal HTTPS support; no credential is required for a public source.
 - Enough disk for one snapshot plus its image per concurrent build; the build
   root is durable execution state, not scratch.
