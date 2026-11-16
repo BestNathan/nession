@@ -39,6 +39,26 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+
+    # MCP Streamable HTTP is never the Web SPA fallback. Keep the original
+    # bearer, protocol, session and Origin headers; disable SSE buffering.
+    location = /mcp {
+        proxy_pass http://nession_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header MCP-Protocol-Version $http_mcp_protocol_version;
+        proxy_set_header Mcp-Session-Id $http_mcp_session_id;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+    }
+
     # Static files (web UI)
     location / {
         root /usr/share/nginx/html;

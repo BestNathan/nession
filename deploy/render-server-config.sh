@@ -39,3 +39,7 @@ heartbeat_timeout_secs = ${SERVER_HEARTBEAT_TIMEOUT}
 terminal_cols = ${NESSION_TERMINAL_COLS}
 terminal_web_font_size = ${NESSION_TERMINAL_WEB_FONT_SIZE}
 TOML
+
+# One image-only default and fail-closed credential check shared with Agent.
+export SERVER_AUTH_TOKEN
+"$(dirname "$0")/render-mcp-config.sh" server >> "$out"

@@ -57,14 +57,6 @@ export LANG="${LANG:-C.UTF-8}"
 export TERM="${TERM:-xterm-256color}"
 mkdir -p "${NESSON_CONFIG_DIR}"
 
-# Generate nginx config
-envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
-  < /etc/nginx/templates/default.conf.template \
-  > /etc/nginx/conf.d/default.conf
-
-nginx -t
-nginx -g 'daemon off;' &
-
 # Generate agent config
 cat > "${NESSON_CONFIG_DIR}/agent-config.toml" <<TOML
 agent_id = "${AGENT_ID}"
@@ -79,13 +71,13 @@ TOML
 
 # Only add connect_url if explicitly set
 if [ -n "${AGENT_CONNECT_URL}" ]; then
-    echo "connect_url = \"${AGENT_CONNECT_URL}\"" >> /etc/nession/agent-config.toml
+    echo "connect_url = \"${AGENT_CONNECT_URL}\"" >> ${NESSON_CONFIG_DIR}/agent-config.toml
 fi
 
 # Only pin the tmux socket if explicitly set; otherwise the agent resolves its
 # documented default.
 if [ -n "${AGENT_TMUX_SOCKET}" ]; then
-    echo "tmux_socket_path = \"${AGENT_TMUX_SOCKET}\"" >> /etc/nession/agent-config.toml
+    echo "tmux_socket_path = \"${AGENT_TMUX_SOCKET}\"" >> ${NESSON_CONFIG_DIR}/agent-config.toml
 fi
 
 # Only add the EROFS cache section if explicitly set. This table must follow
@@ -119,6 +111,18 @@ fi
         echo "state_dir = \"${AGENT_SANDBOX_STATE_DIR}\""
     fi
 } >> "${NESSON_CONFIG_DIR}/agent-config.toml"
+
+# One OCI default after all existing TOML tables; Agent resolves durable
+# inbound Agent Token before MCP mount, never its outbound Server token.
+"$(dirname "$0")/render-mcp-config.sh" agent >> "${NESSON_CONFIG_DIR}/agent-config.toml"
+
+# Generate nginx config
+envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
+  < /etc/nginx/templates/default.conf.template \
+  > /etc/nginx/conf.d/default.conf
+
+nginx -t
+nginx -g 'daemon off;' &
 
 # Initialize Claude Code settings on first run only.
 # /root/.claude is backed by PVC — once created, survives restarts.
