@@ -73,6 +73,85 @@ impl VerifiedImage {
     }
 }
 
+/// A caller-verified referenced Composite view identity (#3697).
+///
+/// The identity is the Composite descriptor digest, never the top Manifest or
+/// a data Blob digest. The primary metadata EROFS and every backing device are
+/// independently verified before the first physical mount.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedComposite {
+    identity: String,
+    metadata: VerifiedImage,
+    devices: Vec<VerifiedImage>,
+}
+
+impl VerifiedComposite {
+    pub fn new(
+        identity: impl Into<String>,
+        metadata: VerifiedImage,
+        devices: Vec<VerifiedImage>,
+    ) -> Result<Self> {
+        let identity = identity.into();
+        if !is_valid_digest(&identity) {
+            anyhow::bail!("invalid composite view identity {identity:?}");
+        }
+        if devices.is_empty() {
+            anyhow::bail!("a composite view requires at least one backing device");
+        }
+        if devices.len() > crate::oci::composite::MAX_COMPOSITE_DEVICES {
+            anyhow::bail!(
+                "a composite view accepts at most {} backing devices",
+                crate::oci::composite::MAX_COMPOSITE_DEVICES
+            );
+        }
+        if identity == metadata.digest() || devices.iter().any(|device| device.digest() == identity)
+        {
+            anyhow::bail!("the composite view identity must differ from every data Blob digest");
+        }
+        let mut seen = HashSet::new();
+        seen.insert(metadata.digest());
+        for device in &devices {
+            if !seen.insert(device.digest()) {
+                anyhow::bail!("composite view repeats device {}", device.digest());
+            }
+        }
+        Ok(Self {
+            identity,
+            metadata,
+            devices,
+        })
+    }
+
+    /// The composite view identity (Composite descriptor digest).
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    pub fn metadata(&self) -> &VerifiedImage {
+        &self.metadata
+    }
+
+    pub fn devices(&self) -> &[VerifiedImage] {
+        &self.devices
+    }
+
+    /// The component digests in physical order: metadata, then devices.
+    pub fn component_digests(&self) -> Vec<String> {
+        std::iter::once(self.metadata.digest().to_string())
+            .chain(
+                self.devices
+                    .iter()
+                    .map(|device| device.digest().to_string()),
+            )
+            .collect()
+    }
+}
+
+/// One pinned composite component set held for the physical mount lifetime.
+struct CompositePins(Vec<Box<dyn BlobPinGuard>>);
+
+impl BlobPinGuard for CompositePins {}
+
 /// Manager construction input.
 pub struct MountManagerConfig {
     /// Manager-owned root. Physical mountpoints live under `<root>/mounts`, and
@@ -94,6 +173,16 @@ pub struct MountManagerConfig {
 /// the verified-mount contract itself untouched.
 trait MountBackend: Send + Sync {
     fn mount(&self, image: &Path, mountpoint: &Path, settings: &MountSettings) -> Result<()>;
+    /// Mount a primary EROFS image with ordered extra devices.
+    fn mount_multi(
+        &self,
+        image: &Path,
+        _devices: &[PathBuf],
+        mountpoint: &Path,
+        settings: &MountSettings,
+    ) -> Result<()> {
+        self.mount(image, mountpoint, settings)
+    }
     fn unmount(&self, settings: &MountSettings, mountpoint: &Path) -> Result<()>;
     fn is_erofs_mount(&self, mountpoint: &Path) -> bool;
 }
@@ -103,6 +192,16 @@ struct RealMountBackend;
 impl MountBackend for RealMountBackend {
     fn mount(&self, image: &Path, mountpoint: &Path, settings: &MountSettings) -> Result<()> {
         mount::mount_shared(image, mountpoint, settings)
+    }
+
+    fn mount_multi(
+        &self,
+        image: &Path,
+        devices: &[PathBuf],
+        mountpoint: &Path,
+        settings: &MountSettings,
+    ) -> Result<()> {
+        mount::mount_shared_with_devices(image, devices, mountpoint, settings)
     }
 
     fn unmount(&self, settings: &MountSettings, mountpoint: &Path) -> Result<()> {
@@ -188,6 +287,26 @@ struct MountIdentity {
     generation: String,
     source: PathBuf,
     created_at: u64,
+    /// Present when the identity is a referenced Composite view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    composite: Option<CompositeIdentity>,
+}
+
+/// The component closure recorded for a Composite view identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CompositeIdentity {
+    metadata_digest: String,
+    device_digests: Vec<String>,
+}
+
+/// One verified source set for a physical mount transition.
+struct MountSourceSet {
+    identity: String,
+    components: Vec<String>,
+    composite: Option<CompositeIdentity>,
+    primary: VerifiedImage,
+    primary_path: PathBuf,
+    device_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -359,11 +478,65 @@ impl MountManager {
     /// Acquisitions of the same digest are single-flight. The returned lease
     /// can release only its own consumer; it cannot unmount the shared mount.
     pub fn acquire(&self, image: &VerifiedImage, execution_id: &str) -> Result<MountLease> {
+        let source = self.verify_source(image)?;
+        self.acquire_sources(
+            MountSourceSet {
+                identity: image.digest().to_string(),
+                components: vec![image.digest().to_string()],
+                composite: None,
+                primary: image.clone(),
+                primary_path: source,
+                device_paths: Vec::new(),
+            },
+            execution_id,
+        )
+    }
+
+    /// Acquire one consumer-scoped lease over a verified referenced Composite
+    /// view (#3697).
+    ///
+    /// The view identity is the Composite descriptor digest, never a data Blob
+    /// digest. The primary metadata EROFS and every backing device are
+    /// independently re-verified; every component is pinned for the physical
+    /// mount lifetime. Consumers of one identity share one physical mount.
+    pub fn acquire_composite(
+        &self,
+        composite: &VerifiedComposite,
+        execution_id: &str,
+    ) -> Result<MountLease> {
         if execution_id.trim().is_empty() {
             anyhow::bail!("a shared EROFS mount consumer needs a non-empty execution id");
         }
-        let source = self.verify_source(image)?;
-        let entry = self.entry_or_create(image.digest());
+        let primary_path = self.verify_source(composite.metadata())?;
+        let mut device_paths = Vec::with_capacity(composite.devices().len());
+        for device in composite.devices() {
+            device_paths.push(self.verify_source(device)?);
+        }
+        self.acquire_sources(
+            MountSourceSet {
+                identity: composite.identity().to_string(),
+                components: composite.component_digests(),
+                composite: Some(CompositeIdentity {
+                    metadata_digest: composite.metadata().digest().to_string(),
+                    device_digests: composite
+                        .devices()
+                        .iter()
+                        .map(|device| device.digest().to_string())
+                        .collect(),
+                }),
+                primary: composite.metadata().clone(),
+                primary_path,
+                device_paths,
+            },
+            execution_id,
+        )
+    }
+
+    fn acquire_sources(&self, sources: MountSourceSet, execution_id: &str) -> Result<MountLease> {
+        if execution_id.trim().is_empty() {
+            anyhow::bail!("a shared EROFS mount consumer needs a non-empty execution id");
+        }
+        let entry = self.entry_or_create(&sources.identity);
         let deadline = std::time::Instant::now() + ACQUIRE_WAIT_TIMEOUT;
         loop {
             let mut state = lock(&entry.state);
@@ -373,6 +546,21 @@ impl MountManager {
                         state.phase = MountState::Unmounted;
                         continue;
                     };
+                    if sources.composite.is_some() {
+                        // A view identity must never be served against a
+                        // different component closure.
+                        match read_identity(&entry.identity_path) {
+                            Ok(identity) if identity.composite == sources.composite => {}
+                            Ok(_) => anyhow::bail!(
+                                "the shared EROFS mount of {} records a different Composite closure",
+                                entry.digest
+                            ),
+                            Err(error) => anyhow::bail!(
+                                "the shared EROFS mount of {} has no readable Composite identity: {error:#}",
+                                entry.digest
+                            ),
+                        }
+                    }
                     if !self.inner.backend.is_erofs_mount(&entry.mountpoint) {
                         let failure = format!(
                             "the shared EROFS mount {} for {} disappeared",
@@ -405,6 +593,7 @@ impl MountManager {
                         token,
                         generation,
                         execution_id,
+                        sources.components,
                     ));
                 }
                 MountState::Mounting | MountState::Unmounting => {
@@ -476,7 +665,7 @@ impl MountManager {
                 MountState::Unmounted => {
                     state.phase = MountState::Mounting;
                     drop(state);
-                    let outcome = self.mount_entry(&entry, &source);
+                    let outcome = self.mount_entry(&entry, &sources);
                     let mut state = lock(&entry.state);
                     match outcome {
                         Ok((generation, pin)) => {
@@ -493,6 +682,7 @@ impl MountManager {
                                 token,
                                 generation,
                                 execution_id,
+                                sources.components,
                             ));
                         }
                         Err(error) => {
@@ -614,16 +804,25 @@ impl MountManager {
                 continue;
             }
             if state.pin.is_none() {
-                if let Some(pinner) = &self.inner.pinner {
-                    match pinner.pin(&consumer.digest) {
-                        Ok(pin) => state.pin = Some(pin),
-                        Err(error) => {
-                            report.unavailable.push((
-                                consumer.digest.clone(),
-                                format!("cannot pin the backing blob: {error:#}"),
-                            ));
-                            continue;
+                let mut digests = vec![consumer.digest.clone()];
+                if let Some(composite) = &identity.composite {
+                    if !digests.contains(&composite.metadata_digest) {
+                        digests.push(composite.metadata_digest.clone());
+                    }
+                    for digest in &composite.device_digests {
+                        if !digests.contains(digest) {
+                            digests.push(digest.clone());
                         }
+                    }
+                }
+                match pin_all(self.inner.pinner.as_ref(), &digests) {
+                    Ok(pin) => state.pin = pin,
+                    Err(error) => {
+                        report.unavailable.push((
+                            consumer.digest.clone(),
+                            format!("cannot pin the backing blob: {error:#}"),
+                        ));
+                        continue;
                     }
                 }
             }
@@ -833,36 +1032,53 @@ impl MountManager {
     fn mount_entry(
         &self,
         entry: &MountEntry,
-        source: &Path,
+        sources: &MountSourceSet,
     ) -> Result<(String, Option<Box<dyn BlobPinGuard>>)> {
-        let actual = file_digest(source)
-            .with_context(|| format!("verify EROFS image {}", source.display()))?;
-        if actual != entry.digest {
+        let actual = file_digest(&sources.primary_path)
+            .with_context(|| format!("verify EROFS image {}", sources.primary_path.display()))?;
+        if actual != sources.primary.digest() {
             anyhow::bail!(
                 "EROFS image {} digest {actual} does not match the requested digest {}",
-                source.display(),
-                entry.digest
+                sources.primary_path.display(),
+                sources.primary.digest()
             );
         }
-        let pin = match &self.inner.pinner {
-            Some(pinner) => Some(
-                pinner
-                    .pin(&entry.digest)
-                    .with_context(|| format!("pin EROFS image {}", entry.digest))?,
-            ),
-            None => None,
-        };
+        for (path, digest) in sources
+            .device_paths
+            .iter()
+            .zip(sources.components.iter().skip(1))
+        {
+            let actual = file_digest(path)
+                .with_context(|| format!("verify EROFS device {}", path.display()))?;
+            if &actual != digest {
+                anyhow::bail!(
+                    "EROFS device {} digest {actual} does not match the requested digest {digest}",
+                    path.display()
+                );
+            }
+        }
+        let mut pin_digests = vec![entry.digest.clone()];
+        for digest in &sources.components {
+            if !pin_digests.contains(digest) {
+                pin_digests.push(digest.clone());
+            }
+        }
+        let pin = pin_all(self.inner.pinner.as_ref(), &pin_digests)?;
         let generation = uuid::Uuid::new_v4().to_string();
         let identity = MountIdentity {
             digest: entry.digest.clone(),
             mountpoint: entry.mountpoint.clone(),
             generation: generation.clone(),
-            source: source.to_path_buf(),
+            source: sources.primary_path.clone(),
             created_at: now_seconds(),
+            composite: sources.composite.clone(),
         };
-        self.inner
-            .backend
-            .mount(source, &entry.mountpoint, &self.inner.settings)?;
+        self.inner.backend.mount_multi(
+            &sources.primary_path,
+            &sources.device_paths,
+            &entry.mountpoint,
+            &self.inner.settings,
+        )?;
         if let Err(error) = write_identity(&entry.identity_path, &identity) {
             let rollback = self
                 .inner
@@ -888,6 +1104,9 @@ pub struct MountLease {
     token: u64,
     generation: String,
     execution_id: String,
+    /// The data component digests of this view (metadata first for a
+    /// Composite; the single layer digest for a v1 image).
+    components: Vec<String>,
     released: bool,
 }
 
@@ -910,6 +1129,7 @@ impl MountLease {
         token: u64,
         generation: String,
         execution_id: &str,
+        components: Vec<String>,
     ) -> Self {
         Self {
             inner,
@@ -917,6 +1137,7 @@ impl MountLease {
             token,
             generation,
             execution_id: execution_id.to_string(),
+            components,
             released: false,
         }
     }
@@ -927,6 +1148,11 @@ impl MountLease {
 
     pub fn digest(&self) -> &str {
         &self.entry.digest
+    }
+
+    /// The data component digests (metadata/device order for a Composite).
+    pub fn component_digests(&self) -> &[String] {
+        &self.components
     }
 
     pub fn generation(&self) -> &str {
@@ -951,6 +1177,24 @@ impl Drop for MountLease {
             let _ = release_token(&self.inner, &self.entry, self.token);
         }
     }
+}
+
+fn pin_all(
+    pinner: Option<&Arc<dyn BlobPinner>>,
+    digests: &[String],
+) -> Result<Option<Box<dyn BlobPinGuard>>> {
+    let Some(pinner) = pinner else {
+        return Ok(None);
+    };
+    let mut guards = Vec::with_capacity(digests.len());
+    for digest in digests {
+        guards.push(
+            pinner
+                .pin(digest)
+                .with_context(|| format!("pin EROFS blob {digest}"))?,
+        );
+    }
+    Ok(Some(Box::new(CompositePins(guards))))
 }
 
 fn release_token(inner: &ManagerInner, entry: &MountEntry, token: u64) -> Result<()> {
@@ -1118,6 +1362,7 @@ mod tests {
     #[derive(Default)]
     struct FakeMountBackend {
         mounted: Mutex<HashSet<PathBuf>>,
+        multi: Mutex<Vec<(PathBuf, Vec<PathBuf>)>>,
     }
 
     impl MountBackend for FakeMountBackend {
@@ -1128,6 +1373,20 @@ mod tests {
                 .unwrap()
                 .insert(mountpoint.to_path_buf());
             Ok(())
+        }
+
+        fn mount_multi(
+            &self,
+            _image: &Path,
+            devices: &[PathBuf],
+            mountpoint: &Path,
+            _settings: &MountSettings,
+        ) -> Result<()> {
+            self.multi
+                .lock()
+                .unwrap()
+                .push((mountpoint.to_path_buf(), devices.to_vec()));
+            self.mount(_image, mountpoint, _settings)
         }
 
         fn unmount(&self, _settings: &MountSettings, mountpoint: &Path) -> Result<()> {
@@ -1282,6 +1541,119 @@ mod tests {
         assert_eq!(status.consumers, 0);
     }
 
+    #[derive(Default)]
+    struct RecordingPinner {
+        pins: Mutex<Vec<String>>,
+    }
+
+    struct RecordingPinGuard;
+
+    impl BlobPinGuard for RecordingPinGuard {}
+
+    impl BlobPinner for RecordingPinner {
+        fn pin(&self, digest: &str) -> Result<Box<dyn BlobPinGuard>> {
+            self.pins.lock().unwrap().push(digest.to_string());
+            Ok(Box::new(RecordingPinGuard))
+        }
+    }
+
+    fn manager_with_composite_backend(
+        root: &Path,
+    ) -> (
+        Arc<MountManager>,
+        Arc<FakeMountBackend>,
+        Arc<RecordingPinner>,
+    ) {
+        let backend = Arc::new(FakeMountBackend::default());
+        let pinner = Arc::new(RecordingPinner::default());
+        let manager = MountManager::open_with_mounts(
+            MountManagerConfig {
+                root: root.join("mounts-root"),
+                settings: MountSettings::new(root.join("erofsfuse"), root.join("fusermount3")),
+                authorized_roots: vec![root.join("images")],
+                pinner: Some(pinner.clone()),
+            },
+            backend.clone(),
+        )
+        .unwrap();
+        (manager, backend, pinner)
+    }
+
+    #[test]
+    fn a_composite_view_identity_shares_one_physical_mount_and_pins_every_component() {
+        let root = tempfile::tempdir().unwrap();
+        let (manager, backend, pinner) = manager_with_composite_backend(root.path());
+        let (metadata_path, metadata_digest) = image(root.path(), b"metadata erofs");
+        let devices = root.path().join("images");
+        let first = devices.join("node.erofs");
+        let second = devices.join("dsh.erofs");
+        std::fs::write(&first, b"node backing erofs").unwrap();
+        std::fs::write(&second, b"dsh backing erofs").unwrap();
+        let metadata = VerifiedImage::new(metadata_digest.clone(), metadata_path).unwrap();
+        let first = VerifiedImage::new(digest_of_bytes(b"node backing erofs"), first).unwrap();
+        let second = VerifiedImage::new(digest_of_bytes(b"dsh backing erofs"), second).unwrap();
+        let identity = digest_of_bytes(b"referenced composite descriptor");
+        assert!(
+            VerifiedComposite::new(&metadata_digest, metadata.clone(), vec![first.clone()])
+                .is_err()
+        );
+        assert!(VerifiedComposite::new(
+            &metadata_digest,
+            metadata.clone(),
+            vec![first.clone(), first.clone()]
+        )
+        .is_err());
+        let composite = VerifiedComposite::new(
+            identity.clone(),
+            metadata.clone(),
+            vec![first.clone(), second.clone()],
+        )
+        .unwrap();
+        let first_lease = manager
+            .acquire_composite(&composite, "execution-a")
+            .unwrap();
+        let second_lease = manager
+            .acquire_composite(&composite, "execution-b")
+            .unwrap();
+        assert_eq!(first_lease.mountpoint(), second_lease.mountpoint());
+        assert_eq!(first_lease.digest(), identity);
+        assert_ne!(first_lease.digest(), metadata.digest());
+        assert_eq!(
+            first_lease.component_digests(),
+            &[
+                metadata.digest().to_string(),
+                first.digest().to_string(),
+                second.digest().to_string()
+            ]
+        );
+        let mounted = backend.multi.lock().unwrap();
+        assert_eq!(mounted.len(), 1, "one physical view");
+        assert_eq!(mounted[0].1.len(), 2, "both backing devices were passed");
+        drop(mounted);
+        let pins = pinner.pins.lock().unwrap().clone();
+        for digest in [
+            &identity,
+            &metadata_digest,
+            &first.digest().to_string(),
+            &second.digest().to_string(),
+        ] {
+            assert!(pins.contains(digest), "pinned {digest}: {pins:?}");
+        }
+        let sidecar = read_identity(
+            &manager
+                .entry(&identity)
+                .expect("composite entry")
+                .identity_path,
+        )
+        .unwrap();
+        let recorded = sidecar.composite.expect("composite sidecar");
+        assert_eq!(recorded.metadata_digest, metadata_digest);
+        assert_eq!(recorded.device_digests.len(), 2);
+        first_lease.release().unwrap();
+        second_lease.release().unwrap();
+        assert!(backend.mounted.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn a_sidecar_with_an_invalid_digest_cannot_derive_an_unmount_target() {
         let root = tempfile::tempdir().unwrap();
@@ -1297,6 +1669,7 @@ mod tests {
                 generation: "generation-1".to_string(),
                 source: root.path().join("image"),
                 created_at: 0,
+                composite: None,
             },
         )
         .unwrap();
@@ -1324,6 +1697,7 @@ mod tests {
                 generation: "generation-1".to_string(),
                 source: root.path().join("image"),
                 created_at: 0,
+                composite: None,
             },
         )
         .unwrap();

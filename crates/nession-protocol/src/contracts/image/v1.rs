@@ -51,6 +51,25 @@ pub const IMAGE_COMPOSE_DESTINATION_MAX_CHARS: usize = 1024;
 
 // ── Source ──────────────────────────────────────────────────────────────
 
+/// How a Compose build represents its result (#3696, #3697).
+///
+/// `Flattened` copies the merged tree into one self-contained raw EROFS layer.
+/// `Referenced` builds one immutable metadata EROFS that references the pinned
+/// source EROFS blobs as external devices, so unchanged backing bytes are not
+/// repackaged. The referenced form requires every source at the composed root
+/// and fails closed on any path conflict.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageComposeRepresentation {
+    /// One self-contained raw EROFS result layer (default).
+    #[default]
+    Flattened,
+    /// One metadata EROFS plus explicit verified backing EROFS blobs.
+    Referenced,
+}
+
 /// One immutable source Image in an EROFS Compose build (#3696).
 ///
 /// The source is named by its catalog Repository plus a Tag or immutable
@@ -94,9 +113,14 @@ pub enum ImageSource {
     /// A validated local directory or bundle on the build host.
     #[serde(rename = "local_directory")]
     LocalDirectory { path: String },
-    /// Compose immutable catalog Images into one flattened EROFS image.
+    /// Compose immutable catalog Images into one EROFS image.
     #[serde(rename = "compose")]
-    Compose { sources: Vec<ImageComposeSource> },
+    Compose {
+        sources: Vec<ImageComposeSource>,
+        /// How the result is represented; defaults to a flattened image.
+        #[serde(default)]
+        representation: ImageComposeRepresentation,
+    },
 }
 
 /// One canonical Compose source.
@@ -122,6 +146,7 @@ pub enum NormalizedImageSource {
         path: String,
     },
     Compose {
+        representation: ImageComposeRepresentation,
         sources: Vec<NormalizedComposeSource>,
     },
 }
@@ -148,7 +173,11 @@ impl NormalizedImageSource {
                 reference: reference.clone(),
             },
             Self::LocalDirectory { path } => ImageSource::LocalDirectory { path: path.clone() },
-            Self::Compose { sources } => ImageSource::Compose {
+            Self::Compose {
+                representation,
+                sources,
+            } => ImageSource::Compose {
+                representation: *representation,
                 sources: sources
                     .iter()
                     .map(|source| ImageComposeSource {
@@ -853,7 +882,10 @@ pub fn normalize_image_source(
         ImageSource::LocalDirectory { path } => Ok(NormalizedImageSource::LocalDirectory {
             path: normalize_local_path(path)?,
         }),
-        ImageSource::Compose { sources } => {
+        ImageSource::Compose {
+            sources,
+            representation,
+        } => {
             if sources.is_empty() {
                 return Err(ImageValidationError::EmptyComposeSources);
             }
@@ -866,26 +898,51 @@ pub fn normalize_image_source(
                 .iter()
                 .map(normalize_compose_source)
                 .collect::<Result<Vec<_>, _>>()?;
-            normalized.sort_by(|left, right| {
-                left.destination
-                    .cmp(&right.destination)
-                    .then_with(|| left.repository.cmp(&right.repository))
-                    .then_with(|| left.reference.cmp(&right.reference))
-            });
-            for pair in normalized.windows(2) {
-                let (Some(left), Some(right)) = (pair.first(), pair.get(1)) else {
-                    continue;
-                };
-                if left.destination.is_empty() && right.destination.is_empty() {
-                    return Err(ImageValidationError::ComposeDestinationOverlap);
+            match representation {
+                ImageComposeRepresentation::Flattened => {
+                    normalized.sort_by(|left, right| {
+                        left.destination
+                            .cmp(&right.destination)
+                            .then_with(|| left.repository.cmp(&right.repository))
+                            .then_with(|| left.reference.cmp(&right.reference))
+                    });
+                    for pair in normalized.windows(2) {
+                        let (Some(left), Some(right)) = (pair.first(), pair.get(1)) else {
+                            continue;
+                        };
+                        if left.destination.is_empty() && right.destination.is_empty() {
+                            return Err(ImageValidationError::ComposeDestinationOverlap);
+                        }
+                        if !left.destination.is_empty()
+                            && compose_destination_is_prefix(&left.destination, &right.destination)
+                        {
+                            return Err(ImageValidationError::ComposeDestinationOverlap);
+                        }
+                    }
                 }
-                if !left.destination.is_empty()
-                    && compose_destination_is_prefix(&left.destination, &right.destination)
-                {
-                    return Err(ImageValidationError::ComposeDestinationOverlap);
+                ImageComposeRepresentation::Referenced => {
+                    // Referenced composition layers complete trees at the
+                    // composed root. A destination prefix would require an
+                    // unproven remap, so it is refused instead.
+                    if normalized
+                        .iter()
+                        .any(|source| !source.destination.is_empty())
+                    {
+                        return Err(ImageValidationError::ComposeDestinationInvalid);
+                    }
+                    for pair in normalized.windows(2) {
+                        let (Some(left), Some(right)) = (pair.first(), pair.get(1)) else {
+                            continue;
+                        };
+                        if left.repository == right.repository && left.reference == right.reference
+                        {
+                            return Err(ImageValidationError::ComposeDestinationOverlap);
+                        }
+                    }
                 }
             }
             Ok(NormalizedImageSource::Compose {
+                representation: *representation,
                 sources: normalized,
             })
         }

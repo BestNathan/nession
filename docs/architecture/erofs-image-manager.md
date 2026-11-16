@@ -87,6 +87,20 @@ V1 accepts three source shapes:
    provenance (repository, reference, Manifest/layer digest, size,
    destination). The build reuses the #3334 cancel/retry/restart lifecycle and
    releases its source pins on every terminal state.
+   The optional `representation = "referenced"` keeps the source EROFS bytes
+   instead of copying them: `mkfs.erofs` rebuild mode emits one metadata EROFS
+   whose chunk indexes reference the source images as external devices, and
+   the Manifest's single layer is the versioned
+   `application/vnd.nession.erofs.composite.v1+json` descriptor. The Config
+   uses `rootfs.type = "erofs-composite"` with the metadata/device closure in
+   `diff_ids`. Sources must be block-addressed (no inline data), all layer at
+   the composed root, and must not own conflicting paths; the pinned rebuild
+   fails closed otherwise. The image identity is the Manifest digest, never a
+   data blob digest; catalog edges and grants retain the whole closure. The
+   EROFS mount manager mounts the metadata image with ordered
+   `erofsfuse --device` arguments and pins every component for the physical
+   view lifetime. Sandbox runtime composition of a referenced Composite is
+   not part of this requirement (#3697) and fails closed if selected.
 
 A branch is resolved **once** by the shallow clone; the resolved commit is
 recorded as `source_sha`. Git runs with no system/global config, no prompt, no

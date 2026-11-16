@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use nession_protocol::contracts::image::v1::{
     is_valid_image_build_id, ImageBuildDescriptor, ImageBuildProgress, ImageBuildStage,
-    ImageBuildStatus, ImagePackaging, ImageSource,
+    ImageBuildStatus, ImageComposeRepresentation, ImagePackaging, ImageSource,
 };
 
 /// The state file format this Server writes and reads.
@@ -75,6 +75,8 @@ pub struct ComposePinnedSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComposeBuildState {
+    #[serde(default)]
+    pub representation: ImageComposeRepresentation,
     pub sources: Vec<ComposePinnedSource>,
 }
 

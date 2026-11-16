@@ -200,6 +200,7 @@ fn access_requires_exactly_one_consumer_and_keeps_project_compatibility() {}
 fn compose_sources_normalize_and_pin_digest_references() {
     let digest = format!("sha256:{}", "d".repeat(64));
     let source = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Flattened,
         sources: vec![
             ImageComposeSource {
                 repository: "nession/tools".to_string(),
@@ -220,6 +221,7 @@ fn compose_sources_normalize_and_pin_digest_references() {
     );
 
     let source = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Flattened,
         sources: vec![
             ImageComposeSource {
                 repository: "nession/tools".to_string(),
@@ -239,6 +241,7 @@ fn compose_sources_normalize_and_pin_digest_references() {
     assert_eq!(mixed.kind(), "compose");
 
     let source = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Flattened,
         sources: vec![
             ImageComposeSource {
                 repository: "nession/tools".to_string(),
@@ -255,9 +258,14 @@ fn compose_sources_normalize_and_pin_digest_references() {
     let normalized = normalize_image_source(&source).unwrap();
     assert_eq!(normalized.kind(), "compose");
     assert_eq!(normalized.source(), source);
-    let NormalizedImageSource::Compose { sources } = &normalized else {
+    let NormalizedImageSource::Compose {
+        sources,
+        representation,
+    } = &normalized
+    else {
         panic!("expected a compose source");
     };
+    assert_eq!(*representation, ImageComposeRepresentation::Flattened);
     assert_eq!(sources.len(), 2);
     assert_eq!(
         sources[1].requested_digest.as_deref(),
@@ -266,8 +274,59 @@ fn compose_sources_normalize_and_pin_digest_references() {
 }
 
 #[test]
+fn a_referenced_compose_keeps_root_layer_order_and_refuses_prefixes() {
+    let source = |repository: &str, destination: &str| ImageComposeSource {
+        repository: repository.to_string(),
+        reference: "latest".to_string(),
+        destination: destination.to_string(),
+    };
+    let referenced = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Referenced,
+        sources: vec![source("nession/node", ""), source("nession/dsh", "")],
+    };
+    let normalized = normalize_image_source(&referenced).unwrap();
+    let NormalizedImageSource::Compose {
+        representation,
+        sources,
+    } = &normalized
+    else {
+        panic!("expected a compose source");
+    };
+    assert_eq!(*representation, ImageComposeRepresentation::Referenced);
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.repository.as_str())
+            .collect::<Vec<_>>(),
+        vec!["nession/node", "nession/dsh"],
+        "the declared layer order is the device order"
+    );
+    assert_eq!(normalized.source(), referenced);
+
+    let prefixed = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Referenced,
+        sources: vec![source("nession/node", "/opt/node")],
+    };
+    assert_eq!(
+        normalize_image_source(&prefixed).unwrap_err().message(),
+        "a compose destination must be `/`-free normalized absolute prefix or empty"
+    );
+    let duplicate = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Referenced,
+        sources: vec![source("nession/node", ""), source("nession/node", "")],
+    };
+    assert_eq!(
+        normalize_image_source(&duplicate).unwrap_err().message(),
+        "compose destinations must not overlap or both name the composed root"
+    );
+}
+
+#[test]
 fn compose_rejects_empty_ambiguous_or_unsafe_sources() {
-    let compose = |sources: Vec<ImageComposeSource>| ImageSource::Compose { sources };
+    let compose = |sources: Vec<ImageComposeSource>| ImageSource::Compose {
+        sources,
+        representation: ImageComposeRepresentation::Flattened,
+    };
     let valid = |destination: &str| ImageComposeSource {
         repository: "nession/base".to_string(),
         reference: "latest".to_string(),
