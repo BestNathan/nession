@@ -19,8 +19,9 @@ RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
 
 # Final Server runtime base (#3178). `Dockerfile.server` extends the identical
 # stage, so both final Server images carry one packaging definition. `git` and
-# `mkfs.erofs` are runtime dependencies of `crates/nession-erofs/src/build.rs`;
-# the probe below fails the image build if either executable is absent.
+# `mkfs.erofs`/`fsck.erofs` are runtime dependencies of
+# `crates/nession-erofs/src/build.rs`; the probe below fails the image build if
+# any executable is absent.
 FROM debian:bookworm-slim AS runtime-tools
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -29,7 +30,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 COPY --from=erofs-utils-builder /usr/local/bin/mkfs.erofs /usr/local/bin/mkfs.erofs
-RUN command -v git mkfs.erofs
+COPY --from=erofs-utils-builder /usr/local/bin/fsck.erofs /usr/local/bin/fsck.erofs
+RUN command -v git mkfs.erofs fsck.erofs
 
 # Final image
 FROM runtime-tools AS runtime

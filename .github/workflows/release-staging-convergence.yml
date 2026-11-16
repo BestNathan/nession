@@ -1,19 +1,26 @@
 name: Release / Staging Convergence
 
-# #2926. Runs on trusted main only. This is a deterministic PR planner/writer,
-# NOT an Agent runtime, Acceptance evaluator or permission to auto-merge.
+# #2926/#3689. Runs on trusted main only. The deterministic planner writes
+# PR proposals and a strict required qualification status; GitHub owns
+# native merge-commit Auto-merge after all authenticated checks.
 # Eligible branches come from checked-in push-triggered Staging deploy workflows.
 # Protected staging syncs use immutable checked two-parent integration heads,
 # so rust-check/web-check can qualify the actual tested merge content.
 on:
   schedule:
     - cron: '0 */2 * * *'
-  # Bootstrap after the workflow definition is first installed/modified on main;
-  # ordinary code pushes do not create extra convergence scans.
+  # Every Main advance invalidates strict-HEAD qualification until rechecked.
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/release-staging-convergence.yml'
+  # Recheck source Issue acceptance after changes; the trusted policy
+  # independently reauthenticates the exact historic source PR/Issue.
+  issues:
+    types: [edited, labeled, unlabeled, closed, reopened]
+  # Publisher-created promotion PRs should be armed as early as possible,
+  # before CI finishes. Only the trusted Main checkout executes below.
+  pull_request_target:
+    branches: [main, staging]
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -28,9 +35,9 @@ on:
     types: [created]
   # #3465: Full E2E is a periodic Main diagnostic, not a convergence wake
   # or an authorization source for either merge direction.
-  # #3211: PR-native staging -> main promotion has native exact-head PR
-  # checks too. Wake on those completed source checks; the controller still
-  # revalidates the bot PR, exact SHA, deployment and Issue evidence.
+  # #3211/#3689: PR-native staging -> main promotion has exact-head PR
+  # checks; wake on completion including failures to revoke stale status.
+  # Only the independent canonical policy may publish qualified success.
   # #3674: wake on successful post-mirror Staging deploy push only after
   # release proof exists. This is NEVER approval; reconcile independently
   # re-attests exact HEAD checks, deployment and all source acceptance.
@@ -45,16 +52,48 @@ permissions:
   actions: write
   issues: write # legacy cleanup only; new batches are PR-native
   pull-requests: read
+  statuses: write # only exact-HEAD canonical qualification context (#3689)
 
 concurrency:
   group: release-staging-convergence
   cancel-in-progress: false
 
 jobs:
+  # GitHub required contexts are branch-wide. Every regular main/staging PR
+  # must receive a trusted "not applicable" success while the Publisher's
+  # native Convergence proposals remain pending/failing until qualified.
+  # Neither the event payload nor the PR head is executed as workflow code.
+  classify_pr:
+    if: github.event_name == 'pull_request_target' && github.repository == 'BestNathan/nession'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Checkout trusted Main classification source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Publish SHA-bound required qualification context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READ_GITHUB_TOKEN: ${{ github.token }}
+          STATUS_GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/staging-convergence-automerge.mjs classify
+
   converge:
+    needs: [classify_pr]
     # The no-approval recheck wakes the same fail-closed controller.
     # Owner PR comments are wake signals only; trusted source/digest checks remain mandatory.
     if: >-
+      always() &&
+      (github.event_name != 'pull_request_target' || needs.classify_pr.result == 'success') &&
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       (
@@ -80,9 +119,30 @@ jobs:
         )
       ) &&
       (
+        github.event_name != 'pull_request_target' ||
+        (
+          github.event.pull_request.user.login == 'nession-publisher[bot]' &&
+          (
+            (
+              github.event.pull_request.head.ref == 'staging' &&
+              github.event.pull_request.base.ref == 'main'
+            ) ||
+            (
+              startsWith(github.event.pull_request.head.ref, 'chore/staging-sync-') &&
+              github.event.pull_request.base.ref == 'staging'
+            )
+          ) &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      ) &&
+      (
         github.event_name != 'workflow_run' ||
         (
-          github.event.workflow_run.conclusion == 'success' &&
+          (
+            github.event.workflow_run.conclusion == 'success' ||
+            github.event.workflow_run.conclusion == 'failure' ||
+            github.event.workflow_run.conclusion == 'cancelled'
+          ) &&
           github.event.workflow_run.head_repository.full_name == github.repository &&
           (
             (
@@ -155,6 +215,7 @@ jobs:
             echo "::error::Protected Main advanced during checkout; retry on latest ref"; exit 1;
           }
           node scripts/staging-branch-convergence.mjs self-test
+          node scripts/staging-convergence-automerge.mjs self-test
           node scripts/staging-convergence-batch.mjs self-test
 
       - name: Discover actual auto-deploy branch sources and plan exact refs
@@ -190,13 +251,17 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Idempotently prepare, qualify and merge main/staging PRs
+      - name: Idempotently prepare and arm protected GitHub Auto-merge
         if: steps.plan.outputs.actionable == 'true' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
           READ_GITHUB_TOKEN: ${{ github.token }}
           DISPATCH_GITHUB_TOKEN: ${{ github.token }}
           ISSUE_GITHUB_TOKEN: ${{ github.token }}
+          STATUS_GITHUB_TOKEN: ${{ github.token }}
+          # The legacy qualified merge remains the default until both
+          # protected targets enforce strict required qualification.
+          NESSION_CONVERGENCE_NATIVE_AUTO_MERGE: ${{ vars.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
@@ -205,9 +270,14 @@ jobs:
             echo '### Pull requests'
             jq -r '.[] | "- " + .direction + ": " + .url + " (" + .action + "; " + .outcome + (if .reason then "; " + .reason else "" end) + (if .issue_number then "; Issue #" + (.issue_number|tostring) else "" end) + (if .integration_head then "; integration " + .integration_head else "" end) + ")"' "$RUNNER_TEMP/convergence-results.json"
             echo
-            echo 'Merges require authenticated exact-head scoped PR Quality/Case/E2E, clean GitHub mergeability and applicable promotion-specific staging/Issue acceptance. Periodic Main Full is non-blocking (#3465).'
+            if [[ "${NESSION_CONVERGENCE_NATIVE_AUTO_MERGE}" == 'true' ]]; then
+              echo 'Native Auto-merge requested: strict required qualification on both protected targets must be proven. GitHub owns the merge.'
+            else
+              echo 'Migration not activated: retaining independently qualified merge-commit Controller until strict protected native Auto-merge is configured.'
+            fi
+            echo 'Main Full remains nonblocking (#3465).'
           } >> "$GITHUB_STEP_SUMMARY"
-          blocked="$(jq '[.[] | select(.outcome != "MERGED")] | length' "$RUNNER_TEMP/convergence-results.json")"
+          blocked="$(jq '[.[] | select(.outcome != "AUTO_MERGE_QUALIFIED" and .outcome != "MERGED")] | length' "$RUNNER_TEMP/convergence-results.json")"
           if [[ "$blocked" -gt 0 ]]; then
             echo "::warning::Staging convergence has ${blocked} outstanding item(s); see the Job Summary for exact reasons"
           fi

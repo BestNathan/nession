@@ -117,6 +117,26 @@ non-raw layers, multi-device EROFS, chunk-index/lazy variants, multiple layers,
 and Overlay/role variants. Original input bytes are preserved where the storage
 or import policy allows so a future version can adopt them.
 
+### Image Compose (#3696)
+
+A Compose build consumes one to sixteen **catalog** source Images and produces
+one new ordinary single-layer EROFS Image. Each source names its Repository, a
+Tag or immutable digest, and a validated absolute destination prefix; the
+Server resolves each reference to an immutable Manifest/Config/layer **once at
+submission** and pins it for the build. Execution re-verifies those exact
+identities, extracts each source with the pinned `fsck.erofs --extract`, merges
+the trees under disjoint destinations with fail-closed duplicate/shadowing,
+whiteout and symlink checks, scans the result once, and packages it with the
+fixed `mkfs.erofs` argv. The result layer digest is a new physical identity;
+the source layer digests are provenance, not the result. Config Env merges by
+name with conflicts failing; commands/working directory are retained only when
+every defining source agrees; conflicting advisory annotations fail. The
+Manifest carries `io.nession.compose.format` and
+`io.nession.compose.sources` provenance annotations (`io.nession.*` values are
+advisory; they never authorize a mount). Whether the result is later referenced
+by source blobs is a separate format owned by #3697, not a v1 Manifest-layer
+shortcut.
+
 Validation verifies the object schema, media types, digest and size, the
 Manifest's Config descriptor, `rootfs.diff_ids` equality with the EROFS layer
 digest, and Index child descriptors. A validation failure never produces a
@@ -184,6 +204,10 @@ optional annotation:
 
 - Git and local directory sources keep the existing non-executing snapshot and
   deterministic `mkfs.erofs` path;
+- catalog Image Compose (#3696) is an explicit source adapter: it resolves and
+  pins Repository references, stages the sources with `fsck.erofs --extract`,
+  and publishes a fresh flattened single-EROFS Manifest; it never treats a
+  digest as authorization;
 - archive/HTTPS/GitHub Release inputs are bounded downloads with checksum
   verification and path-safe extraction (no traversal, escaping links, devices
   or hardlink escapes) and never run install scripts;
@@ -349,7 +373,9 @@ Agent: cache/distribution/mount; Sandbox: mount).
 No Dockerfile, generic software installer or container runtime; no execution of
 OCI `Entrypoint`/`Cmd`; no full `/v2/` OCI Registry server; no tar layer
 unpacking; no new background job queue; no second image database or mirrored
-state; no compressed/multi-device/chunk-index/lazy EROFS variants in v1; no
+state; no compressed/multi-device/chunk-index/lazy EROFS variants in v1; a referenced
+multi-blob Composite format remains #3697 and is not expressed through OCI
+`Manifest.layers[]`; no
 registry credentials in images, EROFS, Agent grants or logs; no automatic
 re-mount of a running process.
 

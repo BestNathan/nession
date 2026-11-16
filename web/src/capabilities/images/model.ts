@@ -24,9 +24,16 @@ export function shortDigest(digest: string | null | undefined): string {
 }
 
 export function sourceLabel(image: ImageDescriptor): string {
-  return image.source.kind === 'github'
-    ? `${image.source.repository_url}@${image.source.ref}`
-    : image.source.path;
+  switch (image.source.kind) {
+    case 'github':
+      return `${image.source.repository_url}@${image.source.ref}`;
+    case 'local_directory':
+      return image.source.path;
+    case 'compose':
+      return `compose: ${image.source.sources
+        .map((source) => `${source.repository}@${source.ref}${source.destination === '' ? '' : ` -> ${source.destination}`}`)
+        .join(', ')}`;
+  }
 }
 
 export function imageServerStatusLabel(status: ImageDescriptor['status']): string {

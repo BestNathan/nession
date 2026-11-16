@@ -8,6 +8,7 @@
 
 use super::*;
 use nession_erofs::{MkfsRunner, ProcessGitRunner};
+use nession_protocol::contracts::image::v1::ImageComposeSource;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex as StdMutex};
 
@@ -119,6 +120,7 @@ impl ImageBuildBackend for SharedBlobBackend {
             blob,
             source_sha: None,
             packaging: ErofsPackaging::default(),
+            compose: None,
         })
     }
 }
@@ -131,6 +133,16 @@ fn key_for(source: &NormalizedImageSource) -> String {
             ..
         } => format!("{repository_url}#{reference}"),
         NormalizedImageSource::LocalDirectory { path } => path.clone(),
+        NormalizedImageSource::Compose { sources } => sources
+            .iter()
+            .map(|source| {
+                format!(
+                    "{}:{}@{}",
+                    source.repository, source.reference, source.destination
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
     }
 }
 
@@ -822,4 +834,302 @@ async fn cleanup_expires_terminal_directories_but_never_active_work() {
     assert_eq!(report.deferred_active, 1);
     assert!(!store.build_dir("build-expired").exists());
     assert!(store.build_dir(&active.build_id).exists());
+}
+
+// ── Flattened Compose (#3696) ───────────────────────────────────────────
+
+/// A backend that records the pinned Compose sources it was handed and
+/// publishes one deterministic flattened layer.
+struct ComposeRecordingBackend {
+    blobs: BlobStore,
+    gate: Arc<Gate>,
+    seen: StdMutex<Vec<Vec<String>>>,
+}
+
+impl ComposeRecordingBackend {
+    fn new(blobs: BlobStore) -> Self {
+        Self {
+            blobs,
+            gate: Arc::new(Gate::default()),
+            seen: StdMutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ImageBuildBackend for ComposeRecordingBackend {
+    fn execute(&self, execution: BuildExecution) -> Result<BuiltImage> {
+        let compose = execution.compose.as_ref().expect("a compose execution");
+        let pinned = compose
+            .sources
+            .iter()
+            .map(|source| source.manifest_digest.clone())
+            .collect::<Vec<_>>();
+        self.seen.lock().unwrap().push(pinned.clone());
+        self.gate.wait();
+        execution.observer.stage(Stage::Packaging);
+        std::fs::create_dir_all(&execution.build_dir)?;
+        let image = execution.build_dir.join("image.erofs.part");
+        std::fs::write(&image, format!("flattened:{pinned:?}"))?;
+        let blob = self.blobs.put_file(&image)?;
+        let sources = compose
+            .sources
+            .iter()
+            .map(|source| nession_erofs::ComposeSourceProvenance {
+                repository: source.repository.clone(),
+                reference: source.reference.clone(),
+                manifest_digest: source.manifest_digest.clone(),
+                layer_digest: source.layer.digest.clone(),
+                size_bytes: source.layer.size,
+                destination: source.destination.clone(),
+            })
+            .collect::<Vec<_>>();
+        Ok(BuiltImage {
+            blob,
+            source_sha: None,
+            packaging: ErofsPackaging::default(),
+            compose: Some(nession_erofs::ComposeImageMetadata {
+                runtime: nession_erofs::ComposeRuntime {
+                    env: vec!["PATH=/usr/bin".to_string()],
+                    annotations: [
+                        (
+                            nession_erofs::oci::annotation::ANNOTATION_COMPOSE_FORMAT.to_string(),
+                            "flattened-v1".to_string(),
+                        ),
+                        (
+                            nession_erofs::oci::annotation::ANNOTATION_COMPOSE_SOURCES.to_string(),
+                            serde_json::to_string(&sources).unwrap(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    ..nession_erofs::ComposeRuntime::default()
+                },
+                sources,
+            }),
+        })
+    }
+}
+
+async fn publish_test_source(
+    db: &Database,
+    blobs: &BlobStore,
+    repository: &str,
+    tag: &str,
+    payload: &[u8],
+    platform: Platform,
+    expectation: nession_erofs::catalog::tag::TagExpectation,
+) -> nession_erofs::image::publish::PublishOutcome {
+    let stored = blobs.put_bytes(payload).unwrap();
+    nession_erofs::build::publication::publish_layer(
+        db.connection(),
+        blobs,
+        &nession_erofs::build::publication::LayerPublication {
+            repository: repository.to_string(),
+            tag: Some(tag.to_string()),
+            expectation,
+            layer: nession_erofs::oci::descriptor::Descriptor {
+                media_type: nession_erofs::oci::annotation::MEDIA_TYPE_EROFS.to_string(),
+                digest: stored.digest,
+                size: stored.size_bytes,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: serde_json::Map::new(),
+            },
+            platform,
+            env: vec!["PATH=/usr/bin".to_string()],
+            runtime: RuntimeConfig::default(),
+            annotations: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+fn compose_source(repository: &str, destination: &str) -> ImageComposeSource {
+    ImageComposeSource {
+        repository: repository.to_string(),
+        reference: "latest".to_string(),
+        destination: destination.to_string(),
+    }
+}
+
+/// SC-01/SC-02: Compose resolves each Repository reference once at submission,
+/// pins the immutable sources, survives a Tag move, publishes a flattened
+/// Manifest with source-vs-result provenance, and releases the build pins.
+#[tokio::test]
+async fn compose_pins_sources_publishes_provenance_and_survives_a_tag_move() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let backend = Arc::new(ComposeRecordingBackend::new(blobs.clone()));
+    let manager = Arc::new(
+        ImageManager::new(
+            Arc::clone(&db),
+            backend.clone(),
+            blobs.clone(),
+            options(dir.path(), 1),
+        )
+        .unwrap(),
+    );
+    let platform = nession_erofs::build::publication::host_platform();
+    let base = publish_test_source(
+        &db,
+        &blobs,
+        "src/base",
+        "latest",
+        b"base-layer",
+        platform.clone(),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let tool = publish_test_source(
+        &db,
+        &blobs,
+        "src/tool",
+        "latest",
+        b"tool-layer",
+        platform.clone(),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let source = ImageSource::Compose {
+        sources: vec![
+            compose_source("src/base", ""),
+            compose_source("src/tool", "/opt/tool"),
+        ],
+    };
+    let submitted = manager
+        .submit_build(&source, Some("composed"), None)
+        .await
+        .unwrap();
+    // The Tag moves after submission. The pinned immutable identity is what
+    // this build reads; a digest alone was never the authorization.
+    let moved = publish_test_source(
+        &db,
+        &blobs,
+        "src/base",
+        "latest",
+        b"moved-layer",
+        platform,
+        nession_erofs::catalog::tag::TagExpectation::Exact(base.manifest_digest.clone()),
+    )
+    .await;
+    backend.gate.release();
+    let done = manager.wait_terminal(&submitted.build_id).await.unwrap();
+    assert_eq!(done.status, ImageBuildStatus::Succeeded, "{done:?}");
+    let digest = done.digest.clone().unwrap();
+    assert_ne!(digest, base.layer_digest);
+    assert_ne!(digest, moved.layer_digest);
+    let seen = backend.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        seen[0],
+        vec![base.manifest_digest.clone(), tool.manifest_digest.clone()],
+        "the build read the pinned sources, not the moved Tag"
+    );
+
+    let objects = nession_erofs::catalog::reference::all_objects(db.connection())
+        .await
+        .unwrap();
+    let mut result_manifest = None;
+    for object in objects {
+        if object.kind != nession_erofs::catalog::reference::ObjectKind::Manifest {
+            continue;
+        }
+        let bytes = blobs.read(&object.digest).unwrap();
+        let (_, manifest) = nession_erofs::oci::parse_manifest(&bytes).unwrap();
+        if manifest
+            .layers
+            .first()
+            .is_some_and(|layer| layer.digest == digest)
+        {
+            result_manifest = Some(manifest);
+            break;
+        }
+    }
+    let manifest = result_manifest.expect("the flattened result Manifest");
+    let annotations = manifest.annotations.expect("compose annotations");
+    assert_eq!(
+        annotations
+            .get(nession_erofs::oci::annotation::ANNOTATION_COMPOSE_FORMAT)
+            .map(String::as_str),
+        Some("flattened-v1")
+    );
+    let provenance: Vec<nession_erofs::ComposeSourceProvenance> = serde_json::from_str(
+        annotations
+            .get(nession_erofs::oci::annotation::ANNOTATION_COMPOSE_SOURCES)
+            .expect("compose source provenance"),
+    )
+    .unwrap();
+    assert_eq!(
+        provenance
+            .iter()
+            .map(|source| source.manifest_digest.as_str())
+            .collect::<Vec<_>>(),
+        vec![base.manifest_digest.as_str(), tool.manifest_digest.as_str()]
+    );
+    assert_eq!(
+        nession_erofs::catalog::pin::live_pin_digests(db.connection(), now_i64())
+            .await
+            .unwrap(),
+        Vec::<String>::new(),
+        "a finished build releases its source pins"
+    );
+    let page = manager.list(0, 10, "").await.unwrap();
+    assert_eq!(page.total, 1);
+}
+
+/// SC-02: a source that is not in the named Repository (a digest is not
+/// authority) and a source with no image for the build platform both fail at
+/// submission, before any build record or ready row exists.
+#[tokio::test]
+async fn compose_rejects_unresolvable_and_wrong_platform_sources_before_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let backend = Arc::new(ComposeRecordingBackend::new(blobs.clone()));
+    let manager = Arc::new(
+        ImageManager::new(
+            Arc::clone(&db),
+            backend,
+            blobs.clone(),
+            options(dir.path(), 1),
+        )
+        .unwrap(),
+    );
+    let unresolvable = ImageSource::Compose {
+        sources: vec![compose_source("src/missing", "")],
+    };
+    let error = manager
+        .submit_build(&unresolvable, None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), "invalid");
+    assert!(error.message().contains("does not resolve"), "{error}");
+
+    let wrong = publish_test_source(
+        &db,
+        &blobs,
+        "src/wrong",
+        "latest",
+        b"wrong-platform",
+        Platform::for_consumer("linux", "riscv64", None),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    assert_ne!(wrong.layer_digest, "");
+    let compose = ImageSource::Compose {
+        sources: vec![compose_source("src/wrong", "")],
+    };
+    let error = manager
+        .submit_build(&compose, None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), "invalid");
+    assert!(error.message().contains("no usable image"), "{error}");
+    assert_eq!(manager.list_builds(0, 10).await.unwrap().total, 0);
+    assert_eq!(manager.list(0, 10, "").await.unwrap().total, 0);
 }

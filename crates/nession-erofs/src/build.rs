@@ -27,6 +27,8 @@
 #[cfg(feature = "sources")]
 pub mod archive;
 #[cfg(feature = "sources")]
+pub mod compose;
+#[cfg(feature = "sources")]
 pub mod import;
 #[cfg(feature = "sources")]
 pub mod oci;
@@ -114,6 +116,44 @@ pub struct BuiltImage {
     pub blob: BlobDigest,
     pub source_sha: Option<String>,
     pub packaging: Packaging,
+    /// Present when this image was produced by an EROFS Compose build
+    /// (#3696). It carries the deterministic runtime projection and the
+    /// pinned source provenance the publisher records.
+    pub compose: Option<ComposeImageMetadata>,
+}
+
+/// The deterministic Config/annotation projection of a Compose build.
+///
+/// The merge rule is fail-closed: identical Env values dedupe, different
+/// values for one name fail; a command or working directory is retained only
+/// when every source that defines it agrees. Nothing here is synthesized.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComposeRuntime {
+    pub env: Vec<String>,
+    pub entrypoint: Option<Vec<String>>,
+    pub cmd: Option<Vec<String>>,
+    pub working_dir: Option<String>,
+    /// Advisory `io.nession.*` annotations plus Compose provenance.
+    pub annotations: std::collections::BTreeMap<String, String>,
+}
+
+/// The pinned source-vs-result provenance of one Compose build.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposeSourceProvenance {
+    pub repository: String,
+    pub reference: String,
+    pub manifest_digest: String,
+    pub layer_digest: String,
+    pub size_bytes: u64,
+    pub destination: String,
+}
+
+/// The Compose projection a server publisher records beside the result digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposeImageMetadata {
+    pub runtime: ComposeRuntime,
+    pub sources: Vec<ComposeSourceProvenance>,
 }
 
 // ── Stages and observation ──────────────────────────────────────────────
@@ -384,6 +424,22 @@ pub enum SnapshotSource {
     LocalDirectory {
         path: String,
     },
+    /// A flattened Compose snapshot identity (#3696). Every pinned source is
+    /// part of the identity, so a changed source set never reuses old bytes.
+    Compose {
+        sources: Vec<ComposeSnapshotSource>,
+    },
+}
+
+/// One pinned source in a Compose snapshot checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposeSnapshotSource {
+    pub repository: String,
+    pub reference: String,
+    pub manifest_digest: String,
+    pub layer_digest: String,
+    pub destination: String,
 }
 
 /// The durable proof that a snapshot completed and is safe to reuse.
@@ -423,7 +479,7 @@ fn read_checkpoint(build_dir: &Path) -> Result<Option<SnapshotCheckpoint>> {
     Ok(Some(checkpoint))
 }
 
-fn write_checkpoint(build_dir: &Path, checkpoint: &SnapshotCheckpoint) -> Result<()> {
+pub(crate) fn write_checkpoint(build_dir: &Path, checkpoint: &SnapshotCheckpoint) -> Result<()> {
     let path = snapshot_checkpoint_path(build_dir);
     let temp = build_dir.join(format!(
         "{SNAPSHOT_CHECKPOINT_FILE}.tmp-{}",
@@ -709,6 +765,10 @@ pub struct ErofsBuilder {
     pub mkfs: Arc<dyn MkfsRunner>,
     pub blobs: BlobStore,
     pub work_root: PathBuf,
+    /// The flattened Compose extractor (#3696). Production uses the pinned
+    /// `fsck.erofs`; tests substitute a deterministic fake.
+    #[cfg(feature = "sources")]
+    pub extractor: Arc<dyn compose::ErofsExtractor>,
 }
 
 impl ErofsBuilder {
@@ -730,7 +790,17 @@ impl ErofsBuilder {
             mkfs,
             blobs,
             work_root,
+            #[cfg(feature = "sources")]
+            extractor: Arc::new(compose::ProcessErofsExtractor::default()),
         })
+    }
+
+    /// Replace the Compose extractor. Test seam; production uses the pinned
+    /// `fsck.erofs` from [`Self::new`].
+    #[cfg(feature = "sources")]
+    pub fn with_extractor(mut self, extractor: Arc<dyn compose::ErofsExtractor>) -> Self {
+        self.extractor = extractor;
+        self
     }
 
     /// Build a Git source into the content-addressed store.
@@ -941,6 +1011,7 @@ impl ErofsBuilder {
             blob,
             source_sha,
             packaging: request.packaging.clone(),
+            compose: None,
         })
     }
 }

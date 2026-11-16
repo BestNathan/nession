@@ -13,8 +13,11 @@ use crate::image::publish::PublishOutcome;
 use crate::oci::annotation::MEDIA_TYPE_EROFS;
 use crate::oci::descriptor::{Descriptor, Platform};
 
-/// The EROFS superblock magic (`"EROFS"` little endian), read at offset 1024.
-pub const EROFS_MAGIC: u32 = 0xE2E1_F5E0;
+/// The EROFS superblock magic as the spec names it, `0xE0F5E1E2`, read as a
+/// little-endian `u32` at offset 1024.
+pub const EROFS_MAGIC: u32 = 0xE0F5_E1E2;
+/// The exact four on-disk magic bytes (`"EROFS"` little endian).
+pub const EROFS_MAGIC_BYTES: [u8; 4] = [0xE2, 0xE1, 0xF5, 0xE0];
 /// The superblock magic offset in a raw EROFS image.
 pub const EROFS_MAGIC_OFFSET: usize = 1024;
 /// The largest raw image this v1 import path accepts.
@@ -123,6 +126,7 @@ pub async fn import_raw_erofs(
             layer,
             platform: import.platform.clone(),
             env: import.env.clone(),
+            runtime: crate::oci::config::RuntimeConfig::default(),
             annotations: import.annotations.clone(),
         },
     )
@@ -144,8 +148,7 @@ mod tests {
 
     fn erofs_file(path: &Path) {
         let mut bytes = vec![0_u8; EROFS_MAGIC_OFFSET + 4 + 64];
-        let magic = EROFS_MAGIC.to_le_bytes();
-        bytes[EROFS_MAGIC_OFFSET..EROFS_MAGIC_OFFSET + 4].copy_from_slice(&magic);
+        bytes[EROFS_MAGIC_OFFSET..EROFS_MAGIC_OFFSET + 4].copy_from_slice(&EROFS_MAGIC_BYTES);
         std::fs::write(path, bytes).unwrap();
     }
 
@@ -205,6 +208,29 @@ mod tests {
         std::fs::write(&path, vec![0_u8; 2048]).unwrap();
         let error = validate_erofs_file(&path).unwrap_err().to_string();
         assert!(error.contains("magic"));
+    }
+
+    #[test]
+    fn the_real_on_disk_magic_bytes_are_accepted_and_the_reversed_order_is_not() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real.erofs");
+        let mut bytes = vec![0_u8; 2048];
+        bytes[EROFS_MAGIC_OFFSET..EROFS_MAGIC_OFFSET + 4].copy_from_slice(&EROFS_MAGIC_BYTES);
+        std::fs::write(&real, &bytes).unwrap();
+        validate_erofs_file(&real).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(EROFS_MAGIC_BYTES),
+            EROFS_MAGIC,
+            "the documented constant and the on-disk bytes agree"
+        );
+
+        let reversed = dir.path().join("reversed.erofs");
+        let mut wrong = bytes;
+        wrong[EROFS_MAGIC_OFFSET..EROFS_MAGIC_OFFSET + 4]
+            .copy_from_slice(&EROFS_MAGIC.to_be_bytes());
+        std::fs::write(&reversed, wrong).unwrap();
+        let error = validate_erofs_file(&reversed).unwrap_err().to_string();
+        assert!(error.contains("magic"), "{error}");
     }
 
     #[test]

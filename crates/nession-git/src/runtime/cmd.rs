@@ -690,6 +690,47 @@ mod tests {
         panic!("fake git never wrote {}", path.display());
     }
 
+    /// Wait for a controlled child's PID while the task that owns it is live.
+    ///
+    /// A barrier that only polls the pidfile cannot tell a slow start from a
+    /// spawn failure: a failed `exec` (for example `ETXTBSY` from a
+    /// fixture-install race, #3504) never writes the pid, so the barrier used
+    /// to burn its whole budget and report "never wrote" instead of the real
+    /// error (#3484). The owned task finishing is the authoritative proof that
+    /// the pidfile will never appear; surface that outcome immediately.
+    #[cfg(target_os = "linux")]
+    async fn wait_for_pid_or_task_end(
+        path: &Path,
+        running: &mut tokio::task::JoinHandle<Result<GitOutput>>,
+    ) -> u32 {
+        let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if let Ok(pid) = text.trim().parse() {
+                    return pid;
+                }
+            }
+            if running.is_finished() {
+                match running.await {
+                    Ok(Err(error)) => panic!(
+                        "the controlled git child failed before writing {}: {error:#}",
+                        path.display()
+                    ),
+                    Ok(Ok(_)) => panic!(
+                        "the git command succeeded without the controlled child writing {}",
+                        path.display()
+                    ),
+                    Err(join_error) => panic!(
+                        "the git task ended before its child wrote {}: {join_error}",
+                        path.display()
+                    ),
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("fake git never wrote {}", path.display());
+    }
+
     #[cfg(target_os = "linux")]
     async fn wait_for_exit(pid: u32) -> bool {
         let deadline = tokio::time::Instant::now() + CHILD_BARRIER_TIMEOUT;
@@ -812,10 +853,12 @@ mod tests {
         // A fixed 300 ms timeout can observe an early spawn/read error under
         // load and incorrectly treat it as cancellation. First prove the
         // controlled child actually started and is still running, then abort
-        // the task that owns its process. The abort drops the caller future,
+        // the task that owns its process. The barrier watches the owned task
+        // too, so a spawn failure is reported as that failure rather than as a
+        // generic barrier timeout. The abort drops the caller future,
         // exercising kill_on_drop without relying on scheduler timing.
-        let running = tokio::spawn(async move { cmd.run(&["status"], 1024).await });
-        let pid = wait_for_pid(&pidfile).await;
+        let mut running = tokio::spawn(async move { cmd.run(&["status"], 1024).await });
+        let pid = wait_for_pid_or_task_end(&pidfile, &mut running).await;
         assert!(
             process_running(pid) && !running.is_finished(),
             "the controlled git child must be alive before cancellation"
@@ -830,6 +873,38 @@ mod tests {
             wait_for_exit(pid).await,
             "cancellation left the direct git child {pid} alive"
         );
+    }
+
+    /// A child that never starts must be reported as the spawn failure it is,
+    /// not as a start-barrier timeout (#3484).
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[should_panic(expected = "failed before writing")]
+    async fn an_unspawnable_child_reports_the_spawn_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pidfile = dir.path().join("pid");
+        let missing = dir.path().join("git-missing");
+        let cmd = GitCmd::new(missing.to_string_lossy(), dir.path())
+            .with_timeout(Duration::from_secs(30));
+
+        let mut running = tokio::spawn(async move { cmd.run(&["status"], 1024).await });
+        let _ = wait_for_pid_or_task_end(&pidfile, &mut running).await;
+    }
+
+    /// A child that finishes without reaching the barrier is reported as such;
+    /// the barrier does not wait out its whole budget (#3484).
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[should_panic(expected = "succeeded without the controlled child writing")]
+    async fn a_child_that_exits_before_the_barrier_is_reported() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pidfile = dir.path().join("pid");
+        let fake = script(dir.path(), "git-exits-early", "#!/bin/sh\nexit 0\n");
+        let cmd =
+            GitCmd::new(fake.to_string_lossy(), dir.path()).with_timeout(Duration::from_secs(30));
+
+        let mut running = tokio::spawn(async move { cmd.run(&["status"], 1024).await });
+        let _ = wait_for_pid_or_task_end(&pidfile, &mut running).await;
     }
 
     /// A child that finishes inside the deadline still returns its exact

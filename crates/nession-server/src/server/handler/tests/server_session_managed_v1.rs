@@ -585,6 +585,7 @@ async fn a_manifest_create_mints_reachable_object_grants_and_records_the_binding
             },
             platform: Platform::for_consumer("linux", "amd64", None),
             env: vec!["PATH=/usr/bin".to_string()],
+            runtime: nession_erofs::oci::config::RuntimeConfig::default(),
             annotations: std::collections::BTreeMap::new(),
         },
     )

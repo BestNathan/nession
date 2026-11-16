@@ -12,6 +12,7 @@
 //! local mutex cannot.
 
 use std::io::Write as _;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -123,6 +124,16 @@ fn validate_relative(relative: &Path) -> Result<()> {
             "an Overlay workspace identity {} must be relative to its authorized root",
             relative.display()
         );
+    }
+    // `Path::components()` drops an interior `.`, so only the raw segments can
+    // enforce the documented rejection of every `.`/`..` component (#3681).
+    for segment in relative.as_os_str().as_bytes().split(|byte| *byte == b'/') {
+        if segment == b".".as_slice() || segment == b"..".as_slice() {
+            anyhow::bail!(
+                "an Overlay workspace identity {} must not contain `.` or `..`",
+                relative.display()
+            );
+        }
     }
     let mut components = 0usize;
     for component in relative.components() {
