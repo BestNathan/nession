@@ -49,7 +49,7 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     location /health { return 200 'ok'; add_header Content-Type text/plain; }
     location /ws {
-        proxy_pass http://${SERVER_BACKEND};
+        proxy_pass https://${SERVER_BACKEND};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -57,12 +57,12 @@ server {
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
-    location /api { proxy_pass http://${SERVER_BACKEND}; proxy_set_header Host \$host; }
+    location /api { proxy_pass https://${SERVER_BACKEND}; proxy_set_header Host \$host; }
 
     # MCP Streamable HTTP is never the Web SPA fallback. Keep the original
     # bearer, protocol, session and Origin headers; disable SSE buffering.
     location = /mcp {
-        proxy_pass http://${SERVER_BACKEND};
+        proxy_pass https://${SERVER_BACKEND};
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host \$host;
