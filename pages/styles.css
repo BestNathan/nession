@@ -222,42 +222,68 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
 @media(max-width:600px){.agent-periods{gap:6px}.agent-period{padding:7px 11px}.entry-right{max-width:100%;overflow-wrap:anywhere}}
 
 
-/* Canonical technical Documents: a Pages-native source-backed reading surface. */
-.documents-kicker{margin-top:51px}
-.documents-heading{font:400 clamp(46px,6vw,78px)/1.05 "Instrument Serif",Georgia,serif;
-  color:var(--ink-deep);letter-spacing:-2px;margin:12px 0}
-.documents-lede{font-size:15px;color:var(--muted);max-width:740px;margin:0 0 20px}
-.documents-snapshot{display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap;
-  border-bottom:1px solid var(--line);color:var(--muted);padding:14px 0 22px;margin-bottom:20px;
+/* Pages Documents: category-first index and shared bounded readers (#3724). */
+.documents-kicker{margin-top:45px}
+.documents-breadcrumb{display:flex;align-items:center;gap:6px;margin:26px 0 10px;
+  font:600 12px "DM Sans",sans-serif;color:var(--muted)}
+.documents-breadcrumb a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.documents-heading{font:400 clamp(44px,5.5vw,70px)/1.08 "Instrument Serif",Georgia,serif;
+  color:var(--ink-deep);letter-spacing:-1.7px;margin:10px 0}
+.documents-lede{font-size:14px;line-height:1.65;color:var(--muted);max-width:740px;margin:0 0 19px}
+.documents-index{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:30px 0 80px}
+.documents-index-card{display:flex;flex-direction:column;gap:18px;min-width:0;min-height:285px;
+  padding:31px 33px;border:1px solid var(--line);border-radius:20px;background:var(--surface);
+  text-decoration:none}
+.documents-index-card:hover,.documents-index-card:focus-visible{border-color:var(--accent);background:var(--tint)}
+.documents-index-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.documents-index-card h2{font:400 clamp(31px,3vw,43px)/1.1 "Instrument Serif",Georgia,serif;
+  margin:0;color:var(--ink)}
+.documents-index-card p{max-width:580px;margin:0;color:var(--muted);font-size:14px;line-height:1.7}
+.documents-index-meta{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;
+  gap:10px;margin-top:auto;border-top:1px solid var(--line);padding-top:20px;font-size:12px}
+.documents-index-meta strong{font-weight:700;color:var(--ink)}
+.documents-index-availability{color:var(--muted)}
+.documents-snapshot{display:flex;gap:9px 18px;align-items:center;flex-wrap:wrap;
+  border-bottom:1px solid var(--line);color:var(--muted);padding:9px 0 14px;margin-bottom:16px;
   font-size:11px;letter-spacing:0}
 .documents-snapshot strong{color:var(--ink)}
 .documents-snapshot a,.documents-source{color:#3a906e;text-decoration:underline;text-underline-offset:3px}
-.documents-layout{display:grid;grid-template-columns:160px minmax(235px,310px) minmax(0,1fr);
-  align-items:start;gap:16px;margin-bottom:65px}
-.documents-side{padding:20px 14px 15px 0;border-right:1px solid var(--line)}
-.documents-side .eyebrow{margin-bottom:13px}
-.documents-filters{display:grid;gap:4px}
-.documents-filter{display:block;width:100%;border:0;border-radius:9px;padding:10px 12px;
+/* The host owns a bounded viewport; only the catalog and reader scroll.
+   Do not put overflow:auto on the page or on a wrapping grid parent. */
+.documents-layout,.documents-mcp-layout{display:grid;grid-template-columns:minmax(260px,315px) minmax(0,1fr);
+  align-items:stretch;gap:16px;height:clamp(440px,calc(100dvh - 310px),850px);
+  min-height:0;margin:0 0 60px}
+.documents-browser-pane{display:flex;flex-direction:column;min-width:0;min-height:0;
+  overflow:hidden;border:1px solid var(--line);border-radius:15px;background:var(--surface)}
+.documents-browser-controls{display:flex;flex-direction:column;gap:10px;flex:none;min-width:0;
+  padding:14px 15px 12px;border-bottom:1px solid var(--line)}
+.documents-browser-controls .eyebrow{margin:0}
+.documents-filters{display:flex;gap:5px;overflow-x:auto;overscroll-behavior-x:contain;
+  min-width:0;padding:2px 0 3px}
+.documents-filter{flex:none;border:1px solid var(--line);border-radius:999px;padding:7px 11px;
   font:600 12px "DM Sans",sans-serif;cursor:pointer;text-align:left;color:var(--muted);
   background:transparent}
-.documents-filter:hover,.documents-filter.active{background:var(--tint);color:var(--ink)}
-.documents-listbox{border:1px solid var(--line);border-radius:15px;background:var(--surface);overflow:hidden}
-.documents-search{display:block;margin:15px;width:calc(100% - 30px);min-width:0;padding:11px 12px;
+.documents-filter:hover,.documents-filter.active{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.documents-search{display:block;width:100%;box-sizing:border-box;min-width:0;padding:11px 12px;
   border:1px solid var(--line);border-radius:9px;background:var(--paper);color:var(--text);
   font:13px "DM Sans",sans-serif}
-.documents-search:focus{outline:2px solid #58a486;outline-offset:1px}
-.documents-count{margin:0;padding:9px 16px;color:var(--muted);font-size:10px;
-  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.documents-entry{display:block;padding:18px 16px;border-bottom:1px solid var(--line);min-width:0}
+.documents-search:focus-visible,.documents-entry:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.documents-count{margin:0;color:var(--muted);font-size:10px}
+.documents-list-scroll{flex:1;min-height:0;min-width:0;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable}
+.documents-entry{display:block;padding:16px;border-bottom:1px solid var(--line);
+  min-width:0;overflow-wrap:anywhere}
 .documents-entry:last-child{border:0}
 .documents-entry:hover,.documents-entry.selected{background:var(--tint)}
-.documents-entry.selected{border-left:3px solid #62a784;padding-left:13px}
+.documents-entry.selected{box-shadow:inset 3px 0 var(--accent)}
 .documents-entry .eyebrow{font-size:10px;color:var(--muted)}
-.documents-entry strong{display:block;margin:7px 0 5px;color:var(--ink);font-size:14px}
-.documents-entry p{font-size:12px;color:var(--muted);line-height:1.55;margin:0}
+.documents-entry strong{display:block;margin:5px 0;color:var(--ink);font-size:13px}
+.documents-entry p{font-size:11px;color:var(--muted);line-height:1.55;margin:0}
 .documents-empty{padding:20px;color:var(--muted);font-size:12px}
-.documents-reader{padding:30px 34px 36px;min-width:0;max-width:100%;overflow-wrap:anywhere}
-.documents-reader h2{font:400 clamp(32px,3vw,47px)/1.12 "Instrument Serif",Georgia,serif;
+.documents-reader-slot{min-height:0;min-width:0;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;background:var(--surface);border:1px solid var(--line);border-radius:15px}
+.documents-reader{padding:26px 31px 36px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.documents-reader h2{font:400 clamp(30px,3vw,43px)/1.12 "Instrument Serif",Georgia,serif;
   color:var(--ink);letter-spacing:-.5px;margin:11px 0}
 .documents-meta{display:flex;gap:9px 19px;flex-wrap:wrap;color:var(--muted);font-size:10px;
   margin:13px 0}
@@ -270,31 +296,27 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
   border:1px solid var(--line);padding:9px 12px}
 .documents-prose th{background:var(--tint);color:var(--ink)}
 .documents-prose hr{border:0;border-top:1px solid var(--line);margin:22px 0}
-.documents-reader .documents-source{display:inline-block;font-size:12px;margin-top:30px;font-weight:600}
+.documents-reader .documents-source{display:inline-block;font-size:12px;margin-top:20px;font-weight:600}
 .documents-back{display:none;color:var(--ink);font-size:12px;font-weight:700;margin-bottom:17px}
 .documents-unavailable{margin:24px 0 65px;max-width:800px}
 .documents-unavailable a{display:inline-block;margin-top:14px;font-size:13px}
-@media(max-width:1130px) and (min-width:901px){
-  .documents-layout{grid-template-columns:125px minmax(200px,260px) minmax(0,1fr);gap:10px}
-  .documents-reader{padding:22px}
-}
 @media(max-width:900px){
-  .documents-layout{display:block}
-  .documents-side{border:0;padding:0 0 14px}
-  .documents-side>.eyebrow{display:none}
-  .documents-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
-  .documents-filter{flex:none;width:auto;border:1px solid var(--line)}
+  .documents-index{grid-template-columns:1fr}
+  .documents-index-card{min-height:210px;padding:24px}
+  .documents-layout,.documents-mcp-layout{display:block;height:clamp(400px,calc(100dvh - 245px),730px)}
+  .documents-browser-pane,.documents-reader-slot{height:100%;box-sizing:border-box}
   .documents-reader-slot{display:none}
-  .documents-layout.reading .documents-reader-slot{display:block}
-  .documents-layout.reading .documents-listbox,
-  .documents-layout.reading .documents-side{display:none}
+  .documents-workspace.reading .documents-reader-slot{display:block}
+  .documents-workspace.reading .documents-browser-pane{display:none}
   .documents-reader{padding:22px}
   .documents-back{display:inline-block}
 }
 @media(max-width:600px){
-  .documents-kicker{margin-top:35px}
-  .documents-heading{font-size:50px}
-  .documents-snapshot{gap:7px 13px}
+  .documents-kicker{margin-top:30px}
+  .documents-breadcrumb{margin-top:24px}
+  .documents-heading{font-size:47px}
+  .documents-snapshot{gap:6px 12px}
+  .documents-index{margin-top:22px}
 }
 
 /* Protocol Reference: one verified Nession introduction per field, not a matrix. */
@@ -338,28 +360,18 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
 .documents-raw code{white-space:pre}
 @media(max-width:900px){.documents-release-note{margin-bottom:14px}}
 
-/* Source-pinned MCP Documents reuse the existing Pages Documents vocabulary. */
-.documents-mcp-back{display:inline-block;color:var(--ink);font-size:12px;font-weight:700;
-  margin:0 0 24px;text-decoration:none}
-.documents-mcp-upstream{padding:24px;margin-bottom:22px;min-width:0}
+/* MCP reuses the same bounded catalog/detail shell as Nession Protocol. */
+.documents-mcp-upstream{padding:19px 21px;margin-bottom:20px;min-width:0}
 .documents-mcp-upstream h2{font-size:28px;margin:8px 0 12px}
 .documents-mcp-upstream h3{font-size:15px;margin:18px 0 6px}
 .documents-mcp-upstream .documents-source{display:inline-block;font-size:12px;
   margin:4px 18px 4px 0;overflow-wrap:anywhere}
-.documents-mcp-highlights{padding-left:22px;line-height:1.65;font-size:13px;
-  max-width:1050px}
+.documents-mcp-highlights{padding-left:22px;line-height:1.65;font-size:13px;max-width:1050px}
 .documents-mcp-highlights li{margin-bottom:7px;overflow-wrap:anywhere}
-.documents-mcp-layout{display:grid;grid-template-columns:minmax(200px,300px) minmax(0,1fr);
-  gap:20px;align-items:start;margin:22px 0 70px}
-.documents-mcp-side{min-width:0}
-.documents-mcp-side .documents-search{width:100%;box-sizing:border-box}
 .documents-mcp-side .documents-entry{display:block;overflow-wrap:anywhere}
-.documents-mcp-reader{min-width:0;overflow:hidden}
+.documents-mcp-side .documents-entry .eyebrow{display:block}
+.documents-mcp-reader{min-width:0;overflow-wrap:anywhere}
 .documents-mcp-reader h2{overflow-wrap:anywhere}
 .documents-mcp-reader .documents-raw pre{max-width:100%;overflow:auto}
-.documents-mcp-reader .documents-source{display:inline-block;margin-top:24px;
-  overflow-wrap:anywhere}
-@media(max-width:900px){
-  .documents-mcp-layout{grid-template-columns:minmax(0,1fr)}
-  .documents-mcp-upstream{padding:18px}
-}
+.documents-mcp-reader .documents-source{display:inline-block;margin-top:15px;overflow-wrap:anywhere}
+@media(max-width:900px){.documents-mcp-upstream{padding:17px}}
