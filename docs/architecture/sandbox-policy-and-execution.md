@@ -170,10 +170,10 @@ before mounting anything.
 - **Shared writable Workspace Overlay (#3582).** One managed Workspace has one
   durable `upper`/`work` pair and therefore **one** physical writable
   `fuse-overlayfs` Merged View per Agent identity and mount namespace. The
-  Agent-owned `OverlayMountManager` derives the mountpoint from an authorized
-  Workspace root plus a validated relative identity (never a caller-supplied
-  path), serializes same-workspace mount/unmount transitions, and returns
-  identified consumer leases. Multiple Sandbox executions may bind that same
+  Sandbox-owned `nession_sandbox::mount::overlay::OverlayMountManager` derives
+  the mountpoint from an authorized Workspace root plus a validated relative
+  identity (never a caller-supplied path), serializes same-workspace
+  mount/unmount transitions, and returns identified consumer leases. Multiple Sandbox executions may bind that same
   Merged View at `/workspace`; the last release unmounts it and never deletes
   the durable upper/work. The Overlay holds its own read-only EROFS lower lease
   for the full physical lifetime; a failed Overlay unmount retains the mount,
