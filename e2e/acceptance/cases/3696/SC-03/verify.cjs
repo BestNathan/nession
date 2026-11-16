@@ -12,6 +12,12 @@ const {
 
 run(({ evidence }) => {
   const sha = targetSha();
+  checked('sudo', ['apt-get', 'update', '-qq'], 120_000);
+  checked(
+    'sudo',
+    ['apt-get', 'install', '-y', '-qq', 'erofs-utils', 'erofsfuse', 'fuse3', 'fuse-overlayfs'],
+    600_000,
+  );
 
   // Real toolchain: mkfs.erofs → fsck.erofs staging → merged mkfs.erofs,
   // deterministic digest and EROFS superblock magic.
