@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFileSync(path.join(root,file),'utf8');
@@ -65,5 +66,11 @@ assert.match(acceptor,/ci_evidence_file="-"/);
 assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 3700 ]]; then'),
   'all other PR contexts must still omit CI evidence');
 assert.match(executor,/ciEvidenceFile === '-' \? null/);
+// Exercise the new Main-owned verifier's positive and negative fixtures
+// in the existing CI tooling Gate before shipping the workflow to main.
+const proofSelfTest = execFileSync(process.execPath,
+  [path.join(root,'scripts/acceptance-3700-git-ci-proof.mjs'),'self-test'],
+  {encoding:'utf8'});
+assert.match(proofSelfTest,/#3707 read-only source\/CI proof self-tests pass/);
 assert.match(acceptor,/name: Apply Acceptance Report and checkbox projection/);
 console.log('Acceptance PR route: immediate SC selection, no Quality/E2E barrier, no PR blocking Gate, merged/close routes and evidence separation verified');
