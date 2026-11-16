@@ -57,17 +57,16 @@ pub struct PluginFile {
 /// beyond `[`, `cat` and redirection.
 const HOOK_SCRIPT: &str = r#"#!/bin/sh
 # Written by nession-agent. Do not edit — it is overwritten on every start.
+# This user-scope hook is inert outside a Nession Session.
 #
-# Reports this Claude session's identity to the Nession agent that started it.
-#
-# Outside a Nession session there is nothing to report and nothing is written:
-# this plugin is installed at user scope so it is present everywhere, and every
-# other terminal must see it as a no-op (#1005 decision 6).
+# New Sessions carry NESSION_RUNTIME_* variables. Surviving Sessions created
+# before the rename retain their original NESSON_* names until they end.
+if [ -n "$NESSION_RUNTIME_SESSION_ID" ] && [ -n "$NESSION_RUNTIME_BINDING_FILE" ]; then
+  cat > "$NESSION_RUNTIME_BINDING_FILE"
+  exit 0
+fi
 [ -n "$NESSON_SESSION_ID" ] || exit 0
 [ -n "$NESSON_BINDING_FILE" ] || exit 0
-
-# Claude sends the payload on stdin. Copied verbatim: the agent knows which
-# session it injected the variables into, so it parses, not this script.
 cat > "$NESSON_BINDING_FILE"
 "#;
 
@@ -404,10 +403,14 @@ mod tests {
             script.contains(r#"[ -n "$NESSON_BINDING_FILE" ] || exit 0"#),
             "the hook would write somewhere it was not told to"
         );
+        assert!(
+            script.contains(r#"[ -n "$NESSION_RUNTIME_SESSION_ID" ] && [ -n "$NESSION_RUNTIME_BINDING_FILE" ]"#),
+            "new Sessions must only use the canonical internal runtime names"
+        );
         // And it must do no work before that guard.
         let guard_line = script
             .lines()
-            .position(|l| l.contains("NESSON_SESSION_ID"))
+            .position(|l| l.contains("NESSION_RUNTIME_SESSION_ID"))
             .expect("the guard is present");
         let first_command = script
             .lines()
@@ -433,11 +436,54 @@ mod tests {
         for name in [
             crate::binding::SESSION_ID_ENV,
             crate::binding::BINDING_FILE_ENV,
+            crate::binding::LEGACY_SESSION_ID_ENV,
+            crate::binding::LEGACY_BINDING_FILE_ENV,
         ] {
             assert!(
                 script.contains(&format!("${name}")),
                 "the hook does not read ${name}, which is what this crate injects; \
                  the script reads: {script}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_hook_writes_for_new_and_surviving_legacy_sessions() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let files = render("1.0.0");
+        let script = file(&files, "hooks/record-binding.sh");
+        for (session_var, binding_var) in [
+            (crate::binding::SESSION_ID_ENV, crate::binding::BINDING_FILE_ENV),
+            (
+                crate::binding::LEGACY_SESSION_ID_ENV,
+                crate::binding::LEGACY_BINDING_FILE_ENV,
+            ),
+        ] {
+            let dir = tempfile::tempdir().expect("hook fixture");
+            let path = dir.path().join("binding.json");
+            let mut child = Command::new("sh")
+                .arg("-c")
+                .arg(script)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env(session_var, "session")
+                .env(binding_var, &path)
+                .stdin(Stdio::piped())
+                .spawn()
+                .expect("run hook");
+            child
+                .stdin
+                .take()
+                .expect("hook stdin")
+                .write_all(br#"{"hook_event_name":"SessionStart"}"#)
+                .expect("write input");
+            assert!(child.wait().expect("hook exit").success());
+            assert_eq!(
+                std::fs::read_to_string(&path).expect("binding"),
+                r#"{"hook_event_name":"SessionStart"}"#
             );
         }
     }

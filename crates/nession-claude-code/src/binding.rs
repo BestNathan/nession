@@ -17,12 +17,12 @@
 //! ## The hook does not parse anything
 //!
 //! The agent injects two variables into every session it creates:
-//! `NESSON_SESSION_ID` and the path of the file that session's binding belongs
+//! `NESSION_RUNTIME_SESSION_ID` and the path of the file that session's binding belongs
 //! in. The hook's whole body is:
 //!
 //! ```sh
-//! [ -n "$NESSON_SESSION_ID" ] || exit 0
-//! cat > "$NESSON_BINDING_FILE"
+//! [ -n "$NESSION_RUNTIME_SESSION_ID" ] || exit 0
+//! cat > "$NESSION_RUNTIME_BINDING_FILE"
 //! ```
 //!
 //! That is deliberate. Parsing Claude's JSON in shell would need `jq` (not
@@ -44,14 +44,19 @@ use serde::Deserialize;
 /// The hook exits on its absence, which is what makes a user-scope install
 /// harmless: Claude Code started from any other terminal runs the same plugin
 /// and it does nothing.
-pub const SESSION_ID_ENV: &str = "NESSON_SESSION_ID";
+pub const SESSION_ID_ENV: &str = "NESSION_RUNTIME_SESSION_ID";
 
 /// The environment variable naming where this session's binding belongs.
 ///
 /// Computed by the agent, not by the hook: the hook would have to know the
 /// agent's state directory and how session ids are made safe for a filename,
 /// and a second implementation of either is a second thing to get wrong.
-pub const BINDING_FILE_ENV: &str = "NESSON_BINDING_FILE";
+pub const BINDING_FILE_ENV: &str = "NESSION_RUNTIME_BINDING_FILE";
+
+/// The old names remain read-only hook inputs for Sessions already running
+/// when the runtime namespace changed. New Sessions never inject these keys.
+pub const LEGACY_SESSION_ID_ENV: &str = "NESSON_SESSION_ID";
+pub const LEGACY_BINDING_FILE_ENV: &str = "NESSON_BINDING_FILE";
 
 /// A Claude session a Nession session has been bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]

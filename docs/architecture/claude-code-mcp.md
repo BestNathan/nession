@@ -176,3 +176,9 @@ Session.
   takeover.
 - No machine-wide scan, Agent picker or user-level mutation owner.
 - No claim that configured equals loaded.
+
+The canonical credential key is `NESSION_MCP_TOKEN`, not an internal
+`NESSION_RUNTIME_*` control name. The ENV Profile binder permits the
+credential while protecting all runtime controls. Surviving pre-migration
+Sessions can still use their old `NESSON_*` identity/hook variables;
+new Sessions only receive `NESSION_RUNTIME_*` controls.
