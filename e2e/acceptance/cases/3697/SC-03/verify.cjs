@@ -6,6 +6,12 @@ const { run, targetSha, checked, assertRan } = require('../../../shared/control-
 
 run(({ evidence }) => {
   const sha = targetSha();
+  checked('sudo', ['apt-get', 'update', '-qq'], 120_000);
+  checked(
+    'sudo',
+    ['apt-get', 'install', '-y', '-qq', 'erofs-utils', 'erofsfuse', 'fuse3', 'fuse-overlayfs'],
+    600_000,
+  );
   const build = checked(
     'cargo',
     [
