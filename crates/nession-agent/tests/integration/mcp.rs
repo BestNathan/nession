@@ -16,11 +16,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nession_agent::config::{AgentConfig, AttachMode};
+use nession_agent::execution::ResourceKey;
 use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::McpConfig;
+use nession_runtime::lane::KeyedLane;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -93,6 +95,13 @@ impl HttpResponse {
 }
 
 async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHandle) {
+    start_agent_with_mcp_using(nession_agent::execution::mutation_scheduler(), 60).await
+}
+
+async fn start_agent_with_mcp_using(
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    tool_timeout_secs: u64,
+) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
@@ -108,7 +117,7 @@ async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHan
             // The same durable Agent Token MCP mounts below: one secret gates
             // both the P2P listener and the embedded MCP endpoint (#3440).
             auth: Arc::new(P2pAuth::new(TOKEN)),
-            mutations: nession_agent::execution::mutation_scheduler(),
+            mutations,
             tmux: Arc::clone(&tmux),
             session_metadata: Arc::new(SessionMetadataStore::with_root(
                 Arc::clone(&tmux),
@@ -128,6 +137,7 @@ async fn start_agent_with_mcp() -> (SocketAddr, nession_agent::server::ServerHan
         agent_token: TOKEN.to_string(),
         mcp: McpConfig {
             enabled: true,
+            tool_timeout_secs,
             ..Default::default()
         },
         ..Default::default()
@@ -323,6 +333,146 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     assert_eq!(killed["isError"], false, "{killed}");
     assert_eq!(text_of(&killed)["name"], name);
 
+    let _ = handle.shutdown().await;
+}
+
+/// Reproduce the actual MCP timeout across the Agent listener, shared lane and
+/// tmux owner. Both writes have been admitted to the queue but not started.
+/// The original implementation ran them after the HTTP request timed out.
+async fn abandoned_queued_call(
+    addr: SocketAddr,
+    mcp_session: &str,
+    mutations: &Arc<KeyedLane<ResourceKey>>,
+    name: &str,
+    tool_name: &str,
+) {
+    let key = ResourceKey::Session(name.to_string());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    mutations
+        .enqueue(
+            key.clone(),
+            Box::pin(async move {
+                let _ = started_tx.send(());
+                let _ = release_rx.await;
+            }),
+        )
+        .await;
+    started_rx.await.expect("the blocker owns the Session key");
+
+    let result = call_tool(
+        addr,
+        mcp_session,
+        tool_name,
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(result["isError"], true, "a blocked tool must time out: {result}");
+    let error = text_of(&result);
+    assert_eq!(error["error"]["kind"], "timeout", "{error}");
+    let message = error["error"]["message"].as_str().expect("timeout message");
+    assert!(
+        message.contains("inspect the affected state before retrying"),
+        "{message}"
+    );
+
+    // The queued work must have reached the owner lane before the response;
+    // otherwise this test would prove only a timeout before dispatch.
+    let pending = mutations.snapshot().await;
+    assert_eq!(pending.queued, 1, "MCP write was not queued: {pending:?}");
+
+    // Queue a sentinel after the cancelled call, release the blocker, then
+    // await FIFO completion. No sleep/polling or guessed completion timing.
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    mutations
+        .enqueue(
+            key,
+            Box::pin(async move {
+                let _ = done_tx.send(());
+            }),
+        )
+        .await;
+    release_tx.send(()).expect("release blocker");
+    tokio::time::timeout(Duration::from_secs(10), done_rx)
+        .await
+        .expect("lane drained the timed-out call")
+        .expect("sentinel completed");
+}
+
+#[tokio::test]
+async fn agent_mcp_abandoned_queued_create_and_kill_preserve_tmux_state() {
+    let mutations = nession_agent::execution::mutation_scheduler();
+    let (addr, handle) = start_agent_with_mcp_using(Arc::clone(&mutations), 1).await;
+    let mcp_session = initialize(addr).await;
+    let name = unique_session_name("mcp-timeout");
+
+    abandoned_queued_call(
+        addr,
+        &mcp_session,
+        &mutations,
+        &name,
+        "nession_agent_create_session",
+    )
+    .await;
+    let absent = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": TEST_AGENT_ID }),
+    )
+    .await;
+    assert_eq!(absent["isError"], false, "{absent}");
+    assert!(
+        !text_of(&absent)["sessions"]
+            .as_array()
+            .expect("Agent sessions")
+            .iter()
+            .any(|item| item["name"] == name),
+        "a timed-out queued create changed tmux state"
+    );
+
+    // A deliberate readback-before-retry, not an implicit replay.
+    let created = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_create_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+
+    abandoned_queued_call(
+        addr,
+        &mcp_session,
+        &mutations,
+        &name,
+        "nession_agent_kill_session",
+    )
+    .await;
+    let retained = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": TEST_AGENT_ID }),
+    )
+    .await;
+    assert_eq!(retained["isError"], false, "{retained}");
+    assert!(
+        text_of(&retained)["sessions"]
+            .as_array()
+            .expect("Agent sessions")
+            .iter()
+            .any(|item| item["name"] == name),
+        "a timed-out queued kill removed a live tmux Session"
+    );
+    let killed = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_kill_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
     let _ = handle.shutdown().await;
 }
 
