@@ -7,7 +7,7 @@ test('MCP Documents renders the pinned Rust registry and returns to Documents in
     await page.goto(site.origin+'/#/documents/mcp');
     await expect(page.getByRole('heading',{name:'MCP Tools'})).toBeVisible();
     await expect(page.getByRole('heading',{name:'nession_server_list_agents'})).toBeVisible();
-    await expect(page.getByText('1 registered Tools',{exact:true})).toBeVisible();
+    await expect(page.locator('.documents-count')).toContainText('1 / 1 REGISTERED TOOLS');
     await page.getByText('Input JSON Schema').click();
     await expect(page.locator('.documents-raw code')).toContainText('"type": "object"');
     await expect(page.getByRole('link',{name:'Documents',exact:true}).first()).toHaveAttribute('aria-current','page');
@@ -109,10 +109,10 @@ test('MCP detail prioritizes Tool identity, named input/output fields and compac
     await expect(page.getByRole('heading',{name:'Output fields'})).toBeVisible();
     await expect(tool.locator('.documents-mcp-field-name')).toContainText([
       'scope','filters','filters.agent_id','agents','agents[].id','cursor']);
-    await expect(tool.getByText('Server-scoped query')).toBeVisible();
-    await expect(tool.getByText('Only the requested Agent identity')).toBeVisible();
-    await expect(tool.getByText('Registered Agent records')).toBeVisible();
-    await expect(tool.getByText('Canonical Agent ID')).toBeVisible();
+    await expect(tool.getByText('Server-scoped query',{exact:true})).toBeVisible();
+    await expect(tool.getByText('Only the requested Agent identity',{exact:true})).toBeVisible();
+    await expect(tool.getByText('Registered Agent records',{exact:true})).toBeVisible();
+    await expect(tool.getByText('Canonical Agent ID',{exact:true})).toBeVisible();
     await expect(tool.locator('.documents-mcp-spec')).not.toHaveAttribute('open');
     await tool.getByText('Output JSON Schema').click();
     await expect(tool.locator('.documents-mcp-contract').nth(1).locator('.documents-mcp-raw code')).toContainText('agents');
