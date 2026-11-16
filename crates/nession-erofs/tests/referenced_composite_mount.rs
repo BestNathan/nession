@@ -31,10 +31,9 @@ use serde_json::Map;
 const ROUTE_PREFIX: &str = "/images/blobs/";
 const TOKEN: &str = "server-token";
 
-fn mode(path: &Path, value: u32) {
+fn mode(path: &Path, value: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(value))
-        .expect("set fixture mode");
 }
 
 fn config() -> ImageConfig {
@@ -60,13 +59,13 @@ fn config() -> ImageConfig {
     }
 }
 
-fn source(path: &Path, reference: &str) -> ReferencedSourceInput {
-    let size = std::fs::metadata(path).expect("fixture metadata").len();
-    ReferencedSourceInput {
+fn source(path: &Path, reference: &str) -> anyhow::Result<ReferencedSourceInput> {
+    let size = std::fs::metadata(path)?.len();
+    Ok(ReferencedSourceInput {
         path: path.to_path_buf(),
         layer: Descriptor {
             media_type: MEDIA_TYPE_EROFS.to_string(),
-            digest: nession_erofs::file_digest(path).expect("fixture digest"),
+            digest: nession_erofs::file_digest(path)?,
             size,
             urls: None,
             annotations: None,
@@ -80,7 +79,7 @@ fn source(path: &Path, reference: &str) -> ReferencedSourceInput {
         manifest_digest: format!("sha256:{}", "d".repeat(64)),
         platform: Platform::for_consumer("linux", "amd64", None),
         config: config(),
-    }
+    })
 }
 
 #[tokio::test]
@@ -98,14 +97,14 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         let path = tree.join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, &bytes).unwrap();
-        mode(&path, 0o755);
+        mode(&path, 0o755).unwrap();
         let image = root.path().join(name);
         mkfs.run(
             &compose_mkfs_command(&image, &tree, &packaging),
             &ProcessControl::new(),
         )
         .unwrap();
-        sources.push(source(&image, name));
+        sources.push(source(&image, name).unwrap());
     }
     let composer = ErofsReferencedComposer::new(
         Arc::new(ProcessErofsExtractor::default()),

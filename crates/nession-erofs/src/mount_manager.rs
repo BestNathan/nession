@@ -148,7 +148,10 @@ impl VerifiedComposite {
 }
 
 /// One pinned composite component set held for the physical mount lifetime.
-struct CompositePins(Vec<Box<dyn BlobPinGuard>>);
+struct CompositePins {
+    /// Guards are RAII-only; each pinned component stays alive while held.
+    _guards: Vec<Box<dyn BlobPinGuard>>,
+}
 
 impl BlobPinGuard for CompositePins {}
 
@@ -1194,7 +1197,7 @@ fn pin_all(
                 .with_context(|| format!("pin EROFS blob {digest}"))?,
         );
     }
-    Ok(Some(Box::new(CompositePins(guards))))
+    Ok(Some(Box::new(CompositePins { _guards: guards })))
 }
 
 fn release_token(inner: &ManagerInner, entry: &MountEntry, token: u64) -> Result<()> {
