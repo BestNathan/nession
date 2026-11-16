@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFileSync(path.join(root,file),'utf8');
@@ -11,6 +12,7 @@ const source = read('.github/workflows/acceptance-orchestrator.yml');
 const background = read('.github/workflows/acceptance-orchestrator-background.yml');
 const acceptor = read('.github/workflows/agent-sc-acceptance.yml');
 const executor = read('scripts/acceptance-executor.mjs');
+const caseWorkflow = read('.github/workflows/acceptance-cases.yml');
 const extract = (text,name) => {
   const start = text.indexOf('\n  '+name+':\n');
   assert.ok(start>=0,'missing job '+name);
@@ -64,4 +66,14 @@ assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUM
   'all other PR contexts must still omit CI evidence');
 assert.match(executor,/ciEvidenceFile === '-' \? null/);
 assert.match(acceptor,/name: Apply Acceptance Report and checkbox projection/);
+// A native EROFS Case on a Staging SHA must never run without the real
+// toolchain. Check the trusted (main-owned) selector and fail-closed routing.
+const proofSelfTest = execFileSync(process.execPath,
+  [path.join(root, 'scripts/acceptance-erofs-case-prereqs.mjs'), 'self-test'],
+  {encoding:'utf8'});
+assert.match(proofSelfTest,/#3711 scoped EROFS Case prerequisite admission self-tests passed/);
+assert.match(caseWorkflow,/node trusted\/scripts\/acceptance-erofs-case-prereqs\.mjs selected/);
+assert.match(caseWorkflow,/sudo apt-get install -y erofs-utils erofsfuse fuse3/);
+assert.match(caseWorkflow,/command -v "\$tool" \|\| \{ echo "::error::required native EROFS tool missing:/);
+assert.match(caseWorkflow,/steps\.select\.outputs\.count != '0'/);
 console.log('Acceptance PR route: immediate SC selection, no Quality/E2E barrier, no PR blocking Gate, merged/close routes and evidence separation verified');
