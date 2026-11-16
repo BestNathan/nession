@@ -38,6 +38,9 @@ function includes(text, fragments, context) {
   for (const fragment of fragments) assert.ok(text.includes(fragment), context + ': missing ' + fragment);
 }
 function source(file) { return fs.readFileSync(path.join(root, file), 'utf8'); }
+function composeTokenIsHardcoded(text) {
+  return text.includes('change-me-standalone') || /AGENT_TOKEN:\\s*["']?(?:test|example|change-me)/.test(text);
+}
 function renderServer(name, overrides) {
   const dest = path.join(dir, name);
   const result = shell('deploy/render-server-config.sh', [dest], overrides);
@@ -118,6 +121,8 @@ try {
     }
   }
   const compose = source('deploy/docker-compose.yml');
+  assert.equal(composeTokenIsHardcoded(source('deploy/docker-compose.yml')), false,
+    'Compose must never publish a known Agent bearer token');
   assert.equal(
     (compose.match(/NESSION_MCP_ENABLED: "\$\{NESSION_MCP_ENABLED:-true\}"/g) || []).length,
     3,

@@ -358,3 +358,8 @@ and a safe read; unauthorized calls must return 401. Public exposure requires
 TLS or a trusted TLS-terminating proxy. The source and prebuilt image paths
 copy the same entrypoint, nginx template and renderer; no separate MCP
 process or listener is launched.
+
+Compose intentionally carries no published Agent default bearer token. Set
+`AGENT_TOKEN` to a unique secret to select your own, or leave it unset to use
+the Agent's durable token provisioned under `NSESSION_HOME` (`/data` in Compose).
+Never publish a shared fixture token on an exposed MCP port.

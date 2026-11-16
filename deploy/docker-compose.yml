@@ -26,10 +26,10 @@ services:
       AGENT_ID: agent-docker
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: ""   # standalone, no server
-      # Required by the line above: with no Server there is nothing to mint a
-      # credential, so the agent refuses to start without one rather than
-      # binding a socket that refuses every connection (#1013).
-      AGENT_TOKEN: "change-me-standalone"
+      # Never ship a published default bearer token. An explicit AGENT_TOKEN
+      # is accepted; otherwise the Agent provisions one on its durable /data
+      # volume before mounting MCP (#3440).
+      AGENT_TOKEN: "${AGENT_TOKEN:-}"
       # Fixed terminal columns (#2487). The same value the Web image was
       # built with; the Agent validates it and uses it for new Sessions.
       NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
