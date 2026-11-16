@@ -150,7 +150,7 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         (
             format!("{ROUTE_PREFIX}{}", referenced.descriptor.digest),
             std::fs::read(
-                &nession_erofs::BlobStore::new(root.path().join("server-blobs"))
+                nession_erofs::BlobStore::new(root.path().join("server-blobs"))
                     .unwrap()
                     .path_for(&referenced.descriptor.digest)
                     .unwrap(),
@@ -160,7 +160,7 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         (
             format!("{ROUTE_PREFIX}{}", referenced.metadata.digest),
             std::fs::read(
-                &nession_erofs::BlobStore::new(root.path().join("server-blobs"))
+                nession_erofs::BlobStore::new(root.path().join("server-blobs"))
                     .unwrap()
                     .path_for(&referenced.metadata.digest)
                     .unwrap(),
@@ -183,7 +183,7 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
     for device in &referenced.devices {
         let path = format!("{ROUTE_PREFIX}{}", device.digest);
         let bytes = std::fs::read(
-            &nession_erofs::BlobStore::new(root.path().join("server-blobs"))
+            nession_erofs::BlobStore::new(root.path().join("server-blobs"))
                 .unwrap()
                 .path_for(&device.digest)
                 .unwrap(),
