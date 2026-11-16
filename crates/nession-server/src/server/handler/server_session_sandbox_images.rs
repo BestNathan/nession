@@ -75,7 +75,10 @@ pub(super) fn derive_sandbox_image_selections(
             }
             return Ok(Vec::new());
         }
-        Some(SandboxFilesystemRoot::Image { digest }) => {
+        Some(SandboxFilesystemRoot::Image {
+            digest,
+            writable: _,
+        }) => {
             derived.push(SandboxImageSelection {
                 role: SandboxImageRole::Base,
                 digest: digest.clone(),

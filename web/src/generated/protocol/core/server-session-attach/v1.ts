@@ -111,7 +111,11 @@ vars: Array<[string, string]>,
  * Non-fatal parse warnings surfaced to the UI.
  */
 warnings: Array<string>, };
-export type ProbedAddress = { status: AddressStatus, 
+export type ProbedAddress = { 
+/**
+ * The server's latest TCP probe result for the endpoint.
+ */
+status: AddressStatus, 
 /**
  * Round-trip time of the last successful probe, in milliseconds.
  */

@@ -22,7 +22,19 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type EnvSource = "server" | "agent";
-export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
+export type EnvFileRef = { 
+/**
+ * Filename including the `.env` suffix.
+ */
+name: string, 
+/**
+ * Where the file lives.
+ */
+source: EnvSource, 
+/**
+ * For `EnvSource::Agent`, the owning agent id. `None` for server files.
+ */
+agent_id?: string | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).

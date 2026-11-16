@@ -6,6 +6,10 @@ and the onboarding steps for a new provider.
 
 Requirement: **#1363**. Design rules: `docs/design/design-system/patterns/conversation.md`.
 
+The Claude Code **Transcripts** surface is a separate raw-record browser; its
+ownership and transport are recorded in
+[claude-transcript.md](claude-transcript.md).
+
 ## The one rule
 
 > Extensions provide capability; Nession owns the experience. (`PRINCIPLE.md` §5)

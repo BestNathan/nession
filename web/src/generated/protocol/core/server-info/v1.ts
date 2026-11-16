@@ -62,7 +62,11 @@ export type ProtocolManifest = {
 /**
  * Who offers this set — an agent id, a server, a runtime name.
  */
-provider: string, protocols: { [key in ProtocolId]: ContractSupport }, 
+provider: string, 
+/**
+ * The Protocol Units this provider serves, keyed by canonical unit id.
+ */
+protocols: { [key in ProtocolId]: ContractSupport }, 
 /**
  * Diagnostics only.
  *

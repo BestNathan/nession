@@ -24,20 +24,24 @@
 
 use async_trait::async_trait;
 use nession_client::{AgentConnection, ClientConfig, ClientConnection, ClientError};
-use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRefusal};
+use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRefusal, WebAgentsListResponse};
 use nession_protocol::contracts::env::v1::{
-    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
+    ClientEnvWriteResponsePayload,
 };
 use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingSetPayload, ServerSessionListReply, SessionRefusal,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
+    ServerSessionListReply, SessionKillResponse, SessionRefusal,
 };
-use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::debug;
 
 use crate::backend::{ClusterBackend, NodeBackend};
 use crate::error::ToolError;
+use crate::tools::nession_agent_create_session::SessionCreatedOutput;
+use crate::tools::nession_agent_list_sessions::SessionListOutput;
 
 /// How long to wait for the Server's authentication handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -76,94 +80,101 @@ impl RemoteClusterBackend {
 
 #[async_trait]
 impl ClusterBackend for RemoteClusterBackend {
-    async fn list_agents(&self) -> Result<Value, ToolError> {
+    async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection.list_agents().await.map_err(map_client_error)?;
         Self::close(connection).await;
         match reply {
-            AgentListReply::Listed(listed) => {
-                serde_json::to_value(listed).map_err(|error| ToolError::backend(error.to_string()))
-            }
+            AgentListReply::Listed(listed) => Ok(listed),
             AgentListReply::Refused(AgentRefusal { status, message }) => {
                 Err(refusal_error(status, message))
             }
         }
     }
 
-    async fn env_list(&self) -> Result<Value, ToolError> {
+    async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection.env_list().await.map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 
-    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+    async fn env_get(
+        &self,
+        payload: ClientEnvGetPayload,
+    ) -> Result<ClientEnvGetResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection
             .env_get(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 
-    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+    async fn env_write(
+        &self,
+        payload: ClientEnvWritePayload,
+    ) -> Result<ClientEnvWriteResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection
             .env_write(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 
-    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+    async fn env_delete(
+        &self,
+        payload: ClientEnvDeletePayload,
+    ) -> Result<ClientEnvDeleteResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection
             .env_delete(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 
     async fn session_env_binding_get(
         &self,
         payload: ClientSessionEnvBindingGetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection
             .session_env_binding_get(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 
     async fn session_env_binding_set(
         &self,
         payload: ClientSessionEnvBindingSetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection
             .session_env_binding_set(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 
     async fn session_env_binding_reapply(
         &self,
         payload: ClientSessionEnvBindingReapplyPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         let mut connection = self.connect().await?;
         let reply = connection
             .session_env_binding_reapply(payload)
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 }
 
@@ -260,7 +271,7 @@ impl ServerRoutedNodeBackend {
 
 #[async_trait]
 impl NodeBackend for ServerRoutedNodeBackend {
-    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         let mut connection = self.connect_to_agent(agent_id).await?;
         // `force: true` asks the target Agent for its live tmux state; the
         // registry's cached view is not "Agent truth" and the Tool promises it.
@@ -270,9 +281,10 @@ impl NodeBackend for ServerRoutedNodeBackend {
             .map_err(map_client_error)?;
         close_server(connection).await;
         match reply {
-            ServerSessionListReply::Listed(listed) => {
-                serde_json::to_value(listed).map_err(|error| ToolError::backend(error.to_string()))
-            }
+            ServerSessionListReply::Listed(listed) => Ok(SessionListOutput::from_web_sessions(
+                &listed.sessions,
+                listed.stale_agents,
+            )),
             ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
                 Err(refusal_error(status, message))
             }
@@ -284,7 +296,7 @@ impl NodeBackend for ServerRoutedNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<SessionCreatedOutput, ToolError> {
         let mut connection = self.connect_to_agent(agent_id).await?;
         // The MCP Tool has no Sandbox parameter; omitting the policy lets the
         // Server's create path apply its default (#2681).
@@ -300,12 +312,19 @@ impl NodeBackend for ServerRoutedNodeBackend {
                     .unwrap_or_else(|| "the Server refused the create".to_string()),
             ));
         }
-        // The same business payload the Server-embedded and Agent-embedded
-        // adapters return for this Tool.
-        Ok(json!({ "name": name, "warnings": reply.warnings }))
+        // The same stabilized business payload every hosting adapter returns
+        // for this Tool.
+        Ok(SessionCreatedOutput {
+            name: name.to_string(),
+            warnings: reply.warnings,
+        })
     }
 
-    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
+    async fn kill_session(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
         let mut connection = self.connect_to_agent(agent_id).await?;
         let reply = connection
             .kill_session(&format!("{agent_id}:{name}"))
@@ -319,7 +338,9 @@ impl NodeBackend for ServerRoutedNodeBackend {
                     .unwrap_or_else(|| "the Server refused the kill".to_string()),
             ));
         }
-        Ok(json!({ "name": name }))
+        Ok(SessionKillResponse {
+            name: name.to_string(),
+        })
     }
 }
 
@@ -379,12 +400,15 @@ impl RemoteNodeBackend {
 
 #[async_trait]
 impl NodeBackend for RemoteNodeBackend {
-    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         self.ensure_target(agent_id)?;
         let mut connection = self.connect().await?;
         let reply = connection.list_sessions().await.map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(SessionListOutput::from_agent_reply(
+            &reply.sessions,
+            reply.stale_agents,
+        ))
     }
 
     async fn create_session(
@@ -392,7 +416,7 @@ impl NodeBackend for RemoteNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<SessionCreatedOutput, ToolError> {
         self.ensure_target(agent_id)?;
         let mut connection = self.connect().await?;
         let reply = connection
@@ -400,10 +424,17 @@ impl NodeBackend for RemoteNodeBackend {
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(SessionCreatedOutput {
+            name: reply.name,
+            warnings: reply.warnings,
+        })
     }
 
-    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
+    async fn kill_session(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
         self.ensure_target(agent_id)?;
         let mut connection = self.connect().await?;
         let reply = connection
@@ -411,7 +442,7 @@ impl NodeBackend for RemoteNodeBackend {
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(reply)
     }
 }
 

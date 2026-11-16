@@ -85,9 +85,16 @@ pub fn materialize_with_composition(
             "filesystem.composition replaces filesystem.access; clear the access lists before selecting images",
         )]);
     }
+    // The client RootFS declaration is the request; the prepared composition
+    // is its materialization. Keep the declaration so `compile` can prove the
+    // two agree (notably `rootfs.writable`, #3698) instead of silently
+    // accepting a different prepared view.
     policy.filesystem = Some(SandboxFilesystemPolicy {
         access: SandboxFilesystemAccess::default(),
-        rootfs: None,
+        rootfs: draft
+            .filesystem
+            .as_ref()
+            .and_then(|filesystem| filesystem.rootfs.clone()),
         mounts: Vec::new(),
         workspace: None,
         composition: Some(composition),
@@ -360,8 +367,10 @@ mod tests {
                 digest: digest.clone(),
                 source: "/cache/base.erofs".to_string(),
             },
+            base_writable: false,
             workspace: Some(nession_protocol::contracts::sandbox::v1::SandboxWorkspace {
                 image: None,
+                lowers: Vec::new(),
                 write: "/state/workspace".to_string(),
                 ownership:
                     nession_protocol::contracts::sandbox::v1::SandboxWorkspaceOwnership::Agent,

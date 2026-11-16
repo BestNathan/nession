@@ -16,7 +16,9 @@ const previous=reconcileMcpPublication({
   catalog:{protocol_versions:['2025-03-26','2026-07-28'],
     upstream:{stable},
     tools:[{name:'nession_server_list_agents',description:'List agents',
-      inputSchema:{type:'object',properties:{}}}]},mainSha:oldSha
+      inputSchema:{type:'object',properties:{}},
+      outputSchema:{type:'object',properties:{
+        agents:{type:'array',description:'Registered Agents'}}}}]},mainSha:oldSha
 }).document;
 const compare={
   status:'ahead',ahead_by:5,total_commits:5,

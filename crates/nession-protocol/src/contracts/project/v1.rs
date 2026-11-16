@@ -47,7 +47,7 @@ pub const PROJECT_ID_PREFIX: &str = "project-";
 /// `ref` is either a branch name or a full commit SHA. The Project only
 /// declares the source; checking it out or cloning it is a separate capability.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSource {
     pub repository_url: String,
@@ -60,7 +60,7 @@ pub struct ProjectSource {
 /// The Project references it; it never clones, mutates or deletes the directory
 /// because the Project is edited or deleted.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectLocation {
     pub agent_id: String,
@@ -69,7 +69,7 @@ pub struct ProjectLocation {
 
 /// Optional defaults a new Session created in this Project should start from.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSessionDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -85,7 +85,7 @@ pub struct ProjectSessionDefaults {
 
 /// A persisted Project as list/detail reads return it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub project_id: String,
@@ -110,7 +110,7 @@ pub struct Project {
 
 /// `server.project.list`'s request — empty.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectListPayload {}
 
@@ -119,7 +119,7 @@ pub struct ProjectListPayload {}
 /// `projects` is empty when the read failed, so `error` distinguishes a failed
 /// read from a genuinely empty collection.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectListResponsePayload {
     pub projects: Vec<Project>,
@@ -129,7 +129,7 @@ pub struct ProjectListResponsePayload {
 
 /// `server.project.get`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectGetPayload {
     pub project_id: String,
@@ -140,7 +140,7 @@ pub struct ProjectGetPayload {
 /// `error_kind` is `invalid`, `not_found`, `unavailable` or `unauthorized`, the
 /// same vocabulary the Session metadata units use.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectGetResponsePayload {
     pub success: bool,
@@ -157,7 +157,7 @@ pub struct ProjectGetResponsePayload {
 /// A name is the only required field: a Project may exist with no Agent, no Git
 /// source, no location and no Session defaults.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectCreatePayload {
     pub name: String,
@@ -175,7 +175,7 @@ pub struct ProjectCreatePayload {
 
 /// `server.project.create`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectCreateResponsePayload {
     pub success: bool,
@@ -190,7 +190,7 @@ pub struct ProjectCreateResponsePayload {
 /// `server.project.update`'s request — a whole replacement of the mutable
 /// fields, like the Session Environment Binding's set operation (#170).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectUpdatePayload {
     pub project_id: String,
@@ -209,7 +209,7 @@ pub struct ProjectUpdatePayload {
 
 /// `server.project.update`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectUpdateResponsePayload {
     pub success: bool,
@@ -223,7 +223,7 @@ pub struct ProjectUpdateResponsePayload {
 
 /// `server.project.delete`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectDeletePayload {
     pub project_id: String,
@@ -231,7 +231,7 @@ pub struct ProjectDeletePayload {
 
 /// `server.project.delete`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectDeleteResponsePayload {
     pub success: bool,

@@ -1,15 +1,32 @@
-// Canonical, deterministic MCP publication reconciliation (#3624).
+// Canonical, deterministic MCP publication reconciliation (#3624, #3735).
 // The last published projection is an untrusted input: validate it before
 // preserving its exact bytes, and never advance a cursor on malformed input.
-import {mcpSemanticDigest} from './mcp-semantic.mjs';
+// Publication schema v2 requires a typed outputSchema for every Tool; a
+// structurally valid v1 snapshot may migrate exactly once, and a malformed
+// snapshot of either version still fails closed.
+import {legacyMcpSemanticDigestV1,mcpSemanticDigest} from './mcp-semantic.mjs';
 const SHA=/^[a-f0-9]{40}$/;
 const VERSION=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
 const REPO='BestNathan/nession';
 const NAME=/^[a-z][a-z0-9_]{1,127}$/;
 
-export function validMcpPublication(data){
-  if(data?.schema_version!==1||data.status!=='available'||
+function validTool(t,requireOutput){
+  if(!NAME.test(t?.name||'')||typeof t.description!=='string'||
+     t.description.length>4000||t.inputSchema?.type!=='object'||
+     JSON.stringify(t.inputSchema).length>50000)return false;
+  if(!requireOutput)return t.outputSchema===undefined||
+    (t.outputSchema!==null&&typeof t.outputSchema==='object'&&
+      !Array.isArray(t.outputSchema)&&JSON.stringify(t.outputSchema).length<=50000);
+  const output=t.outputSchema;
+  return output&&typeof output==='object'&&!Array.isArray(output)&&
+    output.type==='object'&&output.properties&&
+    typeof output.properties==='object'&&!Array.isArray(output.properties)&&
+    Object.keys(output.properties).length>0&&
+    JSON.stringify(output).length<=50000;
+}
+function validBase(data,schemaVersion,requireOutput){
+  if(data?.schema_version!==schemaVersion||data.status!=='available'||
      data.source?.repository!==REPO||data.source?.branch!=='main'||
      !SHA.test(data.source?.sha||'')||!DIGEST.test(data.semantic_sha256||'')||
      !Array.isArray(data.tools)||data.tools.length<1||data.tools.length>256||
@@ -29,19 +46,28 @@ export function validMcpPublication(data){
     return false;
   const names=new Set();
   for(const t of data.tools){
-    if(!NAME.test(t?.name||'')||names.has(t.name)||
-       typeof t.description!=='string'||t.description.length>4000||
-       t.inputSchema?.type!=='object'||JSON.stringify(t.inputSchema).length>50000)
-      return false;
+    if(names.has(t?.name)||!validTool(t,requireOutput))return false;
     names.add(t.name);
   }
+  return true;
+}
+
+export function validMcpPublication(data){
+  if(!validBase(data,2,true))return false;
   return mcpSemanticDigest(data)===data.semantic_sha256;
 }
+
+/** A structurally valid pre-#3735 snapshot, accepted only as a migration source. */
+export function validLegacyMcpPublicationV1(data){
+  if(!validBase(data,1,false))return false;
+  return legacyMcpSemanticDigestV1(data)===data.semantic_sha256;
+}
+
 export function reconcileMcpPublication({catalog,mainSha,previous=null}){
   if(!SHA.test(mainSha||''))throw Error('MCP publication requires pinned main SHA');
   const digest=mcpSemanticDigest(catalog);
   const fresh={
-    schema_version:1,status:'available',tools:catalog.tools,
+    schema_version:2,status:'available',tools:catalog.tools,
     protocol_versions:catalog.protocol_versions,
     upstream:catalog.upstream,
     semantic_sha256:digest,
@@ -49,10 +75,17 @@ export function reconcileMcpPublication({catalog,mainSha,previous=null}){
   };
   if(!validMcpPublication(fresh))throw Error('Invalid generated MCP catalog');
   if(previous!==null){
-    if(!validMcpPublication(previous))
+    if(validMcpPublication(previous)){
+      if(previous.semantic_sha256===digest)
+        return {document:previous,changed:false,reason:'unchanged'};
+    }else if(validLegacyMcpPublicationV1(previous)){
+      // A real schema-v1 publication migrates by rebuilding from the current
+      // typed exporters. Its bytes are never reused, because the new digest
+      // must include the output contracts that v1 could not carry.
+      return {document:fresh,changed:true,reason:'schema_migration'};
+    }else{
       throw Error('Published MCP catalog is malformed: fail closed, no cursor advancement');
-    if(previous.semantic_sha256===digest)
-      return {document:previous,changed:false,reason:'unchanged'};
+    }
   }
   return {document:fresh,changed:true,reason:previous===null?'bootstrap':'semantic_change'};
 }

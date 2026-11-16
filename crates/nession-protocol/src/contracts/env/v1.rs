@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Where an env file physically lives.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EnvSource {
@@ -29,7 +29,7 @@ impl EnvSource {
 
 /// Metadata describing a single env file in a listing.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvFileInfo {
     /// Filename including the `.env` suffix (e.g. `staging.env`).
@@ -49,11 +49,14 @@ pub struct EnvFileInfo {
 
 /// A reference to an env file, used to select files for a session.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvFileRef {
+    /// Filename including the `.env` suffix.
     pub name: String,
+    /// Where the file lives.
     pub source: EnvSource,
+    /// For `EnvSource::Agent`, the owning agent id. `None` for server files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
 }
@@ -61,7 +64,7 @@ pub struct EnvFileRef {
 /// A resolved env-file snapshot: the file's parsed variables captured at
 /// use-time so later edits don't affect a running session.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvSnapshot {
     pub name: String,
@@ -79,14 +82,15 @@ pub struct EnvSnapshot {
 
 /// `server.env.list` — list env files from server + all online agents.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientEnvListPayload {}
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvListResponsePayload {
+    /// Metadata for every ENV file the Server and its online Agents know.
     pub files: Vec<EnvFileInfo>,
     /// Set only when the Server refuses before listing anything — an
     /// unauthenticated caller is told why rather than handed a silently empty
@@ -113,7 +117,7 @@ fn default_env_source() -> EnvSource {
 
 /// `server.env.get` — read one env file's raw content for editing.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvGetPayload {
     pub name: String,
@@ -124,10 +128,12 @@ pub struct ClientEnvGetPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvGetResponsePayload {
+    /// Whether the file was read.
     pub success: bool,
+    /// The file's raw contents. May contain credentials; absent on failure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     /// Session ids currently using this file; an empty list when nothing is.
@@ -141,13 +147,14 @@ pub struct ClientEnvGetResponsePayload {
     /// does rather than changing it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_use_by: Option<Vec<String>>,
+    /// Why the read failed, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
 /// `server.env.write` — create or overwrite an env file (server or agent).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvWritePayload {
     pub name: String,
@@ -178,16 +185,19 @@ pub struct ClientEnvWritePayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvWriteResponsePayload {
+    /// Whether the file was written.
     pub success: bool,
     /// True when the write was refused because the file already exists and
     /// `overwrite` was false (UI prompts for confirmation).
     #[serde(default)]
     pub exists: bool,
+    /// Why the write failed, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Non-fatal warnings from parsing or re-sourcing the file.
     #[serde(default)]
     pub warnings: Vec<String>,
     /// Sessions holding the file, on the refusal that names them.
@@ -210,7 +220,7 @@ pub struct ClientEnvWriteResponsePayload {
 
 /// `server.env.delete` — delete an env file.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvDeletePayload {
     pub name: String,
@@ -230,10 +240,12 @@ pub struct ClientEnvDeletePayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientEnvDeleteResponsePayload {
+    /// Whether the file was deleted.
     pub success: bool,
+    /// Why the delete failed, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -251,7 +263,7 @@ pub struct ClientEnvDeleteResponsePayload {
 /// lifetime, and one added later is `attach`. The binding itself is ordered and
 /// replace-whole; nothing here makes a client the owner of the binding.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionEnvProfile {
     pub profile: EnvFileRef,
@@ -268,10 +280,12 @@ pub struct SessionEnvProfile {
 /// One desired profile plus what the Server currently knows about its
 /// materialization.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEnvBindingProfileState {
+    /// The selected ENV file and its owning source.
     pub profile: EnvFileRef,
+    /// `create` or `attach`: when the profile entered the binding.
     pub phase: String,
     /// Hash captured at the binding revision the Session is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -289,7 +303,7 @@ pub struct SessionEnvBindingProfileState {
 /// know which keys are managed and how far convergence got, not what their
 /// secrets are.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionEnvObservedState {
     /// The binding revision the Agent last applied.
@@ -308,6 +322,7 @@ pub struct SessionEnvObservedState {
     /// The revision the interactive shell last reported converging to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_revision: Option<u64>,
+    /// Why the last application attempt failed, when one did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
@@ -319,13 +334,18 @@ pub struct SessionEnvObservedState {
 /// then empty with revision 0, and `observed` says what the Agent has (or
 /// `None` when the Agent cannot be asked).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEnvBindingState {
+    /// The canonical `agent_id:session_name` identity.
     pub session_id: String,
+    /// The latest desired binding revision.
     pub desired_revision: u64,
+    /// The ordered desired profiles at `desired_revision`.
     #[serde(default)]
     pub desired_profiles: Vec<SessionEnvBindingProfileState>,
+    /// The Agent-observed materialization, absent when the Agent cannot be
+    /// asked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed: Option<SessionEnvObservedState>,
     /// Why `observed` is absent or the binding could not be read. Desired
@@ -337,7 +357,7 @@ pub struct SessionEnvBindingState {
 /// An active env application on a session (for visibility). Reported alongside
 /// session listings / attach info.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveEnvFile {
     pub name: String,
@@ -355,7 +375,7 @@ pub struct ActiveEnvFile {
 
 /// `server.env.list` — ask an agent for its local env files.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEnvListPayload {
     pub request_id: String,
@@ -363,7 +383,7 @@ pub struct ServerEnvListPayload {
 
 /// `server.env.get` — read one agent-local env file.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEnvGetPayload {
     pub request_id: String,
@@ -372,7 +392,7 @@ pub struct ServerEnvGetPayload {
 
 /// `server.env.write` — write an agent-local env file.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEnvWritePayload {
     pub request_id: String,
@@ -384,7 +404,7 @@ pub struct ServerEnvWritePayload {
 
 /// `server.env.delete` — delete an agent-local env file.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEnvDeletePayload {
     pub request_id: String,
@@ -406,7 +426,7 @@ pub struct ServerEnvDeletePayload {
 /// is the durable identity and the snapshot is the content captured for this
 /// revision.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionEnvBindingSetPayload {
     pub request_id: String,
@@ -421,7 +441,7 @@ pub struct ServerSessionEnvBindingSetPayload {
 
 /// `agent.session.env.binding.get` — read one Session's observed binding state.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSessionEnvBindingGetPayload {
     pub request_id: String,
@@ -435,7 +455,7 @@ pub struct ServerSessionEnvBindingGetPayload {
 /// synthetic empty state: an old Session's absence of a binding is not the same
 /// claim as a Session intentionally bound to `[]`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSessionEnvBindingGetResponsePayload {
     pub request_id: String,
@@ -447,7 +467,7 @@ pub struct AgentSessionEnvBindingGetResponsePayload {
 
 /// One Session's observed state, as an Agent reports it after a reconnect.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSessionEnvBindingReportEntry {
     pub session_name: String,
@@ -462,7 +482,7 @@ pub struct AgentSessionEnvBindingReportEntry {
 /// an Agent reconnect) does not make a live Session look unbound merely because
 /// the Server's cache was empty.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSessionEnvBindingReportPayload {
     pub agent_id: String,

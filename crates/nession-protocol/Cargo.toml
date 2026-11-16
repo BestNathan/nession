@@ -20,15 +20,21 @@ thiserror.workspace = true
 # because a list whose comment says "this is the ownership rule" should not grow
 # a transitive graph for a build nobody ships.
 ts-rs = { workspace = true, optional = true }
-# Codegen only as well, and for the same reason. Carries the `derive` feature
-# because the contracts derive `JsonSchema` directly; a runtime build never sees
-# either crate.
+# Schema derivation is a runtime contract for MCP Tools (#3735): a Tool's
+# advertised outputSchema must come from the same authoritative contract type
+# its host validates replies against. The `schema` feature enables only
+# `schemars`; `ts-rs` stays codegen-only. Carries the `derive` feature because
+# the contracts derive `JsonSchema` directly.
 schemars = { workspace = true, optional = true, features = ["derive"] }
 
 [features]
+# Derives `JsonSchema` on the contracts. Enabled at runtime by `nession-mcp`
+# so MCP output schemas are generated from the canonical contract types; the
+# Protocol Kernel still depends on no Nession consumer.
+schema = ["dep:schemars"]
 # Derives `TS` and `JsonSchema` on the contracts so the generators can read
 # them. Never enabled by a runtime build; see crates/nession-protocol-codegen.
-codegen = ["dep:ts-rs", "dep:schemars"]
+codegen = ["dep:ts-rs", "schema"]
 
 [dev-dependencies]
 serde_json.workspace = true
