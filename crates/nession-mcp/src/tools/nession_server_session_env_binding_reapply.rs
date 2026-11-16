@@ -7,10 +7,12 @@
 //! instead of overwriting a concurrent writer.
 
 use crate::error::ToolError;
-use crate::tool::{parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 use crate::tools::env_target::canonical_session_id;
 use async_trait::async_trait;
-use nession_protocol::contracts::session::v1::ClientSessionEnvBindingReapplyPayload;
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -38,6 +40,10 @@ impl ToolHandler for NessionServerSessionEnvBindingReapply {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<ClientSessionEnvBindingResponsePayload>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
@@ -45,13 +51,14 @@ impl ToolHandler for NessionServerSessionEnvBindingReapply {
     ) -> Result<Value, ToolError> {
         let arguments: Arguments = parse_arguments(arguments)?;
         canonical_session_id(&arguments.session_id)?;
-        context
+        let reply = context
             .cluster
             .session_env_binding_reapply(ClientSessionEnvBindingReapplyPayload {
                 session_id: arguments.session_id,
                 expected_revision: Some(arguments.expected_revision),
             })
-            .await
+            .await?;
+        reply_value(&reply)
     }
 }
 

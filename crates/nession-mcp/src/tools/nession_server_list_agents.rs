@@ -5,11 +5,12 @@
 //! Agent node. Hosting mode does not change the owner.
 
 use async_trait::async_trait;
+use nession_protocol::contracts::agent::v1::WebAgentsListResponse;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::error::ToolError;
-use crate::tool::{parse_arguments, schema_for, ToolContext, ToolHandler};
+use crate::tool::{parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
 
 /// The Tool definition.
 pub struct NessionServerListAgents;
@@ -33,13 +34,18 @@ impl ToolHandler for NessionServerListAgents {
         schema_for::<Arguments>()
     }
 
+    fn output_schema(&self) -> Map<String, Value> {
+        schema_for::<WebAgentsListResponse>()
+    }
+
     async fn call(
         &self,
         context: &ToolContext,
         arguments: Map<String, Value>,
     ) -> Result<Value, ToolError> {
         let _: Arguments = parse_arguments(arguments)?;
-        context.cluster.list_agents().await
+        let reply = context.cluster.list_agents().await?;
+        reply_value(&reply)
     }
 }
 

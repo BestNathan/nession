@@ -15,7 +15,8 @@ import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
 import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
 import {createHash} from 'node:crypto';
-import {reconcileMcpPublication,validMcpPublication} from './mcp-reconcile.mjs';
+import {reconcileMcpPublication,validLegacyMcpPublicationV1,validMcpPublication}
+  from './mcp-reconcile.mjs';
 import {loadStableMcpRelease} from './mcp-upstream.mjs';
 import {canReusePublishedMcp} from './mcp-export-gate.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
@@ -231,7 +232,7 @@ if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
     if(!stat.isFile()||stat.isSymbolicLink()||stat.size>2_000_000||stat.size<10)
       throw Error('Invalid last-good MCP publication file');
     previous=JSON.parse(await readFile(prevFile,'utf8'));
-    if(!validMcpPublication(previous))
+    if(!validMcpPublication(previous)&&!validLegacyMcpPublicationV1(previous))
       throw Error('Published MCP catalog is malformed: refuse untrusted compare source');
   }
   // Query a verified official stable release every time, even on a no-op.

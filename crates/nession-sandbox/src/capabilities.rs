@@ -384,17 +384,19 @@ pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementation
     };
     let mut composition_entry = implementation("filesystem.composition", composition);
     if linux && capabilities.erofs {
-        composition_entry
-            .options
-            .push(if capabilities.erofs_overlay {
-                SandboxOptionSupport::available("workspace_image")
-            } else {
-                SandboxOptionSupport::unavailable(
-                    "workspace_image",
-                    SandboxUnsupportedReason::KernelFeatureMissing,
-                    "a Project source image requires the unprivileged fuse-overlayfs helper",
-                )
-            });
+        for option in ["workspace_image", "workspace_multilower", "rootfs_writable"] {
+            composition_entry
+                .options
+                .push(if capabilities.erofs_overlay {
+                    SandboxOptionSupport::available(option)
+                } else {
+                    SandboxOptionSupport::unavailable(
+                        option,
+                        SandboxUnsupportedReason::KernelFeatureMissing,
+                        "this composition mode requires the unprivileged fuse-overlayfs helper",
+                    )
+                });
+        }
     }
     entries.push(composition_entry);
 
@@ -806,16 +808,31 @@ fn validate_linux(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
                 .to_string(),
         ));
     }
-    let needs_overlay = compiled
+    let (needs_overlay, needs_rootfs_overlay) = compiled
         .filesystem
         .as_ref()
         .and_then(|filesystem| filesystem.composition.as_ref())
-        .and_then(|composition| composition.workspace.as_ref())
-        .is_some_and(|workspace| workspace.image.is_some());
+        .map(|composition| {
+            (
+                composition
+                    .workspace
+                    .as_ref()
+                    .is_some_and(crate::policy::CompiledWorkspace::has_lowers),
+                composition.base_writable,
+            )
+        })
+        .unwrap_or((false, false));
     if needs_overlay && !capabilities.erofs_overlay {
         return Err(SandboxError::UnsupportedPolicy(
-            "filesystem.composition with a Project source image requires the unprivileged \
+            "filesystem.composition with Project source lowers requires the unprivileged \
              fuse-overlayfs helper for its bounded writable upper/work"
+                .to_string(),
+        ));
+    }
+    if needs_rootfs_overlay && !capabilities.erofs_overlay {
+        return Err(SandboxError::UnsupportedPolicy(
+            "a writable RootFS requires the unprivileged fuse-overlayfs helper for its \
+             execution-owned transient upper/work"
                 .to_string(),
         ));
     }
@@ -960,17 +977,22 @@ pub fn unsupported_requests(
                                 .to_string(),
                         );
                     }
-                    if composition
-                        .workspace
-                        .as_ref()
-                        .and_then(|workspace| workspace.image.as_ref())
-                        .is_some()
-                        && !capabilities.erofs_overlay
+                    if composition.workspace.as_ref().is_some_and(
+                        nession_protocol::contracts::sandbox::v1::SandboxWorkspace::has_lowers,
+                    ) && !capabilities.erofs_overlay
                     {
                         push(
                             &mut errors,
-                            "filesystem.composition.workspace.image",
-                            "a Project source image requires the unprivileged fuse-overlayfs helper"
+                            "filesystem.composition.workspace.lowers",
+                            "Project source lowers require the unprivileged fuse-overlayfs helper"
+                                .to_string(),
+                        );
+                    }
+                    if composition.base_writable && !capabilities.erofs_overlay {
+                        push(
+                            &mut errors,
+                            "filesystem.composition.base",
+                            "a writable RootFS requires the unprivileged fuse-overlayfs helper"
                                 .to_string(),
                         );
                     }
@@ -1620,6 +1642,52 @@ mod tests {
             seccomp.options[0].id,
             crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1
         );
+    }
+
+    fn writable_rootfs_policy() -> SandboxPolicy {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        policy(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "image", "digest": digest, "writable": true },
+                "composition": {
+                    "base": { "digest": digest, "source": "/cache/base.erofs" },
+                    "base_writable": true,
+                    "workspace": { "write": "/state/workspace" },
+                    "toolchains": []
+                }
+            }
+        }))
+    }
+
+    #[test]
+    fn a_writable_rootfs_is_refused_without_the_measured_overlay_helper() {
+        let mut capabilities = linux_capabilities();
+        capabilities.erofs_overlay = false;
+        let policy = writable_rootfs_policy();
+        let compiled = crate::compile(&policy).expect("the writable RootFS compiles");
+        let error = validate(&compiled, &capabilities)
+            .expect_err("a writable RootFS needs the overlay helper");
+        assert!(error.to_string().contains("writable RootFS"), "{error}");
+        let errors = unsupported_requests(&policy, &capabilities);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.field == "filesystem.composition.base"),
+            "{errors:?}"
+        );
+
+        let catalog = catalog(&capabilities);
+        let composition = implementation(&catalog, "filesystem.composition");
+        assert!(composition.options.iter().any(|option| {
+            option.id == "rootfs_writable"
+                && option.status == SandboxImplementationStatus::Unavailable
+        }));
+        assert!(composition.options.iter().any(|option| {
+            option.id == "workspace_multilower"
+                && option.status == SandboxImplementationStatus::Unavailable
+        }));
     }
 
     #[test]

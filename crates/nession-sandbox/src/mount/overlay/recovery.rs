@@ -21,13 +21,15 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::digest::is_valid_digest;
-use crate::mount_manager::ConsumerRef;
+use nession_erofs::digest::is_valid_digest;
+use nession_erofs::mount_manager::ConsumerRef;
 
 use super::manager::{
     adopt_token, lock, lower_consumer_id, OverlayMountManager, ProtectedWorkspaces,
 };
-use super::state::{OverlayBinding, OverlayConsumerRef, OverlayRecoveryReport, OverlayState};
+use super::state::{
+    OverlayBinding, OverlayConsumerRef, OverlayLowerBinding, OverlayRecoveryReport, OverlayState,
+};
 use super::storage::{self, OverlayWorkspaceKey, OwnerLock};
 
 /// The durable identity of one physical Overlay mount.
@@ -36,9 +38,13 @@ pub(super) struct OverlayIdentityFile {
     pub(super) workspace: OverlayWorkspaceKey,
     pub(super) mountpoint: PathBuf,
     pub(super) generation: String,
+    /// The first lower, kept for pre-#3698 identities.
     pub(super) lower_digest: String,
     pub(super) lower_mountpoint: PathBuf,
     pub(super) lower_generation: String,
+    /// The ordered lower set (#3698). Absent means the legacy one-lower set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) lowers: Vec<OverlayLowerBinding>,
     pub(super) agent_identity: String,
     pub(super) mount_namespace: String,
     pub(super) created_at: u64,
@@ -57,6 +63,7 @@ impl OverlayIdentityFile {
             lower_digest: binding.lower_digest.clone(),
             lower_mountpoint: binding.lower_mountpoint.clone(),
             lower_generation: binding.lower_generation.clone(),
+            lowers: binding.lowers.clone(),
             agent_identity: agent_identity.to_string(),
             mount_namespace: mount_namespace.to_string(),
             created_at: storage::now_seconds(),
@@ -71,6 +78,7 @@ impl OverlayIdentityFile {
             lower_digest: self.lower_digest.clone(),
             lower_mountpoint: self.lower_mountpoint.clone(),
             lower_generation: self.lower_generation.clone(),
+            lowers: self.lowers.clone(),
         }
     }
 }
@@ -173,9 +181,14 @@ impl OverlayMountManager {
                         .then(|| "generation mismatch".to_string())
                 })
                 .or_else(|| {
-                    (identity.lower_digest != consumer.lower_digest
-                        || identity.lower_generation != consumer.lower_generation)
-                        .then(|| "lower identity mismatch".to_string())
+                    let expected = consumer.effective_lowers();
+                    let recorded = identity.binding().effective_lowers();
+                    (expected.len() != recorded.len()
+                        || expected.iter().zip(&recorded).any(|(expected, recorded)| {
+                            expected.digest != recorded.digest
+                                || expected.generation != recorded.generation
+                        }))
+                    .then(|| "ordered lower identity mismatch".to_string())
                 });
             if let Some(reason) = reason {
                 report.unavailable.push((workspace_text, reason));
@@ -241,30 +254,43 @@ impl OverlayMountManager {
                 }
             }
             if state.lower.is_none() {
-                let adoption = self.inner.lower.adopt_lowers(&[ConsumerRef {
-                    digest: consumer.lower_digest.clone(),
-                    execution_id: lower_consumer_id(&entry.workspace),
-                    generation: consumer.lower_generation.clone(),
-                }]);
-                let adopted = adoption.adopted.iter().any(|(digest, execution)| {
-                    digest == &consumer.lower_digest
-                        && execution == &lower_consumer_id(&entry.workspace)
+                let expected = consumer.effective_lowers();
+                let refs: Vec<ConsumerRef> = expected
+                    .iter()
+                    .enumerate()
+                    .map(|(index, lower)| ConsumerRef {
+                        digest: lower.digest.clone(),
+                        execution_id: lower_consumer_id(&entry.workspace, index),
+                        generation: lower.generation.clone(),
+                    })
+                    .collect();
+                let adoption = self.inner.lower.adopt_lowers(&refs);
+                let missing = refs.iter().find(|consumer| {
+                    !adoption.adopted.iter().any(|(digest, execution)| {
+                        digest == &consumer.digest && execution == &consumer.execution_id
+                    })
                 });
-                if !adopted {
+                if let Some(missing) = missing {
                     let reason = adoption
                         .unavailable
-                        .first()
+                        .iter()
+                        .find(|(digest, _)| digest == &missing.digest)
                         .map(|(_, reason)| reason.clone())
-                        .unwrap_or_else(|| {
-                            "the read-only lower could not be re-adopted".to_string()
-                        });
+                        .unwrap_or_else(|| "a read-only lower could not be re-adopted".to_string());
                     report.unavailable.push((workspace_text, reason));
                     continue;
                 }
-                state.lower = Some(super::manager::LowerHandle::Adopted {
-                    digest: consumer.lower_digest.clone(),
-                    generation: consumer.lower_generation.clone(),
-                });
+                state.lower = Some(
+                    expected
+                        .iter()
+                        .enumerate()
+                        .map(|(index, lower)| super::manager::LowerHandle::Adopted {
+                            digest: lower.digest.clone(),
+                            generation: lower.generation.clone(),
+                            consumer_id: lower_consumer_id(&entry.workspace, index),
+                        })
+                        .collect(),
+                );
             }
             state.phase = OverlayState::Mounted;
             state.binding = Some(identity.binding());
@@ -411,14 +437,16 @@ impl OverlayMountManager {
                     continue;
                 }
             }
-            // The Overlay is gone; the stale lower consumer and sidecars are
+            // The Overlay is gone; the stale lower consumers and sidecars are
             // safe to clear. Durable upper/work are untouched.
-            if is_valid_digest(&identity.lower_digest) {
-                let _ = self.inner.lower.release_lower(
-                    &identity.lower_digest,
-                    &lower_consumer_id(&identity.workspace),
-                    Some(&identity.lower_generation),
-                );
+            for (index, lower) in identity.binding().effective_lowers().iter().enumerate() {
+                if is_valid_digest(&lower.digest) {
+                    let _ = self.inner.lower.release_lower(
+                        &lower.digest,
+                        &lower_consumer_id(&identity.workspace, index),
+                        Some(&lower.generation),
+                    );
+                }
             }
             remove_identity(&path);
             storage::remove_owner_record(&identity.workspace.directory());
@@ -470,11 +498,20 @@ fn identity_mismatch(
             mountpoint.display()
         ));
     }
-    if identity.generation.trim().is_empty() || identity.lower_generation.trim().is_empty() {
+    let lowers = identity.binding().effective_lowers();
+    if lowers.is_empty() {
+        return Some("the durable identity has no ordered lower".to_string());
+    }
+    if identity.generation.trim().is_empty() {
         return Some("the durable identity has an empty generation".to_string());
     }
-    if !is_valid_digest(&identity.lower_digest) {
-        return Some("the durable identity has an invalid lower digest".to_string());
+    for lower in &lowers {
+        if lower.generation.trim().is_empty() {
+            return Some("the durable identity has an empty lower generation".to_string());
+        }
+        if !is_valid_digest(&lower.digest) {
+            return Some("the durable identity has an invalid lower digest".to_string());
+        }
     }
     None
 }
@@ -495,6 +532,7 @@ mod tests {
             lower_digest: format!("sha256:{}", "a".repeat(64)),
             lower_mountpoint: root.path().join("lower"),
             lower_generation: "lower-1".to_string(),
+            lowers: Vec::new(),
         };
         let identity = OverlayIdentityFile::from_binding(&binding, "agent-a", "mnt:[1]");
         let path = root.path().join("state.json");

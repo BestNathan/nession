@@ -15,7 +15,7 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView, useAIConversation } from '@/shared/ai-conversation';
 import { claudeCodeConversationAdapter } from '../conversation/adapter';
 import { useTranscripts } from '../hooks/useTranscripts';
-import { useTranscriptItems } from '../hooks/useTranscriptItems';
+import { useTranscriptRecords } from '../hooks/useTranscriptRecords';
 import { useMemory } from '../hooks/useMemory';
 import { useMcp } from '../hooks/useMcp';
 import { TranscriptView } from './TranscriptView';
@@ -559,11 +559,18 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
   // where the reader was, and the list does not depend on what is open.
   const [openTranscript, setOpenTranscript] = useState<string | null>(null);
   const transcripts = useTranscripts({ agentId, sessionId });
-  const transcriptItems = useTranscriptItems({
+  const transcriptRecords = useTranscriptRecords({
     agentId,
     sessionId,
     transcriptId: openTranscript,
   });
+
+  // A different Session or Agent is a different transcript scope. The open
+  // transcript and any raw inspector from the previous scope must not remain
+  // readable under the new one (#3726).
+  useEffect(() => {
+    setOpenTranscript(null);
+  }, [agentId, sessionId]);
   // Memory is fetched only while its view is active, so a Session that never
   // opens it pays nothing. `active` is also the refresh trigger: entering the
   // tab re-resolves the Session's repository before any file is shown (#2689).
@@ -609,7 +616,7 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     handleLoadMore,
     conversation,
     transcripts,
-    transcriptItems,
+    transcriptRecords,
     openTranscript,
     setOpenTranscript,
     memory,
@@ -630,7 +637,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
     handleLoadMore,
     conversation,
     transcripts,
-    transcriptItems,
+    transcriptRecords,
     openTranscript,
     setOpenTranscript,
     memory,
@@ -702,13 +709,16 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
       <main className={activeView === 'transcripts' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
         <TranscriptView
           list={transcripts.list}
-          items={transcriptItems.items}
+          records={transcriptRecords.records}
           open={openTranscript}
+          agentId={agentId}
+          sessionId={sessionId}
           // The same split `ConversationView` makes from the same field: the
           // experience decides how much room there is, and App has to push.
           layout={ctx.experience === 'app' ? 'push' : 'master-detail'}
           onSelect={setOpenTranscript}
-          onLoadOlder={() => transcriptItems.loadOlder()}
+          onLoadOlder={() => transcriptRecords.loadOlder()}
+          onReload={() => transcriptRecords.reload()}
           onBack={() => setOpenTranscript(null)}
         />
       </main>

@@ -659,14 +659,14 @@ impl WorkspaceManager {
         }
         let initialized = record.overlay_storage;
         let storage = if initialized {
-            nession_erofs::overlay::storage::verify(&directory).with_context(|| {
+            nession_sandbox::mount::overlay::storage::verify(&directory).with_context(|| {
                 format!(
                     "Workspace {workspace_id} records durable Overlay storage that is missing or \
                      unsafe; refusing to create a fresh empty upper"
                 )
             })?
         } else {
-            nession_erofs::overlay::storage::initialize(&directory)?
+            nession_sandbox::mount::overlay::storage::initialize(&directory)?
         };
         let mut changed = !initialized;
         if current.is_empty() {

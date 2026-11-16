@@ -225,7 +225,7 @@ mounts?: Array<SandboxMount>,
  * Optional Workspace selection at the implicit `/workspace` target.
  */
 workspace?: SandboxFilesystemWorkspace | null, };
-export type SandboxFilesystemRoot = { "kind": "local" } | { "kind": "image", digest: string, };
+export type SandboxFilesystemRoot = { "kind": "local" } | { "kind": "image", digest: string, writable?: boolean | null, };
 export type SandboxMountSource = { "kind": "image", digest: string, };
 export type SandboxMount = { source: SandboxMountSource, 
 /**

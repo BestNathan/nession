@@ -50,11 +50,11 @@ pub struct SandboxSettings {
     /// closed rather than mounting physical images per execution.
     #[cfg(target_os = "linux")]
     pub mount_manager: Option<std::sync::Arc<nession_erofs::mount_manager::MountManager>>,
-    /// The Agent-owned shared writable Overlay manager (#3582). One physical
-    /// Merged View per managed Workspace is leased by every execution that
-    /// binds it; the Sandbox never creates a per-execution Overlay.
+    /// The Sandbox-owned shared writable Overlay manager (#3582, #3695). One
+    /// physical Merged View per managed Workspace is leased by every execution
+    /// that binds it; the Sandbox never creates a per-execution Overlay.
     #[cfg(target_os = "linux")]
-    pub overlay_manager: Option<std::sync::Arc<nession_erofs::overlay::OverlayMountManager>>,
+    pub overlay_manager: Option<std::sync::Arc<crate::mount::overlay::OverlayMountManager>>,
     /// The unprivileged EROFS FUSE helper.
     pub erofsfuse_path: PathBuf,
     /// The FUSE unmount helper.

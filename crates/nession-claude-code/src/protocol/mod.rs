@@ -12,9 +12,21 @@
 //!   memory_read/v1
 //!   messages/v1
 //!   read/v1
+//!   transcript_record/v1
+//!   transcript_records/v1
 //!   transcript_items/v1
 //!   transcripts/v1
 //! ```
+//!
+//! ## Raw transcript records (`#3726`)
+//!
+//! `claude-code.transcript-records` and `claude-code.transcript-record` are the
+//! Transcript surface's transport: pages of original JSONL lines, and bounded
+//! full-record lookup by an opaque resource-scoped reference. The provider does
+//! not classify or pair these records; one Claude-specific frontend adapter
+//! does. `claude-code.transcript-items` remains for compatibility with clients
+//! built before #3726 migrated the Web Transcript view — it is the legacy
+//! semantic projection, not a second owner of the new path.
 //!
 //! The directory is spelled with an underscore and the unit id is not
 //! (`transcript-items`), because one is a Rust module path and the other is a
@@ -85,6 +97,8 @@ pub mod memory_read;
 pub mod messages;
 pub mod read;
 pub mod transcript_items;
+pub mod transcript_record;
+pub mod transcript_records;
 pub mod transcripts;
 
 use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor};
@@ -105,6 +119,8 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         messages::descriptor()?,
         transcripts::descriptor()?,
         transcript_items::descriptor()?,
+        transcript_records::descriptor()?,
+        transcript_record::descriptor()?,
         memory::descriptor()?,
         memory_read::descriptor()?,
         mcp_servers::descriptor()?,
@@ -126,13 +142,16 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 12] = [
+    const EXPECTED_IDS: [&str; 14] = [
         "claude-code.list",
         "claude-code.read",
         "claude-code.conversations",
         "claude-code.messages",
         "claude-code.transcripts",
         "claude-code.transcript-items",
+        // #3726: raw record transport and bounded single-record access.
+        "claude-code.transcript-records",
+        "claude-code.transcript-record",
         "claude-code.memory",
         "claude-code.memory-read",
         // #3600: Claude MCP inventory, detail/discovery, local/project

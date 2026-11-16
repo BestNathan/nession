@@ -17,11 +17,10 @@ use std::sync::Arc;
 use nession_mcp::backend::{ClusterBackend, NodeBackend, UnavailableClusterBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::pending_mutation::PendingMutation;
+use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
+use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
 use nession_mcp::{McpService, ServiceConfig};
-use nession_protocol::contracts::session::v1::{
-    SessionCreateResponse, SessionKillResponse, SessionListResponse,
-};
-use serde_json::Value;
+use nession_protocol::contracts::session::v1::{SessionKillResponse, SessionListResponse};
 
 use crate::config::AgentConfig;
 use crate::execution::ResourceKey;
@@ -173,18 +172,18 @@ impl AgentNodeBackend {
 
 #[async_trait::async_trait]
 impl NodeBackend for AgentNodeBackend {
-    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         self.ensure_target(agent_id)?;
         let sessions = self
             .tmux
             .list_sessions()
             .await
             .map_err(|error| ToolError::backend(format!("{error:#}")))?;
-        serde_json::to_value(SessionListResponse {
+        let reply = SessionListResponse {
             sessions,
             stale_agents: Vec::new(),
-        })
-        .map_err(|error| ToolError::backend(error.to_string()))
+        };
+        Ok(SessionListOutput::from_agent_sessions(&reply.sessions))
     }
 
     async fn create_session(
@@ -192,7 +191,7 @@ impl NodeBackend for AgentNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<SessionCreatedOutput, ToolError> {
         self.ensure_target(agent_id)?;
         let working_dir = match working_dir {
             Some(path) => SessionManager::validate_initial_working_dir(path)
@@ -219,18 +218,20 @@ impl NodeBackend for AgentNodeBackend {
                     )
                     .await
                     .map_err(|error| ToolError::backend(format!("{error:#}")))?;
-                Ok(SessionCreateResponse {
+                Ok(SessionCreatedOutput {
                     name: queued_name,
                     warnings: outcome.warnings,
-                    sandbox: outcome.sandbox,
-                    workspace: None,
                 })
             })
             .await?;
-        serde_json::to_value(response).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(response)
     }
 
-    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
+    async fn kill_session(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
         self.ensure_target(agent_id)?;
         let tmux = Arc::clone(&self.tmux);
         let sessions = Arc::clone(&self.sessions);
@@ -253,7 +254,7 @@ impl NodeBackend for AgentNodeBackend {
                 Ok(SessionKillResponse { name: queued_name })
             })
             .await?;
-        serde_json::to_value(response).map_err(|error| ToolError::backend(error.to_string()))
+        Ok(response)
     }
 }
 

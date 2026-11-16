@@ -143,13 +143,19 @@ pub fn build(
             // overrides the read-only Project image.
             args.push("--tmpfs".to_string());
             args.push("/".to_string());
-            push_bind(&mut args, "--ro-bind", &resolved.base, Path::new("/"));
+            push_bind(
+                &mut args,
+                if resolved.base_writable {
+                    "--bind"
+                } else {
+                    "--ro-bind"
+                },
+                &resolved.base,
+                Path::new("/"),
+            );
             match &resolved.workspace {
                 crate::linux::erofs::WorkspaceMount::Bind(path) => {
                     push_bind(&mut args, "--bind", path, workspace);
-                }
-                crate::linux::erofs::WorkspaceMount::Image(path) => {
-                    push_bind(&mut args, "--ro-bind", path, workspace);
                 }
                 crate::linux::erofs::WorkspaceMount::Overlay(path) => {
                     push_bind(&mut args, "--bind", path, workspace);

@@ -32,7 +32,15 @@ export type ClientEnvDeletePayload = { name: string, source: EnvSource, agent_id
  * carries its own counterpart (`overwrite`); this was the missing half.
  */
 force: boolean, };
-export type ClientEnvDeleteResponsePayload = { success: boolean, error?: string | null, };
+export type ClientEnvDeleteResponsePayload = { 
+/**
+ * Whether the file was deleted.
+ */
+success: boolean, 
+/**
+ * Why the delete failed, when it did.
+ */
+error?: string | null, };
 export type EnvSource = "server" | "agent";
 
 // ── Operations ──
@@ -51,5 +59,13 @@ export type ClientEnvDeleteCall = { name: string, source: EnvSource, agent_id?: 
 force: boolean, };
 
 /** The payload the provider answers with. */
-export type ClientEnvDeleteReply = { success: boolean, error?: string | null, };
+export type ClientEnvDeleteReply = { 
+/**
+ * Whether the file was deleted.
+ */
+success: boolean, 
+/**
+ * Why the delete failed, when it did.
+ */
+error?: string | null, };
 

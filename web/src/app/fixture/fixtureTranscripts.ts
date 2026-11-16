@@ -18,6 +18,15 @@ import {
   type TranscriptEntryV1,
   type TranscriptItemsResponse,
 } from '@/generated/protocol/claude-code/transcript-items/v1';
+import {
+  PROTOCOL as TRANSCRIPT_RECORD_PROTOCOL,
+  type TranscriptRecordResponse,
+} from '@/generated/protocol/claude-code/transcript-record/v1';
+import {
+  PROTOCOL as TRANSCRIPT_RECORDS_PROTOCOL,
+  type TranscriptRecordV1,
+  type TranscriptRecordsResponse,
+} from '@/generated/protocol/claude-code/transcript-records/v1';
 import { FIXTURE_AGENTS } from './fixtureData';
 import { fixtureConversationSurface } from './fixtureConversation';
 
@@ -507,6 +516,239 @@ function memoryContent(path: unknown, offset: unknown, scenario: string): ReadRe
 }
 
 /**
+ * The raw-record fixture (#3726).
+ *
+ * Every entry below is one physical JSONL line, including an unknown type, a
+ * malformed line and a line too large for a page. The page carries the newest
+ * four; `Load earlier` returns the six before them. The oversized line is a
+ * placeholder with a size and a reference, so the Raw inspector exercises
+ * chunked lookup rather than an inline body.
+ */
+const FIXTURE_ENCODER = new TextEncoder();
+const OVERSIZED_RECORD_TEXT = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9'.repeat(4000);
+
+const PRIMARY_TIMELINE: string[] = [
+  JSON.stringify({
+    type: 'user',
+    uuid: 'u1',
+    timestamp: '2026-09-30T09:00:01Z',
+    message: { role: 'user', content: 'Give the session a transcript view.' },
+  }),
+  JSON.stringify({
+    type: 'assistant',
+    uuid: 'a1',
+    timestamp: '2026-09-30T09:00:03Z',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'The transcript should show every raw JSONL record, not a filtered projection.' },
+        { type: 'text', text: 'I will read the existing transcript path and wire the raw record transport.' },
+        { type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'cargo test -p nession-claude-code' } },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'user',
+    uuid: 'u2',
+    timestamp: '2026-09-30T09:00:04Z',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'call-1', content: 'test result: ok. 399 passed; 0 failed' },
+      ],
+    },
+  }),
+  JSON.stringify({ type: 'system', uuid: 'sys1', subtype: 'turn_duration', durationMs: 4200, timestamp: '2026-09-30T09:00:05Z' }),
+  JSON.stringify({
+    type: 'attachment',
+    uuid: 'att1',
+    timestamp: '2026-09-30T09:00:06Z',
+    attachment: { type: 'hook_success', hookName: 'PostToolUse', output: 'hook completed' },
+  }),
+  JSON.stringify({ type: 'ai-title', aiTitle: 'Transcript execution view', timestamp: '2026-09-30T09:00:07Z' }),
+  JSON.stringify({
+    type: 'new-runtime-diagnostic',
+    uuid: 'future1',
+    subtype: 'probe',
+    timestamp: '2026-09-30T09:00:08Z',
+    detail: 'A record type this build has never seen.',
+  }),
+  'this line is not valid JSON',
+  JSON.stringify({
+    type: 'assistant',
+    uuid: 'a2',
+    timestamp: '2026-09-30T09:00:09Z',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: OVERSIZED_RECORD_TEXT }],
+    },
+  }),
+  JSON.stringify({
+    type: 'user',
+    uuid: 'u3',
+    timestamp: '2026-09-30T09:00:10Z',
+    message: { role: 'user', content: 'Now read the raw records.' },
+  }),
+];
+
+const SIDECHAIN_TIMELINE: string[] = [
+  JSON.stringify({
+    type: 'assistant',
+    uuid: 'sa1',
+    timestamp: '2026-09-30T09:04:01Z',
+    message: { role: 'assistant', content: [{ type: 'text', text: 'The subagent explored the generated bindings.' }] },
+  }),
+  JSON.stringify({
+    type: 'user',
+    uuid: 'su1',
+    timestamp: '2026-09-30T09:04:02Z',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call-9', content: 'generated/protocol/claude-code/transcript-records/v1.ts' }] },
+  }),
+];
+
+function byteOffsets(lines: string[]): number[] {
+  let offset = 0;
+  return lines.map((line) => {
+    const start = offset;
+    offset += FIXTURE_ENCODER.encode(line).length + 1;
+    return start;
+  });
+}
+
+const PRIMARY_OFFSETS = byteOffsets(PRIMARY_TIMELINE);
+const SIDECHAIN_OFFSETS = byteOffsets(SIDECHAIN_TIMELINE);
+const RECORD_INLINE_CEILING = 64 * 1024;
+const FIXTURE_RECORD_CHUNK = 64 * 1024;
+
+function fixtureTimeline(transcriptId: string): { lines: string[]; offsets: number[] } | null {
+  if (transcriptId === SESSION) {
+    return { lines: PRIMARY_TIMELINE, offsets: PRIMARY_OFFSETS };
+  }
+  if (transcriptId.startsWith(`${SESSION}/`)) {
+    return { lines: SIDECHAIN_TIMELINE, offsets: SIDECHAIN_OFFSETS };
+  }
+  return null;
+}
+
+function fixtureRef(transcriptId: string, index: number): string {
+  return `fixture:${index}:${encodeURIComponent(transcriptId)}`;
+}
+
+function fixtureRefIndex(ref: string): { index: number; transcriptId: string } | null {
+  const match = /^fixture:(\d+):(.+)$/.exec(ref);
+  if (!match) {
+    return null;
+  }
+  return { index: Number(match[1]), transcriptId: decodeURIComponent(match[2]) };
+}
+
+function transcriptHeader(transcriptId: string): TranscriptItemV1 {
+  return transcriptId === SESSION
+    ? {
+        id: SESSION,
+        cwd: '/work/nession',
+        kind: 'primary',
+        title: 'Transcript execution view',
+        updated_at: '2026-09-30T09:31:12Z',
+      }
+    : {
+        id: transcriptId,
+        cwd: '/work/nession/web',
+        kind: 'sidechain',
+        parent_id: SESSION,
+        agent_id: transcriptId.split('/')[1] ?? 'agent',
+        updated_at: '2026-09-30T09:06:40Z',
+      };
+}
+
+function rawRecordsForScenario(
+  scenario: string,
+  transcriptId: string,
+  cursor: string | undefined,
+): TranscriptRecordsResponse | undefined {
+  if (scenario === 'unavailable') {
+    return { state: 'unavailable', records: [], has_more: false, partial_tail: false };
+  }
+  const timeline = fixtureTimeline(transcriptId);
+  if (timeline === null) {
+    return { state: 'not_found', records: [], has_more: false, partial_tail: false };
+  }
+
+  let start = 0;
+  let end = timeline.lines.length;
+  let hasMore = false;
+  let nextCursor: string | undefined;
+  let partialTail = false;
+
+  if (scenario === 'partial') {
+    end = Math.min(3, timeline.lines.length);
+    partialTail = true;
+  } else if (transcriptId === SESSION) {
+    if (cursor === 'older-records') {
+      end = Math.min(6, timeline.lines.length);
+    } else if (cursor !== undefined) {
+      return { state: 'stale_cursor', records: [], has_more: false, partial_tail: false };
+    } else {
+      start = Math.max(0, timeline.lines.length - 4);
+      hasMore = true;
+      nextCursor = 'older-records';
+    }
+  }
+
+  const records: TranscriptRecordV1[] = timeline.lines
+    .slice(start, end)
+    .map((line, offsetIndex) => {
+      const index = start + offsetIndex;
+      const sizeBytes = FIXTURE_ENCODER.encode(line).length;
+      return {
+        record_ref: fixtureRef(transcriptId, index),
+        offset: timeline.offsets[index],
+        size_bytes: sizeBytes,
+        ...(sizeBytes <= RECORD_INLINE_CEILING ? { raw: line } : {}),
+      };
+    });
+
+  return {
+    state: 'ready',
+    transcript: transcriptHeader(transcriptId),
+    activity: 'active',
+    records,
+    ...(nextCursor !== undefined ? { next_cursor: nextCursor } : {}),
+    has_more: hasMore,
+    partial_tail: partialTail,
+  };
+}
+
+function rawRecordChunk(recordRef: unknown, requestedOffset: unknown): TranscriptRecordResponse {
+  if (typeof recordRef !== 'string') {
+    return { state: 'not_found' };
+  }
+  const parsed = fixtureRefIndex(recordRef);
+  if (parsed === null) {
+    return { state: 'not_found' };
+  }
+  const timeline = fixtureTimeline(parsed.transcriptId);
+  const line = timeline?.lines[parsed.index];
+  if (timeline === undefined || timeline === null || line === undefined) {
+    return { state: 'not_found' };
+  }
+  const bytes = FIXTURE_ENCODER.encode(line);
+  const start = typeof requestedOffset === 'number' && requestedOffset > 0
+    ? Math.min(requestedOffset, bytes.length)
+    : 0;
+  const end = Math.min(start + FIXTURE_RECORD_CHUNK, bytes.length);
+  return {
+    state: 'ready',
+    record_ref: recordRef,
+    raw: line.slice(start, end),
+    offset: start,
+    size_bytes: bytes.length,
+    has_more: end < bytes.length,
+    next_offset: end,
+  };
+}
+
+/**
  * The fixture's Claude Code surface: the transcript units, over the
  * conversation ones.
  *
@@ -561,6 +803,27 @@ export function fixtureTranscriptsSurface(search: string): PluginSurface {
           );
         }
         return Promise.resolve(response as T);
+      }
+      if (type === TRANSCRIPT_RECORDS_PROTOCOL) {
+        const transcriptId = payload.transcript_id;
+        if (typeof transcriptId !== 'string') {
+          return Promise.reject(
+            new Error(
+              'fixture transcript-records request without a transcript_id — the unit has no other selection',
+            ),
+          );
+        }
+        const cursor = typeof payload.cursor === 'string' ? payload.cursor : undefined;
+        const response = rawRecordsForScenario(scenario, transcriptId, cursor);
+        if (response === undefined) {
+          return Promise.reject(
+            new Error(`fixture transcript surface does not model ?transcripts=${scenario}`),
+          );
+        }
+        return Promise.resolve(response as T);
+      }
+      if (type === TRANSCRIPT_RECORD_PROTOCOL) {
+        return Promise.resolve(rawRecordChunk(payload.record_ref, payload.offset) as T);
       }
       if (type === MEMORY_PROTOCOL) {
         return Promise.resolve(memoryForScenario(memoryScenario) as T);
