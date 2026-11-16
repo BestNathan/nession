@@ -846,8 +846,10 @@ function runSelfTest() {
       [
         'Refs #3653',
         'Implements #3653',
-        'Addresses #3624 — SC-04 verified on merged staging; ' +
-          'SC-01..03 remain owned by PR #3627 after publisher #3632.',
+        'Addresses #3624 — SC-04 integrated MCP Pages incremental ' +
+          'projection, verified on merged staging SHA abc123 after the ' +
+          'separately merged trusted publisher #3632; SC-01..03 ' +
+          'remain owned by PR #3627.',
       ].join('\n'),
       'BestNathan', 'nession',
       'feat(pages): skip source-verified unchanged exporter',
