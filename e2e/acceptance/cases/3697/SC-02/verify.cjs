@@ -16,7 +16,7 @@ run(({ evidence }) => {
   ]);
   const transfer = crateTests(
     'nession-erofs',
-    ['cache::fetch::tests::a_composite_'],
+    ['--features', 'cache', 'cache::fetch::tests::a_composite_'],
     600_000,
   );
   assertRan(transfer, [
