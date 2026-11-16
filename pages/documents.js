@@ -18,13 +18,13 @@ function external(label,href,cls=''){
   return a;
 }
 export function documentsHref(id,version){
-  if(!ID.test(id||''))return '#/documents';
-  return '#/documents?protocol='+encodeURIComponent(id)+
+  if(!ID.test(id||''))return '#/documents/protocol';
+  return '#/documents/protocol?protocol='+encodeURIComponent(id)+
     (Number.isSafeInteger(version)&&version>0?'&v='+version:'');
 }
 export function documentsRoute(hash){
   const raw=String(hash||'').replace(/^#/,'');
-  if(!/^\/documents(?:\?|$)/.test(raw))return null;
+  if(!/^\/documents(?:\/protocol)?(?:\?|$)/.test(raw))return null;
   const params=new URLSearchParams(raw.split('?')[1]||'');
   const id=params.get('protocol');
   const version=params.get('v');
@@ -124,7 +124,7 @@ function contractSection(selected,direction){
 }
 function reader(data,group,selected){
   const article=el('article','documents-reader knowledge-reader');
-  add(article,local('← All protocols','#/documents','documents-back'),
+  add(article,local('← All protocols','#/documents/protocol','documents-back'),
     el('div','eyebrow',group.owner+' / PROTOCOL UNIT'),
     el('h2','',group.id));
   const meta=el('div','documents-meta mono');
@@ -163,14 +163,44 @@ function reader(data,group,selected){
     'documents-source'));
   return article;
 }
+// The Documents landing page intentionally shows domains, not a default reader.
+export function renderDocumentsIndex(root,{protocolCount=null,mcpCount=null,
+  protocolStatus='loading',mcpStatus='loading'}={}){
+  add(root,el('div','eyebrow documents-kicker','NESSION / OPEN ENGINEERING'),
+    el('h1','documents-heading','Documents'),
+    el('p','documents-lede','Source-backed technical references. Choose a catalog to browse its contracts and inspect details.'));
+  const grid=el('div','documents-index');
+  const categories=[
+    {href:'#/documents/protocol',eyebrow:'01 / NESSION',title:'Protocol reference',
+      description:'Versioned Nession Protocol Units, request/response fields and verified Since Nession release boundaries.',
+      count:protocolCount,label:'protocol units',status:protocolStatus,action:'Explore Protocol →'},
+    {href:'#/documents/mcp',eyebrow:'02 / MODEL CONTEXT PROTOCOL',title:'MCP Tools',
+      description:'Canonical Rust-registered Tools, input JSON Schemas and verified upstream MCP specification references.',
+      count:mcpCount,label:'registered tools',status:mcpStatus,action:'Explore MCP →'}
+  ];
+  for(const category of categories){
+    const card=local('',category.href,'documents-index-card');
+    add(card,el('span','eyebrow',category.eyebrow),
+      el('h2','',category.title),el('p','',category.description));
+    const meta=el('div','documents-index-meta');
+    const availability=category.status==='available'&&Number.isSafeInteger(category.count)
+      ?category.count+' '+category.label:category.status==='loading'
+        ?'Loading public catalog…':'Catalog unavailable';
+    add(meta,el('span','documents-index-availability',availability),
+      el('strong','',category.action));
+    card.append(meta);grid.append(card);
+  }
+  root.append(grid);
+}
+
 export function renderDocuments(root,data,hash){
-  add(root,el('div','eyebrow documents-kicker','NESSION / OPEN ENGINEERING / DOCUMENTS'),
+  const crumb=el('nav','documents-breadcrumb');
+  crumb.setAttribute('aria-label','Documents breadcrumb');
+  add(crumb,local('Documents','#/documents'),el('span','',' / Protocol'));
+  add(root,crumb,
     el('h1','documents-heading','Protocol reference'),
     el('p','documents-lede',
-      'Rust-generated Protocol Units, complete request/response fields, and the Nession version each field first supports.'));
-  const mcpLink=el('a','documents-back','MCP Tools →');
-  mcpLink.href='#/documents/mcp';
-  root.append(mcpLink);
+      'Rust-generated Protocol Units with request/response schemas and source-verified release boundaries.'));
   if(!validDocumentsSnapshot(data)||data.status!=='available'){
     const box=el('div','panel documents-unavailable');
     add(box,el('h3','','Protocol catalog unavailable'),
@@ -192,21 +222,23 @@ export function renderDocuments(root,data,hash){
     el('span','',data.protocols.length+' protocol units'),
     external('Architecture ↗',REPO+'/blob/'+data.source.sha+'/docs/architecture/protocol.md'));
   root.append(snapshot);
-  const observed=data.releases.filter(r=>r.status==='available').length;
-  root.append(el('p','documents-release-note',
-    observed?observed+' verified release snapshots inform field Since Nession values. Unknown means earlier history cannot establish the introduction boundary.':
-      'Historical release schemas are not yet available; Since Nession is Unknown until the introduction can be verified. Current main is a development source.'));
-  const layout=el('div','documents-layout'+(exact?' reading':''));
-  const sidebar=el('aside','documents-side');
+  const layout=el('div','documents-layout documents-workspace'+(exact?' reading':''));
+  layout.dataset.section='protocol';
+  const sidebar=el('aside','documents-browser-pane');
+  sidebar.setAttribute('aria-label','Protocol catalog');
+  const controls=el('div','documents-browser-controls');
   const filters=el('div','documents-filters');
   const categories=['All',...new Set(data.protocols.map(p=>p.owner))];
-  const list=el('section','documents-listbox');
   const search=el('input','documents-search');
   search.type='search';search.placeholder='Search protocols or fields';search.value=state.query;
   search.setAttribute('aria-label','Search protocol units');
   const count=el('p','documents-count mono');
+  const scroll=el('div','documents-list-scroll');
+  scroll.setAttribute('role','region');
+  scroll.setAttribute('aria-label','Protocol list');
+  scroll.tabIndex=0;
   const entries=el('div','documents-results');
-  list.append(search,count,entries);
+  scroll.append(entries);
   function repaint(){
     filters.replaceChildren();
     for(const category of categories){
@@ -229,14 +261,28 @@ export function renderDocuments(root,data,hash){
     if(!found.length)entries.append(el('p','documents-empty','No matching protocol units.'));
   }
   search.addEventListener('input',()=>{state.query=search.value;repaint();});
-  add(sidebar,el('div','eyebrow','CONTRACT OWNERS'),filters);
+  add(controls,el('div','eyebrow','PROTOCOL OWNERS'),filters,search,count);
+  add(sidebar,controls,scroll);
   repaint();
-  const right=el('div','documents-reader-slot');
+  const right=el('section','documents-reader-slot');
+  right.setAttribute('role','region');
+  right.setAttribute('aria-label','Protocol details');
+  right.tabIndex=0;
   if(!validRoute){
     const box=el('article','panel');
-    add(box,el('h3','','Unknown protocol or version'),
+    add(box,local('← All protocols','#/documents/protocol','documents-back'),
+      el('h3','','Unknown protocol or version'),
       el('p','','This protocol or contract version is not present in the pinned generated catalog.'));
     right.append(box);
-  }else right.append(reader(data,selectedGroup,selected));
-  layout.append(sidebar,list,right);root.append(layout);
+  }else{
+    const article=reader(data,selectedGroup,selected);
+    const observed=data.releases.filter(r=>r.status==='available').length;
+    const note=el('p','documents-release-note',observed
+      ?observed+' verified release snapshots inform Since Nession values; unavailable history remains Unknown.'
+      :'Historical release snapshots are unavailable; Since Nession remains Unknown until verified.');
+    article.insertBefore(note,article.querySelector('.documents-versions'));
+    right.append(article);
+  }
+  add(layout,sidebar,right);
+  root.append(layout);
 }
