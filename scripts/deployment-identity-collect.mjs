@@ -15,6 +15,7 @@ import {
   ROLES,
   attestDeployment,
   parseEnvironmentOverlay,
+  validateProvenance,
 } from './deployment-identity-policy.mjs';
 
 // The live runner may observe an ordinary rolling Deployment before the new
@@ -102,6 +103,87 @@ export function deploymentIdentityRejection(error) {
 export function formatDeploymentIdentityRejection(error) {
   return DEPLOYMENT_IDENTITY_REJECTION_LOG_PREFIX +
     JSON.stringify(deploymentIdentityRejection(error));
+}
+
+// #3686: a failure-only, read-only diagnostic. Never an attestation or a
+// basis for retrying permanent source/digest/namespace mismatches. Log only
+// fixed roles, trusted SHA/tags and bounded allowlisted Kubernetes metadata.
+export const DEPLOYMENT_IDENTITY_OBSERVATION_LOG_PREFIX =
+  'DEPLOYMENT_IDENTITY_OBSERVATION_V1 ';
+const DIAGNOSTIC_DIGEST = /^sha256:[0-9a-f]{64}$/;
+function nonNegative(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+export function deploymentIdentityFailureObservation({
+  overlayPath, overlayText, gitopsRevision, provenance, deployments, pods, error,
+}) {
+  const overlay = parseEnvironmentOverlay(overlayPath, overlayText);
+  const binding = validateProvenance(provenance);
+  if (!/^[0-9a-f]{40}$/.test(gitopsRevision) ||
+      !Array.isArray(deployments?.items) || deployments.items.length > 100 ||
+      !Array.isArray(pods?.items) || pods.items.length > 500) {
+    throw Error('unbounded or invalid read-only identity observation');
+  }
+  const reason = deploymentIdentityRejection(error);
+  const roles = ROLES.map(role => {
+    const name = overlay.expected_workloads[role];
+    const matches = deployments.items.filter(d => d?.metadata?.name === name);
+    const d = matches.length === 1 && matches[0]?.metadata?.namespace === overlay.namespace
+      ? matches[0] : null;
+    const declared = binding.images[role];
+    const expectedDigests = [...new Set(Object.values(
+      declared.digests ?? {declared: declared.digest}
+    ))].filter(value => DIAGNOSTIC_DIGEST.test(value)).sort().slice(0, 8);
+    // Exact owned ReplicaSet avoids borrowing a sibling staging-01 lane's Pods.
+    const owned = pods.items.filter(p => {
+      const owner = p?.metadata?.ownerReferences?.[0];
+      return p?.metadata?.namespace === overlay.namespace &&
+        owner?.kind === 'ReplicaSet' &&
+        typeof owner.name === 'string' &&
+        new RegExp('^' + name + '-[^-]+$').test(owner.name);
+    });
+    const liveDigests = new Set();
+    let readyContainers = 0;
+    for (const pod of owned) {
+      for (const status of Array.isArray(pod?.status?.containerStatuses)
+        ? pod.status.containerStatuses.slice(0, 20) : []) {
+        if (status?.ready === true) readyContainers++;
+        const digest = typeof status?.imageID === 'string'
+          ? status.imageID.match(/@(sha256:[0-9a-f]{64})$/)?.[1] : null;
+        if (digest) liveDigests.add(digest);
+      }
+    }
+    const actualImage = d?.spec?.template?.spec?.containers?.find(
+      c => c?.name === role)?.image;
+    const observedTag = typeof actualImage === 'string'
+      ? actualImage.match(/:([a-z]+-[a-f0-9]{7,40})$/)?.[1] ?? null : null;
+    return {
+      role,
+      expected_workload: name,
+      deployed_workload_present: Boolean(d),
+      expected_tag: overlay.images[role].tag,
+      observed_tag: observedTag,
+      generation: nonNegative(d?.metadata?.generation),
+      observed_generation: nonNegative(d?.status?.observedGeneration),
+      available_replicas: nonNegative(d?.status?.availableReplicas),
+      matching_pods: owned.length,
+      ready_containers: Math.min(readyContainers, 1000),
+      expected_digests: expectedDigests,
+      observed_digests: [...liveDigests].sort().slice(0, 8),
+      observed_digests_truncated: liveDigests.size > 8,
+    };
+  });
+  return Object.freeze({
+    schema_version: 1,
+    kind: 'nession_deployment_identity_failure_observation',
+    source_sha: binding.source_sha,
+    gitops_revision: gitopsRevision,
+    environment_id: overlay.environment_id,
+    rejection_class: reason.class,
+    retryable: reason.retryable,
+    reason: reason.message,
+    roles,
+  });
 }
 
 // A bounded, single-line log receipt for the trusted Acceptance collector.
@@ -658,6 +740,55 @@ function selfTest() {
     'unexpected parameter',
   ]) assert.equal(deploymentReadinessRetryable(Error(critical)), false, critical);
 
+  // #3686: rolling readiness includes actual source/revision/role evidence;
+  // nonretryable integrity problems remain nonretryable and hostile data hidden.
+  const observed = deploymentIdentityFailureObservation({
+    ...base, ...kubernetesFixtures(), error: Error('server pod is not Running'),
+  });
+  assert.equal(observed.source_sha, SOURCE_SHA);
+  assert.equal(observed.gitops_revision, 'b'.repeat(40));
+  assert.equal(observed.retryable, true);
+  assert.equal(observed.rejection_class, 'readiness');
+  assert.equal(observed.roles.length, 3);
+  assert.equal(observed.roles[0].expected_tag, 'agent-abcdef1');
+  assert.equal(observed.roles[0].observed_tag, 'agent-abcdef1');
+  assert.deepEqual(observed.roles[0].observed_digests, ['sha256:' + '1'.repeat(64)]);
+  const stale = kubernetesFixtures({mutateDeployments: d => {
+    d.items[1].status.observedGeneration = 2;
+    d.items[1].status.availableReplicas = 0;
+  }});
+  const staleObservation = deploymentIdentityFailureObservation({
+    ...base, ...stale, error: Error('server deployment observed generation is stale'),
+  });
+  assert.equal(staleObservation.roles[1].generation, 9);
+  assert.equal(staleObservation.roles[1].observed_generation, 2);
+  assert.equal(staleObservation.roles[1].available_replicas, 0);
+  assert.equal(staleObservation.retryable, true);
+  const permanent = deploymentIdentityFailureObservation({
+    ...base, ...kubernetesFixtures(),
+    error: Error('agent workload imageID does not match the immutable provenance digest'),
+  });
+  assert.equal(permanent.retryable, false);
+  assert.equal(permanent.rejection_class, 'digest');
+  const malicious = kubernetesFixtures({mutatePods: p => {
+    p.items[0].metadata.name = 'secret=ghs_sensitive';
+    p.items[0].status.containerStatuses[0].imageID =
+      'ghcr.io/unsafe@sha256:' + 'f'.repeat(64) + '\nsecret=ghs_sensitive';
+  }});
+  const redacted = deploymentIdentityFailureObservation({
+    ...base, ...malicious, error: Error('agent pod is not Running'),
+  });
+  assert.equal(JSON.stringify(redacted).includes('ghs_sensitive'), false);
+  assert.deepEqual(redacted.roles[0].observed_digests, []);
+  assert.throws(() => deploymentIdentityFailureObservation({
+    ...base, ...kubernetesFixtures(), gitopsRevision: 'invalid',
+    error: Error('agent pod is not Running'),
+  }), /invalid read-only identity observation/);
+  assert.throws(() => deploymentIdentityFailureObservation({
+    ...base, ...kubernetesFixtures(), provenance: {...provenanceFixture(), source_sha: 'invalid'},
+    error: Error('agent pod is not Running'),
+  }), /source_sha/);
+
   // #3318: the workflow may print only this bounded rejection receipt.
   // Known collector/policy messages keep their class and exact text; a
   // hostile or unexpected message is withheld without leaking its body.
@@ -706,6 +837,24 @@ if (process.argv[1]?.endsWith('deployment-identity-collect.mjs')) {
     main(process.argv.slice(2));
   } catch (error) {
     const rejection = deploymentIdentityRejection(error);
+    if (process.argv[2] === 'attest') {
+      try {
+        const args = process.argv.slice(2);
+        const diagnostic = deploymentIdentityFailureObservation({
+          overlayPath: arg(args, 'overlay-path'),
+          overlayText: fs.readFileSync(arg(args, 'overlay'), 'utf8'),
+          gitopsRevision: arg(args, 'gitops-revision'),
+          provenance: readJson(arg(args, 'provenance'), 'provenance'),
+          deployments: readJson(arg(args, 'deployments'), 'deployments'),
+          pods: readJson(arg(args, 'pods'), 'pods'),
+          error,
+        });
+        console.error(DEPLOYMENT_IDENTITY_OBSERVATION_LOG_PREFIX +
+          JSON.stringify(diagnostic));
+      } catch {
+        // No raw fallback on malformed/hostile observations or provenance.
+      }
+    }
     console.error('deployment-identity-collect: ' + error.message);
     // The structured line is the only diagnostic the trusted workflow may
     // surface; arbitrary stderr stays runner-local (#3318).
