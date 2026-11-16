@@ -48,7 +48,8 @@ ENV NESSION_TERMINAL_WEB_FONT_SIZE=${NESSION_TERMINAL_WEB_FONT_SIZE}
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/entrypoint-server.sh /entrypoint.sh
 COPY deploy/render-server-config.sh /render-server-config.sh
-RUN chmod +x /entrypoint.sh /render-server-config.sh
+COPY deploy/render-mcp-config.sh /render-mcp-config.sh
+RUN chmod +x /entrypoint.sh /render-server-config.sh /render-mcp-config.sh
 RUN mkdir -p /data /etc/nession && chown www-data:www-data /data
 
 # Volatile files last — only these layers rebuild on each commit

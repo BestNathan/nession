@@ -335,3 +335,31 @@ management, quick commands, terminal previews or attach flows. It claims only
 the base semantics of the two protocol versions above and does not advertise
 optional capabilities it does not implement. No MCP Tool mints or returns a P2P
 credential.
+
+### OCI image defaults (#3705)
+
+The Server and Agent OCI image entrypoints mount their **existing embedded**
+MCP endpoint at `/mcp` by default. Native host configs still default to
+disabled. A single `deploy/render-mcp-config.sh` emits the OCI-only table.
+
+Set `NESSION_MCP_ENABLED=false` in the container environment, Compose or
+GitOps for emergency rollback; only literal `true` and `false` are valid.
+The Server requires an operator-managed inbound `SERVER_AUTH_TOKEN` when MCP
+is on, or exits before nginx starts. The Agent MCP endpoint reuses its durable
+inbound Agent Token (operator `AGENT_TOKEN` or runtime-provisioned); the
+outbound `AGENT_AUTH_TOKEN` does **not** authorize inbound MCP calls.
+No token is embedded in the image or printed in logs.
+
+The image's nginx `:10080/mcp`, and configured Server TLS `:443/mcp`,
+forward to the same embedded service, without Web HTML fallback. Authorization,
+Origin, MCP-Protocol-Version and Mcp-Session-Id are passed through, with SSE
+buffering disabled. A smoke probe initializes via POST /mcp, calls tools/list
+and a safe read; unauthorized calls must return 401. Public exposure requires
+TLS or a trusted TLS-terminating proxy. The source and prebuilt image paths
+copy the same entrypoint, nginx template and renderer; no separate MCP
+process or listener is launched.
+
+Compose intentionally carries no published Agent default bearer token. Set
+`AGENT_TOKEN` to a unique secret to select your own, or leave it unset to use
+the Agent's durable token provisioned under `NESSION_HOME` (`/data` in Compose).
+Never publish a shared fixture token on an exposed MCP port.

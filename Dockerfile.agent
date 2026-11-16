@@ -153,7 +153,8 @@ COPY --from=rust-builder /build/target/release/nession-agent /usr/local/bin/ness
 COPY --from=web-builder /build/dist /usr/share/nginx/html
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/entrypoint-agent.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY deploy/render-mcp-config.sh /render-mcp-config.sh
+RUN chmod +x /entrypoint.sh /render-mcp-config.sh
 
 # Durable Agent data root (#3023). A Kubernetes deployment mounts its
 # existing PVC at /data and sets the EROFS cache under it. An OCI `VOLUME` is
