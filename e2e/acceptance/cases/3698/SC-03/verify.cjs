@@ -43,11 +43,25 @@ if (!capabilities.backend) {
       'a_managed_workspace_keeps_ordered_lowers_across_restart_and_refuses_reordering',
     );
     const facts = runtimeEvidence(output);
+    assert.equal(facts.two_consumers_shared, true, 'two consumers share one ordered view');
     assert.equal(facts.ordered_reattach, true, 'the same ordered lower set reattaches');
     assert.equal(facts.ordered_lowers, 2, 'both ordered lowers are part of the compatibility key');
     assert.equal(facts.reordered_refused, true, 'a reordered lower set is refused');
     assert.equal(facts.missing_lower_refused, true, 'a missing lower is refused');
     assert.equal(facts.durable_upper_preserved, true, 'the durable upper is preserved');
+    const projectLocation = checked(
+      'cargo',
+      [
+        'test', '-q', '-p', 'nession-agent',
+        'a_project_location_is_external_and_refuses_a_lower', '--', '--nocapture',
+      ],
+      900000,
+    );
+    assert.match(
+      projectLocation,
+      /a_project_location_is_external_and_refuses_a_lower \.\.\. ok/,
+      'a Project Location remains an external Bind and refuses an Overlay lower',
+    );
     const kernel = checked('uname', ['-r'], 30000).trim();
     evidence.push({
       type: 'runtime',

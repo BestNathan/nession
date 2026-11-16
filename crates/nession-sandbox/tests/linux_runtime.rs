@@ -2995,7 +2995,18 @@ fn a_managed_workspace_keeps_ordered_lowers_across_restart_and_refuses_reorderin
             format!("sha256:{bottom_digest}")
         ]
     );
+    let second = manager
+        .acquire(&ordered, "exec-peer")
+        .expect("a second execution shares the ordered Overlay");
+    assert_eq!(first.mountpoint(), second.mountpoint());
+    assert_eq!(first.generation(), second.generation());
     first.release().expect("release the first execution");
+    assert_eq!(
+        std::fs::read_to_string(second.mountpoint().join("restart-edit.txt"))
+            .expect("the peer still sees the durable edit"),
+        "restart edit\n"
+    );
+    second.release().expect("release the peer execution");
 
     // A fresh Agent owner sees the same durable upper and the same ordered
     // compatibility key.
@@ -3048,6 +3059,7 @@ fn a_managed_workspace_keeps_ordered_lowers_across_restart_and_refuses_reorderin
     );
     print_evidence(&serde_json::json!({
         "ordered_reattach": true,
+        "two_consumers_shared": true,
         "ordered_lowers": 2,
         "reordered_refused": true,
         "missing_lower_refused": true,
