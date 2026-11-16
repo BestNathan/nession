@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "40e2e27e40b4c320f4b8a3392dfdd7d7c3714f71590698c36c2c7efa3ca05e9f",
+  "run_id": 43888916223,
+  "run_attempt": 1,
+  "issue": 3735,
+  "criterion": "SC-02",
+  "criterion_text": ": Every verified Nession `tools/call` **success** emits conformant `structuredContent` and compatible, matching `content`/text; Server/Agent runtime tests demonstrate actual behavior, and error results are not falsely validated as successful output.",
+  "stage": "staging",
+  "target_sha": "2c85f985004aeac1fbe6a4a09e48768f905a1ae8",
+  "contract_sha256": "4f01d3ee5830642f51e59b3aff0898471e498620fce32f0c1bb3bdc2303af2c0",
+  "case_revision": "2c85f985004aeac1fbe6a4a09e48768f905a1ae8",
+  "case_tree_sha": "1e5b80a36b0f3b998f43a72f81dfee99e49ee00f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T14:46:58.200Z",
+  "finished_at": "2026-11-16T14:48:06.418Z",
+  "duration_ms": 68217,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "mcp.cjs",
+      "result": "Pass",
+      "summary": "The shared MCP service returns schema-valid structuredContent and keeps errors distinct",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-mcp at exact SHA 2c85f985004aeac1fbe6a4a09e48768f905a1ae8 returned declared structuredContent for all 11 success paths and none for a refusal"
+        }
+      ],
+      "duration_ms": 21290,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "server.cjs",
+      "result": "Pass",
+      "summary": "The Server-embedded MCP host returns conformant structured success replies",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-server embedded MCP at exact SHA 2c85f985004aeac1fbe6a4a09e48768f905a1ae8 returned structuredContent equal to its text for discovery and Agent-routed calls"
+        }
+      ],
+      "duration_ms": 18350,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "agent.cjs",
+      "result": "Pass",
+      "summary": "The Agent-embedded MCP host returns conformant structured success replies",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-agent embedded MCP at exact SHA 2c85f985004aeac1fbe6a4a09e48768f905a1ae8 returned structuredContent equal to its text and no structured content for an error"
+        }
+      ],
+      "duration_ms": 22673,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43888916223,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2c85f985004aeac1fbe6a4a09e48768f905a1ae8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43888916223",
+    "record_path": "runs/2026-11-16/43888916223-1/3735/SC-02.json",
+    "source_result_sha256": "b8cb9fb9a55b288dc0a95d8d4ff2c75a49e2f0dd0353aaed83d1bb37b75e8999"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43888916223-1",
+    "sha256": "b8cb9fb9a55b288dc0a95d8d4ff2c75a49e2f0dd0353aaed83d1bb37b75e8999",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43888916223",
+    "durability": "time-limited; object archival not configured"
+  }
+}
