@@ -1738,6 +1738,7 @@ fn a_writable_rootfs_is_transient_and_never_mutates_the_image() {
         &base_source,
         Path::new(env!("CARGO_BIN_EXE_nession-sandbox-bridge")),
     );
+    std::fs::write(base_source.join("whiteout.txt"), "base file\n").expect("base marker");
     let base_image = images.join("base.erofs");
     mkfs_erofs(&base_source, &base_image);
     let base_digest = sha256_file(&base_image);
@@ -1795,6 +1796,9 @@ fn a_writable_rootfs_is_transient_and_never_mutates_the_image() {
 set -eu
 printf 'transient\\n' > /transient-proof.txt
 [ \"$(cat /transient-proof.txt)\" = transient ] && echo TRANSIENT-WRITE
+[ \"$(cat /whiteout.txt)\" = 'base file' ] && echo BASE-VISIBLE
+rm /whiteout.txt
+[ ! -e /whiteout.txt ] && echo WHITEOUT-OK
 [ ! -e /etc/shadow ] && echo HIDDEN-OK
 ";
     let mut first = launch_rootfs("rootfs-writable", first_script.to_string(), &settings);
@@ -1810,6 +1814,8 @@ printf 'transient\\n' > /transient-proof.txt
         "the writable RootFS shell failed: status={status:?} stdout={stdout} stderr={stderr}"
     );
     assert!(stdout.contains("TRANSIENT-WRITE"), "{stdout}");
+    assert!(stdout.contains("BASE-VISIBLE"), "{stdout}");
+    assert!(stdout.contains("WHITEOUT-OK"), "{stdout}");
     assert!(stdout.contains("HIDDEN-OK"), "{stdout}");
     assert!(
         Path::new(&transient.upper).is_dir(),
@@ -1840,7 +1846,11 @@ printf 'transient\\n' > /transient-proof.txt
     );
     assert_cleaned(&settings, &record);
 
-    let second_script = "set -eu; [ ! -e /transient-proof.txt ] && echo ISOLATED\n";
+    let second_script = "\
+set -eu
+[ ! -e /transient-proof.txt ] && echo ISOLATED
+[ \"$(cat /whiteout.txt)\" = 'base file' ] && echo WHITEOUT-ISOLATED
+";
     let mut second = launch_rootfs("rootfs-second", second_script.to_string(), &settings);
     verify_or_report(
         &mut second,
@@ -1855,6 +1865,10 @@ printf 'transient\\n' > /transient-proof.txt
         stdout.contains("ISOLATED"),
         "a later execution must not see the earlier transient write: {stdout}"
     );
+    assert!(
+        stdout.contains("WHITEOUT-ISOLATED"),
+        "the deleted lower file must reappear in a later execution: {stdout}"
+    );
     second
         .prepared
         .into_handle()
@@ -1862,6 +1876,7 @@ printf 'transient\\n' > /transient-proof.txt
         .expect("cleanup the second writable RootFS");
     print_evidence(&serde_json::json!({
         "transient_write_visible": true,
+        "whiteout_isolated": true,
         "transient_upper_removed": true,
         "base_image_unchanged": true,
         "later_execution_isolated": true,
