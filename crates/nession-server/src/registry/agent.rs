@@ -278,6 +278,53 @@ impl AgentRegistry {
         agents.insert(info.agent_id.clone(), info);
     }
 
+    /// Replace the current registration's advertised addresses.
+    ///
+    /// Only `addresses` and `ip_address` change. The Agent Token, manifest,
+    /// registration and heartbeat timestamps, status, session counts, display
+    /// name and generations stay whatever the current registration owns — an
+    /// address update must not reintroduce state from a read taken before a
+    /// successor registered (#3723).
+    ///
+    /// The caller must hold `CommandBroker::begin_address_update`'s guard
+    /// across this write, so a newer registration cannot publish between the
+    /// generation check and this mutation. The liveness gate taken here is the
+    /// one registration and heartbeat recovery use, so the SQLite address
+    /// columns stay consistent with the in-memory row.
+    ///
+    /// Returns `false` when the Agent is not in the registry; the SQLite update
+    /// then matches no row as well.
+    pub async fn apply_address_update(
+        &self,
+        agent_id: &str,
+        addresses: Vec<ProbedAddress>,
+        ip_address: String,
+    ) -> bool {
+        let gate = self.liveness_gate(agent_id).await;
+        let _liveness = gate.lock_owned().await;
+
+        let addresses_json = encode_addresses(&addresses);
+        if let Err(e) = self
+            .db
+            .update_agent_addresses(agent_id, &ip_address, &addresses_json)
+            .await
+        {
+            tracing::error!(
+                "Failed to persist addresses for agent {}: {:#}",
+                agent_id,
+                e
+            );
+        }
+
+        let mut agents = self.agents.write().await;
+        let Some(agent) = agents.get_mut(agent_id) else {
+            return false;
+        };
+        agent.addresses = addresses;
+        agent.ip_address = ip_address;
+        true
+    }
+
     /// Update heartbeat timestamp and session counts for an agent.
     /// Returns `true` if a **meaningful** field changed (status, session_count,
     /// active_sessions) — i.e. the UI should re-render. Returns `false` when
