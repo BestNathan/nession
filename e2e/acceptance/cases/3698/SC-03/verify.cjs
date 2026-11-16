@@ -57,11 +57,13 @@ if (!capabilities.backend) {
       ],
       900000,
     );
+    const projectLocationText = projectLocation.replace(/\u001b\[[0-9;]*m/g, '');
     assert.match(
-      projectLocation,
+      projectLocationText,
       /a_project_location_is_external_and_refuses_a_lower \.\.\. ok/,
       'a Project Location remains an external Bind and refuses an Overlay lower',
     );
+    assert.match(projectLocationText, /1 passed/, 'the Project Location proof actually ran');
     const kernel = checked('uname', ['-r'], 30000).trim();
     evidence.push({
       type: 'runtime',
