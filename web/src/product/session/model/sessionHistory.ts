@@ -28,10 +28,10 @@ import type { Session } from '@/types';
  * "Today" means the user's calendar day, so the boundary is their local
  * midnight — not `now - 24h`, which would move the whole list under a user who
  * left the screen open past midnight. "Previous 7 days" is the seven calendar
- * days before today, for the same reason. Each boundary is re-normalised to a
- * local midnight after the arithmetic, because subtracting a fixed 7×24h across
- * a daylight-saving change lands an hour off and would put a Session in the
- * wrong bucket twice a year.
+ * days before today, computed with calendar arithmetic (`Date#setDate`) rather
+ * than by subtracting 7×24h: a spring-forward day is 23 hours long, so a fixed
+ * 168-hour subtraction lands on the previous *calendar day* and admits an
+ * eighth day into the bucket (#3680).
  *
  * ## Empty buckets are dropped
  *
@@ -53,12 +53,17 @@ export interface SessionBucket {
   sessions: Session[];
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /** The start of the local calendar day containing `ms`. */
 function startOfLocalDay(ms: number): number {
   const date = new Date(ms);
   date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/** The start of the local calendar day `days` before the day containing `ms`. */
+function startOfLocalDayDaysBefore(ms: number, days: number): number {
+  const date = new Date(startOfLocalDay(ms));
+  date.setDate(date.getDate() - days);
   return date.getTime();
 }
 
@@ -77,7 +82,7 @@ export function sessionBucketOf(
   if (lastActivity >= todayStart) {
     return 'today';
   }
-  const weekStart = startOfLocalDay(todayStart - 7 * DAY_MS);
+  const weekStart = startOfLocalDayDaysBefore(todayStart, 7);
   if (lastActivity >= weekStart) {
     return 'previous7';
   }

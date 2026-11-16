@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { bucketSessions, sessionBucketOf } from '../../model/sessionHistory';
 import type { Session } from '@/types';
 
@@ -124,5 +124,69 @@ describe('bucketSessions', () => {
       NOW,
     );
     expect(buckets).toHaveLength(1);
+  });
+});
+
+/**
+ * The runner's zone need not observe DST (CI commonly runs in UTC), so the
+ * contract is pinned by setting the process zone explicitly. Node re-reads
+ * `TZ` for subsequent Date operations; Vitest runs this file's cases
+ * sequentially and restores the original zone afterwards (#3680).
+ */
+describe('local calendar boundaries across a daylight-saving transition', () => {
+  beforeAll(() => {
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('uses the seventh preceding calendar day, not 168 hours, after spring forward', () => {
+    // Los Angeles springs forward at 2026-03-08 02:00. Subtracting 168 hours
+    // from Sunday 2026-03-15 00:00 PDT lands on Saturday 2026-03-07 00:00 PST,
+    // so the old fixed-duration boundary admitted an eighth calendar day.
+    const now = new Date('2026-03-15T12:00:00').getTime();
+    const seventhDay = new Date('2026-03-08T00:00:00').getTime();
+    const eighthDay = new Date('2026-03-07T00:00:00').getTime();
+
+    expect(sessionBucketOf(seventhDay, now)).toBe('previous7');
+    expect(sessionBucketOf(eighthDay, now)).toBe('older');
+    expect(sessionBucketOf(new Date('2026-03-07T12:00:00').getTime(), now)).toBe(
+      'older',
+    );
+    expect(sessionBucketOf(eighthDay - 1, now)).toBe('older');
+  });
+
+  it('groups sessions on either side of the spring-forward boundary', () => {
+    const now = new Date('2026-03-15T12:00:00').getTime();
+    const buckets = bucketSessions(
+      [
+        at('2026-03-15T09:00:00', 'today'),
+        at('2026-03-08T09:00:00', 'seventh'),
+        at('2026-03-07T12:00:00', 'eighth'),
+      ],
+      now,
+    );
+
+    expect(buckets.map((b) => b.key)).toEqual(['today', 'previous7', 'older']);
+    expect(buckets.flatMap((b) => b.sessions.map((s) => s.session_id))).toEqual([
+      'today',
+      'seventh',
+      'eighth',
+    ]);
+  });
+
+  it('still uses the seventh preceding calendar day after fall back', () => {
+    // Los Angeles falls back at 2026-11-01 02:00; the calendar boundary must
+    // stay November 1 rather than drifting to October 31.
+    const now = new Date('2026-11-08T12:00:00').getTime();
+
+    expect(sessionBucketOf(new Date('2026-11-01T00:00:00').getTime(), now)).toBe(
+      'previous7',
+    );
+    expect(
+      sessionBucketOf(new Date('2026-10-31T23:59:59').getTime(), now),
+    ).toBe('older');
   });
 });
