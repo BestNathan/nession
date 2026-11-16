@@ -138,6 +138,7 @@ jobs:
     environment: ${{ needs.resolve.outputs.environment }}
     permissions:
       actions: read
+      checks: read
       contents: read
       issues: read
       pull-requests: read
