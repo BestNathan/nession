@@ -67,12 +67,12 @@ mod helpers {
         if let Some(root) = &settings.agent_workspaces_root {
             workspace_roots.push(root.clone());
         }
-        let lower: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> = manager;
-        let overlay = nession_erofs::overlay::OverlayMountManager::open(
-            nession_erofs::overlay::OverlayMountManagerConfig {
+        let lower: std::sync::Arc<dyn nession_sandbox::mount::overlay::LowerProvider> = manager;
+        let overlay = nession_sandbox::mount::overlay::OverlayMountManager::open(
+            nession_sandbox::mount::overlay::OverlayMountManagerConfig {
                 root: dir.join("erofs-overlays"),
                 workspace_roots,
-                settings: nession_erofs::overlay::OverlaySettings::new(
+                settings: nession_sandbox::mount::overlay::OverlaySettings::new(
                     settings.fuse_overlayfs_path.clone(),
                     settings.fusermount_path.clone(),
                 ),
@@ -85,9 +85,11 @@ mod helpers {
     }
 
     /// Create a workspace directory with its durable Overlay upper/work.
-    pub(super) fn workspace_storage(path: &Path) -> nession_erofs::overlay::OverlayStoragePaths {
+    pub(super) fn workspace_storage(
+        path: &Path,
+    ) -> nession_sandbox::mount::overlay::OverlayStoragePaths {
         std::fs::create_dir_all(path).expect("workspace");
-        nession_erofs::overlay::storage::initialize(path)
+        nession_sandbox::mount::overlay::storage::initialize(path)
             .expect("initialize the durable Overlay storage")
     }
 
@@ -173,13 +175,13 @@ mod helpers {
         if let Some(root) = &settings.agent_workspaces_root {
             workspace_roots.push(root.clone());
         }
-        let lower_provider: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> =
+        let lower_provider: std::sync::Arc<dyn nession_sandbox::mount::overlay::LowerProvider> =
             lower.clone();
-        let overlay = nession_erofs::overlay::OverlayMountManager::open(
-            nession_erofs::overlay::OverlayMountManagerConfig {
+        let overlay = nession_sandbox::mount::overlay::OverlayMountManager::open(
+            nession_sandbox::mount::overlay::OverlayMountManagerConfig {
                 root: dir.join("erofs-overlays"),
                 workspace_roots,
-                settings: nession_erofs::overlay::OverlaySettings::new(
+                settings: nession_sandbox::mount::overlay::OverlaySettings::new(
                     settings.fuse_overlayfs_path.clone(),
                     settings.fusermount_path.clone(),
                 ),
@@ -211,12 +213,13 @@ mod helpers {
             },
         )
         .expect("open the crash lower manager");
-        let lower_provider: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> = lower;
-        let manager = nession_erofs::overlay::OverlayMountManager::open(
-            nession_erofs::overlay::OverlayMountManagerConfig {
+        let lower_provider: std::sync::Arc<dyn nession_sandbox::mount::overlay::LowerProvider> =
+            lower;
+        let manager = nession_sandbox::mount::overlay::OverlayMountManager::open(
+            nession_sandbox::mount::overlay::OverlayMountManagerConfig {
                 root: root.join("erofs-overlays"),
                 workspace_roots: vec![root.join("agent-workspaces")],
-                settings: nession_erofs::overlay::OverlaySettings::new(
+                settings: nession_sandbox::mount::overlay::OverlaySettings::new(
                     which("fuse-overlayfs").expect("fuse-overlayfs for the crash fixture"),
                     fusermount,
                 ),
@@ -241,7 +244,7 @@ mod helpers {
         .expect("the verified project image");
         let lease = manager
             .acquire(
-                &nession_erofs::overlay::OverlayRequest::new(key, image),
+                &nession_sandbox::mount::overlay::OverlayRequest::new(key, image),
                 "exec-child",
             )
             .expect("acquire the crash Overlay");
@@ -256,7 +259,7 @@ mod helpers {
         root: &Path,
     ) -> (
         std::sync::Arc<nession_erofs::mount_manager::MountManager>,
-        std::sync::Arc<nession_erofs::overlay::OverlayMountManager>,
+        std::sync::Arc<nession_sandbox::mount::overlay::OverlayMountManager>,
     ) {
         let fusermount = which("fusermount3").expect("fusermount3");
         let lower = nession_erofs::mount_manager::MountManager::open(
@@ -271,13 +274,13 @@ mod helpers {
             },
         )
         .expect("open the restarted lower manager");
-        let lower_provider: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> =
+        let lower_provider: std::sync::Arc<dyn nession_sandbox::mount::overlay::LowerProvider> =
             lower.clone();
-        let manager = nession_erofs::overlay::OverlayMountManager::open(
-            nession_erofs::overlay::OverlayMountManagerConfig {
+        let manager = nession_sandbox::mount::overlay::OverlayMountManager::open(
+            nession_sandbox::mount::overlay::OverlayMountManagerConfig {
                 root: root.join("erofs-overlays"),
                 workspace_roots: vec![root.join("agent-workspaces")],
-                settings: nession_erofs::overlay::OverlaySettings::new(
+                settings: nession_sandbox::mount::overlay::OverlaySettings::new(
                     which("fuse-overlayfs").expect("fuse-overlayfs"),
                     fusermount,
                 ),
@@ -2723,8 +2726,9 @@ read lower < /workspace/project.txt
         "durable edit\n"
     );
 
-    let request_lower =
-        || nession_erofs::overlay::OverlayRequest::new(key.clone(), project_image(&images));
+    let request_lower = || {
+        nession_sandbox::mount::overlay::OverlayRequest::new(key.clone(), project_image(&images))
+    };
 
     // A changed lower while the physical Overlay is live is refused and never
     // merges a different Project image into the same durable upper.
@@ -2733,7 +2737,7 @@ read lower < /workspace/project.txt
     std::fs::create_dir_all(&altered_source).expect("altered source");
     std::fs::write(altered_source.join("project.txt"), "altered\n").expect("altered file");
     mkfs_erofs(&altered_source, &altered_image);
-    let altered = nession_erofs::overlay::OverlayRequest::new(
+    let altered = nession_sandbox::mount::overlay::OverlayRequest::new(
         key.clone(),
         nession_erofs::mount_manager::VerifiedImage::new(
             format!("sha256:{}", sha256_file(&altered_image)),
@@ -2794,7 +2798,7 @@ read lower < /workspace/project.txt
     std::fs::rename(&work_aside, &work).expect("restore work");
 
     // A durable owner identity naming another Agent is never taken over.
-    let foreign_owner = nession_erofs::overlay::OwnerRecord {
+    let foreign_owner = nession_sandbox::mount::overlay::OwnerRecord {
         agent_identity: "agent-foreign".to_string(),
         mount_namespace: "mnt:[0]".to_string(),
         workspace: key.identity(),
@@ -2802,7 +2806,7 @@ read lower < /workspace/project.txt
         generation: "foreign-generation".to_string(),
         updated_at: 0,
     };
-    nession_erofs::overlay::storage::write_owner_record(&managed, &foreign_owner)
+    nession_sandbox::mount::overlay::storage::write_owner_record(&managed, &foreign_owner)
         .expect("write a foreign owner record");
     let error = manager
         .acquire(&request_lower(), "exec-foreign-owner")
@@ -2811,7 +2815,7 @@ read lower < /workspace/project.txt
         format!("{error:#}").contains("owned by Agent identity"),
         "{error:#}"
     );
-    nession_erofs::overlay::storage::remove_owner_record(&managed);
+    nession_sandbox::mount::overlay::storage::remove_owner_record(&managed);
     assert_eq!(
         std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
         "durable edit\n"
@@ -2828,17 +2832,17 @@ read lower < /workspace/project.txt
         .expect("the lower manager is configured")
         .acquire(&project_image(&images), "foreign-lower")
         .expect("mount the foreign lower");
-    let overlay_settings = nession_erofs::overlay::OverlaySettings::new(
+    let overlay_settings = nession_sandbox::mount::overlay::OverlaySettings::new(
         settings.fuse_overlayfs_path.clone(),
         settings.fusermount_path.clone(),
     );
-    let foreign_spec = nession_erofs::overlay::OverlayMountSpec {
+    let foreign_spec = nession_sandbox::mount::overlay::OverlayMountSpec {
         lower: lower_lease.mountpoint().to_path_buf(),
         upper: foreign_storage.join("upper"),
         work: foreign_storage.join("work"),
         merged: mountpoint.clone(),
     };
-    nession_erofs::overlay::mount::mount_overlay(&foreign_spec, &overlay_settings)
+    nession_sandbox::mount::overlay::mount::mount_overlay(&foreign_spec, &overlay_settings)
         .expect("mount a competing Overlay");
     let error = manager
         .acquire(&request_lower(), "exec-competing-mount")
@@ -2851,7 +2855,7 @@ read lower < /workspace/project.txt
         std::fs::read_to_string(managed.join("upper").join("edit.txt")).expect("durable edit"),
         "durable edit\n"
     );
-    nession_erofs::overlay::mount::unmount_overlay(&overlay_settings, &mountpoint)
+    nession_sandbox::mount::overlay::mount::unmount_overlay(&overlay_settings, &mountpoint)
         .expect("unmount the competing Overlay");
     lower_lease.release().expect("release the foreign lower");
 
@@ -2880,7 +2884,7 @@ fn a_crashed_overlay_owner_is_recovered_only_from_verified_identity() {
     let root = tempfile::tempdir().expect("tempdir");
     let (managed, lower_digest) = prepare_crash_root(root.path());
     spawn_overlay_crash(root.path());
-    let binding: nession_erofs::overlay::OverlayBinding = serde_json::from_slice(
+    let binding: nession_sandbox::mount::overlay::OverlayBinding = serde_json::from_slice(
         &std::fs::read(root.path().join("child-binding.json")).expect("the child binding"),
     )
     .expect("parse the child binding");
@@ -2919,7 +2923,7 @@ fn a_crashed_overlay_owner_is_recovered_only_from_verified_identity() {
     let lost = tempfile::tempdir().expect("lost tempdir");
     prepare_crash_root(lost.path());
     spawn_overlay_crash(lost.path());
-    let binding: nession_erofs::overlay::OverlayBinding = serde_json::from_slice(
+    let binding: nession_sandbox::mount::overlay::OverlayBinding = serde_json::from_slice(
         &std::fs::read(lost.path().join("child-binding.json")).expect("the lost binding"),
     )
     .expect("parse the lost binding");
@@ -2958,7 +2962,7 @@ fn a_crashed_overlay_owner_is_recovered_only_from_verified_identity() {
     // The stale durable identity and lower consumer are reclaimed without
     // touching the durable upper.
     let reclaimed =
-        lost_manager.reclaim_orphans(&nession_erofs::overlay::ProtectedWorkspaces::new());
+        lost_manager.reclaim_orphans(&nession_sandbox::mount::overlay::ProtectedWorkspaces::new());
     assert_eq!(reclaimed.reclaimed.len(), 1, "{reclaimed:?}");
     let _ = lost_lower.reclaim_orphans(&std::collections::HashSet::new());
 
@@ -2991,17 +2995,17 @@ fn an_injected_overlay_failure_leaves_recoverable_state_without_data_loss() {
     let real_fuse_overlayfs = which("fuse-overlayfs").expect("fuse-overlayfs");
     let lower_manager = settings.mount_manager.clone().expect("the lower manager");
     let project_digest = format!("sha256:{}", images.project_digest);
-    let request = |key: &nession_erofs::overlay::OverlayWorkspaceKey| {
-        nession_erofs::overlay::OverlayRequest::new(key.clone(), project_image(&images))
+    let request = |key: &nession_sandbox::mount::overlay::OverlayWorkspaceKey| {
+        nession_sandbox::mount::overlay::OverlayRequest::new(key.clone(), project_image(&images))
     };
     let open_manager = |root: &Path, helper: PathBuf, fusermount: PathBuf, identity: &str| {
-        let lower: std::sync::Arc<dyn nession_erofs::overlay::LowerProvider> =
+        let lower: std::sync::Arc<dyn nession_sandbox::mount::overlay::LowerProvider> =
             lower_manager.clone();
-        nession_erofs::overlay::OverlayMountManager::open(
-            nession_erofs::overlay::OverlayMountManagerConfig {
+        nession_sandbox::mount::overlay::OverlayMountManager::open(
+            nession_sandbox::mount::overlay::OverlayMountManagerConfig {
                 root: root.to_path_buf(),
                 workspace_roots: vec![durable_root.clone()],
-                settings: nession_erofs::overlay::OverlaySettings::new(helper, fusermount),
+                settings: nession_sandbox::mount::overlay::OverlaySettings::new(helper, fusermount),
                 lower,
                 identity: identity.to_string(),
             },
@@ -3026,7 +3030,10 @@ fn an_injected_overlay_failure_leaves_recoverable_state_without_data_loss() {
         .expect_err("an injected mount failure must fail the acquire");
     assert!(format!("{error:#}").contains("failed"), "{error:#}");
     let status = failing.lookup(&key).expect("failed status");
-    assert_eq!(status.state, nession_erofs::overlay::OverlayState::Failed);
+    assert_eq!(
+        status.state,
+        nession_sandbox::mount::overlay::OverlayState::Failed
+    );
     assert!(!status.mounted);
     assert!(!status.verified);
     assert_eq!(status.consumers, 0);
@@ -3091,7 +3098,10 @@ fn an_injected_overlay_failure_leaves_recoverable_state_without_data_loss() {
         .expect_err("the injected unmount failure must be reported");
     assert!(format!("{error:#}").contains("failed"), "{error:#}");
     let status = retrying.lookup(&key).expect("failed unmount status");
-    assert_eq!(status.state, nession_erofs::overlay::OverlayState::Failed);
+    assert_eq!(
+        status.state,
+        nession_sandbox::mount::overlay::OverlayState::Failed
+    );
     assert!(status.mounted, "the live mount is retained");
     assert_eq!(status.consumers, 0);
     assert!(

@@ -4,7 +4,7 @@
 //! This is a *primitive*: it merges one already-authorized read-only lower
 //! mount with an Agent-owned upper/work pair. Consumers, single-flight,
 //! ownership fencing, durable identity and recovery stay with
-//! [`crate::overlay::manager`]. Missing helpers, a missing `/dev/fuse` or a
+//! [`crate::mount::overlay::manager`]. Missing helpers, a missing `/dev/fuse` or a
 //! mount that never appears fail closed; there is no lazy-unmount escape hatch
 //! for a shared physical Overlay.
 
@@ -13,7 +13,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use crate::mount::{self, MountSettings};
+use nession_erofs::mount::{self, MountSettings};
 
 /// The host helpers one physical Overlay mount needs.
 #[derive(Debug, Clone)]

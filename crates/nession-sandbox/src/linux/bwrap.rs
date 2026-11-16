@@ -148,9 +148,6 @@ pub fn build(
                 crate::linux::erofs::WorkspaceMount::Bind(path) => {
                     push_bind(&mut args, "--bind", path, workspace);
                 }
-                crate::linux::erofs::WorkspaceMount::Image(path) => {
-                    push_bind(&mut args, "--ro-bind", path, workspace);
-                }
                 crate::linux::erofs::WorkspaceMount::Overlay(path) => {
                     push_bind(&mut args, "--bind", path, workspace);
                 }

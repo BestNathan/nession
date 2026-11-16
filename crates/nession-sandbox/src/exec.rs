@@ -970,8 +970,8 @@ fn remove_owned_composition_workspace(settings: &SandboxSettings, record: &Execu
 #[cfg(target_os = "linux")]
 fn overlay_workspace(
     overlay: &OverlayBindingRecord,
-) -> Result<nession_erofs::overlay::OverlayWorkspaceKey> {
-    nession_erofs::overlay::OverlayWorkspaceKey::new(
+) -> Result<crate::mount::overlay::OverlayWorkspaceKey> {
+    crate::mount::overlay::OverlayWorkspaceKey::new(
         PathBuf::from(&overlay.workspace_root),
         PathBuf::from(&overlay.workspace_relative),
     )
@@ -1036,7 +1036,7 @@ fn adopt_overlay_mount(settings: &SandboxSettings, record: &ExecutionRecord) -> 
         Ok(workspace) => workspace,
         Err(error) => return vec![format!("{error:#}")],
     };
-    let report = manager.adopt_consumers(&[nession_erofs::overlay::OverlayConsumerRef {
+    let report = manager.adopt_consumers(&[crate::mount::overlay::OverlayConsumerRef {
         workspace,
         execution_id: record.execution_id.clone(),
         generation: overlay.generation.clone(),
@@ -1217,7 +1217,7 @@ pub fn reconcile(
     #[cfg(target_os = "linux")]
     let mut protected_digests = HashSet::new();
     #[cfg(target_os = "linux")]
-    let mut protected_overlays = nession_erofs::overlay::ProtectedWorkspaces::new();
+    let mut protected_overlays = crate::mount::overlay::ProtectedWorkspaces::new();
     #[cfg(target_os = "linux")]
     let mut unreadable_record = false;
     #[cfg(target_os = "linux")]

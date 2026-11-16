@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::digest::is_valid_digest;
-use crate::mount_manager::ConsumerRef;
+use nession_erofs::digest::is_valid_digest;
+use nession_erofs::mount_manager::ConsumerRef;
 
 use super::manager::{
     adopt_token, lock, lower_consumer_id, OverlayMountManager, ProtectedWorkspaces,

@@ -270,7 +270,7 @@ fifth always-visible item is the derived **Preview**, not a Home policy.
 | Mounted image (RootFS or extra mount) | Agent prepares cache path; Sandbox mounts | Server registry + Agent cache; Sandbox owns the mount only | Unmounted; bytes remain | Bytes remain | Execution cleanup unmounts; cache owns bytes |
 | Project Location | Project declaration (external) | User/Project, never the Agent Manager | Yes | Yes | Never by Workspace management |
 | Managed Workspace | Agent Workspace Manager `get_or_create` | Agent, under its durable storage root | Yes | Yes | Explicit delete when unmounted and unreferenced; never execution cleanup |
-| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession-erofs::overlay` (#3582) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
+| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession-sandbox::mount::overlay` (#3582, #3695) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
 | Execution mounts and mountpoints | Sandbox `prepare` | Sandbox execution record | No | No | Cleanup/reconciliation, in reverse order |
 | `/home`, `/tmp`, `/run/nession` runtime paths | Backend | Execution | No | No | Execution cleanup |
 

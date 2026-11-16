@@ -402,9 +402,9 @@ pub async fn prepare(
         let write = workspace.write.clone();
         let write = Path::new(&write);
         let outcome = if owns_scratch_workspace {
-            nession_erofs::overlay::storage::initialize(write)
+            nession_sandbox::mount::overlay::storage::initialize(write)
         } else {
-            nession_erofs::overlay::storage::verify(write)
+            nession_sandbox::mount::overlay::storage::verify(write)
         };
         if let Err(error) = outcome {
             return Err(error.context(format!(
@@ -844,7 +844,7 @@ mod workspace_override_tests {
         // The Agent owner initializes the durable Overlay storage before a
         // lower-backed composition is prepared (#3582).
         #[cfg(target_os = "linux")]
-        nession_erofs::overlay::storage::initialize(&path).unwrap();
+        nession_sandbox::mount::overlay::storage::initialize(&path).unwrap();
         let prepared = prepare(
             &cache,
             &[
