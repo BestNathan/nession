@@ -2524,7 +2524,7 @@ mod injected_tmux_tests {
                  show-options) [ -f \"{state}\" ] && cat \"{state}\"; exit 0;;\n\
                  set-option) printf '%s' \"$5\" > \"{state}\"; exit 0;;\n\
                  show-environment) case \"$*\" in \
-                    *NESSION_RUNTIME_SESSION_INSTANCE_ID*) exit 0;; \
+                    *NESSION_RUNTIME_SESSION_INSTANCE_ID*) echo 'unknown variable: NESSION_RUNTIME_SESSION_INSTANCE_ID' >&2; exit 1;; \
                     *NESSON_SESSION_INSTANCE_ID*) printf '%s\\n' \
                        'NESSON_SESSION_INSTANCE_ID={delivered}';; esac; exit 0;;\n\
                  *) exit 0;;\n\
@@ -2534,7 +2534,10 @@ mod injected_tmux_tests {
         );
         let manager = crate::test_support::manager_with_fake(&fake);
         assert_eq!(
-            manager.session_instance_id("legacy").await.expect("identity"),
+            manager
+                .session_instance_id("legacy")
+                .await
+                .expect("identity"),
             delivered
         );
     }

@@ -1937,7 +1937,12 @@ mod tests {
         );
         assert_eq!(
             fake.calls(),
-            vec![vec!["show-environment", "-t", "sess", "NESSION_TEST_MALFORMED"]],
+            vec![vec![
+                "show-environment",
+                "-t",
+                "sess",
+                "NESSION_TEST_MALFORMED"
+            ]],
             "the query must be the owner's grammar, run against the injected binary"
         );
     }

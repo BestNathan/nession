@@ -404,7 +404,9 @@ mod tests {
             "the hook would write somewhere it was not told to"
         );
         assert!(
-            script.contains(r#"[ -n "$NESSION_RUNTIME_SESSION_ID" ] && [ -n "$NESSION_RUNTIME_BINDING_FILE" ]"#),
+            script.contains(
+                r#"[ -n "$NESSION_RUNTIME_SESSION_ID" ] && [ -n "$NESSION_RUNTIME_BINDING_FILE" ]"#
+            ),
             "new Sessions must only use the canonical internal runtime names"
         );
         // And it must do no work before that guard.
@@ -456,7 +458,10 @@ mod tests {
         let files = render("1.0.0");
         let script = file(&files, "hooks/record-binding.sh");
         for (session_var, binding_var) in [
-            (crate::binding::SESSION_ID_ENV, crate::binding::BINDING_FILE_ENV),
+            (
+                crate::binding::SESSION_ID_ENV,
+                crate::binding::BINDING_FILE_ENV,
+            ),
             (
                 crate::binding::LEGACY_SESSION_ID_ENV,
                 crate::binding::LEGACY_BINDING_FILE_ENV,

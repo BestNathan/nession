@@ -76,7 +76,11 @@ impl TmuxSessionContext {
         // A surviving pre-upgrade Session may still carry only the old marker.
         let fenced = match self.tmux.get_session_env(name, INSTANCE_ID_ENV).await {
             Ok(Some(_)) => true,
-            Ok(None) => match self.tmux.get_session_env(name, LEGACY_INSTANCE_ID_ENV).await {
+            Ok(None) => match self
+                .tmux
+                .get_session_env(name, LEGACY_INSTANCE_ID_ENV)
+                .await
+            {
                 Ok(Some(_)) => true,
                 Ok(None) => false,
                 Err(err) => {
@@ -501,12 +505,22 @@ mod tests {
         let fixture = binding_fixture("claude-binding-old-marker").await;
         let name = fixture.session.name().to_string();
         let instance = delivered_instance(&fixture.tmux, &name).await;
-        fixture.tmux.env().tmux().ops()
+        fixture
+            .tmux
+            .env()
+            .tmux()
+            .ops()
             .set_environment(&name, LEGACY_INSTANCE_ID_ENV, &instance)
-            .await.expect("set old marker");
-        fixture.tmux.env().tmux().ops()
+            .await
+            .expect("set old marker");
+        fixture
+            .tmux
+            .env()
+            .tmux()
+            .ops()
             .unset_environment(&name, INSTANCE_ID_ENV)
-            .await.expect("remove new marker");
+            .await
+            .expect("remove new marker");
 
         let file = crate::claude_binding::file_for_in(fixture.root.path(), &name, &instance);
         std::fs::write(&file, hook_payload("legacy-fenced")).expect("old binding");
@@ -515,8 +529,11 @@ mod tests {
             fixture.root.path().to_path_buf(),
         );
         assert_eq!(
-            restarted.session_claude_binding(&name).await
-                .expect("old Session binding").claude_session_id,
+            restarted
+                .session_claude_binding(&name)
+                .await
+                .expect("old Session binding")
+                .claude_session_id,
             "legacy-fenced"
         );
     }
