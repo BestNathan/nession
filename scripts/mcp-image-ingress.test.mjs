@@ -144,11 +144,16 @@ async function startContainer(front, backend, tls = false, disable = false) {
   if (tls) env.push('-e', 'TLS_CERT_PATH=/certs/cert.pem', '-e', 'TLS_KEY_PATH=/certs/key.pem');
   const sourceDir = path.join(root, 'deploy');
   const binary = path.join(dir, 'server-stub.sh');
-  const args = ['run', '-d', '--rm', '--network', 'host',
+  // Keep failed containers available for docker logs until explicit teardown.
+  const args = ['run', '-d', '--network', 'host',
     '-w', '/etc/nession', '-v', sourceDir + ':/mcp-deploy:ro',
     '-v', binary + ':/usr/local/bin/nession-server:ro',
     '-v', dir + ':/certs:ro', ...env, tag, 'sh', '-c',
-    'set -e; cp /mcp-deploy/nginx.conf.template /etc/nginx/templates/default.conf.template; ' +
+    // The runtime-tools build stage has nginx but NOT the final image's
+    // COPY-created /etc/nginx/templates directory. Create it in this test
+    // container before projecting the real shipped nginx template.
+    'set -e; mkdir -p /etc/nginx/templates; ' +
+    'cp /mcp-deploy/nginx.conf.template /etc/nginx/templates/default.conf.template; ' +
     'cp /mcp-deploy/entrypoint-server.sh /entrypoint.sh; ' +
     'cp /mcp-deploy/render-server-config.sh /render-server-config.sh; ' +
     'cp /mcp-deploy/render-mcp-config.sh /render-mcp-config.sh; ' +
@@ -164,13 +169,21 @@ async function startContainer(front, backend, tls = false, disable = false) {
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error('real nginx/MCP endpoint never became ready: ' + logTail());
+  throw new Error('real nginx/MCP endpoint never became ready; startup logs: ' + logTail());
 }
 function stopContainer() {
   if (!running) return;
   const id = running;
   running = null;
-  command('docker', ['stop', '-t', '3', id], 18000);
+  // `docker rm -f` settles a live or already-exited process, without leaking
+  // an ephemeral test container on the host or losing its logs before readback.
+  const result = spawnSync('docker', ['rm', '-f', id], {
+    encoding: 'utf8', timeout: 20000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error('could not clean up nginx test container ' + id + ': ' +
+      String(result.error || result.stderr).slice(-1200));
+  }
 }
 async function exercise(port, tls) {
   const opts = { Authorization: 'Bearer ' + token };
