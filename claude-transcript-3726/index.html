@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Claude Transcript · #3726</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./styles.css"></head>
+<body>
+<div class="np-page" data-np-root id="review">
+  <header class="np-overview">
+    <div class="np-eyebrow">Nession / Claude Code · Requirement #3726</div>
+    <h1 class="np-title">Transcript · every record, naturally rendered</h1>
+    <p class="np-subtitle">完整记录浏览器：认识的自然渲染，不认识的也在列表里。每条记录都可独立查看完整 Raw JSON / 原始文本。</p>
+    <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3726" target="_blank" rel="noopener">Requirement #3726</a> · <a href="./README.md" target="_blank" rel="noopener">Scenario &amp; fidelity</a> · <a href="https://github.com/BestNathan/nession/tree/prototype/claude-transcript-3726" target="_blank" rel="noopener">View source</a></div>
+  </header>
+  <section class="np-preview" aria-label="Interactive product preview">
+    <div class="np-preview-toolbar">
+      <strong>Preview</strong>
+      <button data-np-size="1180" aria-pressed="true">Web · 1180</button>
+      <button data-np-size="1024">Web · 1024</button>
+      <button data-np-size="390">App · 390</button>
+      <button data-np-size="375">App · 375</button>
+      <span data-np-current-size></span>
+      <button data-np-reset>Reset</button>
+    </div>
+    <div class="np-stage"><div class="np-device" data-np-device><div id="product" class="product" data-mode="web"></div></div></div>
+  </section>
+  <section class="np-details">
+    <h2>功能验证 · Mock-only</h2>
+    <div class="np-detail-grid">
+      <div class="np-detail"><h3>01 · 逐条保留</h3><p>默认加载最新一页，点击「加载更早记录」查看完整样本。包含 user、assistant、thinking、tool use、tool result、system、attachment、metadata、未知类型、损坏 JSON 与大记录。</p></div>
+      <div class="np-detail"><h3>02 · 双层查看</h3><p>点击行展开语义详情；点击行右侧 Raw 打开独立检查器，可切换 JSON 树 / 原始文本并复制。未知、损坏和大记录入口一致。</p></div>
+      <div class="np-detail"><h3>03 · Web / App</h3><p>Web 采用 Claude 能力内列表与时间线；App 为列表 → 时间线 → Raw 的推入层级，使用单一 Back。无全局新功能入口或解析状态徽章。</p></div>
+      <div class="np-detail"><h3>04 · 增量与归属</h3><p>外部模拟按钮可追加未来未知类型或切换当前 Session。验证新记录不清空已读历史、切换上下文会撤销 Raw 与旧选择。</p></div>
+    </div>
+    <div class="fixture-tools" aria-label="External reviewer simulation controls">
+      <strong>Review fixtures（原型外部控制）</strong>
+      <button type="button" id="append-fixture">模拟追加未知记录</button>
+      <button type="button" id="switch-fixture">模拟切换 Session</button>
+      <span id="fixture-info"></span>
+    </div>
+    <details class="np-inspector"><summary>Mock state inspection</summary><pre id="inspector"></pre></details>
+    <p class="footnote">纯浏览器静态模拟。没有调用 Nession Agent、没有读取真实 Claude transcript、没有引入实际 Schema 依赖；真实协议、权限、跨页游标、Chromium / Playwright 及 Pages 发布验证均留待实施与独立验证。</p>
+  </section>
+</div>
+<script src="../prototype-frame-2758/frame.js"></script>
+<script src="./app.js"></script>
+</body></html>
