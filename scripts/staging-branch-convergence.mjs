@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// #2926: trusted-main deployment-eligible branch discovery and PR convergence.
-// Do not execute workflow files from source branches. This planner cannot merge,
-// push branch refs, waive Gates, or invoke an Agent with privileged credentials.
+// #2926/#3689: trusted-main deployment-eligible branch discovery and PR convergence.
+// Never execute source-branch workflow code or bypass Gates. GitHub owns native
+// Auto-merge when strict required checks are enabled; the old qualified merge
+// path remains active until an explicit audited cutover.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
+import {armProtectedAutoMerge,publishQualificationStatus,isStrictQualificationRequired,
+  QUALIFICATION_CONTEXT}
+  from './staging-convergence-automerge.mjs';
 import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
 import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
   convergenceApproval} from './staging-convergence-pr.mjs';
@@ -577,6 +581,23 @@ function reconcile(plan) {
         results.push(record);
         continue;
       }
+      // Roll out GitHub-native Auto-merge only after protected required
+      // qualification has been configured and proven effective on both
+      // target branches. Until then retain the existing qualified immediate
+      // merge path so convergence is not suspended by an incomplete migration.
+      const expectedHead=sync?integration.sha:lane.sha;
+      const nativeAuto=process.env.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE==='true';
+      if(nativeAuto){
+        const auto=armProtectedAutoMerge({repo,prNumber:receipt.number,
+          base,headSha:expectedHead});
+        if(!auto.armed){
+          record.outcome='BLOCKED';
+          record.reason=auto.reason;
+          results.push(record);
+          continue;
+        }
+        record.auto_merge='armed';
+      }
       if(sync){
         let approval;
         if(legacy)approval=issueApproval(batch,batchIssueNumber);
@@ -590,6 +611,8 @@ function reconcile(plan) {
         if(!approval.approved){
           record.outcome='BLOCKED';
           record.reason=approval.reason;
+          if(nativeAuto)publishQualificationStatus(repo,expectedHead,'failure',
+            'Native sync approval denied: '+approval.reason);
           if(legacy)record.issue_approval_command=approval.approval_command;
           else{
             if(approval.full_run_id)record.full_run_id=approval.full_run_id;
@@ -607,17 +630,17 @@ function reconcile(plan) {
       if (!decision.ready) {
         record.outcome = 'BLOCKED';
         record.reason = decision.reason;
+        if(nativeAuto)publishQualificationStatus(repo,expectedHead,'failure',
+          'Convergence qualification denied: '+decision.reason);
         if (decision.reason === 'MERGE_CONFLICT') {
           record.agent_analysis = dispatchConflictReview(repo, receipt, action, plan, lane);
         }
         results.push(record);
         continue;
       }
-      // Never use `--auto`: acceptance might become stale before delayed merge.
-      // Revalidate current refs and emit one exact-head merge request at a time.
-      // Main can advance without invalidating the checked integration.
-      // Its pinned second parent must remain an ancestor of Main; the Staging
-      // first parent must match exactly. No head rewrite or approval reuse.
+      // Revalidate both remote heads before publishing qualification or
+      // performing a legacy merge. Strict protected GitHub Auto-merge becomes
+      // the sole merge owner once NESSION_CONVERGENCE_NATIVE_AUTO_MERGE=true.
       const liveMain=gitRemoteHead('main');
       let pinnedAncestor=false;
       if(sync){
@@ -627,20 +650,27 @@ function reconcile(plan) {
       }
       if (gitRemoteHead(lane.branch)!==lane.sha ||
           (sync&&!pinnedAncestor)||(!sync&&liveMain!==plan.main_sha)) {
-        reject('stale or divergent sources before merge: '+lane.branch);
+        reject('stale or divergent sources before qualification: '+lane.branch);
       }
-      const expectedHead = sync ? integration.sha : lane.sha;
-      const merge = gh(['--method','PUT','repos/' + repo + '/pulls/' + receipt.number + '/merge',
-        '-f','merge_method=merge','-f','sha=' + expectedHead]);
-      if (merge.merged !== true || !SHA.test(merge.sha)) {
-        reject('GitHub declined an independently qualified merge: ' + receipt.number);
+      if(nativeAuto){
+        if(!isStrictQualificationRequired(repo,base))
+          reject('strict GitHub qualification protection changed before status success');
+        publishQualificationStatus(repo,expectedHead,'success',
+          'Exact-head CI, source/Issue acceptance and deployment qualified');
+        record.outcome='AUTO_MERGE_QUALIFIED';
+        record.required_context=QUALIFICATION_CONTEXT;
+      }else{
+        const merge=gh(['--method','PUT','repos/'+repo+'/pulls/'+receipt.number+'/merge',
+          '-f','merge_method=merge','-f','sha='+expectedHead]);
+        if(merge.merged!==true||!SHA.test(merge.sha))
+          reject('GitHub declined an independently qualified legacy merge: '+receipt.number);
+        record.outcome='MERGED';
+        record.merge_sha=merge.sha;
       }
-      record.outcome = 'MERGED';
-      record.merge_sha = merge.sha;
       results.push(record);
-      // Main may now differ from the pinned plan. Never use another lane's
-      // old comparison in the same run; a fresh scheduled pass will re-plan.
-      if (action === 'promote-lane-to-main') return results;
+      // Main's branch head changes after successful merge. A fresh pass
+      // replans the other lane using the new authenticated Main.
+      if(action==='promote-lane-to-main')return results;
     }
   }
   return results;
@@ -687,6 +717,16 @@ function selfTest() {
   assert.match(receiptStep, /CONVERGENCE_WAKE_V1/);
   assert.match(receiptStep, /source_name: \.workflow_run\.name/);
   assert.match(receiptStep, /controller_run: \(\$controller_run \| tonumber\)/);
+  // #3689: protected qualification must not strand ordinary main/staging PRs.
+  // The native status is required branch-wide; the trusted classifier
+  // publishes NOT_APPLICABLE success for nonnative PR identities.
+  if(workflow.includes('  classify_pr:')){
+    assert.match(workflow,/pull_request_target:[\s\S]*?branches: \[main, staging\]/);
+    assert.match(workflow,/classify_pr:[\s\S]*?statuses: write/);
+    assert.match(workflow,/node scripts\/staging-convergence-automerge\.mjs classify/);
+    assert.match(jobIf[1],/needs\.classify_pr\.result == 'success'/);
+    assert.match(jobIf[1],/always\(\)/);
+  }
   // #3247: prove the actual workflow job-if accepts the authenticated
   // post-deployment completion, not merely a copied JS approximation.
   assert.match(workflow,
@@ -710,6 +750,8 @@ function selfTest() {
       },
       startsWith: (value, prefix) =>
         typeof value === 'string' && value.startsWith(prefix),
+      always: () => true,
+      needs: {'classify_pr': {result: 'success'}},
     }, {timeout: 1000});
   assert.equal(acceptsWake(releaseWake), true,
     'successful verified ACR push must re-wake convergence');
@@ -721,7 +763,6 @@ function selfTest() {
     {path: '.github/workflows/foreign.yml'},
     {head_branch: 'main'},
     {head_branch: 'integration/staging'},
-    {conclusion: 'failure'},
     {conclusion: 'skipped'},
     {head_repository: {full_name: 'attacker/fork'}},
     {repository: {full_name: 'attacker/fork'}},
@@ -731,6 +772,13 @@ function selfTest() {
       'untrusted Staging release wake must not start convergence: '+
         JSON.stringify(mutation));
   }
+  // #3689: failure/cancellation wakes revoke a previously green exact-HEAD
+  // qualification after source evidence changes. The source filter remains.
+  const revocationWakeEnabled=jobIf[1].includes("conclusion == 'failure'");
+  assert.equal(acceptsWake({...releaseWake,conclusion:'failure'}),
+    revocationWakeEnabled, 'failure wake migration must be deliberate');
+  assert.equal(acceptsWake({...releaseWake,conclusion:'cancelled'}),
+    revocationWakeEnabled, 'cancellation must invalidate stale readiness');
   assert.equal(acceptsWake(releaseWake, {ref:'refs/heads/staging'}), false,
     'only protected main may run the release controller');
   assert.equal(acceptsWake(releaseWake, {repository:'attacker/fork'}), false,
