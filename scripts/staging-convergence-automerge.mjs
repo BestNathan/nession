@@ -132,7 +132,7 @@ export function isStrictQualificationRequired(repo,base) {
 export function matchesQualificationReadback(created,inventory,state) {
   if(!created || !Number.isSafeInteger(created.id) || created.id<=0 ||
       created.context!==QUALIFICATION_CONTEXT || created.state!==state ||
-      !Array.isArray(inventory) || inventory.length>=100) return false;
+      !Array.isArray(inventory) || inventory.length===0) return false;
   const latest=inventory.find(item=>item.context===QUALIFICATION_CONTEXT);
   return latest?.id===created.id && latest.state===state &&
     latest.context===QUALIFICATION_CONTEXT;
@@ -249,9 +249,9 @@ function selfTest(){
     'newer green source must not be mistaken for our pending write');
   assert.equal(matchesQualificationReadback(created,[{...created,id:109}], 'pending'),false);
   assert.equal(matchesQualificationReadback(created,[created],'success'),false);
-  assert.equal(matchesQualificationReadback(created,Array.from({length:100},
-    (_,i)=>({...created,id:i+1})), 'pending'),false,
-    'truncated remote status inventory must fail closed');
+  assert.equal(matchesQualificationReadback(created,[created,
+    ...Array.from({length:99},(_,i)=>({...created,id:i+1}))], 'pending'),true,
+    'historical status count cannot strand the latest authenticated write');
 
   const pr={state:'open',draft:false,user:{login:PUBLISHER},
     base:{ref:'main',repo:{full_name:REPO}},head:{ref:'staging',
