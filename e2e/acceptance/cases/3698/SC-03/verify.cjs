@@ -52,7 +52,7 @@ if (!capabilities.backend) {
     const projectLocation = checked(
       'cargo',
       [
-        'test', '-q', '-p', 'nession-agent',
+        'test', '-q', '-p', 'nession-agent', '--lib',
         'a_project_location_is_external_and_refuses_a_lower', '--', '--nocapture',
       ],
       900000,
