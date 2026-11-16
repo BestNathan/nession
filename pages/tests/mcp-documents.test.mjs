@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validMcpSnapshot} from '../mcp-documents.js';
+import {validMcpSnapshot,mcpSchemaFields} from '../mcp-documents.js';
 const SHA='a'.repeat(40);
 const tool={name:'nession_agent_list_sessions',description:'List sessions',
   inputSchema:{type:'object',properties:{agent_id:{type:'string'}},required:['agent_id']}};
@@ -17,4 +17,52 @@ test('MCP catalog fails closed for missing, malformed and unpinned sources',()=>
   assert.equal(validMcpSnapshot({...valid,source:{sha:'main'}}),false);
   assert.equal(validMcpSnapshot({...valid,tools:[]}),false);
   assert.equal(validMcpSnapshot({...valid,tools:[{...tool,inputSchema:{}}]}),false);
+});
+
+test('MCP field renderer exposes exact nested paths, required flags, local refs and descriptions',()=>{
+  const schema={type:'object',required:['identity','options'],properties:{
+    identity:{type:'string',description:'Exact node identity'},
+    options:{$ref:'#/$defs/Options'},
+    tags:{type:'array',description:'Labels',items:{$ref:'#/$defs/Tag'}}
+  },$defs:{
+    Options:{type:'object',description:'Execution preferences',required:['limit'],properties:{
+      limit:{type:'integer',description:'Maximum returned sessions'},
+      target:{anyOf:[{type:'string'},{type:'null'}],description:'Optional destination'} }},
+    Tag:{type:'object',properties:{label:{type:'string',description:'Tag name'}}}
+  }};
+  const rows=mcpSchemaFields(schema);
+  assert.deepEqual(rows.map(x=>x.path),[
+    'identity','options','options.limit','options.target','tags','tags[].label']);
+  assert.equal(rows.find(x=>x.path==='identity').required,true);
+  assert.equal(rows.find(x=>x.path==='options.limit').required,true);
+  assert.equal(rows.find(x=>x.path==='options.target').required,false);
+  assert.equal(rows.find(x=>x.path==='options.target').type,'string | null');
+  assert.equal(rows.find(x=>x.path==='tags[].label').description,'Tag name');
+  assert.equal(rows.find(x=>x.path==='options.limit').description,'Maximum returned sessions');
+});
+test('MCP renderer rejects remote/missing references and bounds cyclic local references',()=>{
+  const bad={type:'object',properties:{
+    remote:{$ref:'https://example.com/private.json#/secret'},
+    missing:{$ref:'#/$defs/DoesNotExist'},
+    self:{$ref:'#/$defs/Cycle'}
+  },$defs:{Cycle:{$ref:'#/$defs/Cycle'}}};
+  const rows=mcpSchemaFields(bad);
+  assert.equal(rows.length,3);
+  assert.equal(rows.every(x=>x.type==='unresolved reference'),true);
+  const huge={type:'object',properties:Object.fromEntries(
+    Array.from({length:250},(_,i)=>['field'+i,{type:'string'}]))};
+  assert.equal(mcpSchemaFields(huge).length,160);
+  assert.deepEqual(mcpSchemaFields(null),[]);
+});
+test('optional outputSchema must be a bounded JSON Schema object, never inferred from examples',()=>{
+  assert.equal(validMcpSnapshot({...valid,tools:[{...tool,outputSchema:{
+    type:'object',properties:{sessions:{type:'array',description:'Actual sessions'}}
+  }}]}),true);
+  assert.equal(validMcpSnapshot({...valid,tools:[{...tool,outputSchema:null}]}),false);
+  assert.equal(validMcpSnapshot({...valid,tools:[{...tool,outputSchema:'guess'}]}),false);
+  assert.equal(validMcpSnapshot({...valid,tools:[{...tool,outputSchema:{type:'object',
+    description:'x'.repeat(51000)}}]}),false);
+  assert.equal(mcpSchemaFields({type:'object',properties:{
+    sessions:{type:'array',description:'Returned sessions'}
+  }})[0].description,'Returned sessions');
 });
