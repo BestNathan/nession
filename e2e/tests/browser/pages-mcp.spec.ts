@@ -9,7 +9,8 @@ test('MCP Documents renders the pinned Rust registry and returns to Documents in
     await expect(page.getByRole('heading',{name:'nession_server_list_agents'})).toBeVisible();
     await expect(page.locator('.documents-count')).toContainText('1 / 1 REGISTERED TOOLS');
     await page.getByText('Input JSON Schema').click();
-    await expect(page.locator('.documents-raw code')).toContainText('"type": "object"');
+    await expect(page.locator('.documents-mcp-contract').first()
+      .locator('.documents-raw code')).toContainText('"type": "object"');
     await expect(page.getByRole('link',{name:'Documents',exact:true}).first()).toHaveAttribute('aria-current','page');
     await page.getByRole('navigation',{name:'Documents breadcrumb'}).getByRole('link',{name:'Documents'}).click();
     await expect(page.getByRole('heading',{name:'Documents',exact:true})).toBeVisible();
