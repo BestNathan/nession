@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43809080462,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3696-erofs-compose",
+    "target_sha": "3dc997cd8d5fdeee02a59c7fc4a4c3815a8d5396",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43809080462",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3bf64c1183dcee381460048eb58ba6bfa1e3b8cdeef764cefbb3b9cab3ec3a8b"
+  },
+  "record": "runs/2026-11-16/43809080462-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "a0cb2760dcbeb2267499e03168d2465cd678faf0280e81ea0097150faf3ac32a"
+}
