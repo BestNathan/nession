@@ -118,10 +118,16 @@ export function attestLiveFullFailure({run,job,artifact,record,index,recordBytes
       deny('linked Bug Issue does not match fingerprint and admitted analysis');
     outcome='BUG_LINKED';
   }else if(state.status==='analyzed'&&state.dispatch_intent?.status==='committed'&&
-      state.latest_observation?.run_id!==run.id&&
-      positive(state.dispatch_run?.run_id)){
-    // A later exact-run observation for an already analyzed fingerprint is a
-    // deterministic reused analysis, even before a publisher links a Bug.
+      positive(state.dispatch_run?.run_id)&&positive(state.dispatch_run?.run_attempt)&&
+      positive(state.first_source?.run_id)&&positive(state.first_source?.run_attempt)&&
+      SHA.test(state.first_source?.target_sha??'')&&
+      state.first_source.run_id!==run.id&&
+      state.latest_observation?.run_id===state.first_source.run_id&&
+      state.latest_observation?.run_attempt===state.first_source.run_attempt&&
+      state.latest_observation?.target_sha===state.first_source.target_sha){
+    // A separately persisted new failed-run observation for an earlier
+    // fingerprint/claimed analysis can be reused without inventing a new Bug.
+    // Ordinary REUSE_ANALYSIS leaves the durable first claim unchanged.
     outcome='ANALYSIS_REUSED';
   }else deny('no matching Bug Issue or authenticated ANALYSIS_REUSED outcome');
   return {kind:'verified_live_main_full_failure_publication',source_run_id:run.id,
@@ -276,12 +282,21 @@ export async function selfTestLiveFullFailure(){
     {head:{...head,sha256:'c'.repeat(64)}},
     {issue:null},{issue:{...issue,labels:[]}},{issue:{...issue,body:''}},
   ])assert.throws(()=>attestLiveFullFailure({...fixture,...invalid}),/unverified live Main Full/);
-  const reused={...state,status:'analyzed',bug_issue:null,
-    dispatch_intent:{status:'committed'},latest_observation:{run_id:300},
-    dispatch_run:{run_id:301}};
+  const prior={'run_id':300,'run_attempt':1,'target_sha':'c'.repeat(40)};
+  const reused={...state,status:'analyzed',bug_issue:null,first_source:prior,
+    dispatch_intent:{status:'committed'},latest_observation:prior,
+    dispatch_run:{run_id:301,run_attempt:1}};
   const reusedBytes=Buffer.from(JSON.stringify(reused,null,2)+'\n');
   assert.equal(attestLiveFullFailure({...fixture,state:reused,stateBytes:reusedBytes,
     head:{...head,sha256:hash(reusedBytes)},issue:null}).outcome,'ANALYSIS_REUSED');
+  for(const invalid of [{...reused,first_source:null},
+    {...reused,first_source:{...prior,run_id:501}},
+    {...reused,latest_observation:{...prior,run_attempt:2}},
+    {...reused,dispatch_run:{run_id:301}}]){
+    const bytes=Buffer.from(JSON.stringify(invalid,null,2)+'\n');
+    assert.throws(()=>attestLiveFullFailure({...fixture,state:invalid,stateBytes:bytes,
+      head:{...head,sha256:hash(bytes)},issue:null}),/unverified live Main Full/);
+  }
   const env=value=>({encoding:'base64',size:Buffer.byteLength(JSON.stringify(value,null,2)+'\n'),
     content:Buffer.from(JSON.stringify(value,null,2)+'\n').toString('base64')});
   const get=async path=>{
