@@ -10,7 +10,7 @@ import {armProtectedAutoMerge,publishQualificationStatus,isStrictQualificationRe
   from './staging-convergence-automerge.mjs';
 import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
 import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
-  convergenceApproval} from './staging-convergence-pr.mjs';
+  revisedNativeConvergenceRisk,convergenceApproval} from './staging-convergence-pr.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
@@ -286,6 +286,7 @@ function existingPr(repo, owner, head, base) {
 
 export function staleGeneratedSyncPr(pr,repo,lane,currentHead) {
   return pr?.state==='open'&&pr.base?.ref===lane&&
+    pr.user?.login==='nession-publisher[bot]'&&
     pr.head?.ref!==currentHead&&pr.head?.repo?.full_name===repo&&
     pr.body?.startsWith('Staging Convergence automated proposal')&&
     pr.head.ref.startsWith('chore/staging-sync-'+lane.replace(/[\/._]/g,'-')+'-');
@@ -340,7 +341,7 @@ function pendingSyncIntegration(repo,lane,liveMainSha) {
     pr,native:isNativeConvergencePr(pr)};
 }
 
-function closeSupersededSyncPrs(repo,lane,currentHead) {
+function closeSupersededSyncPrs(repo,lane,currentHead,policyRetirement=null) {
   const list=gh(['--method','GET','repos/'+repo+'/pulls',
     '-f','base='+lane,'-f','state=open','-f','per_page=100']);
   if(!Array.isArray(list)||list.length>=100)
@@ -348,9 +349,25 @@ function closeSupersededSyncPrs(repo,lane,currentHead) {
   const closed=[];
   for(const pr of list) {
     if(!staleGeneratedSyncPr(pr,repo,lane,currentHead))continue;
+    if(policyRetirement?.pr.number===pr.number){
+      // A stale listing is not permission to close an altered or human-owned
+      // PR. Re-read the exact previously authenticated source before retiring.
+      const live=gh(['--method','GET','repos/'+repo+'/pulls/'+pr.number]);
+      if(live.state!=='open'||live.draft||
+          live.user?.login!=='nession-publisher[bot]'||
+          live.head?.repo?.full_name!==repo||
+          live.head?.ref!==policyRetirement.branch||
+          live.head?.sha!==policyRetirement.sha||
+          live.base?.ref!==lane||
+          live.base?.sha!==policyRetirement.pr.base.sha||
+          live.body!==policyRetirement.pr.body)
+        reject('policy-retired native PR changed after source verification');
+    }
     gh(['--method','PATCH','repos/'+repo+'/pulls/'+pr.number,'-f','state=closed']);
     closed.push(pr.number);
   }
+  if(policyRetirement&&!closed.includes(policyRetirement.pr.number))
+    reject('verified policy-revised native PR was not safely superseded');
   return closed;
 }
 
@@ -490,7 +507,12 @@ function reconcile(plan) {
     for (const action of lane.actions) {
       const sync=action==='sync-main-to-lane';
       let pinned=sync?pendingSyncIntegration(repo,lane,plan.main_sha):null;
-      let legacyRetirement=null;
+      let legacyRetirement=null,policyRetirement=null;
+      if(sync&&pinned?.native&&revisedNativeConvergenceRisk(
+        pinned.pr,ROOT,lane.sha,plan.main_sha)){
+        policyRetirement=pinned;
+        pinned=null; // retire old digest; integrate current trusted Main anew
+      }
       if(sync&&pinned&&!pinned.native){
         const oldBatch=planBatch({branch:lane.branch,main_sha:pinned.main_sha,
           lane_sha:lane.sha,integration_head:pinned.sha});
@@ -548,7 +570,8 @@ function reconcile(plan) {
           legacyRetirement.issue.number);
         if(approved.approved)reject('legacy approval raced migration; rerun');
       }
-      const superseded=sync?closeSupersededSyncPrs(repo,base,head):[];
+      const superseded=sync?closeSupersededSyncPrs(
+        repo,base,head,policyRetirement):[];
       if(legacyRetirement&&legacyRetirement.pinned.branch===head){
         const old=gh(['--method','GET','repos/'+repo+'/pulls/'+
           legacyRetirement.pinned.pr.number]);
@@ -818,7 +841,8 @@ function selfTest() {
   assert.equal(integrationBranchName('staging-01',aa,bb),
     'chore/staging-sync-staging-01-aaaaaaaaaaaa-bbbbbbbbbbbb');
   assert.throws(()=>integrationBranchName('bad..ref',aa,bb),/unsupported/);
-  const sample={state:'open',base:{ref:'staging'},head:{
+  const sample={state:'open',user:{login:'nession-publisher[bot]'},
+    base:{ref:'staging'},head:{
     ref:'chore/staging-sync-staging-aaaaaaaaaaaa-bbbbbbbbbbbb',
     repo:{full_name:'BestNathan/nession'}},
     body:'Staging Convergence automated proposal (source: Release / Staging Convergence).'};
@@ -827,6 +851,9 @@ function selfTest() {
   assert.equal(staleGeneratedSyncPr(sample,'BestNathan/nession','staging',sample.head.ref),false);
   assert.equal(staleGeneratedSyncPr({...sample,body:'manual integration'},
     'BestNathan/nession','staging','another'),false);
+  assert.equal(staleGeneratedSyncPr({...sample,user:{login:'human'}},
+    'BestNathan/nession','staging','another'),false,
+    'never retire a manual PR by prefix or body resemblance');
   assert.equal(staleGeneratedSyncPr({...sample,head:{...sample.head,
     repo:{full_name:'external/fork'}}},'BestNathan/nession','staging','another'),false);
   const pinned={...sample,base:{ref:'staging',sha:bb},
