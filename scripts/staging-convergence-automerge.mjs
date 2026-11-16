@@ -49,7 +49,7 @@ export function isTrustedConvergencePr(pr,{repo,base,headSha}) {
 // success/not-applicable qualification; source Quality checks remain required.
 // Publisher-owned convergence-shaped PRs may ONLY be qualified by the
 // independent canonical Controller after source/deploy/Issue verification.
-export function classifyPrQualification(pr) {
+export function classifyPrQualification(pr,otherOpenPrs=[],stagingHeadSha=null) {
   const base=pr?.base?.ref;
   const head=pr?.head?.ref;
   const publisher=pr?.user?.login===PUBLISHER;
@@ -66,6 +66,20 @@ export function classifyPrQualification(pr) {
       return {state:'pending',reason:'Awaiting canonical Convergence qualification'};
     return {state:'failure',reason:'Publisher proposal requires trusted Convergence identity'};
   }
+  // Commit statuses are keyed by SHA, not PR identity. A second ordinary PR
+  // with the same HEAD must never overwrite a protected native proposal's
+  // pending/failing status with a not-applicable success.
+  if(!Array.isArray(otherOpenPrs)||otherOpenPrs.length>=100 ||
+     (SHA.test(stagingHeadSha??'') && stagingHeadSha===pr.head.sha) ||
+     otherOpenPrs.some(other=>other?.number!==pr.number &&
+       other?.state==='open' && other?.head?.sha===pr.head.sha &&
+       other?.user?.login===PUBLISHER &&
+       (
+         other?.body?.startsWith('Staging Convergence automated proposal') ||
+         (other?.base?.ref==='main'&&other?.head?.ref==='staging') ||
+         /^chore\/staging-sync-[a-zA-Z0-9-]+$/.test(other?.head?.ref??'')
+       )))
+    return {state:'failure',reason:'Shared or unbounded native Convergence HEAD'};
   return {state:'success',reason:'Not a native Convergence PR; ordinary Quality checks apply'};
 }
 
@@ -81,7 +95,14 @@ function qualifyPullRequestEvent() {
       pr.head?.sha!==event.pull_request?.head?.sha||
       pr.base?.ref!==event.pull_request?.base?.ref)
     throw Error('stale/foreign event HEAD cannot certify qualification');
-  const {state,reason}=classifyPrQualification(pr);
+  // This bounded complete inventory binds the not-applicable verdict to
+  // the absence of ANY open publisher-native PR on the exact same commit.
+  const open=api(process.env.READ_GITHUB_TOKEN,
+    ['repos/'+REPO+'/pulls?state=open&per_page=100']);
+  if(!Array.isArray(open)||open.length>=100)
+    throw Error('unbounded open PR inventory cannot authorize not-applicable status');
+  const stage=api(process.env.READ_GITHUB_TOKEN,['repos/'+REPO+'/branches/staging']);
+  const {state,reason}=classifyPrQualification(pr,open,stage?.commit?.sha);
   publishQualificationStatus(REPO,pr.head.sha,state,reason);
   console.log(JSON.stringify({pr:pr.number,head_sha:pr.head.sha,state,reason}));
 }
@@ -192,6 +213,18 @@ function selfTest(){
     body:'Refs #3689'};
   assert.equal(classifyPrQualification(normal).state,'success',
     'ordinary PR must receive a required not-applicable status');
+  const publisherSameSha={...normal,number:44,user:{login:PUBLISHER},
+    head:{...normal.head,ref:'staging'},
+    body:'Staging Convergence automated proposal (source: main)'};
+  assert.equal(classifyPrQualification({...normal,number:42},
+    [publisherSameSha]).state,'failure',
+    'same SHA on a native PR must never receive a foreign success');
+  assert.equal(classifyPrQualification(normal,[],normal.head.sha).state,'failure',
+    'staging source SHA must never be exempted by another PR');
+  assert.equal(classifyPrQualification(normal,Array.from({length:100},
+    (_,i)=>({...normal,number:i+1}))).state,'failure',
+    'truncated open PR inventory must never authorize not-applicable');
+
   assert.equal(classifyPrQualification({...normal,base:{
     ref:'staging',repo:{full_name:REPO}}}).state,'success');
   assert.equal(classifyPrQualification({...normal,user:{login:PUBLISHER},
