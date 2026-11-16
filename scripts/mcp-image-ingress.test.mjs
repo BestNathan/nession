@@ -195,11 +195,14 @@ async function exercise(port, tls) {
   assert.ok(!/<!doctype html/i.test(noAuth.text), 'unauthenticated MCP returned Web UI');
   const wrong = await request(port, 'POST', rpc('tools/list'), { Authorization: 'Bearer bad' }, tls);
   assert.equal(wrong.status, 401, 'incorrect bearer token must be refused');
-  const badOrigin = await request(port, 'POST', rpc('tools/list'), {
-    ...opts, Origin: 'https://attacker.example.invalid',
-    'MCP-Protocol-Version': '2026-07-28',
-  }, tls);
+  // Use a fully valid legacy initialize so a rejection here can only be
+  // attributed to the Origin policy, not absent modern protocol metadata.
+  const badOrigin = await request(port, 'POST', rpc('initialize', {
+    protocolVersion: '2025-03-26', capabilities: {},
+    clientInfo: { name: 'nginx-case', version: '1' },
+  }), { ...opts, Origin: 'https://attacker.example.invalid' }, tls);
   assert.notEqual(badOrigin.status, 200, 'Origin policy bypassed by nginx');
+  assert.ok(!/<!doctype html/i.test(badOrigin.text), 'Origin rejection served Web SPA');
 
   const init = await request(port, 'POST', rpc('initialize', {
     protocolVersion: '2025-03-26', capabilities: {},
