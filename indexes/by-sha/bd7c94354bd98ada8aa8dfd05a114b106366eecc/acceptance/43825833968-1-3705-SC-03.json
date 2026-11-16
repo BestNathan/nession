@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "mode": "acceptance",
+  "source": {
+    "repository": "BestNathan/nession",
+    "run_id": 43825833968,
+    "run_attempt": 1,
+    "event": "push",
+    "head_sha": "bd7c94354bd98ada8aa8dfd05a114b106366eecc",
+    "head_branch": "staging",
+    "workflow_id": 378275235
+  },
+  "record": "runs/2026-11-16/43825833968-1/3705/SC-03.json",
+  "execution_id": "8699c4dfb6ccea9a24f89c94789935706fb91e5ba5580147d1f8e3e3efc4b9ab",
+  "target_sha": "bd7c94354bd98ada8aa8dfd05a114b106366eecc",
+  "issue": 3705,
+  "criterion": "SC-03",
+  "stage": "staging",
+  "case_tree_sha": "1904c2cf4f2cb0c2379ed8a561fa674211e7dbb8",
+  "contract_sha256": "15fa805a198403b41e3feb8bb5e2d4e4e9e2d14b95f77b2ea442903ac7ca7471"
+}

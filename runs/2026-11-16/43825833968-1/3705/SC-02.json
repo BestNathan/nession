@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5ee3702a9f66fc320cd5c7d44aac97468f2444f97459a34773174e9aca5ae2b7",
+  "run_id": 43825833968,
+  "run_attempt": 1,
+  "issue": 3705,
+  "criterion": "SC-02",
+  "criterion_text": "Container startup authenticates with the correct endpoint-owned token, rejects missing Server token, wrong/missing MCP credentials and wrong Agent-vs-Server token; neither log nor catalog leaks tokens.",
+  "stage": "staging",
+  "target_sha": "bd7c94354bd98ada8aa8dfd05a114b106366eecc",
+  "contract_sha256": "15fa805a198403b41e3feb8bb5e2d4e4e9e2d14b95f77b2ea442903ac7ca7471",
+  "case_revision": "bd7c94354bd98ada8aa8dfd05a114b106366eecc",
+  "case_tree_sha": "eb82209a570e449d60fb860bba92adaba157d2d0",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T07:46:05.481Z",
+  "finished_at": "2026-11-16T07:47:30.156Z",
+  "duration_ms": 84675,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Image MCP defaults preserve endpoint-owned tokens and fail closed",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging bd7c94354bd98ada8aa8dfd05a114b106366eecc: image projection rejects missing Server token, bad NESSION_MCP_ENABLED and token-bearing logs; explicit disable works; Server/Agent embedded MCP listeners reject unauthenticated access and Server enumerates the shared catalog"
+        }
+      ],
+      "duration_ms": 84631,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43825833968,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bd7c94354bd98ada8aa8dfd05a114b106366eecc",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43825833968",
+    "record_path": "runs/2026-11-16/43825833968-1/3705/SC-02.json",
+    "source_result_sha256": "10882de7d5c705b868b6fe800182a15e52fd5ac96258a3c9125e2023c3f6b8dc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43825833968-1",
+    "sha256": "10882de7d5c705b868b6fe800182a15e52fd5ac96258a3c9125e2023c3f6b8dc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43825833968",
+    "durability": "time-limited; object archival not configured"
+  }
+}
