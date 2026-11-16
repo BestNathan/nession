@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "64ec49a03d7b6e8f37d251ad812fc4421e93f48d",
+  "run_id": 43863844562,
+  "run_attempt": 1,
+  "plan_digest": "2436c7e81de8fddea9d2f2239ffd7ffe9518c5bcb253749c75c5c21c55ff0715",
+  "artifact_digest": "sha256:76080ec1cdc7487fdf1682f1ec72870af1b913ec337d2ab9e0d91676da520adf",
+  "results": [
+    {
+      "id": "transcript-geometry",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 66
+    }
+  ]
+}
