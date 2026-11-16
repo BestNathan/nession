@@ -63,7 +63,7 @@ jobs:
   # must receive a trusted "not applicable" success while the Publisher's
   # native Convergence proposals remain pending/failing until qualified.
   # Neither the event payload nor the PR head is executed as workflow code.
-  classify-pr:
+  classify_pr:
     if: github.event_name == 'pull_request_target' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -88,12 +88,12 @@ jobs:
         run: node scripts/staging-convergence-automerge.mjs classify
 
   converge:
-    needs: [classify-pr]
+    needs: [classify_pr]
     # The no-approval recheck wakes the same fail-closed controller.
     # Owner PR comments are wake signals only; trusted source/digest checks remain mandatory.
     if: >-
       always() &&
-      (github.event_name != 'pull_request_target' || needs.classify-pr.result == 'success') &&
+      (github.event_name != 'pull_request_target' || needs.classify_pr.result == 'success') &&
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       (
