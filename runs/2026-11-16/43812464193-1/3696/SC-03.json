@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "112876a4ea2ad1f925e5e960407f2bcbe7587ddbd499990e633a7deea146fe16",
+  "run_id": 43812464193,
+  "run_attempt": 1,
+  "issue": 3696,
+  "criterion": "SC-03",
+  "criterion_text": "An async compose build survives permitted cancel/retry/restart paths, publishes an authorized result via the existing Image Manager and transfers to an Agent whose cache can mount it without consulting the original sources.",
+  "stage": "staging",
+  "target_sha": "fbc4aa2e4faa8e03040f42b3d492c969d906bde4",
+  "contract_sha256": "73cd5f0abd74b1f942fc572d5912b9124e55283c299508fd7d48bfe089dd9e76",
+  "case_revision": "fbc4aa2e4faa8e03040f42b3d492c969d906bde4",
+  "case_tree_sha": "5346cd3620439146ae7394722fb48e02f52435d5",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T05:50:40.634Z",
+  "finished_at": "2026-11-16T05:51:09.276Z",
+  "duration_ms": 28641,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "om v0.2.17\n\u001b[1m\u001b[92m   Compiling\u001b[0m digest v0.10.7\n\u001b[1m\u001b[92m   Compiling\u001b[0m ring v0.17.14\n\u001b[1m\u001b[92m   Compiling\u001b[0m serde_core v1.0.229\n\u001b[1m\u001b[92m   Compiling\u001b[0m chrono v0.4.45\n\u001b[1m\u001b[92m   Compiling\u001b[0m rustls-webpki v0.103.15\n\u001b[1m\u001b[92m   Compiling\u001b[0m getrandom v0.3.4\n\u001b[1m\u001b[92m   Compiling\u001b[0m rustls v0.23.43\n\u001b[1m\u001b[92m   Compiling\u001b[0m sha2 v0.10.9\n\u001b[1m\u001b[92m   Compiling\u001b[0m futures-intrusive v0.5.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m serde v1.0.229\n\u001b[1m\u001b[92m   Compiling\u001b[0m rand_core v0.9.5\n\u001b[1m\u001b[92m   Compiling\u001b[0m futures-executor v0.3.34\n\u001b[1m\u001b[92m   Compiling\u001b[0m atoi v2.0.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m getrandom v0.4.3\n\u001b[1m\u001b[92m   Compiling\u001b[0m rand_chacha v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m ordered-float v4.6.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m aho-corasick v1.1.5\n\u001b[1m\u001b[92m   Compiling\u001b[0m serde_json v1.0.151\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-util v0.7.19\n\u001b[1m\u001b[92m   Compiling\u001b[0m h2 v0.4.18\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-stream v0.1.19\n\u001b[1m\u001b[92m   Compiling\u001b[0m tower v0.5.3\n\u001b[1m\u001b[92m   Compiling\u001b[0m sqlx-core v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m serde_urlencoded v0.7.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-rustls v0.26.4\n\u001b[1m\u001b[92m   Compiling\u001b[0m regex-automata v0.4.18\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-query v1.0.2\n\u001b[1m\u001b[92m   Compiling\u001b[0m hyper v1.11.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m sqlx-sqlite v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m rand v0.9.5\n\u001b[1m\u001b[92m   Compiling\u001b[0m hyper-util v0.1.20\n\u001b[1m\u001b[92m   Compiling\u001b[0m sha1 v0.10.7\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-orm-macros v2.0.2\n\u001b[1m\u001b[92m   Compiling\u001b[0m tungstenite v0.29.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m sqlx v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-query-sqlx v0.9.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m hyper-rustls v0.27.9\n\u001b[1m\u001b[92m   Compiling\u001b[0m tower-http v0.6.11\n\u001b[1m\u001b[92m   Compiling\u001b[0m filetime v0.2.29\n\u001b[1m\u001b[92m   Compiling\u001b[0m tempfile v3.27.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m reqwest v0.12.28\n\u001b[1m\u001b[92m   Compiling\u001b[0m tar v0.4.46\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-tungstenite v0.29.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m uuid v1.25.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m regex v1.13.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m bstr v1.13.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m futures v0.3.34\n\u001b[1m\u001b[92m   Compiling\u001b[0m axum v0.8.9\n\u001b[1m\u001b[92m   Compiling\u001b[0m httptest v0.16.4\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-orm v2.0.2\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-erofs v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-erofs)\n\u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 22.66s\n\u001b[1m\u001b[92m     Running\u001b[0m unittests src/lib.rs (target/debug/deps/nession_erofs-1c8aa80cebb8208f)\n\nthread 'build::compose::tests::real_erofs_compose_is_deterministic_and_mountable_metadata' (9538) panicked at crates/nession-erofs/src/build/compose.rs:1245:14:\ncalled `Result::unwrap()` on an `Err` value: failed to execute mkfs.erofs\n\nCaused by:\n    No such file or directory (os error 2)\n\nStack backtrace:\n   0: <E as anyhow::context::ext::StdError>::ext_context\n   1: anyhow::context::<impl anyhow::Context<T,E> for core::result::Result<T,E>>::with_context\n   2: nession_erofs::build::ProcessControl::execute\n   3: <nession_erofs::build::ProcessMkfsRunner as nession_erofs::build::MkfsRunner>::run\n   4: nession_erofs::build::compose::tests::real_erofs_compose_is_deterministic_and_mountable_metadata\n   5: nession_erofs::build::compose::tests::real_erofs_compose_is_deterministic_and_mountable_metadata::{{closure}}\n   6: core::ops::function::FnOnce::call_once\n   7: test::__rust_begin_short_backtrace::<core::result::Result<(), alloc::string::String>, fn() -> core::result::Result<(), alloc::string::String>>\n   8: test::run_test::{closure#0}\n   9: std::sys::backtrace::__rust_begin_short_backtrace::<test::run_test::{closure#1}, ()>\n  10: <std::thread::lifecycle::spawn_unchecked<test::run_test::{closure#1}, ()>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}\n  11: <std::sys::thread::unix::Thread>::new::thread_start\n  12: <unknown>\n  13: <unknown>\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n   1: core::panicking::panic_fmt\n   2: core::result::unwrap_failed\n   3: nession_erofs::build::compose::tests::real_erofs_compose_is_deterministic_and_mountable_metadata\n   4: nession_erofs::build::compose::tests::real_erofs_compose_is_deterministic_and_mountable_metadata::{{closure}}\n   5: core::ops::function::FnOnce::call_once\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-erofs --lib`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 22746,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43812464193,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "fbc4aa2e4faa8e03040f42b3d492c969d906bde4",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43812464193",
+    "record_path": "runs/2026-11-16/43812464193-1/3696/SC-03.json",
+    "source_result_sha256": "78476b3dedce8481ecdae5d3557ef6e256b181028b242e0b239c71295b91526d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43812464193-1",
+    "sha256": "78476b3dedce8481ecdae5d3557ef6e256b181028b242e0b239c71295b91526d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43812464193",
+    "durability": "time-limited; object archival not configured"
+  }
+}
