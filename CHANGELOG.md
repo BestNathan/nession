@@ -794,3 +794,17 @@
 - Categories: architecture, integration, security, agent, web, protocol
 - Reason: Record the Session-scoped Claude MCP configuration owner: file layout and whole-entry precedence, config-only inventory, explicit bounded discovery, native-CLI local/project mutation, and fail-closed Nession registration with a credential reference (#3600)
 - Source: https://github.com/BestNathan/nession/issues/3600
+
+## 2026-11-16T03:39:04Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
+- Reason: Record the owner-approved dual Image/runtime composition boundary and flattened/referenced Image build target; retain v1 limits
+- Source: https://github.com/BestNathan/nession/issues/3693
+
+## 2026-11-16T03:39:04Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record unified typed Sandbox Mount ownership and existing Workspace writable Overlay migration, preserving native recovery invariants and current one-lower limit
+- Source: https://github.com/BestNathan/nession/issues/3693
