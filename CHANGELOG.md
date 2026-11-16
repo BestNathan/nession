@@ -808,3 +808,17 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record unified typed Sandbox Mount ownership and existing Workspace writable Overlay migration, preserving native recovery invariants and current one-lower limit
 - Source: https://github.com/BestNathan/nession/issues/3693
+
+## 2026-11-16T16:56:10Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
+- Reason: Replace the target-only Image Compose section with the delivered flattened/referenced Image formats, exact staging PR and Acceptance Case receipts, legacy compatibility, and the remaining runtime-composite non-goal (#3693)
+- Source: https://github.com/BestNathan/nession/issues/3693
+
+## 2026-11-16T16:56:10Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the delivered Sandbox-owned typed MountPlan/backends, ordered multi-lower integration and opt-in writable RootFS with exact staging Acceptance Case receipts, replacing the one-lower target statement (#3693)
+- Source: https://github.com/BestNathan/nession/issues/3693
