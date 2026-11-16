@@ -50,14 +50,61 @@ export function mcpToolRoute(hash){
   return {name,invalid:name!==null&&!NAME.test(name)};
 }
 export function renderMcpDocuments(root,data,hash='#/documents/mcp'){
-  root.append(el('div','NESSION / OPEN ENGINEERING / DOCUMENTS / MCP','eyebrow'),
+  const crumb=el('nav','','documents-breadcrumb');
+  crumb.setAttribute('aria-label','Documents breadcrumb');
+  crumb.append(link('Documents','#/documents'),el('span',' / MCP'));
+  root.append(crumb,
     el('h1','MCP Tools','documents-heading'),
-    el('p','Current Nession MCP Tools from its registered Rust handlers, alongside the independently verified upstream stable specification. Source snapshots are read-only; upstream features are not automatically Nession capabilities.','documents-lede'),
-    link('← Protocol reference','#/documents','documents-mcp-back'));
+    el('p','Canonical Nession MCP Tool contracts and independently pinned official upstream specifications.','documents-lede'));
   if(!validMcpSnapshot(data)){
     root.append(el('p','MCP catalog unavailable or unverified. Previous support cannot be inferred from a failed source check.','documents-unavailable'));
     return;
   }
+  const route=mcpToolRoute(hash)||{name:null,invalid:false};
+  const selected=!route.invalid&&(route.name?
+    data.tools.find(t=>t.name===route.name):data.tools[0]);
+  const exact=route.name!==null||route.invalid;
+  const layout=el('div','','documents-mcp-layout documents-workspace'+(exact?' reading':''));
+  layout.dataset.section='mcp';
+  const aside=el('aside','','documents-mcp-side documents-browser-pane');
+  aside.setAttribute('aria-label','MCP Tool catalog');
+  const controls=el('div','','documents-browser-controls');
+  const search=el('input','','documents-search');
+  search.type='search';search.placeholder='Search MCP Tools or fields';
+  search.setAttribute('aria-label','Search MCP Tools');
+  search.value=state.query;
+  const counter=el('p','','documents-count mono');
+  controls.append(el('div','MCP TOOL REGISTRY','eyebrow'),search,counter);
+  const results=el('div','','documents-results documents-list-scroll');
+  results.setAttribute('role','region');
+  results.setAttribute('aria-label','MCP Tool list');
+  results.tabIndex=0;
+  aside.append(controls,results);
+  function repaint(){
+    results.replaceChildren();
+    const q=state.query.trim().toLocaleLowerCase();
+    const found=data.tools.filter(t=>!q||[
+      t.name,t.description,JSON.stringify(t.inputSchema)].join(' ').toLocaleLowerCase().includes(q));
+    counter.textContent=found.length+' / '+data.tools.length+' REGISTERED TOOLS';
+    for(const tool of found){
+      const a=link('', '#/documents/mcp?tool='+encodeURIComponent(tool.name),
+        'documents-entry'+(selected?.name===tool.name?' selected':''));
+      a.append(el('strong',tool.name),
+        el('span',tool.name.startsWith('nession_server_')?'Server':
+          tool.name.startsWith('nession_agent_')?'Agent':'Tool','eyebrow'));
+      if(selected?.name===tool.name)a.setAttribute('aria-current','page');
+      results.append(a);
+    }
+    if(!found.length)results.append(el('p','No matching MCP Tools.','documents-empty'));
+  }
+  search.addEventListener('input',()=>{state.query=search.value;repaint();});
+  repaint();
+  const slot=el('section','','documents-reader-slot');
+  slot.setAttribute('role','region');
+  slot.setAttribute('aria-label','MCP Tool details');
+  slot.tabIndex=0;
+  const right=el('article','','documents-mcp-reader documents-reader');
+  right.append(link('← All MCP Tools','#/documents/mcp','documents-back'));
   const stable=data.upstream.stable;
   const upstream=el('section','','documents-mcp-upstream panel');
   upstream.append(el('div','OFFICIAL SPECIFICATION / STABLE','eyebrow'),
@@ -72,60 +119,30 @@ export function renderMcpDocuments(root,data,hash='#/documents/mcp'){
     for(const item of stable.highlights)list.append(el('li',item));
     upstream.append(h,list);
   }
-  root.append(upstream);
+  right.append(upstream);
   const meta=el('div','','documents-snapshot mono');
   meta.append(el('span','NESSION MCP / PINNED SOURCE'),
     el('strong',data.source.sha.slice(0,12)),
     el('span',data.tools.length+' registered Tools'));
   meta.append(link('Rust registry ↗',REPO+'/blob/'+data.source.sha+
     '/crates/nession-mcp/src/tools/mod.rs','documents-source',true));
-  root.append(meta);
-  const route=mcpToolRoute(hash)||{name:null,invalid:false};
-  const selected=!route.invalid&&(route.name?
-    data.tools.find(t=>t.name===route.name):data.tools[0]);
-  const layout=el('div','','documents-mcp-layout');
-  const aside=el('aside','','documents-mcp-side');
-  const search=el('input','','documents-search');
-  search.type='search';
-  search.placeholder='Search MCP Tools or fields';
-  search.setAttribute('aria-label','Search MCP Tools');
-  search.value=state.query;
-  const counter=el('p','','documents-count mono');
-  const results=el('div','','documents-results');
-  aside.append(search,counter,results);
-  function repaint(){
-    results.replaceChildren();
-    const q=state.query.trim().toLocaleLowerCase();
-    const found=data.tools.filter(t=>!q||[
-      t.name,t.description,JSON.stringify(t.inputSchema)].join(' ').toLocaleLowerCase().includes(q));
-    counter.textContent=found.length+' / '+data.tools.length+' REGISTERED TOOLS';
-    for(const tool of found){
-      const a=link(tool.name,'#/documents/mcp?tool='+encodeURIComponent(tool.name),
-        'documents-entry'+(selected?.name===tool.name?' selected':''));
-      if(selected?.name===tool.name)a.setAttribute('aria-current','page');
-      a.append(el('span',tool.name.startsWith('nession_server_')?'Server':
-        tool.name.startsWith('nession_agent_')?'Agent':'Tool','eyebrow'));
-      results.append(a);
-    }
-    if(!found.length)results.append(el('p','No matching MCP Tools.','documents-empty'));
-  }
-  search.addEventListener('input',()=>{state.query=search.value;repaint();});
-  repaint();
-  const right=el('article','','documents-mcp-reader documents-reader');
+  right.append(meta);
+  const detail=el('div','','documents-mcp-tool-detail');
   if(!selected){
-    right.append(el('h2','Unknown MCP Tool'),
+    detail.append(el('h2','Unknown MCP Tool'),
       el('p','This Tool is not registered in the pinned catalog.'));
   }else{
-    right.append(el('div','REGISTERED TOOL / INPUT CONTRACT','eyebrow'),
+    detail.append(el('div','REGISTERED TOOL / INPUT CONTRACT','eyebrow'),
       el('h2',selected.name),el('p',selected.description));
     const details=el('details','','documents-raw');
     details.append(el('summary','Input JSON Schema'));
     const pre=el('pre');pre.append(el('code',JSON.stringify(selected.inputSchema,null,2)));
-    details.append(pre);right.append(details);
-    right.append(link('View pinned Tool source ↗',
+    details.append(pre);detail.append(details);
+    detail.append(link('View pinned Tool source ↗',
       REPO+'/blob/'+data.source.sha+'/crates/nession-mcp/src/tools/'+selected.name+'.rs',
       'documents-source',true));
   }
-  layout.append(aside,right);
+  right.append(detail);slot.append(right);
+  layout.append(aside,slot);
   root.append(layout);
 }
