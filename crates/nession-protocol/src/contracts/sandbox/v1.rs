@@ -40,7 +40,7 @@ fn is_false(value: &bool) -> bool {
 /// `enabled: false` and also carries constraints is contradictory and is
 /// rejected by the validator.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxPolicy {
@@ -75,7 +75,7 @@ pub struct SandboxPolicy {
 
 /// How strictly a backend must honour the policy.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxEnforcement {
@@ -87,7 +87,7 @@ pub enum SandboxEnforcement {
 
 /// The client-safe RootFS declaration (#3405).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SandboxFilesystemRoot {
@@ -107,7 +107,7 @@ pub enum SandboxFilesystemRoot {
 
 /// One authorized additional image source (#3405).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SandboxMountSource {
@@ -118,7 +118,7 @@ pub enum SandboxMountSource {
 
 /// One read-only additional image mount with an explicit target (#3405).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxMount {
@@ -136,7 +136,7 @@ fn default_mount_read_only() -> bool {
 
 /// The client-safe Workspace selection (#3405, resource model #3407).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SandboxFilesystemWorkspace {
@@ -156,7 +156,7 @@ pub enum SandboxFilesystemWorkspace {
 
 /// Filesystem access contract.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemPolicy {
@@ -178,7 +178,7 @@ pub struct SandboxFilesystemPolicy {
     /// generated draft projection omits it so a client cannot name native
     /// image paths or digests.
     #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<SandboxFilesystemComposition>,
 }
@@ -188,7 +188,7 @@ pub struct SandboxFilesystemPolicy {
 /// `source` is an Agent-authorized local file, never a URL or a raw mount
 /// request. The Sandbox verifies the digest before it mounts anything.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxImageRef {
@@ -211,7 +211,7 @@ pub struct SandboxImageRef {
 /// their validation and precedence, and an external Config never authorizes a
 /// mount or overrides a sandbox-owned variable.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemComposition {
@@ -241,7 +241,7 @@ pub struct SandboxFilesystemComposition {
 /// Sandbox re-validates names, bounds and protected keys before it applies
 /// any value.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxImageEnvDefault {
@@ -259,7 +259,7 @@ pub struct SandboxImageEnvDefault {
 /// EROFS lower because the Overlay would have to store upper/work inside a
 /// user-owned tree.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxWorkspaceOwnership {
@@ -273,7 +273,7 @@ pub enum SandboxWorkspaceOwnership {
 /// The `/workspace` view: an optional read-only Project source EROFS plus the
 /// selected writable directory bound over it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxWorkspace {
@@ -319,7 +319,7 @@ impl SandboxWorkspace {
 /// the Sandbox resolves it after target validation and refuses an unsafe or
 /// missing executable directory before user code runs.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxToolchainImage {
@@ -338,7 +338,7 @@ pub struct SandboxToolchainImage {
 /// Authorized host path sets. Other host paths are not visible in the
 /// sandbox; listed Unix sockets remain subject to their own permission checks.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemAccess {
@@ -353,7 +353,7 @@ pub struct SandboxFilesystemAccess {
 /// Network policy, expressed as the shared target contract rather than as an
 /// OS mechanism.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxNetworkPolicy {
@@ -369,7 +369,7 @@ pub struct SandboxNetworkPolicy {
 
 /// The three V1 network modes.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxNetworkMode {
@@ -390,7 +390,7 @@ pub enum SandboxNetworkMode {
 /// only the leading `*.` form and matches subdomains but not the base domain.
 /// `deny` wins over `allow`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxEgressPolicy {
@@ -406,7 +406,7 @@ pub struct SandboxEgressPolicy {
 
 /// The only V1 private-network value.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxPrivateNetwork {
@@ -416,7 +416,7 @@ pub enum SandboxPrivateNetwork {
 
 /// The only V1 ingress value: no port publication.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxIngress {
@@ -426,7 +426,7 @@ pub enum SandboxIngress {
 
 /// Linux-native process namespace requests.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxProcessPolicy {
@@ -439,7 +439,7 @@ pub struct SandboxProcessPolicy {
 /// Mount and network namespaces are owned by `filesystem` and `network`
 /// respectively, so they do not appear here as duplicate knobs.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxLinuxNamespaces {
@@ -458,7 +458,7 @@ pub struct SandboxLinuxNamespaces {
 
 /// Linux cgroup v2 resource policy.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxResourcePolicy {
@@ -474,14 +474,14 @@ pub struct SandboxResourcePolicy {
 /// authority on each value's format and range. The JSON shape
 /// `resource.cgroup_v2: { "cpu.weight": "100" }` is the V1 native boundary.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SandboxCgroupV2Policy(pub std::collections::BTreeMap<String, String>);
 
 /// Linux seccomp policy.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxSyscallPolicy {
@@ -491,7 +491,7 @@ pub struct SandboxSyscallPolicy {
 /// A pinned built-in profile reference, never an arbitrary syscall list or
 /// external BPF blob.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxSeccompPolicy {
@@ -504,7 +504,7 @@ pub struct SandboxSeccompPolicy {
 /// and mechanisms that were verified in effect, and a digest that binds the
 /// report to the exact compiled policy.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxExecutionReport {
     /// Stable identity of this execution, also delivered to the Pane
@@ -544,7 +544,7 @@ pub struct SandboxExecutionReport {
 
 /// The capability's context answers exactly one of three states.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxContextStatus {
@@ -562,7 +562,7 @@ pub enum SandboxContextStatus {
 /// Rows are empty-first: the schema preselects nothing, and an empty list
 /// omits the whole optional group from the materialized policy.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxKvEntry {
@@ -578,7 +578,7 @@ pub struct SandboxKvEntry {
 /// projection, not an alternative schema — the Agent materializes it and
 /// compiles the canonical policy before any host resource is created.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxPolicyDraft {
@@ -604,7 +604,7 @@ pub struct SandboxPolicyDraft {
 
 /// Which prepared image role a Sandbox image selection asks for.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxImageRole {
@@ -618,7 +618,7 @@ pub enum SandboxImageRole {
 
 /// How a selected image participates in the composed root.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxImageMode {
@@ -635,7 +635,7 @@ pub enum SandboxImageMode {
 /// Server authorizes the digest and mints a scoped grant; the Agent resolves
 /// the verified cache path and builds the canonical composition.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxImageSelection {
@@ -787,7 +787,7 @@ pub fn validate_image_selections(
 
 /// Field-level preflight/Enter error.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxFieldError {
     /// Dot/row path such as `resource[0].key` or `filesystem.access.read`.
@@ -800,7 +800,7 @@ pub struct SandboxFieldError {
 
 /// The identity of the Pane execution the capability is reporting on.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxPaneScope {
     pub session_name: String,
@@ -821,7 +821,7 @@ pub struct SandboxPaneScope {
 
 /// One verified Nession-managed execution, as the Agent observed it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxExecutionView {
     pub execution_id: String,
@@ -843,7 +843,7 @@ pub struct SandboxExecutionView {
 
 /// The Native Pane a Sandbox Pane was entered from, preserved untouched.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxNativePane {
     pub window_id: String,
@@ -855,7 +855,7 @@ pub struct SandboxNativePane {
 /// Return to Native is a focus switch; the Sandbox Pane keeps running, so the
 /// capability must be able to name it again without fabricating `inside`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxPaneRef {
     pub execution_id: String,
@@ -866,7 +866,7 @@ pub struct SandboxPaneRef {
 
 /// Whether the Agent's host probe can offer Enter at all.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxCatalogStatus {
@@ -890,7 +890,7 @@ pub const SANDBOX_CATALOG_VERSION: u32 = 2;
 /// guarantee is installed in the selected Pane, nor that arbitrary values
 /// will be accepted at runtime.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxImplementationStatus {
@@ -904,7 +904,7 @@ pub enum SandboxImplementationStatus {
 /// A stable machine-readable reason why an implementation or option is not
 /// available. Free-form diagnostics stay in the sibling `reason` string.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxUnsupportedReason {
@@ -932,7 +932,7 @@ pub enum SandboxUnsupportedReason {
 /// One typed, implementation-owned option (network mode, namespace, seccomp
 /// profile, ...). The meaning of `id` belongs to the implementation path.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxOptionSupport {
@@ -986,7 +986,7 @@ impl SandboxOptionSupport {
 /// own versioned path before it can appear here; a frontend label can never
 /// authorize policy bytes.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxImplementationSupport {
@@ -1030,7 +1030,7 @@ impl SandboxImplementationSupport {
 
 /// One selectable Key/Value key, as the Agent's own probe measured it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxFieldEntry {
     pub key: String,
@@ -1055,7 +1055,7 @@ pub struct SandboxFieldEntry {
 /// `nession-sandbox` still owns final preflight/launch rejection; a stale
 /// probe generation is revalidated on preflight and Enter.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxCapabilityCatalog {
     /// The shape version this catalog answers. Newer versions add fields;
@@ -1142,7 +1142,7 @@ pub const REGISTERED_IMPLEMENTATION_PATHS: [&str; 6] = [
 
 /// The active Pane's Sandbox context.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxCurrentContext {
     pub status: SandboxContextStatus,
@@ -1173,7 +1173,7 @@ pub struct SandboxCurrentContext {
 
 /// Typed outcome kind shared by the capability commands.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxActionErrorKind {
@@ -1192,7 +1192,7 @@ pub enum SandboxActionErrorKind {
 /// Preflight result. `ok` is true only when the Agent's own compile + host
 /// capability validation passed.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxPreflightResult {
     pub ok: bool,
@@ -1217,7 +1217,7 @@ pub struct SandboxPreflightResult {
 
 /// Enter / Return / Focus outcome.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxActionResult {
     pub success: bool,

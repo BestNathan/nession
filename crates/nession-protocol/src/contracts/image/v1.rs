@@ -59,7 +59,7 @@ pub const IMAGE_COMPOSE_DESTINATION_MAX_CHARS: usize = 1024;
 /// repackaged. The referenced form requires every source at the composed root
 /// and fails closed on any path conflict.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageComposeRepresentation {
@@ -77,7 +77,7 @@ pub enum ImageComposeRepresentation {
 /// resolves and authorizes the Repository reference once at submission and
 /// pins the immutable Manifest/layer identities for the whole build.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageComposeSource {
@@ -99,7 +99,7 @@ pub struct ImageComposeSource {
 /// composition of catalog Images. Private GitHub authentication is deliberately
 /// out of scope and is refused rather than silently attempted.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ImageSource {
@@ -198,7 +198,7 @@ impl NormalizedImageSource {
 /// The digest covers both the source tree and these parameters, so two builds
 /// that differ only in packaging never share a digest.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImagePackaging {
@@ -231,7 +231,7 @@ impl ImagePackaging {
 
 /// The lifecycle state of one build.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageStatus {
@@ -271,7 +271,7 @@ pub const IMAGE_LIST_MAX_LIMIT: u32 = 200;
 
 /// An immutable image record as list/get/build replies return it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageDescriptor {
     pub image_id: String,
@@ -301,7 +301,7 @@ pub struct ImageDescriptor {
 
 /// `server.image.build`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildPayload {
     pub source: ImageSource,
@@ -313,7 +313,7 @@ pub struct ImageBuildPayload {
 
 /// `server.image.build`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildResponsePayload {
     pub success: bool,
@@ -333,7 +333,7 @@ pub struct ImageBuildResponsePayload {
 /// the pre-pagination bound for older clients; a caller that wants the complete
 /// inventory follows `next_offset` until it is absent.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageListPayload {
     #[serde(default)]
@@ -352,7 +352,7 @@ fn default_image_list_limit() -> u32 {
 
 /// `server.image.list`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageListResponsePayload {
     pub images: Vec<ImageDescriptor>,
@@ -369,7 +369,7 @@ pub struct ImageListResponsePayload {
 /// `server.image.get`'s request. Exactly one of `digest` or `alias` addresses
 /// the artifact; supplying both or neither is invalid.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageGetPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -380,7 +380,7 @@ pub struct ImageGetPayload {
 
 /// `server.image.get`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageGetResponsePayload {
     pub success: bool,
@@ -394,7 +394,7 @@ pub struct ImageGetResponsePayload {
 
 /// One Agent cache state for a selected image (#3181).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageCacheState {
@@ -413,7 +413,7 @@ pub enum ImageCacheState {
 
 /// One digest's cache state as the owning Agent observed it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageCacheStatus {
     pub digest: String,
@@ -433,7 +433,7 @@ pub const IMAGE_CACHE_OBSERVATION_VERSION: u32 = 1;
 /// completing is `verifying`; only a full SHA-256 match plus atomic
 /// publication is `verified`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageCachePhase {
@@ -462,7 +462,7 @@ pub enum ImageCachePhase {
 /// authoritative total is unknown, and consumers must not synthesize a
 /// percentage in that case. `updated_at` is Unix epoch seconds.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageCacheObservation {
@@ -1140,7 +1140,7 @@ pub const IMAGE_DIAGNOSTIC_MAX_CHARS: usize = 1024;
 
 /// The lifecycle of one durable build record.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageBuildStatus {
@@ -1188,7 +1188,7 @@ impl ImageBuildStatus {
 /// `mkfs.erofs` has no native progress report, so a packaging build reports
 /// this stage and elapsed time, never an invented percentage.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageBuildStage {
@@ -1225,7 +1225,7 @@ impl ImageBuildStage {
 /// Measured build progress. Counts are absent until the snapshot manifest has
 /// measured them; no field is a guessed total.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageBuildProgress {
@@ -1240,7 +1240,7 @@ pub struct ImageBuildProgress {
 
 /// One durable build record as the asynchronous units return it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildDescriptor {
     pub build_id: String,
@@ -1277,7 +1277,7 @@ pub struct ImageBuildDescriptor {
 
 /// `server.image.build.submit`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildSubmitPayload {
     pub source: ImageSource,
@@ -1291,7 +1291,7 @@ pub struct ImageBuildSubmitPayload {
 
 /// `server.image.build.submit`'s reply: the durable record, returned promptly.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildSubmitResponsePayload {
     pub success: bool,
@@ -1305,7 +1305,7 @@ pub struct ImageBuildSubmitResponsePayload {
 
 /// `server.image.build.get`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildGetPayload {
     pub build_id: String,
@@ -1313,7 +1313,7 @@ pub struct ImageBuildGetPayload {
 
 /// `server.image.build.get`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildGetResponsePayload {
     pub success: bool,
@@ -1327,7 +1327,7 @@ pub struct ImageBuildGetResponsePayload {
 
 /// `server.image.build.list`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildListPayload {
     #[serde(default)]
@@ -1342,7 +1342,7 @@ fn default_build_list_limit() -> u32 {
 
 /// `server.image.build.list`'s reply: the durable inventory, newest first.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildListResponsePayload {
     pub builds: Vec<ImageBuildDescriptor>,
@@ -1355,7 +1355,7 @@ pub struct ImageBuildListResponsePayload {
 
 /// `server.image.build.cancel`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildCancelPayload {
     pub build_id: String,
@@ -1363,7 +1363,7 @@ pub struct ImageBuildCancelPayload {
 
 /// `server.image.build.cancel`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildCancelResponsePayload {
     pub success: bool,
@@ -1377,7 +1377,7 @@ pub struct ImageBuildCancelResponsePayload {
 
 /// `server.image.build.retry`'s request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildRetryPayload {
     pub build_id: String,
@@ -1385,7 +1385,7 @@ pub struct ImageBuildRetryPayload {
 
 /// `server.image.build.retry`'s reply.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildRetryResponsePayload {
     pub success: bool,

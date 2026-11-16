@@ -98,11 +98,19 @@ network_type: NetworkType,
  * `NetworkType::default_priority` when not explicitly set.
  */
 priority: number, };
-export type AgentMetadata = { tmux_version: string, 
+export type AgentMetadata = { 
+/**
+ * The tmux version the Agent runs.
+ */
+tmux_version: string, 
 /**
  * Human-readable OS and CPU, for display only.
  */
-os_version: string, nession_version: string, 
+os_version: string, 
+/**
+ * The Nession version the Agent runs.
+ */
+nession_version: string, 
 /**
  * Docker image tag (short sha) baked in at build time.
  * "dev" when running from `cargo run`, "unknown" when not set.
@@ -128,7 +136,11 @@ export type ProtocolManifest = {
 /**
  * Who offers this set — an agent id, a server, a runtime name.
  */
-provider: string, protocols: { [key in ProtocolId]: ContractSupport }, 
+provider: string, 
+/**
+ * The Protocol Units this provider serves, keyed by canonical unit id.
+ */
+protocols: { [key in ProtocolId]: ContractSupport }, 
 /**
  * Diagnostics only.
  *

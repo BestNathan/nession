@@ -4,7 +4,7 @@ use crate::contracts::default_image_tag;
 use crate::{ProtocolManifest, RedactedToken};
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRegisterPayload {
     pub agent_id: String,
@@ -13,7 +13,7 @@ pub struct AgentRegisterPayload {
     pub port: u16,
     /// The Server Token: this Agent's outbound control-plane credential.
     #[cfg_attr(feature = "codegen", ts(type = "string"))]
-    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub auth_token: RedactedToken,
     /// The durable inbound Agent Token (#3440).
     ///
@@ -24,7 +24,7 @@ pub struct AgentRegisterPayload {
     /// it re-registers with the field, and attach refuses P2P clearly.
     #[serde(default)]
     #[cfg_attr(feature = "codegen", ts(type = "string"))]
-    #[cfg_attr(feature = "codegen", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub agent_token: RedactedToken,
     pub metadata: AgentMetadata,
     /// Human-readable display name (set via agent config or Web UI rename).
@@ -61,7 +61,7 @@ pub struct AgentRegisterPayload {
 /// Used to label endpoints in the UI and to break ties when the server must
 /// pick a single legacy `agent_address` for old clients (tunnels win).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkType {
@@ -106,7 +106,7 @@ impl NetworkType {
 
 /// A single advertised way to reach an agent over WebSocket.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentAddress {
     /// Complete WebSocket URL, e.g. `ws://192.168.1.5:8080/ws`.
@@ -124,7 +124,7 @@ pub struct AgentAddress {
 
 /// Result of the server's TCP reachability probe for an address.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AddressStatus {
@@ -151,11 +151,13 @@ impl AddressStatus {
 /// Sent to clients in the attach response so they can prioritise reachable
 /// endpoints and skip known-dead ones.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbedAddress {
+    /// The advertised endpoint this probe result belongs to.
     #[serde(flatten)]
     pub address: AgentAddress,
+    /// The server's latest TCP probe result for the endpoint.
     pub status: AddressStatus,
     /// Round-trip time of the last successful probe, in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -163,12 +165,14 @@ pub struct ProbedAddress {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMetadata {
+    /// The tmux version the Agent runs.
     pub tmux_version: String,
     /// Human-readable OS and CPU, for display only.
     pub os_version: String,
+    /// The Nession version the Agent runs.
     pub nession_version: String,
     /// Docker image tag (short sha) baked in at build time.
     /// "dev" when running from `cargo run`, "unknown" when not set.
@@ -197,7 +201,7 @@ pub struct AgentMetadata {
 /// therefore have two types, and that is the accepted cost of placement staying
 /// a lookup.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRefusal {
     pub status: String,
@@ -206,7 +210,7 @@ pub struct AgentRefusal {
 
 /// `server.agent.list`'s reply: the list, or the refusal.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AgentListReply {
@@ -217,7 +221,7 @@ pub enum AgentListReply {
 /// `server.agent.list`'s request: empty, and explicitly so — the call reads
 /// nothing and is not permitted to have no request.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentListPayload {}
 
@@ -229,7 +233,7 @@ pub struct AgentListPayload {}
 /// in exactly the two ways `agent_view`'s doc comment describes as fixed: no
 /// `protocols`, and no `metadata.image_tag`.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRenameResponse {
     /// On **both** branches, so it is not what the untagged union discriminates
@@ -246,7 +250,7 @@ pub struct AgentRenameResponse {
 /// the distinction is the caller's to make — and the contract says the field is
 /// nullable rather than inventing a sentinel for it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRenamePayload {
     pub agent_id: String,
@@ -261,7 +265,7 @@ pub struct AgentRenamePayload {
 /// this has turned up: the convention is per handler, and a family is no guide
 /// to which one a unit uses.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRenameFailure {
     pub success: bool,
@@ -269,7 +273,7 @@ pub struct AgentRenameFailure {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AgentRenameReply {
@@ -286,7 +290,7 @@ pub enum AgentRenameReply {
 /// On acceptance the server tells the agent which heartbeat interval to use,
 /// so the cadence is configured centrally rather than per-agent.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRegisterResponsePayload {
     /// "accepted" or "rejected".
@@ -307,7 +311,7 @@ pub struct AgentRegisterResponsePayload {
 /// connection read the same shape and the alternative is two `json!` blocks
 /// that agree by luck.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentHeartbeatPayload {
     pub agent_id: String,
@@ -318,7 +322,7 @@ pub struct AgentHeartbeatPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentStatus {
@@ -328,7 +332,7 @@ pub enum AgentStatus {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatMetadata {
     pub uptime_seconds: u64,
@@ -343,14 +347,14 @@ pub struct HeartbeatMetadata {
 
 /// `server.agent.delete` — permanently remove an offline agent and its sessions.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAgentDeletePayload {
     pub agent_id: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientAgentDeleteResponsePayload {
     pub success: bool,
@@ -364,7 +368,7 @@ pub struct ClientAgentDeleteResponsePayload {
 /// VPN connect/disconnect, sleep/wake). The server replaces the agent's
 /// address list and re-probes reachability.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentAddressUpdatePayload {
     pub agent_id: String,
@@ -376,15 +380,22 @@ pub struct AgentAddressUpdatePayload {
 // --- The peer-to-peer projection (#678) ---
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAgentInfo {
+    /// The Agent's stable registry identity.
     pub agent_id: String,
+    /// The hostname the Agent reported at registration.
     pub hostname: String,
+    /// The primary IP address the Agent reported at registration.
     pub ip_address: String,
+    /// The Agent's P2P WebSocket port.
     pub port: u16,
+    /// Registry status: `online`, `offline` or `degraded`.
     pub status: String,
+    /// Number of Sessions the Server's registry associates with this Agent.
     pub session_count: u32,
+    /// Time of the last accepted heartbeat, as an RFC 3339 timestamp.
     pub last_heartbeat: String,
     // The six below were on the wire and not in this type. `agent_view.rs` is
     // the single builder both `server.agent.list` and the `server.agents.changed` push
@@ -398,7 +409,9 @@ pub struct WebAgentInfo {
     /// to the hostname when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Number of Sessions currently active (attached) on the Agent.
     pub active_sessions: u32,
+    /// Time the Agent first registered, as an RFC 3339 timestamp.
     pub registered_at: String,
     /// The server's probe results, so the item type is `ProbedAddress` and not
     /// `AgentAddress` — the obvious guess, and the wrong one.
@@ -413,13 +426,15 @@ pub struct WebAgentInfo {
     /// quoted the rule in this very comment while adding it.
     #[serde(default)]
     pub protocols: Option<ProtocolManifest>,
+    /// What the Agent reported about its runtime and build.
     pub metadata: AgentMetadata,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAgentsListResponse {
+    /// Every Agent the Server's registry currently knows about.
     pub agents: Vec<WebAgentInfo>,
 }
 

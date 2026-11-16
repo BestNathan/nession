@@ -69,6 +69,49 @@ routes and Web/CLI behavior are unchanged**; only the MCP names are gone.
 No MCP Tool mints or returns a P2P credential, and no removed Tool added a
 second management control plane.
 
+## Tool contract: mandatory input and output schemas
+
+Every Nession-owned Tool declares **both** a typed `inputSchema` and a typed
+`outputSchema` (`#3735`). The external MCP specification makes `outputSchema`
+optional for interoperability; Nession's own Tool contract does not. A Tool
+cannot register, be advertised by `tools/list`, be exported to Pages or be
+considered implemented without one.
+
+Both schemas are derived with `schemars` from the same Rust types the Tool and
+its semantic backend use:
+
+| Tool owner | Successful reply type | Schema source |
+|---|---|---|
+| Server discovery | `WebAgentsListResponse` | Protocol contract |
+| Server ENV | `ClientEnvListResponsePayload` / `ClientEnvGetResponsePayload` / `ClientEnvWriteResponsePayload` / `ClientEnvDeleteResponsePayload` | Protocol contract |
+| Server Session ENV binding | `ClientSessionEnvBindingResponsePayload` | Protocol contract |
+| Agent Session kill | `SessionKillResponse` | Protocol contract |
+| Agent Session list | `SessionListOutput` + `SessionSummary` | Tool module |
+| Agent Session create | `SessionCreatedOutput` | Tool module |
+
+The Agent Session list/create replies have one MCP projection because the three
+hosting modes reach the same Agent truth through different Protocol wires (the
+Agent's `agent.session.list` reply, the Server broker's copy of it, and the
+Server's `server.session.list` projection). The Tool advertises only fields
+every route can state truthfully; route-specific fields stay in that route's
+own Protocol contract.
+
+`ToolHandler::output_schema` is required, and `ToolRegistry::build` rejects an
+empty map or a generic object placeholder (`{ "type": "object" }`, an empty
+`properties`, or a field with no type/structure). Host adapters return the typed
+reply — they deserialize a Server/Agent wire reply into it or construct it from
+their own services — so an untyped owner reply cannot become a successful Tool
+result.
+
+A successful `tools/call` result carries the reply both as text content and as
+MCP `structuredContent` conforming to the declared `outputSchema`. Text and
+structured content are the same JSON value. A business refusal or tool error is
+`isError: true` and carries **no** `structuredContent`: the output schema
+describes success only, and an error never masquerades as a conforming success
+result. The source-pinned exporter, semantic digest, publication validation and
+Documents reader all require and hash both schemas; a missing or malformed
+output contract fails publication.
+
 ## Flat Tool structure
 
 ```text
@@ -99,18 +142,19 @@ crates/nession-mcp/src/
 
 Every Tool is **one file named exactly like the MCP Tool**, flat under
 `tools/` (no `tools/server` or `tools/agent` directories). The module owns its
-name, description, typed argument contract, emitted JSON Schema and focused
-tests; the schema is generated from the same `serde` type that parses the
-arguments, so `additionalProperties: false` and runtime validation cannot
-drift. `tools/mod.rs` only declares modules and registers their handlers with
-one `ToolRegistry`; there is no central `match name` dispatch and no automatic
-or macro registration.
+name, description, typed argument contract, typed success output contract,
+emitted JSON Schemas and focused tests; each schema is generated from the same
+`serde` type the Tool parses or returns, so `additionalProperties: false` and
+runtime validation cannot drift. `tools/mod.rs` only declares modules and
+registers their handlers with one `ToolRegistry`; there is no central
+`match name` dispatch and no automatic or macro registration.
 
-The registry is built **once at service startup**. Duplicate Tool names fail
-startup. An unknown Tool call is a tool-level argument error, not a transport
-failure. A host may omit an unconfigured optional backend's Tools only by an
-explicit, tested policy; a temporarily offline target keeps the Tool listed and
-answers with a truthful unavailable error, never a changed identity or schema.
+The registry is built **once at service startup**. Duplicate Tool names and any
+missing or placeholder output contract fail startup. An unknown Tool call is a
+tool-level argument error, not a transport failure. A host may omit an
+unconfigured optional backend's Tools only by an explicit, tested policy; a
+temporarily offline target keeps the Tool listed and answers with a truthful
+unavailable error, never a changed identity or schema.
 
 `McpService` owns the protocol lifecycle, transport, inbound authentication,
 Origin policy, body size, concurrency and deadlines. A handler only validates

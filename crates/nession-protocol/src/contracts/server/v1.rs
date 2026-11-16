@@ -11,13 +11,13 @@ pub(crate) fn default_build_time() -> String {
 
 /// Request payload for `server.info` — empty (protocol marker).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoRequest {}
 
 /// Request payload for `server.mcp.endpoint` — empty (protocol marker).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerMcpEndpointRequest {}
 
@@ -30,7 +30,7 @@ pub struct ServerMcpEndpointRequest {}
 /// from the address it uses for the Server; the Server does not invent a
 /// public URL it may not know (a TLS-terminating proxy, for example).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerMcpEndpointResponse {
     /// `[mcp] enabled = true` on this Server. Disabled is the default and
@@ -43,7 +43,7 @@ pub struct ServerMcpEndpointResponse {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerMcpAuthV1 {
@@ -52,7 +52,7 @@ pub enum ServerMcpAuthV1 {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfoResponse {
     pub version: String,

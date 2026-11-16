@@ -1,27 +1,40 @@
-//! The two semantic backend seams (`#3264`).
+//! The two semantic backend seams (`#3264`, `#3735`).
 //!
 //! A Tool's semantic owner decides which seam it uses — never where the MCP
 //! endpoint happens to run:
 //!
-//! * [`ClusterBackend`] answers **Server-owned discovery**: which Agents the
-//!   Server registry knows about.
+//! * [`ClusterBackend`] answers **Server-owned discovery** and ENV/binding
+//!   management.
 //! * [`NodeBackend`] answers **Agent-owned Session state**: the real tmux
 //!   Sessions of one explicitly named Agent.
+//!
+//! Every seam method returns a **typed success reply** (`#3735`). The type is
+//! either the authoritative Protocol contract the owner already serves
+//! (`WebAgentsListResponse`, `ClientEnv*ResponsePayload`,
+//! `ClientSessionEnvBindingResponsePayload`, `SessionKillResponse`) or, where
+//! hosting modes project one owner's state differently, the stabilized MCP
+//! projection owned by the Tool module. A host adapter deserializes or builds
+//! that type before the Tool can advertise or return it, so an untyped owner
+//! reply cannot become a successful MCP result.
 //!
 //! A backend does not decide a Tool name, schema, validation or result shape —
 //! those live with the Tool module — and it never sees the inbound MCP token.
 
 use async_trait::async_trait;
+use nession_protocol::contracts::agent::v1::WebAgentsListResponse;
 use nession_protocol::contracts::env::v1::{
-    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
+    ClientEnvWriteResponsePayload,
 };
 use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingSetPayload,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
 };
-use serde_json::Value;
 
 use crate::error::ToolError;
+use crate::tools::nession_agent_create_session::SessionCreatedOutput;
+use crate::tools::nession_agent_list_sessions::SessionListOutput;
 
 /// The Server-owned cluster view.
 ///
@@ -30,39 +43,48 @@ use crate::error::ToolError;
 #[async_trait]
 pub trait ClusterBackend: Send + Sync {
     /// `nession_server_list_agents` — the Server registry's Agent view.
-    async fn list_agents(&self) -> Result<Value, ToolError>;
+    async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError>;
 
     /// `nession_server_env_list` — server and online-agent file inventory.
-    async fn env_list(&self) -> Result<Value, ToolError>;
+    async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError>;
 
     /// `nession_server_env_get` — raw file content (potentially sensitive).
-    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError>;
+    async fn env_get(
+        &self,
+        payload: ClientEnvGetPayload,
+    ) -> Result<ClientEnvGetResponsePayload, ToolError>;
 
     /// `nession_server_env_write` — canonical in-use/overwrite protection.
-    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError>;
+    async fn env_write(
+        &self,
+        payload: ClientEnvWritePayload,
+    ) -> Result<ClientEnvWriteResponsePayload, ToolError>;
 
     /// `nession_server_env_delete` — canonical in-use/delete protection.
-    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError>;
+    async fn env_delete(
+        &self,
+        payload: ClientEnvDeletePayload,
+    ) -> Result<ClientEnvDeleteResponsePayload, ToolError>;
 
     /// `nession_server_session_env_binding_get` — desired + observed state.
     async fn session_env_binding_get(
         &self,
         payload: ClientSessionEnvBindingGetPayload,
-    ) -> Result<Value, ToolError>;
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError>;
 
     /// `nession_server_session_env_binding_set` — whole ordered replacement
     /// with the Server's durable revision compare-and-swap.
     async fn session_env_binding_set(
         &self,
         payload: ClientSessionEnvBindingSetPayload,
-    ) -> Result<Value, ToolError>;
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError>;
 
     /// `nession_server_session_env_binding_reapply` — re-resolve the current
     /// selection at a new revision.
     async fn session_env_binding_reapply(
         &self,
         payload: ClientSessionEnvBindingReapplyPayload,
-    ) -> Result<Value, ToolError>;
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError>;
 }
 
 /// One explicitly named Agent node's real Session state.
@@ -78,7 +100,7 @@ pub trait ClusterBackend: Send + Sync {
 #[async_trait]
 pub trait NodeBackend: Send + Sync {
     /// `nession_agent_list_sessions`.
-    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError>;
+    async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError>;
 
     /// `nession_agent_create_session`.
     async fn create_session(
@@ -86,10 +108,14 @@ pub trait NodeBackend: Send + Sync {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
-    ) -> Result<Value, ToolError>;
+    ) -> Result<SessionCreatedOutput, ToolError>;
 
     /// `nession_agent_kill_session`.
-    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError>;
+    async fn kill_session(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionKillResponse, ToolError>;
 }
 
 /// The cluster backend of a host that has no Server configured.
@@ -112,44 +138,53 @@ impl UnavailableClusterBackend {
 
 #[async_trait]
 impl ClusterBackend for UnavailableClusterBackend {
-    async fn list_agents(&self) -> Result<Value, ToolError> {
+    async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
-    async fn env_list(&self) -> Result<Value, ToolError> {
+    async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
-    async fn env_get(&self, _payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+    async fn env_get(
+        &self,
+        _payload: ClientEnvGetPayload,
+    ) -> Result<ClientEnvGetResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
-    async fn env_write(&self, _payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+    async fn env_write(
+        &self,
+        _payload: ClientEnvWritePayload,
+    ) -> Result<ClientEnvWriteResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
-    async fn env_delete(&self, _payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+    async fn env_delete(
+        &self,
+        _payload: ClientEnvDeletePayload,
+    ) -> Result<ClientEnvDeleteResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
     async fn session_env_binding_get(
         &self,
         _payload: ClientSessionEnvBindingGetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
     async fn session_env_binding_set(
         &self,
         _payload: ClientSessionEnvBindingSetPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
     async fn session_env_binding_reapply(
         &self,
         _payload: ClientSessionEnvBindingReapplyPayload,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 }
@@ -175,7 +210,7 @@ impl UnavailableNodeBackend {
 
 #[async_trait]
 impl NodeBackend for UnavailableNodeBackend {
-    async fn list_sessions(&self, _agent_id: &str) -> Result<Value, ToolError> {
+    async fn list_sessions(&self, _agent_id: &str) -> Result<SessionListOutput, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
@@ -184,11 +219,15 @@ impl NodeBackend for UnavailableNodeBackend {
         _agent_id: &str,
         _name: &str,
         _working_dir: Option<&str>,
-    ) -> Result<Value, ToolError> {
+    ) -> Result<SessionCreatedOutput, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 
-    async fn kill_session(&self, _agent_id: &str, _name: &str) -> Result<Value, ToolError> {
+    async fn kill_session(
+        &self,
+        _agent_id: &str,
+        _name: &str,
+    ) -> Result<SessionKillResponse, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 }
