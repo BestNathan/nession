@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "ecfe75591402c8f8dadf8bd8b57f1cde802d55ec",
+  "run_id": 43918516952,
+  "run_attempt": 1,
+  "plan_digest": "2f3fb5841ede6e265a618fcd7f975be1c9ad68c93bbe50ddc8415c776ed00da9",
+  "artifact_digest": "sha256:356a39ea035fd4826be7fe6a3935fcc4f186c9737b20451c758b827179ac4e50",
+  "results": [
+    {
+      "id": "pages-mcp",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 44
+    },
+    {
+      "id": "transcript-geometry",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 66
+    }
+  ]
+}
