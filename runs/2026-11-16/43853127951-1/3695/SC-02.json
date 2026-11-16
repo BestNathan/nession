@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7bd63a6dc22dad96b3be9211db53ad994517c8393bfdb141161f4d13c500c62e",
+  "run_id": 43853127951,
+  "run_attempt": 1,
+  "issue": 3695,
+  "criterion": "SC-02",
+  "criterion_text": "Two Sandbox executions using the same managed Workspace share exactly one verified physical writable Overlay; dropping one does not unmount the other, and last release preserves durable upper/work bytes.",
+  "stage": "staging",
+  "target_sha": "0d8fda4825829f2ad64eb4cfc0192d2e15fa07f8",
+  "contract_sha256": "5fe1f96ade0ca9d5833c5d9d69fed42cf4c4185ad50d5ff72e7064da35156f66",
+  "case_revision": "0d8fda4825829f2ad64eb4cfc0192d2e15fa07f8",
+  "case_tree_sha": "16dea661aa58ba7652165fa1228586b28502cdea",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T10:58:29.432Z",
+  "finished_at": "2026-11-16T10:59:00.918Z",
+  "duration_ms": 31486,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Two Sandbox executions share exactly one typed-Overlay physical view, release independently, and the last release preserves durable Workspace bytes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0d8fda4825829f2ad64eb4cfc0192d2e15fa07f8 on Linux kernel 7.0.0-1014-aws: two verified Sandbox executions over managed Workspace /tmp/.tmpxfVKmL/agent-workspaces/ws_two_consumers passed through the typed MountPlan and shared one physical fuse-overlayfs view (consumers=2, same mountpoint/generation); release A kept B live; the last release unmounted and retained upper/work"
+        }
+      ],
+      "duration_ms": 25596,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43853127951,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0d8fda4825829f2ad64eb4cfc0192d2e15fa07f8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43853127951",
+    "record_path": "runs/2026-11-16/43853127951-1/3695/SC-02.json",
+    "source_result_sha256": "a6fd5be8ccc9ae158a1f43cbecdcbc163594303016d765cee450b1739632b79c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43853127951-1",
+    "sha256": "a6fd5be8ccc9ae158a1f43cbecdcbc163594303016d765cee450b1739632b79c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43853127951",
+    "durability": "time-limited; object archival not configured"
+  }
+}
