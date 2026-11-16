@@ -39,7 +39,8 @@ function includes(text, fragments, context) {
 }
 function source(file) { return fs.readFileSync(path.join(root, file), 'utf8'); }
 function composeTokenIsHardcoded(text) {
-  return text.includes('change-me-standalone') || /AGENT_TOKEN:\\s*["']?(?:test|example|change-me)/.test(text);
+  const line = text.split('\n').find((part) => part.trim().startsWith('AGENT_TOKEN:'));
+  return !line || !line.includes('${AGENT_TOKEN:-}');
 }
 function renderServer(name, overrides) {
   const dest = path.join(dir, name);
@@ -60,6 +61,8 @@ try {
 
   const server = renderServer('server-on.toml', { SERVER_AUTH_TOKEN: token });
   ok(server.result, 'Server with token');
+  assert.equal(fs.statSync(server.dest).mode & 0o777, 0o600,
+    'Server config containing bearer token must be private');
   includes(server.output, ['[mcp]', 'enabled = true', 'path = "/mcp"'], 'Server default');
   assert.equal((server.output.match(/\[mcp\]/g) || []).length, 1, 'exactly one MCP table');
   const missing = renderServer('server-no-token.toml', {});

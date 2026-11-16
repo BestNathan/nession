@@ -487,6 +487,12 @@ async fn agent_mcp_refuses_an_anonymous_request() {
         .await
         .expect("HTTP answer");
     assert_eq!(response.status, 401);
+    // The outbound Server credential (AGENT_AUTH_TOKEN) is never valid on
+    // the Agent's own MCP surface, which checks the durable Agent Token.
+    let wrong = send(addr, "POST", Some("outbound-server-token"), None, &body)
+        .await
+        .expect("wrong bearer must receive an HTTP refusal");
+    assert_eq!(wrong.status, 401);
     let _ = handle.shutdown().await;
 }
 
