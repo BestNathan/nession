@@ -113,7 +113,7 @@ test('MCP detail prioritizes Tool identity, named input/output fields and compac
     await expect(tool.getByText('Only the requested Agent identity',{exact:true})).toBeVisible();
     await expect(tool.getByText('Registered Agent records',{exact:true})).toBeVisible();
     await expect(tool.getByText('Canonical Agent ID',{exact:true})).toBeVisible();
-    await expect(tool.locator('.documents-mcp-spec')).not.toHaveAttribute('open');
+    await expect(page.locator('.documents-mcp-reader > .documents-mcp-spec')).not.toHaveAttribute('open');
     await tool.getByText('Output JSON Schema').click();
     await expect(tool.locator('.documents-mcp-contract').nth(1).locator('.documents-mcp-raw code')).toContainText('agents');
   }finally{await site.close();}
