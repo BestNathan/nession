@@ -33,7 +33,7 @@ import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatch
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import { collectFullRegression } from './verification-full-regression-evidence.mjs';
 import { collectMainPeriodicFull, shouldCollectMainPeriodicFull, selfTestMainPeriodicFull } from './acceptance-main-periodic-full-evidence.mjs';
-import {collectLiveFullFailure,shouldCollectLiveFullFailure} from './acceptance-main-full-failure-bug-evidence.mjs';
+import {collectLiveFullFailure,shouldCollectLiveFullFailure,selfTestLiveFullFailure} from './acceptance-main-full-failure-bug-evidence.mjs';
 import { FULL_NOT_REQUIRED_LOG_PREFIX } from './e2e-full-applicability.mjs';
 import {
   DEPLOYMENT_ATTESTATION_LOG_PREFIX,
@@ -3412,6 +3412,7 @@ async function selfTest() {
   selfTestPrQualityCost();
   selfTestOriginalQwenReview();
   await selfTestMainPeriodicFull();
+  await selfTestLiveFullFailure();
   assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
     verifiedLiveFullFailurePublication:{status:'Pending',reason:'no failed source'}})
     .verified_live_main_full_failure_publication.status,'Pending');
