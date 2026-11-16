@@ -88,6 +88,15 @@ import type {
   TranscriptItemsResponse,
 } from '@/generated/protocol/claude-code/transcript-items/v1';
 import type {
+  TranscriptRecordRequest,
+  TranscriptRecordResponse,
+} from '@/generated/protocol/claude-code/transcript-record/v1';
+import type {
+  TranscriptRecordV1,
+  TranscriptRecordsRequest,
+  TranscriptRecordsResponse,
+} from '@/generated/protocol/claude-code/transcript-records/v1';
+import type {
   TranscriptItemV1,
   TranscriptsRequest,
   TranscriptsResponse,
@@ -105,6 +114,10 @@ export type ClaudeCodeConversationsRequest = ConversationsRequest & { agent_id: 
 export type ClaudeCodeMessagesRequest = MessagesRequest & { agent_id: string };
 export type ClaudeCodeTranscriptsRequest = TranscriptsRequest & { agent_id: string };
 export type ClaudeCodeTranscriptItemsRequest = TranscriptItemsRequest & { agent_id: string };
+/** `#3726`: a raw page of physical JSONL records. */
+export type ClaudeCodeTranscriptRecordsRequest = TranscriptRecordsRequest & { agent_id: string };
+/** `#3726`: bounded full-record access by an opaque record reference. */
+export type ClaudeCodeTranscriptRecordRequest = TranscriptRecordRequest & { agent_id: string };
 export type ClaudeCodeMcpServersRequest = McpServersRequest & { agent_id: string };
 export type ClaudeCodeMcpServerRequest = McpServerRequest & { agent_id: string };
 export type ClaudeCodeMcpMutateRequest = McpMutateRequest & { agent_id: string };
@@ -119,6 +132,8 @@ export type ClaudeCodeConversationsResponse = ConversationsResponse;
 export type ClaudeCodeMessagesResponse = MessagesResponse;
 export type ClaudeCodeTranscriptsResponse = TranscriptsResponse;
 export type ClaudeCodeTranscriptItemsResponse = TranscriptItemsResponse;
+export type ClaudeCodeTranscriptRecordsResponse = TranscriptRecordsResponse;
+export type ClaudeCodeTranscriptRecordResponse = TranscriptRecordResponse;
 
 /** The MCP units' answers (#3600). Re-exported, never mirrored. */
 export type ClaudeCodeMcpServersResponse = McpServersResponse;
@@ -186,11 +201,20 @@ export type ClaudeCodeConversationActivity = ConversationActivityV1;
 export type ClaudeCodeTranscriptItem = TranscriptItemV1;
 
 /**
+ * One raw record of a transcript (#3726).
+ *
+ * The wire shape here is a physical JSONL line plus its opaque reference —
+ * not a semantic transcript item. Decoding and rendering belong to
+ * `model/transcriptRecord.ts`.
+ */
+export type ClaudeCodeTranscriptRecord = TranscriptRecordV1;
+export type ClaudeCodeTranscriptRecordsState = TranscriptRecordsResponse['state'];
+
+/**
  * One item of a transcript's execution timeline (#1234).
  *
- * Seven broad kinds, and the name inside each is upstream data rather than a
- * Nession enum — so a Claude release that adds a record type is a new string
- * here, and `unknown` is the kind that carries it.
+ * Kept for the legacy `claude-code.transcript-items` compatibility path. The
+ * #3726 Transcript surface reads raw records instead.
  */
 export type ClaudeCodeTranscriptEntry = TranscriptEntryV1;
 

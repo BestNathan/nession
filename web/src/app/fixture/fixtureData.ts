@@ -45,6 +45,11 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     // other leaves a route that looks wired and answers nothing.
     'claude-code.transcripts': { versions: [1], wire: ['claude-code.transcripts'] },
     'claude-code.transcript-items': { versions: [1], wire: ['claude-code.transcript-items'] },
+    // `#3726`: the raw record page plus bounded full-record lookup. Advertised
+    // here for the same reason every other unit is — resolution consults the
+    // manifest before the surface.
+    'claude-code.transcript-records': { versions: [1], wire: ['claude-code.transcript-records'] },
+    'claude-code.transcript-record': { versions: [1], wire: ['claude-code.transcript-record'] },
     // `#2689`: the Session's repository Auto Memory. Advertised on both sides
     // for the same reason as every other unit here — `addressed()` resolves
     // against the manifest before the surface is consulted.
