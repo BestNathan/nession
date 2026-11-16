@@ -1800,6 +1800,63 @@ esac"#,
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_token_profile_materializes_in_real_tmux_without_spoofing_identity() {
+        if !crate::tmux::cmd::global()
+            .std()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+        {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let manager = crate::tmux::manager::SessionManager::new();
+        let session = crate::test_support::TestSession::new("mcp-token-profile");
+        manager
+            .create_session(session.name(), 80, 24, "/tmp", &[])
+            .await
+            .expect("create real tmux Session");
+        let instance = manager
+            .session_instance_id(session.name())
+            .await
+            .expect("original instance identity");
+        let snapshots = vec![snapshot(
+            "mcp.env",
+            &[
+                ("NESSION_MCP_TOKEN", "fixture-token"),
+                ("NESSION_RUNTIME_SESSION_INSTANCE_ID", "forged"),
+            ],
+        )];
+        let profiles = profiles_from_snapshots(&snapshots, "attach");
+        let outcome = manager
+            .env()
+            .apply_binding(session.name(), 1, &profiles, &snapshots)
+            .await
+            .expect("apply authorized credential profile");
+
+        assert!(
+            outcome.warnings.iter().any(|warning| {
+                warning.contains("NESSION_RUNTIME_SESSION_INSTANCE_ID")
+            }),
+            "forged runtime identity must be refused"
+        );
+        assert_eq!(
+            manager.get_session_env(session.name(), "NESSION_MCP_TOKEN")
+                .await.expect("observable tmux environment").as_deref(),
+            Some("fixture-token")
+        );
+        assert_eq!(
+            manager.session_instance_id(session.name()).await
+                .expect("identity remains anchored"),
+            instance
+        );
+        manager.kill_session(session.name()).await.expect("cleanup tmux Session");
+    }
+
     // ── the shell adapter, against a real shell ──────────────────────────────
 
     /// Spawn the generated adapter in a real interactive shell and return the
@@ -1967,6 +2024,73 @@ esac"#,
     /// A child started before the binding changes keeps the environment it was
     /// born with. The shell converges at its next prompt; processes already
     /// running are not rewritten.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_surviving_legacy_bash_adapter_converges_after_runtime_rename() {
+        let shell = "/bin/bash";
+        assert!(std::path::Path::new(shell).exists(), "bash is required");
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let mgr = EnvManager::new(dir.path().join("state"));
+        let mut adapter = mgr.install_shell_adapter("legacy-bash", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+
+        // This rcfile is the old Agent's previously installed adapter. The
+        // upgraded Agent changes its *new* template, not this surviving file.
+        let rcfile = std::path::PathBuf::from(&adapter.command[2]);
+        let legacy_script = BASH_ADAPTER.replace("NESSION_RUNTIME_", "NESSON_");
+        std::fs::write(&rcfile, legacy_script).expect("legacy rcfile");
+        for (key, _) in &mut adapter.env {
+            *key = key.replace("NESSION_RUNTIME_", "NESSON_");
+        }
+
+        let session_dir = mgr.session_dir("legacy-bash");
+        mgr.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let (mut child, mut stdin, mut lines) =
+            spawn_adapter_shell(shell, &adapter, &home).await;
+        let first = write_and_wait(
+            &mut stdin, &mut lines,
+            "echo \"LEGACY1:$NESSION_TEST\"", "LEGACY1:",
+        ).await;
+        assert!(first.contains("LEGACY1:one"), "{first}");
+
+        mgr.write_runtime_files(
+            &session_dir,
+            2,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "two".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let _ = write_and_wait(&mut stdin, &mut lines, "echo \"LEGACY_SYNC\"", "LEGACY_SYNC").await;
+        let second = write_and_wait(
+            &mut stdin, &mut lines,
+            "echo \"LEGACY2:$NESSION_TEST\"", "LEGACY2:",
+        ).await;
+        assert!(second.contains("LEGACY2:two"), "{second}");
+        assert_eq!(
+            tokio::fs::read_to_string(session_dir.join(SHELL_REVISION_FILE))
+                .await.unwrap().trim(),
+            "2"
+        );
+        drop(stdin);
+        let _ = child.wait().await;
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_running_child_keeps_its_environment_when_the_binding_changes() {

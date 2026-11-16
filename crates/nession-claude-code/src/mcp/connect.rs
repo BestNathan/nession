@@ -803,6 +803,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_rejected_mcp_token_blocks_without_writing_claude_config() {
+        let server = crate::mcp::test_support::FakeMcp::start_requiring("accepted-token").await;
+        let (temp, context) = fixture(
+            Some(McpHostContext {
+                agent: Some(McpHostEndpoint {
+                    url: server.url("/mcp"),
+                    path: "/mcp".to_string(),
+                }),
+                server_url: None,
+            }),
+            Some(Some("rejected-token".to_string())),
+        );
+        let cli = crate::mcp::test_support::FileCli::new();
+        let mut request = request(McpHostingModeV1::Agent);
+        request.confirm = true;
+        let response = connect_with_cli(&context, "agent:s", request, &cli).await;
+        assert_eq!(response.state, McpConnectStateV1::Blocked);
+        assert!(response.preflight.prerequisites.iter().any(|entry| {
+            entry.id == "credential_verified"
+                && entry.state == McpPrerequisiteStateV1::Missing
+        }));
+        assert!(
+            !temp.path().join("home/.claude.json").exists(),
+            "failed authentication must not create a Claude entry"
+        );
+    }
+
+    #[tokio::test]
     async fn server_mode_blocks_when_the_server_reports_mcp_disabled() {
         let (_temp, context) = fixture(
             Some(McpHostContext {
