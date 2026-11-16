@@ -3,7 +3,7 @@
 //
 // Invariant:
 //   - both final Server images (from-source and prebuilt) install `git` and
-//     copy the pinned `mkfs.erofs`;
+//     copy the pinned `mkfs.erofs` plus `fsck.erofs` (Compose staging, #3696);
 //   - both final Agent images install `fuse3`/`fuse-overlayfs` and copy the
 //     pinned `erofsfuse` (which also provides `fusermount3` through `fuse3`);
 //   - the two variants of each role share one `runtime-tools` definition and
@@ -40,8 +40,8 @@ export const IMAGES = [
 const ROLE_CONTRACT = {
   server: {
     packages: ['git'],
-    artifacts: ['mkfs.erofs'],
-    binaries: ['git', 'mkfs.erofs'],
+    artifacts: ['mkfs.erofs', 'fsck.erofs'],
+    binaries: ['git', 'mkfs.erofs', 'fsck.erofs'],
   },
   agent: {
     packages: ['git', 'bubblewrap', 'fuse3', 'fuse-overlayfs'],
@@ -450,7 +450,11 @@ function selfTest(files) {
       /COPY --from=erofs-utils-builder \/usr\/local\/bin\/mkfs\.erofs \/usr\/local\/bin\/mkfs\.erofs\n/,
       '',
     ), 'must COPY mkfs.erofs'],
-    ['server loses runtime probe', 'Dockerfile.server', (text) => replaceOnce(text, 'RUN command -v git mkfs.erofs', 'RUN true'), 'must probe `command -v git mkfs.erofs`'],
+    ['server loses fsck.erofs copy', 'Dockerfile.server', (text) => text.replace(
+      /COPY --from=erofs-utils-builder \/usr\/local\/bin\/fsck\.erofs \/usr\/local\/bin\/fsck\.erofs\n/,
+      '',
+    ), 'must COPY fsck.erofs'],
+    ['server loses runtime probe', 'Dockerfile.server', (text) => replaceOnce(text, 'RUN command -v git mkfs.erofs fsck.erofs', 'RUN true'), 'must probe `command -v git mkfs.erofs fsck.erofs`'],
     ['server runtime base drifts', 'Dockerfile.server', (text) => replaceOnce(text, 'FROM debian:bookworm-slim AS runtime-tools', 'FROM debian:trixie-slim AS runtime-tools'), 'must use debian:bookworm-slim'],
     ['prebuilt server stops extending runtime-tools', 'Dockerfile.server.prebuilt', (text) => replaceOnce(text, 'FROM runtime-tools AS runtime', 'FROM debian:bookworm-slim AS runtime'), 'final stage must extend `runtime-tools`'],
     ['agent loses fuse3', 'Dockerfile.agent', (text) => replaceOnce(text, 'bubblewrap fuse3 fuse-overlayfs', 'bubblewrap fuse-overlayfs'), 'apt install must include `fuse3`'],

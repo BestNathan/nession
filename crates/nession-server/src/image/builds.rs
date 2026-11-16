@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use nession_protocol::contracts::image::v1::{
     is_valid_image_build_id, ImageBuildDescriptor, ImageBuildProgress, ImageBuildStage,
-    ImageBuildStatus, ImagePackaging, ImageSource,
+    ImageBuildStatus, ImageComposeRepresentation, ImagePackaging, ImageSource,
 };
 
 /// The state file format this Server writes and reads.
@@ -54,6 +54,32 @@ pub struct BuildAttempt {
     pub finished_at: u64,
 }
 
+/// One pinned source of a durable Compose build (#3696).
+///
+/// The reference is the one requested at submission; the digests are the
+/// immutable identities the Server resolved once and pinned for the whole
+/// build. A later Tag move cannot change what this build reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposePinnedSource {
+    pub repository: String,
+    pub reference: String,
+    pub destination: String,
+    pub manifest_digest: String,
+    pub config_digest: String,
+    pub layer_digest: String,
+    pub layer_size: u64,
+}
+
+/// The durable Compose inputs of one build record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposeBuildState {
+    #[serde(default)]
+    pub representation: ImageComposeRepresentation,
+    pub sources: Vec<ComposePinnedSource>,
+}
+
 /// The versioned durable state of one build record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +96,9 @@ pub struct BuildState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
     pub packaging: ImagePackaging,
+    /// Present only for a Compose source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compose: Option<ComposeBuildState>,
     pub status: ImageBuildStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<ImageBuildStage>,

@@ -21,6 +21,8 @@ pub struct ManifestInspection {
     pub manifest: Manifest,
     pub config: ImageConfig,
     pub usage: NessionUsage,
+    /// Present for a referenced Composite Manifest (#3697).
+    pub composite: Option<crate::oci::composite::CompositeDescriptor>,
 }
 
 /// One resolved Index selection.
@@ -58,13 +60,44 @@ pub fn inspect_manifest(store: &BlobStore, manifest_digest: &str) -> Result<Mani
         );
     }
     let (_, config) = parse_config(&config_bytes)?;
-    validate_manifest_config(&manifest, &config)?;
-    let layer_digest = manifest
-        .layers
-        .first()
-        .context("Manifest has no EROFS layer")?
-        .digest
-        .clone();
+    let layer = manifest.layers.first().context("Manifest has no layer")?;
+    let (layer_digest, composite) = if layer.media_type == crate::oci::MEDIA_TYPE_COMPOSITE {
+        let bytes = store.read(&layer.digest).with_context(|| {
+            format!(
+                "Composite descriptor {} is missing from the CAS",
+                layer.digest
+            )
+        })?;
+        if crate::digest::digest_of_bytes(&bytes) != layer.digest
+            || u64::try_from(bytes.len()).ok() != Some(layer.size)
+        {
+            anyhow::bail!("Composite descriptor {} bytes do not match", layer.digest);
+        }
+        let composite = crate::oci::composite::parse_composite(&bytes)?;
+        for descriptor in composite.closure()? {
+            store
+                .verify_named_size(&descriptor.digest, descriptor.size)
+                .with_context(|| {
+                    format!(
+                        "Composite device {} is not a verified CAS object",
+                        descriptor.digest
+                    )
+                })?;
+        }
+        crate::oci::composite::validate_composite_manifest_config(
+            &manifest, &config, &composite, layer,
+        )?;
+        let metadata = composite
+            .closure()?
+            .first()
+            .context("Composite closure has no metadata device")?
+            .digest
+            .clone();
+        (metadata, Some(composite))
+    } else {
+        validate_manifest_config(&manifest, &config)?;
+        (layer.digest.clone(), None)
+    };
     let usage = NessionUsage::from_annotations(manifest.annotations.as_ref())?;
     Ok(ManifestInspection {
         manifest_digest: manifest_digest.to_string(),
@@ -73,6 +106,7 @@ pub fn inspect_manifest(store: &BlobStore, manifest_digest: &str) -> Result<Mani
         manifest,
         config,
         usage,
+        composite,
     })
 }
 

@@ -40,13 +40,64 @@ pub const IMAGE_COMPRESSION: &str = "none";
 /// The HTTP path prefix a scoped blob grant addresses.
 pub const IMAGE_BLOB_PATH_PREFIX: &str = "/images/blobs/";
 
+/// Maximum number of source Images one Compose build accepts.
+pub const IMAGE_COMPOSE_MAX_SOURCES: usize = 16;
+/// Maximum repository name length accepted for a Compose source.
+pub const IMAGE_COMPOSE_REPOSITORY_MAX_CHARS: usize = 255;
+/// Maximum one repository path segment in a Compose source.
+pub const IMAGE_COMPOSE_REPOSITORY_SEGMENT_MAX_CHARS: usize = 63;
+/// Maximum Compose destination prefix length.
+pub const IMAGE_COMPOSE_DESTINATION_MAX_CHARS: usize = 1024;
+
 // ── Source ──────────────────────────────────────────────────────────────
+
+/// How a Compose build represents its result (#3696, #3697).
+///
+/// `Flattened` copies the merged tree into one self-contained raw EROFS layer.
+/// `Referenced` builds one immutable metadata EROFS that references the pinned
+/// source EROFS blobs as external devices, so unchanged backing bytes are not
+/// repackaged. The referenced form requires every source at the composed root
+/// and fails closed on any path conflict.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageComposeRepresentation {
+    /// One self-contained raw EROFS result layer (default).
+    #[default]
+    Flattened,
+    /// One metadata EROFS plus explicit verified backing EROFS blobs.
+    Referenced,
+}
+
+/// One immutable source Image in an EROFS Compose build (#3696).
+///
+/// The source is named by its catalog Repository plus a Tag or immutable
+/// digest. A bare digest is deliberately not a source declaration: the Server
+/// resolves and authorizes the Repository reference once at submission and
+/// pins the immutable Manifest/layer identities for the whole build.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageComposeSource {
+    /// The catalog Repository that owns the source Image.
+    pub repository: String,
+    /// A mutable Tag or an immutable `sha256:<64 hex>` digest.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// Absolute destination prefix inside the composed root. Empty places the
+    /// source at `/`; otherwise the source tree appears below this prefix.
+    #[serde(default)]
+    pub destination: String,
+}
 
 /// Where an image is built from.
 ///
-/// V1 supports one public GitHub HTTPS repository (branch or full commit SHA)
-/// and one validated local directory/bundle. Private GitHub authentication is
-/// deliberately out of scope and is refused rather than silently attempted.
+/// V1 supports one public GitHub HTTPS repository (branch or full commit SHA),
+/// one validated local directory/bundle, and — since #3696 — a validated
+/// composition of catalog Images. Private GitHub authentication is deliberately
+/// out of scope and is refused rather than silently attempted.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +113,25 @@ pub enum ImageSource {
     /// A validated local directory or bundle on the build host.
     #[serde(rename = "local_directory")]
     LocalDirectory { path: String },
+    /// Compose immutable catalog Images into one EROFS image.
+    #[serde(rename = "compose")]
+    Compose {
+        sources: Vec<ImageComposeSource>,
+        /// How the result is represented; defaults to a flattened image.
+        #[serde(default)]
+        representation: ImageComposeRepresentation,
+    },
+}
+
+/// One canonical Compose source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedComposeSource {
+    pub repository: String,
+    pub reference: String,
+    /// The immutable digest when the reference already is one.
+    pub requested_digest: Option<String>,
+    /// Empty for the composed root.
+    pub destination: String,
 }
 
 /// The canonical, trimmed source persisted and hashed into packaging identity.
@@ -75,6 +145,10 @@ pub enum NormalizedImageSource {
     LocalDirectory {
         path: String,
     },
+    Compose {
+        representation: ImageComposeRepresentation,
+        sources: Vec<NormalizedComposeSource>,
+    },
 }
 
 impl NormalizedImageSource {
@@ -83,6 +157,7 @@ impl NormalizedImageSource {
         match self {
             Self::GitHub { .. } => "github",
             Self::LocalDirectory { .. } => "local_directory",
+            Self::Compose { .. } => "compose",
         }
     }
 
@@ -98,6 +173,20 @@ impl NormalizedImageSource {
                 reference: reference.clone(),
             },
             Self::LocalDirectory { path } => ImageSource::LocalDirectory { path: path.clone() },
+            Self::Compose {
+                representation,
+                sources,
+            } => ImageSource::Compose {
+                representation: *representation,
+                sources: sources
+                    .iter()
+                    .map(|source| ImageComposeSource {
+                        repository: source.repository.clone(),
+                        reference: source.reference.clone(),
+                        destination: source.destination.clone(),
+                    })
+                    .collect(),
+            },
         }
     }
 }
@@ -472,6 +561,12 @@ pub enum ImageValidationError {
     EmptyAlias,
     AliasTooLong { max: usize },
     AliasInvalid,
+    EmptyComposeSources,
+    TooManyComposeSources { max: usize },
+    ComposeRepositoryInvalid,
+    ComposeReferenceInvalid,
+    ComposeDestinationInvalid,
+    ComposeDestinationOverlap,
     EmptyDigest,
     InvalidDigest,
     InvalidImageId,
@@ -533,6 +628,26 @@ impl ImageValidationError {
             Self::AliasInvalid => {
                 "image alias must start with a lowercase letter or digit and contain only [a-z0-9._-]"
                     .to_string()
+            }
+            Self::EmptyComposeSources => {
+                "a compose build requires at least one source Image".to_string()
+            }
+            Self::TooManyComposeSources { max } => {
+                format!("a compose build accepts at most {max} source Images")
+            }
+            Self::ComposeRepositoryInvalid => {
+                "a compose source repository must be a lowercase catalog repository name"
+                    .to_string()
+            }
+            Self::ComposeReferenceInvalid => {
+                "a compose source ref must be a Tag or an immutable sha256 digest".to_string()
+            }
+            Self::ComposeDestinationInvalid => {
+                "a compose destination must be `/`-free normalized absolute prefix or empty"
+                    .to_string()
+            }
+            Self::ComposeDestinationOverlap => {
+                "compose destinations must not overlap or both name the composed root".to_string()
             }
             Self::EmptyDigest => "image digest must not be empty".to_string(),
             Self::InvalidDigest => {
@@ -767,7 +882,174 @@ pub fn normalize_image_source(
         ImageSource::LocalDirectory { path } => Ok(NormalizedImageSource::LocalDirectory {
             path: normalize_local_path(path)?,
         }),
+        ImageSource::Compose {
+            sources,
+            representation,
+        } => {
+            if sources.is_empty() {
+                return Err(ImageValidationError::EmptyComposeSources);
+            }
+            if sources.len() > IMAGE_COMPOSE_MAX_SOURCES {
+                return Err(ImageValidationError::TooManyComposeSources {
+                    max: IMAGE_COMPOSE_MAX_SOURCES,
+                });
+            }
+            let mut normalized = sources
+                .iter()
+                .map(normalize_compose_source)
+                .collect::<Result<Vec<_>, _>>()?;
+            match representation {
+                ImageComposeRepresentation::Flattened => {
+                    normalized.sort_by(|left, right| {
+                        left.destination
+                            .cmp(&right.destination)
+                            .then_with(|| left.repository.cmp(&right.repository))
+                            .then_with(|| left.reference.cmp(&right.reference))
+                    });
+                    for pair in normalized.windows(2) {
+                        let (Some(left), Some(right)) = (pair.first(), pair.get(1)) else {
+                            continue;
+                        };
+                        if left.destination.is_empty() && right.destination.is_empty() {
+                            return Err(ImageValidationError::ComposeDestinationOverlap);
+                        }
+                        if !left.destination.is_empty()
+                            && compose_destination_is_prefix(&left.destination, &right.destination)
+                        {
+                            return Err(ImageValidationError::ComposeDestinationOverlap);
+                        }
+                    }
+                }
+                ImageComposeRepresentation::Referenced => {
+                    // Referenced composition layers complete trees at the
+                    // composed root. A destination prefix would require an
+                    // unproven remap, so it is refused instead.
+                    if normalized
+                        .iter()
+                        .any(|source| !source.destination.is_empty())
+                    {
+                        return Err(ImageValidationError::ComposeDestinationInvalid);
+                    }
+                    for pair in normalized.windows(2) {
+                        let (Some(left), Some(right)) = (pair.first(), pair.get(1)) else {
+                            continue;
+                        };
+                        if left.repository == right.repository && left.reference == right.reference
+                        {
+                            return Err(ImageValidationError::ComposeDestinationOverlap);
+                        }
+                    }
+                }
+            }
+            Ok(NormalizedImageSource::Compose {
+                representation: *representation,
+                sources: normalized,
+            })
+        }
     }
+}
+
+fn compose_destination_is_prefix(left: &str, right: &str) -> bool {
+    right == left
+        || right
+            .strip_prefix(left)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Validate one Compose source and return its canonical form.
+pub fn normalize_compose_source(
+    source: &ImageComposeSource,
+) -> Result<NormalizedComposeSource, ImageValidationError> {
+    let repository = source.repository.trim();
+    validate_compose_repository(repository)
+        .map_err(|_| ImageValidationError::ComposeRepositoryInvalid)?;
+    let reference = source.reference.trim();
+    let requested_digest = if is_valid_image_digest(reference) {
+        Some(reference.to_string())
+    } else if is_valid_compose_tag(reference) {
+        None
+    } else {
+        return Err(ImageValidationError::ComposeReferenceInvalid);
+    };
+    let destination = normalize_compose_destination(&source.destination)?;
+    Ok(NormalizedComposeSource {
+        repository: repository.to_string(),
+        reference: reference.to_string(),
+        requested_digest,
+        destination,
+    })
+}
+
+fn validate_compose_repository(name: &str) -> Result<(), ()> {
+    if name.is_empty() || name.chars().count() > IMAGE_COMPOSE_REPOSITORY_MAX_CHARS {
+        return Err(());
+    }
+    for segment in name.split('/') {
+        if segment.is_empty()
+            || segment.chars().count() > IMAGE_COMPOSE_REPOSITORY_SEGMENT_MAX_CHARS
+            || segment == "."
+            || segment == ".."
+        {
+            return Err(());
+        }
+        let mut characters = segment.chars();
+        let first = characters.next().ok_or(())?;
+        let last = segment.chars().last().ok_or(())?;
+        if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+            return Err(());
+        }
+        if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
+            return Err(());
+        }
+        if !segment.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '_' | '.' | '-')
+        }) {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+/// The catalog Tag rule (`[a-z0-9][a-z0-9._-]{0,127}`).
+fn is_valid_compose_tag(value: &str) -> bool {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    value.len() <= 128
+        && characters.all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '.' | '_' | '-')
+        })
+}
+
+/// `/` and the empty string both name the composed root.
+fn normalize_compose_destination(raw: &str) -> Result<String, ImageValidationError> {
+    let value = raw.trim();
+    if value.chars().count() > IMAGE_COMPOSE_DESTINATION_MAX_CHARS {
+        return Err(ImageValidationError::ComposeDestinationInvalid);
+    }
+    if value.is_empty() || value == "/" {
+        return Ok(String::new());
+    }
+    if !value.starts_with('/') || value.ends_with('/') {
+        return Err(ImageValidationError::ComposeDestinationInvalid);
+    }
+    if value.contains('\\')
+        || has_control_characters(value)
+        || value[1..]
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(ImageValidationError::ComposeDestinationInvalid);
+    }
+    Ok(value.to_string())
 }
 
 /// Validate an alias: a mutable tag that must never look like a digest.

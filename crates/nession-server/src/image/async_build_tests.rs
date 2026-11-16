@@ -8,6 +8,7 @@
 
 use super::*;
 use nession_erofs::{MkfsRunner, ProcessGitRunner};
+use nession_protocol::contracts::image::v1::{ImageComposeRepresentation, ImageComposeSource};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex as StdMutex};
 
@@ -119,6 +120,7 @@ impl ImageBuildBackend for SharedBlobBackend {
             blob,
             source_sha: None,
             packaging: ErofsPackaging::default(),
+            compose: None,
         })
     }
 }
@@ -131,6 +133,16 @@ fn key_for(source: &NormalizedImageSource) -> String {
             ..
         } => format!("{repository_url}#{reference}"),
         NormalizedImageSource::LocalDirectory { path } => path.clone(),
+        NormalizedImageSource::Compose { sources, .. } => sources
+            .iter()
+            .map(|source| {
+                format!(
+                    "{}:{}@{}",
+                    source.repository, source.reference, source.destination
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
     }
 }
 
@@ -822,4 +834,631 @@ async fn cleanup_expires_terminal_directories_but_never_active_work() {
     assert_eq!(report.deferred_active, 1);
     assert!(!store.build_dir("build-expired").exists());
     assert!(store.build_dir(&active.build_id).exists());
+}
+
+// ── Flattened Compose (#3696) ───────────────────────────────────────────
+
+/// A backend that records the pinned Compose sources it was handed and
+/// publishes one deterministic flattened layer.
+struct ComposeRecordingBackend {
+    blobs: BlobStore,
+    gate: Arc<Gate>,
+    seen: StdMutex<Vec<Vec<String>>>,
+}
+
+impl ComposeRecordingBackend {
+    fn new(blobs: BlobStore) -> Self {
+        Self {
+            blobs,
+            gate: Arc::new(Gate::default()),
+            seen: StdMutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ImageBuildBackend for ComposeRecordingBackend {
+    fn execute(&self, execution: BuildExecution) -> Result<BuiltImage> {
+        let compose = execution.compose.as_ref().expect("a compose execution");
+        let pinned = compose
+            .sources
+            .iter()
+            .map(|source| source.manifest_digest.clone())
+            .collect::<Vec<_>>();
+        self.seen.lock().unwrap().push(pinned.clone());
+        self.gate.wait();
+        execution.observer.stage(Stage::Packaging);
+        std::fs::create_dir_all(&execution.build_dir)?;
+        let image = execution.build_dir.join("image.erofs.part");
+        std::fs::write(&image, format!("flattened:{pinned:?}"))?;
+        let blob = self.blobs.put_file(&image)?;
+        let sources = compose
+            .sources
+            .iter()
+            .map(|source| nession_erofs::ComposeSourceProvenance {
+                repository: source.repository.clone(),
+                reference: source.reference.clone(),
+                manifest_digest: source.manifest_digest.clone(),
+                layer_digest: source.layer.digest.clone(),
+                size_bytes: source.layer.size,
+                destination: source.destination.clone(),
+            })
+            .collect::<Vec<_>>();
+        Ok(BuiltImage {
+            blob,
+            source_sha: None,
+            packaging: ErofsPackaging::default(),
+            compose: Some(nession_erofs::ComposeImageMetadata {
+                runtime: nession_erofs::ComposeRuntime {
+                    env: vec!["PATH=/usr/bin".to_string()],
+                    annotations: [
+                        (
+                            nession_erofs::oci::annotation::ANNOTATION_COMPOSE_FORMAT.to_string(),
+                            "flattened-v1".to_string(),
+                        ),
+                        (
+                            nession_erofs::oci::annotation::ANNOTATION_COMPOSE_SOURCES.to_string(),
+                            serde_json::to_string(&sources).unwrap(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    ..nession_erofs::ComposeRuntime::default()
+                },
+                sources,
+                referenced: None,
+            }),
+        })
+    }
+}
+
+async fn publish_test_source(
+    db: &Database,
+    blobs: &BlobStore,
+    repository: &str,
+    tag: &str,
+    payload: &[u8],
+    platform: Platform,
+    expectation: nession_erofs::catalog::tag::TagExpectation,
+) -> nession_erofs::image::publish::PublishOutcome {
+    let stored = blobs.put_bytes(payload).unwrap();
+    nession_erofs::build::publication::publish_layer(
+        db.connection(),
+        blobs,
+        &nession_erofs::build::publication::LayerPublication {
+            repository: repository.to_string(),
+            tag: Some(tag.to_string()),
+            expectation,
+            layer: nession_erofs::oci::descriptor::Descriptor {
+                media_type: nession_erofs::oci::annotation::MEDIA_TYPE_EROFS.to_string(),
+                digest: stored.digest,
+                size: stored.size_bytes,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: serde_json::Map::new(),
+            },
+            platform,
+            env: vec!["PATH=/usr/bin".to_string()],
+            runtime: RuntimeConfig::default(),
+            annotations: std::collections::BTreeMap::new(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+fn compose_source(repository: &str, destination: &str) -> ImageComposeSource {
+    ImageComposeSource {
+        repository: repository.to_string(),
+        reference: "latest".to_string(),
+        destination: destination.to_string(),
+    }
+}
+
+/// SC-01/SC-02: Compose resolves each Repository reference once at submission,
+/// pins the immutable sources, survives a Tag move, publishes a flattened
+/// Manifest with source-vs-result provenance, and releases the build pins.
+#[tokio::test]
+async fn compose_pins_sources_publishes_provenance_and_survives_a_tag_move() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let backend = Arc::new(ComposeRecordingBackend::new(blobs.clone()));
+    let manager = Arc::new(
+        ImageManager::new(
+            Arc::clone(&db),
+            backend.clone(),
+            blobs.clone(),
+            options(dir.path(), 1),
+        )
+        .unwrap(),
+    );
+    let platform = nession_erofs::build::publication::host_platform();
+    let base = publish_test_source(
+        &db,
+        &blobs,
+        "src/base",
+        "latest",
+        b"base-layer",
+        platform.clone(),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let tool = publish_test_source(
+        &db,
+        &blobs,
+        "src/tool",
+        "latest",
+        b"tool-layer",
+        platform.clone(),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let source = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Flattened,
+        sources: vec![
+            compose_source("src/base", ""),
+            compose_source("src/tool", "/opt/tool"),
+        ],
+    };
+    let submitted = manager
+        .submit_build(&source, Some("composed"), None)
+        .await
+        .unwrap();
+    // The Tag moves after submission. The pinned immutable identity is what
+    // this build reads; a digest alone was never the authorization.
+    let moved = publish_test_source(
+        &db,
+        &blobs,
+        "src/base",
+        "latest",
+        b"moved-layer",
+        platform,
+        nession_erofs::catalog::tag::TagExpectation::Exact(base.manifest_digest.clone()),
+    )
+    .await;
+    backend.gate.release();
+    let done = manager.wait_terminal(&submitted.build_id).await.unwrap();
+    assert_eq!(done.status, ImageBuildStatus::Succeeded, "{done:?}");
+    let digest = done.digest.clone().unwrap();
+    assert_ne!(digest, base.layer_digest);
+    assert_ne!(digest, moved.layer_digest);
+    let seen = backend.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        seen[0],
+        vec![base.manifest_digest.clone(), tool.manifest_digest.clone()],
+        "the build read the pinned sources, not the moved Tag"
+    );
+
+    let objects = nession_erofs::catalog::reference::all_objects(db.connection())
+        .await
+        .unwrap();
+    let mut result_manifest = None;
+    for object in objects {
+        if object.kind != nession_erofs::catalog::reference::ObjectKind::Manifest {
+            continue;
+        }
+        let bytes = blobs.read(&object.digest).unwrap();
+        let (_, manifest) = nession_erofs::oci::parse_manifest(&bytes).unwrap();
+        if manifest
+            .layers
+            .first()
+            .is_some_and(|layer| layer.digest == digest)
+        {
+            result_manifest = Some(manifest);
+            break;
+        }
+    }
+    let manifest = result_manifest.expect("the flattened result Manifest");
+    let annotations = manifest.annotations.expect("compose annotations");
+    assert_eq!(
+        annotations
+            .get(nession_erofs::oci::annotation::ANNOTATION_COMPOSE_FORMAT)
+            .map(String::as_str),
+        Some("flattened-v1")
+    );
+    let provenance: Vec<nession_erofs::ComposeSourceProvenance> = serde_json::from_str(
+        annotations
+            .get(nession_erofs::oci::annotation::ANNOTATION_COMPOSE_SOURCES)
+            .expect("compose source provenance"),
+    )
+    .unwrap();
+    assert_eq!(
+        provenance
+            .iter()
+            .map(|source| source.manifest_digest.as_str())
+            .collect::<Vec<_>>(),
+        vec![base.manifest_digest.as_str(), tool.manifest_digest.as_str()]
+    );
+    assert_eq!(
+        nession_erofs::catalog::pin::live_pin_digests(db.connection(), now_i64())
+            .await
+            .unwrap(),
+        Vec::<String>::new(),
+        "a finished build releases its source pins"
+    );
+    let page = manager.list(0, 10, "").await.unwrap();
+    assert_eq!(page.total, 1);
+}
+
+/// SC-02: a source that is not in the named Repository (a digest is not
+/// authority) and a source with no image for the build platform both fail at
+/// submission, before any build record or ready row exists.
+#[tokio::test]
+async fn compose_rejects_unresolvable_and_wrong_platform_sources_before_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let backend = Arc::new(ComposeRecordingBackend::new(blobs.clone()));
+    let manager = Arc::new(
+        ImageManager::new(
+            Arc::clone(&db),
+            backend,
+            blobs.clone(),
+            options(dir.path(), 1),
+        )
+        .unwrap(),
+    );
+    let unresolvable = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Flattened,
+        sources: vec![compose_source("src/missing", "")],
+    };
+    let error = manager
+        .submit_build(&unresolvable, None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), "invalid");
+    assert!(error.message().contains("does not resolve"), "{error}");
+
+    let wrong = publish_test_source(
+        &db,
+        &blobs,
+        "src/wrong",
+        "latest",
+        b"wrong-platform",
+        Platform::for_consumer("linux", "riscv64", None),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    assert_ne!(wrong.layer_digest, "");
+    let compose = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Flattened,
+        sources: vec![compose_source("src/wrong", "")],
+    };
+    let error = manager
+        .submit_build(&compose, None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), "invalid");
+    assert!(error.message().contains("no usable image"), "{error}");
+    assert_eq!(manager.list_builds(0, 10).await.unwrap().total, 0);
+    assert_eq!(manager.list(0, 10, "").await.unwrap().total, 0);
+}
+
+// ── Referenced multi-blob Composite (#3697) ─────────────────────────────
+
+/// A backend that publishes one referenced Composite identity and records
+/// the Manifest/Composite digests it handed the manager.
+struct ReferencedRecordingBackend {
+    blobs: BlobStore,
+    manifest: StdMutex<Option<String>>,
+    composite: StdMutex<Option<String>>,
+}
+
+impl ReferencedRecordingBackend {
+    fn new(blobs: BlobStore) -> Self {
+        Self {
+            blobs,
+            manifest: StdMutex::new(None),
+            composite: StdMutex::new(None),
+        }
+    }
+}
+
+impl ImageBuildBackend for ReferencedRecordingBackend {
+    fn execute(&self, execution: BuildExecution) -> Result<BuiltImage> {
+        use nession_erofs::oci::composite::{
+            validate_composite_manifest_config, CompositeDescriptor, COMPOSITE_ROOTFS_TYPE,
+        };
+        let compose = execution.compose.as_ref().expect("a compose execution");
+        if compose.representation != ImageComposeRepresentation::Referenced {
+            anyhow::bail!("this fixture only builds referenced composites");
+        }
+        let devices = compose
+            .sources
+            .iter()
+            .map(|source| source.layer.clone())
+            .collect::<Vec<_>>();
+        let platform = Platform {
+            architecture: compose.sources[0].config.architecture.clone(),
+            os: compose.sources[0].config.os.clone(),
+            os_features: compose.sources[0].config.os_features.clone(),
+            variant: compose.sources[0].config.variant.clone(),
+            ..Platform::default()
+        };
+        std::fs::create_dir_all(&execution.build_dir)?;
+        let metadata_path = execution.build_dir.join("referenced.erofs.part");
+        std::fs::write(&metadata_path, b"referenced metadata erofs")?;
+        let metadata_blob = self.blobs.put_file(&metadata_path)?;
+        let metadata = nession_erofs::oci::Descriptor {
+            media_type: nession_erofs::oci::MEDIA_TYPE_EROFS.to_string(),
+            digest: metadata_blob.digest.clone(),
+            size: metadata_blob.size_bytes,
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: serde_json::Map::new(),
+        };
+        let descriptor_doc = CompositeDescriptor::new(&platform, &metadata, &devices)?;
+        let descriptor_document = descriptor_doc.to_document()?;
+        let descriptor_blob = self.blobs.put_bytes(descriptor_document.bytes())?;
+        let descriptor = nession_erofs::oci::Descriptor {
+            media_type: nession_erofs::oci::MEDIA_TYPE_COMPOSITE.to_string(),
+            digest: descriptor_blob.digest.clone(),
+            size: descriptor_blob.size_bytes,
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: serde_json::Map::new(),
+        };
+        let config = nession_erofs::oci::ImageConfig {
+            created: None,
+            author: None,
+            architecture: platform.architecture.clone(),
+            os: platform.os.clone(),
+            os_version: None,
+            os_features: Some(vec!["erofs".to_string()]),
+            variant: platform.variant,
+            config: nession_erofs::oci::RuntimeConfig::default(),
+            rootfs: nession_erofs::oci::RootFs {
+                fs_type: COMPOSITE_ROOTFS_TYPE.to_string(),
+                diff_ids: descriptor_doc
+                    .closure()?
+                    .into_iter()
+                    .map(|descriptor| descriptor.digest)
+                    .collect(),
+                extra: serde_json::Map::new(),
+            },
+            history: Vec::new(),
+            extra: serde_json::Map::new(),
+        };
+        let config_document =
+            nession_erofs::oci::RawDocument::from_bytes(nession_erofs::oci::to_bytes(&config)?);
+        let manifest = nession_erofs::oci::Manifest {
+            schema_version: 2,
+            media_type: Some(nession_erofs::oci::MEDIA_TYPE_MANIFEST.to_string()),
+            config: nession_erofs::oci::Descriptor {
+                media_type: nession_erofs::oci::MEDIA_TYPE_CONFIG.to_string(),
+                digest: config_document.digest().to_string(),
+                size: config_document.size()?,
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: serde_json::Map::new(),
+            },
+            layers: vec![descriptor.clone()],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+            extra: serde_json::Map::new(),
+        };
+        validate_composite_manifest_config(&manifest, &config, &descriptor_doc, &descriptor)?;
+        let manifest_document =
+            nession_erofs::oci::RawDocument::from_bytes(nession_erofs::oci::to_bytes(&manifest)?);
+        let size_bytes = metadata_blob
+            .size_bytes
+            .saturating_add(descriptor_blob.size_bytes)
+            .saturating_add(config_document.size()?)
+            .saturating_add(manifest_document.size()?)
+            .saturating_add(devices.iter().map(|device| device.size).sum::<u64>());
+        *self.manifest.lock().unwrap() = Some(manifest_document.digest().to_string());
+        *self.composite.lock().unwrap() = Some(descriptor.digest.clone());
+        let provenance = compose
+            .sources
+            .iter()
+            .map(|source| nession_erofs::ComposeSourceProvenance {
+                repository: source.repository.clone(),
+                reference: source.reference.clone(),
+                manifest_digest: source.manifest_digest.clone(),
+                layer_digest: source.layer.digest.clone(),
+                size_bytes: source.layer.size,
+                destination: String::new(),
+            })
+            .collect::<Vec<_>>();
+        Ok(BuiltImage {
+            blob: metadata_blob,
+            source_sha: None,
+            packaging: ErofsPackaging::default(),
+            compose: Some(nession_erofs::ComposeImageMetadata {
+                runtime: nession_erofs::ComposeRuntime::default(),
+                sources: provenance,
+                referenced: Some(nession_erofs::ReferencedImageMetadata {
+                    descriptor,
+                    metadata,
+                    devices,
+                    config: config_document,
+                    manifest: manifest_document,
+                    manifest_digest: self
+                        .manifest
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .expect("manifest digest"),
+                    size_bytes,
+                }),
+            }),
+        })
+    }
+}
+
+/// SC-01/SC-02: a referenced Composite build publishes its own Manifest
+/// identity, not a data Blob digest, and the resolved grant closure contains
+/// the Composite descriptor plus every metadata/device blob.
+#[tokio::test]
+async fn a_referenced_composite_publishes_a_distinct_identity_and_full_closure() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let backend = Arc::new(ReferencedRecordingBackend::new(blobs.clone()));
+    let manager = Arc::new(
+        ImageManager::new(
+            Arc::clone(&db),
+            backend.clone(),
+            blobs.clone(),
+            options(dir.path(), 1),
+        )
+        .unwrap(),
+    );
+    let platform = nession_erofs::build::publication::host_platform();
+    let node = publish_test_source(
+        &db,
+        &blobs,
+        "src/node",
+        "latest",
+        b"node-backing-erofs",
+        platform.clone(),
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let dsh = publish_test_source(
+        &db,
+        &blobs,
+        "src/dsh",
+        "latest",
+        b"dsh-backing-erofs",
+        platform,
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let source = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Referenced,
+        sources: vec![
+            compose_source("src/node", ""),
+            compose_source("src/dsh", ""),
+        ],
+    };
+    let submitted = manager.submit_build(&source, None, None).await.unwrap();
+    let done = manager.wait_terminal(&submitted.build_id).await.unwrap();
+    assert_eq!(done.status, ImageBuildStatus::Succeeded, "{done:?}");
+    let manifest_digest = done.digest.clone().unwrap();
+    let referenced_manifest = backend.manifest.lock().unwrap().clone().unwrap();
+    assert_eq!(manifest_digest, referenced_manifest);
+    assert_ne!(manifest_digest, node.layer_digest);
+    assert_ne!(manifest_digest, dsh.layer_digest);
+    let composite_digest = backend.composite.lock().unwrap().clone().unwrap();
+    assert_ne!(manifest_digest, composite_digest);
+    assert_eq!(
+        nession_erofs::catalog::reference::get_object(db.connection(), &composite_digest)
+            .await
+            .unwrap()
+            .map(|object| object.kind),
+        Some(nession_erofs::catalog::reference::ObjectKind::Composite)
+    );
+    let reachable = nession_erofs::catalog::reference::reachable(
+        db.connection(),
+        std::slice::from_ref(&manifest_digest),
+    )
+    .await
+    .unwrap();
+    for digest in [&composite_digest, &node.layer_digest, &dsh.layer_digest] {
+        assert!(reachable.contains(digest), "{digest} must be reachable");
+    }
+
+    // The Server's authorized resolution returns the whole closure.
+    let resolution = manager
+        .resolve_image_for(
+            GrantConsumer::Session("session-1"),
+            None,
+            None,
+            &manifest_digest,
+            Some(&nession_erofs::build::publication::host_platform()),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+    let ImageResolution::Manifest(access) = resolution else {
+        panic!("a referenced manifest must resolve as a Manifest");
+    };
+    let digests = access
+        .objects
+        .iter()
+        .map(|object| object.digest.as_str())
+        .collect::<Vec<_>>();
+    for digest in [
+        manifest_digest.as_str(),
+        composite_digest.as_str(),
+        node.layer_digest.as_str(),
+        dsh.layer_digest.as_str(),
+    ] {
+        assert!(digests.contains(&digest), "{digest} must be granted");
+    }
+    assert_eq!(
+        access.objects.len(),
+        6,
+        "manifest, config, descriptor, metadata and two devices"
+    );
+    for digest in [&composite_digest, &node.layer_digest, &dsh.layer_digest] {
+        manager.ready_blob(digest).await.unwrap();
+    }
+}
+
+/// A referenced build must not be followed by a legacy digest-addressed grant
+/// that treats its Manifest/Composite identity as a raw EROFS payload.
+#[tokio::test]
+async fn a_referenced_identity_is_never_served_as_a_legacy_erofs_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let backend = Arc::new(ReferencedRecordingBackend::new(blobs.clone()));
+    let manager = Arc::new(
+        ImageManager::new(
+            Arc::clone(&db),
+            backend.clone(),
+            blobs.clone(),
+            options(dir.path(), 1),
+        )
+        .unwrap(),
+    );
+    let platform = nession_erofs::build::publication::host_platform();
+    let node = publish_test_source(
+        &db,
+        &blobs,
+        "src/node",
+        "latest",
+        b"node-backing-erofs",
+        platform,
+        nession_erofs::catalog::tag::TagExpectation::Absent,
+    )
+    .await;
+    let source = ImageSource::Compose {
+        representation: ImageComposeRepresentation::Referenced,
+        sources: vec![compose_source("src/node", "")],
+    };
+    let submitted = manager.submit_build(&source, None, None).await.unwrap();
+    let done = manager.wait_terminal(&submitted.build_id).await.unwrap();
+    let manifest_digest = done.digest.clone().unwrap();
+    let legacy = manager
+        .legacy_image_resolution(
+            &GrantConsumer::Session("session-1"),
+            &manifest_digest,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(
+        legacy.is_none(),
+        "a Manifest/Composite identity is not a legacy raw EROFS payload"
+    );
+    assert_ne!(manifest_digest, node.layer_digest);
 }

@@ -6,15 +6,20 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::sqlite;
 use crate::digest::is_valid_digest;
-use crate::oci::{MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST};
+use crate::oci::{
+    MEDIA_TYPE_COMPOSITE, MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_INDEX,
+    MEDIA_TYPE_MANIFEST,
+};
 
-/// The four stored object kinds.
+/// The stored object kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectKind {
     Index,
     Manifest,
     Config,
     Erofs,
+    /// The referenced multi-blob Composite descriptor (#3697).
+    Composite,
 }
 
 impl ObjectKind {
@@ -24,6 +29,7 @@ impl ObjectKind {
             Self::Manifest => "manifest",
             Self::Config => "config",
             Self::Erofs => "erofs",
+            Self::Composite => "composite",
         }
     }
 
@@ -34,6 +40,7 @@ impl ObjectKind {
             MEDIA_TYPE_MANIFEST => Some(Self::Manifest),
             MEDIA_TYPE_CONFIG => Some(Self::Config),
             MEDIA_TYPE_EROFS => Some(Self::Erofs),
+            MEDIA_TYPE_COMPOSITE => Some(Self::Composite),
             _ => None,
         }
     }
@@ -44,6 +51,7 @@ impl ObjectKind {
             "manifest" => Ok(Self::Manifest),
             "config" => Ok(Self::Config),
             "erofs" => Ok(Self::Erofs),
+            "composite" => Ok(Self::Composite),
             other => anyhow::bail!("unsupported catalog object kind {other:?}"),
         }
     }
@@ -277,6 +285,7 @@ mod tests {
                 ObjectKind::Manifest => MEDIA_TYPE_MANIFEST.to_string(),
                 ObjectKind::Config => MEDIA_TYPE_CONFIG.to_string(),
                 ObjectKind::Erofs => MEDIA_TYPE_EROFS.to_string(),
+                ObjectKind::Composite => MEDIA_TYPE_COMPOSITE.to_string(),
             },
             size_bytes: size,
             kind,

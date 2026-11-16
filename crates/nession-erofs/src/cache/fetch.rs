@@ -15,7 +15,12 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::cache::{CachedImage, DownloadGrant, ErofsCache};
-use crate::oci::annotation::{MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST};
+use crate::oci::annotation::{
+    MEDIA_TYPE_COMPOSITE, MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+};
+use crate::oci::composite::{
+    parse_composite, validate_composite_manifest_config, CompositeDescriptor,
+};
 use crate::oci::config::ImageConfig;
 use crate::oci::descriptor::Descriptor;
 use crate::oci::manifest::Manifest;
@@ -45,8 +50,27 @@ pub struct FetchedImage {
     pub objects: Vec<CachedImage>,
 }
 
-/// Bound for Index/Manifest/Config metadata. Metadata is parsed into memory,
-/// so it is never allowed to grow to payload size.
+/// The verified objects of one referenced Composite Manifest (#3697).
+#[derive(Debug, Clone)]
+pub struct FetchedComposite {
+    pub manifest_digest: String,
+    pub config_digest: String,
+    pub manifest: Manifest,
+    pub config: ImageConfig,
+    pub composite_digest: String,
+    pub composite: CompositeDescriptor,
+    /// The primary metadata EROFS device.
+    pub metadata: Descriptor,
+    pub metadata_path: PathBuf,
+    /// Ordered backing EROFS devices.
+    pub devices: Vec<Descriptor>,
+    pub device_paths: Vec<PathBuf>,
+    /// Every object fetched or adopted from the cache, in closure order.
+    pub objects: Vec<CachedImage>,
+}
+
+/// Bound for Index/Manifest/Config/Composite metadata. Metadata is parsed into
+/// memory, so it is never allowed to grow to payload size.
 pub const MAX_METADATA_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Fetch one resolved Manifest and its reachable Config/EROFS objects.
@@ -161,6 +185,155 @@ pub async fn fetch_manifest_image(
         manifest,
         config,
         objects: vec![manifest_cached, config_cached, layer_cached],
+    })
+}
+
+/// Fetch one referenced Composite Manifest, its descriptor and every backing
+/// device into the verified cache (#3697).
+///
+/// The grant must contain exactly the Manifest, Config, Composite descriptor
+/// and the descriptor's complete metadata/device closure. A missing, extra,
+/// duplicated, mis-typed or descriptor-mismatched object yields no
+/// `FetchedComposite`; no caller can mount a partial closure.
+pub async fn fetch_composite_image(
+    cache: &ErofsCache,
+    objects: &[ImageObjectGrant],
+    origin: &str,
+    server_auth_token: &str,
+    route_prefix: &str,
+) -> Result<FetchedComposite> {
+    let manifest_grant = exactly_one(objects, MEDIA_TYPE_MANIFEST, "Manifest")?;
+    let config_grant = exactly_one(objects, MEDIA_TYPE_CONFIG, "Config")?;
+    let composite_grant = exactly_one(objects, MEDIA_TYPE_COMPOSITE, "Composite descriptor")?;
+    let mut seen = HashSet::new();
+    for object in objects {
+        if !seen.insert(object.digest.as_str()) {
+            anyhow::bail!("duplicate authorized object {}", object.digest);
+        }
+        if !crate::digest::is_valid_digest(&object.digest) {
+            anyhow::bail!("invalid authorized object digest {:?}", object.digest);
+        }
+        let expected = format!("{route_prefix}{}", object.digest);
+        if object.path != expected {
+            anyhow::bail!(
+                "authorized route {:?} is not the blob route for {}",
+                object.path,
+                object.digest
+            );
+        }
+        if object.size_bytes == 0 {
+            anyhow::bail!("authorized object {} declares an empty size", object.digest);
+        }
+    }
+    for grant in [manifest_grant, config_grant, composite_grant] {
+        if grant.size_bytes > MAX_METADATA_BYTES {
+            anyhow::bail!(
+                "{} {} declares {} bytes, above the metadata bound {MAX_METADATA_BYTES}",
+                grant.media_type,
+                grant.digest,
+                grant.size_bytes
+            );
+        }
+    }
+
+    let manifest_cached = fetch_object(cache, manifest_grant, origin, server_auth_token, true)
+        .await
+        .with_context(|| format!("cannot fetch Manifest {}", manifest_grant.digest))?;
+    let manifest_bytes = tokio::fs::read(&manifest_cached.path).await?;
+    let (_, manifest) = parse_manifest(&manifest_bytes)?;
+    if manifest.config.digest != config_grant.digest
+        || manifest.config.media_type != config_grant.media_type
+        || manifest.config.size != config_grant.size_bytes
+    {
+        anyhow::bail!(
+            "Manifest {} does not describe the authorized Config {}",
+            manifest_grant.digest,
+            config_grant.digest
+        );
+    }
+    let layer = manifest
+        .layers
+        .first()
+        .context("Composite Manifest has no layer")?;
+    if layer.media_type != MEDIA_TYPE_COMPOSITE
+        || layer.digest != composite_grant.digest
+        || layer.size != composite_grant.size_bytes
+    {
+        anyhow::bail!(
+            "Manifest {} does not describe the authorized Composite descriptor {}",
+            manifest_grant.digest,
+            composite_grant.digest
+        );
+    }
+    let config_cached = fetch_object(cache, config_grant, origin, server_auth_token, true)
+        .await
+        .with_context(|| format!("cannot fetch Config {}", config_grant.digest))?;
+    let config_bytes = tokio::fs::read(&config_cached.path).await?;
+    let (_, config) = parse_config(&config_bytes)?;
+    let composite_cached = fetch_object(cache, composite_grant, origin, server_auth_token, true)
+        .await
+        .with_context(|| {
+            format!(
+                "cannot fetch Composite descriptor {}",
+                composite_grant.digest
+            )
+        })?;
+    let composite_bytes = tokio::fs::read(&composite_cached.path).await?;
+    let composite = parse_composite(&composite_bytes)?;
+    let closure = composite.closure()?;
+    validate_composite_manifest_config(&manifest, &config, &composite, layer)?;
+
+    if objects.len() != closure.len() + 3 {
+        anyhow::bail!(
+            "the authorized object set has {} objects, the Composite closure requires {}",
+            objects.len(),
+            closure.len() + 3
+        );
+    }
+    let mut metadata_path = None;
+    let mut device_paths = Vec::new();
+    let mut fetched_objects = vec![manifest_cached, config_cached, composite_cached];
+    for (position, descriptor) in closure.iter().enumerate() {
+        let grant = objects
+            .iter()
+            .find(|object| object.digest == descriptor.digest)
+            .with_context(|| {
+                format!(
+                    "the authorized object set has no Composite device {}",
+                    descriptor.digest
+                )
+            })?;
+        if grant.media_type != descriptor.media_type || grant.size_bytes != descriptor.size {
+            anyhow::bail!(
+                "authorized device {} descriptor does not match the Composite closure",
+                descriptor.digest
+            );
+        }
+        let cached = fetch_object(cache, grant, origin, server_auth_token, false)
+            .await
+            .with_context(|| format!("cannot fetch Composite device {}", descriptor.digest))?;
+        if position == 0 {
+            metadata_path = Some(cached.path.clone());
+        } else {
+            device_paths.push(cached.path.clone());
+        }
+        fetched_objects.push(cached);
+    }
+    Ok(FetchedComposite {
+        manifest_digest: manifest_grant.digest.clone(),
+        config_digest: config_grant.digest.clone(),
+        manifest,
+        config,
+        composite_digest: composite_grant.digest.clone(),
+        composite,
+        metadata: closure
+            .first()
+            .cloned()
+            .context("Composite closure has no metadata device")?,
+        metadata_path: metadata_path.context("Composite metadata was not fetched")?,
+        devices: closure.into_iter().skip(1).collect(),
+        device_paths,
+        objects: fetched_objects,
     })
 }
 
@@ -400,6 +573,217 @@ mod tests {
         assert_eq!(
             std::fs::read(&first_fetched.layer_path).unwrap(),
             b"one shared erofs payload"
+        );
+    }
+
+    fn composite_fixture() -> (
+        RawDocument,
+        RawDocument,
+        RawDocument,
+        Vec<RawDocument>,
+        crate::oci::composite::CompositeDescriptor,
+    ) {
+        use crate::oci::composite::CompositeDescriptor;
+        use crate::oci::descriptor::{Descriptor, Platform};
+        use crate::oci::MEDIA_TYPE_COMPOSITE;
+        let device = |name: &str| RawDocument::from_bytes(name.as_bytes().to_vec());
+        let metadata = device("metadata erofs bytes");
+        let first = device("node backing bytes");
+        let second = device("dsh backing bytes");
+        let descriptor_of = |document: &RawDocument| Descriptor {
+            media_type: MEDIA_TYPE_EROFS.to_string(),
+            digest: document.digest().to_string(),
+            size: document.size().unwrap(),
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: Map::new(),
+        };
+        let descriptors = [
+            descriptor_of(&metadata),
+            descriptor_of(&first),
+            descriptor_of(&second),
+        ];
+        let composite = CompositeDescriptor::new(
+            &Platform::for_consumer("linux", "amd64", None),
+            &descriptors[0],
+            &[descriptors[1].clone(), descriptors[2].clone()],
+        )
+        .unwrap();
+        let composite_document = composite.to_document().unwrap();
+        let config = ImageConfig {
+            created: None,
+            author: None,
+            architecture: "amd64".to_string(),
+            os: "linux".to_string(),
+            os_version: None,
+            os_features: Some(vec!["erofs".to_string()]),
+            variant: None,
+            config: RuntimeConfig::default(),
+            rootfs: RootFs {
+                fs_type: crate::oci::composite::COMPOSITE_ROOTFS_TYPE.to_string(),
+                diff_ids: composite
+                    .closure()
+                    .unwrap()
+                    .into_iter()
+                    .map(|descriptor| descriptor.digest)
+                    .collect(),
+                extra: Map::new(),
+            },
+            history: Vec::new(),
+            extra: Map::new(),
+        };
+        let config = RawDocument::from_bytes(to_bytes(&config).unwrap());
+        let manifest = Manifest {
+            schema_version: 2,
+            media_type: Some(MEDIA_TYPE_MANIFEST.to_string()),
+            config: Descriptor {
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                digest: config.digest().to_string(),
+                size: config.size().unwrap(),
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: Map::new(),
+            },
+            layers: vec![Descriptor {
+                media_type: MEDIA_TYPE_COMPOSITE.to_string(),
+                digest: composite_document.digest().to_string(),
+                size: composite_document.size().unwrap(),
+                urls: None,
+                annotations: None,
+                platform: None,
+                artifact_type: None,
+                data: None,
+                extra: Map::new(),
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+            extra: Map::new(),
+        };
+        let manifest = RawDocument::from_bytes(to_bytes(&manifest).unwrap());
+        (
+            manifest,
+            config,
+            composite_document,
+            vec![metadata, first, second],
+            composite,
+        )
+    }
+
+    fn composite_grants(
+        manifest: &RawDocument,
+        config: &RawDocument,
+        composite: &RawDocument,
+        devices: &[RawDocument],
+    ) -> Vec<ImageObjectGrant> {
+        use crate::oci::MEDIA_TYPE_COMPOSITE;
+        let mut objects = vec![
+            ImageObjectGrant {
+                digest: manifest.digest().to_string(),
+                media_type: MEDIA_TYPE_MANIFEST.to_string(),
+                size_bytes: manifest.size().unwrap(),
+                path: format!("{ROUTE_PREFIX}{}", manifest.digest()),
+            },
+            ImageObjectGrant {
+                digest: config.digest().to_string(),
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                size_bytes: config.size().unwrap(),
+                path: format!("{ROUTE_PREFIX}{}", config.digest()),
+            },
+            ImageObjectGrant {
+                digest: composite.digest().to_string(),
+                media_type: MEDIA_TYPE_COMPOSITE.to_string(),
+                size_bytes: composite.size().unwrap(),
+                path: format!("{ROUTE_PREFIX}{}", composite.digest()),
+            },
+        ];
+        for device in devices {
+            objects.push(ImageObjectGrant {
+                digest: device.digest().to_string(),
+                media_type: MEDIA_TYPE_EROFS.to_string(),
+                size_bytes: device.size().unwrap(),
+                path: format!("{ROUTE_PREFIX}{}", device.digest()),
+            });
+        }
+        objects
+    }
+
+    #[tokio::test]
+    async fn a_composite_fetches_every_closure_object_and_returns_ordered_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, config, composite_document, devices, descriptor) = composite_fixture();
+        assert_eq!(descriptor.devices.len(), 2);
+        let grants = composite_grants(&manifest, &config, &composite_document, &devices);
+        let server = Server::run();
+        for document in [&manifest, &config, &composite_document] {
+            serve(&server, document.bytes(), document.digest(), 1);
+        }
+        for device in &devices {
+            serve(&server, device.bytes(), device.digest(), 1);
+        }
+        let cache = cache(dir.path()).await;
+        let fetched = fetch_composite_image(
+            &cache,
+            &grants,
+            server.url("/").to_string().trim_end_matches('/'),
+            TOKEN,
+            ROUTE_PREFIX,
+        )
+        .await
+        .unwrap();
+        assert_eq!(fetched.manifest_digest, manifest.digest());
+        assert_eq!(fetched.composite_digest, composite_document.digest());
+        assert_eq!(
+            fetched.metadata.digest,
+            devices.first().unwrap().digest(),
+            "the metadata device is first"
+        );
+        assert_eq!(
+            fetched
+                .devices
+                .iter()
+                .map(|device| device.digest.as_str())
+                .collect::<Vec<_>>(),
+            vec![devices[1].digest(), devices[2].digest()]
+        );
+        assert_eq!(fetched.device_paths.len(), 2);
+        assert!(fetched.metadata_path.is_file());
+        for path in &fetched.device_paths {
+            assert!(path.is_file());
+        }
+        assert_eq!(cache.fetch_count(), 6);
+    }
+
+    #[tokio::test]
+    async fn a_composite_grant_missing_a_device_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, config, composite_document, devices, _) = composite_fixture();
+        let mut grants = composite_grants(&manifest, &config, &composite_document, &devices);
+        grants.pop();
+        let server = Server::run();
+        for document in [&manifest, &config, &composite_document] {
+            serve(&server, document.bytes(), document.digest(), 1);
+        }
+        let cache = cache(dir.path()).await;
+        let error = fetch_composite_image(
+            &cache,
+            &grants,
+            server.url("/").to_string().trim_end_matches('/'),
+            TOKEN,
+            ROUTE_PREFIX,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("requires 6") || error.contains("no Composite device"),
+            "{error}"
         );
     }
 

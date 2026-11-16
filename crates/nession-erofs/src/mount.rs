@@ -153,8 +153,25 @@ impl Drop for ErofsMount {
 /// Mount `image` read-only at `mountpoint`, with bounded helper, bounded
 /// stderr collection and verified rollback on failure.
 pub fn mount_shared(image: &Path, mountpoint: &Path, settings: &MountSettings) -> Result<()> {
+    mount_shared_with_devices(image, &[], mountpoint, settings)
+}
+
+/// Mount one EROFS image with ordered extra devices (#3697).
+///
+/// The devices are the backing EROFS blobs named by a referenced Composite
+/// descriptor, in device-table order. `erofsfuse --device=<path>` is passed
+/// once per device; an empty slice is exactly [`mount_shared`].
+pub fn mount_shared_with_devices(
+    image: &Path,
+    devices: &[PathBuf],
+    mountpoint: &Path,
+    settings: &MountSettings,
+) -> Result<()> {
     create_mountpoint(mountpoint)?;
     let mut command = Command::new(&settings.erofsfuse); // not-tmux: unprivileged EROFS FUSE helper
+    for device in devices {
+        command.arg(format!("--device={}", device.display()));
+    }
     command.arg(image).arg(mountpoint);
     let label = format!("{} {}", settings.erofsfuse.display(), image.display());
     let outcome = match run_bounded_helper(command, &label, PROBE_TIMEOUT) {

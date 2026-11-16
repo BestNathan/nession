@@ -11,6 +11,7 @@
 //! reserializing a typed view and claiming the old digest.
 
 pub mod annotation;
+pub mod composite;
 pub mod config;
 pub mod descriptor;
 pub mod index;
@@ -24,7 +25,14 @@ use serde_json::Value;
 
 pub use annotation::{
     ImageKind, NessionUsage, ANNOTATION_KIND, ANNOTATION_MOUNT_DEFAULT, ANNOTATION_PATH_PREPEND,
-    MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST,
+    MEDIA_TYPE_COMPOSITE, MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_INDEX,
+    MEDIA_TYPE_MANIFEST,
+};
+pub use composite::{
+    parse_composite, validate_composite_manifest_config, CompositeBlob, CompositeDescriptor,
+    CompositePacker, CompositePlatform, COMPOSITE_BLOCK_SIZE, COMPOSITE_CHUNK_SIZE,
+    COMPOSITE_PACKER_FORMAT, COMPOSITE_PACKER_TOOL, COMPOSITE_ROOTFS_TYPE,
+    COMPOSITE_SCHEMA_VERSION, MAX_COMPOSITE_DEVICES,
 };
 pub use config::{History, ImageConfig, RootFs, RuntimeConfig};
 pub use descriptor::{Descriptor, Platform};

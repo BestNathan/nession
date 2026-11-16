@@ -172,10 +172,21 @@ function matches(image: ImageDescriptor, query: string): boolean {
     || (image.alias ?? '').toLowerCase().includes(target)
     || image.aliases.some((alias) => alias.toLowerCase().includes(target))
     || (image.digest ?? '').toLowerCase().includes(target)
-    || (image.source.kind === 'local_directory'
-      ? image.source.path.toLowerCase().includes(target)
-      : image.source.repository_url.toLowerCase().includes(target))
+    || sourceText(image.source).toLowerCase().includes(target)
   );
+}
+
+function sourceText(source: ImageDescriptor['source']): string {
+  switch (source.kind) {
+    case 'github':
+      return `${source.repository_url}@${source.ref}`;
+    case 'local_directory':
+      return source.path;
+    case 'compose':
+      return source.sources
+        .map((entry) => `${entry.repository}@${entry.ref} ${entry.destination}`)
+        .join(' ');
+  }
 }
 
 type Emit = (build: ImageBuildDescriptor) => void;

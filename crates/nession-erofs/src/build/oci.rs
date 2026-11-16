@@ -194,7 +194,7 @@ mod tests {
         let path = dir.join("fake-oci-to-erofs");
         let magic = format!(
             "dd if=/dev/zero of=\"$out\" bs=1 count=1028 2>/dev/null\n\
-             printf '\\340\\365\\341\\342' | dd of=\"$out\" bs=1 seek=1024 conv=notrunc 2>/dev/null\n\
+             printf '\\342\\341\\365\\340' | dd of=\"$out\" bs=1 seek=1024 conv=notrunc 2>/dev/null\n\
              printf '%s' '{}' > \"$out.config.json\"\n",
             sidecar.replace('\'', "'\\''")
         );

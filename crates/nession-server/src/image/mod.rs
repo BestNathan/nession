@@ -22,8 +22,8 @@ pub mod http;
 #[cfg(test)]
 mod async_build_tests;
 pub use builds::{
-    BuildCleanupReport, BuildState, BuildStore, DEFAULT_BUILD_LOG_MAX_BYTES,
-    DEFAULT_BUILD_RETENTION_SECS,
+    BuildCleanupReport, BuildState, BuildStore, ComposeBuildState, ComposePinnedSource,
+    DEFAULT_BUILD_LOG_MAX_BYTES, DEFAULT_BUILD_RETENTION_SECS,
 };
 pub use http::ImageHttpService;
 
@@ -35,7 +35,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
 use nession_erofs::build::Packaging as ErofsPackaging;
-use nession_erofs::oci::descriptor::Platform;
+use nession_erofs::oci::config::{ImageConfig, RuntimeConfig};
+use nession_erofs::oci::descriptor::{Descriptor, Platform};
 use nession_erofs::{
     discard_packaged_image, discard_snapshot_artifacts, verify_snapshot, BlobStore, BuildObserver,
     BuildRequest, BuildSource, BuiltImage, ErofsBuilder, ProcessControl, ResumePoint,
@@ -44,13 +45,33 @@ use nession_erofs::{
 use nession_protocol::contracts::image::v1::{
     is_valid_image_digest, normalize_alias, normalize_client_request_id, normalize_image_build_id,
     normalize_image_digest, normalize_image_source, validate_packaging, ImageBuildDescriptor,
-    ImageBuildProgress, ImageBuildStage, ImageBuildStatus, ImageDescriptor, ImagePackaging,
-    ImageSource, ImageStatus, NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX,
-    IMAGE_BUILD_LIST_MAX_LIMIT, IMAGE_DIAGNOSTIC_MAX_CHARS, IMAGE_LIST_MAX_LIMIT,
+    ImageBuildProgress, ImageBuildStage, ImageBuildStatus, ImageComposeRepresentation,
+    ImageDescriptor, ImagePackaging, ImageSource, ImageStatus, NormalizedComposeSource,
+    NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX, IMAGE_BUILD_LIST_MAX_LIMIT,
+    IMAGE_DIAGNOSTIC_MAX_CHARS, IMAGE_LIST_MAX_LIMIT,
 };
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 
 use crate::db::{Database, ImageLeaseRow, ImageRow};
+
+/// One pinned Compose source loaded for mechanical execution.
+pub struct ComposeSourceExecution {
+    pub layer: Descriptor,
+    pub path: PathBuf,
+    pub repository: String,
+    pub reference: String,
+    pub manifest_digest: String,
+    pub destination: String,
+    pub config: ImageConfig,
+    /// The source Manifest's advisory annotations.
+    pub annotations: std::collections::BTreeMap<String, String>,
+}
+
+/// The Compose inputs of one build execution.
+pub struct ComposeExecution {
+    pub representation: ImageComposeRepresentation,
+    pub sources: Vec<ComposeSourceExecution>,
+}
 
 /// One stage-level build execution handed to the mechanical backend.
 pub struct BuildExecution {
@@ -61,6 +82,8 @@ pub struct BuildExecution {
     pub resume: ResumePoint,
     /// The commit a prior attempt pinned, when one exists.
     pub pinned_sha: Option<String>,
+    /// Resolved Compose sources when `source` is a Compose declaration.
+    pub compose: Option<ComposeExecution>,
     pub control: Arc<ProcessControl>,
     pub observer: Arc<dyn BuildObserver>,
 }
@@ -83,6 +106,86 @@ impl ImageBuildBackend for ErofsBuilder {
             fixed_timestamp: execution.packaging.fixed_timestamp,
             fixed_uuid: execution.packaging.fixed_uuid.clone(),
         };
+        if let Some(compose) = &execution.compose {
+            let source_annotations_key = nession_erofs::build::compose::SOURCE_ANNOTATIONS_KEY;
+            let sources = compose
+                .sources
+                .iter()
+                .map(|source| {
+                    let mut config = source.config.clone();
+                    config.extra.insert(
+                        source_annotations_key.to_string(),
+                        serde_json::to_value(&source.annotations)
+                            .map_err(|error| anyhow::anyhow!("compose annotations: {error}"))?,
+                    );
+                    let platform = platform_from_config(&config);
+                    Ok((
+                        config.clone(),
+                        nession_erofs::build::compose::ComposeSourceInput {
+                            path: source.path.clone(),
+                            layer: source.layer.clone(),
+                            repository: source.repository.clone(),
+                            reference: source.reference.clone(),
+                            manifest_digest: source.manifest_digest.clone(),
+                            destination: source.destination.clone(),
+                            platform,
+                            config,
+                        },
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if compose.representation == ImageComposeRepresentation::Referenced {
+                let referenced = sources
+                    .iter()
+                    .map(|(config, source)| {
+                        nession_erofs::build::referenced::ReferencedSourceInput {
+                            path: source.path.clone(),
+                            layer: source.layer.clone(),
+                            repository: source.repository.clone(),
+                            reference: source.reference.clone(),
+                            manifest_digest: source.manifest_digest.clone(),
+                            platform: source.platform.clone(),
+                            config: config.clone(),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let composer = nession_erofs::build::referenced::ErofsReferencedComposer::new(
+                    self.extractor.clone(),
+                    self.mkfs.clone(),
+                    self.blobs.clone(),
+                    self.work_root.clone(),
+                )?;
+                return composer
+                    .run(nession_erofs::build::referenced::ReferencedBuildRequest {
+                        build_dir: &execution.build_dir,
+                        sources: &referenced,
+                        packaging: &packaging,
+                        control: &execution.control,
+                        observer: execution.observer.as_ref(),
+                    })
+                    .map(|referenced| referenced.built);
+            }
+            let sources = sources
+                .into_iter()
+                .map(|(_, source)| source)
+                .collect::<Vec<_>>();
+            let composer = nession_erofs::build::compose::ErofsComposer::new(
+                self.extractor.clone(),
+                self.mkfs.clone(),
+                self.blobs.clone(),
+                self.work_root.clone(),
+            )?;
+            return composer
+                .run(nession_erofs::build::compose::ComposeBuildRequest {
+                    build_dir: &execution.build_dir,
+                    sources: &sources,
+                    packaging: &packaging,
+                    resume: execution.resume,
+                    control: &execution.control,
+                    observer: execution.observer.as_ref(),
+                })
+                .map(|composed| composed.built);
+        }
         let source = match &execution.source {
             NormalizedImageSource::GitHub {
                 repository_url,
@@ -97,6 +200,9 @@ impl ImageBuildBackend for ErofsBuilder {
             NormalizedImageSource::LocalDirectory { path } => BuildSource::LocalDirectory {
                 path: Path::new(path),
             },
+            NormalizedImageSource::Compose { .. } => {
+                anyhow::bail!("compose source requires a resolved Compose execution")
+            }
         };
         self.run(BuildRequest {
             build_dir: &execution.build_dir,
@@ -174,6 +280,18 @@ enum GrantConsumer<'a> {
 impl From<nession_protocol::contracts::image::v1::ImageValidationError> for ImageError {
     fn from(error: nession_protocol::contracts::image::v1::ImageValidationError) -> Self {
         Self::Invalid(error.message())
+    }
+}
+
+/// The OCI platform an image Config declares.
+fn platform_from_config(config: &ImageConfig) -> Platform {
+    Platform {
+        architecture: config.architecture.clone(),
+        os: config.os.clone(),
+        os_version: config.os_version.clone(),
+        os_features: config.os_features.clone(),
+        variant: config.variant.clone(),
+        ..Platform::default()
     }
 }
 
@@ -652,7 +770,7 @@ impl ImageManager {
             }
         }
 
-        self.submit_new(store, canonical_source, alias, request_id)
+        self.submit_new(store, canonical_source, &normalized, alias, request_id)
             .await
     }
 
@@ -660,6 +778,7 @@ impl ImageManager {
         self: &Arc<Self>,
         store: Arc<BuildStore>,
         canonical_source: ImageSource,
+        normalized: &NormalizedImageSource,
         alias: Option<String>,
         client_request_id: Option<String>,
     ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
@@ -668,6 +787,20 @@ impl ImageManager {
         let build_id = format!("build-{}", uuid::Uuid::new_v4().simple());
         let image_id = format!("image-{}", uuid::Uuid::new_v4().simple());
         let sequence = now_sequence();
+        // Compose sources are resolved and pinned once, before any durable
+        // build record exists. A digest alone is not authority: each source
+        // names its catalog Repository and the Server proves it resolves there
+        // for this build host's platform.
+        let compose = match normalized {
+            NormalizedImageSource::Compose {
+                representation,
+                sources,
+            } => Some(
+                self.resolve_compose_sources(sources, *representation, &build_id)
+                    .await?,
+            ),
+            _ => None,
+        };
         let source_json = serde_json::to_string(&canonical_source)
             .map_err(|e| ImageError::Unavailable(format!("image source encoding failed: {e}")))?;
         let packaging_json = serde_json::to_string(&packaging).map_err(|e| {
@@ -683,6 +816,7 @@ impl ImageManager {
             source: canonical_source,
             alias: alias.clone(),
             packaging: packaging.clone(),
+            compose,
             status: ImageBuildStatus::Queued,
             stage: None,
             pinned_sha: None,
@@ -699,9 +833,13 @@ impl ImageManager {
             attempts: Vec::new(),
             recovered: false,
         };
-        store.create(&state).map_err(|e| {
-            ImageError::Unavailable(format!("image build storage is unusable: {e:#}"))
-        })?;
+        if let Err(error) = store.create(&state) {
+            self.release_compose_pins(state.compose.as_ref(), &build_id)
+                .await;
+            return Err(ImageError::Unavailable(format!(
+                "image build storage is unusable: {error:#}"
+            )));
+        }
         let row = ImageRow {
             image_id: image_id.clone(),
             digest: None,
@@ -716,6 +854,8 @@ impl ImageManager {
         };
         if let Err(error) = self.db.insert_image(&row).await {
             let _ = store.remove(&build_id);
+            self.release_compose_pins(state.compose.as_ref(), &build_id)
+                .await;
             return Err(ImageError::Unavailable(format!(
                 "image build could not be recorded: {error:#}"
             )));
@@ -733,6 +873,236 @@ impl ImageManager {
         self.start_build(state, ResumePoint::Source).await?;
         self.publish_descriptor(&descriptor);
         Ok(descriptor)
+    }
+
+    /// Resolve every Compose source once at submission and pin its immutable
+    /// Manifest for the whole build.
+    async fn resolve_compose_sources(
+        &self,
+        sources: &[NormalizedComposeSource],
+        representation: ImageComposeRepresentation,
+        build_id: &str,
+    ) -> std::result::Result<ComposeBuildState, ImageError> {
+        let conn = self.db.connection();
+        let platform = nession_erofs::build::publication::host_platform();
+        let mut pinned = Vec::with_capacity(sources.len());
+        for source in sources {
+            let label = format!("{}:{}", source.repository, source.reference);
+            let root = nession_erofs::image::resolve_root(
+                conn,
+                Some(&source.repository),
+                &source.reference,
+            )
+            .await
+            .map_err(|error| {
+                ImageError::Invalid(format!(
+                    "compose source {label} does not resolve in its Repository: {error:#}"
+                ))
+            })?;
+            let target = nession_erofs::image::resolve_root_for_platform(
+                conn,
+                &self.blobs,
+                &root,
+                &platform,
+            )
+            .await
+            .map_err(|error| {
+                ImageError::Invalid(format!(
+                    "compose source {label} has no usable image for {}/{}: {error:#}",
+                    platform.os, platform.architecture
+                ))
+            })?;
+            if target.layer.media_type != nession_erofs::oci::annotation::MEDIA_TYPE_EROFS {
+                return Err(ImageError::Invalid(format!(
+                    "compose source {label} is not a flattened raw EROFS image"
+                )));
+            }
+            nession_erofs::catalog::pin::pin(
+                conn,
+                nession_erofs::catalog::pin::ConsumerKind::Build,
+                build_id,
+                &target.manifest_digest,
+                now_i64(),
+                None,
+            )
+            .await
+            .map_err(|error| {
+                ImageError::Unavailable(format!(
+                    "compose source {label} could not be pinned: {error:#}"
+                ))
+            })?;
+            pinned.push(ComposePinnedSource {
+                repository: source.repository.clone(),
+                reference: source.reference.clone(),
+                destination: source.destination.clone(),
+                manifest_digest: target.manifest_digest,
+                config_digest: target.config_digest,
+                layer_digest: target.layer.digest,
+                layer_size: target.layer.size,
+            });
+        }
+        Ok(ComposeBuildState {
+            representation,
+            sources: pinned,
+        })
+    }
+
+    /// Drop the GC pins one Compose build placed on its sources.
+    async fn release_compose_pins(&self, compose: Option<&ComposeBuildState>, build_id: &str) {
+        let Some(compose) = compose else {
+            return;
+        };
+        let conn = self.db.connection();
+        for source in &compose.sources {
+            let Ok(pin_id) = nession_erofs::catalog::pin::pin_id(
+                nession_erofs::catalog::pin::ConsumerKind::Build,
+                build_id,
+                &source.manifest_digest,
+            ) else {
+                continue;
+            };
+            if let Err(error) = nession_erofs::catalog::pin::unpin(conn, &pin_id).await {
+                tracing::warn!(
+                    build_id = %build_id,
+                    error = %format!("{error:#}"),
+                    "compose source pin could not be released"
+                );
+            }
+        }
+    }
+
+    /// Re-read and verify the pinned source objects before a Compose execution.
+    async fn load_compose_execution(
+        &self,
+        state: &BuildState,
+    ) -> std::result::Result<ComposeExecution, ImageError> {
+        let Some(compose) = &state.compose else {
+            return Err(ImageError::BuildFailed(
+                "compose build has no pinned source identities".to_string(),
+            ));
+        };
+        let conn = self.db.connection();
+        let expected = nession_erofs::build::publication::host_platform();
+        let mut sources = Vec::with_capacity(compose.sources.len());
+        for source in &compose.sources {
+            let label = format!("{}:{}", source.repository, source.reference);
+            let manifest_object =
+                nession_erofs::catalog::reference::get_object(conn, &source.manifest_digest)
+                    .await
+                    .map_err(|error| {
+                        ImageError::Unavailable(format!("compose source read failed: {error:#}"))
+                    })?
+                    .filter(|object| {
+                        object.kind == nession_erofs::catalog::reference::ObjectKind::Manifest
+                    })
+                    .ok_or_else(|| {
+                        ImageError::BuildFailed(format!(
+                            "compose source {label} Manifest is no longer available"
+                        ))
+                    })?;
+            self.blobs
+                .verify_named_size(&source.manifest_digest, manifest_object.size_bytes)
+                .map_err(|error| {
+                    ImageError::BuildFailed(format!(
+                        "compose source {label} Manifest bytes do not verify: {error:#}"
+                    ))
+                })?;
+            let manifest_bytes = self.blobs.read(&source.manifest_digest).map_err(|error| {
+                ImageError::BuildFailed(format!(
+                    "compose source {label} Manifest cannot be read: {error:#}"
+                ))
+            })?;
+            let (_, manifest) =
+                nession_erofs::oci::parse_manifest(&manifest_bytes).map_err(|error| {
+                    ImageError::BuildFailed(format!(
+                        "compose source {label} Manifest is invalid: {error:#}"
+                    ))
+                })?;
+            if manifest.config.digest != source.config_digest {
+                return Err(ImageError::BuildFailed(format!(
+                    "compose source {label} Config identity changed after pinning"
+                )));
+            }
+            let config_object =
+                nession_erofs::catalog::reference::get_object(conn, &source.config_digest)
+                    .await
+                    .map_err(|error| {
+                        ImageError::Unavailable(format!("compose source read failed: {error:#}"))
+                    })?
+                    .filter(|object| {
+                        object.kind == nession_erofs::catalog::reference::ObjectKind::Config
+                    })
+                    .ok_or_else(|| {
+                        ImageError::BuildFailed(format!(
+                            "compose source {label} Config is no longer available"
+                        ))
+                    })?;
+            self.blobs
+                .verify_named_size(&source.config_digest, config_object.size_bytes)
+                .map_err(|error| {
+                    ImageError::BuildFailed(format!(
+                        "compose source {label} Config bytes do not verify: {error:#}"
+                    ))
+                })?;
+            let config_bytes = self.blobs.read(&source.config_digest).map_err(|error| {
+                ImageError::BuildFailed(format!(
+                    "compose source {label} Config cannot be read: {error:#}"
+                ))
+            })?;
+            let (_, config) = nession_erofs::oci::parse_config(&config_bytes).map_err(|error| {
+                ImageError::BuildFailed(format!(
+                    "compose source {label} Config is invalid: {error:#}"
+                ))
+            })?;
+            let layer = manifest.layers.first().ok_or_else(|| {
+                ImageError::BuildFailed(format!("compose source {label} Manifest has no layer"))
+            })?;
+            if layer.media_type != nession_erofs::oci::annotation::MEDIA_TYPE_EROFS
+                || layer.digest != source.layer_digest
+                || layer.size != source.layer_size
+            {
+                return Err(ImageError::BuildFailed(format!(
+                    "compose source {label} layer identity changed after pinning"
+                )));
+            }
+            let platform = platform_from_config(&config);
+            if !platform.matches(&expected) {
+                return Err(ImageError::BuildFailed(format!(
+                    "compose source {label} targets {}/{} variant {:?}, not the build host's {}/{}",
+                    platform.os,
+                    platform.architecture,
+                    platform.variant,
+                    expected.os,
+                    expected.architecture
+                )));
+            }
+            self.blobs
+                .verify_named_size(&source.layer_digest, source.layer_size)
+                .map_err(|error| {
+                    ImageError::BuildFailed(format!(
+                        "compose source {label} EROFS bytes do not verify: {error:#}"
+                    ))
+                })?;
+            let path = self.blobs.path_for(&source.layer_digest).map_err(|error| {
+                ImageError::BuildFailed(format!(
+                    "compose source {label} EROFS payload has no local path: {error:#}"
+                ))
+            })?;
+            sources.push(ComposeSourceExecution {
+                layer: layer.clone(),
+                path,
+                repository: source.repository.clone(),
+                reference: source.reference.clone(),
+                manifest_digest: source.manifest_digest.clone(),
+                destination: source.destination.clone(),
+                config,
+                annotations: manifest.annotations.clone().unwrap_or_default(),
+            });
+        }
+        Ok(ComposeExecution {
+            representation: compose.representation,
+            sources,
+        })
     }
 
     fn indexed_build(&self, request_id: &str) -> Option<String> {
@@ -1083,6 +1453,8 @@ impl ImageManager {
         for mut state in states {
             known_images.insert(state.image_id.clone());
             if state.is_terminal() {
+                self.release_compose_pins(state.compose.as_ref(), &state.build_id)
+                    .await;
                 continue;
             }
             if self
@@ -1228,6 +1600,20 @@ impl ImageManager {
                 return;
             }
         };
+        let compose = if matches!(&source, NormalizedImageSource::Compose { .. }) {
+            match self.load_compose_execution(&state).await {
+                Ok(compose) => Some(compose),
+                Err(error) => {
+                    let _ = self
+                        .finish_failed(state, error.message().to_string(), false, None)
+                        .await;
+                    drop(permit);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let observer = Arc::new(SharedBuild::new(
             Arc::clone(&store),
             state.clone(),
@@ -1241,6 +1627,7 @@ impl ImageManager {
             packaging: state.packaging.clone(),
             resume,
             pinned_sha: state.pinned_sha.clone(),
+            compose,
             control: Arc::clone(&run.control),
             observer: observer_dyn,
         };
@@ -1278,7 +1665,16 @@ impl ImageManager {
         };
         let _publication = self.publication.lock().await;
         let now = now_secs();
-        let digest = built.blob.digest.clone();
+        let referenced = built
+            .compose
+            .as_ref()
+            .and_then(|compose| compose.referenced.as_ref());
+        let digest = referenced
+            .map(|referenced| referenced.manifest_digest.clone())
+            .unwrap_or_else(|| built.blob.digest.clone());
+        let size_bytes = referenced
+            .map(|referenced| referenced.size_bytes)
+            .unwrap_or(built.blob.size_bytes);
         let mut deduplicated = false;
         let existing = self.db.get_image_by_digest(&digest).await.ok().flatten();
         if existing.is_some_and(|row| row.status == ImageStatus::Ready.as_str()) {
@@ -1292,7 +1688,7 @@ impl ImageManager {
                 .finish_image(
                     &state.image_id,
                     &digest,
-                    built.blob.size_bytes,
+                    size_bytes,
                     built.source_sha.as_deref(),
                     now_i64(),
                 )
@@ -1315,7 +1711,7 @@ impl ImageManager {
                     let row = ImageRow {
                         image_id: state.image_id.clone(),
                         digest: Some(digest.clone()),
-                        size_bytes: built.blob.size_bytes,
+                        size_bytes,
                         source_json,
                         source_sha: built.source_sha.clone(),
                         packaging_json,
@@ -1368,11 +1764,13 @@ impl ImageManager {
                 "successful image build scratch bytes could not be released"
             );
         }
-        self.publish_catalog_identity(&state, &digest, built.blob.size_bytes)
+        self.publish_catalog_identity(&state, &digest, size_bytes, built.compose.as_ref())
+            .await;
+        self.release_compose_pins(state.compose.as_ref(), &state.build_id)
             .await;
         state.status = ImageBuildStatus::Succeeded;
         state.digest = Some(digest);
-        state.size_bytes = built.blob.size_bytes;
+        state.size_bytes = size_bytes;
         state.deduplicated = deduplicated;
         state.error = None;
         state.finished_at = Some(now);
@@ -1396,13 +1794,62 @@ impl ImageManager {
     /// Publish the standard Config+Manifest identity for a successful build
     /// (#3497). The legacy digest/alias registry remains authoritative for old
     /// consumers; this adds the Manifest-addressed identity beside it.
-    async fn publish_catalog_identity(&self, state: &BuildState, digest: &str, size_bytes: u64) {
+    async fn publish_catalog_identity(
+        &self,
+        state: &BuildState,
+        digest: &str,
+        size_bytes: u64,
+        compose: Option<&nession_erofs::ComposeImageMetadata>,
+    ) {
         let conn = self.db.connection();
         let mut annotations = std::collections::BTreeMap::new();
-        annotations.insert(
-            nession_erofs::oci::annotation::ANNOTATION_KIND.to_string(),
-            "directory".to_string(),
-        );
+        let runtime = match compose {
+            Some(compose) => RuntimeConfig {
+                env: (!compose.runtime.env.is_empty()).then(|| compose.runtime.env.clone()),
+                entrypoint: compose.runtime.entrypoint.clone(),
+                cmd: compose.runtime.cmd.clone(),
+                working_dir: compose.runtime.working_dir.clone(),
+                ..RuntimeConfig::default()
+            },
+            None => RuntimeConfig::default(),
+        };
+        match compose {
+            Some(compose) => annotations.extend(compose.runtime.annotations.clone()),
+            None => {
+                annotations.insert(
+                    nession_erofs::oci::annotation::ANNOTATION_KIND.to_string(),
+                    "directory".to_string(),
+                );
+            }
+        }
+        if let Some(referenced) = compose.and_then(|compose| compose.referenced.as_ref()) {
+            let publication = nession_erofs::build::publication::CompositePublication {
+                repository: "builds".to_string(),
+                tag: None,
+                expectation: nession_erofs::catalog::tag::TagExpectation::Absent,
+                composite: referenced.descriptor.clone(),
+                metadata: referenced.metadata.clone(),
+                devices: referenced.devices.clone(),
+                config: referenced.config.clone(),
+                manifest: referenced.manifest.clone(),
+            };
+            if let Err(error) = nession_erofs::build::publication::publish_composite(
+                conn,
+                &self.blobs,
+                &publication,
+                now_i64(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    build_id = %state.build_id,
+                    image_id = %state.image_id,
+                    error = %format!("{error:#}"),
+                    "referenced Composite Manifest identity could not be published"
+                );
+            }
+            return;
+        }
         let publication = nession_erofs::build::publication::LayerPublication {
             repository: "builds".to_string(),
             tag: None,
@@ -1420,6 +1867,7 @@ impl ImageManager {
             },
             platform: nession_erofs::build::publication::host_platform(),
             env: Vec::new(),
+            runtime,
             annotations,
         };
         if let Err(error) =
@@ -1460,6 +1908,8 @@ impl ImageManager {
         let terminal_status = state.status;
         push_attempt(&mut state, terminal_status, Some(text.clone()));
         state.stage = None;
+        self.release_compose_pins(state.compose.as_ref(), &state.build_id)
+            .await;
         // A failed/canceled build never changes a Project reference or a
         // published digest; it only fails its own registry row.
         if let Ok(Some(row)) = self.db.get_image_by_id(&state.image_id).await {
@@ -1983,7 +2433,7 @@ impl ImageManager {
                         "resolved Manifest disappeared from the catalog".to_string(),
                     )
                 })?;
-        let objects = vec![
+        let mut objects = vec![
             ImageObjectAccess {
                 digest: target.manifest_digest.clone(),
                 media_type: manifest_object.media_type,
@@ -1996,13 +2446,40 @@ impl ImageManager {
                 size_bytes: target.manifest.config.size,
                 path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.config_digest),
             },
-            ImageObjectAccess {
+        ];
+        match &target.composite {
+            Some(composite) => {
+                let mut descriptors = vec![composite.descriptor_object.clone()];
+                descriptors.push(composite.metadata.clone());
+                descriptors.extend(composite.devices.iter().cloned());
+                for descriptor in descriptors {
+                    let object =
+                        nession_erofs::catalog::reference::get_object(conn, &descriptor.digest)
+                            .await
+                            .map_err(|error| {
+                                ImageError::Unavailable(format!("image read failed: {error:#}"))
+                            })?
+                            .ok_or_else(|| {
+                                ImageError::Unavailable(format!(
+                                    "resolved Composite object {} disappeared from the catalog",
+                                    descriptor.digest
+                                ))
+                            })?;
+                    objects.push(ImageObjectAccess {
+                        digest: descriptor.digest.clone(),
+                        media_type: object.media_type,
+                        size_bytes: object.size_bytes,
+                        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", descriptor.digest),
+                    });
+                }
+            }
+            None => objects.push(ImageObjectAccess {
                 digest: target.layer.digest.clone(),
                 media_type: target.layer.media_type.clone(),
                 size_bytes: target.layer.size,
                 path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.layer.digest),
-            },
-        ];
+            }),
+        }
         if let Some(session_id) = pin_session {
             nession_erofs::catalog::pin::pin(
                 conn,
@@ -2033,6 +2510,17 @@ impl ImageManager {
     ) -> std::result::Result<Option<ImageResolution>, ImageError> {
         if !is_valid_image_digest(reference) {
             return Ok(None);
+        }
+        // A catalog object that is not a raw EROFS blob is an image identity
+        // (Manifest/Index/Composite), not a legacy digest-addressed payload.
+        if let Some(object) =
+            nession_erofs::catalog::reference::get_object(self.db.connection(), reference)
+                .await
+                .map_err(|error| ImageError::Unavailable(format!("image read failed: {error:#}")))?
+        {
+            if object.kind != nession_erofs::catalog::reference::ObjectKind::Erofs {
+                return Ok(None);
+            }
         }
         let Some(row) = self
             .db
@@ -2337,6 +2825,24 @@ fn resume_decision(
         NormalizedImageSource::LocalDirectory { path } => {
             SnapshotSource::LocalDirectory { path: path.clone() }
         }
+        NormalizedImageSource::Compose { .. } => {
+            let Some(compose) = &state.compose else {
+                return Err("compose build has no pinned source identities".to_string());
+            };
+            SnapshotSource::Compose {
+                sources: compose
+                    .sources
+                    .iter()
+                    .map(|source| nession_erofs::ComposeSnapshotSource {
+                        repository: source.repository.clone(),
+                        reference: source.reference.clone(),
+                        manifest_digest: source.manifest_digest.clone(),
+                        layer_digest: source.layer_digest.clone(),
+                        destination: source.destination.clone(),
+                    })
+                    .collect(),
+            }
+        }
     };
     let packaging = ErofsPackaging {
         compression: state.packaging.compression.clone(),
@@ -2355,6 +2861,9 @@ fn resume_decision(
             NormalizedImageSource::LocalDirectory { .. } => {
                 Err("local source has no validated snapshot; a new build is required".to_string())
             }
+            // Compose sources are immutable and pinned; a missing or rejected
+            // snapshot is safely re-extracted from those exact identities.
+            NormalizedImageSource::Compose { .. } => Ok((ResumePoint::Source, None)),
         },
         Err(error) => match &normalized {
             // A rejected checkpoint is never reused. Git may fetch the pinned
@@ -2363,6 +2872,7 @@ fn resume_decision(
             NormalizedImageSource::LocalDirectory { .. } => {
                 Err(format!("image build checkpoint is not usable: {error:#}"))
             }
+            NormalizedImageSource::Compose { .. } => Ok((ResumePoint::Source, None)),
         },
     }
 }
@@ -2508,6 +3018,16 @@ mod tests {
                 ..
             } => format!("{repository_url}#{reference}"),
             NormalizedImageSource::LocalDirectory { path } => path.clone(),
+            NormalizedImageSource::Compose { sources, .. } => sources
+                .iter()
+                .map(|source| {
+                    format!(
+                        "{}:{}@{}",
+                        source.repository, source.reference, source.destination
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(","),
         }
     }
 
@@ -2533,9 +3053,11 @@ mod tests {
                 blob,
                 source_sha: match &execution.source {
                     NormalizedImageSource::GitHub { requested_sha, .. } => requested_sha.clone(),
-                    NormalizedImageSource::LocalDirectory { .. } => None,
+                    NormalizedImageSource::LocalDirectory { .. }
+                    | NormalizedImageSource::Compose { .. } => None,
                 },
                 packaging: ErofsPackaging::default(),
+                compose: None,
             })
         }
     }
@@ -3420,6 +3942,7 @@ mod tests {
                     layer: descriptor.clone(),
                     platform: linux_amd64(),
                     env: vec![env.to_string()],
+                    runtime: nession_erofs::oci::config::RuntimeConfig::default(),
                     annotations: std::collections::BTreeMap::new(),
                 },
             )
