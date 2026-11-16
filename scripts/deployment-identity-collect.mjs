@@ -105,18 +105,15 @@ export function formatDeploymentIdentityRejection(error) {
     JSON.stringify(deploymentIdentityRejection(error));
 }
 
-// #3686: diagnostics are observational, never an attestation or an
-// authorization to retry a permanent identity mismatch. Every value logged
-// below is either from validated trusted overlay/provenance or a bounded
-// allowlisted read-only Kubernetes field. No pod names, container messages,
-// arbitrary resource values, secrets or raw Kubernetes JSON enter logs.
+// #3686: a failure-only, read-only diagnostic. Never an attestation or a
+// basis for retrying permanent source/digest/namespace mismatches. Log only
+// fixed roles, trusted SHA/tags and bounded allowlisted Kubernetes metadata.
 export const DEPLOYMENT_IDENTITY_OBSERVATION_LOG_PREFIX =
   'DEPLOYMENT_IDENTITY_OBSERVATION_V1 ';
 const DIAGNOSTIC_DIGEST = /^sha256:[0-9a-f]{64}$/;
 function nonNegative(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
-
 export function deploymentIdentityFailureObservation({
   overlayPath, overlayText, gitopsRevision, provenance, deployments, pods, error,
 }) {
@@ -133,18 +130,63 @@ export function deploymentIdentityFailureObservation({
     const matches = deployments.items.filter(d => d?.metadata?.name === name);
     const d = matches.length === 1 && matches[0]?.metadata?.namespace === overlay.namespace
       ? matches[0] : null;
-    const expectedTag = overlay.images[role].tag;
     const declared = binding.images[role];
     const expectedDigests = [...new Set(Object.values(
       declared.digests ?? {declared: declared.digest}
     ))].filter(value => DIAGNOSTIC_DIGEST.test(value)).sort().slice(0, 8);
-    // ReplicaSet ownership must be exact; never borrow sibling staging-01 pods.
+    // Exact owned ReplicaSet avoids borrowing a sibling staging-01 lane's Pods.
     const owned = pods.items.filter(p => {
       const owner = p?.metadata?.ownerReferences?.[0];
       return p?.metadata?.namespace === overlay.namespace &&
         owner?.kind === 'ReplicaSet' &&
         typeof owner.name === 'string' &&
-        new RegExp('^' + name + '-[^-]+
+        new RegExp('^' + name + '-[^-]+$').test(owner.name);
+    });
+    const liveDigests = new Set();
+    let readyContainers = 0;
+    for (const pod of owned) {
+      for (const status of Array.isArray(pod?.status?.containerStatuses)
+        ? pod.status.containerStatuses.slice(0, 20) : []) {
+        if (status?.ready === true) readyContainers++;
+        const digest = typeof status?.imageID === 'string'
+          ? status.imageID.match(/@(sha256:[0-9a-f]{64})$/)?.[1] : null;
+        if (digest) liveDigests.add(digest);
+      }
+    }
+    const actualImage = d?.spec?.template?.spec?.containers?.find(
+      c => c?.name === role)?.image;
+    const observedTag = typeof actualImage === 'string'
+      ? actualImage.match(/:([a-z]+-[a-f0-9]{7,40})$/)?.[1] ?? null : null;
+    return {
+      role,
+      expected_workload: name,
+      deployed_workload_present: Boolean(d),
+      expected_tag: overlay.images[role].tag,
+      observed_tag: observedTag,
+      generation: nonNegative(d?.metadata?.generation),
+      observed_generation: nonNegative(d?.status?.observedGeneration),
+      available_replicas: nonNegative(d?.status?.availableReplicas),
+      matching_pods: owned.length,
+      ready_containers: Math.min(readyContainers, 1000),
+      expected_digests: expectedDigests,
+      observed_digests: [...liveDigests].sort().slice(0, 8),
+      observed_digests_truncated: liveDigests.size > 8,
+    };
+  });
+  return Object.freeze({
+    schema_version: 1,
+    kind: 'nession_deployment_identity_failure_observation',
+    source_sha: binding.source_sha,
+    gitops_revision: gitopsRevision,
+    environment_id: overlay.environment_id,
+    rejection_class: reason.class,
+    retryable: reason.retryable,
+    reason: reason.message,
+    roles,
+  });
+}
+
+// A bounded, single-line log receipt for the trusted Acceptance collector.
 // The Acceptance harness never reads artifacts or step summaries; the job log
 // is the channel it can attest. The receipt carries only identity that is
 // already part of the canonical attestation, never overlay/pod/provenance
@@ -698,8 +740,8 @@ function selfTest() {
     'unexpected parameter',
   ]) assert.equal(deploymentReadinessRetryable(Error(critical)), false, critical);
 
-  // #3686: verified source/desired revision and bounded observed workload
-  // identities survive a rolling-readiness failure, without granting Pass.
+  // #3686: rolling readiness includes actual source/revision/role evidence;
+  // nonretryable integrity problems remain nonretryable and hostile data hidden.
   const observed = deploymentIdentityFailureObservation({
     ...base, ...kubernetesFixtures(), error: Error('server pod is not Running'),
   });
@@ -728,9 +770,9 @@ function selfTest() {
   });
   assert.equal(permanent.retryable, false);
   assert.equal(permanent.rejection_class, 'digest');
-  const malicious = kubernetesFixtures({mutatePods: pods => {
-    pods.items[0].metadata.name = 'secret=ghs_sensitive';
-    pods.items[0].status.containerStatuses[0].imageID =
+  const malicious = kubernetesFixtures({mutatePods: p => {
+    p.items[0].metadata.name = 'secret=ghs_sensitive';
+    p.items[0].status.containerStatuses[0].imageID =
       'ghcr.io/unsafe@sha256:' + 'f'.repeat(64) + '\nsecret=ghs_sensitive';
   }});
   const redacted = deploymentIdentityFailureObservation({
