@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "81177dca7d0afe0c94733bcdfab174541a9157c5846a43ede8e8f6819de70052",
+  "run_id": 43830447809,
+  "run_attempt": 1,
+  "issue": 3705,
+  "criterion": "SC-03",
+  "criterion_text": "From the image's nginx HTTP/TLS entrypoints, an authorized independent MCP client completes protocol discovery/`tools/list` and a safe Tool read, while malformed/unauthorized requests are rejected without frontend fallback; legacy and modern MCP eras still work.",
+  "stage": "staging",
+  "target_sha": "8c86bb6da31f434ca96074c54c0b476a1ddffdcb",
+  "contract_sha256": "15fa805a198403b41e3feb8bb5e2d4e4e9e2d14b95f77b2ea442903ac7ca7471",
+  "case_revision": "8c86bb6da31f434ca96074c54c0b476a1ddffdcb",
+  "case_tree_sha": "1904c2cf4f2cb0c2379ed8a561fa674211e7dbb8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T08:25:52.252Z",
+  "finished_at": "2026-11-16T08:26:50.305Z",
+  "duration_ms": 58053,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Both nginx HTTP and TLS front doors preserve MCP authentication and protocol lifecycle",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 8c86bb6da31f434ca96074c54c0b476a1ddffdcb: shipped nginx runtime-tools stage with checkout entrypoint and real Server RPC behind HTTP and TLS; independent client observed 401 bearer refusal, Origin policy, legacy initialize/tools-list/DELETE and modern safe Tool read, without SPA fallback"
+        }
+      ],
+      "duration_ms": 58030,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43830447809,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8c86bb6da31f434ca96074c54c0b476a1ddffdcb",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43830447809",
+    "record_path": "runs/2026-11-16/43830447809-1/3705/SC-03.json",
+    "source_result_sha256": "c3d15e62a47b5b841962c0de503145aa6c955027de3bde26e0151a0fc63dee32"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43830447809-1",
+    "sha256": "c3d15e62a47b5b841962c0de503145aa6c955027de3bde26e0151a0fc63dee32",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43830447809",
+    "durability": "time-limited; object archival not configured"
+  }
+}
