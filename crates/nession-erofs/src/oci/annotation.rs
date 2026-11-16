@@ -12,6 +12,8 @@ pub const MEDIA_TYPE_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+jso
 pub const MEDIA_TYPE_CONFIG: &str = "application/vnd.oci.image.config.v1+json";
 /// The raw EROFS layer media type from the EROFS Image Spec.
 pub const MEDIA_TYPE_EROFS: &str = "application/vnd.erofs";
+/// The referenced multi-blob EROFS composite descriptor media type (#3697).
+pub const MEDIA_TYPE_COMPOSITE: &str = "application/vnd.nession.erofs.composite.v1+json";
 
 /// Advisory image kind. It never classifies format validity or authorization.
 pub const ANNOTATION_KIND: &str = "io.nession.kind";
@@ -25,6 +27,8 @@ pub const ANNOTATION_COMPOSE_FORMAT: &str = "io.nession.compose.format";
 pub const ANNOTATION_COMPOSE_SOURCES: &str = "io.nession.compose.sources";
 /// The only flattened Compose format this build writes.
 pub const COMPOSE_FORMAT_FLATTENED_V1: &str = "flattened-v1";
+/// The only referenced Compose format this build writes.
+pub const COMPOSE_FORMAT_REFERENCED_V1: &str = "referenced-v1";
 
 /// The three advisory Nession image kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

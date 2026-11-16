@@ -34,6 +34,8 @@ pub mod import;
 pub mod oci;
 #[cfg(feature = "sources")]
 pub mod publication;
+#[cfg(feature = "sources")]
+pub mod referenced;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -149,11 +151,35 @@ pub struct ComposeSourceProvenance {
     pub destination: String,
 }
 
+/// The referenced Composite identity a publisher records (#3697).
+///
+/// The composite descriptor is the Manifest's single layer and the physical
+/// dependency closure; its metadata EROFS is the primary device and `devices`
+/// are the ordered backing EROFS blobs. The Config/Manifest bytes are built by
+/// the crate so the Server adapter only publishes exact verified documents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferencedImageMetadata {
+    /// The composite descriptor JSON blob (Manifest layer).
+    pub descriptor: crate::oci::Descriptor,
+    /// The primary metadata EROFS device.
+    pub metadata: crate::oci::Descriptor,
+    /// Ordered backing EROFS devices.
+    pub devices: Vec<crate::oci::Descriptor>,
+    pub config: crate::oci::RawDocument,
+    pub manifest: crate::oci::RawDocument,
+    pub manifest_digest: String,
+    /// Total exact bytes of the complete published closure (descriptor,
+    /// metadata, devices, Config and Manifest).
+    pub size_bytes: u64,
+}
+
 /// The Compose projection a server publisher records beside the result digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposeImageMetadata {
     pub runtime: ComposeRuntime,
     pub sources: Vec<ComposeSourceProvenance>,
+    /// Present when the result is a referenced multi-blob Composite.
+    pub referenced: Option<ReferencedImageMetadata>,
 }
 
 // ── Stages and observation ──────────────────────────────────────────────

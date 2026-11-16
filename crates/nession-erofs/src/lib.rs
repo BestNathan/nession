@@ -89,7 +89,13 @@ pub use build::oci::{
 };
 #[cfg(feature = "sources")]
 pub use build::publication::{
-    host_platform, image_documents, image_documents_with_runtime, publish_layer, LayerPublication,
+    host_platform, image_documents, image_documents_with_runtime, publish_composite, publish_layer,
+    CompositePublication, CompositePublishOutcome, LayerPublication,
+};
+#[cfg(feature = "sources")]
+pub use build::referenced::{
+    referenced_mkfs_command, validate_metadata_image, ErofsReferencedComposer,
+    ReferencedBuildRequest, ReferencedImage, ReferencedSourceInput, REFERENCED_IMAGE_FILE,
 };
 #[cfg(feature = "build")]
 pub use build::{
@@ -97,7 +103,8 @@ pub use build::{
     snapshot_dir, verify_snapshot, BuildObserver, BuildRequest, BuildSource, BuiltImage,
     ComposeImageMetadata, ComposeRuntime, ComposeSnapshotSource, ComposeSourceProvenance,
     ErofsBuilder, MkfsRunner, NoopObserver, Packaging, ProcessControl, ProcessMkfsRunner,
-    ResumePoint, SnapshotCheckpoint, SnapshotSource, Stage, TreeManifest, TreeStats,
+    ReferencedImageMetadata, ResumePoint, SnapshotCheckpoint, SnapshotSource, Stage, TreeManifest,
+    TreeStats,
 };
 #[cfg(feature = "cache")]
 pub use cache::{CachedImage, DownloadGrant, ErofsCache, PinGuard};

@@ -45,7 +45,11 @@ alias?: string | null,
  * Every mutable tag currently resolving to this digest, sorted.
  */
 aliases: Array<string>, created_at: number, updated_at: number, };
-export type ImageSource = { "kind": "github", repository_url: string, ref: string, } | { "kind": "local_directory", path: string, } | { "kind": "compose", sources: Array<ImageComposeSource>, };
+export type ImageSource = { "kind": "github", repository_url: string, ref: string, } | { "kind": "local_directory", path: string, } | { "kind": "compose", sources: Array<ImageComposeSource>, 
+/**
+ * How the result is represented; defaults to a flattened image.
+ */
+representation: ImageComposeRepresentation, };
 export type ImageComposeSource = { 
 /**
  * The catalog Repository that owns the source Image.
@@ -60,6 +64,7 @@ ref: string,
  * source at `/`; otherwise the source tree appears below this prefix.
  */
 destination: string, };
+export type ImageComposeRepresentation = "flattened" | "referenced";
 export type ImagePackaging = { compression: string, block_size: number, fixed_timestamp: number, fixed_uuid: string, };
 export type ImageStatus = "building" | "ready" | "failed";
 

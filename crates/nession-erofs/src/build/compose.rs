@@ -231,7 +231,12 @@ impl ErofsComposer {
             )
         })?;
         let provenance = compose_provenance(request.sources)?;
-        let runtime = compose_runtime(request.sources)?;
+        let mut runtime = compose_runtime(request.sources)?;
+        runtime.annotations = compose_annotations(
+            runtime.annotations,
+            &provenance,
+            COMPOSE_FORMAT_FLATTENED_V1,
+        )?;
         let expected = SnapshotSource::Compose {
             sources: provenance
                 .iter()
@@ -274,6 +279,7 @@ impl ErofsComposer {
                 compose: Some(ComposeImageMetadata {
                     runtime,
                     sources: provenance,
+                    referenced: None,
                 }),
             },
             tree,
@@ -404,44 +410,51 @@ pub fn compose_mkfs_command(image: &Path, root: &Path, packaging: &Packaging) ->
     args
 }
 
-fn verify_source_file(source: &ComposeSourceInput) -> Result<()> {
-    if source.layer.media_type != MEDIA_TYPE_EROFS {
+pub(crate) fn verify_source_file(source: &ComposeSourceInput) -> Result<()> {
+    verify_layer_file(&source.path, &source.layer)
+}
+
+/// Verify one local EROFS file against a pinned descriptor.
+pub(crate) fn verify_layer_file(path: &Path, layer: &Descriptor) -> Result<()> {
+    if layer.media_type != MEDIA_TYPE_EROFS {
         anyhow::bail!(
             "source layer media type {:?} is not {MEDIA_TYPE_EROFS}",
-            source.layer.media_type
+            layer.media_type
         );
     }
-    let metadata = fs::symlink_metadata(&source.path)
-        .with_context(|| format!("source image {} is unreadable", source.path.display()))?;
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("source image {} is unreadable", path.display()))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         anyhow::bail!(
             "source image {} must be a regular file, not a symlink",
-            source.path.display()
+            path.display()
         );
     }
-    if metadata.len() != source.layer.size {
+    if metadata.len() != layer.size {
         anyhow::bail!(
             "source image {} is {} bytes, its pinned descriptor claims {}",
-            source.path.display(),
+            path.display(),
             metadata.len(),
-            source.layer.size
+            layer.size
         );
     }
-    let actual = file_digest(&source.path)
-        .with_context(|| format!("source image {} cannot be verified", source.path.display()))?;
-    if actual != source.layer.digest {
+    let actual = file_digest(path)
+        .with_context(|| format!("source image {} cannot be verified", path.display()))?;
+    if actual != layer.digest {
         anyhow::bail!(
             "source image {} hashes to {actual}, its pinned descriptor claims {}",
-            source.path.display(),
-            source.layer.digest
+            path.display(),
+            layer.digest
         );
     }
-    validate_erofs_file(&source.path).context("source image is not a raw EROFS image")?;
+    validate_erofs_file(path).context("source image is not a raw EROFS image")?;
     Ok(())
 }
 
 /// The canonical, deterministically ordered provenance of a Compose build.
-fn compose_provenance(sources: &[ComposeSourceInput]) -> Result<Vec<ComposeSourceProvenance>> {
+pub(crate) fn compose_provenance(
+    sources: &[ComposeSourceInput],
+) -> Result<Vec<ComposeSourceProvenance>> {
     let mut provenance = sources
         .iter()
         .map(|source| ComposeSourceProvenance {
@@ -491,7 +504,7 @@ fn compose_provenance(sources: &[ComposeSourceInput]) -> Result<Vec<ComposeSourc
 }
 
 /// Merge source Configs with a fail-closed deterministic rule.
-fn compose_runtime(sources: &[ComposeSourceInput]) -> Result<ComposeRuntime> {
+pub(crate) fn compose_runtime(sources: &[ComposeSourceInput]) -> Result<ComposeRuntime> {
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     let mut entrypoint: Option<Vec<String>> = None;
     let mut cmd: Option<Vec<String>> = None;
@@ -555,7 +568,7 @@ fn compose_runtime(sources: &[ComposeSourceInput]) -> Result<ComposeRuntime> {
             &format!("compose sources disagree on WorkingDir for {label}"),
         )?;
 
-        let annotations = compose_annotations(&source.config)?;
+        let annotations = source_annotations(&source.config)?;
         merge_optional(
             &mut kind,
             annotations.get(ANNOTATION_KIND).cloned(),
@@ -573,7 +586,6 @@ fn compose_runtime(sources: &[ComposeSourceInput]) -> Result<ComposeRuntime> {
         )?;
     }
 
-    let provenance = compose_provenance(sources)?;
     let mut annotations = BTreeMap::new();
     if let Some(kind) = kind {
         annotations.insert(ANNOTATION_KIND.to_string(), kind);
@@ -584,14 +596,6 @@ fn compose_runtime(sources: &[ComposeSourceInput]) -> Result<ComposeRuntime> {
     if let Some(path_prepend) = path_prepend {
         annotations.insert(ANNOTATION_PATH_PREPEND.to_string(), path_prepend);
     }
-    annotations.insert(
-        ANNOTATION_COMPOSE_FORMAT.to_string(),
-        COMPOSE_FORMAT_FLATTENED_V1.to_string(),
-    );
-    annotations.insert(
-        ANNOTATION_COMPOSE_SOURCES.to_string(),
-        serde_json::to_string(&provenance).context("compose provenance could not be encoded")?,
-    );
     Ok(ComposeRuntime {
         env: env
             .into_iter()
@@ -602,6 +606,21 @@ fn compose_runtime(sources: &[ComposeSourceInput]) -> Result<ComposeRuntime> {
         working_dir,
         annotations,
     })
+}
+
+/// Attach the Compose format and pinned source provenance to advisory
+/// annotations.
+pub(crate) fn compose_annotations(
+    mut annotations: BTreeMap<String, String>,
+    provenance: &[ComposeSourceProvenance],
+    format: &str,
+) -> Result<BTreeMap<String, String>> {
+    annotations.insert(ANNOTATION_COMPOSE_FORMAT.to_string(), format.to_string());
+    annotations.insert(
+        ANNOTATION_COMPOSE_SOURCES.to_string(),
+        serde_json::to_string(provenance).context("compose provenance could not be encoded")?,
+    );
+    Ok(annotations)
 }
 
 fn merge_optional<T: PartialEq>(
@@ -627,7 +646,7 @@ fn merge_optional<T: PartialEq>(
 /// Config's `extra` under the reserved `io.nession.source.annotations` key? No:
 /// the caller supplies them separately. Here we read the advisory projection
 /// the Server copies into `Config.extra` so the crate stays wire-free.
-fn compose_annotations(config: &ImageConfig) -> Result<BTreeMap<String, String>> {
+fn source_annotations(config: &ImageConfig) -> Result<BTreeMap<String, String>> {
     let Some(value) = config.extra.get(SOURCE_ANNOTATIONS_KEY) else {
         return Ok(BTreeMap::new());
     };
@@ -735,19 +754,23 @@ fn merge_tree(
     )
 }
 
-fn entry_is_whiteout(path: &Path) -> bool {
+pub(crate) fn entry_is_whiteout(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with(".wh."))
 }
 
-fn display_relative(path: &Path, root: &Path) -> String {
+pub(crate) fn display_relative(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .map(|relative| format!("/{}", relative.display()))
         .unwrap_or_else(|_| path.display().to_string())
 }
 
-fn validate_symlink_target(target: &Path, link: &Path, composed_root: &Path) -> Result<()> {
+pub(crate) fn validate_symlink_target(
+    target: &Path,
+    link: &Path,
+    composed_root: &Path,
+) -> Result<()> {
     if target.as_os_str().is_empty() {
         anyhow::bail!("compose source contains an empty symlink target");
     }

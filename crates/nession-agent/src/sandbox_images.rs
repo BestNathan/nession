@@ -25,6 +25,20 @@ use uuid::Uuid;
 use crate::erofs_cache::{
     resolve_grant_image, ErofsCache, ResolvedGrantImage, ResolvedManifestBinding,
 };
+
+/// Referenced Composite Images are a distribution/mount format, not a
+/// Sandbox runtime composition input. #3697 explicitly does not make them a
+/// prerequisite for Sandbox multi-lower/root composition, so selecting one
+/// here fails closed instead of mounting the metadata image as a plain root.
+fn reject_referenced_composite(resolved: &ResolvedGrantImage) -> Result<()> {
+    if resolved.composite.is_some() {
+        anyhow::bail!(
+            "referenced Composite image {} is not yet selectable by the Sandbox composition;              the EROFS mount manager owns its verified composite lease (#3697)",
+            resolved.layer_digest
+        );
+    }
+    Ok(())
+}
 use crate::managed_session::blob_origin;
 use crate::workspace_manager::WorkspaceLease;
 
@@ -266,6 +280,11 @@ pub async fn prepare(
     let workspace_ref = match workspace {
         Some(grant) => match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
             Ok(resolved) => {
+                if let Err(error) = reject_referenced_composite(&resolved) {
+                    guard.disarm();
+                    remove_owned_workspace(&guard.root, &guard.path);
+                    return Err(error);
+                }
                 let ((role, digest, path), binding) = record(ManagedImageRole::Workspace, resolved);
                 manifests.extend(binding);
                 images.push((role, digest.clone(), path.clone()));
@@ -292,6 +311,11 @@ pub async fn prepare(
                 return Err(error);
             }
         };
+        if let Err(error) = reject_referenced_composite(&resolved) {
+            guard.disarm();
+            remove_owned_workspace(&guard.root, &guard.path);
+            return Err(error);
+        }
         let target = match toolchain_target(grant.target.as_deref(), &resolved) {
             Ok(target) => target,
             Err(error) => {

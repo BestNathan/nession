@@ -8,7 +8,8 @@
 
 pub use nession_erofs::cache::eviction::{evict_all_unpinned, evict_unpinned, EvictionReport};
 pub use nession_erofs::cache::fetch::{
-    fetch_manifest_image, FetchedImage, ImageObjectGrant, MAX_METADATA_BYTES,
+    fetch_composite_image, fetch_manifest_image, FetchedComposite, FetchedImage, ImageObjectGrant,
+    MAX_METADATA_BYTES,
 };
 pub use nession_erofs::cache::{
     identity_root, CacheDiagnostics, CacheObservation, CachePhase, CacheProgress, CachedImage,
@@ -87,6 +88,16 @@ pub struct ResolvedManifestBinding {
     pub layer_digest: String,
 }
 
+/// One resolved referenced Composite closure (#3697).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedCompositeGrant {
+    pub descriptor_digest: String,
+    pub metadata_digest: String,
+    pub device_digests: Vec<String>,
+    pub metadata_path: PathBuf,
+    pub device_paths: Vec<PathBuf>,
+}
+
 /// One grant resolved to the physical EROFS identity the mount layer uses.
 ///
 /// A Manifest-aware grant carries the immutable Manifest digest and the
@@ -101,6 +112,8 @@ pub struct ResolvedGrantImage {
     /// Typed read-only Config/annotation suggestions. Present only for a
     /// Manifest-aware grant whose Config bytes were verified.
     pub usage: Option<nession_erofs::oci::usage::ImageRuntimeUsage>,
+    /// Present when the Manifest is a referenced multi-blob Composite.
+    pub composite: Option<ResolvedCompositeGrant>,
 }
 
 /// Fetch one Server grant into this Agent's verified cache (#3499).
@@ -137,6 +150,7 @@ pub async fn resolve_grant_image(
             layer_digest: grant.digest.clone(),
             layer_path: cached.path,
             usage: None,
+            composite: None,
         });
     }
 
@@ -182,6 +196,42 @@ pub async fn resolve_grant_image(
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    if objects
+        .iter()
+        .any(|object| object.media_type == nession_erofs::oci::MEDIA_TYPE_COMPOSITE)
+    {
+        let fetched = fetch_composite_image(
+            cache,
+            &objects,
+            origin,
+            server_auth_token,
+            IMAGE_BLOB_PATH_PREFIX,
+        )
+        .await
+        .with_context(|| format!("cannot prepare Composite image {}", grant.digest))?;
+        let usage = nession_erofs::oci::usage::ImageRuntimeUsage::from_manifest_and_config(
+            &fetched.manifest,
+            &fetched.config,
+        )
+        .with_context(|| format!("cannot read the runtime usage of Manifest {}", grant.digest))?;
+        return Ok(ResolvedGrantImage {
+            manifest_digest: Some(fetched.manifest_digest.clone()),
+            layer_digest: fetched.metadata.digest.clone(),
+            layer_path: fetched.metadata_path.clone(),
+            usage: Some(usage),
+            composite: Some(ResolvedCompositeGrant {
+                descriptor_digest: fetched.composite_digest,
+                metadata_digest: fetched.metadata.digest.clone(),
+                device_digests: fetched
+                    .devices
+                    .iter()
+                    .map(|device| device.digest.clone())
+                    .collect(),
+                metadata_path: fetched.metadata_path,
+                device_paths: fetched.device_paths,
+            }),
+        });
+    }
     let fetched = fetch_manifest_image(
         cache,
         &objects,
@@ -201,6 +251,7 @@ pub async fn resolve_grant_image(
         layer_digest: fetched.layer.digest.clone(),
         layer_path: fetched.layer_path,
         usage: Some(usage),
+        composite: None,
     })
 }
 
