@@ -123,7 +123,7 @@ function contractSection(selected,direction){
   add(section,summary,scroll);return section;
 }
 function reader(data,group,selected){
-  const article=el('article','documents-reader knowledge-reader');
+  const article=el('article','documents-reader');
   add(article,local('← All protocols','#/documents/protocol','documents-back'),
     el('div','eyebrow',group.owner+' / PROTOCOL UNIT'),
     el('h2','',group.id));
