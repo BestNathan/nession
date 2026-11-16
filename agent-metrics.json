@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "agent_metrics_aggregate",
-  "generated_at": "2026-11-16T18:20:19.103Z",
+  "generated_at": "2026-11-16T18:43:01.783Z",
   "windows": {
     "7d": {
       "runs": {
