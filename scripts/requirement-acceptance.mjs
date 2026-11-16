@@ -848,7 +848,7 @@ function runSelfTest() {
         'Implements #3653',
         'Addresses #3624 — SC-04 verified on merged staging; ' +
           'SC-01..03 remain owned by PR #3627 after publisher #3632.',
-      ].join('\\n'),
+      ].join('\n'),
       'BestNathan', 'nession',
       'feat(pages): skip source-verified unchanged exporter',
     ),
