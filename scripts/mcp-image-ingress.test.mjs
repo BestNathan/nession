@@ -216,9 +216,44 @@ async function exercise(port, tls) {
   const tools = decoded(legacy).result.tools;
   assert.ok(tools.some((x) => x.name === 'nession_server_list_agents'), 'no Server Tool behind nginx');
 
-  const modern = await request(port, 'POST', rpc('tools/call', {
+  // Modern stateless MCP uses the protocol's envelope metadata AND the
+  // method/name HTTP headers. This must match the official in-repository
+  // protocol fixtures; the legacy session headers alone are not sufficient.
+  const modernVersion = '2026-07-28';
+  const modernMeta = {
+    'io.modelcontextprotocol/protocolVersion': modernVersion,
+    'io.modelcontextprotocol/clientInfo': { name: 'nginx-case', version: '1' },
+    'io.modelcontextprotocol/clientCapabilities': {},
+  };
+  const discovery = await request(port, 'POST', rpc('server/discover', {
+    _meta: modernMeta,
+  }), { ...opts, 'MCP-Protocol-Version': modernVersion,
+    'Mcp-Method': 'server/discover' }, tls);
+  assert.equal(discovery.status, 200,
+    'modern discovery: ' + discovery.text.slice(0, 500));
+  const supported = decoded(discovery).result.supportedVersions;
+  assert.ok(supported.includes(modernVersion) && supported.includes('2025-03-26'),
+    'modern discovery lost either advertised protocol version');
+
+  const modernHeaders = {
+    ...opts,
+    'MCP-Protocol-Version': modernVersion,
+    'Mcp-Method': 'tools/call',
+    'Mcp-Name': 'nession_server_list_agents',
+  };
+  // Negative fixture: a malformed modern request is rejected *through*
+  // nginx, not silently reinterpreted as a legacy request or static HTML.
+  const missingMeta = await request(port, 'POST', rpc('tools/call', {
     name: 'nession_server_list_agents', arguments: {},
-  }), { ...opts, 'MCP-Protocol-Version': '2026-07-28' }, tls);
+  }), modernHeaders, tls);
+  assert.equal(missingMeta.status, 400,
+    'modern missing metadata must fail closed through nginx');
+  assert.ok(!/<!doctype html/i.test(missingMeta.text),
+    'malformed MCP request unexpectedly served Web SPA');
+
+  const modern = await request(port, 'POST', rpc('tools/call', {
+    name: 'nession_server_list_agents', arguments: {}, _meta: modernMeta,
+  }), modernHeaders, tls);
   assert.equal(modern.status, 200, 'modern Tool read: ' + modern.text.slice(0, 500));
   const result = decoded(modern).result;
   assert.notEqual(result?.isError, true, 'modern read failed');
