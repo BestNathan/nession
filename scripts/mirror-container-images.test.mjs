@@ -48,6 +48,10 @@ function fixture(mode='fast'){
     fs.appendFileSync(process.env.MIRROR_TEST_EVENTS,'regctl '+a.join(' ')+'\\n');
     if(a[0]==='registry'&&a[1]==='set')process.exit(0);
     if(a[0]==='image'&&a[1]==='copy'){
+      if(process.env.MIRROR_TEST_MODE==='copy-auth'){
+        console.error('unauthorized: token=https://auth.example/SECRET-TOKEN');
+        process.exit(1);
+      }
       if(process.env.MIRROR_TEST_MODE==='copy-fail')process.exit(124);
       process.exit(0);
     }
@@ -111,6 +115,25 @@ test('three failed chunk uploads block index and GitOps publication',()=>{
   assert.doesNotMatch(run.stdout,/Verified both linux/);
   assert.equal((log.match(/90s docker buildx imagetools create/g)||[]).length,1);
   assert.equal((log.match(/360s regctl image copy/g)||[]).length,3);
+  assert.doesNotMatch(log,/regctl index create/);
+});
+
+test('stalled chunk uploads are observable, shrink chunks and fail closed',()=>{
+  const {run,log}=fixture('copy-fail');
+  assert.equal(run.status,1,run.stderr);
+  assert.match(log,/regctl registry set crpi.example.cn --blob-max 1048576 --blob-chunk 4194304/);
+  assert.match(log,/regctl registry set crpi.example.cn --blob-max 1048576 --blob-chunk 1048576/);
+  assert.match(log,/regctl registry set crpi.example.cn --blob-max 1048576 --blob-chunk 524288/);
+  assert.match(run.stderr,/ACR_MIRROR_ATTEMPT tag=agent-0123456 arch=amd64 method=regctl attempt=3/);
+  assert.match(run.stderr,/outcome=transfer_deadline/);
+  assert.doesNotMatch(log,/regctl index create/);
+});
+test('a real auth rejection does not retry or emit registry token URLs',()=>{
+  const {run,log}=fixture('copy-auth');
+  assert.equal(run.status,1);
+  assert.equal((log.match(/360s regctl image copy/g)||[]).length,1);
+  assert.match(run.stderr,/outcome=credential_or_permission_rejected/);
+  assert.doesNotMatch(run.stdout+run.stderr,/SECRET-TOKEN/);
   assert.doesNotMatch(log,/regctl index create/);
 });
 test('post-copy manifest mismatch still fails closed',()=>{
