@@ -35,15 +35,69 @@ if ! command -v timeout >/dev/null 2>&1; then
   exit 2
 fi
 
-# Three bounded uploads plus checks remain well below the workflow's 45-minute
-# job deadline. An incomplete/expired upload never becomes a release receipt.
+# Preserve the fast Buildx path for small/cached images, but do not spend
+# 3 x 420 seconds repeating the *same* large Blob upload failure (#3674).
+# regctl's chunked registry protocol handles large layers independently.
 bounded_inspect() {
   timeout --signal=TERM --kill-after=15s 90s docker buildx imagetools inspect --raw "$1"
 }
 bounded_create() {
   local destination="$1" amd64="$2" arm64="$3"
-  timeout --signal=TERM --kill-after=15s 420s docker buildx imagetools create \
+  timeout --signal=TERM --kill-after=15s 90s docker buildx imagetools create \
     --tag "$destination" "$amd64" "$arm64"
+}
+bounded_copy() {
+  local source="$1" destination="$2"
+  timeout --signal=TERM --kill-after=15s 360s regctl image copy "$source" "$destination"
+}
+bounded_index() {
+  local destination="$1" amd64="$2" arm64="$3"
+  timeout --signal=TERM --kill-after=15s 90s regctl index create "$destination" \
+    --ref "$amd64" --ref "$arm64"
+}
+chunked_copy() {
+  local tag="$1" amd64="$2" arm64="$3"
+  if ! command -v regctl >/dev/null 2>&1; then
+    echo "ERROR: pinned regctl is required for chunked ACR copy" >&2
+    return 2
+  fi
+
+  # The same target ACR hostname, the Docker login already established; never
+  # transmit credentials to an unrelated registry or mirror.
+  # Force even moderately sized changed layers down the resumable path;
+  # the failed UI blob need not be 64MiB to suffer a monolithic timeout.
+  regctl registry set "${destination_image%%/*}" \
+    --blob-max 1048576 --blob-chunk 4194304
+
+  local arch digest source_ref dest_ref copied
+  for arch in amd64 arm64; do
+    if [[ "$arch" == amd64 ]]; then digest="$amd64"; else digest="$arm64"; fi
+    # @ source manifest is pinned by its platform digest, not an index tag.
+    source_ref="${source_image}@$digest"
+    dest_ref="${destination_image}:${tag}-$arch"
+    copied=false
+    for attempt in 1 2 3; do
+      if bounded_copy "$source_ref" "$dest_ref"; then
+        copied=true
+        break
+      fi
+      if (( attempt < 3 )); then
+        echo "::warning::chunked ACR copy failed for ${tag}/$arch attempt $attempt/3; retrying" >&2
+        sleep "$((attempt * 15))"
+      fi
+    done
+    if [[ "$copied" != true ]]; then
+      echo "ERROR: chunked ACR copy failed for ${tag}/$arch after 3 attempts" >&2
+      return 1
+    fi
+  done
+
+  # These per-architecture tags retain already-completed Blobs across reruns.
+  # The published index contains only linux/amd64 and linux/arm64, no GHCR
+  # SBOM/provenance unknown-platform images rejected by ACR Personal Edition.
+  bounded_index "${destination_image}:${tag}" \
+    "${destination_image}:${tag}-amd64" \
+    "${destination_image}:${tag}-arm64"
 }
 
 platform_digests() {
@@ -76,21 +130,15 @@ for tag in "${tags[@]}"; do
   arm64_digest="$(jq -r '.[] | select(.arch == "arm64") | .digest' <<< "${source_platforms}")"
 
   echo "Mirroring two platform manifests: ${source_ref} -> ${destination_ref}"
-  copied=false
-  for attempt in 1 2 3; do
-    if bounded_create "${destination_ref}" \
+  # Fast path: no excessive wait when ACR already holds the shared blobs.
+  # A failed/slow Buildx transfer triggers per-architecture chunked transport
+  # rather than repeating the same problematic opaque upload three times.
+  if bounded_create "${destination_ref}" \
       "${source_image}@${amd64_digest}" "${source_image}@${arm64_digest}"; then
-      copied=true
-      break
-    fi
-    if (( attempt < 3 )); then
-      echo "::warning::ACR mirror ${tag} attempt ${attempt}/3 failed or exceeded 420s; retrying within bounded job budget"
-      sleep "$((attempt * 15))"
-    fi
-  done
-  if [[ "${copied}" != true ]]; then
-    echo "ERROR: ACR mirror failed for ${tag} after 3 attempts" >&2
-    exit 1
+    echo "Buildx fast-path ACR copy completed: ${tag}"
+  else
+    echo "::warning::Buildx ACR copy for ${tag} failed or exceeded 90s; using chunked regctl fallback"
+    chunked_copy "${tag}" "${amd64_digest}" "${arm64_digest}"
   fi
 
   # The destination must preserve exactly the selected platform manifest
