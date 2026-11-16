@@ -8,7 +8,6 @@
 import { expect, test } from '@playwright/test';
 import { verifiedRuntime } from '../../../shared/foreground-resume-browser.cjs';
 import {
-  leaveSearch,
   openAppFiles,
   openSearch,
   searchInput,
@@ -51,10 +50,10 @@ test('SC-03: App Search states and Viewer selection stay usable', async ({ page 
   await early.click();
   await expect(page.locator('.cm-content')).toContainText('fixture early needle');
 
-  // Back to Search, then a complete scan keeps the plain empty message.
+  // Choosing a result leaves Search and opens the viewer; Back returns to the
+  // Files directory the selection came from.
   await page.getByTestId('app-page-back').click();
-  await expect(page.getByTestId('files-app-search')).toBeVisible();
-  await leaveSearch(page);
+  await expect(page.getByTestId('files-app-layout')).toBeVisible();
   await seedSearchForest(page, { filesBeforeMatch: 0 });
   await openSearch(page);
   await searchInput(page).fill('zzz-no-such-file');
