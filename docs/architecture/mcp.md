@@ -212,6 +212,10 @@ Axum; the MCP endpoint keeps its own path check, Bearer authentication, Origin
 and Host policy. The standalone `nession-mcp` binary owns its own listener and
 still drives the shared service through hyper.
 
+### Abandoned MCP mutation requests
+
+The MCP service bounds request execution, but a timeout is **not** proof that a remote Session mutation was rolled back. Agent- and Server-embedded Session create/kill share their owner's keyed mutation lane. The request/worker pair uses a one-way admission guard: dropping an MCP request while its operation is queued atomically marks it abandoned, so the queued work skips the side effect when it reaches its turn. Once the worker has claimed execution, a later MCP timeout cannot retract the already-started business operation. The caller receives a timeout with explicit readback-before-retry guidance; it must inspect current Agent Session state rather than assume a failed write or automatically repeat it. The guard does not add a Session state owner, retry daemon or new Tool. Remote backend timeouts are likewise not evidence of rollback.
+
 ## Hosting modes
 
 ### Standalone

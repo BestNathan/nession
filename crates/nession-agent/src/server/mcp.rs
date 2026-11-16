@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use nession_mcp::backend::{ClusterBackend, NodeBackend, UnavailableClusterBackend};
 use nession_mcp::error::ToolError;
+use nession_mcp::pending_mutation::PendingMutation;
 use nession_mcp::{McpService, ServiceConfig};
 use nession_protocol::contracts::session::v1::{
     SessionCreateResponse, SessionKillResponse, SessionListResponse,
@@ -142,6 +143,7 @@ impl AgentNodeBackend {
         F: std::future::Future<Output = Result<T, ToolError>> + Send + 'static,
     {
         let (reply, result) = tokio::sync::oneshot::channel();
+        let (request, admission) = PendingMutation::new();
         let mut lanes = ExecutionLanes::shared(
             DEFAULT_QUERY_CONCURRENCY,
             Arc::clone(&self.mutations),
@@ -152,13 +154,20 @@ impl AgentNodeBackend {
             .key(
                 ResourceKey::Session(session_name.to_string()),
                 Box::pin(async move {
-                    let _ = reply.send(work.await);
+                    // An expired MCP request must not start its queued mutation.
+                    // Once admitted to execution, let the owner finish it; the
+                    // caller may receive an indeterminate timeout instead.
+                    if admission.try_begin() {
+                        let _ = reply.send(work.await);
+                    }
                 }),
             )
             .await;
-        result
+        let outcome = result
             .await
-            .map_err(|_| ToolError::backend("the Agent's mutation lane ended before answering"))?
+            .map_err(|_| ToolError::backend("the Agent's mutation lane ended before answering"))?;
+        drop(request);
+        outcome
     }
 }
 
@@ -245,5 +254,76 @@ impl NodeBackend for AgentNodeBackend {
             })
             .await?;
         serde_json::to_value(response).map_err(|error| ToolError::backend(error.to_string()))
+    }
+}
+
+// A real shared-key queue must not run abandoned MCP work after the earlier
+// owner operation releases the key. This uses explicit barriers, not sleeps.
+#[cfg(test)]
+mod mcp_cancellation_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn abandoned_queued_mutation_never_starts_after_lane_release() {
+        let mut lane = KeyedLane::<ResourceKey>::new(16, "mcp test ");
+        let key = ResourceKey::Session("held-session".to_string());
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        lane.enqueue(
+            key.clone(),
+            Box::pin(async move {
+                let _ = started_sender.send(());
+                let _ = release_receiver.await;
+            }),
+        )
+        .await;
+        started_receiver
+            .await
+            .expect("the first mutation claimed this key");
+
+        let (request, admission) = PendingMutation::new();
+        let executed = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&executed);
+        lane.enqueue(
+            key,
+            Box::pin(async move {
+                if admission.try_begin() {
+                    observed.store(true, Ordering::SeqCst);
+                }
+            }),
+        )
+        .await;
+        drop(request); // exactly what an outer MCP timeout does to run_keyed
+        release_sender.send(()).expect("release blocker");
+        lane.drain().await;
+        assert!(!executed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn started_mutation_finishes_even_after_caller_abandons_reply() {
+        let mut lane = KeyedLane::<ResourceKey>::new(16, "mcp test ");
+        let key = ResourceKey::Session("running-session".to_string());
+        let (request, admission) = PendingMutation::new();
+        let executed = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&executed);
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        lane.enqueue(
+            key,
+            Box::pin(async move {
+                if admission.try_begin() {
+                    let _ = started_sender.send(());
+                    let _ = release_receiver.await;
+                    observed.store(true, Ordering::SeqCst);
+                }
+            }),
+        )
+        .await;
+        started_receiver.await.expect("worker entered its mutation");
+        drop(request); // the owner must finish a mutation already admitted
+        release_sender.send(()).expect("release running work");
+        lane.drain().await;
+        assert!(executed.load(Ordering::SeqCst));
     }
 }

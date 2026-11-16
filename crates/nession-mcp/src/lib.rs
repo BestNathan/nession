@@ -44,6 +44,7 @@
 pub mod backend;
 pub mod error;
 pub mod http;
+pub mod pending_mutation;
 pub mod protocol;
 pub mod registry;
 pub mod service;
