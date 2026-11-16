@@ -351,6 +351,16 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y tmux bubblewrap
+          # #3711: only the trusted main-owned selector can authorize native
+          # EROFS prerequisites for #3696/SC-03. No target Case installs
+          # packages or gets sudo/GitHub credentials. Missing tools fail closed.
+          node trusted/scripts/acceptance-erofs-case-prereqs.mjs self-test
+          if [[ "$(node trusted/scripts/acceptance-erofs-case-prereqs.mjs selected "$RUNNER_TEMP/selected-cases.json")" == 'true' ]]; then
+            sudo apt-get install -y erofs-utils erofsfuse fuse3
+            for tool in mkfs.erofs fsck.erofs erofsfuse; do
+              command -v "$tool" || { echo "::error::required native EROFS tool missing: $tool"; exit 1; }
+            done
+          fi
           # Native Sandbox Cases need unprivileged user namespaces and a
           # writable delegated cgroup v2 subtree. This is an ephemeral hosted
           # runner used only for this target-SHA Case batch; target Case code
