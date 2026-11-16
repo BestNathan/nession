@@ -19,7 +19,7 @@ export function currentNavRoute(pathname,hash){
   if(raw.startsWith('/agents/')||raw.startsWith('/agents?'))return '/agents';
   if(raw.startsWith('/work/'))return '/work';
   if(raw==='/knowledge'||raw.startsWith('/knowledge?'))return '/knowledge';
-  if(raw==='/documents'||raw.startsWith('/documents?'))return '/documents';
+  if(raw==='/documents'||raw.startsWith('/documents?')||raw.startsWith('/documents/'))return '/documents';
   return raw;
 }
 
