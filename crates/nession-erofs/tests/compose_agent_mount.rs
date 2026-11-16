@@ -31,10 +31,9 @@ use serde_json::Map;
 const ROUTE_PREFIX: &str = "/images/blobs/";
 const TOKEN: &str = "server-token";
 
-fn mode(path: &Path, value: u32) {
+fn mode(path: &Path, value: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(value))
-        .expect("set fixture mode");
 }
 
 fn config() -> ImageConfig {
@@ -63,10 +62,10 @@ fn config() -> ImageConfig {
     }
 }
 
-fn source(image: &Path, destination: &str) -> ComposeSourceInput {
-    let digest = nession_erofs::file_digest(image).expect("fixture digest");
-    let size = std::fs::metadata(image).expect("fixture metadata").len();
-    ComposeSourceInput {
+fn source(image: &Path, destination: &str) -> anyhow::Result<ComposeSourceInput> {
+    let digest = nession_erofs::file_digest(image)?;
+    let size = std::fs::metadata(image)?.len();
+    Ok(ComposeSourceInput {
         path: image.to_path_buf(),
         layer: Descriptor {
             media_type: MEDIA_TYPE_EROFS.to_string(),
@@ -90,7 +89,7 @@ fn source(image: &Path, destination: &str) -> ComposeSourceInput {
             ..Platform::default()
         },
         config: config(),
-    }
+    })
 }
 
 #[tokio::test]
@@ -103,8 +102,8 @@ async fn a_compose_result_transfers_to_the_agent_cache_and_mounts_without_source
     std::fs::create_dir_all(tool_dir.join("bin")).unwrap();
     std::fs::write(base_dir.join("usr/bin/sh"), b"#!/bin/sh\n").unwrap();
     std::fs::write(tool_dir.join("bin/tool"), b"tool-binary\n").unwrap();
-    mode(&base_dir.join("usr/bin/sh"), 0o755);
-    mode(&tool_dir.join("bin/tool"), 0o755);
+    mode(&base_dir.join("usr/bin/sh"), 0o755).unwrap();
+    mode(&tool_dir.join("bin/tool"), 0o755).unwrap();
 
     let packaging = Packaging::default();
     let mkfs = Arc::new(ProcessMkfsRunner::default());
@@ -119,7 +118,7 @@ async fn a_compose_result_transfers_to_the_agent_cache_and_mounts_without_source
             &ProcessControl::new(),
         )
         .unwrap();
-        sources.push(source(&image, destination));
+        sources.push(source(&image, destination).unwrap());
     }
 
     let source_paths = sources
