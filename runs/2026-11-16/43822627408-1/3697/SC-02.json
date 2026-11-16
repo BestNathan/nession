@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a0de4bb11764a7b33361ff495a0087b1abbb2cb9298acfe5ff855d4b525fb7ff",
+  "run_id": 43822627408,
+  "run_attempt": 1,
+  "issue": 3697,
+  "criterion": "SC-02",
+  "criterion_text": "Catalog GC/transfer/Agent cache retain and verify every referenced Blob under concurrent Tag changes, partial downloads and active read-only mount leases; unreachable dependencies are eventually reclaimable.",
+  "stage": "staging",
+  "target_sha": "67c3533e9fd51e66bb325d8c1f3434b24a0c3abd",
+  "contract_sha256": "824a5bcef399c66d979e631da1900babb46136e02e568ade30249b6302c2dbda",
+  "case_revision": "67c3533e9fd51e66bb325d8c1f3434b24a0c3abd",
+  "case_tree_sha": "a5ea42e505bf35e45b159ef367d4538ab40b957e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T07:19:32.480Z",
+  "finished_at": "2026-11-16T07:19:52.825Z",
+  "duration_ms": 20345,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "catalog GC, Agent transfer/cache and the composite mount lease retain and verify every referenced device blob",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 67c3533e9fd51e66bb325d8c1f3434b24a0c3abd: a tagged Composite Manifest retained its config, descriptor, metadata and every device through descriptor edges; moving the Tag made the closure reclaimable after the bounded mark/grace sweep; the Agent grant fetched exactly the closure and refused a missing device; two consumers shared one physical view while the descriptor, metadata and both devices were pinned until the last release"
+        }
+      ],
+      "duration_ms": 14451,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43822627408,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "67c3533e9fd51e66bb325d8c1f3434b24a0c3abd",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43822627408",
+    "record_path": "runs/2026-11-16/43822627408-1/3697/SC-02.json",
+    "source_result_sha256": "6dd9fe21759b37d89ccab4a6773247747757b1f58a49ab3b2a9d6eaa65474677"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43822627408-1",
+    "sha256": "6dd9fe21759b37d89ccab4a6773247747757b1f58a49ab3b2a9d6eaa65474677",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43822627408",
+    "durability": "time-limited; object archival not configured"
+  }
+}
