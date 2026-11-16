@@ -8,6 +8,7 @@ pub mod messages;
 pub(crate) mod payload;
 pub mod plugin;
 pub mod protocol;
+pub mod records;
 pub mod scanner;
 pub mod security;
 pub mod server;
