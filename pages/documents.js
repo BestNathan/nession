@@ -141,7 +141,11 @@ function reader(data,group,selected){
   }
   const note=el('p','documents-note',
     'Contract v1/v2 selects the protocol definition. Since Nession refers to the release version that first supports each field, where verified. Missing historical evidence is Unknown.');
-  add(article,versionBar,note,
+  const observed=data.releases.filter(r=>r.status==='available').length;
+  const releaseNote=el('p','documents-release-note',observed
+    ?observed+' verified release snapshots inform Since Nession values; unavailable history remains Unknown.'
+    :'Historical release snapshots are unavailable; Since Nession remains Unknown until verified.');
+  add(article,releaseNote,versionBar,note,
     contractSection(selected,'request'),
     contractSection(selected,'response'));
   const raw=el('details','documents-raw');
@@ -274,15 +278,7 @@ export function renderDocuments(root,data,hash){
       el('h3','','Unknown protocol or version'),
       el('p','','This protocol or contract version is not present in the pinned generated catalog.'));
     right.append(box);
-  }else{
-    const article=reader(data,selectedGroup,selected);
-    const observed=data.releases.filter(r=>r.status==='available').length;
-    const note=el('p','documents-release-note',observed
-      ?observed+' verified release snapshots inform Since Nession values; unavailable history remains Unknown.'
-      :'Historical release snapshots are unavailable; Since Nession remains Unknown until verified.');
-    article.insertBefore(note,article.querySelector('.documents-versions'));
-    right.append(article);
-  }
+  }else right.append(reader(data,selectedGroup,selected));
   add(layout,sidebar,right);
   root.append(layout);
 }
