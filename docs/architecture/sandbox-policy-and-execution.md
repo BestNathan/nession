@@ -127,12 +127,14 @@ before mounting anything.
   Content-addressed sharing, consumer leases, the same-digest state machine and
   durable mount identity live in `nession_erofs::mount_manager` (#3449).
   `nession-sandbox` keeps source-root authorization, byte verification (through
-  `nession_erofs::digest`), mount ordering, the overlay composition and the
-  per-execution cleanup record; neither manager nor primitive sees an image
-  role or a mount plan. A Project source image is merged with the durable
-  Workspace upper/work by the Agent-owned
-  `nession_erofs::overlay::OverlayMountManager` (#3582, below); a workspace
-  without an image is a direct writable bind. Bubblewrap starts from an empty
+  `nession_erofs::digest`), mount ordering, the typed `MountPlan`, the overlay
+  composition and the per-execution cleanup record; neither manager nor
+  primitive sees an image role or a mount plan. The Sandbox compiles
+  `mount::plan::MountPlan` from the prepared composition and acquires each
+  view through `ErofsRoBackend`, `OverlayBackend` or `BindBackend` (#3695). A
+  Project source image is merged with the durable Workspace upper/work by the
+  Sandbox-owned `nession_sandbox::mount::overlay::OverlayMountManager` (#3582,
+  below); a workspace without an image is a direct writable bind. Bubblewrap starts from an empty
   tmpfs root, binds the Base Runtime over `/`, installs `/workspace`, then the
   toolchains, and only then mounts `/dev`, `/proc`, `/tmp`, `/home` and
   `/run/nession`.
@@ -168,10 +170,10 @@ before mounting anything.
 - **Shared writable Workspace Overlay (#3582).** One managed Workspace has one
   durable `upper`/`work` pair and therefore **one** physical writable
   `fuse-overlayfs` Merged View per Agent identity and mount namespace. The
-  Agent-owned `OverlayMountManager` derives the mountpoint from an authorized
-  Workspace root plus a validated relative identity (never a caller-supplied
-  path), serializes same-workspace mount/unmount transitions, and returns
-  identified consumer leases. Multiple Sandbox executions may bind that same
+  Sandbox-owned `nession_sandbox::mount::overlay::OverlayMountManager` derives
+  the mountpoint from an authorized Workspace root plus a validated relative
+  identity (never a caller-supplied path), serializes same-workspace
+  mount/unmount transitions, and returns identified consumer leases. Multiple Sandbox executions may bind that same
   Merged View at `/workspace`; the last release unmounts it and never deletes
   the durable upper/work. The Overlay holds its own read-only EROFS lower lease
   for the full physical lifetime; a failed Overlay unmount retains the mount,
@@ -583,8 +585,9 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Validation, capability probing, no fallback | `crates/nession-sandbox/src/policy.rs`, `capabilities.rs` |
 | Launcher argv, masking, seccomp baseline | `crates/nession-sandbox/src/linux/bwrap.rs`, `linux/seccomp.rs` |
 | EROFS composition shape and validation | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + `crates/nession-sandbox/src/policy.rs` |
+| Typed Mount plan, backends, views and explicit release | `crates/nession-sandbox/src/mount/{plan,backends,view}.rs` (#3695) |
 | Prepared image digest/mount/overlay and unmount | `crates/nession-sandbox/src/linux/erofs.rs` |
-| Shared writable Workspace Overlay, consumers, fencing, recovery | `crates/nession-erofs/src/overlay/` |
+| Shared writable Workspace Overlay, consumers, fencing, recovery | `crates/nession-sandbox/src/mount/overlay/` (#3582, moved by #3695) |
 | Managed Workspace durable upper/work and ordered lower binding | `crates/nession-agent/src/workspace_manager.rs` |
 | Composition mount ordering and read-only root | `crates/nession-sandbox/src/linux/bwrap.rs` |
 | Cgroup delegation, limits and cleanup | `crates/nession-sandbox/src/linux/cgroup.rs` |

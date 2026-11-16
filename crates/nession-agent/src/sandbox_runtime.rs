@@ -217,12 +217,13 @@ impl SandboxRuntime {
                     return None;
                 }
             }
-            let lower_provider: Arc<dyn nession_erofs::overlay::LowerProvider> = lower.clone();
-            match nession_erofs::overlay::OverlayMountManager::open(
-                nession_erofs::overlay::OverlayMountManagerConfig {
+            let lower_provider: Arc<dyn nession_sandbox::mount::overlay::LowerProvider> =
+                lower.clone();
+            match nession_sandbox::mount::overlay::OverlayMountManager::open(
+                nession_sandbox::mount::overlay::OverlayMountManagerConfig {
                     root: settings.state_dir.join("erofs-overlays"),
                     workspace_roots,
-                    settings: nession_erofs::overlay::OverlaySettings::new(
+                    settings: nession_sandbox::mount::overlay::OverlaySettings::new(
                         settings.fuse_overlayfs_path.clone(),
                         settings.fusermount_path.clone(),
                     ),
@@ -303,7 +304,7 @@ impl SandboxRuntime {
                 if let Some(status) = manager.lookup(&workspace) {
                     if status.mounted
                         || status.consumers > 0
-                        || status.state != nession_erofs::overlay::OverlayState::Idle
+                        || status.state != nession_sandbox::mount::overlay::OverlayState::Idle
                     {
                         return Some(format!(
                             "the Workspace has observed Overlay state ({:?})",

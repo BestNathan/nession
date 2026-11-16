@@ -335,10 +335,12 @@ pub fn is_mounted(path: &Path) -> bool {
     mount_entry(path).is_some()
 }
 
-pub(crate) struct BoundedOutcome {
-    pub(crate) status: ExitStatus,
-    pub(crate) stderr: String,
-    pub(crate) stderr_stalled: bool,
+/// The observed outcome of one bounded FUSE helper invocation.
+#[derive(Debug)]
+pub struct BoundedOutcome {
+    pub status: ExitStatus,
+    pub stderr: String,
+    pub stderr_stalled: bool,
 }
 
 /// Run a helper process with a hard deadline and a bounded stderr collection.
@@ -346,7 +348,7 @@ pub(crate) struct BoundedOutcome {
 /// A helper whose descendant keeps the stderr pipe open after the helper has
 /// exited cannot stall this call: the reader is detached and the stall is
 /// reported. The child is killed and reaped on timeout.
-pub(crate) fn run_bounded_helper(
+pub fn run_bounded_helper(
     mut command: Command,
     label: &str,
     timeout: Duration,
@@ -394,7 +396,8 @@ pub(crate) fn run_bounded_helper(
     })
 }
 
-pub(crate) fn stderr_detail(outcome: &BoundedOutcome) -> String {
+/// Render bounded helper stderr for an error message.
+pub fn stderr_detail(outcome: &BoundedOutcome) -> String {
     if outcome.stderr.is_empty() {
         if outcome.stderr_stalled {
             "stderr collection stalled".to_string()

@@ -224,7 +224,7 @@ pub async fn prepare(
     // its Agent owner before any host mount (#3582). A filesystem that cannot
     // hold it fails the create; there is no per-execution fallback.
     #[cfg(target_os = "linux")]
-    if let Err(error) = nession_erofs::overlay::storage::initialize(&workspace_dir) {
+    if let Err(error) = nession_sandbox::mount::overlay::storage::initialize(&workspace_dir) {
         let _ = std::fs::remove_dir_all(&workspace_dir);
         return Err(error.context(format!(
             "cannot initialize the Managed workspace Overlay storage {}",

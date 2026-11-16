@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::mount_manager::{ConsumerRef, MountLease, MountManager, VerifiedImage};
+use nession_erofs::mount_manager::{ConsumerRef, MountLease, MountManager, VerifiedImage};
 
 use super::mount::{self, OverlayMountSpec, OverlaySettings};
 use super::probe;
@@ -180,7 +180,7 @@ pub struct OverlayMountManagerConfig {
 ///
 /// Production always uses [`RealMountBackend`]. Unit tests inject a fake so
 /// single-flight, sharing and recovery can be exercised without FUSE.
-pub(super) trait OverlayMountBackend: Send + Sync {
+pub(crate) trait OverlayMountBackend: Send + Sync {
     fn mount(&self, spec: &OverlayMountSpec, settings: &OverlaySettings) -> Result<()>;
     fn unmount(&self, settings: &OverlaySettings, mountpoint: &Path) -> Result<()>;
     fn is_overlay_mount(&self, mountpoint: &Path) -> bool;
@@ -335,8 +335,9 @@ impl OverlayMountManager {
         Self::open_with_backend_inner(config, Arc::new(RealMountBackend))
     }
 
+    /// Test seam: exercise the manager against an injected mount backend.
     #[cfg(test)]
-    pub(super) fn open_with_backend(
+    pub(crate) fn open_with_backend(
         config: OverlayMountManagerConfig,
         backend: Arc<dyn OverlayMountBackend>,
     ) -> Result<Arc<Self>> {
@@ -1258,7 +1259,7 @@ pub type ProtectedWorkspaces = HashSet<OverlayWorkspaceKey>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::digest::digest_of_bytes;
+    use nession_erofs::digest::digest_of_bytes;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
 
     fn image(root: &Path, bytes: &[u8]) -> VerifiedImage {
@@ -2007,25 +2008,23 @@ mod tests {
     }
 
     #[test]
-    fn the_overlay_crate_has_no_reverse_dependency() {
+    fn the_sandbox_overlay_owner_keeps_erofs_read_only_and_has_no_runtime_reverse_dependency() {
         let manifest =
             std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
         let dependencies = manifest
             .split("[dependencies]")
             .nth(1)
             .expect("a dependencies section");
-        for forbidden in [
-            "nession-protocol",
-            "nession-agent",
-            "nession-sandbox",
-            "nession-server",
-            "nession-tmux",
-        ] {
+        for forbidden in ["nession-agent", "nession-server", "nession-tmux"] {
             assert!(
                 !dependencies.contains(forbidden),
-                "nession-erofs must not depend on {forbidden}"
+                "nession-sandbox must not depend on {forbidden}"
             );
         }
+        assert!(
+            dependencies.contains("nession-erofs"),
+            "the Sandbox Overlay owner delegates read-only lower mounts to nession-erofs"
+        );
     }
 
     impl Fixture {

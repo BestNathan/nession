@@ -33,6 +33,10 @@ mod util;
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+/// Typed Sandbox mount planning and backends (#3695). The Workspace Overlay
+/// physical owner lives here, not in the reusable EROFS crate.
+#[cfg(target_os = "linux")]
+pub mod mount;
 
 pub use capabilities::{catalog, Capabilities};
 pub use draft::{draft_from_policy, materialize, materialize_with_composition};

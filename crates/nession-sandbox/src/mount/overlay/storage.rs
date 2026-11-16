@@ -95,9 +95,9 @@ impl OverlayWorkspaceKey {
     /// A stable short identity for manager-owned names (mountpoints, sidecars
     /// and lower consumer ids).
     pub fn short_id(&self) -> String {
-        let digest = crate::digest::digest_of_bytes(self.identity().as_bytes());
+        let digest = nession_erofs::digest::digest_of_bytes(self.identity().as_bytes());
         digest
-            .strip_prefix(crate::digest::DIGEST_PREFIX)
+            .strip_prefix(nession_erofs::digest::DIGEST_PREFIX)
             .unwrap_or(&digest)
             .to_string()
     }
