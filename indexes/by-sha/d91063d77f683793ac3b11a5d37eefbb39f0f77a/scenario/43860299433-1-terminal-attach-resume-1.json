@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43860299433,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3698-multilower-rootfs",
+    "target_sha": "d91063d77f683793ac3b11a5d37eefbb39f0f77a",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43860299433",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0fd37a88ae94b8611e923c0c6e1cdfec90c1a0ad8fefa7f50bab80ca985d01b0"
+  },
+  "record": "runs/2026-11-16/43860299433-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "ad50b95c5e1594ee49d96d1f819250f88a588bab6689935c7ec286a555c0d5c6"
+}
