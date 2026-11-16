@@ -720,11 +720,11 @@ function selfTest() {
   // #3689: protected qualification must not strand ordinary main/staging PRs.
   // The native status is required branch-wide; the trusted classifier
   // publishes NOT_APPLICABLE success for nonnative PR identities.
-  if(workflow.includes('  classify-pr:')){
+  if(workflow.includes('  classify_pr:')){
     assert.match(workflow,/pull_request_target:[\s\S]*?branches: \[main, staging\]/);
-    assert.match(workflow,/classify-pr:[\s\S]*?statuses: write/);
+    assert.match(workflow,/classify_pr:[\s\S]*?statuses: write/);
     assert.match(workflow,/node scripts\/staging-convergence-automerge\.mjs classify/);
-    assert.match(jobIf[1],/needs\.classify-pr\.result == 'success'/);
+    assert.match(jobIf[1],/needs\.classify_pr\.result == 'success'/);
     assert.match(jobIf[1],/always\(\)/);
   }
   // #3247: prove the actual workflow job-if accepts the authenticated
@@ -751,7 +751,7 @@ function selfTest() {
       startsWith: (value, prefix) =>
         typeof value === 'string' && value.startsWith(prefix),
       always: () => true,
-      needs: {'classify-pr': {result: 'success'}},
+      needs: {'classify_pr': {result: 'success'}},
     }, {timeout: 1000});
   assert.equal(acceptsWake(releaseWake), true,
     'successful verified ACR push must re-wake convergence');
