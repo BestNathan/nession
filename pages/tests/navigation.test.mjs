@@ -60,6 +60,8 @@ test('active route stays correct across nested and hash routes',()=>{
   assert.equal(currentNavRoute('/nession/','#/agents?window=30d'),'/agents');
   assert.equal(currentNavRoute('/nession/','#/knowledge?article=topic'),'/knowledge');
   assert.equal(currentNavRoute('/nession/','#/documents?doc=docs%2Farchitecture%2Fmcp.md'),'/documents');
+  assert.equal(currentNavRoute('/nession/','#/documents/protocol?protocol=git.status&v=2'),'/documents');
+  assert.equal(currentNavRoute('/nession/','#/documents/mcp?tool=nession_server_list_agents'),'/documents');
   assert.equal(currentNavRoute('/nession/workflows.html','#/prototypes'),'/workflows');
   const h=harness('/nession/','#/agents');
   assert.equal(h.nav.children[1].attrs['aria-current'],'page');
