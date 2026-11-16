@@ -10,10 +10,12 @@
 > must stay outside `nession-erofs`; the no-reverse-dependency rule is retained.
 > Current Server Image Manager behavior remains described by
 > [Global EROFS Image Manager](erofs-image-manager.md) and the current Agent
-> cache by [Agent EROFS cache](agent-erofs-cache.md) until the migration phases
-> land. Where this document and an un-migrated implementation differ, this
-> document is the approved target contract, not a claim that the target is
-> already executable.
+> cache by [Agent EROFS cache](agent-erofs-cache.md). The v1 object model, CAS,
+> catalog, distribution/cache and physical mount manager are delivered; Image
+> Compose and Sandbox runtime mount composition are delivered on staging by the
+> children in [Composition and mount delivery](#composition-and-mount-delivery-3693).
+> Where this document and an un-migrated deployment differ, this document is
+> the contract, not evidence that a particular runner installed it.
 
 ## Ownership
 
@@ -46,6 +48,38 @@ Rules that follow from this table:
 - There is one OCI model. `nession-protocol` may carry opaque digests, media
   types and descriptors on the wire, but a second typed OCI implementation is
   forbidden.
+
+## Two compositions, two output resources
+
+"Composition" names two operations with different owners and different
+outputs. They are not two names for one pipeline, and OverlayFS is not an Image
+type or a third composition owner ([#3693](https://github.com/BestNathan/nession/issues/3693)).
+
+| | EROFS Image Composition | Sandbox Runtime Composition |
+|---|---|---|
+| Canonical owner | `nession-erofs` image Build/Catalog, driven by the Server Image Manager | `nession-sandbox` `mount` domain, hosted by the Agent adapter |
+| Input | One to sixteen **pinned catalog Image revisions**, validated destinations and merge rules | Authorized, already-prepared host views: verified EROFS files, an authorized Workspace upper/work or canonical directory, Sandbox targets and policy |
+| Output | A **new immutable Manifest-addressed Image** published to the CAS/Catalog | One prepared `MountPlan` and the per-execution `MountedView` set; no Image, Manifest, Blob, Catalog row or grant |
+| Data / mount identity | Manifest digest = Image revision. A raw layer digest or a referenced Composite descriptor/metadata digest identifies physical bytes. A Tag is an alias, never a runtime path. | The backend-derived host mountpoint plus generation identifies a physical view. The in-Sandbox target is a separate identity. A durable Workspace upper is Agent workspace data, not an EROFS Blob. |
+| Lifetime | Persistent until no Tag, pin or lease reaches it and GC reclaims it | A consumer lease per execution. The one Workspace Overlay may outlive an execution, but its upper never becomes an Image. |
+| APIs | Image Compose submission (`flattened` / `referenced`), catalog publication, distribution, grants and cache | `MountPlan`, `MountSource::{Erofs, Overlay, Bind}`, `MountBackend::acquire`, `MountedView`, `MountRecoveryBinding` and explicit release |
+| Explicit non-goals | No process execution, no `/workspace` upper, no ENV/PATH precedence, no mount target policy | No CAS/Catalog publication, no Manifest creation, no second physical EROFS mount manager, no image build |
+
+Rules that keep the boundary one-way:
+
+- A Sandbox view may consume an Image Compose result exactly like any other
+  Image. Runtime composition never changes that Image, and its own output is
+  never publishable as an Image.
+- `ErofsRoBackend` delegates physical read-only mounting, digest-keyed sharing,
+  cache pins and recovery to `nession_erofs::mount_manager`. It must not
+  reimplement them; `nession-erofs` must not depend on `nession-sandbox`.
+- OverlayFS is a mechanism inside the Sandbox mount domain (persistent
+  Workspace upper/work or an execution-owned transient RootFS upper/work). It
+  is never an Image format or a `Manifest.layers[]` value. A referenced
+  Composite is an Image format; it is not an Overlay.
+- Image Config ENV/Entrypoint/Cmd/WorkingDir and `io.nession.*` annotations are
+  read-only Image data. Sandbox policy owns the effective environment, PATH,
+  targets and execution isolation.
 
 ## Object model and immutable identity
 
@@ -348,9 +382,13 @@ before the Coding Agent process starts. An already running process never
 receives a retroactive mount or PATH change; adopting a new image binding
 requires re-enter/restart.
 
-The physical mount manager remains keyed on the EROFS blob digest (#3449). Two
-Manifests sharing one payload share one physical mount but can have distinct
-Env and targets; a pinned running Session keeps its Manifest after a Tag moves.
+The physical mount manager remains keyed on the EROFS blob digest (#3449); a
+referenced Composite is keyed on its Composite descriptor digest and pins the
+whole device closure. Two Manifests sharing one payload share one physical
+mount but can have distinct Env and targets; a pinned running Session keeps its
+Manifest after a Tag moves. Runtime composition of these views belongs to the
+Sandbox mount domain; see
+[Sandbox policy and execution isolation](sandbox-policy-and-execution.md#typed-mount-plan-and-backends-3695).
 
 ## Delivery DAG
 
@@ -388,6 +426,46 @@ transfer tests; (4) native Sandbox mount/ENV and lease tests;
 (5) persistence/recovery/GC. Reuse #3022, #3303, #3334, #3449, #3412, #3405,
 #3180 and #3062 as the accepted baselines; do not reopen them merely because
 this architecture expands their scope.
+
+## Composition and mount delivery (#3693)
+
+The Image-Compose and runtime-composition children are separate Requirements so
+one can be verified without waiting for the other:
+
+```text
+#3693 architecture boundary (this contract)
+  ├─ #3695 MountPlan/MountBackend and Workspace Overlay ownership migration
+  │    └─ #3698 runtime ordered multi-lower and opt-in writable RootFS
+  └─ #3696 flattened Image Compose (self-contained raw EROFS)
+       └─ #3697 referenced multi-blob Image Compose (metadata + device closure)
+```
+
+`#3698` does not depend on `#3697`: runtime multi-lower consumes ordinary
+single-layer Images and must not wait for the referenced Composite format.
+`#3697` does not depend on `#3695`: its physical mount support belongs to
+`nession_erofs::mount_manager`, which already owns digest-keyed leases.
+
+| Child | Delivered on staging | PR-stage evidence | Native Linux proof |
+|---|---|---|---|
+| [#3695](https://github.com/BestNathan/nession/issues/3695) | PR [#3725](https://github.com/BestNathan/nession/pull/3725) at `0d8fda4825829f2ad64eb4cfc0192d2e15fa07f8` | Agent run `43852186904` at `9cad89f59b91ad873b108aaf93e77051b18ab08a` (SC-01/SC-04) | Acceptance / Cases run `43853127951` at `0d8fda48` (SC-02/SC-03) |
+| [#3696](https://github.com/BestNathan/nession/issues/3696) | PR [#3703](https://github.com/BestNathan/nession/pull/3703) at `fbc4aa2e4faa8e03040f42b3d492c969d906bde4`; Case setup PR [#3710](https://github.com/BestNathan/nession/pull/3710) at `e84fb5dfb92e2442984d28ba0143883834ad1616` | Agent run `43815815870` at `10c3e3f3fe03d688fb69cf515f659a4101b51429` (SC-01/SC-02) | Acceptance / Cases run `43813771715` at `e84fb5df` (SC-03) |
+| [#3697](https://github.com/BestNathan/nession/issues/3697) | PR [#3709](https://github.com/BestNathan/nession/pull/3709) at `47507cf4368dce4ece012a7b10088146b8133f6d`; repairs PRs [#3713](https://github.com/BestNathan/nession/pull/3713), [#3714](https://github.com/BestNathan/nession/pull/3714), [#3715](https://github.com/BestNathan/nession/pull/3715) at `67c3533e9fd51e66bb325d8c1f3434b24a0c3abd` | Agent run `43818068382` at `dd69c927fe13798fb6f1dbd3d33e765551660daa` (SC-01) | Acceptance / Cases run `43822627408` at `67c3533e` (SC-02/SC-03) |
+| [#3698](https://github.com/BestNathan/nession/issues/3698) | PR [#3736](https://github.com/BestNathan/nession/pull/3736) at `5434c99158330729032ecb28b804baf863be8992`; follow-up PR [#3741](https://github.com/BestNathan/nession/pull/3741) at `5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e` | Agent run `43875307694` at `9ba3a457499f51d55c8d69547aa6bb6fcaac6d0d` (SC-04) | Acceptance / Cases run `43877231534` at `5e9e853a` (SC-01/SC-02/SC-03) |
+
+Legacy compatibility and proof ownership:
+
+- A v1 single-layer Image remains valid and mountable. The Compose and
+  Composite forms are additive; #3494 is not reopened.
+- A pre-#3698 `workspace.image` declaration decodes as a one-element ordered
+  lower set, and the legacy `OverlayBinding`/execution-record fields remain
+  readable. No reader requires the new ordered fields; the new writer fills
+  both the legacy first-lower fields and the ordered set.
+- #3582 durable Workspace `upper`/`work` paths, owner lock, generation,
+  mountinfo and restart adoption are preserved; the ownership move changed the
+  module, not the on-disk layout or the algorithm.
+- Native Linux behaviour is owned by the child staging Cases above (real
+  `erofsfuse`/`fuse-overlayfs`, mountinfo, restart and fault injection). This
+  architecture document and the Knowledge articles are not kernel evidence.
 
 ## Cargo and module boundaries
 
@@ -450,3 +528,5 @@ this document instead of spawning a competing explanation.
 - [Agent EROFS cache](agent-erofs-cache.md) — current Agent cache behavior
 - [Sandbox filesystem declaration model](sandbox-filesystem-policy.md)
 - [Sandbox policy and execution isolation](sandbox-policy-and-execution.md)
+- [#3693](https://github.com/BestNathan/nession/issues/3693) — owner decision
+  separating Image Compose output from Sandbox runtime composition

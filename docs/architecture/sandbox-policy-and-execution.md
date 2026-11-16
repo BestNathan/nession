@@ -4,9 +4,15 @@ Status: **V1 delivered in source for #2681**, with the context capability and
 existing-Session Enter added by #3124, the prepared EROFS root composition
 added by #3024, and Server-owned image composition on existing-Session Enter
 added by #3181 (on-demand, Pane-scoped execution; not whole-Session
-enforcement). Real Linux/macOS proof is bound to the Acceptance Cases under
+enforcement). The typed mount domain and Workspace Overlay ownership are
+delivered by #3695 (PR #3725 at `0d8fda48`), and ordered multi-lower plus
+opt-in writable RootFS by #3698 (PR #3736 at `5434c991`, follow-up #3741 at
+`5e9e853a`). The exact staging receipts are in
+[Native mount evidence](#native-mount-evidence). Real
+Linux/macOS proof is bound to the Acceptance Cases under
 `e2e/acceptance/cases/2681/`, `e2e/acceptance/cases/3124/`,
-`e2e/acceptance/cases/3024/` and `e2e/acceptance/cases/3181/`; nothing in this
+`e2e/acceptance/cases/3024/`, `e2e/acceptance/cases/3181/`,
+`e2e/acceptance/cases/3695/` and `e2e/acceptance/cases/3698/`; nothing in this
 document is evidence that a particular runner installed a mechanism.
 
 This is the canonical current-architecture owner for Sandbox behaviour. The
@@ -60,13 +66,15 @@ Absence of a dimension adds no user-requested constraint in that dimension.
 Backend safety prerequisites still apply (next section). `version` is `1`;
 any other version is `UnsupportedPolicy`, never interpreted as v1.
 
-The client-safe Filesystem declaration direction for the next contract
+The client-safe Filesystem declaration direction
 (`filesystem.rootfs`, `filesystem.mounts`, `filesystem.workspace`, with
 `filesystem.access.read/write` unchanged) is recorded in
 [Sandbox filesystem declaration model](sandbox-filesystem-policy.md). That
-document is the declaration source of truth, not a shipped schema: V1 still
-accepts only `access` or the Agent-prepared `composition`, and the two remain
-mutually exclusive.
+document is the declaration source of truth. A RootFS/mount/Workspace
+declaration is executable only through the Agent-prepared `composition`;
+access-only declarations remain independent. A client field that has no
+matching prepared source fails closed, and `filesystem.access` remains
+mutually exclusive with a composed root.
 
 ## Backend baseline (all executions)
 
@@ -125,17 +133,16 @@ before mounting anything.
   bounded helper invocation, mountpoint readiness identity check and strict
   unmount live in the reusable `nession_erofs::mount` primitive (#3303).
   Content-addressed sharing, consumer leases, the same-digest state machine and
-  durable mount identity live in `nession_erofs::mount_manager` (#3449).
-  `nession-sandbox` keeps source-root authorization, byte verification (through
-  `nession_erofs::digest`), mount ordering, the overlay composition and the
-  per-execution cleanup record; neither manager nor primitive sees an image
-  role or a mount plan. A Project source image is merged with the durable
-  Workspace upper/work by the Agent-owned
-  `nession_erofs::overlay::OverlayMountManager` (#3582, below); a workspace
-  without an image is a direct writable bind. Bubblewrap starts from an empty
-  tmpfs root, binds the Base Runtime over `/`, installs `/workspace`, then the
-  toolchains, and only then mounts `/dev`, `/proc`, `/tmp`, `/home` and
-  `/run/nession`.
+  durable mount identity live in `nession_erofs::mount_manager` (#3449). The
+  Sandbox does not reimplement either owner; `ErofsRoBackend` acquires the
+  manager lease through the typed mount plan and records it as a view lease.
+  A Project source image is merged with the durable Workspace upper/work by the
+  Sandbox-owned `nession_sandbox::mount::overlay::OverlayMountManager`
+  (#3582/#3695, below); one or more ordered Project lowers are supported by
+  #3698. A workspace without an image is a direct writable
+  bind. Bubblewrap starts from an empty tmpfs root, binds the Base Runtime over
+  `/`, installs `/workspace`, then the toolchains, and only then mounts `/dev`,
+  `/proc`, `/tmp`, `/home` and `/run/nession`.
 - **Base Runtime contract.** Because the composed root is read-only, the image
   must already contain the mountpoint directories the backend installs:
   `/bin/sh` (or `/usr/bin/sh`), `/workspace`, every declared `/opt/<name>`,
@@ -165,17 +172,19 @@ before mounting anything.
   as an orphan after identity checks. Multiple digests never alias one
   mountpoint, and the manager never falls back to a lazy unmount for shared
   reclamation.
-- **Shared writable Workspace Overlay (#3582).** One managed Workspace has one
-  durable `upper`/`work` pair and therefore **one** physical writable
+- **Shared writable Workspace Overlay (#3582/#3695).** One managed Workspace
+  has one durable `upper`/`work` pair and therefore **one** physical writable
   `fuse-overlayfs` Merged View per Agent identity and mount namespace. The
-  Agent-owned `OverlayMountManager` derives the mountpoint from an authorized
-  Workspace root plus a validated relative identity (never a caller-supplied
-  path), serializes same-workspace mount/unmount transitions, and returns
-  identified consumer leases. Multiple Sandbox executions may bind that same
-  Merged View at `/workspace`; the last release unmounts it and never deletes
-  the durable upper/work. The Overlay holds its own read-only EROFS lower lease
-  for the full physical lifetime; a failed Overlay unmount retains the mount,
-  the lower pin, the durable identity and the upper for a bounded retry.
+  Sandbox-owned
+  `nession_sandbox::mount::overlay::OverlayMountManager` derives the
+  mountpoint from an authorized Workspace root plus a validated relative
+  identity (never a caller-supplied path), serializes same-workspace
+  mount/unmount transitions, and returns identified consumer leases. Multiple
+  Sandbox executions may bind that same Merged View at `/workspace`; the last
+  release unmounts it and never deletes the durable upper/work. The Overlay
+  acquires and retains every ordered read-only EROFS lower lease (#3698) for
+  the full physical lifetime; a failed Overlay unmount retains the mount, the
+  lower pins, the durable identity and the upper for a bounded retry.
   A durable owner lock next to the durable bytes (plus the owner/identity
   sidecars and mountinfo) fences another process or manager root, and the
   upper/work filesystem is probed: it must be one local filesystem with user
@@ -186,18 +195,86 @@ before mounting anything.
   missing, partial or symlinked pair refuses instead of creating a fresh empty
   upper.
 - **Lifecycle.** The writable Overlay is recorded as a durable manager binding
-  (`workspace root/relative, mountpoint, generation, lower digest/generation`),
-  not as an execution-scoped mountpoint. Temporary files remain under the
-  execution directory. Cleanup releases the Overlay consumer first (which
-  releases its lower), then any legacy execution-scoped mount, then the
-  independent shared image consumers. Reconciliation adopts a live record only
-  when the durable identity, generation, Agent identity, mount namespace,
-  owner lock and mountinfo agree and the lower can be re-adopted; a legacy
-  record without the binding keeps its old execution-scoped cleanup. A failed
-  unmount keeps the record for retry rather than leaking the mount.
+  (`workspace root/relative, mountpoint, generation, ordered lower
+  digests/generations`), not as an execution-scoped mountpoint. Temporary
+  files remain under the execution directory. Cleanup releases the Overlay
+  consumer first (which releases its lower leases), then any legacy
+  execution-scoped mount, then the independent shared image consumers.
+  Reconciliation adopts a live record only when the durable identity,
+  generation, Agent identity, mount namespace, owner lock and mountinfo agree
+  and every ordered lower can be re-adopted; a legacy record without the
+  binding keeps its old execution-scoped cleanup. A failed unmount keeps the
+  record for retry rather than leaking the mount. A transient writable RootFS
+  (#3698) is not a manager binding: its execution-owned lease is released,
+  its upper/work removed, and its Base lower released only after a verified
+  unmount.
 - **macOS.** EROFS composition is rejected with an explicit
   `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
   equivalence is claimed.
+
+### Typed Mount plan and backends (#3695)
+
+`nession_sandbox::mount` owns runtime composition mechanics. It is a separate
+domain from Image Compose: this path publishes no Image and creates no new
+Manifest ([boundary contract](oci-erofs-image-infrastructure.md#two-compositions-two-output-resources)).
+
+- **Plan.** A `MountPlan` is compiled from the prepared composition and binds
+  one typed `MountSource` to one absolute in-Sandbox target. The plan never
+  carries a host mountpoint; a backend derives the physical view from the
+  typed source. `MountSource` is exactly `Erofs(ErofsSource)`,
+  `Overlay(OverlaySource)` or `Bind { directory, ownership }`; there is no
+  raw `mount(source, target)` or caller-chosen host path.
+- **Shape validation.** Compilation refuses duplicate or nested targets, a
+  missing/duplicate Base or Workspace, more than `MAX_MOUNT_VIEWS` views, and
+  an unsafe target before any host resource exists. Toolchains remain exactly
+  `/opt/<lowercase-name>`; Base is `/`; Workspace is `/workspace`.
+- **Backends.** `MountBackend::acquire` returns a `MountedView` carrying the
+  host view, the independent target, a serializable `MountRecoveryBinding` and
+  an identified view lease. `ErofsRoBackend` delegates to
+  `nession_erofs::mount_manager`; `OverlayBackend` leases the one shared
+  Workspace Merged View; `TransientRootfsBackend` owns an execution-local
+  writable RootFS; `BindBackend` exposes an Agent-validated directory.
+- **Release.** Releasing a view drops only that identified consumer. Physical
+  unmount authority stays with the backend owner (the EROFS manager, the
+  shared Workspace Overlay manager, or the transient RootFS lease). A missing
+  manager or unsupported source kind is `UnsupportedPolicy`; there is no
+  fallback backend.
+
+### Ordered lowers and writable RootFS (#3698)
+
+- **Ordered multi-lower Workspace.** `OverlayRequest.lowers` and the prepared
+  `OverlayMountSpec.lowers` carry up to 16 ordered read-only EROFS lowers; the
+  first has the highest priority (`lowerdir=first:second:…`). The shared
+  Workspace manager acquires and retains every lower lease for the physical
+  view lifetime, records the ordered digest set as the compatibility key, and
+  refuses a reordered, different or missing set. Legacy single-lower
+  `OverlayBinding` fields remain readable; a new writer records both the
+  legacy first-lower fields and the ordered list.
+- **Opt-in writable RootFS.** `filesystem.rootfs.writable` (protocol) and the
+  prepared `SandboxFilesystemComposition.base_writable` must agree; an absent
+  or mismatched declaration is refused. `TransientRootfsBackend` creates
+  `rootfs-overlay/{upper,work,merged}` under the execution directory, probes
+  the filesystem, mounts `fuse-overlayfs`, and returns an execution-owned
+  lease. Release is strictly ordered: unmount the merged view, remove the
+  transient upper/work, then release the Base image lower. The Base image
+  bytes are never modified and the transient upper is never durable. A failed
+  unmount retains the live mount and its lower consumer for record
+  reconciliation instead of leaking or force-removing it.
+- **Persistent vs transient.** A managed Workspace lower/upper is owned by the
+  Agent Workspace Manager and survives execution. A writable RootFS upper/work
+  is execution-owned and is discarded. A Project Existing Location remains a
+  direct Bind and can carry neither an Overlay upper nor a lower.
+
+### Native mount evidence
+
+The exact staging receipts for these behaviours are in
+[Composition and mount delivery](oci-erofs-image-infrastructure.md#composition-and-mount-delivery-3693):
+#3695 Acceptance / Cases run `43853127951` at `0d8fda48` (two consumers of one
+physical Overlay; restart/foreign/fault recovery) and #3698 Acceptance / Cases
+run `43877231534` at `5e9e853a` (ordered lowering, transient writable RootFS,
+ordered identity across restart). Source review in this document is not a
+substitute for those native receipts.
+
 
 ## Managed Workspace resources (#3407)
 
@@ -558,7 +635,9 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
   command overrides and the shared control plane remain outside a Pane's
   execution domain. Enter isolates one new Pane; it does not convert the
   existing Native Pane or cover future Panes.
-- No OCI image/rootfs, layer store, VM or ingress port publication.
+- No general OCI container rootfs or OCI layer store, VM or ingress port
+  publication. Immutable EROFS Images (including Image Compose results) are
+  the supported filesystem artifact.
 - No HTTPS MITM, URL-path/method filtering, payload inspection or DLP.
 - An allowed host/port can still exfiltrate data; the policy authorizes
   destinations, not content.
@@ -582,9 +661,11 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Policy shape and unknown-key refusal | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + protocol Gates |
 | Validation, capability probing, no fallback | `crates/nession-sandbox/src/policy.rs`, `capabilities.rs` |
 | Launcher argv, masking, seccomp baseline | `crates/nession-sandbox/src/linux/bwrap.rs`, `linux/seccomp.rs` |
-| EROFS composition shape and validation | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + `crates/nession-sandbox/src/policy.rs` |
-| Prepared image digest/mount/overlay and unmount | `crates/nession-sandbox/src/linux/erofs.rs` |
-| Shared writable Workspace Overlay, consumers, fencing, recovery | `crates/nession-erofs/src/overlay/` |
+| EROFS composition shape, ordered lowers and writable RootFS declaration | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + `crates/nession-sandbox/src/policy.rs` |
+| Typed mount plan, backend selection, views and release | `crates/nession-sandbox/src/mount/{plan,backends,view}.rs` |
+| Prepared composition compile/execute and legacy cleanup | `crates/nession-sandbox/src/linux/erofs.rs` |
+| Physical read-only EROFS mount sharing, pins and recovery | `crates/nession-erofs/src/mount_manager.rs` (#3449) |
+| Shared writable Workspace Overlay, ordered lower leases, consumers, fencing, recovery | `crates/nession-sandbox/src/mount/overlay/` |
 | Managed Workspace durable upper/work and ordered lower binding | `crates/nession-agent/src/workspace_manager.rs` |
 | Composition mount ordering and read-only root | `crates/nession-sandbox/src/linux/bwrap.rs` |
 | Cgroup delegation, limits and cleanup | `crates/nession-sandbox/src/linux/cgroup.rs` |
@@ -593,7 +674,7 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Draft rows → canonical policy, per-implementation catalog | `crates/nession-sandbox/src/draft.rs`, `capabilities.rs` |
 | Preflight/Enter generation binding and unsupported field paths | `crates/nession-sandbox/src/capabilities.rs` (`unsupported_requests`), `crates/nession-agent/src/tmux/sandbox_context.rs` |
 | Owned-resource reconciliation (by Pane) | `crates/nession-sandbox/src/exec.rs`, `crates/nession-agent/src/sandbox_runtime.rs` |
-| Real Linux behaviour | `crates/nession-sandbox/tests/linux_runtime.rs`, `e2e/acceptance/cases/2681/` and `e2e/acceptance/cases/3024/` |
+| Real Linux behaviour | `crates/nession-sandbox/tests/linux_runtime.rs`, `e2e/acceptance/cases/2681/`, `e2e/acceptance/cases/3024/`, `e2e/acceptance/cases/3695/` and `e2e/acceptance/cases/3698/` |
 | Existing-Session Enter and active-Pane context | `e2e/acceptance/cases/3124/` (real Server + Agent), `e2e/tests/browser/sandbox-workspace-capability.spec.ts` |
 | macOS verified scope | `crates/nession-sandbox/src/macos/` (probe tests run on macOS) |
 
@@ -609,6 +690,12 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
   [Sandbox filesystem declaration model](sandbox-filesystem-policy.md).
 - [#3582](https://github.com/BestNathan/nession/issues/3582) — shared
   writable Workspace Overlay with durable Upper ownership.
+- [#3693](https://github.com/BestNathan/nession/issues/3693) — architecture
+  boundary between EROFS Image Composition and Sandbox runtime composition.
+- [#3695](https://github.com/BestNathan/nession/issues/3695) — typed Mount
+  plan/backends and Workspace Overlay ownership migration.
+- [#3698](https://github.com/BestNathan/nession/issues/3698) — ordered
+  multi-lower Workspace and opt-in writable RootFS.
 - [#2469](session-tmux-sdk-ownership.md) — Session/tmux ownership.
 - [#2514](agent-process-discovery.md) — read-only process discovery.
 - [#170](session-env-binding.md) — independent Session Environment Binding.

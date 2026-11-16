@@ -54,9 +54,12 @@ Execution isolation belongs to `nession-sandbox`, not to this Agent:
   digest compatibility key. It initializes the pair on first lower-backed use
   and never recreates a missing/partial/symlinked pair after that.
 - One physical writable `fuse-overlayfs` Merged View per managed Workspace is
-  owned by `nession_erofs::overlay::OverlayMountManager`; Sessions hold
+  owned by
+  `nession_sandbox::mount::overlay::OverlayMountManager`; Sessions hold
   identified consumer leases over it. The Agent never creates a
-  per-execution Workspace Overlay.
+  per-execution Workspace Overlay. The manager retains every ordered lower
+  lease (#3698) and refuses a reordered, different or missing lower set
+  against the durable Workspace binding.
 - Workspace deletion consults observed state (mountinfo, live consumers, the
   durable owner lock and surviving execution records), not only a volatile
   in-process lease count.
