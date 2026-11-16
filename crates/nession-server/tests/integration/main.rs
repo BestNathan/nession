@@ -1,6 +1,7 @@
 // Single harness for all nession-server integration tests.
 // cargo discovers this automatically and names the target `integration`.
 
+mod agent_address_update_race;
 mod agent_delete_race;
 mod agent_registry;
 mod command_broker;
