@@ -67,8 +67,9 @@ function deref(root,node,refs){
     const resolved=localSchemaRef(root,ref);
     if(!resolved)return {node:item,refs:trail,unresolved:true};
     trail.add(ref);
-    item={...resolved,...item};
-    delete item.$ref;
+    const overlay={...item};
+    delete overlay.$ref;
+    item={...resolved,...overlay};
   }
   return {node:item,refs:trail,unresolved:false};
 }
