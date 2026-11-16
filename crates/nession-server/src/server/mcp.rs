@@ -19,6 +19,7 @@ use std::sync::Arc;
 use nession_common::config::ServerConfig;
 use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
+use nession_mcp::pending_mutation::PendingMutation;
 use nession_mcp::{McpService, ServiceConfig};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
@@ -228,6 +229,7 @@ impl ServerNodeBackend {
         F: std::future::Future<Output = Result<T, ToolError>> + Send + 'static,
     {
         let (reply, result) = tokio::sync::oneshot::channel();
+        let (request, admission) = PendingMutation::new();
         let mut lanes = Lanes::shared(
             DEFAULT_QUERY_CONCURRENCY,
             Arc::clone(&self.mutations),
@@ -238,13 +240,20 @@ impl ServerNodeBackend {
             .key(
                 key,
                 Box::pin(async move {
-                    let _ = reply.send(work.await);
+                    // An expired MCP request must not start its queued mutation.
+                    // Once admitted to execution, let the owner finish it; the
+                    // caller may receive an indeterminate timeout instead.
+                    if admission.try_begin() {
+                        let _ = reply.send(work.await);
+                    }
                 }),
             )
             .await;
-        result
+        let outcome = result
             .await
-            .map_err(|_| ToolError::backend("the Server's mutation lane ended before answering"))?
+            .map_err(|_| ToolError::backend("the Server's mutation lane ended before answering"))?;
+        drop(request);
+        outcome
     }
 }
 

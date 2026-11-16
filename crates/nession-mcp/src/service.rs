@@ -357,12 +357,16 @@ impl ServerHandler for RegistryServer {
             }
             Err(_) => {
                 warn!(tool = %name, "MCP tool call timed out");
-                tool_error_result(&ToolError::timeout(format!(
-                    "tool `{name}` did not answer in time"
-                )))
+                tool_error_result(&execution_timeout(&name))
             }
         }))
     }
+}
+
+fn execution_timeout(name: &str) -> ToolError {
+    ToolError::timeout(format!(
+        "tool `{name}` timed out before returning a result. A write may already have started or completed; inspect the affected state before retrying. The timeout does not imply rollback"
+    ))
 }
 
 /// The stable `tools/call` result shape.
@@ -474,6 +478,16 @@ fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_timeout_does_not_report_a_confirmed_failed_mutation() {
+        let error = execution_timeout("nession_agent_create_session");
+        assert_eq!(error.kind, crate::error::ToolErrorKind::Timeout);
+        assert!(error.message.contains("inspect the affected state before retrying"));
+        assert!(error.message.contains("does not imply rollback"));
+        let reply = tool_error_result(&error);
+        assert_eq!(reply.is_error, Some(true));
+    }
 
     #[test]
     fn tokens_compare_by_content_and_length() {
