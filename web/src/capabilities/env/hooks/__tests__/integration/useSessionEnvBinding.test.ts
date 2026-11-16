@@ -8,10 +8,7 @@ const envApi = vi.hoisted(() => ({
   reapplySessionEnvBinding: vi.fn(),
 }));
 
-vi.mock('@/capabilities/env', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/capabilities/env')>()),
-  envApi,
-}));
+vi.mock('@/capabilities/env/envApi', () => ({ envApi }));
 
 import { useSessionEnvBinding } from '@/capabilities/env/hooks/useSessionEnvBinding';
 
@@ -99,7 +96,7 @@ describe('useSessionEnvBinding', () => {
       ok = (await result.current.replace(refs)).success;
     });
     expect(ok).toBe(true);
-    expect(envApi.setSessionEnvBinding).toHaveBeenCalledWith('s1', refs);
+    expect(envApi.setSessionEnvBinding).toHaveBeenCalledWith('s1', refs, 2);
     expect(result.current.binding?.observed?.status).toBe('pending_shell');
     expect(result.current.error).toBeNull();
     expect(result.current.pending).toBe(false);
@@ -158,8 +155,19 @@ describe('useSessionEnvBinding', () => {
     await act(async () => {
       await result.current.reapply();
     });
-    expect(envApi.reapplySessionEnvBinding).toHaveBeenCalledWith('s1');
+    expect(envApi.reapplySessionEnvBinding).toHaveBeenCalledWith('s1', 2);
     expect(result.current.binding?.desired_revision).toBe(4);
+  });
+
+  it('omits the revision when no state was ever read', async () => {
+    envApi.getSessionEnvBinding.mockRejectedValue(new Error('socket closed'));
+    const { result } = renderHook(() => useSessionEnvBinding('s1'));
+    await waitFor(() => expect(result.current.error).toBe('socket closed'));
+
+    await act(async () => {
+      await result.current.replace([]);
+    });
+    expect(envApi.setSessionEnvBinding).toHaveBeenCalledWith('s1', [], undefined);
   });
 
   it('a transport failure keeps the last valid binding and reports the error', async () => {

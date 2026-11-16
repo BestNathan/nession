@@ -16,12 +16,19 @@ use nession_protocol::contracts::agent::v1::{
     ClientAgentDeletePayload, ClientAgentDeleteResponsePayload,
 };
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
+    ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
+    ClientEnvWritePayload, ClientEnvWriteResponsePayload,
+};
 use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoResponse};
 use nession_protocol::contracts::session::v1::{
     ClientRelayBeginPayload, ClientSessionAttachPayload, ClientSessionAttachReply,
     ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
+    ClientSessionCreateResponsePayload, ClientSessionEnvBindingGetPayload,
+    ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
+    ClientSessionEnvBindingSetPayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
     ServerSessionListPayload, ServerSessionListReply,
 };
 use nession_protocol::Message;
@@ -47,6 +54,34 @@ impl UnitRequest for AgentListPayload {
 
 impl UnitRequest for ServerSessionListPayload {
     type Reply = ServerSessionListReply;
+}
+
+impl UnitRequest for ClientEnvListPayload {
+    type Reply = ClientEnvListResponsePayload;
+}
+
+impl UnitRequest for ClientEnvGetPayload {
+    type Reply = ClientEnvGetResponsePayload;
+}
+
+impl UnitRequest for ClientEnvWritePayload {
+    type Reply = ClientEnvWriteResponsePayload;
+}
+
+impl UnitRequest for ClientEnvDeletePayload {
+    type Reply = ClientEnvDeleteResponsePayload;
+}
+
+impl UnitRequest for ClientSessionEnvBindingGetPayload {
+    type Reply = ClientSessionEnvBindingResponsePayload;
+}
+
+impl UnitRequest for ClientSessionEnvBindingSetPayload {
+    type Reply = ClientSessionEnvBindingResponsePayload;
+}
+
+impl UnitRequest for ClientSessionEnvBindingReapplyPayload {
+    type Reply = ClientSessionEnvBindingResponsePayload;
 }
 
 impl UnitRequest for ClientSessionAttachPayload {
@@ -151,6 +186,72 @@ impl AttachMode {
 }
 
 impl ClientConnection {
+    /// `server.env.list` — the Server's authoritative inventory (all sources).
+    pub async fn env_list(&mut self) -> Result<ClientEnvListResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_ENV_LIST, ClientEnvListPayload {}))
+            .await
+    }
+
+    /// `server.env.get` — read a named Server or Agent ENV file.
+    pub async fn env_get(
+        &mut self,
+        payload: ClientEnvGetPayload,
+    ) -> Result<ClientEnvGetResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_ENV_GET, payload)).await
+    }
+
+    /// `server.env.write` — create or replace through the canonical in-use gate.
+    pub async fn env_write(
+        &mut self,
+        payload: ClientEnvWritePayload,
+    ) -> Result<ClientEnvWriteResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_ENV_WRITE, payload))
+            .await
+    }
+
+    /// `server.env.delete` — remove through the canonical in-use gate.
+    pub async fn env_delete(
+        &mut self,
+        payload: ClientEnvDeletePayload,
+    ) -> Result<ClientEnvDeleteResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_ENV_DELETE, payload))
+            .await
+    }
+
+    /// `server.session.env.binding.get` — desired + observed binding state.
+    ///
+    /// The reply never carries ENV values: only profile identities, revisions,
+    /// managed key names and the Agent's convergence status.
+    pub async fn session_env_binding_get(
+        &mut self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_ENV_BINDING_GET, payload))
+            .await
+    }
+
+    /// `server.session.env.binding.set` — replace the whole ordered selection.
+    ///
+    /// A present `expected_revision` is a durable compare-and-swap; a stale one
+    /// is answered with a `revision_conflict` refusal and changes nothing.
+    pub async fn session_env_binding_set(
+        &mut self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_ENV_BINDING_SET, payload))
+            .await
+    }
+
+    /// `server.session.env.binding.reapply` — re-resolve the current profiles
+    /// at a new revision without changing the selection.
+    pub async fn session_env_binding_reapply(
+        &mut self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<ClientSessionEnvBindingResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_ENV_BINDING_REAPPLY, payload))
+            .await
+    }
+
     /// `server.agent.list` — every agent the Server knows about, or its refusal.
     ///
     /// Returns the contract's union rather than mapping the refusal into an
@@ -409,6 +510,7 @@ impl ClientConnection {
                     name: name.to_string(),
                     working_dir: working_dir.map(str::to_owned),
                     env_files: Vec::new(),
+                    env_selection_mode: None,
                     sandbox,
                     project_id: None,
                     managed: None,

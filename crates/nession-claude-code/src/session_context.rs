@@ -50,6 +50,29 @@ pub struct SessionClaudeConfig {
     pub remote_memory_dir: Option<String>,
 }
 
+/// The MCP hosting this Agent can offer a Connect operation (#3600).
+///
+/// It is a fact about the host, not about a Session's file, and it deliberately
+/// carries no token: the endpoint's inbound credential is referenced by name in
+/// the Session environment. `None` from
+/// [`SessionContext::claude_mcp_host`] means the host cannot answer at all,
+/// which is distinct from a host that answers "no endpoint".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpHostContext {
+    /// This Agent's own embedded MCP endpoint, when it mounts one.
+    pub agent: Option<McpHostEndpoint>,
+    /// The Server this Agent reports to, when it has one. Only the origin is
+    /// used: the Agent derives the MCP URL from the address it actually reaches.
+    pub server_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpHostEndpoint {
+    /// The URL a process on this host reaches, including the path.
+    pub url: String,
+    pub path: String,
+}
+
 /// The host's view of Nession sessions.
 ///
 /// Implemented by the agent host, which is the only thing that owns session
@@ -102,6 +125,32 @@ pub trait SessionContext: Send + Sync {
     /// conversation: the candidate list is still the answer to that, and a caller
     /// must not read `None` as "nothing here".
     async fn session_claude_binding(&self, session_id: &str) -> Option<Binding>;
+
+    /// One environment variable as the Session's own shell sees it (#3600).
+    ///
+    /// `None` is "the host could not ask"; `Some(None)` is an observation that
+    /// the variable is unset. MCP configuration, CLI invocation and credential
+    /// presence all resolve through the Session rather than the Agent daemon,
+    /// for the same reason [`Self::session_claude_config`] does.
+    ///
+    /// The default answers "cannot ask" so a host that predates this method
+    /// makes the MCP view report `unavailable` instead of reading the daemon's
+    /// environment.
+    async fn session_environment_variable(
+        &self,
+        _session_id: &str,
+        _name: &str,
+    ) -> Option<Option<String>> {
+        None
+    }
+
+    /// The MCP hosting this Agent offers (#3600).
+    ///
+    /// `None` means the host cannot answer. The default says exactly that; the
+    /// agent host overrides it with its configured Server and embedded endpoint.
+    async fn claude_mcp_host(&self) -> Option<McpHostContext> {
+        None
+    }
 }
 
 /// A host that knows nothing — every lookup answers `None`.

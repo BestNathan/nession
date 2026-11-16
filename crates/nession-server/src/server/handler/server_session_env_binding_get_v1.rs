@@ -21,6 +21,7 @@ impl ConnectionHandler {
                     binding: None,
                     warnings: Vec::new(),
                     error: Some(error.to_string()),
+                    refusal: None,
                 },
             )
         };
@@ -45,6 +46,7 @@ impl ConnectionHandler {
                 binding: Some(binding),
                 warnings: Vec::new(),
                 error: None,
+                refusal: None,
             },
         ))
     }

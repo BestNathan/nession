@@ -37,6 +37,18 @@ The optional Git Source declares where the work comes from and which branch or f
 
 Session defaults describe what a new Session created in the Project should start from. They are **desired defaults**, not a binding: the actual Session environment reconciliation remains owned by [#170](https://github.com/BestNathan/nession/issues/170). A legacy Session with no Project association remains valid.
 
+`session_defaults.env_profile_ids` is an ordered list of **Server ENV references**. Project Settings can add, remove and reorder them; Project Detail shows that exact order and marks a reference the ENV Library no longer contains. The Project stores names only: it never copies an ENV file, its contents or its values, and an explicitly empty list is a valid declaration.
+
+On **Project → Create Session** the user chooses one of three explicit intents ([#3649](https://github.com/BestNathan/nession/issues/3649)):
+
+- **Use Project defaults** — inherit the Project's current ordered references;
+- **Custom ENV selection** — replace them with only the ordered files the user picks;
+- **No environment** — explicitly bind zero ENV files, even when the Project declares defaults.
+
+The create request carries this as `env_selection_mode` (`inherit` or `replace`). `replace` uses `env_files` exactly, including an empty list. An absent field preserves the legacy behavior: an empty `env_files` with a Project inherits its defaults, while a non-empty selection replaces them. A missing inherited reference fails the create visibly rather than silently starting with no or different environment.
+
+Project edits affect **future** Sessions only. A created Session owns its realized binding; editing or deleting the Project never rebinds it.
+
 ### Image reference
 
 An optional `image_digest` is an immutable reference (`sha256:<64 hex>`) to an EROFS artifact owned by the global Image Manager. A Project never owns blob bytes, a build engine or a store. Deleting a Project removes only the declaration; globally shared content and every other Project referencing the same digest are untouched.

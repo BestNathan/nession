@@ -517,6 +517,187 @@ const PROJECT: import('@/product/project/types').Project = {
 };
 
 describe('CreateSessionDialog Project mode', () => {
+  const envFile = (name: string) => ({
+    name,
+    source: 'server' as const,
+    size: 5,
+    modified: 0,
+    var_count: 2,
+  });
+  const PROJECT_WITH_DEFAULTS: import('@/product/project/types').Project = {
+    ...PROJECT,
+    session_defaults: {
+      shell: null,
+      env_profile_ids: ['shared.env'],
+      sandbox_policy_ref: null,
+    },
+  };
+
+  it('previews and submits the Project defaults in inherit mode', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    listEnvFilesMock.mockResolvedValue({ files: [envFile('shared.env')] });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={PROJECT_WITH_DEFAULTS}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'inherited');
+    await waitFor(() => {
+      expect(screen.getByTestId('env-effective-item-0')).toHaveTextContent('shared.env');
+    });
+    expect(screen.getByTestId('env-effective-origin')).toHaveTextContent(
+      'From Project defaults',
+    );
+
+    await user.click(screen.getByTestId('create-session-submit'));
+    await waitFor(() => {
+      expect(createSessionMock).toHaveBeenCalledWith('macbook', 'inherited', [], {
+        workingDir: '/Users/nathan/code/nession',
+        projectId: PROJECT.project_id,
+        envSelectionMode: 'inherit',
+      });
+    });
+  });
+
+  it('sends an explicit custom replacement in selection order', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    listEnvFilesMock.mockResolvedValue({
+      files: [envFile('shared.env'), envFile('explicit.env')],
+    });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={PROJECT_WITH_DEFAULTS}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'custom');
+    await user.click(screen.getByTestId('env-mode-custom'));
+    expect(screen.getByTestId('env-effective-origin')).toHaveTextContent(
+      'Explicit replacement',
+    );
+    await user.click(screen.getByText('explicit.env'));
+    await waitFor(() => {
+      expect(screen.getByTestId('env-effective-item-0')).toHaveTextContent('explicit.env');
+    });
+
+    await user.click(screen.getByTestId('create-session-submit'));
+    await waitFor(() => {
+      expect(createSessionMock).toHaveBeenCalledWith(
+        'macbook',
+        'custom',
+        [{ name: 'explicit.env', source: 'server' }],
+        {
+          workingDir: '/Users/nathan/code/nession',
+          projectId: PROJECT.project_id,
+          envSelectionMode: 'replace',
+        },
+      );
+    });
+  });
+
+  it('sends an explicit empty replacement in none mode', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    listEnvFilesMock.mockResolvedValue({ files: [envFile('shared.env')] });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={PROJECT_WITH_DEFAULTS}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'no-env');
+    await user.click(screen.getByTestId('env-mode-none'));
+    expect(screen.getByTestId('env-effective-origin')).toHaveTextContent('Explicit empty');
+    expect(screen.getByTestId('env-effective-empty')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('create-session-submit'));
+    await waitFor(() => {
+      expect(createSessionMock).toHaveBeenCalledWith('macbook', 'no-env', [], {
+        workingDir: '/Users/nathan/code/nession',
+        projectId: PROJECT.project_id,
+        envSelectionMode: 'replace',
+      });
+    });
+  });
+
+  it('blocks creation when an inherited reference is missing', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    listEnvFilesMock.mockResolvedValue({ files: [] });
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={{
+          ...PROJECT,
+          session_defaults: {
+            shell: null,
+            env_profile_ids: ['missing.env'],
+            sandbox_policy_ref: null,
+          },
+        }}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'missing-default');
+    await screen.findByTestId('env-effective-missing-0');
+    await user.click(screen.getByTestId('create-session-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('create-session-error')).toHaveTextContent(
+        'Cannot create Session: missing.env unavailable',
+      );
+    });
+    expect(createSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('requires a custom selection or an explicit none choice', async () => {
+    const user = userEvent.setup();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={PROJECT_WITH_DEFAULTS}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'empty-custom');
+    await user.click(screen.getByTestId('env-mode-custom'));
+    await user.click(screen.getByTestId('create-session-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('create-session-error')).toHaveTextContent(
+        'Select at least one ENV file, or choose No environment.',
+      );
+    });
+    expect(createSessionMock).not.toHaveBeenCalled();
+  });
+
   it('creates with the declared location and project_id', async () => {
     const user = userEvent.setup();
     const onCreated = vi.fn();
@@ -544,6 +725,7 @@ describe('CreateSessionDialog Project mode', () => {
         {
           workingDir: '/Users/nathan/code/nession',
           projectId: PROJECT.project_id,
+          envSelectionMode: 'inherit',
         },
       );
     });

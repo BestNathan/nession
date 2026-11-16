@@ -30,13 +30,37 @@ Session
 
 An empty binding is a valid state: desired revision 0, no profiles, no overlay.
 
+## Create-time selection (#3649)
+
+`server.session.create` carries an optional `env_selection_mode` that states
+whether the request's `env_files` are an explicit replacement or an inheritance
+request:
+
+| Mode | Meaning |
+|---|---|
+| absent | Legacy: non-empty `env_files` replaces; empty `env_files` inherits the named Project's defaults |
+| `inherit` | Resolve the Project's ordered `session_defaults.env_profile_ids`; an explicit `env_files` selection is refused |
+| `replace` | Use `env_files` exactly, including `[]` — the explicit "No environment" choice |
+
+Project defaults are Server ENV references. Resolution, snapshot capture and
+validation happen at create time through the same `resolve_snapshots` path; an
+unsupported mode, an `inherit` without a Project, or a reference the ENV
+Library no longer contains refuses the create. There is no fallback to an empty
+or different environment.
+
+The resolved selection becomes the Session-owned desired binding only after the
+create succeeds (or on the documented ambiguous-create recovery). The Project
+declaration is not consulted again: editing defaults later affects future
+Sessions only, and an existing Session changes only through its own binding
+`set` / `reapply` units.
+
 ## Protocol units
 
 | Unit | Owner | Semantics |
 |---|---|---|
 | `server.session.env.binding.get` | Server | desired + observed state |
-| `server.session.env.binding.set` | Server | replace the whole ordered selection |
-| `server.session.env.binding.reapply` | Server | re-resolve desired profiles at a new revision |
+| `server.session.env.binding.set` | Server | replace the whole ordered selection; `expected_revision` is a durable compare-and-swap |
+| `server.session.env.binding.reapply` | Server | re-resolve desired profiles at a new revision; `expected_revision` is a durable compare-and-swap |
 | `agent.session.env.binding.set` | Agent | materialize one revision (profiles + snapshots) |
 | `agent.session.env.binding.get` | Agent | observed state for one Session |
 | `server.agent.session-env-binding` | Agent → Server | one-way reconnect report of observed state |
@@ -48,6 +72,25 @@ Attach carries no environment for canonical clients. A pre-#170 client that
 still sends `env_snapshots` on attach is translated, explicitly and with a
 warning, into a binding replacement before the attach — never into an
 attach-owned overlay.
+
+## Revision compare-and-swap
+
+`set` and `reapply` accept an optional `expected_revision`. When present, the
+Server applies it as a **durable compare-and-swap** in the database write
+(`Database::compare_and_swap_session_env_binding`), not as a preflight read: a
+concurrent Web or MCP writer that advanced the row first makes the write a
+no-op. The loser receives `success: false` with `refusal:
+"revision_conflict"` (and a sentence naming the expected and current
+revisions), **nothing is persisted, and no `agent.session.env.binding.set` is
+dispatched**. There is deliberately no `force`, `ignore_conflict` or
+automatic retry; the caller re-reads with `get` and decides.
+
+An absent `expected_revision` keeps the legacy unconditional replacement used
+by the `apply`/`unset` adapters and by older Web payloads. First-party Web
+calls send the revision they last read, so a stale tab is refused rather than
+silently overwriting another writer. A conflict is a refusal of intent, not a
+materialization failure: `binding` is absent from that reply, while an Agent
+failure after a committed revision still returns the resulting desired state.
 
 ## Runtime layers
 
@@ -168,6 +211,11 @@ materialized revision is on tmux and waiting for the shell's next prompt;
 tmux failure. A child process already running when the binding changes keeps
 its original environment — this is the honest contract.
 
+When the Agent cannot be asked for the observed half, the state carries an
+`error` naming that failed observation alongside the desired side (and the
+last cached observed state, when there is one). No `in_sync` or other
+convergence status is synthesized from the desired revision alone.
+
 ## Reconnect and migration
 
 - An Agent restart or reconnect reports every recorded observed state; the
@@ -196,6 +244,8 @@ its original environment — this is the honest contract.
 - `crates/nession-server/src/server/handler/tests/server_session_env_binding_v1.rs`:
   replace-whole semantics, phase preservation, desired survival on Agent
   failure, reapply content resolution, legacy unset without re-reading the
-  removed file, Session-scoped query, and reconnect report filtering.
+  removed file, Session-scoped query, reconnect report filtering, and the
+  revision compare-and-swap (a stale writer is refused with no durable change
+  and no Agent dispatch; concurrent store writers have exactly one winner).
 - `crates/nession-agent/src/extension.rs` and the protocol Gates: the manifest
   advertises the units it serves and the generated bindings do not drift.

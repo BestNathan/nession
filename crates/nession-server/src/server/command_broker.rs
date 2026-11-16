@@ -1,8 +1,8 @@
+use nession_runtime::frame::WsFrame;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex, OwnedMutexGuard, RwLock};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, info, warn};
 
 use super::outbound::WsMessageSender;
@@ -511,7 +511,7 @@ impl CommandBroker {
         // agent across everyone talking to the Server. `Err` is the answer to
         // "no room" and to "no connection" alike, and both mean the same thing
         // to the caller — this command cannot be delivered now.
-        let undeliverable = match sender.try_send_command(WsMessage::Text(json)) {
+        let undeliverable = match sender.try_send_command(WsFrame::Text(json)) {
             Ok(()) => {
                 info!(
                     "CommandBroker: sent {} to agent {} (req: {})",

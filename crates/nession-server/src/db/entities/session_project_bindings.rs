@@ -14,6 +14,9 @@ pub struct Model {
     /// Agent-reported tmux creation time fallback; `0` until reconciled.
     pub agent_created_at: i64,
     pub revision: i64,
+    /// `false` marks a tombstone: the Session is unassociated, but the row
+    /// keeps the last revision so it is never reused (#3661).
+    pub associated: bool,
     pub updated_at: i64,
 }
 

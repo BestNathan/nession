@@ -1450,11 +1450,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
             flag.cancel();
         });
+        // `exec` makes the owned child the sleeper itself. A forking shell
+        // leaves a grandchild holding the pipes, so the reader join would wait
+        // for the natural exit — the exact delay this test forbids.
         let mut command = Command::new("sh");
-        // `exec` makes the shell replace itself, so the direct child is the
-        // process that holds the capture pipes. dash otherwise forks `sleep`,
-        // and the surviving grandchild keeps those pipes open after
-        // cancellation (#3681).
         command.args(["-c", "exec sleep 30"]);
         let started = Instant::now();
         let error = control.execute(&mut command, "sleep fixture").unwrap_err();
@@ -1469,8 +1468,8 @@ mod tests {
     fn a_subprocess_wall_time_bound_is_enforced() {
         let control = ProcessControl::with_timeout(Duration::from_millis(100));
         let mut command = Command::new("sh");
-        // Same `exec` requirement as the cancellation fixture: the bounded
-        // direct child must own the pipes, not a surviving grandchild (#3681).
+        // Same reason as the cancellation fixture: the sleeper is the child
+        // the control owns, not a grandchild behind a forking shell.
         command.args(["-c", "exec sleep 30"]);
         let error = control.execute(&mut command, "sleep fixture").unwrap_err();
         assert!(

@@ -10,9 +10,9 @@
 //!   existing command broker. The Server host never creates a tmux Session
 //!   itself.
 //!
-//! Only four Tools exist: one Server-owned discovery Tool and three
-//! Agent-owned Session Tools. Removing an MCP projection did not remove any
-//! Protocol route.
+//! The Server-owned ENV operations use the existing Server route table, including
+//! its in-use and overwrite protections; Agent-owned Session tools still route
+//! to the Agent that owns the Session.
 
 use std::sync::Arc;
 
@@ -20,9 +20,16 @@ use nession_common::config::ServerConfig;
 use nession_mcp::backend::{ClusterBackend, NodeBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::{McpService, ServiceConfig};
+use nession_protocol::contracts::env::v1::{
+    ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload,
+};
+use nession_protocol::contracts::session::v1::{
+    ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
+    ClientSessionEnvBindingSetPayload,
+};
 use nession_protocol::Message;
+use nession_runtime::frame::WsFrame;
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::registry::{AgentRegistry, AgentStatus};
 use crate::server::execution::{
@@ -57,6 +64,8 @@ pub(crate) fn build(
             heartbeat_interval_secs: config.heartbeat_interval_secs,
             terminal_cols: config.terminal_cols,
             terminal_web_font_size: config.terminal_web_font_size,
+            mcp_enabled: config.mcp.enabled,
+            mcp_path: config.mcp.path.clone(),
         },
     );
 
@@ -105,7 +114,7 @@ async fn dispatch_with(
         .await
         .map_err(|error| ToolError::backend(error.to_string()))?;
     match action {
-        HandlerAction::Reply(Some(WsMessage::Text(text))) => {
+        HandlerAction::Reply(Some(WsFrame::Text(text))) => {
             let envelope: Message<Value> = serde_json::from_str(&text)
                 .map_err(|error| ToolError::backend(error.to_string()))?;
             Ok(envelope.payload)
@@ -123,6 +132,70 @@ async fn dispatch_with(
 impl ClusterBackend for ServerClusterBackend {
     async fn list_agents(&self) -> Result<Value, ToolError> {
         dispatch_with(self.handler.clone(), "server.agent.list", json!({})).await
+    }
+
+    async fn env_list(&self) -> Result<Value, ToolError> {
+        dispatch_with(self.handler.clone(), "server.env.list", json!({})).await
+    }
+
+    async fn env_get(&self, payload: ClientEnvGetPayload) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(self.handler.clone(), "server.env.get", payload).await
+    }
+
+    async fn env_write(&self, payload: ClientEnvWritePayload) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(self.handler.clone(), "server.env.write", payload).await
+    }
+
+    async fn env_delete(&self, payload: ClientEnvDeletePayload) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(self.handler.clone(), "server.env.delete", payload).await
+    }
+
+    async fn session_env_binding_get(
+        &self,
+        payload: ClientSessionEnvBindingGetPayload,
+    ) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(
+            self.handler.clone(),
+            "server.session.env.binding.get",
+            payload,
+        )
+        .await
+    }
+
+    async fn session_env_binding_set(
+        &self,
+        payload: ClientSessionEnvBindingSetPayload,
+    ) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(
+            self.handler.clone(),
+            "server.session.env.binding.set",
+            payload,
+        )
+        .await
+    }
+
+    async fn session_env_binding_reapply(
+        &self,
+        payload: ClientSessionEnvBindingReapplyPayload,
+    ) -> Result<Value, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_with(
+            self.handler.clone(),
+            "server.session.env.binding.reapply",
+            payload,
+        )
+        .await
     }
 }
 

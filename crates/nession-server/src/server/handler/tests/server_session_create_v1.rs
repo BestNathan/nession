@@ -1138,6 +1138,239 @@ async fn project_session_create_explicit_env_selection_wins() {
     assert_eq!(stored.profiles[0].profile.name, "explicit.env");
 }
 
+/// #3649: `inherit` states the Project-defaults intent explicitly and applies
+/// the same ordered Server references the legacy empty-selection path uses.
+#[tokio::test]
+async fn explicit_inherit_mode_applies_project_defaults() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("shared.env", "SHARED=1", false)
+        .await
+        .unwrap();
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["shared.env"]),
+    )
+    .await;
+
+    let (reply, command) = create_and_capture(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "explicit-inherit",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+            "env_selection_mode": "inherit",
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], true);
+    let snapshots = command["payload"]["env_snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0]["name"], "shared.env");
+    let stored = h
+        .env_service
+        .bindings
+        .get("a1:explicit-inherit")
+        .await
+        .unwrap()
+        .expect("inherit materializes the Session-owned binding");
+    assert_eq!(stored.profiles[0].profile.name, "shared.env");
+}
+
+/// `inherit` and an explicit selection are contradictory intents; the request
+/// is refused instead of silently preferring one of them.
+#[tokio::test]
+async fn explicit_inherit_mode_rejects_an_explicit_selection() {
+    let mut h = handler_with_online_agent().await;
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["shared.env"]),
+    )
+    .await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "contradictory",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+            "env_selection_mode": "inherit",
+            "env_files": [{ "name": "explicit.env", "source": "server" }],
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(
+        reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("cannot be combined with env_files"),
+        "{reply}"
+    );
+    assert!(h.session_registry.get("a1:contradictory").await.is_none());
+}
+
+/// Inheriting is meaningless without a Project to inherit from.
+#[tokio::test]
+async fn explicit_inherit_mode_requires_a_project() {
+    let mut h = handler_with_online_agent().await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "no-project",
+            "env_selection_mode": "inherit",
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(
+        reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("requires a Project"),
+        "{reply}"
+    );
+}
+
+/// `replace` is the complete ordered selection, including the explicit empty
+/// list that binds no environment even when the Project declares defaults.
+#[tokio::test]
+async fn explicit_replace_mode_uses_the_request_exactly() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("shared.env", "SHARED=1", false)
+        .await
+        .unwrap();
+    h.env_service
+        .store
+        .write("explicit.env", "EXPLICIT=1", false)
+        .await
+        .unwrap();
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["shared.env"]),
+    )
+    .await;
+
+    let (reply, command) = create_and_capture(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "explicit-replace",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+            "env_selection_mode": "replace",
+            "env_files": [{ "name": "explicit.env", "source": "server" }],
+        }),
+    )
+    .await;
+    assert_eq!(reply["payload"]["success"], true);
+    let snapshots = command["payload"]["env_snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0]["name"], "explicit.env");
+
+    let (reply, command) = create_and_capture(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "explicit-empty",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+            "env_selection_mode": "replace",
+            "env_files": [],
+        }),
+    )
+    .await;
+    assert_eq!(reply["payload"]["success"], true);
+    assert_eq!(command["payload"]["env_snapshots"], json!([]));
+    assert!(
+        h.env_service
+            .bindings
+            .get("a1:explicit-empty")
+            .await
+            .unwrap()
+            .is_none(),
+        "an explicit empty replacement starts from no binding"
+    );
+}
+
+/// An unsupported mode is its own deterministic refusal, not the generic
+/// malformed-payload error.
+#[tokio::test]
+async fn unsupported_env_selection_mode_is_refused_deterministically() {
+    let mut h = handler_with_online_agent().await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "bad-mode",
+            "env_selection_mode": "append",
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(
+        reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("env_selection_mode must be 'inherit' or 'replace'"),
+        "{reply}"
+    );
+}
+
+/// A missing inherited reference fails the create visibly; it never falls back
+/// to an empty or different environment.
+#[tokio::test]
+async fn inherit_mode_fails_visibly_when_a_default_is_missing() {
+    let mut h = handler_with_online_agent().await;
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["missing.env"]),
+    )
+    .await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "missing-default",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+            "env_selection_mode": "inherit",
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(
+        reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Env file not found"),
+        "{reply}"
+    );
+    assert!(h.session_registry.get("a1:missing-default").await.is_none());
+}
+
 /// SC-03 immutability: a later Project defaults edit does not touch an
 /// existing Session's realized binding.
 #[tokio::test]

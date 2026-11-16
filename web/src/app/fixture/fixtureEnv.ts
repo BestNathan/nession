@@ -54,6 +54,8 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   /#/fixture/workspace?capability=env&env=error        → materialization failed
  *   /#/fixture/workspace?capability=env&env=unavailable  → Agent did not report
  *   /#/fixture/workspace?capability=env&env=race         → first list answer held; imports mutate
+ *   /#/fixture/workspace?capability=env&env=deferred-binding&git=selection-overlap
+ *                                                        → Session A SET held across A→B selection
  */
 
 /**
@@ -81,6 +83,13 @@ const PROD_CONTENT = [
 
 /** `local.env` — a quiet third row: no sensitivity, no usage, no warnings. */
 const LOCAL_CONTENT = ['DEBUG=true', 'PORT=13000'].join('\n');
+
+/**
+ * A second Server profile for the #3649 Project-defaults Case. It is only
+ * offered by `?env=project-env`, so the canonical Environment screens keep
+ * their three-file baseline.
+ */
+const SHARED_CONTENT = ['SHARED=project-default'].join('\n');
 
 /** The sessions the server would name for `prod.env` — including none of the fixture's own. */
 const PROD_IN_USE_BY = ['api-tests', 'deploy'];
@@ -122,6 +131,9 @@ function contentFor(payload: Record<string, unknown>): EnvGetResponse {
   if (key === 'agent:devbox-01:local.env') {
     return { success: true, content: LOCAL_CONTENT, in_use_by: [] };
   }
+  if (key === 'server::shared.env') {
+    return { success: true, content: SHARED_CONTENT, in_use_by: [] };
+  }
   return { success: false, error: `env file not found: ${String(payload.name)}` };
 }
 
@@ -139,6 +151,7 @@ const BINDING_REF: EnvFileRef = { name: 'staging.env', source: 'server' };
 /** The keys a profile would manage, derived from the content the fixture serves. */
 const KEYS: Record<string, string[]> = {
   'server::staging.env': ['API_BASE', 'API_KEY', 'EMPTY_OVERRIDE', 'FEATURE_FLAGS', 'LOG_LEVEL', 'NODE_ENV'],
+  'server::shared.env': ['SHARED'],
   'agent:devbox-01:prod.env': ['DATABASE_URL', 'DB_PASSWORD', 'LOG_LEVEL', 'NODE_ENV'],
   'agent:devbox-01:local.env': ['DEBUG', 'PORT'],
 };
@@ -344,6 +357,12 @@ export interface FixtureEnvControl {
   isHeld: () => boolean;
 }
 
+/** #3444: deferred Session A binding reply, controlled from Playwright. */
+export interface FixtureDeferredBindingControl {
+  releaseBinding: () => void;
+  isHeld: () => boolean;
+}
+
 /** Read one mutable `env=race` profile, including a just-imported one. */
 function raceEnvContent(
   contents: ReadonlyMap<string, string>,
@@ -408,7 +427,17 @@ function raceEnvWrite(
 export function fixtureEnvSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('env') ?? 'profiles';
   const race = scenario === 'race';
+  const deferredBinding = scenario === 'deferred-binding';
   const files: EnvFileInfo[] = scenario === 'empty' ? [] : [...FILES];
+  if (scenario === 'project-env') {
+    files.push({
+      name: 'shared.env',
+      source: 'server',
+      size: SHARED_CONTENT.length,
+      modified: 1756425600,
+      var_count: 1,
+    });
+  }
   // The binding is the one mutable piece: SET and REAPPLY change the revision
   // this surface answers from then on.
   let binding = bindingFor(scenario);
@@ -417,11 +446,23 @@ export function fixtureEnvSurface(search: string): PluginSurface {
   // after it. Every other scenario keeps the stateless read-only answers.
   const contents = new Map<string, string>([
     ['server::staging.env', STAGING_CONTENT],
+    ['server::shared.env', SHARED_CONTENT],
     ['agent:devbox-01:prod.env', PROD_CONTENT],
     ['agent:devbox-01:local.env', LOCAL_CONTENT],
   ]);
   let holdNextList = race;
   let releaseHeldList: (() => void) | null = null;
+  let releaseHeldBinding: (() => void) | null = null;
+
+  if (deferredBinding && typeof window !== 'undefined') {
+    (window as Window & { fixtureEnvBinding?: FixtureDeferredBindingControl }).fixtureEnvBinding = {
+      releaseBinding: () => {
+        releaseHeldBinding?.();
+        releaseHeldBinding = null;
+      },
+      isHeld: () => releaseHeldBinding !== null,
+    };
+  }
 
   if (race && typeof window !== 'undefined') {
     (window as Window & { fixtureEnv?: FixtureEnvControl }).fixtureEnv = {
@@ -474,7 +515,18 @@ export function fixtureEnvSurface(search: string): PluginSurface {
         const refs = Array.isArray(payload.profiles)
           ? (payload.profiles as EnvFileRef[])
           : [];
-        binding = afterSet(binding, refs);
+        const next = afterSet(binding, refs);
+        if (deferredBinding && payload.session_id === FIXTURE_SELECTED_ID) {
+          // The response is held while the user changes the active Session;
+          // the original Server mutation still belongs exclusively to A.
+          return new Promise<T>((resolve) => {
+            releaseHeldBinding = () => {
+              binding = next;
+              resolve({ ...next, warnings: ['A-only late warning'] } as T);
+            };
+          });
+        }
+        binding = next;
         return Promise.resolve(binding as T);
       }
       if (type === SESSION_ENV_BINDING_REAPPLY_WIRE) {

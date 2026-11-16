@@ -1,0 +1,9 @@
+schema_version: 1
+issue: 3649
+criterion: SC-03
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: protocol
+    entry: verify.cjs
+result_policy: all-pass

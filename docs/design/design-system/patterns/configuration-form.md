@@ -97,6 +97,7 @@ Executable form: `data-recipe="configuration-form"` plus `data-recipe-part="form
 The recipe is domain-agnostic. It does not know what a Project Location, a Sandbox resource key or an environment profile is. Those semantics stay with their owners:
 
 - `ProjectLocationsEditor` owns the location rows and their #3136 compact geometry;
+- `ProjectSessionDefaultsEditor` owns the ordered Server ENV reference rows and reuses `EnvFileMultiSelect` for the picker;
 - `SandboxKvEditor`/`SandboxKvRow` own native Key/Value suggestions and the Agent's measured availability;
 - `SandboxStringListEditor` owns an explicit list's add/edit/remove path;
 - each domain owns its draft, validation and submit action.
@@ -120,7 +121,8 @@ First consumers:
 
 - Project Create/Settings through
   `web/src/product/project/components/ProjectFormFields.tsx`,
-  `ProjectLocationsEditor.tsx` and `ProjectDialogs.tsx`;
+  `ProjectLocationsEditor.tsx`, `ProjectSessionDefaultsEditor.tsx` and
+  `ProjectDialogs.tsx`;
 - the Sandbox Outside composer through
   `SandboxFilesystemFields.tsx`, `SandboxNetworkProcessFields.tsx`,
   `SandboxKvEditor.tsx`/`SandboxKvRow.tsx` and `SandboxSyscallProfile.tsx`;

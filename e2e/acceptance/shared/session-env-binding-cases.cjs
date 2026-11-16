@@ -467,7 +467,9 @@ function emitFailure(error) {
 }
 
 module.exports = {
+  AGENT_ID,
   REPO_ROOT,
+  TOKEN,
   assertRan,
   authenticate,
   createSessionWithProfiles,
@@ -477,6 +479,7 @@ module.exports = {
   killSession,
   openSocket,
   reapplyBinding,
+  request,
   runTargetCheckoutTests,
   runWebTestsWithNames,
   runtimeFromEnv,

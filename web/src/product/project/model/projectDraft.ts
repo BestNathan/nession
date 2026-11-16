@@ -1,8 +1,8 @@
 import type { ProjectUpdatePayload } from '@/generated/protocol/core/server-project-update/v1';
-import type { Project, ProjectDraft } from '@/product/project/types';
+import type { Project, ProjectDraft, ProjectSessionDefaults } from '@/product/project/types';
 
 export function emptyProjectDraft(): ProjectDraft {
-  return { name: '', locations: [] };
+  return { name: '', locations: [], envProfileIds: [] };
 }
 
 /** Client-side preflight; the Server's canonical validation remains authoritative. */
@@ -43,6 +43,7 @@ export function draftOf(project: Project): ProjectDraft {
     description: project.description ?? undefined,
     source: project.source ?? undefined,
     locations: project.locations,
+    envProfileIds: project.session_defaults?.env_profile_ids ?? [],
     image_digest: project.image_digest ?? undefined,
   };
 }
@@ -71,7 +72,39 @@ export function updatePayload(project: Project, draft: ProjectDraft): ProjectUpd
         }
       : null,
     locations: normalizedLocations(draft),
-    session_defaults: project.session_defaults ?? null,
+    session_defaults: sessionDefaultsOf(project, draft),
     image_digest: draft.image_digest?.trim() || null,
   };
+}
+
+/**
+ * The Session-defaults replacement for an update (#3649).
+ *
+ * Only ENV references are edited here. `shell` and `sandbox_policy_ref` are
+ * preserved because the update unit replaces the whole declaration, and a
+ * Project that had no defaults still gains an object when the user explicitly
+ * saves an empty ENV list — the empty list is a declaration, not an absence.
+ */
+export function sessionDefaultsOf(
+  project: Project,
+  draft: ProjectDraft,
+): ProjectSessionDefaults | null {
+  const existing = project.session_defaults;
+  if (!existing && draft.envProfileIds.length === 0) {
+    return null;
+  }
+  return {
+    shell: existing?.shell ?? null,
+    env_profile_ids: draft.envProfileIds,
+    sandbox_policy_ref: existing?.sandbox_policy_ref ?? null,
+  };
+}
+
+/** The create payload's optional defaults: present when the user selected any. */
+export function createSessionDefaults(
+  draft: ProjectDraft,
+): ProjectSessionDefaults | undefined {
+  return draft.envProfileIds.length > 0
+    ? { env_profile_ids: draft.envProfileIds }
+    : undefined;
 }
