@@ -336,7 +336,13 @@ function issueReferencePattern(owner, name) {
 function collectIssueReferences(text, owner, name) {
   const numbers = new Set();
   const reference = new RegExp(issueReferencePattern(owner, name), 'gi');
-  for (const match of String(text ?? '').matchAll(reference)) {
+  const source = String(text ?? '');
+  for (const match of source.matchAll(reference)) {
+    // A source PR may mention another pull request in its explanation.
+    // GitHub exposes PRs via the Issues API, but they are not Acceptance Issues.
+    // Only explicit Issue associations may create release obligations.
+    const preceding = source.slice(0, match.index);
+    if (/\b(?:PRs?|pull[\s-]+requests?)\s*:?\s*$/i.test(preceding)) continue;
     const value = match[1] ?? match[2] ?? match[3];
     if (value) numbers.add(Number(value));
   }
@@ -374,7 +380,11 @@ function parseAssociatedIssueNumbers(body, owner, name) {
         : -1;
     if (associationStart < 0) continue;
 
-    for (const number of collectIssueReferences(rawLine.slice(associationStart), owner, name)) {
+    // An em dash starts a descriptive/explanatory clause, not another Issue
+    // association. E.g. "Addresses #3624 — ... PR #3627 ... publisher #3632".
+    // Keep genuine comma/slash-separated Issue lists before that boundary.
+    const association = rawLine.slice(associationStart).split(/\s+[—–]\s+/)[0];
+    for (const number of collectIssueReferences(association, owner, name)) {
       numbers.add(number);
     }
   }
@@ -827,6 +837,38 @@ function runSelfTest() {
       'nession',
     ),
     [],
+  );
+
+  // #3688: a historical PR reference and prose after an em dash must not
+  // manufacture a non-acceptance Issue obligation during Main promotion.
+  assert.deepEqual(
+    parsePreMergeIssueNumbers(
+      [
+        'Refs #3653',
+        'Implements #3653',
+        'Addresses #3624 — SC-04 integrated MCP Pages incremental ' +
+          'projection, verified on merged staging SHA abc123 after the ' +
+          'separately merged trusted publisher #3632; SC-01..03 ' +
+          'remain owned by PR #3627.',
+      ].join('\n'),
+      'BestNathan', 'nession',
+      'feat(pages): skip source-verified unchanged exporter',
+    ),
+    [3624, 3653],
+  );
+  assert.deepEqual(
+    parsePreMergeIssueNumbers(
+      'Refs #40, #41; see PR #42 and pull request #43',
+      'BestNathan', 'nession',
+    ),
+    [40, 41],
+    'an explicitly identified PR is never a Requirement association',
+  );
+  assert.deepEqual(
+    parsePreMergeIssueNumbers('Implements the first slice of #42 / #43',
+      'BestNathan', 'nession'),
+    [42, 43],
+    'multiple genuine Issue associations remain mandatory',
   );
 
   // A merged ref owns only the PR that merged as that exact commit. GitHub
