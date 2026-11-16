@@ -17,6 +17,8 @@ const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
 const MARKER='nession-convergence-pr:v1';
+const RISK_CATEGORIES=['tooling-only','e2e-runner','app-runtime',
+  'e2e-fixture-catalog','mixed','unknown'];
 const sha256=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const git=(root,...args)=>execFileSync('git',args,{
   cwd:root,encoding:'utf8',maxBuffer:8_000_000,
@@ -40,8 +42,7 @@ export function convergenceBatchDigest(batch){
   if(!safeBranch(batch?.branch)||![batch?.main_sha,batch?.lane_sha,
     batch?.integration_head].every(x=>SHA.test(x??''))||
     !Array.isArray(batch.changedPaths)||!batch.changedPaths.length||
-    !['tooling-only','e2e-runner','app-runtime','e2e-fixture-catalog','mixed','unknown']
-      .includes(batch.impact?.category)||
+    !RISK_CATEGORIES.includes(batch.impact?.category)||
     !['newIds','regressionIds','removed'].every(k=>Array.isArray(batch[k])))
     throw Error('invalid source-bound convergence digest input');
   return sha256({
@@ -157,7 +158,7 @@ function parseMarker(body){
 // Rebuild the batch from immutable Git bytes and authenticate the PR metadata.
 // For a merged staging push, targetSha is the merge commit and its second
 // parent must be the PR integration head. No Issue is consulted or created.
-export function verifiedConvergenceBatch(pr,repoRoot,baseSha,
+function inspectConvergenceSource(pr,repoRoot,baseSha,
   targetSha=pr?.head?.sha,{requireCheckout=true}={}){
   if(!isNativeConvergencePr(pr)||pr.head?.repo?.full_name!==REPO||
     pr.base?.repo?.full_name!==REPO||!safeBranch(pr.base?.ref)||
@@ -192,6 +193,47 @@ export function verifiedConvergenceBatch(pr,repoRoot,baseSha,
   }
   const batch=planBatch({branch:marker.branch,main_sha:marker.main,
     lane_sha:marker.lane,integration_head:marker.head,repoRoot});
+  return {batch,marker};
+}
+
+// Only a trusted main-owned policy revision may retire a still-source-valid
+// historical PR. This is never merge authorization: verifiedConvergenceBatch
+// continues to reject the old digest, and the controller mints a fresh head.
+export function revisedNativeConvergenceRisk(pr,repoRoot,baseSha,liveMainSha){
+  if(!SHA.test(liveMainSha??'')||
+      pr?.user?.login!=='nession-publisher[bot]'||
+      pr?.title!=='chore(release): integrate main into '+pr?.base?.ref+
+        ' via checked head')
+    throw Error('native convergence policy retirement requires bot ownership');
+  const {batch,marker}=inspectConvergenceSource(pr,repoRoot,baseSha,
+    pr.head?.sha,{requireCheckout:false});
+  const currentDigest=convergenceBatchDigest(batch);
+  // A mismatched marker on the same main ancestor is not a policy revision.
+  if(marker.main===liveMainSha){
+    if(marker.digest!==currentDigest)
+      throw Error('native convergence digest mismatch without main advance');
+    return false;
+  }
+  if(!ancestors(repoRoot,marker.main,liveMainSha))
+    throw Error('native convergence policy retirement main ancestry invalid');
+  if(marker.digest===currentDigest)return false;
+  // Digest must match exactly the same Git-derived paths and E2E obligations,
+  // with only one formerly valid risk category changed by the trusted policy.
+  // Arbitrary digest mismatches, altered source SHAs, and malformed markers
+  // remain fail-closed, even for a bot-owned PR.
+  const priorRisk=RISK_CATEGORIES.find(category=>
+    category!==batch.impact.category &&
+    convergenceBatchDigest({...batch,impact:{...batch.impact,category}})===
+      marker.digest);
+  if(!priorRisk)
+    throw Error('native convergence digest is not a historical risk-only revision');
+  return true;
+}
+
+export function verifiedConvergenceBatch(pr,repoRoot,baseSha,
+  targetSha=pr?.head?.sha,{requireCheckout=true}={}){
+  const {batch,marker}=inspectConvergenceSource(pr,repoRoot,baseSha,
+    targetSha,{requireCheckout});
   if(convergenceBatchDigest(batch)!==marker.digest)
     throw Error('native convergence batch digest differs from Git history');
   return batch;
@@ -392,6 +434,58 @@ export function selfTest(){
     run('update-ref','refs/remotes/origin/main',later);
     run('checkout','--detach',head);
     assert.deepEqual(convergenceE2ESelection(pr,root,lane),selected);
+    // #3526: a policy-only risk revision on trusted, advanced Main must retire
+    // an old bot-authored native PR, never relabel its immutable marker.
+    const botPr={...pr,title:'chore(release): integrate main into staging via checked head',
+      user:{login:'nession-publisher[bot]'}};
+    const previousRisk=source.impact.category==='unknown'?'mixed':'unknown';
+    const historical={...source,impact:{...source.impact,category:previousRisk}};
+    const stale={...botPr,body:botPr.body.replace(
+      convergencePrMarker(source),convergencePrMarker(historical))};
+    assert.equal(revisedNativeConvergenceRisk(botPr,root,lane,later),false,
+      'advanced Main alone must preserve a still-valid pinned digest');
+    assert.throws(()=>verifiedConvergenceBatch(stale,root,lane),/digest/,
+      'a superseded PR never qualifies against the new risk policy');
+    assert.equal(revisedNativeConvergenceRisk(stale,root,lane,later),true);
+    assert.throws(()=>revisedNativeConvergenceRisk(stale,root,lane,main),
+      /without main advance/);
+    assert.throws(()=>revisedNativeConvergenceRisk(
+      {...stale,user:{login:'human'}},root,lane,later),/bot ownership/);
+    assert.throws(()=>revisedNativeConvergenceRisk(
+      {...stale,title:'Manual sync'},root,lane,later),/bot ownership/);
+    assert.throws(()=>revisedNativeConvergenceRisk(
+      {...stale,body:stale.body.replace(convergenceBatchDigest(historical),
+        '0'.repeat(64))},root,lane,later),/historical risk-only revision/);
+    assert.throws(()=>revisedNativeConvergenceRisk(
+      {...stale,body:stale.body+'\n'+convergencePrMarker(historical)},
+      root,lane,later),/duplicated/);
+    assert.throws(()=>revisedNativeConvergenceRisk(
+      {...stale,base:{...stale.base,sha:main}},root,lane,later),
+      /base advanced/);
+    assert.throws(()=>revisedNativeConvergenceRisk(
+      {...stale,head:{...stale.head,repo:{full_name:'attacker/fork'}}},
+      root,lane,later),/identity/);
+    const falseTree=run('rev-parse',lane+'^{tree}');
+    const forgedHead=run('commit-tree',falseTree,'-p',lane,'-p',main,
+      '-m','forged integration tree');
+    const forgedBatch={...historical,integration_head:forgedHead};
+    const forged={...stale,head:{...stale.head,sha:forgedHead},
+      body:stale.body.replace(convergencePrMarker(historical),
+        convergencePrMarker(forgedBatch))};
+    assert.throws(()=>revisedNativeConvergenceRisk(forged,root,lane,later),
+      /tree differs/);
+    const refreshedTree=run('merge-tree','--write-tree',lane,later).split(/\s+/)[0];
+    const refreshedHead=run('commit-tree',refreshedTree,'-p',lane,'-p',later,
+      '-m','new source-pinned integration');
+    const refreshed=planBatch({branch:'staging',main_sha:later,lane_sha:lane,
+      integration_head:refreshedHead,repoRoot:root});
+    assert.notEqual(convergencePrMarker(refreshed),convergencePrMarker(historical));
+    assert.deepEqual(run('rev-list','--parents','-n','1',refreshedHead).split(/\s+/),
+      [refreshedHead,lane,later],
+      'new integration retains staging first parent and current Main second parent');
+    assert.deepEqual([...refreshed.newIds,...refreshed.regressionIds].sort(),
+      [...source.newIds,...source.regressionIds].sort(),
+      'new source still declares historical browser E2E obligations');
     // The resulting staging merge has first parent lane and second parent H.
     const merged=run('commit-tree',tree,'-p',lane,'-p',head,
       '-m','merge checked source into staging');
