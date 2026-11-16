@@ -1,0 +1,132 @@
+name: Deploy / Staging Rollout Readback
+
+# #3674: on-demand & main-owned diagnostic after ACR/GitOps succeeded but
+# Kubernetes read-only identity timed out. This is NOT an acceptance receipt.
+on:
+  push:
+    branches: ['main']
+    paths:
+      - '.github/workflows/deploy-staging-rollout-readback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-rollout-readback
+  cancel-in-progress: false
+
+jobs:
+  readback:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: nession-staging-identity
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read current trusted GitOps Staging source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin gitops
+          git show origin/gitops:environments/staging/nession/kustomization.yaml > "$RUNNER_TEMP/overlay.yaml"
+          short="$(awk '/newTag: server-/{sub(/.*server-/,""); print; exit}' "$RUNNER_TEMP/overlay.yaml")"
+          [[ "$short" =~ ^[0-9a-f]{7,40}$ ]] || exit 1
+          for role in agent server ui; do
+            grep -Eq "newTag: ${role}-${short}[[:space:]]*$" "$RUNNER_TEMP/overlay.yaml" || exit 1
+          done
+          echo "DEPLOYED_SHORT=$short" >> "$GITHUB_ENV"
+          echo "NAMESPACE=nession" >> "$GITHUB_ENV"
+          echo "GITOPS_REVISION=$(git rev-parse origin/gitops)" >> "$GITHUB_ENV"
+
+      - name: Install approved GOST client
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gost.tgz" \
+            https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/gost.tgz" -C "$RUNNER_TEMP" gost
+          chmod 755 "$RUNNER_TEMP/gost"
+
+      - name: Start job-owned API-only VPN
+        env:
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+        shell: bash
+        run: bash scripts/ci/deploy-identity-tunnel.sh start
+
+      - name: Read only Staging deployment and pod readiness
+        env:
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export KUBECONFIG="$RUNNER_TEMP/nession-ci-kubeconfig"
+          [[ -n "$KUBE_CONFIG_CI" ]] || { echo "::error::Kubernetes credential unavailable"; exit 1; }
+          if [[ "$KUBE_CONFIG_CI" == *'apiVersion:'* ]]; then
+            printf '%s\n' "$KUBE_CONFIG_CI" > "$KUBECONFIG"
+          else
+            printf '%s' "$KUBE_CONFIG_CI" | base64 -d > "$KUBECONFIG"
+          fi
+          chmod 600 "$KUBECONFIG"
+          for resource in deployments pods; do
+            kubectl --request-timeout=20s auth can-i get "$resource" -n "$NAMESPACE" --quiet ||
+              { echo "::error::missing read-only permission for $resource"; exit 1; }
+          done
+          for action in "get secrets" "list secrets" "create deployments" "delete pods" "create pods/exec" "get nodes" "list namespaces"; do
+            if kubectl --request-timeout=20s auth can-i $action -n "$NAMESPACE" --quiet; then
+              echo "::error::readback identity has unexpected privilege ($action)"; exit 1
+            fi
+          done
+          kubectl --request-timeout=20s -n "$NAMESPACE" get deployments -o json > "$RUNNER_TEMP/deployments.json"
+          kubectl --request-timeout=20s -n "$NAMESPACE" get pods -o json > "$RUNNER_TEMP/pods.json"
+          # Only allowlisted deployment and pod status fields reach the logs;
+          # never dump raw JSON, environment, events, kubeconfig or secrets.
+          jq -c --arg short "$DEPLOYED_SHORT" '
+            {
+              schema: "nession-staging-rollout-readback-v1",
+              desired_sha: $short,
+              deployments: [.items[] |
+                select(.metadata.name | test("^nession-(agent|server|ui)-staging$")) |
+                {name: .metadata.name,
+                 generation: .metadata.generation,
+                 observed_generation: (.status.observedGeneration // 0),
+                 desired: (.spec.replicas // 1),
+                 updated: (.status.updatedReplicas // 0),
+                 ready: (.status.readyReplicas // 0),
+                 available: (.status.availableReplicas // 0),
+                 image_tag: (.spec.template.spec.containers[0].image // "" | split(":") | last),
+                 conditions: [(.status.conditions // [])[] |
+                   {type, status, reason}]}]
+            }' "$RUNNER_TEMP/deployments.json" | tee "$RUNNER_TEMP/deploy-status.txt"
+          jq -c '
+            {
+              pod_status: [.items[] |
+                select(.metadata.labels.env == "staging") |
+                {phase: (.status.phase // "Unknown"),
+                 containers: [(.status.containerStatuses // [])[] |
+                   {ready: .ready, restart_count: .restartCount,
+                    image_tag: (.image // "" | split(":") | last),
+                    image_id: (.imageID // "" | split("@") | last),
+                    waiting_reason: (.state.waiting.reason // null),
+                    terminated_reason: (.state.terminated.reason // null)}]}]
+            }' "$RUNNER_TEMP/pods.json" | tee "$RUNNER_TEMP/pod-status.txt"
+          {
+            echo "### Read-only Staging rollout (NOT an acceptance pass)"
+            echo "GitOps revision: \`$GITOPS_REVISION\`, desired image tag suffix: \`$DEPLOYED_SHORT\`."
+            echo "\`\`\`json"
+            cat "$RUNNER_TEMP/deploy-status.txt" "$RUNNER_TEMP/pod-status.txt"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "STAGING_ROLLOUT_READBACK_V1 completed (no cluster writes)"
+
+      - name: Clean up only job-owned VPN and credentials
+        if: always()
+        shell: bash
+        run: bash scripts/ci/deploy-identity-tunnel.sh cleanup
