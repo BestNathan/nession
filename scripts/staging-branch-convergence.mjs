@@ -611,6 +611,8 @@ function reconcile(plan) {
         if(!approval.approved){
           record.outcome='BLOCKED';
           record.reason=approval.reason;
+          if(nativeAuto)publishQualificationStatus(repo,expectedHead,'failure',
+            'Native sync approval denied: '+approval.reason);
           if(legacy)record.issue_approval_command=approval.approval_command;
           else{
             if(approval.full_run_id)record.full_run_id=approval.full_run_id;
@@ -628,6 +630,8 @@ function reconcile(plan) {
       if (!decision.ready) {
         record.outcome = 'BLOCKED';
         record.reason = decision.reason;
+        if(nativeAuto)publishQualificationStatus(repo,expectedHead,'failure',
+          'Convergence qualification denied: '+decision.reason);
         if (decision.reason === 'MERGE_CONFLICT') {
           record.agent_analysis = dispatchConflictReview(repo, receipt, action, plan, lane);
         }
