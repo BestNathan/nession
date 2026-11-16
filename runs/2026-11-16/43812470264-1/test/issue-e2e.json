@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "fbc4aa2e4faa8e03040f42b3d492c969d906bde4",
+  "run_id": 43812470264,
+  "run_attempt": 1,
+  "plan_digest": "38264f0598df6eb2c5658dea5dd8de95ef4d91aa0ac0bc079bba9d26d9b0711a",
+  "artifact_digest": "sha256:46d13c9d196bada4c826d53833141946642fb28ef54512f8a08e4e32cdb23d27",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 222
+    },
+    {
+      "id": "fixture-env",
+      "result": "Pass",
+      "discovered": 21,
+      "passed": 21,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 139
+    },
+    {
+      "id": "pages-mcp",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 12
+    },
+    {
+      "id": "project-session-create",
+      "result": "Pass",
+      "discovered": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 377
+    },
+    {
+      "id": "session-metadata",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 38
+    }
+  ]
+}
