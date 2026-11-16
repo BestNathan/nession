@@ -270,20 +270,28 @@ mod mcp_cancellation_tests {
         let key = ResourceKey::Session("held-session".to_string());
         let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
         let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
-        lane.enqueue(key.clone(), Box::pin(async move {
-            let _ = started_sender.send(());
-            let _ = release_receiver.await;
-        })).await;
+        lane.enqueue(
+            key.clone(),
+            Box::pin(async move {
+                let _ = started_sender.send(());
+                let _ = release_receiver.await;
+            }),
+        )
+        .await;
         started_receiver.await.expect("the first mutation claimed this key");
 
         let (request, admission) = PendingMutation::new();
         let executed = Arc::new(AtomicBool::new(false));
         let observed = Arc::clone(&executed);
-        lane.enqueue(key, Box::pin(async move {
-            if admission.try_begin() {
-                observed.store(true, Ordering::SeqCst);
-            }
-        })).await;
+        lane.enqueue(
+            key,
+            Box::pin(async move {
+                if admission.try_begin() {
+                    observed.store(true, Ordering::SeqCst);
+                }
+            }),
+        )
+        .await;
         drop(request); // exactly what an outer MCP timeout does to run_keyed
         release_sender.send(()).expect("release blocker");
         lane.drain().await;
