@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0f2622442dbaac988e5eaa36564aca6d9297bc7656797259df62318e342530d6",
+  "run_id": 43820503209,
+  "run_attempt": 1,
+  "issue": 3704,
+  "criterion": "SC-01",
+  "criterion_text": "An expired/abandoned create/kill request parked behind a controlled shared-lane barrier never subsequently starts the queued side effect; independent live Session/tmux state remains unchanged after barrier release.",
+  "stage": "staging",
+  "target_sha": "5211e13106d94b7148de79a35ba9dc6cdbc8366f",
+  "contract_sha256": "04e5542e5faf489fa64311cb260f493178da23bb24d695737d289b3e53a7d85b",
+  "case_revision": "5211e13106d94b7148de79a35ba9dc6cdbc8366f",
+  "case_tree_sha": "06e42f46b5f194a0b38e6c85b715c313308f1afe",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T07:01:38.720Z",
+  "finished_at": "2026-11-16T07:02:17.899Z",
+  "duration_ms": 39179,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Abandoned queued Agent MCP create and kill have no late Session side effect",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact staging 5211e13106d94b7148de79a35ba9dc6cdbc8366f: real Agent HTTP tools/call timed out behind the shared Session-key barrier; after FIFO release no abandoned create or kill changed the actual tmux Session list, and explicit readback/successful manual create+kill worked"
+        }
+      ],
+      "duration_ms": 39145,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43820503209,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5211e13106d94b7148de79a35ba9dc6cdbc8366f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43820503209",
+    "record_path": "runs/2026-11-16/43820503209-1/3704/SC-01.json",
+    "source_result_sha256": "bce0d3c89d92ab85ee3c571077d688a99f11b95735388b7e29d06da28039cd73"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43820503209-1",
+    "sha256": "bce0d3c89d92ab85ee3c571077d688a99f11b95735388b7e29d06da28039cd73",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43820503209",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5e720eb80ec4eb44c9ef4a7460cc2482d8ef12162ac138da86fa636693a12194",
+  "run_id": 43820503209,
+  "run_attempt": 1,
+  "issue": 3704,
+  "criterion": "SC-02",
+  "criterion_text": "An expired create/kill which has already begun is reported as outcome-indeterminate (not a confirmed failure), and an AI retry requires readback or demonstrated idempotency; tests assert the eventual observed Session state and no accidental double execution.",
+  "stage": "staging",
+  "target_sha": "5211e13106d94b7148de79a35ba9dc6cdbc8366f",
+  "contract_sha256": "04e5542e5faf489fa64311cb260f493178da23bb24d695737d289b3e53a7d85b",
+  "case_revision": "5211e13106d94b7148de79a35ba9dc6cdbc8366f",
+  "case_tree_sha": "84f0737c98540c7f9d6c51776bd7addbd6c1af5d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-16T07:02:17.900Z",
+  "finished_at": "2026-11-16T07:03:02.575Z",
+  "duration_ms": 44675,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Timed-out writes report uncertain outcomes; completed operations are not claimed rolled back",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact staging 5211e13106d94b7148de79a35ba9dc6cdbc8366f: atomic claim forbids late queue execution but preserves in-flight completion; timeout is a structured error with explicit rollback uncertainty/readback-before-retry instruction"
+        }
+      ],
+      "duration_ms": 44653,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43820503209,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5211e13106d94b7148de79a35ba9dc6cdbc8366f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43820503209",
+    "record_path": "runs/2026-11-16/43820503209-1/3704/SC-02.json",
+    "source_result_sha256": "604d2013d78f1feaed8a0e88f001f619fe5715f0ecf03d43731096287b16ad25"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43820503209-1",
+    "sha256": "604d2013d78f1feaed8a0e88f001f619fe5715f0ecf03d43731096287b16ad25",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43820503209",
+    "durability": "time-limited; object archival not configured"
+  }
+}
