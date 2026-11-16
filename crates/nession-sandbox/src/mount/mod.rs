@@ -20,7 +20,7 @@ pub mod view;
 pub use backends::{BindBackend, ErofsRoBackend, MountBackend, OverlayBackend};
 pub use plan::{
     ErofsSource, MountCapabilities, MountConsumer, MountPlan, MountPlanEntry, MountRole,
-    MountSource, MountSourceKind, MAX_MOUNT_VIEWS,
+    MountSource, MountSourceKind, OverlaySource, MAX_MOUNT_VIEWS,
 };
 pub use view::{
     MountRecoveryBinding, MountRecoverySource, MountedComposition, MountedView,

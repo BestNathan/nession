@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, SandboxError};
 use crate::exec::SharedMountRecord;
 
-use super::overlay::{OverlayBinding, OverlayLease, OverlayWorkspaceKey};
+use super::overlay::{OverlayBinding, OverlayLease, OverlayLowerBinding, OverlayWorkspaceKey};
 use super::plan::{MountPlanEntry, MountRole, MountSource, MountSourceKind};
 
 /// The serialized recovery binding of one mounted view.
@@ -44,6 +44,14 @@ pub enum MountRecoverySource {
         workspace: OverlayWorkspaceKey,
         mountpoint: PathBuf,
         generation: String,
+        lowers: Vec<OverlayLowerBinding>,
+    },
+    /// An execution-owned transient writable RootFS. Its upper/work are
+    /// disposable after a verified unmount.
+    TransientRootfs {
+        mountpoint: PathBuf,
+        upper: PathBuf,
+        work: PathBuf,
         lower_digest: String,
         lower_mountpoint: PathBuf,
         lower_generation: String,
@@ -59,6 +67,7 @@ pub enum MountRecoverySource {
 pub(super) enum ViewLease {
     Erofs(nession_erofs::mount_manager::MountLease),
     Overlay(OverlayLease),
+    TransientRootfs(super::backends::TransientRootfsLease),
     Bind,
 }
 
@@ -75,6 +84,7 @@ impl ViewLease {
                     "could not release the shared Workspace Overlay consumer: {error:#}"
                 ))
             }),
+            Self::TransientRootfs(lease) => lease.release(),
             Self::Bind => Ok(()),
         }
     }
@@ -170,6 +180,9 @@ pub enum WorkspaceMount {
 #[derive(Debug, Clone)]
 pub struct ResolvedComposition {
     pub base: PathBuf,
+    /// Whether the launcher binds the Base host view writable. A transient
+    /// RootFS is merged with an execution-owned upper/work.
+    pub base_writable: bool,
     pub workspace: WorkspaceMount,
     /// `(sandbox target, host view)`, sorted by target.
     pub toolchains: Vec<(PathBuf, PathBuf)>,
@@ -183,13 +196,14 @@ pub struct MountedComposition {
 
 impl MountedComposition {
     pub(super) fn new(views: Vec<MountedView>) -> Result<Self> {
-        let base = views
+        let base_view = views
             .iter()
             .find(|view| view.role() == MountRole::Base)
-            .map(|view| view.host_view().to_path_buf())
             .ok_or_else(|| {
                 SandboxError::InvalidPolicy("the mount plan has no Base view".to_string())
             })?;
+        let base = base_view.host_view().to_path_buf();
+        let base_writable = base_view.source_kind() == MountSourceKind::Overlay;
         let workspace_view = views
             .iter()
             .find(|view| view.role() == MountRole::Workspace)
@@ -217,6 +231,7 @@ impl MountedComposition {
             views,
             resolved: ResolvedComposition {
                 base,
+                base_writable,
                 workspace,
                 toolchains,
             },
@@ -232,6 +247,9 @@ impl MountedComposition {
     }
 
     /// Shared EROFS consumers recorded in the durable execution record.
+    ///
+    /// A transient writable RootFS also holds its immutable base lower through
+    /// the read-only mount manager, so that consumer appears here as well.
     pub fn shared_mounts(&self) -> Vec<SharedMountRecord> {
         self.views
             .iter()
@@ -244,6 +262,16 @@ impl MountedComposition {
                     digest: digest.clone(),
                     mountpoint: mountpoint.display().to_string(),
                     generation: generation.clone(),
+                }),
+                MountRecoverySource::TransientRootfs {
+                    lower_digest,
+                    lower_mountpoint,
+                    lower_generation,
+                    ..
+                } => Some(SharedMountRecord {
+                    digest: lower_digest.clone(),
+                    mountpoint: lower_mountpoint.display().to_string(),
+                    generation: lower_generation.clone(),
                 }),
                 _ => None,
             })
@@ -259,17 +287,35 @@ impl MountedComposition {
                     workspace,
                     mountpoint,
                     generation,
-                    lower_digest,
-                    lower_mountpoint,
-                    lower_generation,
-                } => Some(OverlayBinding {
-                    workspace: workspace.clone(),
-                    mountpoint: mountpoint.clone(),
-                    generation: generation.clone(),
-                    lower_digest: lower_digest.clone(),
-                    lower_mountpoint: lower_mountpoint.clone(),
-                    lower_generation: lower_generation.clone(),
-                }),
+                    lowers,
+                } => {
+                    let first = lowers.first()?;
+                    Some(OverlayBinding {
+                        workspace: workspace.clone(),
+                        mountpoint: mountpoint.clone(),
+                        generation: generation.clone(),
+                        lower_digest: first.digest.clone(),
+                        lower_mountpoint: first.mountpoint.clone(),
+                        lower_generation: first.generation.clone(),
+                        lowers: lowers.clone(),
+                    })
+                }
+                _ => None,
+            })
+    }
+
+    /// The execution-owned transient RootFS of this composition, when one was
+    /// selected.
+    pub fn transient_rootfs(&self) -> Option<(PathBuf, PathBuf, PathBuf)> {
+        self.views
+            .iter()
+            .find_map(|view| match &view.recovery().source {
+                MountRecoverySource::TransientRootfs {
+                    mountpoint,
+                    upper,
+                    work,
+                    ..
+                } => Some((mountpoint.clone(), upper.clone(), work.clone())),
                 _ => None,
             })
     }
@@ -345,9 +391,11 @@ mod tests {
                     workspace,
                     mountpoint: PathBuf::from("/mounts/overlay/a"),
                     generation: "generation-o".to_string(),
-                    lower_digest: format!("sha256:{}", "b".repeat(64)),
-                    lower_mountpoint: PathBuf::from("/mounts/erofs/b"),
-                    lower_generation: "generation-b".to_string(),
+                    lowers: vec![OverlayLowerBinding {
+                        digest: format!("sha256:{}", "b".repeat(64)),
+                        mountpoint: PathBuf::from("/mounts/erofs/b"),
+                        generation: "generation-b".to_string(),
+                    }],
                 },
             },
             MountRecoveryBinding {

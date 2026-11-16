@@ -61,13 +61,13 @@ pub fn overlay_available(settings: &SandboxSettings) -> bool {
 /// (#3582); it is never created below the execution directory.
 pub fn mount_composition(
     composition: &CompiledComposition,
-    _execution_dir: &Path,
+    execution_dir: &Path,
     execution_id: &str,
     settings: &SandboxSettings,
 ) -> Result<MountedComposition> {
     let plan = MountPlan::compile(composition, settings)?;
     let consumer = MountConsumer::new(execution_id)?;
-    let mounted = plan.execute(&consumer, settings)?;
+    let mounted = plan.execute(&consumer, settings, execution_dir)?;
     let resolved = mounted.resolved();
 
     let base = &resolved.base;

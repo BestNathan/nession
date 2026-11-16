@@ -70,7 +70,7 @@ pub fn probe(settings: &OverlaySettings) -> (bool, Option<String>) {
 /// The inputs of one physical Overlay mount. Every path is manager-derived.
 #[derive(Debug, Clone)]
 pub struct OverlayMountSpec {
-    pub lower: std::path::PathBuf,
+    pub lowers: Vec<std::path::PathBuf>,
     pub upper: std::path::PathBuf,
     pub work: std::path::PathBuf,
     pub merged: std::path::PathBuf,
@@ -79,7 +79,14 @@ pub struct OverlayMountSpec {
 /// Mount one `fuse-overlayfs` Merged View, with a bounded helper and a
 /// verified mountinfo observation.
 pub fn mount_overlay(spec: &OverlayMountSpec, settings: &OverlaySettings) -> Result<()> {
-    for path in [&spec.lower, &spec.upper, &spec.work, &spec.merged] {
+    if spec.lowers.is_empty() {
+        anyhow::bail!("an Overlay mount needs at least one read-only lower");
+    }
+    for path in spec
+        .lowers
+        .iter()
+        .chain([&spec.upper, &spec.work, &spec.merged])
+    {
         let text = path.to_string_lossy();
         if text.contains(',') || text.contains(':') {
             anyhow::bail!(
@@ -90,9 +97,14 @@ pub fn mount_overlay(spec: &OverlayMountSpec, settings: &OverlaySettings) -> Res
     }
     create_mountpoint(&spec.merged)?;
     let mut command = Command::new(&settings.fuse_overlayfs); // not-tmux: unprivileged OverlayFS FUSE helper
+    let lowerdir = spec
+        .lowers
+        .iter()
+        .map(|lower| lower.display().to_string())
+        .collect::<Vec<_>>()
+        .join(":");
     command.arg("-o").arg(format!(
-        "lowerdir={},upperdir={},workdir={}",
-        spec.lower.display(),
+        "lowerdir={lowerdir},upperdir={},workdir={}",
         spec.upper.display(),
         spec.work.display()
     ));
@@ -217,7 +229,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let settings = OverlaySettings::new("/bin/true", "/bin/true");
         let spec = OverlayMountSpec {
-            lower: PathBuf::from("/lower,with,comma"),
+            lowers: vec![PathBuf::from("/lower,with,comma")],
             upper: root.path().join("upper"),
             work: root.path().join("work"),
             merged: root.path().join("merged"),

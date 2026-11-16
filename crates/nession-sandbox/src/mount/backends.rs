@@ -15,13 +15,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use nession_erofs::digest::file_digest;
-use nession_erofs::mount_manager::{MountManager, VerifiedImage};
+use nession_erofs::mount_manager::{MountLease, MountManager, VerifiedImage};
 
 use crate::error::{Result, SandboxError};
 use crate::policy::CompiledWorkspace;
 use crate::settings::SandboxSettings;
 
-use super::overlay::{OverlayMountManager, OverlayRequest};
+use super::overlay::{
+    self, OverlayMountManager, OverlayMountSpec, OverlayRequest, OverlaySettings,
+};
 use super::plan::{ErofsSource, MountConsumer, MountPlanEntry, MountSource, MountSourceKind};
 use super::view::{MountRecoveryBinding, MountRecoverySource, MountedView, ViewLease};
 
@@ -38,6 +40,7 @@ pub(super) fn acquire(
     entry: &MountPlanEntry,
     consumer: &MountConsumer,
     settings: &SandboxSettings,
+    execution_dir: &Path,
 ) -> Result<MountedView> {
     match &entry.source {
         MountSource::Erofs(_) => {
@@ -54,7 +57,7 @@ pub(super) fn acquire(
             })?;
             ErofsRoBackend::new(manager, image_root).acquire(entry, consumer)
         }
-        MountSource::Overlay { .. } => {
+        MountSource::Overlay(source) if source.workspace.is_some() => {
             let manager = settings.overlay_manager.clone().ok_or_else(|| {
                 SandboxError::UnsupportedPolicy(
                     "the Agent's shared Workspace Overlay manager is not configured".to_string(),
@@ -67,6 +70,9 @@ pub(super) fn acquire(
                 )
             })?;
             OverlayBackend::new(manager, image_root).acquire(entry, consumer)
+        }
+        MountSource::Overlay(_) => {
+            TransientRootfsBackend::new(settings.clone(), execution_dir).acquire(entry, consumer)
         }
         MountSource::Bind {
             directory,
@@ -163,14 +169,17 @@ impl MountBackend for OverlayBackend {
     }
 
     fn acquire(&self, entry: &MountPlanEntry, consumer: &MountConsumer) -> Result<MountedView> {
-        let MountSource::Overlay { workspace, lower } = &entry.source else {
+        let MountSource::Overlay(source) = &entry.source else {
             return Err(SandboxError::InvalidPolicy(
                 "the Workspace Overlay backend received a non-Overlay source".to_string(),
             ));
         };
-        let canonical = verify_erofs_source(lower, &self.image_root)?;
-        let verified = VerifiedImage::new(lower.digest.clone(), canonical)
-            .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+        let Some(workspace) = &source.workspace else {
+            return Err(SandboxError::InvalidPolicy(
+                "the Workspace Overlay backend received a transient RootFS source".to_string(),
+            ));
+        };
+        let verified = verify_erofs_sources(&source.lowers, &self.image_root)?;
         let lease = self
             .manager
             .acquire(
@@ -192,9 +201,7 @@ impl MountBackend for OverlayBackend {
                 workspace: binding.workspace.clone(),
                 mountpoint: mountpoint.clone(),
                 generation: binding.generation.clone(),
-                lower_digest: binding.lower_digest.clone(),
-                lower_mountpoint: binding.lower_mountpoint.clone(),
-                lower_generation: binding.lower_generation,
+                lowers: binding.effective_lowers(),
             },
         };
         Ok(MountedView::new(
@@ -203,6 +210,255 @@ impl MountBackend for OverlayBackend {
             recovery,
             ViewLease::Overlay(lease),
         ))
+    }
+}
+
+/// One execution-owned, disposable writable RootFS.
+pub(super) struct TransientRootfsLease {
+    settings: OverlaySettings,
+    mountpoint: PathBuf,
+    upper: PathBuf,
+    work: PathBuf,
+    lower: Option<MountLease>,
+}
+
+impl TransientRootfsLease {
+    /// Strictly unmount, then remove the ephemeral upper/work, then release
+    /// the read-only base consumer. A failed unmount retains everything.
+    pub(super) fn release(mut self) -> Result<()> {
+        if overlay::mount::is_overlay_mount(&self.mountpoint) {
+            overlay::mount::unmount_overlay(&self.settings, &self.mountpoint).map_err(|error| {
+                SandboxError::Cleanup(format!(
+                    "could not unmount the transient RootFS at {}: {error:#}",
+                    self.mountpoint.display()
+                ))
+            })?;
+        } else if nession_erofs::mount::is_mounted(&self.mountpoint) {
+            return Err(SandboxError::Cleanup(format!(
+                "the transient RootFS path {} is a foreign mount; refusing to unmount it",
+                self.mountpoint.display()
+            )));
+        }
+        remove_owned_directory(&self.upper)?;
+        remove_owned_directory(&self.work)?;
+        if let Some(lower) = self.lower.take() {
+            lower.release().map_err(|error| {
+                SandboxError::Cleanup(format!(
+                    "could not release the transient RootFS base lower: {error:#}"
+                ))
+            })?;
+        }
+        Ok(())
+    }
+}
+
+/// Transient writable RootFS views (#3698).
+pub struct TransientRootfsBackend {
+    settings: SandboxSettings,
+    execution_dir: PathBuf,
+}
+
+impl TransientRootfsBackend {
+    pub fn new(settings: SandboxSettings, execution_dir: &Path) -> Self {
+        Self {
+            settings,
+            execution_dir: execution_dir.to_path_buf(),
+        }
+    }
+}
+
+impl MountBackend for TransientRootfsBackend {
+    fn kind(&self) -> MountSourceKind {
+        MountSourceKind::Overlay
+    }
+
+    fn acquire(&self, entry: &MountPlanEntry, consumer: &MountConsumer) -> Result<MountedView> {
+        let MountSource::Overlay(source) = &entry.source else {
+            return Err(SandboxError::InvalidPolicy(
+                "the transient RootFS backend received a non-Overlay source".to_string(),
+            ));
+        };
+        if source.workspace.is_some() {
+            return Err(SandboxError::InvalidPolicy(
+                "the transient RootFS backend received a managed Workspace source".to_string(),
+            ));
+        }
+        if source.lowers.len() != 1 {
+            return Err(SandboxError::InvalidPolicy(
+                "a writable RootFS has exactly one immutable Base lower".to_string(),
+            ));
+        }
+        let overlay_settings = OverlaySettings::new(
+            self.settings.fuse_overlayfs_path.clone(),
+            self.settings.fusermount_path.clone(),
+        );
+        let (available, reason) = overlay::mount::probe(&overlay_settings);
+        if !available {
+            return Err(SandboxError::UnsupportedPolicy(format!(
+                "a writable RootFS requires the unprivileged Overlay helpers: {}",
+                reason.unwrap_or_else(|| "unavailable".to_string())
+            )));
+        }
+        let image_root = self.settings.erofs_image_root.as_ref().ok_or_else(|| {
+            SandboxError::UnsupportedPolicy(
+                "a writable RootFS requires an Agent-authorized EROFS image root".to_string(),
+            )
+        })?;
+        let manager = self.settings.mount_manager.as_ref().ok_or_else(|| {
+            SandboxError::UnsupportedPolicy(
+                "a writable RootFS requires the shared EROFS read-only mount manager".to_string(),
+            )
+        })?;
+        let source = source.lowers.first().ok_or_else(|| {
+            SandboxError::InvalidPolicy(
+                "a writable RootFS has exactly one immutable Base lower".to_string(),
+            )
+        })?;
+        let canonical = verify_erofs_source(source, image_root)?;
+        let verified = VerifiedImage::new(source.digest.clone(), canonical)
+            .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+        let lower = manager
+            .acquire(&verified, consumer.execution_id())
+            .map_err(|error| {
+                SandboxError::Prepare(format!(
+                    "could not acquire the writable RootFS base lower {}: {error:#}",
+                    source.digest
+                ))
+            })?;
+        let transient_root = self.execution_dir.join("rootfs-overlay");
+        let setup = (|| -> Result<(PathBuf, PathBuf, PathBuf)> {
+            create_owned_directory(&transient_root)?;
+            let upper = transient_root.join("upper");
+            let work = transient_root.join("work");
+            create_owned_directory(&upper)?;
+            create_owned_directory(&work)?;
+            let facts = overlay::probe::probe_storage(&upper, &work)
+                .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+            facts
+                .validate_paths(&upper, &work)
+                .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+            let merged = transient_root.join("merged");
+            let spec = OverlayMountSpec {
+                lowers: vec![lower.mountpoint().to_path_buf()],
+                upper: upper.clone(),
+                work: work.clone(),
+                merged: merged.clone(),
+            };
+            overlay::mount::mount_overlay(&spec, &overlay_settings)
+                .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?;
+            if !overlay::mount::is_overlay_mount(&merged) {
+                let rollback = overlay::mount::unmount_overlay(&overlay_settings, &merged);
+                return Err(SandboxError::Prepare(match rollback {
+                    Ok(()) => format!(
+                        "the RootFS helper reported success but {} is not a fuse-overlayfs mount",
+                        merged.display()
+                    ),
+                    Err(rollback) => format!(
+                        "the RootFS helper reported success but {} is not a fuse-overlayfs mount; \
+                         verified rollback also failed: {rollback:#}",
+                        merged.display()
+                    ),
+                }));
+            }
+            Ok((upper, work, merged))
+        })();
+        let (upper, work, mountpoint) = match setup {
+            Ok(paths) => paths,
+            Err(error) => {
+                let merged = transient_root.join("merged");
+                let unmount_ok = if overlay::mount::is_overlay_mount(&merged) {
+                    overlay::mount::unmount_overlay(&overlay_settings, &merged).is_ok()
+                } else {
+                    true
+                };
+                if unmount_ok {
+                    let _ = remove_owned_directory(&transient_root);
+                }
+                let _ = lower.release();
+                return Err(error);
+            }
+        };
+        let recovery = MountRecoveryBinding {
+            role: entry.role,
+            target: entry.target.clone(),
+            source: MountRecoverySource::TransientRootfs {
+                mountpoint: mountpoint.clone(),
+                upper: upper.clone(),
+                work: work.clone(),
+                lower_digest: lower.digest().to_string(),
+                lower_mountpoint: lower.mountpoint().to_path_buf(),
+                lower_generation: lower.generation().to_string(),
+            },
+        };
+        Ok(MountedView::new(
+            entry.clone(),
+            mountpoint.clone(),
+            recovery,
+            ViewLease::TransientRootfs(TransientRootfsLease {
+                settings: overlay_settings,
+                mountpoint,
+                upper,
+                work,
+                lower: Some(lower),
+            }),
+        ))
+    }
+}
+
+fn create_owned_directory(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(SandboxError::Prepare(format!(
+                    "the transient RootFS directory {} must be a real directory",
+                    path.display()
+                )));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(path).map_err(|error| {
+                SandboxError::Prepare(format!(
+                    "could not create the transient RootFS directory {}: {error}",
+                    path.display()
+                ))
+            })?;
+        }
+        Err(error) => {
+            return Err(SandboxError::Prepare(format!(
+                "could not inspect the transient RootFS directory {}: {error}",
+                path.display()
+            )))
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(())
+}
+
+fn remove_owned_directory(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(SandboxError::Cleanup(format!(
+            "refusing to remove symlinked transient RootFS path {}",
+            path.display()
+        ))),
+        Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(path).map_err(|error| {
+            SandboxError::Cleanup(format!(
+                "could not remove the transient RootFS directory {}: {error}",
+                path.display()
+            ))
+        }),
+        Ok(_) => Err(SandboxError::Cleanup(format!(
+            "the transient RootFS path {} is not a directory",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(SandboxError::Cleanup(format!(
+            "could not inspect the transient RootFS path {}: {error}",
+            path.display()
+        ))),
     }
 }
 
@@ -233,7 +489,7 @@ impl MountBackend for BindBackend {
             ));
         };
         let workspace = CompiledWorkspace {
-            image: None,
+            lowers: Vec::new(),
             write: directory.clone(),
             ownership: *ownership,
         };
@@ -253,6 +509,23 @@ impl MountBackend for BindBackend {
             ViewLease::Bind,
         ))
     }
+}
+
+fn verify_erofs_sources(sources: &[ErofsSource], image_root: &Path) -> Result<Vec<VerifiedImage>> {
+    if sources.is_empty() {
+        return Err(SandboxError::InvalidPolicy(
+            "an Overlay needs at least one read-only lower".to_string(),
+        ));
+    }
+    let mut verified = Vec::with_capacity(sources.len());
+    for source in sources {
+        let canonical = verify_erofs_source(source, image_root)?;
+        verified.push(
+            VerifiedImage::new(source.digest.clone(), canonical)
+                .map_err(|error| SandboxError::Prepare(format!("{error:#}")))?,
+        );
+    }
+    Ok(verified)
 }
 
 /// Re-verify the exact authorized local bytes of one EROFS source.
@@ -578,10 +851,10 @@ mod tests {
     ) -> MountPlanEntry {
         MountPlanEntry {
             role: super::super::plan::MountRole::Workspace,
-            source: MountSource::Overlay {
-                workspace: manager.resolve_workspace(workspace).unwrap(),
-                lower,
-            },
+            source: MountSource::Overlay(super::super::plan::OverlaySource {
+                workspace: Some(manager.resolve_workspace(workspace).unwrap()),
+                lowers: vec![lower],
+            }),
             target: PathBuf::from("/workspace"),
         }
     }
@@ -613,7 +886,7 @@ mod tests {
         assert_eq!(physical.mounts.load(Ordering::SeqCst), 1);
         let MountRecoverySource::Overlay {
             workspace: recorded,
-            lower_digest: recorded_lower,
+            lowers,
             ..
         } = &first.recovery().source
         else {
@@ -623,7 +896,10 @@ mod tests {
             recorded.identity(),
             manager.resolve_workspace(&workspace).unwrap().identity()
         );
-        assert_eq!(recorded_lower, &lower_digest);
+        assert_eq!(
+            lowers.first().map(|lower| lower.digest.as_str()),
+            Some(lower_digest.as_str())
+        );
 
         let mut first = first;
         first.release().unwrap();
@@ -641,10 +917,10 @@ mod tests {
     }
 
     fn entry_workspace(entry: &MountPlanEntry) -> crate::mount::overlay::OverlayWorkspaceKey {
-        let MountSource::Overlay { workspace, .. } = &entry.source else {
+        let MountSource::Overlay(source) = &entry.source else {
             panic!("an Overlay source");
         };
-        workspace.clone()
+        source.workspace.clone().expect("a persistent workspace")
     }
 
     #[test]

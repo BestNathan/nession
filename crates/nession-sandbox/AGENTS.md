@@ -100,15 +100,20 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   unmounts, only after the last consumer, and a failed unmount retains the
   live mount, the read-only lower lease and the durable upper. The Sandbox
   never creates a per-execution Overlay and never falls back to Native.
-- **Typed MountPlan and backends (#3695).** `mount::plan::MountPlan` binds
-  prepared host views to independent in-Sandbox targets. Its typed
+- **Typed MountPlan and backends (#3695, #3698).** `mount::plan::MountPlan`
+  binds prepared host views to independent in-Sandbox targets. Its typed
   `MountSource` is `Erofs`, `Overlay` or `Bind`; the plan never carries a host
   mountpoint. `ErofsRoBackend` delegates to
   `nession_erofs::mount_manager::MountManager::acquire`; `OverlayBackend`
-  consumes a manager-authorized Workspace identity; `BindBackend` consumes an
+  consumes a manager-authorized Workspace identity and its ordered lowers;
+  `TransientRootfsBackend` merges the immutable Base with an
+  execution-owned, disposable upper/work; `BindBackend` consumes an
   Agent-validated canonical directory. `mount::view::MountedView` retains the
   identified consumer lease and its serialized recovery binding, and release
-  is explicit and idempotent. A missing backend is an explicit
+  is explicit and idempotent. The Workspace Overlay holds every ordered lower
+  lease for its lifetime; a reordered, different or missing set fails closed.
+  A transient RootFS is strictly unmounted before its upper/work and lower
+  consumer are released. A missing backend is an explicit
   `UnsupportedPolicy`, never a per-execution fallback.
 - TEMPORARY execution-owned resources remain under the execution directory
   and are recorded. Cleanup releases only this execution's own consumer

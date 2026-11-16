@@ -30,10 +30,12 @@ pub mod storage;
 pub use manager::{
     LowerAdoption, LowerLease, LowerProvider, LowerStatus, OverlayLease, OverlayMountManager,
     OverlayMountManagerConfig, OverlayRequest, ProtectedWorkspaces, ACQUIRE_WAIT_TIMEOUT,
+    MAX_OVERLAY_LOWERS,
 };
 pub use mount::{OverlayMountSpec, OverlaySettings};
 pub use probe::{StorageFacts, StorageSupport};
 pub use state::{
-    OverlayBinding, OverlayConsumerRef, OverlayRecoveryReport, OverlayState, OverlayStatus,
+    OverlayBinding, OverlayConsumerRef, OverlayLowerBinding, OverlayLowerRef,
+    OverlayRecoveryReport, OverlayState, OverlayStatus,
 };
 pub use storage::{OverlayStoragePaths, OverlayWorkspaceKey, OwnerRecord};

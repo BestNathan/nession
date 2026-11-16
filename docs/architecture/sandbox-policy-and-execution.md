@@ -138,12 +138,17 @@ before mounting anything.
   tmpfs root, binds the Base Runtime over `/`, installs `/workspace`, then the
   toolchains, and only then mounts `/dev`, `/proc`, `/tmp`, `/home` and
   `/run/nession`.
-- **Base Runtime contract.** Because the composed root is read-only, the image
-  must already contain the mountpoint directories the backend installs:
-  `/bin/sh` (or `/usr/bin/sh`), `/workspace`, every declared `/opt/<name>`,
-  `/dev`, `/proc`, `/home`, `/tmp` and `/run/nession`. The Base Runtime also
-  carries the glibc loader/libs the bridge and the shell need. Missing paths
-  are a prepare error; the backend never extracts or copies a fallback root.
+- **Base Runtime contract.** The image must already contain the mountpoint
+  directories the backend installs: `/bin/sh` (or `/usr/bin/sh`),
+  `/workspace`, every declared `/opt/<name>`, `/dev`, `/proc`, `/home`,
+  `/tmp` and `/run/nession`. The Base Runtime also carries the glibc
+  loader/libs the bridge and the shell need. Missing paths are a prepare
+  error; the backend never extracts or copies a fallback root. By default the
+  Base is bound read-only. An explicit `filesystem.rootfs.writable` selection
+  is the exception: the Sandbox compiles one transient Overlay view whose
+  upper/work live under the execution directory, and cleanup strictly
+  unmounts it before removing those directories (#3698). The image bytes stay
+  immutable.
 - **No privilege escalation.** The default Agent Pod is not made privileged:
   both helpers are FUSE-based and unprivileged. A host without `erofsfuse`,
   `/dev/fuse`, `fuse-overlayfs` when a Project image is present, or the
@@ -167,13 +172,18 @@ before mounting anything.
   as an orphan after identity checks. Multiple digests never alias one
   mountpoint, and the manager never falls back to a lazy unmount for shared
   reclamation.
-- **Shared writable Workspace Overlay (#3582).** One managed Workspace has one
-  durable `upper`/`work` pair and therefore **one** physical writable
+- **Shared writable Workspace Overlay (#3582, #3698).** One managed Workspace
+  has one durable `upper`/`work` pair and therefore **one** physical writable
   `fuse-overlayfs` Merged View per Agent identity and mount namespace. The
+  Workspace may declare an ordered set of up to 16 immutable EROFS lowers;
+  the first has priority, later lowers are beneath it, and every lower keeps
+  its read-only consumer lease for the full physical Overlay lifetime. The
   Sandbox-owned `nession_sandbox::mount::overlay::OverlayMountManager` derives
   the mountpoint from an authorized Workspace root plus a validated relative
   identity (never a caller-supplied path), serializes same-workspace
-  mount/unmount transitions, and returns identified consumer leases. Multiple Sandbox executions may bind that same
+  mount/unmount transitions, and returns identified consumer leases. The
+  ordered lower digest set is the compatibility key: a reordered, different
+  or missing set fails closed. Multiple Sandbox executions may bind that same
   Merged View at `/workspace`; the last release unmounts it and never deletes
   the durable upper/work. The Overlay holds its own read-only EROFS lower lease
   for the full physical lifetime; a failed Overlay unmount retains the mount,
@@ -187,11 +197,13 @@ before mounting anything.
   compatibility key and initializes the durable pair on first use; a later
   missing, partial or symlinked pair refuses instead of creating a fresh empty
   upper.
-- **Lifecycle.** The writable Overlay is recorded as a durable manager binding
-  (`workspace root/relative, mountpoint, generation, lower digest/generation`),
-  not as an execution-scoped mountpoint. Temporary files remain under the
-  execution directory. Cleanup releases the Overlay consumer first (which
-  releases its lower), then any legacy execution-scoped mount, then the
+- **Lifecycle.** The writable Workspace Overlay is recorded as a durable
+  manager binding (`workspace root/relative, mountpoint, generation, ordered
+  lowers with digest/generation`), not as an execution-scoped mountpoint. A
+  writable RootFS has its own execution-scoped record and remains under the
+  execution directory. Cleanup strictly unmounts and removes a transient RootFS
+  first, then releases the Workspace Overlay consumer (which releases all of
+  its ordered lower leases), then any legacy execution-scoped mount, then the
   independent shared image consumers. Reconciliation adopts a live record only
   when the durable identity, generation, Agent identity, mount namespace,
   owner lock and mountinfo agree and the lower can be re-adopted; a legacy

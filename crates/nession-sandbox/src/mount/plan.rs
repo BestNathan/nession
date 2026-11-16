@@ -24,17 +24,25 @@ use super::view::MountedComposition;
 /// The maximum number of independent mount views one composition may bind.
 pub const MAX_MOUNT_VIEWS: usize = 32;
 
+/// An Overlay view. One persistent Workspace identity has one shared physical
+/// Merged View; a transient RootFS has no workspace identity and is owned by a
+/// single execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverlaySource {
+    /// `Some` for the persistent managed Workspace view; `None` for a
+    /// transient writable RootFS.
+    pub workspace: Option<OverlayWorkspaceKey>,
+    /// Ordered read-only lowers; the first has the highest priority.
+    pub lowers: Vec<ErofsSource>,
+}
+
 /// One typed, prepared host view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MountSource {
     /// An immutable, verified EROFS image file mounted read-only.
     Erofs(ErofsSource),
-    /// The one persistent writable Merged View of an authorized managed
-    /// Workspace, merged over its read-only EROFS lower.
-    Overlay {
-        workspace: OverlayWorkspaceKey,
-        lower: ErofsSource,
-    },
+    /// A writable Overlay over one or more ordered read-only lowers.
+    Overlay(OverlaySource),
     /// An Agent-validated canonical directory bound as-is.
     Bind {
         directory: PathBuf,
@@ -113,7 +121,7 @@ impl MountPlanEntry {
     pub fn source_kind(&self) -> MountSourceKind {
         match self.source {
             MountSource::Erofs(_) => MountSourceKind::Erofs,
-            MountSource::Overlay { .. } => MountSourceKind::Overlay,
+            MountSource::Overlay(_) => MountSourceKind::Overlay,
             MountSource::Bind { .. } => MountSourceKind::Bind,
         }
     }
@@ -121,7 +129,7 @@ impl MountPlanEntry {
     pub fn read_only(&self) -> bool {
         !matches!(
             self.source,
-            MountSource::Overlay { .. } | MountSource::Bind { .. }
+            MountSource::Overlay(_) | MountSource::Bind { .. }
         )
     }
 }
@@ -155,16 +163,23 @@ pub struct MountCapabilities {
     /// image root.
     pub erofs_ro: bool,
     /// The Agent's shared Workspace Overlay manager.
-    pub overlay: bool,
+    pub workspace_overlay: bool,
+    /// The unprivileged `fuse-overlayfs`/`fusermount` helpers plus the
+    /// authorized EROFS source root for an execution-owned transient view.
+    pub transient_overlay: bool,
     /// A validated Agent-owned or Project Location directory can be bound.
     pub bind: bool,
 }
 
 impl MountCapabilities {
     pub fn from_settings(settings: &SandboxSettings) -> Self {
+        let erofs_ro = settings.mount_manager.is_some() && settings.erofs_image_root.is_some();
         Self {
-            erofs_ro: settings.mount_manager.is_some() && settings.erofs_image_root.is_some(),
-            overlay: settings.overlay_manager.is_some(),
+            erofs_ro,
+            workspace_overlay: settings.overlay_manager.is_some(),
+            transient_overlay: erofs_ro
+                && nession_erofs::mount::executable(&settings.fuse_overlayfs_path)
+                && nession_erofs::mount::executable(&settings.fusermount_path),
             bind: true,
         }
     }
@@ -185,9 +200,17 @@ impl MountPlan {
     /// created.
     pub fn compile(composition: &CompiledComposition, settings: &SandboxSettings) -> Result<Self> {
         let mut entries = Vec::new();
+        let base_source = if composition.base_writable {
+            MountSource::Overlay(OverlaySource {
+                workspace: None,
+                lowers: vec![ErofsSource::from(&composition.base)],
+            })
+        } else {
+            MountSource::Erofs(ErofsSource::from(&composition.base))
+        };
         entries.push(MountPlanEntry {
             role: MountRole::Base,
-            source: MountSource::Erofs(ErofsSource::from(&composition.base)),
+            source: base_source,
             target: Path::new("/").to_path_buf(),
         });
         let Some(workspace) = &composition.workspace else {
@@ -195,47 +218,45 @@ impl MountPlan {
                 "filesystem.composition requires a workspace view".to_string(),
             ));
         };
-        let workspace_entry = match &workspace.image {
-            Some(image) => {
-                if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
-                    return Err(SandboxError::InvalidPolicy(
-                        "a Project Location workspace cannot carry a Project EROFS lower"
-                            .to_string(),
-                    ));
-                }
-                let manager = settings.overlay_manager.as_ref().ok_or_else(|| {
-                    SandboxError::UnsupportedPolicy(
-                        "the workspace Overlay requires the Agent's shared Workspace Overlay \
-                         manager"
-                            .to_string(),
-                    )
-                })?;
-                let key = manager
-                    .resolve_workspace(&workspace.write)
-                    .map_err(|error| {
-                        SandboxError::InvalidPolicy(format!(
-                            "the workspace write directory {} is not an authorized Overlay \
-                         workspace: {error:#}",
-                            workspace.write.display()
-                        ))
-                    })?;
-                MountPlanEntry {
-                    role: MountRole::Workspace,
-                    source: MountSource::Overlay {
-                        workspace: key,
-                        lower: ErofsSource::from(image),
-                    },
-                    target: Path::new("/workspace").to_path_buf(),
-                }
+        let workspace_entry = if workspace.has_lowers() {
+            if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
+                return Err(SandboxError::InvalidPolicy(
+                    "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
+                ));
             }
-            None => MountPlanEntry {
+            let manager = settings.overlay_manager.as_ref().ok_or_else(|| {
+                SandboxError::UnsupportedPolicy(
+                    "the workspace Overlay requires the Agent's shared Workspace Overlay \
+                     manager"
+                        .to_string(),
+                )
+            })?;
+            let key = manager
+                .resolve_workspace(&workspace.write)
+                .map_err(|error| {
+                    SandboxError::InvalidPolicy(format!(
+                        "the workspace write directory {} is not an authorized Overlay \
+                         workspace: {error:#}",
+                        workspace.write.display()
+                    ))
+                })?;
+            MountPlanEntry {
+                role: MountRole::Workspace,
+                source: MountSource::Overlay(OverlaySource {
+                    workspace: Some(key),
+                    lowers: workspace.lowers.iter().map(ErofsSource::from).collect(),
+                }),
+                target: Path::new("/workspace").to_path_buf(),
+            }
+        } else {
+            MountPlanEntry {
                 role: MountRole::Workspace,
                 source: MountSource::Bind {
                     directory: workspace.write.clone(),
                     ownership: workspace.ownership,
                 },
                 target: Path::new("/workspace").to_path_buf(),
-            },
+            }
         };
         entries.push(workspace_entry);
         for toolchain in &composition.toolchains {
@@ -277,11 +298,17 @@ impl MountPlan {
             match entry.role {
                 MountRole::Base => {
                     bases += 1;
-                    if entry.target != Path::new("/")
-                        || entry.source_kind() != MountSourceKind::Erofs
-                    {
+                    let valid = entry.target == Path::new("/")
+                        && match &entry.source {
+                            MountSource::Erofs(_) => true,
+                            MountSource::Overlay(overlay) => overlay.workspace.is_none(),
+                            MountSource::Bind { .. } => false,
+                        };
+                    if !valid {
                         return Err(SandboxError::InvalidPolicy(
-                            "the Base Runtime view must be one read-only EROFS at `/`".to_string(),
+                            "the Base Runtime view must be a read-only EROFS or a transient \
+                             writable Overlay at `/`"
+                                .to_string(),
                         ));
                     }
                 }
@@ -292,9 +319,15 @@ impl MountPlan {
                             "the Workspace view target must be /workspace".to_string(),
                         ));
                     }
-                    if entry.source_kind() == MountSourceKind::Erofs {
+                    let valid = match &entry.source {
+                        MountSource::Overlay(overlay) => overlay.workspace.is_some(),
+                        MountSource::Bind { .. } => true,
+                        MountSource::Erofs(_) => false,
+                    };
+                    if !valid {
                         return Err(SandboxError::InvalidPolicy(
-                            "the Workspace view must be a writable Overlay or an authorized Bind"
+                            "the Workspace view must be a persistent writable Overlay or an \
+                             authorized Bind"
                                 .to_string(),
                         ));
                     }
@@ -309,30 +342,22 @@ impl MountPlan {
             }
             match &entry.source {
                 MountSource::Erofs(source) => validate_erofs_source(source)?,
-                MountSource::Overlay { workspace, lower } => {
-                    workspace.validate().map_err(|error| {
-                        SandboxError::InvalidPolicy(format!(
-                            "the Overlay workspace identity is invalid: {error:#}"
-                        ))
-                    })?;
-                    validate_erofs_source(lower)?;
+                MountSource::Overlay(overlay) => {
+                    if let Some(workspace) = &overlay.workspace {
+                        workspace.validate().map_err(|error| {
+                            SandboxError::InvalidPolicy(format!(
+                                "the Overlay workspace identity is invalid: {error:#}"
+                            ))
+                        })?;
+                    }
+                    validate_overlay_lowers(&overlay.lowers)?;
                 }
-                MountSource::Bind {
-                    directory,
-                    ownership,
-                } => {
+                MountSource::Bind { directory, .. } => {
                     if !directory.is_absolute() {
                         return Err(SandboxError::InvalidPolicy(format!(
                             "the Workspace Bind directory {} must be absolute",
                             directory.display()
                         )));
-                    }
-                    if *ownership == SandboxWorkspaceOwnership::ProjectLocation
-                        && matches!(entry.source, MountSource::Overlay { .. })
-                    {
-                        return Err(SandboxError::InvalidPolicy(
-                            "a Project Location cannot carry an Overlay upper".to_string(),
-                        ));
                     }
                 }
             }
@@ -369,7 +394,25 @@ impl MountPlan {
                     "the shared EROFS read-only mount manager and an authorized image root",
                 ),
                 MountSourceKind::Overlay => {
-                    (capabilities.overlay, "the shared Workspace Overlay manager")
+                    let transient = matches!(
+                        &entry.source,
+                        MountSource::Overlay(OverlaySource {
+                            workspace: None,
+                            ..
+                        })
+                    );
+                    if transient {
+                        (
+                            capabilities.transient_overlay,
+                            "the unprivileged fuse-overlayfs/fusermount helpers and an authorized \
+                             EROFS source root",
+                        )
+                    } else {
+                        (
+                            capabilities.workspace_overlay,
+                            "the shared Workspace Overlay manager",
+                        )
+                    }
                 }
                 MountSourceKind::Bind => (capabilities.bind, "an authorized Bind directory"),
             };
@@ -390,12 +433,13 @@ impl MountPlan {
         &self,
         consumer: &MountConsumer,
         settings: &SandboxSettings,
+        execution_dir: &Path,
     ) -> Result<MountedComposition> {
         self.check_capabilities(&MountCapabilities::from_settings(settings))?;
         let mut views = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
-            let view =
-                super::backends::acquire(entry, consumer, settings).map_err(|error| match error {
+            let view = super::backends::acquire(entry, consumer, settings, execution_dir).map_err(
+                |error| match error {
                     SandboxError::InvalidPolicy(message)
                     | SandboxError::UnsupportedPolicy(message)
                     | SandboxError::BackendUnavailable(message)
@@ -407,7 +451,8 @@ impl MountPlan {
                         entry.target.display()
                     )),
                     other @ SandboxError::UnsupportedRequests(_) => other,
-                });
+                },
+            );
             match view {
                 Ok(view) => views.push(view),
                 Err(error) => {
@@ -420,6 +465,31 @@ impl MountPlan {
         }
         MountedComposition::new(views)
     }
+}
+
+fn validate_overlay_lowers(lowers: &[ErofsSource]) -> Result<()> {
+    if lowers.is_empty() {
+        return Err(SandboxError::InvalidPolicy(
+            "an Overlay view needs at least one read-only lower".to_string(),
+        ));
+    }
+    if lowers.len() > super::overlay::MAX_OVERLAY_LOWERS {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "an Overlay view accepts at most {} ordered lowers",
+            super::overlay::MAX_OVERLAY_LOWERS
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for lower in lowers {
+        validate_erofs_source(lower)?;
+        if !seen.insert(lower.digest.clone()) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "the ordered Overlay lower set repeats digest {}",
+                lower.digest
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_erofs_source(source: &ErofsSource) -> Result<()> {
@@ -480,8 +550,9 @@ mod tests {
     ) -> CompiledComposition {
         CompiledComposition {
             base: image('a', "/images/base.erofs", "/"),
+            base_writable: false,
             workspace: Some(workspace.unwrap_or(CompiledWorkspace {
-                image: None,
+                lowers: Vec::new(),
                 write: PathBuf::from("/tmp/nession-workspace"),
                 ownership: SandboxWorkspaceOwnership::Agent,
             })),
@@ -574,10 +645,87 @@ mod tests {
         assert!(plan
             .check_capabilities(&MountCapabilities {
                 erofs_ro: true,
-                overlay: false,
+                workspace_overlay: false,
+                transient_overlay: true,
                 bind: true,
             })
             .is_ok());
+    }
+
+    #[test]
+    fn a_writable_base_is_a_transient_overlay_and_requires_the_overlay_capability() {
+        let root = tempfile::tempdir().unwrap();
+        let mut compiled = composition(None, Vec::new());
+        compiled.base_writable = true;
+        let plan = MountPlan::compile(&compiled, &settings(root.path())).unwrap();
+        let MountSource::Overlay(source) = &plan.entries()[0].source else {
+            panic!("a writable base is an Overlay source");
+        };
+        assert!(source.workspace.is_none(), "a RootFS has no workspace key");
+        assert_eq!(source.lowers.len(), 1);
+        let error = plan
+            .check_capabilities(&MountCapabilities {
+                erofs_ro: true,
+                workspace_overlay: false,
+                transient_overlay: false,
+                bind: true,
+            })
+            .unwrap_err();
+        assert!(format!("{error}").contains("fuse-overlayfs"), "{error}");
+    }
+
+    #[test]
+    fn an_ordered_lower_set_is_typed_and_order_sensitive_in_the_plan() {
+        let workspace = OverlayWorkspaceKey::new("/workspaces", "ws_a").unwrap();
+        let lower = |digest_char: char, source: &str| {
+            ErofsSource::new(
+                format!("sha256:{}", digest_char.to_string().repeat(64)),
+                source,
+            )
+        };
+        let plan = MountPlan {
+            entries: vec![
+                MountPlanEntry {
+                    role: MountRole::Base,
+                    source: MountSource::Erofs(lower('a', "/images/base.erofs")),
+                    target: PathBuf::from("/"),
+                },
+                MountPlanEntry {
+                    role: MountRole::Workspace,
+                    source: MountSource::Overlay(OverlaySource {
+                        workspace: Some(workspace),
+                        lowers: vec![
+                            lower('b', "/images/top.erofs"),
+                            lower('c', "/images/bottom.erofs"),
+                        ],
+                    }),
+                    target: PathBuf::from("/workspace"),
+                },
+            ],
+        };
+        plan.validate().unwrap();
+        let MountSource::Overlay(source) = &plan.entries()[1].source else {
+            panic!("an Overlay workspace");
+        };
+        assert_eq!(
+            source
+                .lowers
+                .iter()
+                .map(|lower| lower.digest.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                format!("sha256:{}", "b".repeat(64)),
+                format!("sha256:{}", "c".repeat(64))
+            ]
+        );
+
+        let mut duplicate = plan.clone();
+        let MountSource::Overlay(source) = &mut duplicate.entries[1].source else {
+            panic!("an Overlay workspace");
+        };
+        source.lowers[1].digest = source.lowers[0].digest.clone();
+        let error = duplicate.validate().unwrap_err();
+        assert!(format!("{error}").contains("repeats digest"), "{error}");
     }
 
     #[test]
@@ -586,7 +734,7 @@ mod tests {
         let workspace_root = root.path().join("workspaces");
         std::fs::create_dir_all(workspace_root.join("ws_a")).unwrap();
         let workspace = CompiledWorkspace {
-            image: Some(image('d', "/images/project.erofs", "/workspace")),
+            lowers: vec![image('d', "/images/project.erofs", "/workspace")],
             write: workspace_root.join("ws_a"),
             ownership: SandboxWorkspaceOwnership::Agent,
         };
@@ -599,7 +747,7 @@ mod tests {
 
         // A Project Location can never carry a lower.
         let project = CompiledWorkspace {
-            image: Some(image('d', "/images/project.erofs", "/workspace")),
+            lowers: vec![image('d', "/images/project.erofs", "/workspace")],
             write: workspace_root.join("ws_a"),
             ownership: SandboxWorkspaceOwnership::ProjectLocation,
         };
