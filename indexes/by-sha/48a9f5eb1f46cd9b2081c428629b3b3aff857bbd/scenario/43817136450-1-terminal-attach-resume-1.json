@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43817136450,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3704-mcp-mutation-timeout",
+    "target_sha": "48a9f5eb1f46cd9b2081c428629b3b3aff857bbd",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43817136450",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "7996897b844ca5be9c7f2f1819d842a143a64b96a9294bc7dd776e6bba5dccbf"
+  },
+  "record": "runs/2026-11-16/43817136450-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "d20f3c8c0812e43ebc3328d42a5e33935c6ed49e7ac90ff31e8427c671cddf8f"
+}
