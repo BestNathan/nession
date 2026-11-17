@@ -530,15 +530,20 @@ jobs:
             mcp_readback="$(mktemp)"
             mcp_ui_readback="$(mktemp)"
             mcp_ready=false
+            # Keep public readback tied to the producer-owned publication schema.
+            # #3735 added schema-v2 typed outputs; an old v1 check rejects valid bytes.
             for attempt in {1..18}; do
               if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
                   -H 'Cache-Control: no-cache' "$url/data/mcp.json?revision=$EXPECTED_SHA" -o "$mcp_readback" \
-                && jq -e --arg sha "$EXPECTED_MCP_SOURCE_SHA" --arg digest "$EXPECTED_MCP_SEMANTIC_SHA256" --argjson count "$EXPECTED_MCP_TOOLS" '
-                  .schema_version == 1 and .status == "available" and
-                  .source.repository == "BestNathan/nession" and
-                  .source.branch == "main" and .source.sha == $sha and
-                  .semantic_sha256 == $digest and (.tools | length) == $count
-                ' "$mcp_readback" >/dev/null \
+                && node --input-type=module -e '
+                  import {readFileSync} from "node:fs";
+                  import {validMcpPublication} from "./pages/scripts/mcp-reconcile.mjs";
+                  const data=JSON.parse(readFileSync(process.argv[1], "utf8"));
+                  if (!validMcpPublication(data) ||
+                      data.source.sha !== process.argv[2] ||
+                      data.semantic_sha256 !== process.argv[3] ||
+                      data.tools.length !== Number(process.argv[4])) process.exit(1);
+                ' "$mcp_readback" "$EXPECTED_MCP_SOURCE_SHA" "$EXPECTED_MCP_SEMANTIC_SHA256" "$EXPECTED_MCP_TOOLS" \
                 && [[ "$(sha256sum "$mcp_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_JSON_SHA256" ]] \
                 && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
                   -H 'Cache-Control: no-cache' "$url/mcp-documents.js?revision=$EXPECTED_SHA" -o "$mcp_ui_readback" \
