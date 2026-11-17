@@ -24,12 +24,14 @@ use std::sync::Arc;
 use crate::registry::{RegistryError, ToolRegistry};
 use crate::tool::ToolHandler;
 
-/// Build the catalog this service advertises.
+/// The baseline Tools every host advertises.
 ///
 /// The order is the advertised order and is stable: Server-owned discovery
-/// first, then the Agent-owned Session operations.
-pub fn registry() -> Result<ToolRegistry, RegistryError> {
-    ToolRegistry::build([
+/// first, then the Agent-owned Session operations. A host composes Extension
+/// contributions on top of this list through [`crate::catalog::McpCatalog`];
+/// this function never sees a provider.
+pub fn baseline_handlers() -> Vec<Arc<dyn ToolHandler>> {
+    vec![
         Arc::new(nession_server_list_agents::NessionServerListAgents) as Arc<dyn ToolHandler>,
         Arc::new(nession_server_env_list::NessionServerEnvList),
         Arc::new(nession_server_env_get::NessionServerEnvGet),
@@ -41,7 +43,16 @@ pub fn registry() -> Result<ToolRegistry, RegistryError> {
         Arc::new(nession_agent_list_sessions::NessionAgentListSessions),
         Arc::new(nession_agent_create_session::NessionAgentCreateSession),
         Arc::new(nession_agent_kill_session::NessionAgentKillSession),
-    ])
+    ]
+}
+
+/// Build the baseline-only catalog.
+///
+/// Hosts that compose Extension contributions build a
+/// [`crate::catalog::McpCatalog`] instead; both paths register the same
+/// baseline Tools in the same order.
+pub fn registry() -> Result<ToolRegistry, RegistryError> {
+    ToolRegistry::build(baseline_handlers())
 }
 
 /// The exact names this service advertises.
