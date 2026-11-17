@@ -18,7 +18,7 @@ const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
 const MARKER='nession-convergence-pr:v1';
 const RISK_CATEGORIES=['tooling-only','e2e-runner','app-runtime',
-  'e2e-fixture-catalog','mixed','unknown'];
+  'e2e-fixture-catalog','mixed','unknown','ancestry-only'];
 const sha256=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const git=(root,...args)=>execFileSync('git',args,{
   cwd:root,encoding:'utf8',maxBuffer:8_000_000,
@@ -41,9 +41,14 @@ function integrationBranch(branch,main,lane){
 export function convergenceBatchDigest(batch){
   if(!safeBranch(batch?.branch)||![batch?.main_sha,batch?.lane_sha,
     batch?.integration_head].every(x=>SHA.test(x??''))||
-    !Array.isArray(batch.changedPaths)||!batch.changedPaths.length||
+    !Array.isArray(batch.changedPaths)||
     !RISK_CATEGORIES.includes(batch.impact?.category)||
-    !['newIds','regressionIds','removed'].every(k=>Array.isArray(batch[k])))
+    !['newIds','regressionIds','removed'].every(k=>Array.isArray(batch[k]))||
+    (batch.changedPaths.length===0?
+      (batch.impact.category!=='ancestry-only'||
+       batch.newIds.length!==0||batch.regressionIds.length!==0||
+       batch.removed.length!==0):
+      batch.impact.category==='ancestry-only'))
     throw Error('invalid source-bound convergence digest input');
   return sha256({
     version:1,branch:batch.branch,main:batch.main_sha,lane:batch.lane_sha,
@@ -328,6 +333,20 @@ export function selfTest(){
   assert.notEqual(convergenceBatchDigest({...batch,changedPaths:['scripts/b.mjs']}),digest);
   assert.notEqual(convergenceBatchDigest({...batch,impact:{category:'tooling-only'}}),digest);
   assert.throws(()=>convergenceBatchDigest({...batch,impact:{category:'tooling'}}),/invalid/);
+  // #3769: content-empty *ancestry* merges preserve immutable source and
+  // exact-head required CI, but never claim an invented path or E2E Pass.
+  const ancestry={...batch,changedPaths:[],impact:{category:'ancestry-only'}};
+  assert.match(convergenceBatchDigest(ancestry),DIGEST);
+  assert.equal(convergenceApproval(ancestry).approved,true);
+  assert.equal(convergenceE2EPlan({baseSha:b,targetSha:c,ids:[],
+    convergence:{batch_digest:convergenceBatchDigest(ancestry)}}).mode,
+    'not-required','no fabricated browser execution in an ancestry-only batch');
+  assert.throws(()=>convergenceBatchDigest({...batch,changedPaths:[]}),/invalid/);
+  assert.throws(()=>convergenceBatchDigest({...batch,impact:{category:'ancestry-only'}}),/invalid/);
+  assert.throws(()=>convergenceBatchDigest({...ancestry,
+    newIds:['forged-id']}),/invalid/);
+  assert.throws(()=>convergenceBatchDigest({...ancestry,
+    impact:{category:'unknown'}}),/invalid/);
   assert.equal(convergenceApproval(batch).reason,'AUTOMATED_SCOPED_SOURCE_POLICY');
   assert.equal(convergenceApproval(batch).approved,true,
     'mixed-risk source with scoped green checks does not wait for Full');
