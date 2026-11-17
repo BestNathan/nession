@@ -83,7 +83,7 @@
       section("Source & dependencies",'<dl class="im-facts">'+fact("Source",m.source||"Unknown")+fact("Layers",m.layers==null?"Unknown":String(m.layers))+fact("Size",bytes(im.size_bytes))+fact("Closure",m.format==="referenced multi-blob"?"Metadata + "+(m.layers-1)+" external blob(s)":"Self-contained image")+fact("Default target",im.default_mount||"Not declared")+fact("OCI Config",m.config||"Not exposed in legacy descriptor")+fact("EROFS packaging",m.packaging||"Deterministic · see Build provenance")+'</dl>')+
       section("References",'<p class="im-muted">A Tag is movable. Project and Session image references stay pinned to an immutable manifest.</p>'+
         (refs.length?'<ul class="im-reference-list">'+refs.map(x=>'<li>'+h(x)+'</li>').join("")+'</ul>':'<p class="im-empty-inline">No known active consumers</p>'))+
-      section("Availability",'<dl class="im-facts">'+fact("Server",statusOf(im))+fact("Agent · "+agentName,cache)+fact("Runtime",reason||"Compatible with current Agent")+'</dl>')+
+      section("Availability",'<dl class="im-facts">'+fact("Server",serverUp(s)?statusOf(im):"Unknown · Server unreachable")+fact("Agent · "+agentName,cache)+fact("Runtime",reason||"Compatible with current Agent")+'</dl>')+
       '</div>';
     const consume=im.kind==="Base Runtime"?"Use as RootFS":"Mount in Filesystem";
     return '<div class="im-record-detail" id="im-detail-'+h(im.id)+'">'+details+
@@ -99,7 +99,7 @@
     if(ui.tagPhase==="edit"){
       body=field("Tag name",input("tagName",ui.tagName,"stable"),
       "Repository-scoped mutable pointer. This operation never rewrites a Manifest.")+
-      '<div class="im-operation-footer">'+act("Cancel","im:tag-cancel")+act("Review change","im:tag-review:"+im.id,"primary")+'</div>';
+      '<div class="im-operation-footer">'+act("Cancel","im:tag-cancel")+act("Unlink selected Tag","im:tag-remove:"+im.id,"danger",!(im.tags||[]).includes(ui.tagName))+act("Review change","im:tag-review:"+im.id,"primary")+'</div>';
     } else {
       const unlink=ui.tagPhase==="unlink",impact=(im.imMeta?.refs||[]);
       body='<div class="im-operation-summary"><div><span>Repository</span><strong>'+h(im.repository)+'</strong></div>'+
@@ -108,7 +108,7 @@
         (unlink?'<div><span>Mutation</span><strong>Unlink Tag only</strong></div>':'<div><span>New revision</span><code>'+h(digest(im.digest))+'</code></div>')+'</div>'+
         '<p class="im-muted im-impact">Impact · '+impact.length+' known pinned consumer(s). '+(impact.length?impact.map(h).join(" · "):"No active reference known")+
         '. Pinned Manifests, leased mounts and CAS bytes remain unchanged.</p>'+
-        '<div class="im-operation-footer">'+act("Back","im:tag-back:"+im.id)+act(unlink?"Confirm unlink":"Confirm Tag move","im:"+(unlink?"tag-unlink:":"tag-save:")+im.id,unlink?"danger":"primary")+'</div>';
+        '<div class="im-operation-footer">'+act("Back","im:tag-back:"+im.id)+(ui.tagMessage.startsWith("Conflict")?act("Refresh expected Tag","im:tag-refresh:"+im.id):"")+act(unlink?"Confirm unlink":"Confirm Tag move","im:"+(unlink?"tag-unlink:":"tag-save:")+im.id,unlink?"danger":"primary")+'</div>';
     }
     return '<section class="im-operation" aria-label="Manage repository tag"><div class="im-operation-head"><h4>'+h(ui.tagPhase==="edit"?"Edit repository Tag":ui.tagPhase==="unlink"?"Confirm Tag unlink":"Review Tag mutation")+'</h4>'+flag("Catalog · CAS")+'</div>'+
       note(ui.tagMessage,ui.tagMessage.startsWith("Conflict")||ui.tagMessage.startsWith("Invalid")?"error":"info")+body+'</section>';
@@ -126,7 +126,7 @@
           '<button type="button" class="im-record-trigger im-library-columns" data-action="im:open:'+h(im.id)+'" aria-expanded="'+expanded+'" aria-controls="im-detail-'+h(im.id)+'" aria-label="'+h(brief)+'">'+
           '<span class="im-record-title"><strong>'+h(im.name)+'</strong><small>'+h(im.repository)+' · '+h((im.tags||[])[0]||"untagged")+'</small></span>'+
           '<span class="im-cell-muted">'+h(meta.format||"Unknown")+'</span><span class="im-cell-muted im-code">'+h(bytes(im.size_bytes))+'</span>'+
-          '<span>'+flag(statusOf(im),im.status==="failed"?"error":im.status==="building"?"attention":"quiet")+'</span>'+
+          '<span>'+flag(serverUp(s)?statusOf(im):"Unknown",!serverUp(s)?"attention":im.status==="failed"?"error":im.status==="building"?"attention":"quiet")+'</span>'+
           '<span class="im-chevron" aria-hidden="true">'+(expanded?"⌃":"⌄")+'</span></button>'+
           (expanded?catalogDetail(s,im):"")+'</article>';
       }).join(""):'<div class="im-zero"><strong>No matching images</strong><p>Try another search or status filter.</p>'+rowAction("Reset filters","im:filters-reset")+'</div>')+
@@ -330,9 +330,10 @@
     else if(part==="tag"){const im=find();if(im&&serverUp(s)){ui.tag=id;ui.tagName=(im.tags||[])[0]||"stable";ui.tagExpected=(s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName))||{}).digest||null;ui.tagPhase="edit";ui.tagMessage="";}}
     else if(part==="tag-cancel"){ui.tag=null;ui.tagMessage="";}
     else if(part==="tag-back"){ui.tagPhase="edit";ui.tagMessage="";}
+    else if(part==="tag-refresh"){const im=find();const o=im&&s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagMessage="Expected Tag refreshed; review before confirming."; }
     else if(part==="tag-review"){const im=find();if(!im||!serverUp(s))return true;if(!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(ui.tagName)){ui.tagMessage="Invalid Tag: use lower-case letters, digits, dot, underscore or hyphen.";return true;}const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagPhase="review";ui.tagMessage="";}
     else if(part==="tag-save"){const im=find();if(!im||ui.tagPhase!=="review"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: Tag changed since review. Refresh the expected revision before retry.";return true;}if(o)o.tags=o.tags.filter(t=>t!==ui.tagName);if(!im.tags.includes(ui.tagName))im.tags.push(ui.tagName);ui.tag=null;ui.notice="Tag "+ui.tagName+" updated. Existing pinned consumers are unchanged.";}
-    else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";}
+    else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=(im.tags||[]).includes(ui.tagName)?ui.tagName:im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";}
     else if(part==="tag-unlink"){const im=find();if(!im||ui.tagPhase!=="unlink"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: the Tag changed before unlink. Nothing was removed.";return true;}o.tags=o.tags.filter(t=>t!==ui.tagName);ui.tag=null;ui.notice="Tag unlinked; immutable Manifest, consumer pins and Blob Store remain.";
     } else if(part==="distribution"){s.sub.images="distribution";ui.cacheSelected=id;}
     else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.repository="all";ui.status="all";ui.selected=id;ui.libraryPage=Math.max(0,Math.floor(catalog(s).findIndex(im=>im.id===id)/ui.librarySize));}
@@ -357,7 +358,7 @@
         if(ui.compose.some(line=>!s.images.some(im=>im.id===line.id&&im.status==="ready")))error="All Compose inputs must be Server Ready.";
         if(new Set(ui.compose.map(line=>line.id)).size!==ui.compose.length)error="Each source revision must be selected only once.";
         if(ui.compose.some(line=>!line.destination.startsWith("/")||line.destination.includes("..")))error="Compose destinations must be normalized absolute paths.";
-        if(new Set(ui.compose.map(line=>line.destination)).size!==ui.compose.length)error="Compose destinations cannot overlap.";
+        if(ui.compose.some((line,i)=>ui.compose.some((other,j)=>i!==j&&(line.destination===other.destination||line.destination.startsWith(other.destination+"/")||other.destination.startsWith(line.destination+"/")))))error="Compose destination paths cannot overlap.";
         if(ui.buildRepresentation==="referenced"&&ui.compose.some(line=>line.destination!=="/"))error="Referenced Composite requires all source roots at /. Check source tree conflicts.";
       }
       if(error){ui.buildError=error;return true;}
