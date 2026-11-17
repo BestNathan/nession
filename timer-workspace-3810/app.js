@@ -69,12 +69,16 @@ function formBody(){
  '</div><div class="t-form-footer">'+(root.dataset.mode==='app'?'':button('cancel','Cancel'))+'<button class="t-btn primary" type="submit">'+(state.editId?'Save changes':'Create Timer')+'</button></div></form>';
 }
 function confirmation(){const t=timer(state.selected);return '<div><h1 class="t-page-title">Delete Timer</h1><p class="t-confirm-copy">Delete <strong>'+esc(t?t.name:'Timer')+'</strong>? The Server will record a deletion tombstone; an offline Agent may not stop until its existing authorization expires.</p><div class="t-stacked-actions">'+(root.dataset.mode==='app'?'':button('cancel-delete','Cancel'))+button('confirm-delete','Delete Timer','danger')+'</div></div>';}
+function terminalView(){return '<div class="t-terminal-preview"><div class="t-terminal-path">~/nession · devbox-01</div><pre>~/nession $ cargo test&#10;running 84 tests&#10;test result: ok&#10;&#10;~/nession $ ▋</pre>'+button('workspace','Open Workspace')+'</div>';}
 function render(){
  const mobile=root.dataset.mode==='app';
- let content=state.screen==='list'?renderList():state.screen==='detail'?detail():state.screen==='agent'?agentDetails():state.screen==='confirm'?confirmation():formBody();
+ const terminalPane=document.getElementById('web-terminal-pane');if(terminalPane)terminalPane.hidden=mobile||state.screen!=='terminal';
+ const workspacePane=document.querySelector('.t-workspace-panel');if(workspacePane)workspacePane.hidden=state.screen==='terminal';
+ const appDock=document.querySelector('.t-app-bottom');if(appDock)appDock.hidden=state.screen==='form'||state.screen==='confirm'||state.screen==='terminal';
+ let content=state.screen==='terminal'?terminalView():state.screen==='list'?renderList():state.screen==='detail'?detail():state.screen==='agent'?agentDetails():state.screen==='confirm'?confirmation():formBody();
  webContent.innerHTML=mobile?'':content;
  appContent.innerHTML=mobile?content:'';
- if(mobile){appTitle.textContent=state.screen==='form'?(state.editId?'Edit Timer':'New Timer'):state.screen==='detail'?'Timer details':state.screen==='agent'?'Agent details':state.screen==='confirm'?'Delete Timer':'Timers';}
+ if(mobile){appTitle.textContent=state.screen==='form'?(state.editId?'Edit Timer':'New Timer'):state.screen==='detail'?'Timer details':state.screen==='agent'?'Agent details':state.screen==='confirm'?'Delete Timer':state.screen==='terminal'?'Terminal':'Timers';}
  webCrumb.textContent=state.screen==='detail'?'Timer details':state.screen==='agent'?'Agent details':state.screen==='form'?'New Timer':'Timers';
  overlay.hidden=true;overlay.innerHTML='';
  if(!mobile&&(state.screen==='form'||state.screen==='confirm')){
@@ -85,7 +89,7 @@ function render(){
  document.getElementById('review-state')&&report();
 }
 function openForm(edit){const t=edit?timer(state.selected):null;state.editId=t?t.id:null;state.draft=t?JSON.parse(JSON.stringify(t)):{id:'',name:'',owner:'nession',schedule:'daily',time:'09:00',tz:'Asia/Shanghai',action:'claude.submit',input:'',placement:'agent',agent:'devbox-01',location:'devbox-location',target:'',enabled:true,revision:0,offline:'online_required',runs:[]};state.error='';state.screen='form';render();}
-function back(){if(state.screen==='form'){state.screen=state.editId?'detail':'list';state.draft=null;}else if(state.screen==='confirm'){state.screen='detail';}else if(state.screen==='list'){state.appLayer='terminal';showToast('Returned to Terminal context (mock).');}else state.screen='list';render();}
+function back(){if(state.screen==='form'){state.screen=state.editId?'detail':'list';state.draft=null;}else if(state.screen==='confirm'){state.screen='detail';}else if(state.screen==='list'){state.screen='terminal';}else state.screen='list';render();}
 function save(){const d=state.draft;if(!d)return;d.name=d.name.trim();if(!d.name){state.error='Name is required.';render();return;}if(d.name.length>80){state.error='Name is too long.';render();return;}if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(d.time)){state.error='Enter a valid time, for example 09:00.';render();return;}if(d.placement==='affinity'&&d.owner!=='nession'){state.error='This owner has no Project Location to resolve.';render();return;}if(d.target==='stale-session'){state.error='Target Session is no longer available. Select a valid target.';render();return;}
  if(state.editId){const old=timer(state.editId);d.id=old.id;d.revision=old.revision+1;d.runs=old.runs;state.timers=state.timers.map(x=>x.id===d.id?d:x);state.selected=d.id;showToast('Desired revision saved on Server (mock).');}
  else{d.id='timer-'+String(Date.now()).slice(-5);d.revision=1;d.runs=[];state.timers.unshift(d);state.selected=d.id;showToast('Timer saved on Server · '+status(d).value);}
@@ -108,7 +112,8 @@ function action(a,id){
  if(a==='cancel-delete'){state.screen='detail';render();return;}
  if(a==='confirm-delete'){state.timers=state.timers.filter(t=>t.id!==state.selected);state.screen='list';showToast('Deletion tombstone saved on Server (mock).');render();return;}
  if(a==='collapse'){document.querySelector('.t-sidebar').classList.toggle('compact');return;}
- if(a==='terminal'){showToast('Terminal context retained; Timers are accessible from Workspace.');return;}
+ if(a==='terminal'){state.screen='terminal';render();return;}
+ if(a==='workspace'){state.screen='list';render();return;}
  if(a==='session'||a==='project'||a==='new-session'){showToast('Context entry only; no Session or Project is created in this mock.');return;}
 }
 function syncDraft(key,value){
