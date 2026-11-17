@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nession · Claude App · #3829</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./styles.css"></head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review">
+<header class="np-overview">
+<nav class="np-breadcrumb"><a href="../index.html">Nession / Prototypes</a><span>·</span>Claude Code / App</nav>
+<div class="np-eyebrow">Requirement #3829 · Mobile-first capability design</div>
+<div class="np-header-main"><div><h1 class="np-title">Claude Code · 对话优先的 App 工作区</h1><p class="np-subtitle">当前对话是主画布；历史与管理能力通过 Browse 按需展开；所有深入页面遵守 Nession 单一返回与滚动规则。</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3829" target="_blank" rel="noopener">Requirement #3829</a><a href="./README.md" target="_blank" rel="noopener">Scenario &amp; fidelity</a><a href="https://github.com/BestNathan/nession/tree/prototype/claude-app-3829" target="_blank" rel="noopener">View source</a></div></div>
+<div class="np-meta"><span><strong>Surface</strong> App / Workspace</span><span><strong>Source</strong> synthetic fixtures</span><span><strong>Fidelity</strong> interactive concept</span></div>
+</header>
+<section class="np-preview" aria-label="Interactive App prototype">
+<div class="np-section-heading"><div><h2>Interactive product preview</h2><p>从当前对话开始，点击 Browse 查看 Claude 五类资源。</p></div></div>
+<div class="np-preview-toolbar"><strong>Viewport</strong><button data-np-size="390" aria-pressed="true">App · 390</button><button data-np-size="375">App · 375</button><button data-np-size="430">App · 430</button><span data-np-current-size></span><button data-np-reset>Reset</button></div>
+<div class="np-stage"><div class="np-device" data-np-device><div id="product" class="product" data-experience="app" aria-label="Nession App simulated product"><div id="terminal-layer" class="p-terminal" hidden></div><div id="workspace-layer" class="p-workspace"></div><div id="sheet-layer" class="p-sheet-holder" hidden></div></div></div></div>
+</section>
+<section class="np-details"><h2>场景与交互验证</h2><p class="np-details-lede">场景控制仅用于外部评审，不属于实际 App UI。建议先完整走一遍 Browse → Detail → Back 路径。</p>
+<div class="np-detail-grid">
+<div class="np-detail"><h3>01 · Conversation is work</h3><p>默认进入当前绑定对话。消息、工具活动与会话标题占据主体；没有伪造的 Claude 回复输入框。</p></div>
+<div class="np-detail"><h3>02 · One resource entry</h3><p>Browse 中统一入口：Conversations、Transcripts、Memory、MCP、Configuration。资源内部推进详情，不把全部功能压入顶部 Tab。</p></div>
+<div class="np-detail"><h3>03 · Honest states</h3><p>切换 No binding / Agent offline / Verified working 验证对话归属、安全状态展示与来源切换。</p></div>
+<div class="np-detail"><h3>04 · App depth</h3><p>Transcript 逐条可见且可查看 Raw，MCP 工具展示 schema，配置文件单列推进。返回不替代 Terminal 的工作现场。</p></div>
+</div>
+<div class="fixture-tools" aria-label="Reviewer-only simulation controls"><strong>Review fixtures（原型外部控制）</strong><button data-fixture="bound" type="button" aria-pressed="true">Bound · Idle</button><button data-fixture="working" type="button">Verified working</button><button data-fixture="unbound" type="button">No binding</button><button data-fixture="offline" type="button">Agent offline</button><button data-fixture="new-session" type="button">Switch Session</button></div>
+<details class="np-inspector"><summary>Mock route and state inspector</summary><pre id="inspector"></pre></details>
+<p class="np-details-lede" style="margin-top:18px">静态数据与本地状态模拟，不连接真实 Claude CLI / Agent，也不执行真实 MCP 操作。iOS Safari、生产组件和 Pages 发布仍待验证。</p>
+</section>
+</div>
+<script src="../prototype-frame-2758/frame.js"></script><script src="./app.js"></script>
+</body></html>
