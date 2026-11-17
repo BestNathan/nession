@@ -392,6 +392,267 @@ pub struct ImageGetResponsePayload {
     pub error_kind: Option<String>,
 }
 
+// ── Library, Tags and reference impact (#3799) ──────────────────────────
+
+/// The default Library page size.
+pub const IMAGE_LIBRARY_DEFAULT_LIMIT: u32 = 50;
+/// The largest Library page a caller may request.
+pub const IMAGE_LIBRARY_MAX_LIMIT: u32 = 200;
+
+fn default_image_library_limit() -> u32 {
+    IMAGE_LIBRARY_DEFAULT_LIMIT
+}
+
+/// How one Server Catalog revision represents its EROFS bytes (#3697, #3799).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageLibraryRepresentation {
+    /// One self-contained EROFS layer under a standard Manifest.
+    SingleLayer,
+    /// A Compose result flattened into one self-contained EROFS layer.
+    Flattened,
+    /// A metadata EROFS that references verified external EROFS blobs.
+    Referenced,
+    /// The catalog identity is absent or not readable; never inferred.
+    #[default]
+    Unknown,
+}
+
+/// One descriptor edge of a Library revision.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageLibraryLayer {
+    pub digest: String,
+    pub media_type: String,
+    pub size_bytes: u64,
+    /// The catalog reference role, for example `layer`, `config` or `device`.
+    pub role: String,
+}
+
+/// Known reference impact for one immutable revision (#3799).
+///
+/// Counts are authoritative Server observations. A count is never invented:
+/// when a reference class cannot be observed, `unknown` is true and removal
+/// must fail closed rather than claim the revision is unreferenced.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageReferenceImpact {
+    pub manifest_digest: String,
+    /// Active durable Project pins.
+    #[serde(default)]
+    pub project_pins: u64,
+    /// Active durable Session pins.
+    #[serde(default)]
+    pub session_pins: u64,
+    /// Other mutable Tags resolving to the same revision.
+    #[serde(default)]
+    pub other_tags: Vec<String>,
+    /// Expiring transfer/build/mount leases.
+    #[serde(default)]
+    pub leases: u64,
+    /// Referenced Composite or Catalog parents that consume this revision.
+    #[serde(default)]
+    pub compose_references: u64,
+    /// At least one reference class could not be observed.
+    #[serde(default)]
+    pub unknown: bool,
+}
+
+impl ImageReferenceImpact {
+    /// Whether any known or unknown reference forbids a silent unlink.
+    pub fn requires_confirmation(&self) -> bool {
+        self.unknown
+            || self.project_pins > 0
+            || self.session_pins > 0
+            || self.leases > 0
+            || self.compose_references > 0
+    }
+}
+
+/// One Library revision with its Server-owned catalog identity (#3799).
+///
+/// `image` is the legacy digest/alias registry projection. `manifest_digest`
+/// and its metadata come from the Manifest-addressed catalog; they are absent
+/// (never synthesized) when the legacy row has no readable catalog identity.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageLibraryEntry {
+    pub image: ImageDescriptor,
+    /// The Server Catalog repository, or empty when no catalog identity exists.
+    #[serde(default)]
+    pub repository: String,
+    /// Mutable repository-scoped Tags resolving to `manifest_digest`, sorted.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// The immutable OCI Manifest/Index/Composite digest, when readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// `manifest`, `index` or `composite`, when readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// `os/arch`, when the catalog records or verifies a platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub representation: ImageLibraryRepresentation,
+    /// Descriptor edges of this revision.
+    #[serde(default)]
+    pub layers: Vec<ImageLibraryLayer>,
+    /// Every CAS object reachable from this revision, sorted.
+    #[serde(default)]
+    pub closure: Vec<String>,
+    /// Known reference impact; absent when the caller may not observe it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<ImageReferenceImpact>,
+}
+
+/// `server.image.library.list`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageLibraryListPayload {
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default = "default_image_library_limit")]
+    pub limit: u32,
+    /// Case-sensitive substring filter over alias, tag, digest, image id and
+    /// persisted source. Empty returns the unfiltered page.
+    #[serde(default)]
+    pub query: String,
+    /// Exact Server Catalog repository filter; empty returns all repositories.
+    #[serde(default)]
+    pub repository: String,
+}
+
+/// `server.image.library.list`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageLibraryListResponsePayload {
+    pub success: bool,
+    #[serde(default)]
+    pub entries: Vec<ImageLibraryEntry>,
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.tag.set`'s request.
+///
+/// `expected_digest` absent means create-only: the Tag must not exist.
+/// A present value is the exact prior digest the move must observe.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageTagSetPayload {
+    pub repository: String,
+    pub tag: String,
+    /// The immutable target digest.
+    pub digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_digest: Option<String>,
+}
+
+/// The committed result of one Tag CAS mutation.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageTagUpdate {
+    pub repository: String,
+    pub tag: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous: Option<String>,
+    pub digest: String,
+}
+
+/// `server.image.tag.set`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageTagSetResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<ImageTagUpdate>,
+    /// The digest the Tag actually resolves to after a CAS conflict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.tag.remove`'s request.
+///
+/// Removal is a logical unlink. It never deletes CAS bytes, moves a running
+/// Session or Project pin, or evicts Agent cache. `accept_reference_impact`
+/// must be true when the Server reports a confirmation-requiring impact.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageTagRemovePayload {
+    pub repository: String,
+    pub tag: String,
+    /// The exact prior digest the removal must observe.
+    pub expected_digest: String,
+    #[serde(default)]
+    pub accept_reference_impact: bool,
+}
+
+/// `server.image.tag.remove`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageTagRemoveResponsePayload {
+    pub success: bool,
+    #[serde(default)]
+    pub removed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<ImageReferenceImpact>,
+    /// The digest the Tag actually resolves to after a CAS conflict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
+/// `server.image.impact.get`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageImpactPayload {
+    pub repository: String,
+    pub tag: String,
+}
+
+/// `server.image.impact.get`'s reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageImpactResponsePayload {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<ImageReferenceImpact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+}
+
 /// One Agent cache state for a selected image (#3181).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

@@ -196,6 +196,12 @@ server_routes!(handler, msg, payload;
     "server.image.build" => "server.image.build" => 1 => Inline => handler.handle_client_image_build(msg).await,
     "server.image.list" => "server.image.list" => 1 => Query => handler.handle_client_image_list(msg).await,
     "server.image.get" => "server.image.get" => 1 => Query => handler.handle_client_image_get(msg).await,
+    // Server Catalog Library and mutable Tag lifecycle (#3799). Reads are
+    // queries; Tag mutations are small CAS-guarded catalog writes.
+    "server.image.library.list" => "server.image.library.list" => 1 => Query => handler.handle_client_image_library_list(msg).await,
+    "server.image.impact.get" => "server.image.impact.get" => 1 => Query => handler.handle_client_image_impact_get(msg).await,
+    "server.image.tag.set" => "server.image.tag.set" => 1 => Inline => handler.handle_client_image_tag_set(msg).await,
+    "server.image.tag.remove" => "server.image.tag.remove" => 1 => Inline => handler.handle_client_image_tag_remove(msg).await,
     // Asynchronous durable build lifecycle (#3334). Submit/cancel/retry are
     // small writes to the durable build directory; get/list read it.
     "server.image.build.submit" => "server.image.build.submit" => 1 => Inline => handler.handle_client_image_build_submit(msg).await,

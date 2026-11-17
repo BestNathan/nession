@@ -16,10 +16,21 @@ import {
   DetailSurface,
 } from '@/components/ui/resource-detail';
 import { Input } from '@/components/ui/input';
+import {
+  OperationActions,
+  OperationError,
+  OperationLead,
+} from '@/components/ui/operation-surface';
 import type { WorkspaceViewProps } from '@/app/workspace/workspaceContext';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
-import { imagesApi, type ImageBuildDescriptor, type ImageDescriptor } from '../ImagesPlugin';
+import {
+  imagesApi,
+  type ImageBuildDescriptor,
+  type ImageDescriptor,
+  type ImageLibraryEntry,
+  type ImageReferenceImpact,
+} from '../ImagesPlugin';
 import {
   IMAGE_PAGE_SIZE,
   imageAliases,
@@ -27,12 +38,26 @@ import {
   imageBuildStageLabel,
   imageBuildStatusLabel,
   imageServerStatusLabel,
+  impactSummary,
   isTerminalBuild,
+  libraryManifestDigest,
+  libraryRepository,
+  libraryTagsLabel,
+  libraryTitle,
+  representationLabel,
   shortDigest,
   sourceLabel,
 } from '../model';
 import { useImageBuilds, type ImageBuildsState } from '../hooks/useImageBuilds';
-import { useImagesPage, type ImagesPageState } from '../hooks/useImagesPage';
+import {
+  useImageLibraryPage,
+  type ImageLibraryPageState,
+} from '../hooks/useImageLibraryPage';
+import {
+  tagOperationTitle,
+  useTagOperation,
+  type TagOperationState,
+} from '../hooks/useTagOperation';
 
 function ImageStatusBadge({ image }: { image: ImageDescriptor }) {
   const variant =
@@ -45,25 +70,26 @@ function ImageStatusBadge({ image }: { image: ImageDescriptor }) {
 }
 
 function ImageRow({
-  image,
+  entry,
   expanded,
   onToggle,
 }: {
-  image: ImageDescriptor;
+  entry: ImageLibraryEntry;
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const aliases = imageAliases(image);
+  const image = entry.image;
   return (
     <button
       type="button"
       data-testid="image-row"
       data-image-digest={image.digest ?? ''}
+      data-image-repository={entry.repository}
       aria-expanded={expanded}
       aria-controls={`image-detail-${image.image_id}`}
       onClick={onToggle}
       className={cn(
-        'flex min-w-0 items-center gap-2 rounded-[var(--nession-radius-control)] border border-transparent px-3 py-2 text-left transition-colors',
+        'flex w-full min-w-0 items-center gap-2 rounded-[var(--nession-radius-control)] border border-transparent px-3 py-2 text-left transition-colors',
         'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         expanded && 'bg-muted',
       )}
@@ -71,15 +97,21 @@ function ImageRow({
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex min-w-0 items-center justify-between gap-2">
           <span className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
-            {aliases.length > 0 ? aliases[0] : image.image_id}
+            {libraryTitle(entry)}
           </span>
           <ImageStatusBadge image={image} />
         </span>
-        <span className="min-w-0 truncate text-muted-foreground">
-          {sourceLabel(image)}
+        <span
+          className="min-w-0 truncate text-muted-foreground"
+          data-testid="image-row-repository"
+        >
+          {libraryRepository(entry)}
+          {entry.tags.length > 0 ? ` · ${entry.tags.join(', ')}` : ' · No tag'}
+          {` · ${representationLabel(entry.representation)}`}
+          {` · ${image.size_bytes.toLocaleString()} bytes`}
         </span>
         <span className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}>
-          {shortDigest(image.digest)}
+          {shortDigest(entry.manifest_digest ?? image.digest)}
         </span>
       </span>
       {expanded ? (
@@ -91,41 +123,364 @@ function ImageRow({
   );
 }
 
-export function ImagesDetail({ image }: { image: ImageDescriptor }) {
+interface TagOperationFieldsProps {
+  operation: TagOperationState;
+  tagName: string;
+  onTagName: (value: string) => void;
+  targetDigest: string;
+  onTargetDigest: (value: string) => void;
+  impact: ImageReferenceImpact | null;
+  impactLoading: boolean;
+  acceptImpact: boolean;
+  onAcceptImpact: (value: boolean) => void;
+  needsReview: boolean;
+}
+
+function TagOperationFields(props: TagOperationFieldsProps) {
+  const { operation, impact, impactLoading, needsReview } = props;
+  return (
+    <>
+      <OperationLead>
+        {operation.kind === 'remove'
+          ? 'Unlinking a Tag changes only this mutable reference. Durable pins, other Tags, CAS bytes, running consumers and Agent cache are untouched; Server GC remains the only reclaim authority.'
+          : 'A Tag is a mutable, repository-scoped reference. The immutable Manifest digest and every pinned Session or Project revision stay unchanged.'}
+      </OperationLead>
+      {operation.kind === 'remove' ? (
+        <DetailFacts>
+          <DetailFact label="Tag" mono>
+            {operation.tag}
+          </DetailFact>
+          <DetailFact label="Expected digest" mono>
+            {operation.expected ?? 'Unknown'}
+          </DetailFact>
+          <DetailFact label="Reference impact" testId="images-tag-impact">
+            {impactLoading ? 'Reading the Server reference graph…' : impactSummary(impact)}
+          </DetailFact>
+        </DetailFacts>
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <Input
+            type="text"
+            value={props.tagName}
+            placeholder="tag name"
+            aria-label="Tag name"
+            data-testid="images-tag-name"
+            className="min-w-0 flex-1"
+            disabled={operation.kind === 'move'}
+            onChange={(event) => props.onTagName(event.target.value)}
+          />
+          <Input
+            type="text"
+            value={props.targetDigest}
+            placeholder="sha256:<64 hex> target"
+            aria-label="Target manifest digest"
+            data-testid="images-tag-target"
+            className="min-w-0 flex-1"
+            onChange={(event) => props.onTargetDigest(event.target.value)}
+          />
+        </div>
+      )}
+      {operation.kind === 'remove' && needsReview && impact !== null && !impact.unknown ? (
+        <label
+          className="flex min-w-0 items-center gap-2"
+          data-testid="images-tag-impact-confirm-label"
+        >
+          <input
+            type="checkbox"
+            checked={props.acceptImpact}
+            data-testid="images-tag-impact-confirm"
+            onChange={(event) => props.onAcceptImpact(event.target.checked)}
+          />
+          <span className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
+            I reviewed the reference impact; unlink the Tag only.
+          </span>
+        </label>
+      ) : null}
+    </>
+  );
+}
+
+function TagOperationFeedback({
+  conflictDigest,
+  error,
+}: {
+  conflictDigest: string | null;
+  error: string | null;
+}) {
+  return (
+    <>
+      {conflictDigest ? (
+        <p className="break-all text-destructive" data-testid="images-tag-conflict">
+          The Tag now resolves to {conflictDigest}. Refresh and review the operation again; the
+          expected digest was not bypassed.
+        </p>
+      ) : null}
+      {error ? <OperationError testId="images-tag-error">{error}</OperationError> : null}
+    </>
+  );
+}
+
+/**
+ * One deliberate Tag operation (#3799).
+ *
+ * The Server is the mutation authority. A CAS conflict is surfaced with the
+ * digest the Tag actually resolves to and requires a fresh review; a known
+ * reference impact needs explicit confirmation, and an unobservable impact
+ * disables the unlink entirely.
+ */
+function TagOperationSection({
+  entry,
+  operation,
+  onClose,
+  onChanged,
+}: {
+  entry: ImageLibraryEntry;
+  operation: TagOperationState;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const state = useTagOperation(entry, operation, onClose, onChanged);
+  return (
+    <DetailSection title={tagOperationTitle(operation.kind)} level="h3">
+      <div data-testid="images-tag-operation" className="flex min-w-0 flex-col gap-2">
+        <TagOperationFields
+          operation={operation}
+          tagName={state.tagName}
+          onTagName={state.setTagName}
+          targetDigest={state.targetDigest}
+          onTargetDigest={state.setTargetDigest}
+          impact={state.impact}
+          impactLoading={state.impactLoading}
+          acceptImpact={state.acceptImpact}
+          onAcceptImpact={state.setAcceptImpact}
+          needsReview={state.needsReview}
+        />
+        <TagOperationFeedback
+          conflictDigest={state.conflictDigest}
+          error={state.error}
+        />
+        <OperationActions>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="images-tag-cancel"
+            disabled={state.busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            data-testid="images-tag-confirm"
+            disabled={state.confirmDisabled}
+            onClick={() => void state.submit()}
+          >
+            {state.busy
+              ? 'Applying…'
+              : operation.kind === 'remove'
+                ? 'Unlink tag'
+                : 'Apply tag'}
+          </Button>
+        </OperationActions>
+      </div>
+    </DetailSection>
+  );
+}
+
+function ImagesIdentityFacts({ entry }: { entry: ImageLibraryEntry }) {
+  const image = entry.image;
   const aliases = imageAliases(image);
   return (
-    <DetailSurface data-testid="images-detail">
-      <DetailHeader
-        eyebrow="Server-owned immutable image"
-        title={aliases[0] ?? image.image_id}
-        titleTestId="images-detail-title"
-        badges={<ImageStatusBadge image={image} />}
-        meta={
-          <span className={cn('break-all', chromeMonoRole('code'))}>
-            {image.digest ?? 'No digest (build not ready)'}
+    <DetailFacts>
+      <DetailFact label="Repository" testId="images-detail-repository">
+        {libraryRepository(entry)}
+      </DetailFact>
+      <DetailFact label="Tags" testId="images-detail-tags">
+        {libraryTagsLabel(entry)}
+      </DetailFact>
+      <DetailFact label="Manifest / Index" mono testId="images-detail-manifest">
+        {libraryManifestDigest(entry)}
+      </DetailFact>
+      <DetailFact label="Kind" testId="images-detail-kind">
+        {entry.kind ?? 'Unknown kind'}
+      </DetailFact>
+      <DetailFact label="Media type" mono testId="images-detail-media-type">
+        {entry.media_type ?? 'Unknown media type'}
+      </DetailFact>
+      <DetailFact label="Platform" testId="images-detail-platform">
+        {entry.platform ?? 'Unknown platform'}
+      </DetailFact>
+      <DetailFact label="Representation" testId="images-detail-representation">
+        {representationLabel(entry.representation)}
+      </DetailFact>
+      <DetailFact label="Aliases" testId="images-detail-aliases">
+        {aliases.length > 0 ? aliases.join(', ') : 'No alias'}
+      </DetailFact>
+      <DetailFact label="Source" testId="images-detail-source">
+        {sourceLabel(image)}
+      </DetailFact>
+      {image.source_sha ? (
+        <DetailFact label="Source commit" mono testId="images-detail-source-sha">
+          {image.source_sha}
+        </DetailFact>
+      ) : null}
+      <DetailFact label="Size" testId="images-detail-size">
+        {image.size_bytes.toLocaleString()} bytes
+      </DetailFact>
+      <DetailFact label="Created" testId="images-detail-created">
+        {new Date(image.created_at * 1000).toLocaleString()}
+      </DetailFact>
+    </DetailFacts>
+  );
+}
+
+function ImagesTagsSection({
+  entry,
+  onTagsChanged,
+}: {
+  entry: ImageLibraryEntry;
+  onTagsChanged: () => void;
+}) {
+  const [operation, setOperation] = useState<TagOperationState | null>(null);
+  const canManageTags = entry.repository !== '' && entry.manifest_digest !== null;
+  return (
+    <DetailSection title="Tags" level="h3">
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
+        A Tag is a mutable repository-scoped reference. Moving or unlinking it never changes the
+        immutable Manifest or a pinned consumer revision.
+      </p>
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {entry.tags.map((tag) => (
+          <span
+            key={tag}
+            data-testid="images-tag"
+            className="flex items-center gap-1 rounded-[var(--nession-radius-control)] border border-border px-2 py-1"
+          >
+            <span className={chromeMonoRole('code')}>{tag}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid={`images-tag-move-${tag}`}
+              disabled={!canManageTags}
+              onClick={() =>
+                setOperation({ kind: 'move', tag, expected: entry.manifest_digest ?? null })
+              }
+            >
+              Move
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid={`images-tag-remove-${tag}`}
+              disabled={!canManageTags}
+              onClick={() =>
+                setOperation({ kind: 'remove', tag, expected: entry.manifest_digest ?? null })
+              }
+            >
+              Unlink
+            </Button>
           </span>
-        }
-        description="The Server owns these bytes and the immutable digest. A Project references one digest; a Sandbox composition pins a resolved digest before execution."
-      />
+        ))}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="images-tag-create"
+          disabled={!canManageTags}
+          onClick={() => setOperation({ kind: 'create', tag: '', expected: null })}
+        >
+          Create tag
+        </Button>
+      </div>
+      {!canManageTags ? (
+        <p
+          className={cn('text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="images-tag-unavailable"
+        >
+          No Server catalog identity is readable for this revision; Tag changes are unavailable.
+        </p>
+      ) : null}
+      {operation ? (
+        <TagOperationSection
+          entry={entry}
+          operation={operation}
+          onClose={() => setOperation(null)}
+          onChanged={onTagsChanged}
+        />
+      ) : null}
+    </DetailSection>
+  );
+}
+
+function ImagesDependenciesSection({ entry }: { entry: ImageLibraryEntry }) {
+  return (
+    <DetailSection title="Dependencies" level="h3">
       <DetailFacts>
-        <DetailFact label="Aliases" testId="images-detail-aliases">
-          {aliases.length > 0 ? aliases.join(', ') : 'No alias'}
+        <DetailFact label="Descriptor edges" testId="images-detail-layers">
+          {entry.layers.length}
         </DetailFact>
-        <DetailFact label="Source" testId="images-detail-source">
-          {sourceLabel(image)}
-        </DetailFact>
-        {image.source_sha ? (
-          <DetailFact label="Source commit" mono testId="images-detail-source-sha">
-            {image.source_sha}
-          </DetailFact>
-        ) : null}
-        <DetailFact label="Size" testId="images-detail-size">
-          {image.size_bytes.toLocaleString()} bytes
-        </DetailFact>
-        <DetailFact label="Created" testId="images-detail-created">
-          {new Date(image.created_at * 1000).toLocaleString()}
+        <DetailFact label="Reachable EROFS blobs" testId="images-detail-closure">
+          {entry.closure.length}
         </DetailFact>
       </DetailFacts>
+      {entry.layers.length > 0 ? (
+        <ul className="flex min-w-0 flex-col gap-1">
+          {entry.layers.map((layer) => (
+            <li
+              key={`${layer.role}-${layer.digest}`}
+              data-testid="images-detail-layer"
+              className="flex min-w-0 items-center gap-2"
+            >
+              <span className={chromeSansRole('caption')}>{layer.role}</span>
+              <span className={cn('min-w-0 truncate', chromeMonoRole('code'))}>
+                {shortDigest(layer.digest)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p
+          className={cn('text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="images-detail-layers-unknown"
+        >
+          No descriptor closure is readable; representation is unknown.
+        </p>
+      )}
+    </DetailSection>
+  );
+}
+
+function ImagesReferencesSection({ entry }: { entry: ImageLibraryEntry }) {
+  const image = entry.image;
+  return (
+    <DetailSection title="References and availability" level="h3">
+      <DetailFacts>
+        <DetailFact label="Reference impact" testId="images-detail-impact">
+          {impactSummary(entry.impact)}
+        </DetailFact>
+        <DetailFact label="Server" testId="images-detail-server">
+          {imageServerStatusLabel(image.status)}
+        </DetailFact>
+        <DetailFact label="Agent cache" testId="images-detail-agent-cache">
+          Unknown here; observed only in Distribution for the current Session
+        </DetailFact>
+        <DetailFact label="Sandbox runtime" testId="images-detail-runtime">
+          {entry.representation === 'referenced'
+            ? 'Referenced composite: not a Sandbox MountPlan input'
+            : 'Checked by the consumer flow at prepare time'}
+        </DetailFact>
+      </DetailFacts>
+    </DetailSection>
+  );
+}
+
+function ImagesBuildSections({ image }: { image: ImageDescriptor }) {
+  return (
+    <>
       <DetailSection title="Build state" level="h3">
         {image.status === 'ready' ? (
           <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
@@ -155,10 +510,40 @@ export function ImagesDetail({ image }: { image: ImageDescriptor }) {
           </DetailFact>
         </DetailFacts>
       </DetailSection>
-    </DetailSurface>
+    </>
   );
 }
 
+export function ImagesDetail({
+  entry,
+  onTagsChanged,
+}: {
+  entry: ImageLibraryEntry;
+  onTagsChanged: () => void;
+}) {
+  const image = entry.image;
+  return (
+    <DetailSurface data-testid="images-detail">
+      <DetailHeader
+        eyebrow="Server-owned immutable image"
+        title={libraryTitle(entry)}
+        titleTestId="images-detail-title"
+        badges={<ImageStatusBadge image={image} />}
+        meta={
+          <span className={cn('break-all', chromeMonoRole('code'))}>
+            {entry.manifest_digest ?? image.digest ?? 'No digest (build not ready)'}
+          </span>
+        }
+        description="The Server owns these bytes, the Manifest identity and the mutable Tags. A Project or Session pins an immutable digest; a Tag move never rebinds it."
+      />
+      <ImagesIdentityFacts entry={entry} />
+      <ImagesTagsSection entry={entry} onTagsChanged={onTagsChanged} />
+      <ImagesDependenciesSection entry={entry} />
+      <ImagesReferencesSection entry={entry} />
+      <ImagesBuildSections image={image} />
+    </DetailSurface>
+  );
+}
 
 function BuildStatusBadge({ build }: { build: ImageBuildDescriptor }) {
   const variant =
@@ -381,12 +766,125 @@ export function ImagesBuildsPanel({ builds }: { builds: ImageBuildsState }) {
   );
 }
 
+function ImagesLibraryHeader({ page }: { page: ImageLibraryPageState }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2 border-b border-border p-3">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <h2 className={cn('min-w-0', chromeSansRole('title'))}>Image Library</h2>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label="Refresh image inventory"
+          data-testid="images-refresh"
+          onClick={page.refresh}
+        >
+          <RefreshCw aria-hidden="true" />
+        </Button>
+      </div>
+      <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
+        Server-owned immutable images and mutable Tags. Agent cache readiness is observed
+        separately for the current Session&apos;s Agent.
+      </p>
+      <Input
+        type="search"
+        value={page.query}
+        placeholder="Search alias, tag, digest or source"
+        aria-label="Search images"
+        data-testid="images-search"
+        onChange={(event) => page.setQuery(event.target.value)}
+      />
+      <Input
+        type="search"
+        value={page.repository}
+        placeholder="Filter by repository"
+        aria-label="Filter by repository"
+        data-testid="images-repository"
+        onChange={(event) => page.setRepository(event.target.value)}
+      />
+    </div>
+  );
+}
+
+function ImagesLibraryPager({ page }: { page: ImageLibraryPageState }) {
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-border p-2">
+      <span
+        className={cn('text-muted-foreground', chromeSansRole('caption'))}
+        data-testid="images-page-label"
+      >
+        {page.total === 0
+          ? '0 images'
+          : `${page.offset + 1}–${page.offset + page.entries.length} of ${page.total}`}
+      </span>
+      <span className="flex items-center gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!page.hasPrevious || page.loading}
+          data-testid="images-previous"
+          onClick={page.previous}
+        >
+          <ChevronLeft aria-hidden="true" /> Previous
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!page.hasNext || page.loading}
+          data-testid="images-next"
+          onClick={page.next}
+        >
+          Next <ChevronRight aria-hidden="true" />
+        </Button>
+      </span>
+    </div>
+  );
+}
+
+function ImagesLibraryRows({
+  page,
+  expandedImageId,
+  onExpand,
+}: {
+  page: ImageLibraryPageState;
+  expandedImageId: string | null;
+  onExpand: (imageId: string | null) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col p-1">
+      {page.entries.map((entry) => {
+        const expanded = entry.image.image_id === expandedImageId;
+        return (
+          <div key={entry.image.image_id} className="min-w-0">
+            <ImageRow
+              entry={entry}
+              expanded={expanded}
+              onToggle={() => onExpand(expanded ? null : entry.image.image_id)}
+            />
+            {expanded ? (
+              <div
+                id={`image-detail-${entry.image.image_id}`}
+                data-testid="image-detail-row"
+                className="min-w-0 pb-2 pt-1"
+              >
+                <ImagesDetail entry={entry} onTagsChanged={page.refresh} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ImagesLibraryPanel({
   page,
   expandedImageId,
   onExpand,
 }: {
-  page: ImagesPageState;
+  page: ImageLibraryPageState;
   expandedImageId: string | null;
   onExpand: (imageId: string | null) => void;
 }) {
@@ -396,106 +894,40 @@ export function ImagesLibraryPanel({
       aria-label="Server image inventory"
       className="flex min-w-0 flex-col"
     >
-      <div className="flex min-w-0 flex-col gap-2 border-b border-border p-3">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <h2 className={cn('min-w-0', chromeSansRole('title'))}>Image Library</h2>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="Refresh image inventory"
-            data-testid="images-refresh"
-            onClick={page.refresh}
-          >
-            <RefreshCw aria-hidden="true" />
-          </Button>
-        </div>
-        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
-          Server-owned immutable images. Agent cache readiness is observed separately for the
-          current Session&apos;s Agent.
-        </p>
-        <Input
-          type="search"
-          value={page.query}
-          placeholder="Search alias, digest or source"
-          aria-label="Search images"
-          data-testid="images-search"
-          onChange={(event) => page.setQuery(event.target.value)}
-        />
-      </div>
+      <ImagesLibraryHeader page={page} />
       {page.error ? (
         <div className="flex flex-col items-start gap-2 p-4">
-          <p className={cn('text-destructive', chromeSansRole('secondary'))} data-testid="images-error">
+          <p
+            className={cn('text-destructive', chromeSansRole('secondary'))}
+            data-testid="images-error"
+          >
             {page.error}
           </p>
           <Button type="button" variant="outline" onClick={page.refresh}>
             Retry
           </Button>
         </div>
-      ) : page.loading && page.images.length === 0 ? (
-        <p className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))} data-testid="images-loading">
+      ) : page.loading && page.entries.length === 0 ? (
+        <p
+          className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="images-loading"
+        >
           Reading the Server image inventory…
         </p>
-      ) : page.images.length === 0 ? (
+      ) : page.entries.length === 0 ? (
         <DetailEmpty data-testid="images-empty">
-          {page.query.trim()
+          {page.query.trim() || page.repository.trim()
             ? 'No image matches this search.'
             : 'This Server currently holds no images.'}
         </DetailEmpty>
       ) : (
-        <div className="flex min-w-0 flex-col p-1">
-          {page.images.map((image) => {
-            const expanded = image.image_id === expandedImageId;
-            return (
-              <div key={image.image_id} className="min-w-0">
-                <ImageRow
-                  image={image}
-                  expanded={expanded}
-                  onToggle={() => onExpand(expanded ? null : image.image_id)}
-                />
-                {expanded ? (
-                  <div
-                    id={`image-detail-${image.image_id}`}
-                    data-testid="image-detail-row"
-                    className="min-w-0 pb-2 pt-1"
-                  >
-                    <ImagesDetail image={image} />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+        <ImagesLibraryRows
+          page={page}
+          expandedImageId={expandedImageId}
+          onExpand={onExpand}
+        />
       )}
-      <div className="flex items-center justify-between gap-2 border-t border-border p-2">
-        <span className={cn('text-muted-foreground', chromeSansRole('caption'))} data-testid="images-page-label">
-          {page.total === 0
-            ? '0 images'
-            : `${page.offset + 1}–${page.offset + page.images.length} of ${page.total}`}
-        </span>
-        <span className="flex items-center gap-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!page.hasPrevious || page.loading}
-            data-testid="images-previous"
-            onClick={page.previous}
-          >
-            <ChevronLeft aria-hidden="true" /> Previous
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!page.hasNext || page.loading}
-            data-testid="images-next"
-            onClick={page.next}
-          >
-            Next <ChevronRight aria-hidden="true" />
-          </Button>
-        </span>
-      </div>
+      <ImagesLibraryPager page={page} />
     </section>
   );
 }
@@ -516,7 +948,7 @@ export function ImagesPanel({
   experience: 'web' | 'app';
   distribution?: React.ReactNode;
 }) {
-  const page = useImagesPage(IMAGE_PAGE_SIZE);
+  const page = useImageLibraryPage(IMAGE_PAGE_SIZE);
   const builds = useImageBuilds(IMAGE_PAGE_SIZE);
   const sections = distribution
     ? (['library', 'builds', 'distribution'] as const)
