@@ -91,12 +91,19 @@ async function main() {
   const command = process.argv[2];
   if (command === 'self-test') { selfTest(); return; }
   const sourceSha = process.argv[3];
-  if (command !== 'wait' || !SHA.test(sourceSha) ||
-      process.env.GITHUB_REPOSITORY !== REPO ||
-      process.env.GITHUB_REF !== 'refs/heads/staging' ||
-      process.env.GITHUB_SHA !== sourceSha ||
-      !process.env.GH_TOKEN) {
-    deny('invalid trusted execution or usage: self-test | wait <full-sha>');
+  // A manual main-owned diagnostic can inspect a historical, authenticated
+  // Staging release but may not deploy it or claim a current Staging identity.
+  const staged = command === 'wait';
+  const diagnostic = command === 'verify-mirror';
+  const trustedContext = staged
+    ? process.env.GITHUB_REF === 'refs/heads/staging' &&
+      process.env.GITHUB_SHA === sourceSha
+    : diagnostic && process.env.GITHUB_REF === 'refs/heads/main' &&
+      process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+  if ((!staged && !diagnostic) || !SHA.test(sourceSha) ||
+      process.env.GITHUB_REPOSITORY !== REPO || !trustedContext ||
+      !process.env.GH_TOKEN || !process.env.GITHUB_OUTPUT) {
+    deny('invalid trusted execution or usage: self-test | wait <full-sha> | verify-mirror <full-sha>');
   }
   const api = async route => {
     const response = await fetch('https://api.github.com/repos/' + REPO + route, {
@@ -111,7 +118,7 @@ async function main() {
   };
   // This independent job can wait while the GHCR-only build proceeds. A failed
   // or absent source cannot be laundered into a successful ACR/GitOps receipt.
-  for (let attempt = 1; attempt <= 240; attempt++) {
+  for (let attempt = 1; attempt <= (diagnostic ? 1 : 240); attempt++) {
     const body = await api('/actions/workflows/release-staging.yml/runs?head_sha=' +
       sourceSha + '&per_page=100');
     if (!Array.isArray(body.workflow_runs) || body.total_count > 100) {
@@ -138,15 +145,20 @@ async function main() {
           '/attempts/' + selected.run_attempt + '/jobs?per_page=100'),
       ]);
       const verified = verifyRelease(run, jobs, sourceSha);
-      const branch = await api('/branches/staging');
-      if (branch.commit?.sha !== sourceSha) {
-        deny('Staging moved to another SHA; refuse a stale rollout');
+      if (staged) {
+        const branch = await api('/branches/staging');
+        if (branch.commit?.sha !== sourceSha) {
+          deny('Staging moved to another SHA; refuse a stale rollout');
+        }
       }
       fs.appendFileSync(process.env.GITHUB_OUTPUT,
         'short_sha=' + verified.short_sha + '\n' +
         'source_run_id=' + verified.source_run_id + '\n');
       console.log('TRUSTED_STAGING_GHCR_V1 ' + JSON.stringify(verified));
       return;
+    }
+    if (diagnostic) {
+      deny('no completed authenticated Staging GHCR release for source SHA');
     }
     if (attempt % 8 === 1) {
       console.log('Waiting for GHCR release ' + sourceSha.slice(0, 7));
