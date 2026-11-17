@@ -18,6 +18,9 @@ Related owners:
 - [`agent-process-discovery.md`](agent-process-discovery.md) — the read-only
   Session process-membership contract that consumes `TmuxOps::list_panes`;
   it owns the discovery methods, coverage/fallback truth and redaction.
+- [`session-activity.md`](session-activity.md) — the capability-reported
+  Session work dimension and its Pane-owner fencing. It consumes verified
+  Session/Pane identity; it is not a second lifecycle or foreground oracle.
 - [`../../crates/nession-agent/AGENTS.md`](../../crates/nession-agent/AGENTS.md)
   — the executable tmux chokepoint rule for the Agent subtree.
 - [`../design/terminal/ahp-inspired-terminal-consistency.md`](../design/terminal/ahp-inspired-terminal-consistency.md)

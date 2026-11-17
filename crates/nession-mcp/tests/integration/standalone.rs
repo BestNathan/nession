@@ -186,7 +186,9 @@ async fn start_agent(
             },
             ..Default::default()
         };
-        server.mount_mcp(&config, agent_token).expect("mount MCP");
+        server
+            .mount_mcp(&config, agent_token, Vec::new())
+            .expect("mount MCP");
     }
     let (handle, addr) = server.start().await.expect("start agent");
     tokio::time::sleep(Duration::from_millis(50)).await;
