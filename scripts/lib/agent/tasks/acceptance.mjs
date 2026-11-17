@@ -22,8 +22,10 @@ export function acceptanceModelView(context) {
     // Exact-head Rust Quality execution (including the Rust coverage Gate)
     // for a criterion that explicitly makes that execution its proof.
     pr_rust_quality:context.stage==='pr' ? context.pr_rust_quality??null : null,
-    proof_boundary:context.stage==='pr' && (context.pr_tooling_quality || context.pr_rust_quality)
-      ? 'pr_tooling_quality proves exact-HEAD executed CI tooling Gates; pr_rust_quality proves the exact-HEAD rust-check Quality job executed and passed. For those two receipts, a completed/skipped path-scoped job means that Gate was NOT APPLICABLE to this change, never that it failed; a failed/cancelled job is Fail. A null pr_web_quality is expected for governance/policy SCs, not proof of their failure. Inspect deterministic negative/positive source fixtures separately. No receipt automatically grants SC Pass.'
+    // Authenticated exact-HEAD Quality/E2E/Case Smoke execution triad.
+    pr_ci_triad:context.stage==='pr' ? context.pr_ci_triad??null : null,
+    proof_boundary:context.stage==='pr' && (context.pr_tooling_quality || context.pr_rust_quality || context.pr_ci_triad)
+      ? 'pr_tooling_quality proves exact-HEAD executed CI tooling Gates; pr_rust_quality proves the exact-HEAD rust-check Quality job executed and passed. For those two receipts, a completed/skipped path-scoped job means that Gate was NOT APPLICABLE to this change, never that it failed; a failed/cancelled job is Fail. A null pr_web_quality is expected for governance/policy SCs, not proof of their failure. Inspect deterministic negative/positive source fixtures separately. pr_ci_triad binds three independently successful exact-head PR workflow runs and required Job/Step results; an incomplete triad cannot support a claim that all three executed. No receipt automatically grants SC Pass.'
       : null,
     acceptance_sources:context.acceptance_sources??null,
     source_manifest:context.source_manifest??null,
