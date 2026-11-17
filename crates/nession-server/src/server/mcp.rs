@@ -110,9 +110,24 @@ pub(crate) fn build(
         allowed_origins: config.mcp.allowed_origins.clone(),
         allowed_hosts,
     };
-    let service =
-        McpService::with_catalog(service_config, cluster, node, extension_tools.catalog())?;
-    Ok(Some(Arc::new(service)))
+    let service = Arc::new(McpService::with_catalog(
+        service_config,
+        cluster,
+        node,
+        extension_tools.catalog(),
+    )?);
+    // The contribution catalog and the mounted endpoint are both live now;
+    // connect the explicit-manifest-update announcer to the endpoint's
+    // legacy-session list-change notification (`#3778` P2).
+    {
+        let weak = Arc::downgrade(&service);
+        extension_tools.set_change_notifier(Arc::new(move || {
+            if let Some(service) = weak.upgrade() {
+                service.notify_catalog_changed();
+            }
+        }));
+    }
+    Ok(Some(service))
 }
 
 struct ServerClusterBackend {

@@ -207,6 +207,19 @@ advertises. An offline Agent keeps its Tools listed and answers `unavailable`;
 an unknown Agent, or a Tool absent from that Agent's validated manifest, is
 `not_found`. There is never a cross-Agent fallback.
 
+Each catalog generation has a monotonic revision, exposed as
+`_meta["nession/catalogRevision"]` on `tools/list`. Only an explicit manifest
+install/removal or host reconfiguration advances it; a reconnection that
+advertises an unchanged manifest does not rebuild the catalog, and no Session,
+Extension-runtime or connection-state change triggers one. A connected legacy
+session receives `notifications/tools/list_changed` after an explicit change. A
+stateless `2026-07-28` request has no notification channel and observes the new
+revision and definitions on its next `tools/list`, bounded by the advertised
+TTL. The source-pinned static export (Pages/Documents) is built from the
+baseline registry, never from a runtime manifest: a dynamic Agent capability
+can change what an endpoint advertises, never the Rust-owned contract source
+that publication verifies.
+
 `McpService` owns the protocol lifecycle, transport, inbound authentication,
 Origin policy, body size, concurrency and deadlines. A handler only validates
 arguments and executes the business operation through the injected

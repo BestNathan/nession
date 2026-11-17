@@ -27,6 +27,11 @@ use nession_common::config::{McpConfig, ServerConfig};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use rand::Rng;
+use rmcp::model::{CallToolRequestParams, ProtocolVersion};
+use rmcp::service::NotificationContext;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::{ClientHandler, ClientLifecycleMode, ClientServiceExt, RoleClient};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -1717,6 +1722,26 @@ async fn extension_tool_routes_to_the_named_agent_across_hosts() {
             .any(|tool| tool["name"] == "fixture_extension_echo"),
         "standalone must advertise the Server's contributed Tool: {standalone_tools}"
     );
+    // Same name means the same schema and description in every hosting mode.
+    let server_contribution = tools_of(server_addr, SERVER_TOKEN)
+        .await
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .cloned()
+        .expect("the Server still advertises the contribution");
+    let standalone_contribution = standalone_tools
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .cloned()
+        .expect("the standalone host advertises the contribution");
+    assert_eq!(
+        standalone_contribution, server_contribution,
+        "the contributed Tool definition must be identical across hosts"
+    );
     let standalone_session = initialize_with(standalone_addr, MCP_TOKEN).await;
     let via_standalone = call_tool(
         standalone_addr,
@@ -1788,5 +1813,127 @@ async fn extension_tool_routes_to_the_named_agent_across_hosts() {
 
     second_agent.abort();
     third_agent.abort();
+    server_task.abort();
+}
+
+fn catalog_revision(tools: &rmcp::model::ListToolsResult) -> u64 {
+    tools
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.0.get("nession/catalogRevision"))
+        .and_then(Value::as_u64)
+        .expect("every tools/list carries the catalog revision")
+}
+
+/// Records a legacy session's `notifications/tools/list_changed`.
+struct ToolListWatcher {
+    changed: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+impl ClientHandler for ToolListWatcher {
+    fn on_tool_list_changed(
+        &self,
+        _context: NotificationContext<RoleClient>,
+    ) -> impl std::future::Future<Output = ()> + rmcp::service::MaybeSendFuture + '_ {
+        let _ = self.changed.send(());
+        std::future::ready(())
+    }
+}
+
+/// `#3778` SC-02: an explicit manifest update is observable and notifies a
+/// connected legacy session; ordinary catalog reads and calls do not churn the
+/// generation, and a stateless modern client sees the same revision.
+#[tokio::test]
+async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_not_churn() {
+    let (server_addr, server_task) = start_server_with_heartbeat(true, 1, 1).await;
+    let uri = format!("http://{server_addr}/mcp");
+    let (changed_tx, mut changed_rx) = tokio::sync::mpsc::unbounded_channel();
+    let legacy = ToolListWatcher {
+        changed: changed_tx,
+    }
+    .serve_with_lifecycle(
+        StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(uri.clone()).auth_header(SERVER_TOKEN),
+        ),
+        ClientLifecycleMode::Initialize,
+    )
+    .await
+    .expect("legacy client");
+
+    let first = legacy.list_tools(None).await.expect("tools/list");
+    let first_revision = catalog_revision(&first);
+    assert_eq!(first.tools.len(), 11);
+
+    // Reading and calling do not alter the catalog generation.
+    let _ = legacy
+        .call_tool(CallToolRequestParams::new("nession_server_list_agents"))
+        .await
+        .expect("tools/call");
+    let stable = legacy.list_tools(None).await.expect("tools/list");
+    assert_eq!(catalog_revision(&stable), first_revision);
+    assert_eq!(stable.tools.len(), 11);
+
+    // Ordinary Session runtime work is not a catalog event either.
+    let _ = legacy
+        .call_tool(
+            CallToolRequestParams::new("nession_agent_create_session").with_arguments(
+                json!({ "agent_id": CLUSTER_AGENT, "name": "runtime-churn" })
+                    .as_object()
+                    .expect("arguments")
+                    .clone(),
+            ),
+        )
+        .await
+        .expect("session create");
+    let after_session = legacy.list_tools(None).await.expect("tools/list");
+    assert_eq!(catalog_revision(&after_session), first_revision);
+    assert_eq!(after_session.tools.len(), 11);
+
+    // Installing a manifest is an explicit catalog change: the connected
+    // legacy session receives the list-change notification and the next list
+    // carries the new generation.
+    let (agent, _) = register_extension_agent(
+        server_addr,
+        CLUSTER_AGENT,
+        extension_manifest("Echo one message.", 1),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), changed_rx.recv())
+        .await
+        .expect("a list-change notification must arrive")
+        .expect("the notification channel stays open");
+    let changed = legacy.list_tools(None).await.expect("tools/list");
+    let changed_revision = catalog_revision(&changed);
+    assert!(
+        changed_revision > first_revision,
+        "{changed_revision} <= {first_revision}"
+    );
+    assert!(changed
+        .tools
+        .iter()
+        .any(|tool| tool.name == "fixture_extension_echo"));
+
+    // The same generation is visible to a stateless modern client, which has
+    // no notification channel and relies on the revision and TTL.
+    let modern = ()
+        .serve_with_lifecycle(
+            StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(uri).auth_header(SERVER_TOKEN),
+            ),
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await
+        .expect("modern client");
+    let modern_tools = modern.list_tools(None).await.expect("tools/list");
+    assert_eq!(catalog_revision(&modern_tools), changed_revision);
+    assert!(modern_tools
+        .tools
+        .iter()
+        .any(|tool| tool.name == "fixture_extension_echo"));
+    modern.cancel().await.expect("cancel modern");
+    legacy.cancel().await.expect("cancel legacy");
+    agent.abort();
     server_task.abort();
 }
