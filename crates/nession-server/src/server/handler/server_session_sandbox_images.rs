@@ -7,10 +7,75 @@
 //! that transport shape here instead of requiring a second client object.
 //! Nothing is downloaded or authorized in this module.
 
+use nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX;
 use nession_protocol::contracts::sandbox::v1::{
     SandboxFilesystemRoot, SandboxImageMode, SandboxImageRole, SandboxImageSelection,
     SandboxMountSource, SandboxPolicyDraft,
 };
+use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
+
+use crate::image::{ImageAccessGrant, ImageResolution, ResolvedManifestAccess};
+
+/// Project one scoped legacy Blob grant into the Server→Agent contract.
+pub(super) fn managed_grant(
+    selection: &SandboxImageSelection,
+    grant: ImageAccessGrant,
+) -> ManagedImageGrant {
+    let (role, target) = managed_role(selection);
+    ManagedImageGrant {
+        role,
+        digest: selection.digest.clone(),
+        path: grant.path,
+        target,
+        objects: Vec::new(),
+    }
+}
+
+/// Project one resolved Manifest closure into the Server→Agent contract.
+pub(super) fn managed_manifest_grant(
+    selection: &SandboxImageSelection,
+    access: ResolvedManifestAccess,
+) -> ManagedImageGrant {
+    let (role, target) = managed_role(selection);
+    ManagedImageGrant {
+        role,
+        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", access.manifest_digest),
+        digest: access.manifest_digest,
+        target,
+        objects: access
+            .objects
+            .into_iter()
+            .map(
+                |object| nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
+                    digest: object.digest,
+                    media_type: object.media_type,
+                    size_bytes: object.size_bytes,
+                    path: object.path,
+                },
+            )
+            .collect(),
+    }
+}
+
+fn managed_role(selection: &SandboxImageSelection) -> (ManagedImageRole, Option<String>) {
+    match selection.role {
+        SandboxImageRole::Base => (ManagedImageRole::Base, None),
+        SandboxImageRole::Workspace => (ManagedImageRole::Workspace, None),
+        SandboxImageRole::Toolchain => (ManagedImageRole::Toolchain, selection.target.clone()),
+    }
+}
+
+/// The scoped grant one authorized Image identity resolves to for a
+/// consumer-driven cache preparation (#3796).
+pub(super) fn prepare_grant(
+    selection: &SandboxImageSelection,
+    resolution: ImageResolution,
+) -> ManagedImageGrant {
+    match resolution {
+        ImageResolution::Manifest(access) => managed_manifest_grant(selection, access),
+        ImageResolution::Legacy(grant) => managed_grant(selection, grant),
+    }
+}
 
 fn selection_key(selection: &SandboxImageSelection) -> (String, String, String, String) {
     let role = match selection.role {
