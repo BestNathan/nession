@@ -172,6 +172,10 @@ pub struct McpService {
     /// The host-owned catalog the endpoint reads. Kept here so a host that
     /// owns the service can explicitly reconfigure it (`#3778`).
     catalog: Arc<McpCatalog>,
+    /// The context every local Tool handler receives. Exposed so the same
+    /// Agent can execute its contributions through the Server-relayed route
+    /// (`#3778`) instead of building a second backend graph.
+    context: Arc<ToolContext>,
     /// The authenticated, path-scoped tower service in front of rmcp.
     endpoint: AuthorizedMcp,
 }
@@ -216,9 +220,10 @@ impl McpService {
         catalog: Arc<McpCatalog>,
     ) -> Result<Self, ServiceConfigError> {
         config.validate()?;
+        let context = Arc::new(ToolContext::new(cluster, node));
         let handler = RegistryServer {
             catalog: Arc::clone(&catalog),
-            context: Arc::new(ToolContext::new(cluster, node)),
+            context: Arc::clone(&context),
             calls: Arc::new(Semaphore::new(config.max_concurrent_calls)),
             tool_timeout: config.tool_timeout,
         };
@@ -249,6 +254,7 @@ impl McpService {
         Ok(Self {
             path: Arc::from(config.path.as_str()),
             catalog,
+            context,
             endpoint: AuthorizedMcp {
                 inner,
                 path: Arc::from(config.path.as_str()),
@@ -264,6 +270,15 @@ impl McpService {
     /// atomically.
     pub fn catalog(&self) -> Arc<McpCatalog> {
         Arc::clone(&self.catalog)
+    }
+
+    /// The context local Tool handlers receive.
+    ///
+    /// An Agent uses this to execute an Extension contribution through the
+    /// Server-relayed route: the same backends, deadlines and owner state its
+    /// embedded endpoint uses, not a second graph.
+    pub fn tool_context(&self) -> Arc<ToolContext> {
+        Arc::clone(&self.context)
     }
 
     /// The endpoint path this service answers on.

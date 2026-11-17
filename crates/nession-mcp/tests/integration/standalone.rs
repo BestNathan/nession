@@ -111,11 +111,19 @@ impl HttpResponse {
 }
 
 async fn start_server_with_mcp(mcp_enabled: bool) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    start_server_with_heartbeat(mcp_enabled, 10, 60).await
+}
+
+async fn start_server_with_heartbeat(
+    mcp_enabled: bool,
+    heartbeat_interval_secs: u64,
+    heartbeat_timeout_secs: u64,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         auth_token: SERVER_TOKEN.to_string(),
-        heartbeat_interval_secs: 10,
-        heartbeat_timeout_secs: 60,
+        heartbeat_interval_secs,
+        heartbeat_timeout_secs,
         image_blob_dir: std::env::temp_dir()
             .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
             .join("blobs")
@@ -392,8 +400,13 @@ async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, 
         .await
         .expect("register");
     let task_log = Arc::clone(&log);
+    let answering_agent = CLUSTER_AGENT.to_string();
     let task = tokio::spawn(async move {
-        while let Some(Ok(frame)) = stream.next().await {
+        let mut heartbeat = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            tokio::select! {
+                frame = stream.next() => {
+            let Some(Ok(frame)) = frame else { break };
             let Ok(text) = frame.to_text() else { continue };
             let Ok(parsed) = serde_json::from_str::<Value>(text) else {
                 continue;
@@ -458,7 +471,28 @@ async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, 
                     "payload": payload
                 })
             };
-            let _ = sink.send(WsMessage::Text(response.to_string())).await;
+            if sink.send(WsMessage::Text(response.to_string())).await.is_err() {
+                break;
+            }
+                }
+                _ = heartbeat.tick() => {
+                    let beat = json!({
+                        "msg_type": "control.heartbeat",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": 0,
+                        "payload": {
+                            "agent_id": answering_agent,
+                            "status": "online",
+                            "session_count": 0,
+                            "active_sessions": 0,
+                            "metadata": { "uptime_seconds": 0, "load_average": [0.0, 0.0, 0.0] }
+                        }
+                    });
+                    if sink.send(WsMessage::Text(beat.to_string())).await.is_err() {
+                        break;
+                    }
+                }
+            }
         }
     });
     (task, log)
@@ -1365,5 +1399,394 @@ async fn all_three_hosts_share_one_tool_catalog() {
     }
 
     let _ = agent_handle.shutdown().await;
+    server_task.abort();
+}
+
+/// The fixture Extension Tool manifest a participant advertises (`#3778`).
+fn extension_manifest(description: &str, version: u32) -> Value {
+    json!({
+        "manifest_version": version,
+        "tools": [{
+            "name": "fixture_extension_echo",
+            "provider": "fixture-extension",
+            "description": description,
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["agent_id", "message", "session_id"],
+                "properties": {
+                    "agent_id": { "type": "string", "description": "The owning Agent." },
+                    "message": { "type": "string", "description": "The message to echo." },
+                    "session_id": { "type": "string", "description": "The owner-specific Session." }
+                }
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string", "description": "The echoed message." },
+                    "agent": { "type": "string", "description": "The answering Agent." }
+                }
+            }
+        }]
+    })
+}
+
+/// Register a participant that advertises a contribution manifest and answers
+/// the Server's relayed Tool call like the owning Agent would.
+///
+/// Returns only after the Server accepted the registration, so the manifest is
+/// already installed (or refused) when the caller inspects the catalog.
+async fn register_extension_agent(
+    addr: SocketAddr,
+    agent_id: &str,
+    manifest: Value,
+) -> (tokio::task::JoinHandle<()>, Arc<BrokerLog>) {
+    let log = Arc::new(BrokerLog::default());
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("mock agent socket");
+    let (mut sink, mut stream) = ws.split();
+    let register = json!({
+        "msg_type": "server.agent.register",
+        "id": "register-1",
+        "timestamp": 0,
+        "payload": {
+            "agent_id": agent_id,
+            "hostname": "mock",
+            "ip_address": "127.0.0.1",
+            "port": 19999,
+            "auth_token": SERVER_TOKEN,
+            "protocol_manifest": { "provider": "test-agent", "protocols": {} },
+            "mcp_tool_manifest": manifest,
+            "metadata": {
+                "tmux_version": "3.3",
+                "os_version": "Linux",
+                "nession_version": "0.1.0"
+            }
+        }
+    });
+    sink.send(WsMessage::Text(register.to_string()))
+        .await
+        .expect("register");
+    // The acceptance is sent after the Server installed the manifest, so this
+    // wait is the synchronization point for the catalog assertions below.
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("registration answer")
+            .expect("registration frame")
+            .expect("registration frame is valid");
+        let text = frame.to_text().expect("text frame");
+        let parsed: Value = serde_json::from_str(text).expect("registration JSON");
+        if parsed["msg_type"] == "server.agent.register" {
+            assert_eq!(parsed["payload"]["status"], "accepted", "{parsed}");
+            break;
+        }
+    }
+    let task_log = Arc::clone(&log);
+    let answering_agent = agent_id.to_string();
+    let task = tokio::spawn(async move {
+        let mut heartbeat = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            tokio::select! {
+                frame = stream.next() => {
+            let Some(Ok(frame)) = frame else { break };
+            let Ok(text) = frame.to_text() else { continue };
+            let Ok(parsed) = serde_json::from_str::<Value>(text) else {
+                continue;
+            };
+            let Some(request_id) = parsed["payload"]["request_id"].as_str() else {
+                continue;
+            };
+            let command = parsed["msg_type"].as_str().unwrap_or_default().to_string();
+            task_log
+                .commands
+                .lock()
+                .expect("broker log")
+                .push(command.clone());
+            let payload = if command == "agent.mcp.tool.call" {
+                let arguments = &parsed["payload"]["arguments"];
+                let message = arguments["message"].as_str().unwrap_or_default();
+                let session = arguments["session_id"].as_str().unwrap_or_default();
+                if session == "missing-session" {
+                    json!({
+                        "request_id": request_id,
+                        "command": command,
+                        "success": false,
+                        "error": {
+                            "kind": "not_found",
+                            "message": format!("Session '{session}' does not exist")
+                        },
+                    })
+                } else {
+                    json!({
+                        "request_id": request_id,
+                        "command": command,
+                        "success": true,
+                        "result": { "message": message, "agent": answering_agent },
+                    })
+                }
+            } else {
+                json!({
+                    "request_id": request_id,
+                    "command": command,
+                    "success": true,
+                    "sessions": [],
+                })
+            };
+            let response = json!({
+                "msg_type": "server.agent.command-response",
+                "id": format!("response-{request_id}"),
+                "timestamp": 0,
+                "payload": payload
+            });
+            if sink.send(WsMessage::Text(response.to_string())).await.is_err() {
+                break;
+            }
+                }
+                _ = heartbeat.tick() => {
+                    let beat = json!({
+                        "msg_type": "control.heartbeat",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": 0,
+                        "payload": {
+                            "agent_id": answering_agent,
+                            "status": "online",
+                            "session_count": 0,
+                            "active_sessions": 0,
+                            "metadata": { "uptime_seconds": 0, "load_average": [0.0, 0.0, 0.0] }
+                        }
+                    });
+                    if sink.send(WsMessage::Text(beat.to_string())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    (task, log)
+}
+
+/// `#3778` SC-03: one contributed Tool, advertised by its owning Agent,
+/// invoked through Server-embedded and Standalone hosts, with wrong-target and
+/// conflicting/stale manifests failing closed.
+#[tokio::test]
+async fn extension_tool_routes_to_the_named_agent_across_hosts() {
+    // A one-second liveness window makes the offline transition observable in
+    // this test without a sixty-second wait.
+    let (server_addr, server_task) = start_server_with_heartbeat(true, 1, 1).await;
+    let (first_agent, first_log) = register_extension_agent(
+        server_addr,
+        CLUSTER_AGENT,
+        extension_manifest("Echo one message.", 1),
+    )
+    .await;
+
+    let server_tools = tools_of(server_addr, SERVER_TOKEN).await;
+    let tool = server_tools
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .expect("the contributed Tool is advertised");
+    assert_eq!(tool["description"], "Echo one message.");
+    assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+    assert_eq!(
+        tool["inputSchema"]["required"],
+        json!(["agent_id", "message", "session_id"])
+    );
+    assert_eq!(
+        tool["outputSchema"]["properties"]["agent"]["description"],
+        "The answering Agent."
+    );
+
+    let server_session = initialize_with(server_addr, SERVER_TOKEN).await;
+    let called = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(called["isError"], false, "{called}");
+    assert_eq!(
+        text_of(&called),
+        json!({ "message": "hello", "agent": CLUSTER_AGENT })
+    );
+    assert_eq!(
+        first_log.commands(),
+        vec!["agent.mcp.tool.call".to_string()],
+        "the Server brokered exactly one call to the owning Agent"
+    );
+
+    // A different Agent is not silently substituted.
+    let wrong = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": "other-agent", "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(wrong["isError"], true, "{wrong}");
+    assert_eq!(text_of(&wrong)["error"]["kind"], "not_found", "{wrong}");
+
+    // Owner-specific addressing is forwarded and the owner decides: an
+    // unknown Session is refused by the Agent, never guessed or rerouted.
+    let unknown_session = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "hello", "session_id": "missing-session" }),
+    )
+    .await;
+    assert_eq!(unknown_session["isError"], true, "{unknown_session}");
+    assert_eq!(
+        text_of(&unknown_session)["error"]["kind"],
+        "not_found",
+        "{unknown_session}"
+    );
+
+    // A second Agent advertising the same name with a different contract is
+    // refused as a manifest. The first contract stays advertised and the second
+    // Agent cannot be routed to it.
+    let (second_agent, _) = register_extension_agent(
+        server_addr,
+        "second-agent",
+        extension_manifest("Different semantics.", 1),
+    )
+    .await;
+    let after_conflict = tools_of(server_addr, SERVER_TOKEN).await;
+    let tool = after_conflict
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .expect("the contributed Tool is still advertised");
+    assert_eq!(
+        tool["description"], "Echo one message.",
+        "a conflicting manifest must not replace the live contract"
+    );
+    let conflicted = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": "second-agent", "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(conflicted["isError"], true, "{conflicted}");
+    assert_eq!(
+        text_of(&conflicted)["error"]["kind"],
+        "not_found",
+        "the refused Agent's contribution is not routable"
+    );
+
+    // An unsupported manifest version is refused the same way.
+    let (third_agent, _) = register_extension_agent(
+        server_addr,
+        "third-agent",
+        extension_manifest("Stale semantics.", 99),
+    )
+    .await;
+    let stale = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": "third-agent", "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(stale["isError"], true, "{stale}");
+    assert_eq!(text_of(&stale)["error"]["kind"], "not_found", "{stale}");
+
+    // Standalone reads the Server's validated manifest at startup and invokes
+    // the same Tool against the same explicitly named Agent.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut standalone = spawn_standalone(&config_path);
+    let standalone_addr = await_listen_addr(&mut standalone.0).await;
+    let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
+    assert!(
+        standalone_tools
+            .as_array()
+            .expect("tools")
+            .iter()
+            .any(|tool| tool["name"] == "fixture_extension_echo"),
+        "standalone must advertise the Server's contributed Tool: {standalone_tools}"
+    );
+    let standalone_session = initialize_with(standalone_addr, MCP_TOKEN).await;
+    let via_standalone = call_tool(
+        standalone_addr,
+        MCP_TOKEN,
+        &standalone_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "via standalone", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(via_standalone["isError"], false, "{via_standalone}");
+    assert_eq!(
+        text_of(&via_standalone),
+        json!({ "message": "via standalone", "agent": CLUSTER_AGENT })
+    );
+
+    // An Agent going offline keeps its Tool listed and answers the truth for
+    // the named target; it never reroutes to another Agent or a local guess.
+    first_agent.abort();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let listed = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_server_list_agents",
+            json!({}),
+        )
+        .await;
+        let status = text_of(&listed)["agents"]
+            .as_array()
+            .and_then(|agents| {
+                agents
+                    .iter()
+                    .find(|agent| agent["agent_id"] == CLUSTER_AGENT)
+            })
+            .map(|agent| agent["status"].clone());
+        if status == Some(json!("offline")) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the Server never observed the Agent's disconnect: {listed}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let offline = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(offline["isError"], true, "{offline}");
+    assert_eq!(
+        text_of(&offline)["error"]["kind"],
+        "unavailable",
+        "{offline}"
+    );
+    let after_offline = tools_of(server_addr, SERVER_TOKEN).await;
+    assert!(
+        after_offline
+            .as_array()
+            .expect("tools")
+            .iter()
+            .any(|tool| tool["name"] == "fixture_extension_echo"),
+        "an offline owner keeps its capability advertised: {after_offline}"
+    );
+
+    second_agent.abort();
+    third_agent.abort();
     server_task.abort();
 }

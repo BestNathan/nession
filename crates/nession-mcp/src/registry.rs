@@ -76,7 +76,7 @@ fn output_schema_problem(schema: &Map<String, Value>) -> Option<&'static str> {
 /// The startup-built Tool catalog.
 pub struct ToolRegistry {
     handlers: Vec<Arc<dyn ToolHandler>>,
-    positions: HashMap<&'static str, usize>,
+    positions: HashMap<String, usize>,
 }
 
 impl ToolRegistry {
@@ -89,7 +89,7 @@ impl ToolRegistry {
         let mut positions = HashMap::with_capacity(handlers.len());
         for (position, handler) in handlers.iter().enumerate() {
             let name = handler.name();
-            if positions.insert(name, position).is_some() {
+            if positions.insert(name.to_string(), position).is_some() {
                 return Err(RegistryError::Duplicate(name.to_string()));
             }
             let output = handler.output_schema();

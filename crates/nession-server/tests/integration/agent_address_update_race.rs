@@ -75,6 +75,7 @@ impl Fixture {
             env_service: Arc::clone(&self.env),
             image_manager: image_manager(Arc::clone(&self.db))?,
             db: Arc::clone(&self.db),
+            extension_tools: None,
         })
     }
 

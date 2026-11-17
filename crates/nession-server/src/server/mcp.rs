@@ -65,6 +65,17 @@ pub(crate) fn build(
         .validate_for_host(&config.auth_token, "auth_token")?;
 
     let agent_registry = Arc::clone(&deps.agent_registry);
+    // The contribution catalog is the Server's one owner of Agent manifests
+    // (#3778). Production constructs it before this build so registration can
+    // install manifests; a directly built service (tests) still gets a valid
+    // baseline catalog rather than an empty route.
+    let extension_tools = match deps.extension_tools.clone() {
+        Some(tools) => tools,
+        None => Arc::new(crate::server::extension_tools::ExtensionToolCatalog::new(
+            Arc::clone(&deps.agent_registry),
+            Arc::clone(&deps.command_broker),
+        )?),
+    };
     let handler = ConnectionHandler::new_authenticated(
         deps,
         ConnectionHandlerConfig {
@@ -84,6 +95,7 @@ pub(crate) fn build(
         handler,
         agent_registry,
         mutations,
+        extension_tools: Arc::clone(&extension_tools),
     });
 
     let allowed_hosts =
@@ -98,7 +110,8 @@ pub(crate) fn build(
         allowed_origins: config.mcp.allowed_origins.clone(),
         allowed_hosts,
     };
-    let service = McpService::new(service_config, cluster, node)?;
+    let service =
+        McpService::with_catalog(service_config, cluster, node, extension_tools.catalog())?;
     Ok(Some(Arc::new(service)))
 }
 
@@ -246,6 +259,8 @@ impl ClusterBackend for ServerClusterBackend {
 struct ServerNodeBackend {
     handler: ConnectionHandler,
     agent_registry: Arc<AgentRegistry>,
+    /// The Server's validated contribution catalog and broker route (#3778).
+    extension_tools: Arc<crate::server::extension_tools::ExtensionToolCatalog>,
     /// The runtime's keyed mutation lane. A node create/kill is ordered against
     /// a cluster `server.session.create`/`kill` of the same Session, because
     /// both name the same registry resource.
@@ -435,6 +450,15 @@ impl NodeBackend for ServerNodeBackend {
         Ok(SessionKillResponse {
             name: name.to_string(),
         })
+    }
+
+    async fn call_extension_tool(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        arguments: serde_json::Map<String, Value>,
+    ) -> Result<Value, ToolError> {
+        self.extension_tools.call(agent_id, tool, arguments).await
     }
 }
 

@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     init_logging();
     let path = config_path();
     let config = StandaloneConfig::load(&path)?;
-    let service = config.build_service()?;
+    let service = config.build_service().await?;
     let tls = match config.tls_material()? {
         Some((cert, key)) => Some(build_tls_acceptor(&cert, &key)?),
         None => None,

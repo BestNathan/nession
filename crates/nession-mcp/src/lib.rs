@@ -72,7 +72,7 @@ pub mod standalone;
 pub use backend::{ClusterBackend, NodeBackend, UnavailableClusterBackend, UnavailableNodeBackend};
 pub use catalog::{CatalogError, CatalogSnapshot, McpCatalog};
 pub use error::{ToolError, ToolErrorKind};
-pub use provider::{McpToolProvider, ToolProviderError};
+pub use provider::{McpToolContribution, McpToolProvider, RoutedTool, ToolProviderError};
 pub use registry::{RegistryError, ToolRegistry};
 pub use service::{McpService, ServiceConfig, ServiceConfigError};
 pub use tool::{ToolContext, ToolHandler};
