@@ -3505,7 +3505,10 @@ read lower < /workspace/project.txt
     let error = manager
         .acquire(&altered, "exec-lower-second")
         .expect_err("a changed lower must be refused");
-    assert!(format!("{error:#}").contains("refusing lower"), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("refusing ordered lowers"),
+        "{error:#}"
+    );
     assert_eq!(
         overlay_mount_count(live.mountpoint()),
         1,
