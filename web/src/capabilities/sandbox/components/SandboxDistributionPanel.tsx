@@ -90,6 +90,7 @@ function DistributionRow({
   return (
     <li
       data-testid="sandbox-distribution-row"
+      data-image-digest={image.digest ?? ''}
       className="flex min-w-0 flex-col gap-1 border-b border-border px-2 py-2 last:border-b-0"
     >
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
