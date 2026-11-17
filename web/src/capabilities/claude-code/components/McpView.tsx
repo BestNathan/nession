@@ -1347,7 +1347,7 @@ function ConnectDialog({
               setScope={setScope}
               name={name}
               setName={setName}
-              credentialEnv={preflight?.credential_env ?? 'NESSON_MCP_TOKEN'}
+              credentialEnv={preflight?.credential_env ?? 'NESSION_MCP_TOKEN'}
               projectConfirmed={projectConfirmed}
               setProjectConfirmed={setProjectConfirmed}
               replaceExisting={replaceExisting}

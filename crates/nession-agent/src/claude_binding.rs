@@ -45,7 +45,7 @@ use nession_common::paths::agent_claude_bindings_dir;
 /// simply not bound.
 ///
 /// `session_name` is a tmux session name — the same string the agent put in
-/// `NESSON_SESSION_ID` — not a wire session id. Normalising an id is the
+/// `NESSION_RUNTIME_SESSION_ID` — not a wire session id. Normalising an id is the
 /// caller's job, and both callers do it with
 /// [`extract_session_name`](crate::server::websocket::extract_session_name).
 pub(crate) fn file_for(session_name: &str, instance_id: &str) -> Option<PathBuf> {
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn the_session_id_injected_is_the_name_the_hook_reports_back() {
-        // The hook writes `NESSON_SESSION_ID` into the payload it copies, and
+        // The hook writes `NESSION_RUNTIME_SESSION_ID` into the payload it copies, and
         // the reader later normalises a wire id back to this same string. A
         // mismatch here would file one session's conversation under another.
         let env = env_for("nession-test-sess", "instance");
