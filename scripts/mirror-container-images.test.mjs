@@ -15,7 +15,7 @@ function executable(dir,name,content){
   const file=path.join(dir,name);
   fs.writeFileSync(file,'#!/usr/bin/env node\n'+content,{mode:0o755});
 }
-function fixture(mode='fast'){
+function fixture(mode='fast',kind='agent'){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-mirror-deadline-'));
   const events=path.join(dir,'events.log');
   executable(dir,'timeout',`
@@ -80,7 +80,7 @@ function fixture(mode='fast'){
   `);
   const env={...process.env,PATH:dir+path.delimiter+process.env.PATH,
     MIRROR_TEST_EVENTS:events,MIRROR_TEST_MODE:mode};
-  const run=spawnSync('bash',[mirror,source,target,'0123456','0123456','agent'],{
+  const run=spawnSync('bash',[mirror,source,target,'0123456','0123456',kind],{
     env,encoding:'utf8',timeout:10000
   });
   const log=fs.readFileSync(events,'utf8');
@@ -135,6 +135,13 @@ test('a real auth rejection does not retry or emit registry token URLs',()=>{
   assert.match(run.stderr,/outcome=credential_or_permission_rejected/);
   assert.doesNotMatch(run.stdout+run.stderr,/SECRET-TOKEN/);
   assert.doesNotMatch(log,/regctl index create/);
+});
+test('standalone MCP host mirrors under the workspace runtime tag',()=>{
+  const {run,log}=fixture('fast','mcp');
+  assert.equal(run.status,0,run.stderr);
+  assert.match(log,
+    /imagetools create --tag crpi\.example\.cn\/n_public\/nession:mcp-0123456 /);
+  assert.match(run.stdout,/Verified both linux\/amd64 and linux\/arm64/);
 });
 test('post-copy manifest mismatch still fails closed',()=>{
   const {run}=fixture('mismatch');

@@ -267,7 +267,7 @@ jobs:
 
       - name: cargo zigbuild (release)
         run: |
-          cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession
+          cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession --bin nession-mcp
 
       - name: Package native binaries
         run: |
@@ -305,6 +305,12 @@ jobs:
         with:
           name: agent-bin-amd64
           path: target/x86_64-unknown-linux-gnu/release/nession-agent
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-bin-amd64
+          path: target/x86_64-unknown-linux-gnu/release/nession-mcp
           retention-days: 1
 
   # ═══════════════════════════════════════════════════════════════════
@@ -347,7 +353,7 @@ jobs:
 
       - name: cargo zigbuild (release)
         run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession
+          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession --bin nession-mcp
 
       - name: Package native binaries
         run: |
@@ -386,8 +392,14 @@ jobs:
           path: target/aarch64-unknown-linux-gnu/release/nession-agent
           retention-days: 1
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-bin-arm64
+          path: target/aarch64-unknown-linux-gnu/release/nession-mcp
+          retention-days: 1
+
   # ═══════════════════════════════════════════════════════════════════
-  # Docker — 6 parallel jobs (server/agent/ui × amd64/arm64)
+  # Docker — 8 parallel jobs (server/agent/mcp/ui × amd64/arm64)
   # ═══════════════════════════════════════════════════════════════════
 
   # ── amd64 ──────────────────────────────────────────────────────────
@@ -465,6 +477,42 @@ jobs:
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
+
+  # Standalone MCP host image (#3791). Version-tagged with the common
+  # workspace release; it is not part of the Server/Agent/UI GitOps rollout.
+  docker-mcp-amd64:
+    needs: [version-check, regression-ready, build-linux-amd64]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: mcp-bin-amd64, path: /tmp/mcp-bin }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mcp.prebuilt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMG }}:mcp-${{ env.RUST_VER }}-amd64
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_SOURCE_REVISION=${{ github.sha }}
+          build-contexts: |
+            mcp-bin=/tmp/mcp-bin
 
   docker-ui-amd64:
     needs: [version-check, regression-ready, build-web]
@@ -574,6 +622,40 @@ jobs:
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
+  docker-mcp-arm64:
+    needs: [version-check, regression-ready, build-linux-arm64]
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: mcp-bin-arm64, path: /tmp/mcp-bin }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "RUST_VER=${{ needs.version-check.outputs.rust_version }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mcp.prebuilt
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMG }}:mcp-${{ env.RUST_VER }}-arm64
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_SOURCE_REVISION=${{ github.sha }}
+          build-contexts: |
+            mcp-bin=/tmp/mcp-bin
+
   docker-ui-arm64:
     needs: [version-check, regression-ready, build-web]
     if: needs.version-check.outputs.version_changed == 'true'
@@ -612,8 +694,8 @@ jobs:
   merge:
     needs:
       [version-check, regression-ready,
-       docker-server-amd64, docker-agent-amd64, docker-ui-amd64,
-       docker-server-arm64, docker-agent-arm64, docker-ui-arm64]
+       docker-server-amd64, docker-agent-amd64, docker-mcp-amd64, docker-ui-amd64,
+       docker-server-arm64, docker-agent-arm64, docker-mcp-arm64, docker-ui-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -631,7 +713,7 @@ jobs:
           RUST_VER="${{ needs.version-check.outputs.rust_version }}"
           WEB_VER="${{ needs.version-check.outputs.web_version }}"
 
-          for prefix in server agent; do
+          for prefix in server agent mcp; do
             docker buildx imagetools create -t ${IMG}:${prefix}-${RUST_VER} \
               ${IMG}:${prefix}-${RUST_VER}-amd64 ${IMG}:${prefix}-${RUST_VER}-arm64
           done
@@ -767,6 +849,7 @@ jobs:
             ### Docker Images
             - `ghcr.io/${{ github.repository_owner }}/nession:server-${{ needs.version-check.outputs.rust_version }}`
             - `ghcr.io/${{ github.repository_owner }}/nession:agent-${{ needs.version-check.outputs.rust_version }}`
+            - `ghcr.io/${{ github.repository_owner }}/nession:mcp-${{ needs.version-check.outputs.rust_version }}` (standalone MCP host, independently deployed)
             - `ghcr.io/${{ github.repository_owner }}/nession:ui-${{ needs.version-check.outputs.web_version }}`
 
             ### Native Binaries
@@ -793,7 +876,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        image: [server, agent, ui]
+        image: [server, agent, mcp, ui]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
