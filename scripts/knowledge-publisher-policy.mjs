@@ -102,8 +102,17 @@ async function request(url, token) {
 async function check() {
   const token = process.env.GH_TOKEN;
   const appId = Number(process.env.KNOWLEDGE_PUBLISHER_APP_ID);
+  const event = process.env.GITHUB_EVENT_NAME;
+  // The existing Publisher's first-attempt main-owned cleanup lane may
+  // re-check the same live protection without authorizing a Knowledge write.
+  const isCleanupEvent = ['push','workflow_dispatch'].includes(event) &&
+    process.env.GITHUB_ACTIONS === 'true' &&
+    process.env.GITHUB_WORKFLOW === 'Store / Knowledge Publisher' &&
+    process.env.GITHUB_RUN_ATTEMPT === '1' &&
+    SHA.test(process.env.GITHUB_SHA || '');
   if (!token || !Number.isSafeInteger(appId) || appId<=0 ||
-      !['repository_dispatch','workflow_run','issue_comment'].includes(process.env.GITHUB_EVENT_NAME) ||
+      (!['repository_dispatch','workflow_run','issue_comment'].includes(event) &&
+       !isCleanupEvent) ||
       process.env.GITHUB_REF !== 'refs/heads/main' ||
       process.env.GITHUB_REPOSITORY !== REPO)
     fail('trusted main and read-only API token plus dedicated App ID required');
