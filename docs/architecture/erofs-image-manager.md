@@ -63,7 +63,11 @@ are in
 
 ## Sources
 
-V1 accepts three source shapes:
+V1 accepts three source shapes. The Web Build editor offers exactly these
+kinds: the lower-level archive and OCI-conversion boundaries are not Server
+Build Source DTOs, so they are not presented as selectable adapters (#3795).
+An invalid or unauthorized declaration is refused by the editor before a
+durable build record exists.
 
 1. **Public GitHub HTTPS repository** — `https://github.com/<owner>/<repo>`
    with a branch name or a full 40-character commit SHA. The canonical
@@ -72,7 +76,11 @@ V1 accepts three source shapes:
    path segments are refused. A fixed SHA that the remote cannot fetch is an
    explicit build failure.
 2. **Validated local directory or bundle** — an absolute path with no `..` or
-   control characters. The tree is copied without following symlinks, scanned,
+   control characters, inside the one Server-authorized `image_source_root`
+   (#3795). The Server refuses the local adapter entirely when no root is
+   configured, so a browser can never point a build at an arbitrary host path;
+   an existing path is additionally canonicalized so a symlinked source cannot
+   escape the root. The tree is copied without following symlinks, scanned,
    and built from the private copy.
 3. **Flattened Compose of catalog Images** (#3696) — one to sixteen sources,
    each naming a catalog `repository`, a Tag or immutable digest, and a

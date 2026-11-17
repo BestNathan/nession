@@ -206,6 +206,7 @@ fn options(dir: &Path, max_concurrent: usize) -> ImageManagerOptions {
     ImageManagerOptions {
         max_concurrent_builds: max_concurrent,
         build_root: dir.join("builds"),
+        source_root: Some(std::path::PathBuf::from("/")),
         build_stage_timeout: Some(Duration::from_secs(30)),
         build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
         build_retention_secs: 60,
