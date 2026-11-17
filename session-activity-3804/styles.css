@@ -104,7 +104,8 @@
 .n-mock .n-backlink { font-size:11px;color:var(--nession-text-secondary);border-radius:7px;padding:6px; }
 .n-mock .n-workspace-pane h2 { font-weight:600;font-size:24px;letter-spacing:-.03em;margin:38px 0 8px; }
 .n-mock .n-workspace-pane p,.n-mock .n-app-workspace-content p { color:var(--nession-muted-foreground); }
-.n-mock .n-workspace-entry { display:flex;justify-content:space-between;max-width:570px;align-items:center;border-bottom:1px solid var(--nession-border);padding:15px 5px;font-weight:520; }
+.n-mock .n-workspace-entry { display:flex;justify-content:space-between;max-width:570px;width:100%;align-items:center;text-align:left;border-bottom:1px solid var(--nession-border);padding:15px 5px;font-weight:520; }
+.n-mock .n-workspace-entry:hover { background:var(--nession-muted); }
 .n-mock .n-workspace-entry span { color:var(--nession-muted-foreground); }
 .n-mock .n-app-sessions,.n-mock .n-app-terminal,.n-mock .n-app-workspace { position:absolute;inset:0;display:flex;flex-direction:column;min-height:0;overflow:hidden;background:var(--nession-background); }
 .n-mock .n-app-header { height:60px;display:flex;align-items:center;gap:12px;padding:0 17px;border-bottom:1px solid var(--nession-border);flex:none; }
