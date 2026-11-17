@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "58affad1d851fd2f578734648cf1a61b9c63f63e274a466f2f1ded1c923693ad",
+  "run_id": 44126325141,
+  "run_attempt": 1,
+  "issue": 3799,
+  "criterion": "SC-01",
+  "criterion_text": "At Web 1180/1024 and App 390/375, Library can search/paginate and expand inline an authorized Image showing actual Server-owned Repository, Tags, Manifest/Index, platform, source, representation/closure, pins/usage summary (when authorized), and selected-Agent cache only when observed; absent/legacy/offline metadata is explicitly unknown and not mislabeled Ready.",
+  "stage": "staging",
+  "target_sha": "d1d9c5185663f7eb9f6e0f43444d3fbb5d9998e7",
+  "contract_sha256": "c031e2b60f9026b6967563c20bc9905531b7482e5ba965b66350d1481fb060f5",
+  "case_revision": "d1d9c5185663f7eb9f6e0f43444d3fbb5d9998e7",
+  "case_tree_sha": "95897ab7431d68edc96e3424023788b2c095e36a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Error",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T16:32:50.530Z",
+  "finished_at": "2026-11-17T16:34:57.106Z",
+  "duration_ms": 126576,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.ts",
+      "result": "Error",
+      "summary": "browser verifier timed out",
+      "evidence": [],
+      "duration_ms": 120016,
+      "infrastructure_error": "timeout"
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44126325141,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d1d9c5185663f7eb9f6e0f43444d3fbb5d9998e7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44126325141",
+    "record_path": "runs/2026-11-17/44126325141-1/3799/SC-01.json",
+    "source_result_sha256": "416c80ed502febd8e96136b7d54c75e30dd073286542fb7fbef2e75e7a6df5f4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44126325141-1",
+    "sha256": "416c80ed502febd8e96136b7d54c75e30dd073286542fb7fbef2e75e7a6df5f4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44126325141",
+    "durability": "time-limited; object archival not configured"
+  }
+}
