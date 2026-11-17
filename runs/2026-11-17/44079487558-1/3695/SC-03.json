@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f2e8cab7c089cba275e0f349b7f025099b2c43c453d17e74efab842014b3d361",
+  "run_id": 44079487558,
+  "run_attempt": 1,
+  "issue": 3695,
+  "criterion": "SC-03",
+  "criterion_text": "Agent owner restart, stale/foreign mount, changing ordered lower identity, unmount failure and missing upper/work fail closed with no data loss; existing #3582 persisted records and legacy Workspace paths remain readable.",
+  "stage": "staging",
+  "target_sha": "2041fb2ca9bc0f8403a17f23660af3a980b663e3",
+  "contract_sha256": "5fe1f96ade0ca9d5833c5d9d69fed42cf4c4185ad50d5ff72e7064da35156f66",
+  "case_revision": "2041fb2ca9bc0f8403a17f23660af3a980b663e3",
+  "case_tree_sha": "1e84d4d6aa2655cfeec6488e7de6472ab65c37e8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T12:06:35.783Z",
+  "finished_at": "2026-11-17T12:06:56.850Z",
+  "duration_ms": 21067,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The Sandbox-owned Overlay manager preserves verified restart recovery, retains a failed legacy cleanup for retry, and fails closed for changed/foreign/missing/failed state without touching durable Workspace bytes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 2041fb2ca9bc0f8403a17f23660af3a980b663e3 on Linux kernel 7.0.0-1014-aws: after moving physical ownership into nession-sandbox::mount::overlay, restart reattach preserved the durable upper; a changed lower, missing upper, symlinked work, foreign owner, competing mount, crashed owner and injected mount/unmount failure each failed closed without data loss; the last verified unmount released the lower and legacy durable paths stayed readable; a legacy record whose strict unmount failed kept its durable record and occupied directory, and a later retry completed the cleanup"
+        }
+      ],
+      "duration_ms": 15214,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44079487558,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2041fb2ca9bc0f8403a17f23660af3a980b663e3",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44079487558",
+    "record_path": "runs/2026-11-17/44079487558-1/3695/SC-03.json",
+    "source_result_sha256": "9884938625d96ed85c92d080be645afa2ddbd26ebfdf06a303cef53dc9312eb8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44079487558-1",
+    "sha256": "9884938625d96ed85c92d080be645afa2ddbd26ebfdf06a303cef53dc9312eb8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44079487558",
+    "durability": "time-limited; object archival not configured"
+  }
+}
