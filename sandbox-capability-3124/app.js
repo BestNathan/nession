@@ -15,12 +15,14 @@
     image("base2","alpine-runtime","Base Runtime","f"),
     image("rust","rust-toolchain","Toolchain","b","/opt/rust"),
     image("node","node-toolchain","Toolchain","c","/opt/node"),
-    image("source","nession-source","Project Source","d","/opt/nession-source")
+    image("source","nession-source","Project Source","d","/opt/nession-source"),
+    Object.assign(image("composite","composite-tool-bundle","Toolchain","e","/opt/bundle"),{representation:"referenced",platform:"linux/amd64"}),
+    Object.assign(image("darwin","darwin-node","Toolchain","0","/opt/node"),{platform:"darwin/arm64"})
   ];
   function initialWorkspaces(){return [
     {id:"project:nession",name:"Nession · Existing Location",kind:"project_location",project:"Nession",path:"/home/dev/projects/nession",status:"available"},
     {id:"ws:prior",name:"investigate-build",kind:"managed",project:"—",path:"Agent managed · ws:prior",status:"available"},
-    {id:"ws:busy",name:"shared-build",kind:"managed",project:"—",path:"Agent managed · ws:busy",status:"in_use"}
+    {id:"ws:busy",name:"shared-build",kind:"managed",project:"—",path:"Agent managed · ws:busy",status:"in_use",lease_count:2,upper_bytes:8192000,lower:"nession-source"}
   ];}
   function defaults(){
     return {mode:"web",width:1180,surface:"workspace",session:"sandbox-review",fixture:"linux",area:"overview",
@@ -31,15 +33,16 @@
         {id:"build-119",name:"rust-toolchain",status:"succeeded",stage:"publishing",elapsed_ms:93000,files:15290,bytes:104000000,attempt:1,diagnostic:"Digest published"},
         {id:"build-118",name:"node-toolchain",status:"failed",stage:"snapshotting",elapsed_ms:12000,files:null,bytes:null,attempt:1,diagnostic:"Snapshot failed: source unavailable"}
       ],
-      cache:{base:"verified",base2:"absent",rust:"verified",node:"preparing",source:"verified"},
+      cache:{base:"verified",base2:"absent",rust:"verified",node:"preparing",source:"verified",composite:"verified",darwin:"verified"},
       transfers:{node:{state:"resumable",received:12000000,total:48000000},base2:{state:"absent",received:0,total:21000000}},
       workspaces:initialWorkspaces(),selectedWorkspace:"project:nession",newWorkspaceName:"",deletePending:null,
-      rootMode:"image",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,workspaceManualName:"",readPaths:"",writePaths:"",
+      rootMode:"host",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,workspaceManualName:"",readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:null,imageAction:"",
-      step:0,tip:null,fsInspect:false};
+      step:0,tip:null,fsInspect:false,buildOpen:false,buildKind:"github",buildSourceValue:"https://github.com/BestNathan/nession",buildRepresentation:"flattened",buildError:"",buildFilter:"all",buildPage:0,inspectWorkspace:"ws:busy"};
   }
   var s=defaults();
+  s.builds.push({id:"build-117",name:"old-release",status:"succeeded",stage:"publishing",elapsed_ms:65000,files:410,bytes:2900000,attempt:1,diagnostic:"Published"},{id:"build-116",name:"invalid-archive",status:"failed",stage:"validating",elapsed_ms:3500,files:0,bytes:0,attempt:2,diagnostic:"Archive escaped authorized root"},{id:"build-115",name:"old-source",status:"canceled",stage:"snapshotting",elapsed_ms:14000,files:14,bytes:18000,attempt:1,diagnostic:"Canceled"});
   var sections=[["overview","Overview"],["images","Images"],["workspaces","Workspaces"],["policies","Policies"]];
   var subs={
     images:[["library","Image Library"],["builds","Builds"],["distribution","Distribution"]],
@@ -53,6 +56,14 @@
   function macos(){return s.fixture==="macos";}
   function isEditable(){return online()&&!s.inside;}
   function imageBy(id){return s.images.find(function(x){return x.id===id;});}
+  function imageIssue(im){
+    if(!im)return "Image absent";
+    if(im.representation==="referenced")return "Referenced Composite Sandbox mount is not supported";
+    if(im.platform==="darwin/arm64")return "darwin/arm64 image is incompatible with the current linux/amd64 Agent";
+    if(!online())return "Agent offline";
+    if(s.cache[im.id]!=="verified")return "Agent cache is "+(s.cache[im.id]||"absent")+" — Prepare in Distribution";
+    return "";
+  }
   function currentWorkspace(){return s.workspaces.find(function(w){return w.id===s.selectedWorkspace;});}
   function nativeStatus(key){
     if(!online())return {state:"unknown",reason:"Agent offline; capability not measured"};
@@ -130,7 +141,7 @@
     if(targets.some(function(t){return !/^\/opt\/[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(t)}))return "Custom mount target requires backend support (current V1 supports /opt/<name>).";
     if(s.tools.some(function(t){return !imageBy(t)||imageBy(t).kind==="Base Runtime"||imageBy(t).status!=="ready";}))return "Mount image must be a Server Ready non-base_runtime EROFS.";
     if(s.tools.some(function(t){return s.cache[t]!=="verified";}))return "One or more mount images have not been loaded into the Agent cache.";
-    if(s.rootMode==="host"&&s.tools.length)return "Mounting EROFS tools on a local root requires backend support (not in current V1).";
+    if(s.tools.some(function(id){return imageIssue(imageBy(id));}))return "Toolchain is incompatible with current Agent / Image representation (candidate #3793).";
     if(s.rootMode==="image"&&(!imageBy(s.rootImage)||imageBy(s.rootImage).status!=="ready"))return "Base Runtime image is not Server Ready.";
     var paths=[s.readPaths,s.writePaths].join("\n").split("\n").filter(Boolean);
     if(paths.some(function(p){return !p.startsWith("/")||p.indexOf("..")>=0}))return "Access paths must be absolute normalized host paths.";
@@ -139,8 +150,8 @@
     if(s.seccomp&&nativeStatus("seccomp").state!=="available")return "seccomp unavailable on current Agent.";
     if(s.cgroup&&nativeStatus("cgroup_v2").state!=="available")return "cgroup_v2 unavailable on current Agent.";
     if(Object.keys(s.namespace).some(function(k){return s.namespace[k]})&&nativeStatus("linux_namespace").state!=="available")return "linux_namespace unavailable on current Agent.";
-    if(s.workspaceLower&&s.rootMode!=="image")return "Workspace EROFS lower requires an EROFS RootFS in current V1.";
-    if(s.rootMode==="image"&&s.workspaceLower&&resolveDefault().kind!=="managed")return "EROFS Overlay Lower requires an Agent-managed writable Workspace; Project Location is bound directly.";
+    if(s.workspaceLower&&s.rootMode==="host"&&macos())return "macOS EROFS Workspace mount is unavailable.";
+    if(s.workspaceLower&&resolveDefault().kind!=="managed")return "EROFS Overlay Lower requires an Agent-managed writable Workspace; Project Location is bound directly.";
     if(s.rootMode==="image"&&s.workspaceLower&&macos())return "Workspace Overlay mounting is not supported by this macOS Agent.";
     if(s.selectedWorkspace==="manual"&&!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(s.workspaceManualName.trim()))return "Enter a valid managed Workspace name.";
     if(s.rootMode==="image"&&s.selectedWorkspace!=="auto"&&s.selectedWorkspace!=="manual"&&!currentWorkspace())return "Selected Workspace is missing; choose a valid Agent resource.";
@@ -187,7 +198,7 @@
       action("Execution evidence","detail","","")+'</div>':
       '<div class="cand-actions">'+action("Validate policy","validate","",!online())+
       action("Enter Sandbox","enter","primary",s.preflight!=="passed"||!online())+'</div>';
-    return lead+cards+card("Current execution","Scope: current Session / active tmux Pane; Sandbox is not global.",
+    return lead+cards+card("Resource setup · Candidate #3792","Host Runtime can consume verified Toolchains and Workspace without Base EROFS (proposed).",'<div class="cand-actions">'+action("Use Host + Rust + Workspace","demo-host","primary",!online()||s.inside)+action("Inspect Image compatibility","area:images") +action("Inspect Agent Workspace","ws-detail:ws:busy") +'</div>')+card("Current execution","Scope: current Session / active tmux Pane; Sandbox is not global.",
       facts+(s.preflight==="passed"?alert("Validation passed.","success"):"")+
       (s.preflight==="failed"?alert(s.error,"danger"):"")+(s.notice?alert(s.notice):"")+buttons);
   }
@@ -198,18 +209,20 @@
       var expanded=s.selectedImage===im.id;
       var detailId="cand-image-detail-"+i;
       var cache=online()?(s.cache[im.id]||"absent"):"unknown";
+      var problem=imageIssue(im);
       var details=expanded?
         '<div class="cand-image-detail" id="'+detailId+'" role="region" aria-label="'+h(im.name)+' details">'+
           '<div class="cand-image-details-grid">'+
             '<div><span>Digest</span><code>'+h(im.digest)+'</code></div>'+
-            '<div><span>Type</span><strong>'+h(im.kind)+'</strong></div>'+
+            '<div><span>Type / Platform</span><strong>'+h(im.kind)+' · '+h(im.platform||'linux/amd64')+'</strong></div>'+
             '<div><span>Agent cache</span>'+statusChip(cache)+'</div>'+
             '<div><span>'+(im.kind==="Base Runtime"?"RootFS target":"Default mount")+'</span><code>'+h(im.kind==="Base Runtime"?"/":im.default_mount||"—")+'</code></div>'+
           '</div>'+
+          (problem?alert(problem,'danger'):alert('Runtime compatible · current Agent','success'))+
           '<div class="cand-actions">'+
             (im.kind==="Base Runtime"
-              ? action("Use as RootFS","image-root:"+im.id,"primary",cache!=="verified"||!isEditable())
-              : action("Mount in Filesystem","image-tool:"+im.id,"primary",!isEditable()))+
+              ? action("Use as RootFS","image-root:"+im.id,"primary",!!problem||!isEditable())
+              : action("Mount in Filesystem","image-tool:"+im.id,"primary",!!problem||!isEditable()))+
           '</div>'+
         '</div>':"";
       return '<div class="cand-image-entry'+(expanded?' expanded':'')+'">'+
@@ -233,8 +246,21 @@
     return s.transfers[im.id]||{state:s.cache[im.id]==="verified"?"verified":"absent",
       received:s.cache[im.id]==="verified"?im.size_bytes:0,total:im.size_bytes};
   }
+  function buildEditor(){
+    var kinds=[["github","GitHub"],["directory","Directory"],["archive","Archive"],["oci","OCI"],["compose","Image Compose"]];
+    var options=kinds.map(function(o){return action(o[1],"build-kind:"+o[0],s.buildKind===o[0]?"muted":"");}).join("");
+    var hintValue=s.buildKind==="github"?"https://github.com/owner/repo":s.buildKind==="directory"?"/authorized/source":s.buildKind==="archive"?"https://example.com/source.tar.gz":s.buildKind==="oci"?"registry/name@sha256:…":"rust-toolchain + nession-source (pinned)";
+    return card("New Build","Existing Server Image Manager; no shell execution in mock.",
+      '<div class="cand-actions">'+options+'</div>'+
+      (s.buildKind==="compose"?'<div class="cand-actions">'+action("Flattened","build-representation:flattened",s.buildRepresentation==="flattened"?"muted":"")+action("Referenced","build-representation:referenced",s.buildRepresentation==="referenced"?"muted":"")+'</div>':
+        '<div class="cand-field"><label>Source declaration</label><input aria-label="Build source" data-field="buildSourceValue" value="'+h(s.buildSourceValue)+'" placeholder="'+h(hintValue)+'"></div>')+
+      (s.buildError?alert(s.buildError,"danger"):"")+
+      '<div class="cand-actions">'+action("Cancel","build-start")+action("Submit Build","build-submit","primary",!online())+'</div>');
+  }
   function imageBuilds(){
-    var rows=s.builds.map(function(b){
+    var filtered=s.builds.filter(function(b){return s.buildFilter==="all"||b.status===s.buildFilter;});
+    var pageCount=Math.max(1,Math.ceil(filtered.length/3));s.buildPage=Math.min(s.buildPage,pageCount-1);
+    var rows=filtered.slice(s.buildPage*3,(s.buildPage+1)*3).map(function(b){
       var active=b.status==="running"||b.status==="queued",terminal=!active;
       var counts=(b.files!=null?b.files.toLocaleString()+" files":"Files pending")+
         " · "+(b.bytes!=null?sizeLabel(b.bytes):"Bytes pending");
@@ -248,8 +274,11 @@
         '<div class="cand-actions">'+(active?action("Cancel","build-cancel:"+b.id,"",!online()):"")+
           (b.status==="failed"||b.status==="canceled"?action("Retry","build-retry:"+b.id,"",!online()):"")+'</div></section>';
     }).join("");
-    return sectionHead("Builds","",action("+ New build","build-start","primary",!online()))+
-      '<div class="cand-job-list">'+rows+'</div>';
+    return sectionHead("Builds","",action(s.buildOpen?"Close build editor":"+ New build","build-start","primary",!online()))+
+      (s.buildOpen?buildEditor():"")+
+      '<div class="cand-actions">'+["all","running","succeeded","failed","canceled"].map(function(k){return action(k,"build-filter:"+k,s.buildFilter===k?"muted":"");}).join("")+'</div>'+
+      '<div class="cand-job-list">'+(rows||'<p class="fs-empty">No matching Build records</p>')+'</div>'+
+      '<div class="cand-actions">'+action("Previous","build-page:-1","",s.buildPage===0)+action("Next","build-page:1","",s.buildPage>=pageCount-1)+'<span>Page '+(s.buildPage+1)+' / '+pageCount+'</span></div>';
   }
   function distribution(){
     var rows=s.images.map(function(im){
@@ -311,7 +340,7 @@
         (w.kind==="project_location"?" · "+h(w.path):" · Agent-managed persistent")+'</small>'+
         '<small>'+h(w.project||"—")+' · nession-dev'+(selected?" · Selected for /workspace":"")+'</small></div>'+
         statusChip(online()?w.status:"unknown")+
-        action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside||w.status!=="available"||(w.kind==="project_location"&&s.session!=="sandbox-review"))+
+        action("Details","ws-detail:"+w.id,"",false)+action(selected?"Selected":"Use","ws-use:"+w.id,selected?"muted":"",!online()||s.inside||w.status!=="available"||(w.kind==="project_location"&&s.session!=="sandbox-review"))+
         (w.kind==="managed"?action("Delete","ws-delete:"+w.id,"danger",selected||w.status!=="available"||!online()||s.inside):"")+'</div>';
     }).join("");
     var auto=s.workspaces.find(function(w){return w.kind==="managed"&&w.name===s.session;});
@@ -327,12 +356,17 @@
         '<div class="cand-actions">'+action("Cancel","ws-delete-cancel")+action("Delete Workspace","ws-delete-confirm","danger")+'</div>':"");
   }
   function workspaceDetail(){
-    var w=currentWorkspace();
+    var w=s.workspaces.find(function(w){return w.id===s.inspectWorkspace})||currentWorkspace();
     return sectionHead("Workspace Detail","Workspace 管理和 Filesystem 消费不重复登记资源")+
       card(w?h(w.name):"Auto-allocated Workspace","Current Agent is the authority for directory and mount state.",
       '<div class="cand-facts">'+meta("Kind",w?w.kind:"pending")+meta("Name",w?w.name:s.session)+meta("Agent","nession-dev")+
       meta("Physical source",w?w.path:"Allocated by Agent on first Enter")+meta("Mapping","Implicit /workspace")+
-      meta("Lifecycle",w&&w.kind==="project_location"?"User-owned; never delete":"Managed: retained after Session ends")+'</div>'+
+      meta("Lifecycle",w&&w.kind==="project_location"?"User-owned; never delete":"Managed: retained after Session ends")+
+       meta("Immutable Lower",w&&w.kind==="managed"?(w.lower||"No image lower"):"Project-owned directory")+
+       meta("Writable Upper",w&&w.kind==="managed"?"Agent-owned persistent Upper":"Project-owned directory")+
+       meta("Upper bytes",w&&w.kind==="managed"?sizeLabel(w.upper_bytes||0):"Not managed")+
+       meta("Active leases",w&&w.kind==="managed"?String(w.lease_count||0):"N/A")+
+       meta("Mount",w&&w.status==="in_use"?"Mounted · in use":"Not currently mounted")+'</div>'+
       '<div class="cand-actions">'+action("Configure in Filesystem","policy:filesystem","primary")+
       action("Back to list","sub:workspaces:list")+'</div>');
   }
@@ -409,7 +443,7 @@
         '<div class="fs-mount-target"><input data-mount-target="'+h(id)+'" type="text" value="'+h(s.mountTargets[id]||im.default_mount||"")+'" aria-label="'+h(im.name)+' mount target"'+(locked?' disabled':'')+'></div>'+
         '<span class="fs-mode-pill">RO</span>'+action("×","mount-remove:"+id,"compact",locked)+'</div>';
     }).join("");
-    var available=s.images.filter(function(im){return im.kind!=="Base Runtime"&&im.status==="ready"&&!s.tools.includes(im.id)});
+    var available=s.images.filter(function(im){return im.kind!=="Base Runtime"&&im.status==="ready"&&!imageIssue(im)&&!s.tools.includes(im.id)});
     var selectable='<div class="fs-add-mount">'+fsImageOptions("Add EROFS image",available,s.mountToAdd,locked||!available.length,'data-field="mountToAdd"')+
       action("+ Add mount","mount-add","",locked||!available.length)+'</div>';
     var mounts=fsBlock("mounts","2 · Mounts",
@@ -540,7 +574,7 @@
       var val=t.value;
       if(fieldName==="newWorkspaceName")s.newWorkspaceName=val;
       else if(fieldName==="selectedWorkspace"){s.selectedWorkspace=val;dirty();}
-      else if(["rootMode","rootImage","toolTarget","mountToAdd","workspaceManualName","readPaths","writePaths","home","network","cgroup"].includes(fieldName)){
+      else if(["rootMode","rootImage","toolTarget","mountToAdd","workspaceManualName","readPaths","writePaths","home","network","cgroup","buildSourceValue"].includes(fieldName)){
         s[fieldName]=val;dirty();
       }
       return true;
@@ -564,6 +598,7 @@
     return false;
   }
   function doAction(a){
+    if(a==="demo-host"){s.rootMode="host";s.tools=["rust"];s.selectedWorkspace="ws:prior";s.workspaceLower=true;s.mountTargets.rust="/opt/rust";s.area="policies";s.sub.policies="filesystem";dirty();return;}
     if(a==="fs-inspect"){s.fsInspect=!s.fsInspect;return;}
     if(a.indexOf("fs-mode:")===0){if(isEditable()){s.rootMode=a.slice(8);dirty();}return;}
     if(a==="fs-ws:project"){if(isEditable()&&s.session==="sandbox-review"){s.selectedWorkspace="project:nession";dirty();}return;}
@@ -580,7 +615,7 @@
     }
     if(a==="mount-add"){
       if(!isEditable())return;
-      var available=s.images.filter(function(x){return x.kind!=="Base Runtime"&&x.status==="ready"&&!s.tools.includes(x.id)});
+      var available=s.images.filter(function(x){return x.kind!=="Base Runtime"&&x.status==="ready"&&!imageIssue(x)&&!s.tools.includes(x.id)});
       var target=available.find(function(x){return x.id===s.mountToAdd})||available[0];
       if(target){s.tools.push(target.id);s.mountTargets[target.id]=s.mountTargets[target.id]||target.default_mount||"/opt/"+target.id;s.mountToAdd=(available.find(function(x){return x.id!==target.id})||{}).id||"";dirty();}
       return;
@@ -600,12 +635,24 @@
     }
     if(a.indexOf("image:")===0){var id=a.slice(6);s.selectedImage=s.selectedImage===id?null:id;return;}
     if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&s.cache[id]==="verified"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
-    if(a.indexOf("image-tool:")===0){var id=a.slice(11),im=imageBy(id);if(im&&im.kind!=="Base Runtime"&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;s.area="policies";s.sub.policies="filesystem";dirty();}return;}
-    if(a==="build-start"){
+    if(a.indexOf("image-tool:")===0){var id=a.slice(11),im=imageBy(id);if(im&&im.kind!=="Base Runtime"&&!imageIssue(im)&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;s.area="policies";s.sub.policies="filesystem";dirty();}return;}
+    if(a==="build-start"){s.buildOpen=!s.buildOpen;s.buildError="";return;}
+    if(a.indexOf("build-kind:")===0){s.buildKind=a.slice(11);s.buildError="";s.buildSourceValue="";return;}
+    if(a.indexOf("build-representation:")===0){s.buildRepresentation=a.slice(21);return;}
+    if(a.indexOf("build-filter:")===0){s.buildFilter=a.slice(13);s.buildPage=0;return;}
+    if(a.indexOf("build-page:")===0){s.buildPage=Math.max(0,s.buildPage+Number(a.slice(11)));return;}
+    if(a==="build-submit"){
       if(!online())return;
+      if(s.buildKind!=="compose"&&(!s.buildSourceValue.trim()||
+        (s.buildKind==="github"&&!s.buildSourceValue.startsWith("https://github.com/"))||
+        (s.buildKind==="directory"&&!s.buildSourceValue.startsWith("/authorized/"))||
+        (s.buildKind==="archive"&&!s.buildSourceValue.startsWith("https://"))||
+        (s.buildKind==="oci"&&s.buildSourceValue.indexOf("@sha256:")<0))){
+        s.buildError="Unsupported or unauthorized Source. No build submitted.";return;
+      }
       var id="build-"+(121+s.builds.length);
-      s.builds.unshift({id:id,name:"new-source-"+(s.builds.length+1),status:"queued",stage:null,elapsed_ms:0,files:null,bytes:null,attempt:1,diagnostic:"Awaiting worker"});
-      s.sub.images="builds";return;
+      s.builds.unshift({id:id,name:s.buildKind==="compose"?"composed-workspace":s.buildKind+"-image",status:"queued",stage:null,elapsed_ms:0,files:null,bytes:null,attempt:1,diagnostic:"Queued · "+s.buildKind+(s.buildKind==="compose"?" · "+s.buildRepresentation:"")});
+      s.buildOpen=false;s.buildPage=0;s.buildFilter="all";return;
     }
     if(a.indexOf("build-cancel:")===0){var b=s.builds.find(function(x){return x.id===a.slice(13)});if(b&&(b.status==="running"||b.status==="queued")){b.status="canceled";b.diagnostic="Canceled by user";}return;}
     if(a.indexOf("build-retry:")===0){var b=s.builds.find(function(x){return x.id===a.slice(12)});if(b&&(b.status==="failed"||b.status==="canceled")){b.status="queued";b.stage=null;b.attempt++;b.elapsed_ms=0;b.diagnostic="Awaiting worker";}return;}
@@ -616,6 +663,7 @@
       s.transfers[id]={state:"downloading",received:previous.received||0,total:im.size_bytes};
       s.cache[id]="preparing";return;
     }
+    if(a.indexOf("ws-detail:")===0){s.inspectWorkspace=a.slice(10);s.area="workspaces";s.sub.workspaces="details";return;}
     if(a.indexOf("ws-use:")===0){var selected=s.workspaces.find(function(w){return w.id===a.slice(7)});if(isEditable()&&selected&&selected.status==="available"&&(selected.kind!=="project_location"||s.session==="sandbox-review")){s.selectedWorkspace=selected.id;dirty();}return;}
     if(a==="ws-auto"){
       if(!isEditable())return;
