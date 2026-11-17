@@ -209,6 +209,7 @@ var base=[
    {id:'item_31',kind:'agentMessage',label:'Completed',detail:'Runtime review complete.'}
   ]}]}
 ];
+var workBase=[{id:'thr_work_1',name:'Workspace session task',status:'idle',cwd:'/workspace/work',turns:[{id:'turn_work_1',status:'completed',items:[{id:'item_work_1',kind:'agentMessage',label:'Workspace summary',detail:'This belongs to the other Nession Session.'}]}]}];
 var state={threads:clone(base),selected:0,turn:0,item:0,section:'threads',sub:'native',scenario:'ready',mode:'web',depth:'list',session:'dev',dialog:null,message:'',showRaw:false};
 var $=function(q){return document.querySelector(q)};
 function clone(v){return JSON.parse(JSON.stringify(v))}
@@ -216,10 +217,10 @@ function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'
 function selected(){return state.threads[state.selected]||null}
 function turn(){var t=selected();return t&&t.turns[state.turn]||null}
 function item(){var t=turn();return t&&t.items[state.item]||null}
-function readableStatus(s){return ({idle:'Idle',active:'Active turn',waitingOnApproval:'Waiting for approval',notLoaded:'Not loaded',completed:'Completed',interrupted:'Interrupted'})[s]||s}
+function readableStatus(s){return ({idle:'Idle',active:'Active turn',waitingOnApproval:'Waiting for approval',notLoaded:'Not loaded',inProgress:'In progress',completed:'Completed',interrupted:'Interrupted'})[s]||s}
 function disableState(){return state.scenario==='offline'||state.scenario==='unavailable'}
 function button(label,act,cls,disabled,extra){return '<button type="button" class="button '+(cls||'')+'" data-act="'+act+'" '+(disabled?'disabled':'')+' '+(extra||'')+'>'+esc(label)+'</button>'}
-function changeScenario(kind){state.scenario=kind;state.threads=clone(base);state.selected=0;state.turn=0;state.item=0;state.depth='list';state.section='threads';state.sub='native';state.message='';
+function changeScenario(kind){state.scenario=kind;state.session='dev';state.threads=clone(base);state.selected=0;state.turn=0;state.item=0;state.depth='list';state.section='threads';state.sub='native';state.message='';
  if(kind==='active'){state.threads[0].status='active';state.threads[0].turns[0].status='inProgress'}
  if(kind==='approval'){state.threads[0].status='waitingOnApproval';state.threads[0].turns[0].status='inProgress';state.threads[0].turns[0].items.splice(3,0,{id:'item_approval',kind:'approval',label:'Run command approval',detail:'Permission requested for a workspace command.'})}
  if(kind==='empty'){state.threads=[]}
@@ -301,7 +302,7 @@ else if(act==='resume'){if(selected()){selected().status='idle';state.message='T
 else if(act==='interrupt'){if(turn()){turn().status='interrupted';selected().status='idle';state.message='Turn interrupted (simulated), result not fabricated.'}}
 else if(act==='back'){if(state.dialog)state.dialog=null;else if(state.depth==='item')state.depth='thread';else if(state.depth==='thread')state.depth='list';else if(state.section!=='threads')state.section='threads'}
 else if(act==='cancel'){state.dialog=null}
-else if(act==='deny'){state.dialog=null;if(selected()){selected().status='idle';state.message='Approval denied (simulated).'}}
+else if(act==='deny'){state.dialog=null;if(selected()){selected().status='idle';if(turn())turn().status='interrupted';state.message='Approval denied; Turn interrupted (simulated).'}}
 else if(act==='confirm'){
  if(state.dialog==='new'){
   var name=$('#new-title');if(!name||!name.value.trim()){name&&name.focus();return}
@@ -314,7 +315,7 @@ else if(act==='confirm'){
  }else if(state.dialog==='approval'){if(selected()){selected().status='active';state.message='User approved (mock only); no command executed.'}}
  state.dialog=null;
 }
-else if(act==='session'){state.session=id;state.threads=clone(base);state.selected=0;state.turn=0;state.item=0;state.depth='list';state.section='threads';state.message='Session changed. All Codex selections and drafts cleared.'}
+else if(act==='session'){state.session=id;state.threads=clone(id==='work'?workBase:base);state.selected=0;state.turn=0;state.item=0;state.depth='list';state.section='threads';state.message='Session changed. All Codex selections and drafts cleared.'}
 else if(act==='resource-action'){state.message='Explicit test simulated; no network connection was opened.';$('#main-pane').insertAdjacentHTML('beforeend','<div class="status-line">Mock connection probe only. Client-loaded state stays unknown.</div>');return}
 else if(act==='terminal'||act==='cap'){state.message='Shell-owned navigation preview only. No Terminal attach or capability switch was executed.'}
 render();
