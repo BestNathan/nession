@@ -5,6 +5,10 @@
 // unknown instead of being shown as ready.
 import { expect, test, type Page } from '@playwright/test';
 
+/** One DetailFact's value cell; the fact wrapper also contains its label. */
+function factValue(page: Page, testId: string) {
+  return page.getByTestId(testId).locator('[data-recipe-part="detail-fact-value"]');
+}
 
 async function openWebLibrary(page: Page): Promise<void> {
   await page.goto('/#/fixture/workspace?capability=sandbox&images=lifecycle');
@@ -49,41 +53,41 @@ test('SC-01: the Server Catalog Library searches, paginates and expands inline',
     await expect(detail).toBeVisible();
     await expect(page.getByTestId('image-detail-row')).toBeVisible();
     await expect(detail).toContainText('Server-owned immutable image');
-    await expect(page.getByTestId('images-detail-repository')).toHaveText(
+    await expect(factValue(page, 'images-detail-repository')).toHaveText(
       'nession/fixtures',
     );
-    await expect(page.getByTestId('images-detail-tags')).toHaveText(
+    await expect(factValue(page, 'images-detail-tags')).toHaveText(
       'fixture-build-latest',
     );
-    await expect(page.getByTestId('images-detail-manifest')).toContainText('sha256:');
-    await expect(page.getByTestId('images-detail-platform')).toHaveText('linux/amd64');
-    await expect(page.getByTestId('images-detail-representation')).toHaveText(
+    await expect(factValue(page, 'images-detail-manifest')).toContainText('sha256:');
+    await expect(factValue(page, 'images-detail-platform')).toHaveText('linux/amd64');
+    await expect(factValue(page, 'images-detail-representation')).toHaveText(
       'Single layer',
     );
-    await expect(page.getByTestId('images-detail-impact')).toContainText('1 Project pin');
-    await expect(page.getByTestId('images-detail-impact')).toContainText('1 lease');
-    await expect(page.getByTestId('images-detail-layers')).toHaveText('1');
-    await expect(page.getByTestId('images-detail-closure')).toHaveText('1');
-    await expect(page.getByTestId('images-detail-agent-cache')).toContainText('Unknown');
+    await expect(factValue(page, 'images-detail-impact')).toContainText('1 Project pin');
+    await expect(factValue(page, 'images-detail-impact')).toContainText('1 lease');
+    await expect(factValue(page, 'images-detail-layers')).toHaveText('1');
+    await expect(factValue(page, 'images-detail-closure')).toHaveText('1');
+    await expect(factValue(page, 'images-detail-agent-cache')).toContainText('Unknown');
     await expect(page.getByTestId('images-tag-create')).toBeVisible();
     await expect(page.getByTestId('images-tag-remove-fixture-build-latest')).toBeVisible();
 
-    // A revision with no readable catalog identity is explicitly unknown.
-    await page.getByTestId('images-search').fill('fixture-image-2');
-    await expect(page.getByTestId('image-row')).toHaveCount(1);
-    await page.getByTestId('image-row').first().click();
-    await expect(page.getByTestId('images-detail-manifest')).toHaveText(
+    // A revision with no readable catalog identity is explicitly unknown. The
+    // newest entry is the managed one; every other inventory row is legacy.
+    await page.getByTestId('images-search').fill('');
+    await expect(page.getByTestId('image-row')).toHaveCount(50);
+    await expect(page.getByTestId('images-page-label')).toHaveText('1–50 of 236');
+    await page.getByTestId('image-row').nth(1).click();
+    await expect(factValue(page, 'images-detail-manifest')).toHaveText(
       'Unknown manifest',
     );
-    await expect(page.getByTestId('images-detail-platform')).toHaveText('Unknown platform');
-    await expect(page.getByTestId('images-detail-representation')).toHaveText(
+    await expect(factValue(page, 'images-detail-platform')).toHaveText('Unknown platform');
+    await expect(factValue(page, 'images-detail-representation')).toHaveText(
       'Unknown representation',
     );
     await expect(page.getByTestId('images-tag-unavailable')).toBeVisible();
 
     // The complete inventory still pages after the searched view.
-    await page.getByTestId('images-search').fill('');
-    await expect(page.getByTestId('images-page-label')).toHaveText('1–50 of 236');
     await page.getByTestId('images-next').click();
     await expect(page.getByTestId('images-page-label')).toHaveText('51–100 of 236');
     await page.getByTestId('images-previous').click();
