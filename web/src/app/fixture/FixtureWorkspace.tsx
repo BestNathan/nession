@@ -50,7 +50,11 @@ const fixtureOps = fixtureFileOps();
  */
 /** Routes that expose the Session-switch control while a Git request is in flight. */
 function isGitSessionScenario(scenario: string | null): boolean {
-  return scenario === 'selection-overlap' || scenario === 'mutation-overlap';
+  return (
+    scenario === 'selection-overlap' ||
+    scenario === 'mutation-overlap' ||
+    scenario === 'history-overlap'
+  );
 }
 
 export function FixtureWorkspace() {

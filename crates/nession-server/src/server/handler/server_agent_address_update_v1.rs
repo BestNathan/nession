@@ -28,7 +28,25 @@ impl ConnectionHandler {
         };
         let payload: AgentAddressUpdatePayload = serde_json::from_value(value)?;
 
-        let Some(mut agent) = self.agent_registry.get(&agent_id).await else {
+        // The identity check above can pass while a newer connection registers
+        // before this read-modify-write begins. Take the Agent's registration
+        // gate and re-verify the generation, and keep the guard until the write
+        // is done: otherwise a successor's registration can publish in that
+        // window and this stale snapshot would replace its whole row, including
+        // its Agent Token (#3723).
+        let Some(_current) = self
+            .command_broker
+            .begin_address_update(&agent_id, self.connection_generation)
+            .await
+        else {
+            info!(
+                "agent.address_update for agent '{}' came from a superseded connection; refusing",
+                agent_id
+            );
+            return Ok(HandlerAction::Reply(None));
+        };
+
+        let Some(agent) = self.agent_registry.get(&agent_id).await else {
             info!(
                 "agent.address_update from unknown agent '{}'; ignoring",
                 agent_id
@@ -51,19 +69,26 @@ impl ConnectionHandler {
             agent.port,
             agent.connect_url.as_deref(),
         );
-        agent.addresses = addresses;
-        if let Some(ip) = primary_ip {
-            agent.ip_address = ip;
+        let address_count = addresses.len();
+        let ip_address = primary_ip.unwrap_or_else(|| agent.ip_address.clone());
+
+        if !self
+            .agent_registry
+            .apply_address_update(&agent_id, addresses, ip_address.clone())
+            .await
+        {
+            info!(
+                "agent.address_update for unknown agent '{}'; ignoring",
+                agent_id
+            );
+            return Ok(HandlerAction::Reply(None));
         }
 
         info!(
             "Updated {} address(es) for agent {} (primary ip: {})",
-            agent.addresses.len(),
-            agent_id,
-            agent.ip_address,
+            address_count, agent_id, ip_address,
         );
 
-        self.agent_registry.register(agent).await;
         Ok(HandlerAction::Reply(None))
     }
 }

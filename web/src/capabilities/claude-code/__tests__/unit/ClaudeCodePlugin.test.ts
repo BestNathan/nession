@@ -395,7 +395,7 @@ describe('ClaudeCodePlugin', () => {
       expect(JSON.stringify(surface.requests[0]?.payload)).not.toContain('Bearer');
       surface.resolveNext('claude-code.mcp-connect', {
         state: 'preflight',
-        preflight: { mode: 'server', credential_env: 'NESSON_MCP_TOKEN', ready: false, prerequisites: [] },
+        preflight: { mode: 'server', credential_env: 'NESSION_MCP_TOKEN', ready: false, prerequisites: [] },
         reload_required: false,
       });
       await expect(pending).resolves.toMatchObject({ state: 'preflight' });

@@ -251,4 +251,98 @@ describe('fixture git surface', () => {
       }
     }
   });
+
+  /**
+   * #3751: the History pagination scenario needs two Sessions whose histories
+   * are distinguishable, pageable by cursor, and reproducible when a first page
+   * is refreshed. The Case, not a timer, decides when the held older page
+   * settles.
+   */
+  it('serves per-Session pageable histories and holds the first older page (#3751)', async () => {
+    const globalRecord = globalThis as unknown as { window?: unknown };
+    const hadWindow = 'window' in globalRecord;
+    const previousWindow = globalRecord.window;
+    const fakeWindow: Record<string, unknown> = {};
+    globalRecord.window = fakeWindow;
+    try {
+      const surface = fixtureGitSurface('?capability=git&git=history-overlap');
+      const sessionA = 'devbox-01:fix-terminal-reconnect';
+      const sessionB = 'devbox-01:design-system';
+
+      const first = await surface.request<GitLogResponse>('git.log', { session: sessionA });
+      expect(first.state).toBe('ok');
+      if (first.state !== 'ok') {
+        return;
+      }
+      expect(first.history.commits).toHaveLength(50);
+      expect(first.history.commits[0]?.subject).toContain('A first page 1 commit 1');
+      expect(first.history.end_of_history).toBe(false);
+      const cursor = first.history.next_cursor;
+      // A cursor is what the agent returns: a commit OID.
+      expect(cursor).toMatch(/^[0-9a-f]{40}$/);
+
+      // The first older page is held; the next one answers immediately so a
+      // Case can prove a normal continuation still appends.
+      const held = surface.request<GitLogResponse>('git.log', {
+        session: sessionA,
+        before: cursor,
+      });
+      const immediate = await surface.request<GitLogResponse>('git.log', {
+        session: sessionA,
+        before: cursor,
+      });
+      expect(immediate.state).toBe('ok');
+      if (immediate.state !== 'ok') {
+        return;
+      }
+      expect(immediate.history.commits[0]?.subject).toContain('A older page 1 commit 1');
+      expect(immediate.history.end_of_history).toBe(true);
+
+      const control = fakeWindow.fixtureGitHistoryOverlap as {
+        firstPageRequests: (session: string) => number;
+        olderRequests: () => number;
+        olderSettled: () => boolean;
+        releaseOlder: () => void;
+      };
+      expect(control.olderRequests()).toBe(2);
+      expect(control.firstPageRequests(sessionA)).toBe(1);
+
+      control.releaseOlder();
+      const older = await held;
+      expect(older.state).toBe('ok');
+      if (older.state === 'ok') {
+        expect(older.history.commits[0]?.subject).toContain('A older page 1 commit 1');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(control.olderSettled()).toBe(true);
+
+      // A refresh is the next first-page generation; B is its own generation.
+      const refreshed = await surface.request<GitLogResponse>('git.log', {
+        session: sessionA,
+      });
+      expect(refreshed.state).toBe('ok');
+      if (refreshed.state === 'ok') {
+        expect(refreshed.history.commits[0]?.subject).toContain('A first page 2 commit 1');
+        expect(refreshed.history.next_cursor).toMatch(/^[0-9a-f]{40}$/);
+        expect(refreshed.history.next_cursor).not.toBe(cursor);
+      }
+      expect(control.firstPageRequests(sessionA)).toBe(2);
+
+      const sessionBFirst = await surface.request<GitLogResponse>('git.log', {
+        session: sessionB,
+      });
+      expect(sessionBFirst.state).toBe('ok');
+      if (sessionBFirst.state === 'ok') {
+        expect(sessionBFirst.history.commits[0]?.subject).toContain('B first page 1 commit 1');
+        expect(sessionBFirst.history.next_cursor).toMatch(/^[0-9a-f]{40}$/);
+        expect(sessionBFirst.history.next_cursor).not.toBe(cursor);
+      }
+    } finally {
+      if (hadWindow) {
+        globalRecord.window = previousWindow;
+      } else {
+        delete globalRecord.window;
+      }
+    }
+  });
 });
