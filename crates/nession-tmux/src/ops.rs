@@ -1880,7 +1880,7 @@ mod tests {
 
         let set = format!(
             "{:#}",
-            ops.set_environment("sess", "NESSON_SPAWN", "v")
+            ops.set_environment("sess", "NESSION_TEST_SPAWN", "v")
                 .await
                 .expect_err("there is no binary to spawn")
         );
@@ -1889,13 +1889,13 @@ mod tests {
             "the failure must say the process never started: {set}"
         );
         assert!(
-            set.contains("NESSON_SPAWN") && set.contains("sess"),
+            set.contains("NESSION_TEST_SPAWN") && set.contains("sess"),
             "and it must name the variable and the session it was for: {set}"
         );
 
         let show = format!(
             "{:#}",
-            ops.show_environment("sess", "NESSON_SPAWN")
+            ops.show_environment("sess", "NESSION_TEST_SPAWN")
                 .await
                 .expect_err("there is no binary to spawn")
         );
@@ -1904,7 +1904,7 @@ mod tests {
             "the query must fail the same way rather than answer `None`: {show}"
         );
         assert!(
-            show.contains("NESSON_SPAWN") && show.contains("sess"),
+            show.contains("NESSION_TEST_SPAWN") && show.contains("sess"),
             "and it must name the variable and the session it was asked about: {show}"
         );
     }
@@ -1923,7 +1923,7 @@ mod tests {
         let err = format!(
             "{:#}",
             TmuxOps::new(fake.command())
-                .show_environment("sess", "NESSON_MALFORMED")
+                .show_environment("sess", "NESSION_TEST_MALFORMED")
                 .await
                 .expect_err("a line with no `=` is not a value")
         );
@@ -1932,12 +1932,17 @@ mod tests {
             "the failure must say what tmux answered instead: {err}"
         );
         assert!(
-            err.contains("NESSON_MALFORMED") && err.contains("sess"),
+            err.contains("NESSION_TEST_MALFORMED") && err.contains("sess"),
             "and it must name the variable and the session it asked about: {err}"
         );
         assert_eq!(
             fake.calls(),
-            vec![vec!["show-environment", "-t", "sess", "NESSON_MALFORMED"]],
+            vec![vec![
+                "show-environment",
+                "-t",
+                "sess",
+                "NESSION_TEST_MALFORMED"
+            ]],
             "the query must be the owner's grammar, run against the injected binary"
         );
     }

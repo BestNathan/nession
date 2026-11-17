@@ -154,8 +154,8 @@ const TMUX_CREATE_RECONCILE_TIMEOUT: Duration = Duration::from_secs(3);
 /// afterwards. The token is what lets the reconciliation prove that a Session
 /// appearing after the deadline is this attempt's, instead of guessing from
 /// its name and killing a Session someone else owns. It is also reserved:
-/// environment profiles cannot control `NESSON_*` keys.
-const CREATE_TOKEN_ENV: &str = "NESSON_CREATE_TOKEN";
+/// environment profiles cannot control `NESSION_RUNTIME_*` keys.
+const CREATE_TOKEN_ENV: &str = "NESSION_RUNTIME_CREATE_TOKEN";
 
 /// The environment variable carrying this tmux Session's instance identity.
 ///
@@ -166,10 +166,13 @@ const CREATE_TOKEN_ENV: &str = "NESSON_CREATE_TOKEN";
 /// has no such variable, which is what lets the reader tell it apart from a
 /// fenced Session whose binding is simply absent.
 ///
-/// Reserved like every `NESSON_*` key ([`NEVER_FORWARDED_ENV`] and the env
+/// Reserved like every `NESSION_RUNTIME_*` key ([`NEVER_FORWARDED_ENV`] and the env
 /// profile policy), so neither a parent Nession Session nor a profile can
 /// substitute one.
-pub(crate) const INSTANCE_ID_ENV: &str = "NESSON_SESSION_INSTANCE_ID";
+pub(crate) const INSTANCE_ID_ENV: &str = "NESSION_RUNTIME_SESSION_INSTANCE_ID";
+
+/// Old tmux Session marker, read only until all pre-migration Sessions end.
+pub(crate) const LEGACY_INSTANCE_ID_ENV: &str = "NESSON_SESSION_INSTANCE_ID";
 
 /// The tmux user option that durably stores a Session's instance identity
 /// (`#2789`), beside the environment variable above.
@@ -188,7 +191,7 @@ const INSTANCE_ID_OPTION: &str = "@nession_instance_id";
 /// that itself runs inside a nession Session must not inherit a stale token
 /// into the create it is performing. [`INSTANCE_ID_ENV`] is withheld for the
 /// same reason — every create states its own identity.
-const NEVER_FORWARDED_ENV: [&str; 7] = [
+const NEVER_FORWARDED_ENV: [&str; 9] = [
     "TERM",
     "LANG",
     "LC_ALL",
@@ -196,12 +199,19 @@ const NEVER_FORWARDED_ENV: [&str; 7] = [
     "TMUX_TMPDIR",
     CREATE_TOKEN_ENV,
     INSTANCE_ID_ENV,
+    LEGACY_INSTANCE_ID_ENV,
+    "NESSION_MCP_TOKEN",
 ];
 
 /// Whether an inherited env var is withheld from a new session — either
 /// forced/stripped by policy, or superseded by a caller-supplied value.
 fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
-    NEVER_FORWARDED_ENV.contains(&key) || caller_keys.contains(&key)
+    // A new Session must never inherit control state from a parent Session,
+    // or the MCP credential from the Agent daemon without explicit binding.
+    NEVER_FORWARDED_ENV.contains(&key)
+        || key.starts_with("NESSION_RUNTIME_")
+        || key.starts_with("NESSON_")
+        || caller_keys.contains(&key)
 }
 
 /// Compose the create-time base environment (#3500).
@@ -636,10 +646,19 @@ impl SessionManager {
             }
         }
 
-        let delivered = ops
+        let delivered = match ops
             .show_environment(session_name, INSTANCE_ID_ENV)
             .await
-            .with_context(|| format!("read the instance identity of session {session_name}"))?;
+            .with_context(|| format!("read the instance identity of session {session_name}"))?
+        {
+            Some(value) => Some(value),
+            None => ops
+                .show_environment(session_name, LEGACY_INSTANCE_ID_ENV)
+                .await
+                .with_context(|| {
+                    format!("read the legacy instance identity of session {session_name}")
+                })?,
+        };
         let fresh = delivered
             .as_deref()
             .and_then(|value| uuid::Uuid::parse_str(value.trim()).ok())
@@ -1089,10 +1108,10 @@ impl SessionManager {
             &withheld,
         );
         if !has_ps1 {
-            session_env.push(("NESSON_PS1".to_string(), DEFAULT_PS1.to_string()));
+            session_env.push(("NESSION_RUNTIME_PS1".to_string(), DEFAULT_PS1.to_string()));
             session_env.push((
                 "PROMPT_COMMAND".to_string(),
-                r#"[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }"#.to_string(),
+                r#"[ -n "$NESSION_RUNTIME_PS1" ] && { PS1="$NESSION_RUNTIME_PS1"; unset NESSION_RUNTIME_PS1; }"#.to_string(),
             ));
         }
         session_env.extend(claude_env);
@@ -1102,7 +1121,7 @@ impl SessionManager {
         // as fenced at all (#2974).
         session_env.push((INSTANCE_ID_ENV.to_string(), instance_id.clone()));
         // This create's ownership fence, delivered by the `new-session` below.
-        // Profiles cannot set it: `NESSON_*` keys are reserved.
+        // Profiles cannot set it: `NESSION_RUNTIME_*` keys are reserved.
         session_env.push((CREATE_TOKEN_ENV.to_string(), token.to_string()));
         // Last, so the adapter's ZDOTDIR cannot be overwritten by the agent's
         // inherited environment.
@@ -2334,6 +2353,14 @@ mod legacy_stage_two_tests {
 mod injected_tmux_tests {
     use super::*;
 
+    #[test]
+    fn new_sessions_do_not_inherit_runtime_state_or_mcp_credentials() {
+        assert!(skip_env("NESSION_RUNTIME_BINDING_FILE", &[]));
+        assert!(skip_env("NESSON_SESSION_INSTANCE_ID", &[]));
+        assert!(skip_env("NESSION_MCP_TOKEN", &[]));
+        assert!(!skip_env("NESSION_TEST", &[]));
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn with_tmux_bin_reaches_the_env_manager_beside_the_manager() {
@@ -2365,7 +2392,7 @@ mod injected_tmux_tests {
             .env()
             .set_environment(
                 "nession-fake",
-                &[("NESSON_WIRED".to_string(), "1".to_string())],
+                &[("TEST_WIRED".to_string(), "1".to_string())],
             )
             .await
             .expect_err("the injected binary refuses every set-environment");
@@ -2380,7 +2407,7 @@ mod injected_tmux_tests {
                 "set-environment",
                 "-t",
                 "nession-fake",
-                "NESSON_WIRED",
+                "TEST_WIRED",
                 "1"
             ]],
             "the env operation must have run on the injected binary"
@@ -2486,6 +2513,37 @@ mod injected_tmux_tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn a_legacy_instance_marker_is_adopted_after_upgrade() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = dir.path().join("legacy-instance");
+        let delivered = "2f0a6c1e-0d43-4a6e-9f7c-3c1d2e4b5a60";
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            &format!(
+                "case \"$1\" in\n\
+                 show-options) [ -f \"{state}\" ] && cat \"{state}\"; exit 0;;\n\
+                 set-option) printf '%s' \"$5\" > \"{state}\"; exit 0;;\n\
+                 show-environment) case \"$*\" in \
+                    *NESSION_RUNTIME_SESSION_INSTANCE_ID*) echo 'unknown variable: NESSION_RUNTIME_SESSION_INSTANCE_ID' >&2; exit 1;; \
+                    *NESSON_SESSION_INSTANCE_ID*) printf '%s\\n' \
+                       'NESSON_SESSION_INSTANCE_ID={delivered}';; esac; exit 0;;\n\
+                 *) exit 0;;\n\
+                 esac",
+                state = state.display(),
+            ),
+        );
+        let manager = crate::test_support::manager_with_fake(&fake);
+        assert_eq!(
+            manager
+                .session_instance_id("legacy")
+                .await
+                .expect("identity"),
+            delivered
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn the_instance_identity_adopts_the_id_the_create_delivered() {
         // #2974. The durable option is initialized from the id the create
         // delivered to the Session's environment, not from a fresh UUID. That
@@ -2554,7 +2612,7 @@ mod injected_tmux_tests {
         let fake = crate::test_support::FakeTmux::new(
             dir.path(),
             "case \"$1\" in \
-             set-environment) case \"$*\" in *NESSON_SESSION_INSTANCE_ID*) exit 0;; \
+             set-environment) case \"$*\" in *NESSION_RUNTIME_SESSION_INSTANCE_ID*) exit 0;; \
              *) echo 'unknown flag -e' >&2; exit 1;; esac;; \
              *) case \"$*\" in *' -e '*) echo 'no -e support' >&2; exit 1;; \
              *) exit 0;; esac;; esac",
@@ -2586,7 +2644,7 @@ mod injected_tmux_tests {
             .env()
             .set_environment(
                 session.name(),
-                &[("NESSON_REQUIRED".to_string(), "1".to_string())],
+                &[("TEST_REQUIRED".to_string(), "1".to_string())],
             )
             .await;
         assert!(
@@ -2681,7 +2739,7 @@ mod create_claim_tests {
 /// The fake keeps a small session table on disk (`fake-sessions/<name>`), so
 /// "the Session is gone" and "the same name can be created again" are read
 /// from state instead of inferred from exit codes. `new-session` records the
-/// `NESSON_CREATE_TOKEN` the manager passed; `kill-session` removes the row.
+/// `NESSION_RUNTIME_CREATE_TOKEN` the manager passed; `kill-session` removes the row.
 /// A pre-existing row is the identity half: it must survive untouched.
 #[cfg(test)]
 mod create_recovery_tests {
@@ -2690,7 +2748,7 @@ mod create_recovery_tests {
     use nession_protocol::contracts::env::v1::EnvSource;
 
     /// The ownership fence the manager delivers through `new-session -e`.
-    const TOKEN_VAR: &str = "NESSON_CREATE_TOKEN";
+    const TOKEN_VAR: &str = "NESSION_RUNTIME_CREATE_TOKEN";
 
     fn session_row(dir: &std::path::Path, name: &str) -> PathBuf {
         dir.join("fake-sessions").join(name)
