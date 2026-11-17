@@ -41,8 +41,8 @@
     };
     s.images.forEach(im=>{
       const extra=overrides[im.id]||{};
-      if(!im.imMeta)im.imMeta={...extra};
-      if(!im.tags)im.tags=im.revision?[im.revision]:[im.id];
+      if(!im.imMeta){im.imMeta={...extra};if(im.tags?.length===1&&im.tags[0]===im.id&&extra.revision)im.tags=[extra.revision];}
+      if(!im.tags)im.tags=extra.revision?[extra.revision]:[im.id];
       im.repository=extra.repository||im.repository||"nession/generated";
     });
     return s.im;
@@ -79,7 +79,7 @@
       '<div class="im-resource-identity"><div><span class="im-eyebrow">Immutable image revision</span><strong>'+h(im.name)+'</strong><code>'+h(im.digest)+'</code></div>'+
       '<div class="im-resource-actions">'+rowAction("Copy digest","im:copy:"+im.id)+rowAction("Manage tags","im:tag:"+im.id,!serverUp(s))+'</div></div>'+
       '<div class="im-detail-grid">'+
-      section("Identity",'<dl class="im-facts">'+fact("Repository",im.repository)+fact("Tags",tagHead)+fact("Platform",m.platform||"Unknown")+fact("Representation",m.format||"Unknown")+fact("Created",m.created||"Unknown")+'</dl>')+
+      section("Identity",'<dl class="im-facts">'+fact("Repository",im.repository)+fact("Tags",tagHead)+fact("Manifest revision",digest(im.digest))+fact("Platform",m.platform||"Unknown")+fact("Representation",m.format||"Unknown")+fact("Created",m.created||"Unknown")+'</dl>')+
       section("Source & dependencies",'<dl class="im-facts">'+fact("Source",m.source||"Unknown")+fact("Layers",m.layers==null?"Unknown":String(m.layers))+fact("Size",bytes(im.size_bytes))+fact("Closure",m.format==="referenced multi-blob"?"Metadata + "+(m.layers-1)+" external blob(s)":"Self-contained image")+fact("Default target",im.default_mount||"Not declared")+fact("OCI Config",m.config||"Not exposed in legacy descriptor")+fact("EROFS packaging",m.packaging||"Deterministic · see Build provenance")+'</dl>')+
       section("References",'<p class="im-muted">A Tag is movable. Project and Session image references stay pinned to an immutable manifest.</p>'+
         (refs.length?'<ul class="im-reference-list">'+refs.map(x=>'<li>'+h(x)+'</li>').join("")+'</ul>':'<p class="im-empty-inline">No known active consumers</p>'))+
