@@ -32,15 +32,15 @@ use http_body_util::{BodyExt, Empty};
 use nession_protocol::TokenVerifier;
 use rmcp::model::{
     CacheScope, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult,
-    PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
+    MetaObject, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{Peer, RequestContext};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::Semaphore;
+use tokio::sync::{broadcast, Semaphore};
 use tokio::time::timeout;
 use tower_service::Service;
 use tracing::{info, warn};
@@ -176,6 +176,11 @@ pub struct McpService {
     /// Agent can execute its contributions through the Server-relayed route
     /// (`#3778`) instead of building a second backend graph.
     context: Arc<ToolContext>,
+    /// Catalog-generation changes, broadcast to every legacy session so it can
+    /// receive `notifications/tools/list_changed` (`#3778` P2). A stateless
+    /// modern request has no channel to notify; it reads the revision from
+    /// `tools/list` `_meta` instead.
+    catalog_changes: broadcast::Sender<u64>,
     /// The authenticated, path-scoped tower service in front of rmcp.
     endpoint: AuthorizedMcp,
 }
@@ -221,11 +226,13 @@ impl McpService {
     ) -> Result<Self, ServiceConfigError> {
         config.validate()?;
         let context = Arc::new(ToolContext::new(cluster, node));
+        let (catalog_changes, _) = broadcast::channel(16);
         let handler = RegistryServer {
             catalog: Arc::clone(&catalog),
             context: Arc::clone(&context),
             calls: Arc::new(Semaphore::new(config.max_concurrent_calls)),
             tool_timeout: config.tool_timeout,
+            peer: Arc::new(std::sync::RwLock::new(None)),
         };
 
         let mut transport = StreamableHttpServerConfig::default()
@@ -250,11 +257,45 @@ impl McpService {
         };
 
         let inner: StreamableHttpService<RegistryServer, LocalSessionManager> =
-            StreamableHttpService::new(move || Ok(handler.clone()), Default::default(), transport);
+            StreamableHttpService::new(
+                {
+                    let template = handler;
+                    let session_changes = catalog_changes.clone();
+                    move || {
+                        let mut session = template.clone();
+                        // One peer slot per MCP session; the template's is
+                        // never written. A watcher forwards every explicit
+                        // catalog change to that session's legacy peer.
+                        session.peer = Arc::new(std::sync::RwLock::new(None));
+                        let peer_slot = Arc::clone(&session.peer);
+                        let mut changes = session_changes.subscribe();
+                        tokio::spawn(async move {
+                            while changes.recv().await.is_ok() {
+                                let peer = match peer_slot.read() {
+                                    Ok(peer) => peer.clone(),
+                                    Err(poisoned) => poisoned.into_inner().clone(),
+                                };
+                                let Some(peer) = peer else { continue };
+                                // A closed session is not a failure worth
+                                // logging: the notification simply has no
+                                // recipient, and a later request carries the
+                                // fresh generation anyway.
+                                if peer.notify_tool_list_changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                        Ok(session)
+                    }
+                },
+                Default::default(),
+                transport,
+            );
         Ok(Self {
             path: Arc::from(config.path.as_str()),
             catalog,
             context,
+            catalog_changes,
             endpoint: AuthorizedMcp {
                 inner,
                 path: Arc::from(config.path.as_str()),
@@ -279,6 +320,19 @@ impl McpService {
     /// embedded endpoint uses, not a second graph.
     pub fn tool_context(&self) -> Arc<ToolContext> {
         Arc::clone(&self.context)
+    }
+
+    /// Announce that the advertised catalog generation changed (`#3778` P2).
+    ///
+    /// Connected legacy sessions receive `notifications/tools/list_changed`.
+    /// Stateless modern requests have no notification channel; they observe
+    /// the new definitions and `_meta.nession/catalogRevision` on their next
+    /// `tools/list`. Call this only after an explicit successful
+    /// [`McpCatalog::reconfigure`] — never for runtime state such as a Session
+    /// appearing or an Extension switching between idle and busy.
+    pub fn notify_catalog_changed(&self) {
+        // No receivers is the ordinary stateless case, not a failure.
+        let _ = self.catalog_changes.send(self.catalog.revision());
     }
 
     /// The endpoint path this service answers on.
@@ -337,6 +391,24 @@ struct RegistryServer {
     context: Arc<ToolContext>,
     calls: Arc<Semaphore>,
     tool_timeout: Duration,
+    /// The peer of the MCP session this handler serves, recorded on its first
+    /// request so catalog-change notifications have a recipient. The factory
+    /// installs a fresh slot per session; the template's is never written.
+    peer: Arc<std::sync::RwLock<Option<Peer<RoleServer>>>>,
+}
+
+impl RegistryServer {
+    /// Remember this session's peer so a later explicit catalog change can
+    /// notify it (`#3778` P2). A stateless modern request re-records the same
+    /// transient peer; sending a notification to it is harmless and it closes
+    /// with the response.
+    fn remember_peer(&self, context: &RequestContext<RoleServer>) {
+        let mut peer = match self.peer.write() {
+            Ok(peer) => peer,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *peer = Some(context.peer.clone());
+    }
 }
 
 impl ServerHandler for RegistryServer {
@@ -363,19 +435,29 @@ impl ServerHandler for RegistryServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        self.remember_peer(&context);
         let snapshot = self.catalog.snapshot();
-        Ok(ListToolsResult::with_all_items(snapshot.tools())
+        let mut result = ListToolsResult::with_all_items(snapshot.tools())
             .with_ttl_ms(protocol::TOOLS_LIST_TTL_MS)
-            .with_cache_scope(CacheScope::Private))
+            .with_cache_scope(CacheScope::Private);
+        // The generation is observable even to a client that did not receive a
+        // list-change notification (a stateless modern request has no channel
+        // for one). `_meta` is the protocol's extension point for exactly this.
+        result.meta = Some(MetaObject(serde_json::Map::from_iter([(
+            "nession/catalogRevision".to_string(),
+            json!(snapshot.revision()),
+        )])));
+        Ok(result)
     }
 
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        self.remember_peer(&context);
         let name = request.name.to_string();
         let arguments = request.arguments;
 

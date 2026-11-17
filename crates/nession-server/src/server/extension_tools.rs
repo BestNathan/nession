@@ -72,6 +72,10 @@ pub struct ExtensionToolCatalog {
     /// Serializes explicit updates so a candidate is built, validated and
     /// swapped as one transition.
     update: Mutex<()>,
+    /// The mounted MCP endpoint's list-change announcer, installed by
+    /// `server::mcp::build` after the service exists (`#3778` P2). A
+    /// successful explicit reconfigure calls it; nothing else does.
+    notifier: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl ExtensionToolCatalog {
@@ -86,7 +90,21 @@ impl ExtensionToolCatalog {
             catalog: Arc::new(McpCatalog::baseline()?),
             manifests: RwLock::new(BTreeMap::new()),
             update: Mutex::new(()),
+            notifier: Mutex::new(None),
         })
+    }
+
+    /// Install the mounted endpoint's list-change announcer.
+    ///
+    /// Called once by `server::mcp::build` after both the catalog and the
+    /// service exist. A later explicit manifest install/removal calls it so
+    /// connected legacy sessions receive `notifications/tools/list_changed`.
+    pub fn set_change_notifier(&self, notifier: Arc<dyn Fn() + Send + Sync>) {
+        let mut installed = match self.notifier.lock() {
+            Ok(installed) => installed,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *installed = Some(notifier);
     }
 
     /// The catalog the Server's MCP endpoint advertises.
@@ -143,6 +161,16 @@ impl ExtensionToolCatalog {
         match self.manifests.write() {
             Ok(mut manifests) => *manifests = candidate,
             Err(poisoned) => *poisoned.into_inner() = candidate,
+        }
+        // Announce the new generation only after it is both advertised and
+        // stored. This is an explicit manifest update — never a Session or
+        // Extension runtime-state change.
+        let notify = match self.notifier.lock() {
+            Ok(notifier) => notifier.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        if let Some(notify) = notify {
+            notify();
         }
         Ok(())
     }
