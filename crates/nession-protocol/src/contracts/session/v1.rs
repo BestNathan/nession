@@ -1983,6 +1983,76 @@ pub struct ServerSessionSandboxContextPayload {
     pub cache_digests: Vec<String>,
 }
 
+/// The explicit user-authorized action for one Image identity in the current
+/// Session Agent's cache (#3796).
+///
+/// The intent is *not* inferred from an observation: a read never downloads,
+/// and the user chooses whether an absent digest is fetched, a durable partial
+/// is resumed, or a failed identity is retried.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxImagePrepareIntent {
+    /// Fetch an absent, resumable or failed identity. A verified identity is
+    /// already prepared and is returned unchanged.
+    Prepare,
+    /// Continue a durable partial from its measured offset.
+    Resume,
+    /// Re-attempt a failed identity after a corrupted or failed verification.
+    Retry,
+}
+
+/// `server.session.sandbox.image-prepare` — one explicit prepare/resume/retry
+/// of one Image identity in the current Session Agent's cache.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxImagePreparePayload {
+    /// `agent_id:session_name`, the registry key the Session list already uses.
+    pub session_id: String,
+    /// The immutable Manifest identity (or a legacy Blob digest) to prepare.
+    pub digest: String,
+    pub intent: SandboxImagePrepareIntent,
+}
+
+/// `server.session.sandbox.image-prepare`'s reply.
+///
+/// `observation` is the Agent's authoritative aggregate state for the
+/// identity's required closure. `observations` names every observed closure
+/// digest so a consumer can show which object is still missing; it never
+/// contains a local path or a bearer grant.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxImagePrepareResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<crate::contracts::sandbox::v1::SandboxActionErrorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<crate::contracts::image::v1::ImageCacheObservation>,
+    #[serde(default)]
+    pub observations: Vec<crate::contracts::image::v1::ImageCacheObservation>,
+}
+
+/// `agent.session.sandbox.image-prepare` — the Server forwards the authorized
+/// identity, the explicit intent and the one scoped grant it minted.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSessionSandboxImagePreparePayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub digest: String,
+    pub intent: SandboxImagePrepareIntent,
+    /// The Server-authorized objects for this identity. The Agent verifies
+    /// every object byte and never invents a route or a digest.
+    pub grant: ManagedImageGrant,
+}
+
 /// `server.session.sandbox.preflight` — validate one draft against the exact
 /// context revision without creating host resources.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

@@ -53,8 +53,8 @@ use nession_protocol::contracts::session::v1::{
     AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
     ServerSessionCreatePayload, ServerSessionProcessesPayload, ServerSessionSandboxContextPayload,
     ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
-    ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
-    SessionMetadataUpdatePayload,
+    ServerSessionSandboxImagePreparePayload, ServerSessionSandboxPreflightPayload,
+    ServerSessionSandboxReturnPayload, SessionMetadataUpdatePayload,
 };
 use nession_protocol::contracts::workspace::v1::{
     AgentWorkspaceDescriptor, AgentWorkspaceKind, AgentWorkspaceStatus,
@@ -4697,6 +4697,125 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "cache_statuses": cache_statuses,
                             "cache_observations": cache_observations,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.image-prepare" => "agent.session.sandbox.image-prepare" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxImagePreparePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.image-prepare payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.image-prepare",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                        "error_kind": "invalid",
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, error, error_kind, observation, observations) = async {
+                        // The Server resolved the Session to this Agent. Prove
+                        // the named Session is still one this Agent owns before
+                        // touching the cache: a stale name is unavailable, not
+                        // an invitation to prepare bytes for a vanished owner.
+                        match agent.tmux.list_sessions().await {
+                            Ok(sessions)
+                                if sessions
+                                    .iter()
+                                    .any(|session| session.name == payload.session_name) => {}
+                            Ok(_) => {
+                                return (
+                                    false,
+                                    Some("the named Session is not on this Agent".to_string()),
+                                    Some("unavailable"),
+                                    None,
+                                    Vec::new(),
+                                );
+                            }
+                            Err(e) => {
+                                return (
+                                    false,
+                                    Some(format!("cannot list this Agent's Sessions: {e:#}")),
+                                    Some("unavailable"),
+                                    None,
+                                    Vec::new(),
+                                );
+                            }
+                        }
+                        if payload.grant.digest != payload.digest {
+                            return (
+                                false,
+                                Some(
+                                    "the authorized grant does not name the requested image identity"
+                                        .to_string(),
+                                ),
+                                Some("invalid"),
+                                None,
+                                Vec::new(),
+                            );
+                        }
+                        let Some(cache) = agent
+                            .tmux
+                            .sandbox_runtime()
+                            .and_then(|runtime| runtime.erofs_cache())
+                        else {
+                            return (
+                                false,
+                                Some("this Agent has no EROFS cache configured".to_string()),
+                                Some("unavailable"),
+                                None,
+                                Vec::new(),
+                            );
+                        };
+                        match crate::erofs_cache::prepare_grant_image(
+                            &cache,
+                            &payload.grant,
+                            payload.intent,
+                            &agent.server_url,
+                            &agent.auth_token,
+                        )
+                        .await
+                        {
+                            Ok(prepared) => (
+                                true,
+                                None,
+                                None,
+                                Some(prepared.observation),
+                                prepared.observations,
+                            ),
+                            Err(e) => (
+                                false,
+                                Some(format!("{e:#}")),
+                                Some("failed"),
+                                None,
+                                Vec::new(),
+                            ),
+                        }
+                    }
+                    .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.image-prepare",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "observation": observation,
+                            "observations": observations,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

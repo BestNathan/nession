@@ -1165,9 +1165,13 @@ mod tests {
         // Up by one for #3778: `mcp.tool.call` is served on both sockets,
         // because the owning Agent executes a contributed Tool whether the
         // Server relayed the call or a direct management client made it.
+        // Up by one for #3796: `agent.session.sandbox.image-prepare` is the
+        // explicit, user-authorized cache action the Server forwards for one
+        // current Session. It prepares one already-cataloged identity and
+        // never starts a download from an observation read.
         assert_eq!(
             manifest.protocols.len(),
-            41,
+            42,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

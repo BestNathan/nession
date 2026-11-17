@@ -39,8 +39,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
     ClientSessionProcessesPayload, ClientSessionSandboxContextPayload,
     ClientSessionSandboxEnterPayload, ClientSessionSandboxFocusPayload,
-    ClientSessionSandboxPreflightPayload, ClientSessionSandboxReturnPayload, ProcessSnapshot,
-    SandboxContextResponse, ServerSessionListPayload, ServerSessionListReply,
+    ClientSessionSandboxImagePreparePayload, ClientSessionSandboxPreflightPayload,
+    ClientSessionSandboxReturnPayload, ProcessSnapshot, SandboxContextResponse,
+    SandboxImagePrepareResponse, ServerSessionListPayload, ServerSessionListReply,
     ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvBindingRefusalKind,
     SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
     SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
@@ -1527,6 +1528,7 @@ mod server_session_relay_begin_v1;
 mod server_session_sandbox_context_v1;
 mod server_session_sandbox_enter_v1;
 mod server_session_sandbox_focus_v1;
+mod server_session_sandbox_image_prepare_v1;
 mod server_session_sandbox_images;
 mod server_session_sandbox_preflight_v1;
 mod server_session_sandbox_return_to_native_v1;
