@@ -1012,21 +1012,22 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // The core and peer-to-peer lists share six ids (`session.create`,
+        // The core and peer-to-peer lists share seven ids (`session.create`,
         // `session.kill`, `session.capture-preview`, `session.metadata.get` /
-        // `session.metadata.update` since #2789, and `session.list` since #565,
+        // `session.metadata.update` since #2789, `session.list` since #565,
         // where the Server-hosted MCP node tools ask the Agent over the control
-        // channel for the same answer a direct client gets over P2P), so the
-        // union is one entry per id — the derived assertion below states that
-        // relation.
+        // channel for the same answer a direct client gets over P2P, and
+        // `mcp.tool.call` since #3778: a contributed Tool is invoked on both
+        // the Server-relayed and direct management surfaces), so the union is
+        // one entry per id — the derived assertion below states that relation.
         //
         // Spelled as a number on purpose: adding a unit should make someone read
         // this line, and the failure of a relaxed assertion is indistinguishable
         // from a unit that was never wired up.
         assert_eq!(
             manifest.protocols.len(),
-            core.len() + p2p.len() - 6,
-            "the union is by id, so the six shared units are counted once"
+            core.len() + p2p.len() - 7,
+            "the union is by id, so the seven shared units are counted once"
         );
         // The literal count is unchanged by #565: `session.list` was already in
         // the peer-to-peer list, so adding its control-channel arm grows both
@@ -1078,9 +1079,12 @@ mod tests {
         // credential model, and `server.image.access` left with it — image
         // blobs are read with the Server Token as a bearer credential rather
         // than through an access-grant wire.
+        // Up by one for #3778: `mcp.tool.call` is served on both sockets,
+        // because the owning Agent executes a contributed Tool whether the
+        // Server relayed the call or a direct management client made it.
         assert_eq!(
             manifest.protocols.len(),
-            40,
+            41,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

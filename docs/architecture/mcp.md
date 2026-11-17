@@ -186,6 +186,27 @@ and a provider is never reached by side-effect registration. Live runtime state
 — a Session appearing, an Extension switching between idle and busy, a
 transient disconnect — is not a catalog mutation.
 
+An Agent advertises its contributions in `server.agent.register` as a typed
+`McpToolManifest` (`mcp_tool_manifest`): the exact name, owning provider,
+description, input schema and output schema of each contributed Tool. The
+manifest is derived from the same catalog the Agent's embedded endpoint serves,
+so it cannot advertise a Tool the Agent cannot execute. The Server validates it
+— supported manifest version, one contract per Tool name across the fleet, a
+required `agent_id` argument, a typed output contract — and merges the
+compatible Tools into its own catalog generation. A refused manifest leaves the
+previous generation live and is logged; the Agent still registers and serves
+its Sessions. `server.mcp.tools.list` exposes the validated merged manifest (a
+standalone host adopts it at startup); `server.mcp.tool.call` and
+`agent.mcp.tool.call` carry one explicitly targeted call.
+
+Every contributed call names a non-empty `agent_id` in its own arguments.
+Server-embedded and Server-routed standalone hosts broker it to exactly that
+Agent through the canonical Agent route; direct-Agent standalone mode uses the
+P2P unit; an Agent-embedded host executes only Tools its own catalog
+advertises. An offline Agent keeps its Tools listed and answers `unavailable`;
+an unknown Agent, or a Tool absent from that Agent's validated manifest, is
+`not_found`. There is never a cross-Agent fallback.
+
 `McpService` owns the protocol lifecycle, transport, inbound authentication,
 Origin policy, body size, concurrency and deadlines. A handler only validates
 arguments and executes the business operation through the injected

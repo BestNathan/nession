@@ -960,6 +960,8 @@ wires: &["server.agent.register"],
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
                 decl_of::<nession_protocol::ProtocolManifest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolManifest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolDescriptor>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::NetworkType>(cfg),
                 decl_of::<nession_protocol::ContractSupport>(cfg),
                 decl_of::<nession_protocol::ProtocolId>(cfg),
@@ -2317,6 +2319,30 @@ wires: &["agent.env.delete"],
         },
         Unit {
             owner: "core",
+            id: "agent.mcp.tool.call",
+            version: 1,
+            wires: &["agent.mcp.tool.call"],
+            // The Server relays one authorized contributed-Tool call to the
+            // Agent that advertised it (#3778). The Agent validates the named
+            // target and executes through its own composed catalog.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallError>(cfg),
+            ],
+            request: Some((
+                "AgentMcpToolCall",
+                nession_protocol::contracts::mcp::v1::McpToolCallPayload::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>,
+            )),
+            response: Some((
+                "AgentMcpToolCallReply",
+                nession_protocol::contracts::mcp::v1::McpToolCallReply::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "server.info",
             version: 1,
 wires: &["server.info"],
@@ -2358,6 +2384,55 @@ wires: &["server.info"],
                 "ServerMcpEndpointReply",
                 nession_protocol::contracts::server::v1::ServerMcpEndpointResponse::inline,
                 schema_of::<nession_protocol::contracts::server::v1::ServerMcpEndpointResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.mcp.tools.list",
+            version: 1,
+            wires: &["server.mcp.tools.list"],
+            // The validated Extension contribution manifest (#3778). The
+            // standalone host reads it to advertise the same Tool definitions
+            // the Server would; a Tool stays listed while its owner is offline.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolsListRequest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolsListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolManifest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolDescriptor>(cfg),
+            ],
+            request: Some((
+                "McpToolsListCall",
+                nession_protocol::contracts::mcp::v1::McpToolsListRequest::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolsListRequest>,
+            )),
+            response: Some((
+                "McpToolsListReply",
+                nession_protocol::contracts::mcp::v1::McpToolsListResponse::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolsListResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.mcp.tool.call",
+            version: 1,
+            wires: &["server.mcp.tool.call"],
+            // An authorized call of an Extension-contributed Tool. The Server
+            // owns routing: it checks the named Agent's validated manifest and
+            // brokers the call to that Agent, never to another one.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallError>(cfg),
+            ],
+            request: Some((
+                "ServerMcpToolCall",
+                nession_protocol::contracts::mcp::v1::McpToolCallPayload::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>,
+            )),
+            response: Some((
+                "ServerMcpToolCallReply",
+                nession_protocol::contracts::mcp::v1::McpToolCallReply::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>,
             )),
         },
         Unit {

@@ -21,6 +21,9 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
     ClientEnvWritePayload, ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::mcp::v1::{
+    McpToolCallPayload, McpToolCallReply, McpToolsListRequest, McpToolsListResponse,
+};
 use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoResponse};
 use nession_protocol::contracts::session::v1::{
@@ -98,6 +101,14 @@ impl UnitRequest for ClientSessionKillPayload {
 
 impl UnitRequest for ServerInfoRequest {
     type Reply = ServerInfoResponse;
+}
+
+impl UnitRequest for McpToolsListRequest {
+    type Reply = McpToolsListResponse;
+}
+
+impl UnitRequest for McpToolCallPayload {
+    type Reply = McpToolCallReply;
 }
 
 /// Capture preview's replies are a union the contract does not declare: the
@@ -590,6 +601,35 @@ impl ClientConnection {
             wire::SERVER_AGENT_DELETE,
             ClientAgentDeletePayload {
                 agent_id: agent_id.to_string(),
+            },
+        ))
+        .await
+    }
+
+    /// `server.mcp.tools.list` — the Server's validated Extension contribution
+    /// manifest (`#3778`).
+    pub async fn list_mcp_tools(&mut self) -> Result<McpToolsListResponse, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_MCP_TOOLS_LIST,
+            McpToolsListRequest {},
+        ))
+        .await
+    }
+
+    /// `server.mcp.tool.call` — route one contributed Tool call to the Agent
+    /// the caller explicitly names (`#3778`).
+    pub async fn call_mcp_tool(
+        &mut self,
+        agent_id: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> Result<McpToolCallReply, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_MCP_TOOL_CALL,
+            McpToolCallPayload {
+                agent_id: agent_id.to_string(),
+                tool: tool.to_string(),
+                arguments,
             },
         ))
         .await

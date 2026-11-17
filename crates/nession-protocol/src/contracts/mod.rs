@@ -40,6 +40,7 @@ pub mod file;
 #[cfg(test)]
 mod fixtures;
 pub mod image;
+pub mod mcp;
 pub mod project;
 pub mod sandbox;
 pub mod server;

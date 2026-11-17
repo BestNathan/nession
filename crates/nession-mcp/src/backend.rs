@@ -31,6 +31,7 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
 };
+use serde_json::{Map, Value};
 
 use crate::error::ToolError;
 use crate::tools::nession_agent_create_session::SessionCreatedOutput;
@@ -116,6 +117,24 @@ pub trait NodeBackend: Send + Sync {
         agent_id: &str,
         name: &str,
     ) -> Result<SessionKillResponse, ToolError>;
+
+    /// Execute one Extension-contributed Tool on the explicitly named Agent
+    /// (`#3778`).
+    ///
+    /// The default is a truthful refusal: a host that cannot route a
+    /// contribution (for example an Agent answering for somebody else) never
+    /// silently executes it locally. The Server broker and the standalone
+    /// routing backends override this with the canonical route.
+    async fn call_extension_tool(
+        &self,
+        _agent_id: &str,
+        _tool: &str,
+        _arguments: Map<String, Value>,
+    ) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(
+            "this MCP host cannot execute Extension-contributed Tools for the named Agent",
+        ))
+    }
 }
 
 /// The cluster backend of a host that has no Server configured.

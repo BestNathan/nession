@@ -289,6 +289,14 @@ pub async fn run(
     agent_server
         .mount_mcp(&config, agent_token.as_str(), compose_mcp_tool_providers())
         .context("failed to mount the MCP endpoint")?;
+    // The composed contribution catalog and the context its handlers receive
+    // (#3778). The central connection advertises the manifest on registration
+    // and executes Server-relayed contributed calls through the same catalog
+    // and owner state as the embedded endpoint.
+    let mcp_tools = match (agent_server.mcp_catalog(), agent_server.mcp_tool_context()) {
+        (Some(catalog), Some(context)) => Some((catalog, context)),
+        _ => None,
+    };
     let (server_handle, listen_addr) = agent_server
         .start()
         .await
@@ -380,6 +388,10 @@ pub async fn run(
             Arc::clone(&mutation_lane),
         )
         .with_session_metadata(session_metadata);
+        let server_client = match mcp_tools {
+            Some((catalog, context)) => server_client.with_mcp_tools(catalog, context),
+            None => server_client,
+        };
 
         // Attempt to connect with a timeout so the agent can still serve
         // local clients even if the central server is unreachable. The

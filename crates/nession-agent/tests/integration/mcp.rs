@@ -295,6 +295,8 @@ struct ExtensionEchoOutput {
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ExtensionEchoInput {
+    /// The Agent this call names.
+    agent_id: String,
     /// The message to echo.
     message: String,
 }
@@ -325,6 +327,7 @@ impl ToolHandler for ExtensionEchoTool {
         arguments: serde_json::Map<String, Value>,
     ) -> Result<Value, ToolError> {
         let input = parse_arguments::<ExtensionEchoInput>(arguments)?;
+        nession_mcp::tool::non_empty(&input.agent_id, "agent_id")?;
         reply_value(&ExtensionEchoOutput {
             message: input.message,
             provider: "fixture-extension".to_string(),
@@ -346,6 +349,106 @@ impl McpToolProvider for FixtureExtensionProvider {
         self.enumerations.fetch_add(1, Ordering::SeqCst);
         Ok(vec![Arc::new(ExtensionEchoTool)])
     }
+}
+
+/// Send one business frame on an authenticated direct P2P connection.
+async fn p2p_request(addr: SocketAddr, payload: Value) -> Value {
+    use futures_util::{SinkExt, StreamExt};
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("p2p socket");
+    let (mut sink, mut stream) = ws.split();
+    let auth = json!({
+        "msg_type": "client.auth",
+        "id": "auth-1",
+        "timestamp": 0,
+        "payload": { "auth_token": TOKEN, "client_id": null }
+    });
+    sink.send(tokio_tungstenite::tungstenite::Message::Text(
+        auth.to_string(),
+    ))
+    .await
+    .expect("client.auth");
+    loop {
+        let frame = stream.next().await.expect("auth frame").expect("frame");
+        let parsed: Value = serde_json::from_str(frame.to_text().expect("text")).expect("JSON");
+        if parsed["id"] == "auth-1" {
+            assert_eq!(parsed["msg_type"], "ok", "{parsed}");
+            break;
+        }
+    }
+    let request = json!({
+        "msg_type": "agent.mcp.tool.call",
+        "id": "call-1",
+        "timestamp": 0,
+        "payload": payload
+    });
+    sink.send(tokio_tungstenite::tungstenite::Message::Text(
+        request.to_string(),
+    ))
+    .await
+    .expect("tool call");
+    loop {
+        let frame = stream.next().await.expect("call frame").expect("frame");
+        let parsed: Value = serde_json::from_str(frame.to_text().expect("text")).expect("JSON");
+        if parsed["id"] == "call-1" {
+            return parsed["payload"].clone();
+        }
+    }
+}
+
+#[tokio::test]
+async fn agent_p2p_mcp_tool_call_executes_its_own_contribution() {
+    let (addr, handle) = start_agent_with_providers(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        vec![Arc::new(FixtureExtensionProvider::default())],
+    )
+    .await;
+
+    let reply = p2p_request(
+        addr,
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "tool": "fixture_extension_echo",
+            "arguments": { "agent_id": TEST_AGENT_ID, "message": "p2p" }
+        }),
+    )
+    .await;
+    assert_eq!(reply["success"], true, "{reply}");
+    assert_eq!(
+        reply["result"],
+        json!({ "message": "p2p", "provider": "fixture-extension" })
+    );
+
+    // A call naming a different Agent is refused, never executed locally.
+    let foreign = p2p_request(
+        addr,
+        json!({
+            "agent_id": "other-agent",
+            "tool": "fixture_extension_echo",
+            "arguments": { "agent_id": "other-agent", "message": "p2p" }
+        }),
+    )
+    .await;
+    assert_eq!(foreign["success"], false, "{foreign}");
+    assert_eq!(foreign["error"]["kind"], "invalid_argument", "{foreign}");
+
+    // A Tool this Agent does not advertise is refused, not looked up on a
+    // baseline or a neighbour.
+    let unknown = p2p_request(
+        addr,
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "tool": "missing_tool",
+            "arguments": { "agent_id": TEST_AGENT_ID }
+        }),
+    )
+    .await;
+    assert_eq!(unknown["success"], false, "{unknown}");
+    assert_eq!(unknown["error"]["kind"], "not_found", "{unknown}");
+
+    let _ = handle.shutdown().await;
 }
 
 #[tokio::test]
@@ -508,7 +611,7 @@ async fn agent_mcp_composes_an_extension_tool_into_the_shared_catalog() {
         addr,
         &session,
         "fixture_extension_echo",
-        json!({ "message": "hello" }),
+        json!({ "agent_id": TEST_AGENT_ID, "message": "hello" }),
     )
     .await;
     assert_eq!(called["isError"], false, "{called}");
@@ -520,7 +623,7 @@ async fn agent_mcp_composes_an_extension_tool_into_the_shared_catalog() {
         addr,
         &session,
         "fixture_extension_echo",
-        json!({ "wrong": "hello" }),
+        json!({ "agent_id": TEST_AGENT_ID, "wrong": "hello" }),
     )
     .await;
     assert_eq!(refused["isError"], true, "{refused}");
