@@ -228,9 +228,9 @@ test('MCP kit keeps the Session context and never probes on view (#3772)', async
   await expect(page.getByTestId('mcp-server-row').filter({ hasText: 'read-only' })).toHaveCount(1);
   // A view read is configuration only: no Tools exist before an explicit probe.
   await expect(page.getByTestId('mcp-tool-row')).toHaveCount(0);
-  await expect(page.getByTestId('mcp-tools-not-probed')).toContainText('never probes');
 
   await page.getByTestId('mcp-server-row').filter({ hasText: 'nession' }).click();
+  await expect(page.getByTestId('mcp-tools-not-probed')).toContainText('never probes');
   await expect(page.getByTestId('mcp-connection-reachability')).toHaveText('Not probed');
   await expect(page.getByTestId('mcp-connection-loaded')).toHaveText('Unknown');
 
@@ -249,7 +249,7 @@ test('MCP kit keeps the Session context and never probes on view (#3772)', async
   await expect(page.getByTestId('mcp-result-empty')).toBeVisible();
   await page.getByTestId('mcp-run').click();
   await expect(page.getByTestId('mcp-argument-error')).toContainText('Required: scope');
-  await page.getByTestId('mcp-argument').fill('current');
+  await page.locator('[data-argument-name="scope"]').fill('current');
   await page.getByTestId('mcp-run').click();
   await expect(page.getByTestId('mcp-result-structured')).toContainText('fixture-session');
   await expect(page.getByTestId('mcp-call-history-row')).toHaveCount(1);
@@ -293,7 +293,7 @@ test('MCP stdio probe needs consent and an external Tool has no output schema (#
   await expect(page.getByTestId('mcp-schema-output-fields')).toHaveCount(0);
 
   await page.getByTestId('mcp-open-runner').click();
-  await page.getByTestId('mcp-argument').fill('nession');
+  await page.locator('[data-argument-name="query"]').fill('nession');
   await page.getByTestId('mcp-run').click();
   await expect(page.getByTestId('mcp-result-structured')).toContainText('BestNathan/nession');
 });
@@ -307,7 +307,7 @@ test('MCP isError is an answer, and offline inventory is unavailable rather than
   await page.getByTestId('mcp-connection-test').click();
   await page.getByTestId('mcp-tool-row').filter({ hasText: 'session.list' }).click();
   await page.getByTestId('mcp-open-runner').click();
-  await page.getByTestId('mcp-argument').fill('current');
+  await page.locator('[data-argument-name="scope"]').fill('current');
   await page.getByTestId('mcp-run').click();
   await expect(page.getByTestId('mcp-result-is-error')).toContainText('isError: true');
   await expect(page.getByTestId('mcp-result-structured')).toContainText('PERMISSION_DENIED');
@@ -335,7 +335,7 @@ test('MCP configuration is adapter-scoped, honors read-only entries, and confirm
 
   await page.getByTestId('mcp-server-add').click();
   await expect(page.getByTestId('mcp-server-editor')).toBeVisible();
-  await expect(page.getByTestId('mcp-editor-scope')).toHaveText('Local');
+  await expect(page.getByTestId('mcp-editor-scope')).toContainText('Local');
   await page.getByTestId('mcp-editor-name').fill('docs');
   await page.getByTestId('mcp-editor-endpoint').fill('not-a-url');
   await page.getByTestId('mcp-editor-save').click();
