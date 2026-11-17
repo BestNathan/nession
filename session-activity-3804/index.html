@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Session Activity · #3804</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review-root">
+  <header class="np-overview">
+    <nav class="np-breadcrumb" aria-label="Prototype navigation">
+      <a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a>
+      <span>·</span><span>Session Activity</span>
+    </nav>
+    <span class="np-eyebrow">REQUIREMENT #3804 · SESSION ACTIVITY</span>
+    <div class="np-header-main">
+      <div>
+        <h1 class="np-title">看见 Session 正在做什么</h1>
+        <p class="np-subtitle">让 Shell 命令、Claude Turn、Codex 等能力自行上报活动状态；Session 列表只呈现统一、可信且安静的 Working / Idle / Unknown / Needs input。重点验证 Web Sidebar 与 App Sessions 层，而不是堆叠一个状态管理页。</p>
+      </div>
+      <div class="np-links">
+        <a href="https://github.com/BestNathan/nession/issues/3804" target="_blank" rel="noopener noreferrer">Issue #3804</a>
+        <a href="https://github.com/BestNathan/nession/issues/3800" target="_blank" rel="noopener noreferrer">Core #3800</a>
+        <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+      </div>
+    </div>
+    <div class="np-meta">
+      <span>Product surface: <strong>Web Sidebar / App Sessions</strong></span>
+      <span>Viewports: <strong>Web 1180 / 1024 · App 390 / 375</strong></span>
+      <span>Data: <strong>synthetic fixture, no Agent API</strong></span>
+    </div>
+  </header>
+  <main>
+    <section class="np-preview" aria-labelledby="preview-title">
+      <div class="np-section-heading">
+        <div>
+          <h2 id="preview-title">可交互产品预览 · 1:1</h2>
+          <p>选中 Session、打开行尾菜单，再使用屏幕下方的测试控制模拟状态切换。测试控制不属于产品 UI。</p>
+        </div>
+        <div class="np-preview-toolbar" aria-label="Viewport controls">
+          <button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button>
+          <button type="button" data-np-size="1024">Web 1024</button>
+          <button type="button" data-np-size="390">App 390</button>
+          <button type="button" data-np-size="375">App 375</button>
+          <button type="button" data-np-reset>Reset</button>
+        </div>
+      </div>
+      <div class="np-stage" aria-label="Actual size product preview stage">
+        <div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:700px">
+          <div class="n-mock" id="mock-shell" data-experience="web" data-surface="terminal">
+            <div class="n-web">
+              <aside class="n-sidebar" id="web-sidebar" aria-label="Nession Web Sidebar">
+                <div class="n-sidebar-top">
+                  <span class="n-brand-mark" aria-hidden="true">n</span>
+                  <span class="n-brand-name">nession</span>
+                  <button type="button" class="n-icon n-sidebar-collapse" id="collapse-sidebar" aria-label="Collapse Sidebar" title="Collapse Sidebar">◧</button>
+                </div>
+                <div class="n-sidebar-expanded">
+                  <div class="n-sidebar-actions">
+                    <button type="button" class="n-action-row" data-action="new"><span class="n-action-symbol">＋</span> New Session</button>
+                    <label class="n-search"><span aria-hidden="true">⌕</span><input id="web-search" aria-label="Search sessions" placeholder="Search sessions…" autocomplete="off"></label>
+                  </div>
+                  <div class="n-sidebar-section-title">Sessions <span class="n-section-count" id="web-count"></span></div>
+                  <div class="n-session-scroll" id="web-session-scroll"><div class="n-session-list" id="web-session-list" aria-label="Sessions"></div></div>
+                  <div class="n-projects-section">
+                    <div class="n-sidebar-section-title">Projects</div>
+                    <button type="button" class="n-project-row" data-action="projects"><span aria-hidden="true">▦</span> nession</button>
+                  </div>
+                  <div class="n-sidebar-bottom"><span class="n-server-dot" aria-hidden="true"></span> Server connected</div>
+                </div>
+                <div class="n-sidebar-rail" id="web-rail">
+                  <button type="button" class="n-icon" id="expand-sidebar" aria-label="Expand Sidebar" title="Expand Sidebar">☰</button>
+                  <button type="button" class="n-icon" data-action="new" aria-label="New Session" title="New Session">＋</button>
+                  <button type="button" class="n-icon" id="rail-search" aria-label="Expand Sidebar and search" title="Search">⌕</button>
+                  <div class="n-rail-space"></div><span class="n-server-dot" aria-label="Server connected"></span>
+                </div>
+              </aside>
+              <div class="n-shell-main">
+                <header class="n-shell-header">
+                  <button type="button" class="n-icon n-narrow-nav" id="web-menu" aria-label="Open Sessions Sidebar">☰</button>
+                  <span class="n-shell-title" id="web-active-title">CI Workflow repair</span>
+                  <div class="n-shell-tools">
+                    <button type="button" class="n-text-button" data-action="workspace">Workspace</button>
+                    <span class="n-head-rule" aria-hidden="true"></span>
+                    <button type="button" class="n-icon" data-action="details" aria-label="Current Session details" title="Session details">ⓘ</button>
+                  </div>
+                </header>
+                <div class="n-main-pane">
+                  <div class="n-terminal-pane" id="web-terminal">
+                    <pre class="n-terminal-ink" id="web-terminal-copy" aria-label="Mock terminal output">~/nession $ claude
+> Review the GitHub Actions workflow
+Reading workflows…
+Inspecting check failures…
+
+</pre>
+                    <form class="n-capsule" id="web-composer">
+                      <button type="button" class="n-capsule-plus" data-action="capabilities" aria-label="Show capabilities">＋</button>
+                      <input id="web-prompt" aria-label="Terminal message" placeholder="Ask Nession…" autocomplete="off">
+                      <button class="n-capsule-send" type="submit" aria-label="Submit mock message">↑</button>
+                    </form>
+                  </div>
+                  <section class="n-workspace-pane" id="web-workspace" hidden aria-label="Workspace">
+                    <div class="n-workspace-crumb"><button type="button" class="n-backlink" data-action="terminal">← Terminal</button><span> / Workspace</span></div>
+                    <h2 id="web-workspace-title">Workspace</h2><p>当前 Session 的上下文。Activity 由 Agent 提供，不需要独立的 Workspace 状态中心。</p>
+                    <div class="n-workspace-entry">Files <span>›</span></div><div class="n-workspace-entry">Git <span>›</span></div><div class="n-workspace-entry">Claude Code <span>›</span></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+            <div class="n-app">
+              <section class="n-app-sessions" id="app-sessions" aria-label="App Sessions layer">
+                <header class="n-app-header"><h1>Sessions</h1><button type="button" class="n-icon" data-action="new" aria-label="New Session">＋</button></header>
+                <div class="n-app-list-head"><label class="n-search"><span aria-hidden="true">⌕</span><input id="app-search" aria-label="Search sessions" placeholder="Search sessions…" autocomplete="off"></label></div>
+                <div class="n-app-scroll" id="app-session-scroll">
+                  <div class="n-app-section-name">Recent</div>
+                  <div class="n-session-list" id="app-session-list" aria-label="Sessions"></div>
+                  <div class="n-app-section-name n-agents-heading">Agents</div>
+                  <div class="n-agent-summary"><span class="n-server-dot"></span> macbook <span>Connected</span></div>
+                  <div class="n-agent-summary"><span class="n-server-dot"></span> devbox-01 <span id="app-agent-health">Connected</span></div>
+                </div>
+                <div class="n-app-connection-problem" id="app-connection-problem" hidden>devbox-01 is unreachable. Last activity observation is not current.</div>
+              </section>
+              <section class="n-app-terminal" id="app-terminal" hidden aria-label="App Terminal layer">
+                <header class="n-app-header">
+                  <button type="button" class="n-icon" data-action="sessions" aria-label="Open Sessions">☰</button>
+                  <h1 id="app-active-title">CI Workflow repair</h1>
+                  <button type="button" class="n-icon" data-action="workspace" aria-label="Open Workspace">▦</button>
+                </header>
+                <pre class="n-terminal-ink" id="app-terminal-copy" aria-label="Mock terminal output">~/nession $ claude
+> Review GitHub Actions
+Reading workflows…
+
+</pre>
+                <form class="n-capsule" id="app-composer">
+                  <button type="button" class="n-capsule-plus" data-action="capabilities" aria-label="Show capabilities">＋</button>
+                  <input id="app-prompt" aria-label="Terminal message" placeholder="Ask Nession…" autocomplete="off">
+                  <button class="n-capsule-send" type="submit" aria-label="Submit mock message">↑</button>
+                </form>
+              </section>
+              <section class="n-app-workspace" id="app-workspace" hidden aria-label="App Workspace layer">
+                <header class="n-app-header">
+                  <button type="button" class="n-icon" data-action="terminal" aria-label="Back to Terminal">‹</button>
+                  <h1>Workspace</h1><span class="n-app-header-spacer"></span>
+                </header>
+                <div class="n-app-workspace-content"><p class="n-muted-kicker">CURRENT SESSION</p><h2 id="app-workspace-title">CI Workflow repair</h2><p>Session 的上下文与可用能力。</p>
+                  <div class="n-workspace-entry">Files <span>›</span></div><div class="n-workspace-entry">Git <span>›</span></div><div class="n-workspace-entry">Claude Code <span>›</span></div>
+                </div>
+              </section>
+            </div>
+            <div class="n-overlay-backdrop" id="overlay-backdrop" hidden></div>
+            <div class="n-menu" id="session-actions" role="menu" aria-label="Session actions" hidden></div>
+            <div class="n-dialog-layer" id="dialog-layer" hidden></div>
+            <div class="n-toast" id="toast" role="status" hidden></div>
+          </div>
+        </div>
+      </div>
+      <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+      <div class="fixture-tools" aria-label="Review-only Activity observation fixtures">
+        <span class="fixture-overline">模拟 Agent Activity · 原型外部控制</span>
+        <div class="fixture-actions">
+          <button type="button" data-event="start">Claude · Working</button>
+          <button type="button" data-event="idle">Claude · Idle</button>
+          <button type="button" data-event="input">Needs input</button>
+          <button type="button" data-event="unknown">Unknown</button>
+          <button type="button" data-event="offline">Agent offline</button>
+          <button type="button" data-event="reconnect">Re-sync</button>
+          <button type="button" data-event="stale">Stale event</button>
+        </div>
+        <div class="fixture-feedback"><span id="scenario-summary">初始：Claude 正在处理；Shell 空闲；Codex 需要输入；另一 Session 状态未知。</span><span class="fixture-revision" id="scenario-revision">generation 1</span></div>
+      </div>
+    </section>
+    <section class="np-details" aria-label="Design and validation notes">
+      <h2>交互决策与验收场景</h2>
+      <p class="np-details-lede">产品内部只有统一的 Session 活动提示；测试事件、归属与协议细节保留在外部评审区域。真实 Server/Agent / CLI 状态同步属于 #3800–#3804 的后续实现。</p>
+      <div class="np-detail-grid">
+        <article class="np-detail"><h3>01 · 列表信息层级</h3>
+          <p>第一行：Session 名称 + 左侧固定大小活动符号。第二行：workload · Agent · recency。Working 是有动效的细小弧线；Idle 是弱轮廓；Unknown 显示问号；Needs input 才增加第三行请求注意。所有状态占位宽度一致，避免列表跳动。</p>
+          <p>所有图标都有无障碍文本；没有用一个彩色点同时表达联网、Session 存活、连接与活动。</p>
+        </article>
+        <article class="np-detail"><h3>02 · 状态与连接独立</h3>
+          <p>选 “Agent offline” 后，原有 Working 不再宣称是实时状态，行显示 Unknown + Agent unreachable。选 “Re-sync” 才恢复新的权威状态。“Stale event” 不覆盖当前值，也不更改 recency。</p>
+          <p>动效遵循 reduced-motion；后台无输出的命令不自动变成 Idle。</p>
+        </article>
+        <article class="np-detail"><h3>03 · Web 与 App 真实导航</h3>
+          <ol class="np-steps">
+            <li>在 Web 的 Sidebar 选中 Session，主区域切换当前 Terminal。</li>
+            <li>切换 App 390/375：出现独立 Sessions 层，而不是压缩后的 Sidebar；点 Session 进入 Terminal，再从左上角回到 Sessions。</li>
+            <li>每行尾部的 “···” 允许查看详情、编辑标题、配置 attach、模拟删除，不会自动选中目标。</li>
+          </ol>
+        </article>
+        <article class="np-detail"><h3>04 · 原型与真实实现的边界</h3>
+          <p>Mock：固定 Sessions、状态变化、实例代际、原型中的对话结果与操作反馈。没有连接真实 GitHub Actions、tmux、Claude/Codex、Server 或用户数据；Terminal 使用纯文本近似，不是 xterm。</p>
+          <p>Web 主体与 App 的空间层级依据现有 main 组件；像素、字体、滚动和细节仍需 Chromium 与生产 Fixture 对照后确认。</p>
+        </article>
+      </div>
+      <details class="np-inspector"><summary>观察结果 / 状态快照（review only）</summary><pre id="fixture-inspector" aria-label="Synthetic Activity snapshot"></pre></details>
+    </section>
+    <footer class="np-footer">Prototype artifact for #3804 · no production changes or real session operations.</footer>
+  </main>
+</div>
+<script defer src="./app.js"></script>
+<script defer src="../prototype-frame-2758/frame.js"></script>
+</body>
+</html>
