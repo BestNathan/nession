@@ -32,6 +32,7 @@ async fn make_handler() -> anyhow::Result<ConnectionHandler> {
             env_service,
             image_manager,
             db,
+            extension_tools: None,
         },
         ConnectionHandlerConfig {
             server_auth_token: "test_token".to_string(),

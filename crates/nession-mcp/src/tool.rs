@@ -45,10 +45,10 @@ impl ToolContext {
 #[async_trait]
 pub trait ToolHandler: Send + Sync {
     /// The exact MCP Tool name and Rust module stem.
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
 
     /// What the Tool answers and which owner it belongs to.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
 
     /// The JSON Schema emitted for its typed argument contract.
     fn input_schema(&self) -> Map<String, Value>;
@@ -77,8 +77,12 @@ pub trait ToolHandler: Send + Sync {
     /// Both schemas ride on the same definition, so `tools/list`, the
     /// source-pinned exporter and the runtime handler cannot disagree.
     fn definition(&self) -> Tool {
-        Tool::new(self.name(), self.description(), self.input_schema())
-            .with_raw_output_schema(Arc::new(self.output_schema()))
+        Tool::new(
+            self.name().to_string(),
+            self.description().to_string(),
+            self.input_schema(),
+        )
+        .with_raw_output_schema(Arc::new(self.output_schema()))
     }
 }
 

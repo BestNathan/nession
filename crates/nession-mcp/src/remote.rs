@@ -30,16 +30,18 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
     ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::mcp::v1::{McpToolCallReply, McpToolManifest};
 use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
     ServerSessionListReply, SessionKillResponse, SessionRefusal,
 };
+use serde_json::Map;
 use std::time::Duration;
 use tracing::debug;
 
 use crate::backend::{ClusterBackend, NodeBackend};
-use crate::error::ToolError;
+use crate::error::{ToolError, ToolErrorKind};
 use crate::tools::nession_agent_create_session::SessionCreatedOutput;
 use crate::tools::nession_agent_list_sessions::SessionListOutput;
 
@@ -75,6 +77,20 @@ impl RemoteClusterBackend {
 
     async fn close(connection: ClientConnection) {
         close_server(connection).await;
+    }
+
+    /// The Server's validated Extension contribution manifest (`#3778`).
+    ///
+    /// A standalone host advertises exactly what the Server would; the unit is
+    /// authenticated with the same Server token the cluster backend uses.
+    pub async fn mcp_tool_manifest(&self) -> Result<McpToolManifest, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .list_mcp_tools()
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        Ok(reply.manifest)
     }
 }
 
@@ -342,6 +358,21 @@ impl NodeBackend for ServerRoutedNodeBackend {
             name: name.to_string(),
         })
     }
+
+    async fn call_extension_tool(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        arguments: Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .call_mcp_tool(agent_id, tool, serde_json::Value::Object(arguments))
+            .await
+            .map_err(map_client_error)?;
+        close_server(connection).await;
+        reply_result(reply)
+    }
 }
 
 /// An Agent-backed node backend for a standalone MCP host.
@@ -444,6 +475,42 @@ impl NodeBackend for RemoteNodeBackend {
         Self::close(connection).await;
         Ok(reply)
     }
+
+    async fn call_extension_tool(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        arguments: Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, ToolError> {
+        self.ensure_target(agent_id)?;
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .call_mcp_tool(agent_id, tool, serde_json::Value::Object(arguments))
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        reply_result(reply)
+    }
+}
+
+/// Turn one routed Owner reply into the Tool result or the stable refusal.
+fn reply_result(reply: McpToolCallReply) -> Result<serde_json::Value, ToolError> {
+    if reply.success {
+        return reply.result.ok_or_else(|| {
+            ToolError::backend("the owning Agent reported success without a Tool result")
+        });
+    }
+    let error =
+        reply
+            .error
+            .unwrap_or_else(|| nession_protocol::contracts::mcp::v1::McpToolCallError {
+                kind: "backend".to_string(),
+                message: "the owning Agent refused the call without a reason".to_string(),
+            });
+    Err(ToolError::new(
+        ToolErrorKind::from_wire(&error.kind),
+        error.message,
+    ))
 }
 
 fn map_client_error(error: ClientError) -> ToolError {

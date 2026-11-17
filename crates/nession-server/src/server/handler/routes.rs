@@ -180,6 +180,12 @@ server_routes!(handler, msg, payload;
     // a Claude client must resolve "is `/mcp` really on, and at which path?"
     // from the host rather than invent a port or assume the default.
     "server.mcp.endpoint" => "server.mcp.endpoint" => 1 => Query => handler.handle_client_mcp_endpoint(msg).await,
+    // Extension-contributed MCP Tool discovery and routing (#3778). `list`
+    // answers the validated merged manifest; `call` authorizes the named Agent
+    // against its own manifest and brokers one call. Neither is a new
+    // management plane: the Agent remains the execution authority.
+    "server.mcp.tools.list" => "server.mcp.tools.list" => 1 => Query => handler.handle_client_mcp_tools_list(msg).await,
+    "server.mcp.tool.call" => "server.mcp.tool.call" => 1 => Query => handler.handle_client_mcp_tool_call(msg).await,
     "server.agent.rename" => "server.agent.rename" => 1 => Inline => handler.handle_client_agent_rename(msg).await,
     "server.agent.delete" => "server.agent.delete" => 1 => Inline => handler.handle_client_agent_delete(msg).await,
     "server.commands.list" => "server.commands.list" => 1 => Query => handler.handle_client_commands_list(msg).await,

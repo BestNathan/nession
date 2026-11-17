@@ -123,6 +123,8 @@ pub struct ConnectionHandler {
     image_manager: Arc<crate::image::ImageManager>,
     /// Database handle for quick-command CRUD (issue #95, part 3).
     db: Arc<crate::db::Database>,
+    /// The validated Extension-contribution catalog (`#3778`).
+    extension_tools: Option<Arc<crate::server::extension_tools::ExtensionToolCatalog>>,
     config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
@@ -177,6 +179,7 @@ impl Clone for ConnectionHandler {
             env_service: Arc::clone(&self.env_service),
             image_manager: Arc::clone(&self.image_manager),
             db: Arc::clone(&self.db),
+            extension_tools: self.extension_tools.clone(),
             config: ConnectionHandlerConfig {
                 server_auth_token: self.config.server_auth_token.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
@@ -221,6 +224,11 @@ pub struct ConnectionHandlerDeps {
     /// Server-owned global EROFS image manager (#3022).
     pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
+    /// The Server's validated Extension-contributed MCP Tool catalog
+    /// (`#3778`). Registration installs each Agent's advertised manifest here,
+    /// and the route handlers read the same catalog. `None` only in tests that
+    /// do not exercise contribution routing.
+    pub extension_tools: Option<Arc<crate::server::extension_tools::ExtensionToolCatalog>>,
 }
 
 /// Why the canonical Session binding mutation refused.
@@ -276,6 +284,7 @@ impl ConnectionHandler {
             env_service: deps.env_service,
             image_manager: deps.image_manager,
             db: deps.db,
+            extension_tools: deps.extension_tools,
             config,
             authenticated_client: false,
             registered_agent_id: None,
@@ -1496,6 +1505,8 @@ mod server_image_tag_remove_v1;
 mod server_image_tag_set_v1;
 mod server_info_v1;
 mod server_mcp_endpoint_v1;
+mod server_mcp_tool_call_v1;
+mod server_mcp_tools_list_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;
 mod server_project_get_v1;

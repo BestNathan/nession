@@ -22,6 +22,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
+use nession_protocol::contracts::mcp::v1::{McpToolDescriptor, McpToolManifest};
 use rmcp::model::Tool;
 use serde_json::{Map, Value};
 
@@ -32,6 +33,9 @@ use crate::tool::{ToolContext, ToolHandler};
 
 /// The owner label for the Tools every host advertises.
 const BASELINE_OWNER: &str = "the baseline catalog";
+
+/// One candidate generation's handlers and their advertised contracts.
+type Collected = (Vec<Arc<dyn ToolHandler>>, Vec<McpToolDescriptor>);
 
 /// The first generation a catalog publishes.
 const FIRST_REVISION: u64 = 1;
@@ -61,12 +65,65 @@ pub enum CatalogError {
     /// The combined list violates the Tool contract.
     #[error(transparent)]
     Registry(#[from] RegistryError),
+    /// A contributed Tool cannot be routed to its owning Agent.
+    #[error(
+        "MCP Tool `{name}` from provider `{provider}` must declare a required top-level \
+         `agent_id` string argument; a contributed call always names its owning Agent"
+    )]
+    MissingRoutingField {
+        /// The contributed Tool name.
+        name: String,
+        /// The provider that contributes it.
+        provider: String,
+    },
+    /// A contribution's advertised contract and its handler disagree.
+    #[error(
+        "MCP Tool `{name}` from provider `{provider}` has a handler and an advertised contract \
+         that disagree on {field}; one Tool has one typed source"
+    )]
+    ContributionMismatch {
+        /// The contributed Tool name.
+        name: String,
+        /// The provider that contributes it.
+        provider: String,
+        /// Which part disagrees (`name`, `description`, `input schema` or
+        /// `output schema`).
+        field: &'static str,
+    },
+    /// A received manifest uses a contract version this build cannot validate.
+    #[error("MCP Tool manifest version {0} is not supported by this host")]
+    UnsupportedManifest(u32),
+}
+
+/// Whether a contributed Tool's argument schema names its owning Agent.
+///
+/// The Server and every standalone host route a contributed call by the
+/// explicit `agent_id` the caller supplies; a Tool whose schema cannot carry
+/// one could be advertised but never routed, so it cannot enter the catalog.
+fn declares_agent_id(schema: &Value) -> bool {
+    let typed = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get("agent_id"))
+        .and_then(Value::as_object)
+        .and_then(|property| property.get("type"))
+        .and_then(Value::as_str)
+        == Some("string");
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|required| required.iter().any(|field| field == "agent_id"));
+    typed && required
 }
 
 /// One immutable generation of the advertised Tool catalog.
 pub struct CatalogSnapshot {
     revision: u64,
     registry: ToolRegistry,
+    /// The Extension-contributed Tools in this generation, in composition
+    /// order. Baseline Tools are not contributions: the Server already owns
+    /// them.
+    contributions: Vec<McpToolDescriptor>,
 }
 
 impl CatalogSnapshot {
@@ -79,6 +136,17 @@ impl CatalogSnapshot {
     /// The advertised `tools/list` definitions, in generation order.
     pub fn tools(&self) -> Vec<Tool> {
         self.registry.list()
+    }
+
+    /// The Extension contributions this generation advertises, exactly as
+    /// another host must reproduce them.
+    pub fn contributions(&self) -> &[McpToolDescriptor] {
+        &self.contributions
+    }
+
+    /// The manifest an owning Agent advertises for this generation.
+    pub fn manifest(&self) -> McpToolManifest {
+        McpToolManifest::new(self.contributions.clone())
     }
 
     /// Invoke one Tool from this generation.
@@ -122,6 +190,25 @@ impl McpCatalog {
         })
     }
 
+    /// A catalog that advertises another host's validated manifest and routes
+    /// each contributed call to the Agent the caller names (`#3778`).
+    ///
+    /// Used by a standalone host after reading the Server's
+    /// `server.mcp.tools.list`. The descriptors are kept verbatim so the Tool
+    /// name and schemas are identical to the owning Agent's.
+    pub fn from_manifest(manifest: &McpToolManifest) -> Result<Self, CatalogError> {
+        if !manifest.is_supported() {
+            return Err(CatalogError::UnsupportedManifest(manifest.manifest_version));
+        }
+        let contributions = manifest
+            .tools
+            .iter()
+            .cloned()
+            .map(crate::provider::McpToolContribution::routed)
+            .collect();
+        Self::with_providers(&[Arc::new(StaticProvider { contributions })])
+    }
+
     /// The current generation.
     pub fn snapshot(&self) -> Arc<CatalogSnapshot> {
         let current = match self.current.read() {
@@ -134,6 +221,11 @@ impl McpCatalog {
     /// The current generation number.
     pub fn revision(&self) -> u64 {
         self.snapshot().revision()
+    }
+
+    /// The manifest an owning Agent advertises for the current generation.
+    pub fn manifest(&self) -> McpToolManifest {
+        self.snapshot().manifest()
     }
 
     /// Build and validate a candidate generation, then atomically swap it in.
@@ -166,9 +258,39 @@ fn build_snapshot(
     providers: &[Arc<dyn McpToolProvider>],
     revision: u64,
 ) -> Result<CatalogSnapshot, CatalogError> {
-    let handlers = collect_handlers(baseline, providers)?;
+    let (handlers, contributions) = collect_handlers(baseline, providers)?;
     let registry = ToolRegistry::build(handlers)?;
-    Ok(CatalogSnapshot { revision, registry })
+    Ok(CatalogSnapshot {
+        revision,
+        registry,
+        contributions,
+    })
+}
+
+/// A fixed set of already-validated contributions, used when a host adopts
+/// another host's manifest.
+struct StaticProvider {
+    contributions: Vec<crate::provider::McpToolContribution>,
+}
+
+impl McpToolProvider for StaticProvider {
+    fn provider_name(&self) -> &str {
+        "routed manifest"
+    }
+
+    fn tools(&self) -> Result<Vec<Arc<dyn ToolHandler>>, crate::provider::ToolProviderError> {
+        Ok(self
+            .contributions
+            .iter()
+            .map(|contribution| Arc::clone(&contribution.handler))
+            .collect())
+    }
+
+    fn contributions(
+        &self,
+    ) -> Result<Vec<crate::provider::McpToolContribution>, crate::provider::ToolProviderError> {
+        Ok(self.contributions.clone())
+    }
 }
 
 /// Gather the baseline and every provider contribution, enforcing one
@@ -176,39 +298,71 @@ fn build_snapshot(
 fn collect_handlers(
     baseline: &[Arc<dyn ToolHandler>],
     providers: &[Arc<dyn McpToolProvider>],
-) -> Result<Vec<Arc<dyn ToolHandler>>, CatalogError> {
-    let mut owners: HashMap<&'static str, String> = HashMap::new();
+) -> Result<Collected, CatalogError> {
+    let mut owners: HashMap<String, String> = HashMap::new();
     let mut handlers = Vec::new();
+    let mut contributions = Vec::new();
     for handler in baseline {
-        owners.insert(handler.name(), BASELINE_OWNER.to_string());
+        owners.insert(handler.name().to_string(), BASELINE_OWNER.to_string());
         handlers.push(Arc::clone(handler));
     }
     for provider in providers {
         let provider_name = provider.provider_name();
-        let tools = provider.tools().map_err(|error| CatalogError::Provider {
-            provider: provider_name.to_string(),
-            message: error.to_string(),
-        })?;
-        for tool in tools {
-            let name = tool.name();
-            if let Some(existing) = owners.get(name) {
+        let provided = provider
+            .contributions()
+            .map_err(|error| CatalogError::Provider {
+                provider: provider_name.to_string(),
+                message: error.to_string(),
+            })?;
+        for contribution in provided {
+            let descriptor = contribution.descriptor;
+            let name = descriptor.name.clone();
+            if let Some(existing) = owners.get(&name) {
                 return Err(CatalogError::NameConflict {
-                    name: name.to_string(),
+                    name,
                     owners: format!("{existing} and provider `{provider_name}`"),
                 });
             }
+            let mismatch = if contribution.handler.name() != descriptor.name {
+                Some("name")
+            } else if contribution.handler.description() != descriptor.description {
+                Some("description")
+            } else if Value::Object(contribution.handler.input_schema()) != descriptor.input_schema
+            {
+                Some("input schema")
+            } else if Value::Object(contribution.handler.output_schema())
+                != descriptor.output_schema
+            {
+                Some("output schema")
+            } else {
+                None
+            };
+            if let Some(field) = mismatch {
+                return Err(CatalogError::ContributionMismatch {
+                    name,
+                    provider: provider_name.to_string(),
+                    field,
+                });
+            }
+            if !declares_agent_id(&descriptor.input_schema) {
+                return Err(CatalogError::MissingRoutingField {
+                    name,
+                    provider: provider_name.to_string(),
+                });
+            }
             owners.insert(name, format!("provider `{provider_name}`"));
-            handlers.push(tool);
+            contributions.push(descriptor);
+            handlers.push(contribution.handler);
         }
     }
-    Ok(handlers)
+    Ok((handlers, contributions))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::provider::ToolProviderError;
-    use crate::tool::{parse_arguments, reply_value, schema_for};
+    use crate::tool::{non_empty, parse_arguments, reply_value, schema_for};
     use async_trait::async_trait;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -224,6 +378,8 @@ mod tests {
     #[derive(serde::Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     struct EchoInput {
+        /// The Agent this call names.
+        agent_id: String,
         /// The message to echo.
         message: String,
     }
@@ -254,10 +410,49 @@ mod tests {
             arguments: Map<String, Value>,
         ) -> Result<Value, ToolError> {
             let input = parse_arguments::<EchoInput>(arguments)?;
+            non_empty(&input.agent_id, "agent_id")?;
             reply_value(&EchoOutput {
                 message: input.message,
                 provider: "fixture".to_string(),
             })
+        }
+    }
+
+    /// A Tool that cannot name the Agent a routed call targets.
+    struct UnroutableTool(&'static str);
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct UnroutableInput {
+        /// No owning-Agent field.
+        message: String,
+    }
+
+    #[async_trait]
+    impl ToolHandler for UnroutableTool {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+
+        fn description(&self) -> &'static str {
+            "unroutable"
+        }
+
+        fn input_schema(&self) -> Map<String, Value> {
+            schema_for::<UnroutableInput>()
+        }
+
+        fn output_schema(&self) -> Map<String, Value> {
+            schema_for::<EchoOutput>()
+        }
+
+        async fn call(
+            &self,
+            _context: &ToolContext,
+            arguments: Map<String, Value>,
+        ) -> Result<Value, ToolError> {
+            let input = parse_arguments::<UnroutableInput>(arguments)?;
+            Ok(json!({ "message": input.message, "provider": "fixture" }))
         }
     }
 
@@ -297,6 +492,8 @@ mod tests {
     #[derive(serde::Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     struct DifferentInput {
+        /// The Agent this call names.
+        agent_id: String,
         /// A different argument.
         other: String,
     }
@@ -331,6 +528,7 @@ mod tests {
             arguments: Map<String, Value>,
         ) -> Result<Value, ToolError> {
             let input = parse_arguments::<DifferentInput>(arguments)?;
+            non_empty(&input.agent_id, "agent_id")?;
             Ok(json!({ "different": !input.other.is_empty() }))
         }
     }
@@ -449,7 +647,39 @@ mod tests {
             output["properties"]["provider"]["description"],
             "The provider that answered."
         );
+
+        let manifest = snapshot.manifest();
+        assert!(manifest.is_supported());
+        assert_eq!(manifest.tools.len(), 1);
+        let descriptor = &manifest.tools[0];
+        assert_eq!(descriptor.name, "fixture_echo");
+        assert_eq!(descriptor.provider, "fixtures");
+        assert_eq!(descriptor.description, "echo one message");
+        assert_eq!(descriptor.input_schema["type"], "object");
+        assert_eq!(
+            descriptor.output_schema["properties"]["provider"]["description"],
+            "The provider that answered."
+        );
         assert_eq!(provider.enumerations(), 1);
+    }
+
+    #[test]
+    fn a_contributed_tool_must_name_its_owning_agent() {
+        let provider = FixtureProvider::new(
+            "fixtures",
+            vec![Arc::new(UnroutableTool("fixture_unroutable")) as Arc<dyn ToolHandler>],
+        );
+        let error = match McpCatalog::with_providers(&[provider]) {
+            Ok(_) => panic!("a Tool without agent_id cannot be routed"),
+            Err(error) => error,
+        };
+        match error {
+            CatalogError::MissingRoutingField { name, provider } => {
+                assert_eq!(name, "fixture_unroutable");
+                assert_eq!(provider, "fixtures");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 
     #[tokio::test]
@@ -462,7 +692,12 @@ mod tests {
             .call(
                 &context(),
                 "fixture_echo",
-                Some(json!({ "message": "hello" }).as_object().unwrap().clone()),
+                Some(
+                    json!({ "agent_id": "agent-a", "message": "hello" })
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
             )
             .await
             .expect("reply");
@@ -472,7 +707,12 @@ mod tests {
             .call(
                 &context(),
                 "fixture_echo",
-                Some(json!({ "wrong": "hello" }).as_object().unwrap().clone()),
+                Some(
+                    json!({ "agent_id": "agent-a", "wrong": "hello" })
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
             )
             .await;
         let error = refusal.expect_err("a contract mismatch must not execute");

@@ -31,6 +31,20 @@ impl ToolErrorKind {
             Self::Backend => "backend",
         }
     }
+
+    /// Read a wire kind from a routed owner's reply.
+    ///
+    /// An unknown spelling is a refusal (`backend`), never a success and never
+    /// a silently dropped classification.
+    pub fn from_wire(kind: &str) -> Self {
+        match kind {
+            "invalid_argument" => Self::InvalidArgument,
+            "not_found" => Self::NotFound,
+            "unavailable" => Self::Unavailable,
+            "timeout" => Self::Timeout,
+            _ => Self::Backend,
+        }
+    }
 }
 
 /// A tool call failure with a caller-facing sentence.

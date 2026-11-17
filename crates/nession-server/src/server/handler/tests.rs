@@ -101,6 +101,7 @@ impl TestDeps {
                 env_service: Arc::clone(&self.env_service),
                 image_manager: Arc::clone(&self.image_manager),
                 db: Arc::clone(&self.db),
+                extension_tools: None,
             },
             ConnectionHandlerConfig {
                 server_auth_token: auth_token.to_string(),
