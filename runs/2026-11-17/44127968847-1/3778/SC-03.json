@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f3db184e75932e9f8acefc752935221df846a138246adbee6fb9809a31df22db",
+  "run_id": 44127968847,
+  "run_attempt": 1,
+  "issue": 3778,
+  "criterion": "SC-03",
+  "criterion_text": "Server-embedded, Agent-embedded and Standalone MCP clients invoke the same fixture Tool against explicitly named owning Agents; offline, wrong Agent, unknown Session and stale manifest fail closed without cross-Agent fallback.",
+  "stage": "staging",
+  "target_sha": "ce2a353df7734cffcd8663ea33dd4df89b4a476d",
+  "contract_sha256": "055d14fd33619376047fae1b46645473cefc3dd58089f22a2dff0478ed964d38",
+  "case_revision": "ce2a353df7734cffcd8663ea33dd4df89b4a476d",
+  "case_tree_sha": "28ad0bd340e807e150a26d41eb072904280c3f86",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T16:42:08.601Z",
+  "finished_at": "2026-11-17T16:43:29.385Z",
+  "duration_ms": 80784,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One fixture contribution was discoverable and executable by the named owner across Server, Standalone and Agent surfaces; incompatible and stale manifests were refused while the last valid generation stayed live.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA ce2a353df7734cffcd8663ea33dd4df89b4a476d: a fixture Extension Tool advertised by one Agent was listed and invoked through Server-embedded and Standalone MCP hosts against the explicitly named owning Agent, and the Server brokered exactly one call to that Agent"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA ce2a353df7734cffcd8663ea33dd4df89b4a476d: a wrong Agent, an unknown owner-specific Session, an offline owner, a conflicting same-name contract and an unsupported manifest version each failed closed (not_found/unavailable) with no cross-Agent fallback; the capability stayed listed while its owner was offline"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA ce2a353df7734cffcd8663ea33dd4df89b4a476d: the owning Agent executed the same contributed Tool on its direct P2P surface and refused a foreign agent_id and an unadvertised Tool"
+        }
+      ],
+      "duration_ms": 80757,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44127968847,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ce2a353df7734cffcd8663ea33dd4df89b4a476d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44127968847",
+    "record_path": "runs/2026-11-17/44127968847-1/3778/SC-03.json",
+    "source_result_sha256": "7bba286be9bd06366b16b0f5f96cc9d30c36dee95e8200e25cd4f4e7bb5541ae"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44127968847-1",
+    "sha256": "7bba286be9bd06366b16b0f5f96cc9d30c36dee95e8200e25cd4f4e7bb5541ae",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44127968847",
+    "durability": "time-limited; object archival not configured"
+  }
+}

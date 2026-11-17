@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5e09570eb9ffe954543bc03cb043bd342ef50aa81cc9c41322806be105fa8c6a",
+  "run_id": 44127968847,
+  "run_attempt": 1,
+  "issue": 3778,
+  "criterion": "SC-02",
+  "criterion_text": "Installing/removing/reconfiguring a fixture Extension updates the catalog atomically with observable revision/notifications where supported; ordinary Session/Claude runtime state changes do not alter its Tool inventory or schema.",
+  "stage": "staging",
+  "target_sha": "ce2a353df7734cffcd8663ea33dd4df89b4a476d",
+  "contract_sha256": "055d14fd33619376047fae1b46645473cefc3dd58089f22a2dff0478ed964d38",
+  "case_revision": "ce2a353df7734cffcd8663ea33dd4df89b4a476d",
+  "case_tree_sha": "e20aed63cffd9a313a6468108c1a11b566aea430",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T16:41:27.568Z",
+  "finished_at": "2026-11-17T16:42:08.601Z",
+  "duration_ms": 41033,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Explicit manifest updates were observable through revision and legacy notification; ordinary runtime work did not churn the catalog; the static export source remained independent.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA ce2a353df7734cffcd8663ea33dd4df89b4a476d: installing a fixture Extension manifest advanced the observable tools/list catalogRevision and delivered notifications/tools/list_changed to a connected legacy session; a stateless modern client read the same advanced revision"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA ce2a353df7734cffcd8663ea33dd4df89b4a476d: repeated tools/list, tools/call and an ordinary Session create left the catalog revision and Tool inventory unchanged — runtime state is not a catalog event"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA ce2a353df7734cffcd8663ea33dd4df89b4a476d: the source-pinned export catalog stayed the eleven baseline Tools after a dynamic manifest was composed and advertised"
+        }
+      ],
+      "duration_ms": 40993,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44127968847,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ce2a353df7734cffcd8663ea33dd4df89b4a476d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44127968847",
+    "record_path": "runs/2026-11-17/44127968847-1/3778/SC-02.json",
+    "source_result_sha256": "7a5ad13bb59b8b57361ce0e863241005d61be65e73cd8589f18ac00eb0bfc243"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44127968847-1",
+    "sha256": "7a5ad13bb59b8b57361ce0e863241005d61be65e73cd8589f18ac00eb0bfc243",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44127968847",
+    "durability": "time-limited; object archival not configured"
+  }
+}
