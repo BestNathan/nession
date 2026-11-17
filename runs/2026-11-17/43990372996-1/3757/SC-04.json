@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e3776822153561a388cce85d4f72fb6e90725ca8585dd78fe47165903b47042c",
+  "run_id": 43990372996,
+  "run_attempt": 1,
+  "issue": 3757,
+  "criterion": "SC-04",
+  "criterion_text": "Creating, attaching, reconnecting/restarting an Agent with an existing legacy-created Session preserves its instance identity, Claude binding lookup and Bash/zsh revision convergence without letting a Profile override protected control fields.",
+  "stage": "staging",
+  "target_sha": "34179ee981696660918ab4444a1394b6b768b74f",
+  "contract_sha256": "1e303bc91f1e34532b57ba30103888697553f559180583b16d5440d79eb388af",
+  "case_revision": "34179ee981696660918ab4444a1394b6b768b74f",
+  "case_tree_sha": "26c85f45854669bbfa208279d090d6c34e8563b3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T00:52:00.867Z",
+  "finished_at": "2026-11-17T00:52:03.105Z",
+  "duration_ms": 2238,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "instance.cjs",
+      "result": "Pass",
+      "summary": "Legacy marker and canonical identity remain consistent after Agent update",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 34179ee981696660918ab4444a1394b6b768b74f: an old tmux environment marker is adopted into the durable instance-id option without inventing a new identity"
+        }
+      ],
+      "duration_ms": 299,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "binding.cjs",
+      "result": "Pass",
+      "summary": "Agent restarts and Session recreation preserve the Claude binding fence",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 34179ee981696660918ab4444a1394b6b768b74f: real tmux legacy instance preserves Claude binding on Agent restart; pre-fence path remains readable and newer same-name Sessions reject stale files"
+        }
+      ],
+      "duration_ms": 1565,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "shell.cjs",
+      "result": "Pass",
+      "summary": "Surviving Bash ENV adapter continues revision convergence after migration",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 34179ee981696660918ab4444a1394b6b768b74f: surviving Bash adapter with legacy variable names consumed revision 1 then revision 2 and recorded the new shell revision without changing its old hook"
+        }
+      ],
+      "duration_ms": 349,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43990372996,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "34179ee981696660918ab4444a1394b6b768b74f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43990372996",
+    "record_path": "runs/2026-11-17/43990372996-1/3757/SC-04.json",
+    "source_result_sha256": "ac5a3c7503792ab171fe89f15e6534afe8dac04c877386267f67d2fce0b06097"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43990372996-1",
+    "sha256": "ac5a3c7503792ab171fe89f15e6534afe8dac04c877386267f67d2fce0b06097",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43990372996",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "00cbd9442f4e186a6cebccf151638010afd66cf4388c95380fced92a14ad9b31",
+  "run_id": 43990372996,
+  "run_attempt": 1,
+  "issue": 3757,
+  "criterion": "SC-01",
+  "criterion_text": "A bound Profile containing `NESSION_MCP_TOKEN` is materialized into the target Session's tmux environment, and an otherwise valid MCP Connect preflight reports credential-present and performs an authenticated handshake; missing/wrong credentials fail closed without writing a Claude entry.",
+  "stage": "staging",
+  "target_sha": "34179ee981696660918ab4444a1394b6b768b74f",
+  "contract_sha256": "1e303bc91f1e34532b57ba30103888697553f559180583b16d5440d79eb388af",
+  "case_revision": "34179ee981696660918ab4444a1394b6b768b74f",
+  "case_tree_sha": "dc88a1adcc40ec1b2ea92432a695b363ed8bc48c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T00:50:50.164Z",
+  "finished_at": "2026-11-17T00:52:00.866Z",
+  "duration_ms": 70702,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "env.cjs",
+      "result": "Pass",
+      "summary": "The Session binder permits the credential and protects runtime identity in tmux",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 34179ee981696660918ab4444a1394b6b768b74f: actual isolated tmux Session observed explicitly bound NESSION_MCP_TOKEN; rejected runtime instance override and preserved the UUID fence"
+        }
+      ],
+      "duration_ms": 53486,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "connect.cjs",
+      "result": "Pass",
+      "summary": "Authenticated MCP preflight and secure Claude config write preserve fail-closed behavior",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 34179ee981696660918ab4444a1394b6b768b74f: isolated MCP HTTP initialize authenticates a bound-like credential, rejected/missing credentials block without config mutation, and success writes only a variable reference"
+        }
+      ],
+      "duration_ms": 17170,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43990372996,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "34179ee981696660918ab4444a1394b6b768b74f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43990372996",
+    "record_path": "runs/2026-11-17/43990372996-1/3757/SC-01.json",
+    "source_result_sha256": "96936b975fdf0c7007f6557477c8f8959db5aa61145a8c5b02d2512f5d7131a6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43990372996-1",
+    "sha256": "96936b975fdf0c7007f6557477c8f8959db5aa61145a8c5b02d2512f5d7131a6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43990372996",
+    "durability": "time-limited; object archival not configured"
+  }
+}
