@@ -152,8 +152,10 @@ async function main() {
         }
       }
       fs.appendFileSync(process.env.GITHUB_OUTPUT,
+        'source_sha=' + verified.source_sha + '\n' +
         'short_sha=' + verified.short_sha + '\n' +
-        'source_run_id=' + verified.source_run_id + '\n');
+        'source_run_id=' + verified.source_run_id + '\n' +
+        'source_run_attempt=' + verified.source_run_attempt + '\n');
       console.log('TRUSTED_STAGING_GHCR_V1 ' + JSON.stringify(verified));
       return;
     }
