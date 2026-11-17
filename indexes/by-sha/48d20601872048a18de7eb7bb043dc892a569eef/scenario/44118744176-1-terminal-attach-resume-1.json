@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44118744176,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3799-image-library-tag-lifecycle",
+    "target_sha": "48d20601872048a18de7eb7bb043dc892a569eef",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44118744176",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "d8603c8f1ed2ad565890e703987d799cc0f64711ea31d053689562f77b59578a"
+  },
+  "record": "runs/2026-11-17/44118744176-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "c694355e8ee5295ac17522dfc0ffa50264a1d938bc9c215595b6d1a80425669d"
+}
