@@ -321,6 +321,34 @@ impl Database {
         Ok(())
     }
 
+    /// Update only an Agent's advertised addresses.
+    ///
+    /// An address update is not a registration: it must not rewrite the
+    /// registration timestamp, heartbeat, status, metadata or credentials that
+    /// the current registration owns (#3723). Returns the number of rows
+    /// affected so a caller can tell an update from an absent row.
+    pub async fn update_agent_addresses(
+        &self,
+        agent_id: &str,
+        ip_address: &str,
+        addresses: &str,
+    ) -> Result<u64> {
+        let result = agents::Entity::update_many()
+            .col_expr(
+                agents::Column::IpAddress,
+                Expr::value(ip_address.to_owned()),
+            )
+            .col_expr(
+                agents::Column::Addresses,
+                Expr::value(Some(addresses.to_owned())),
+            )
+            .filter(agents::Column::AgentId.eq(agent_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to update agent addresses")?;
+        Ok(result.rows_affected)
+    }
+
     /// Update (or clear) the display name for an agent.  Pass `None` to remove
     /// the override and fall back to the config/hostname chain.
     pub async fn update_agent_display_name(
