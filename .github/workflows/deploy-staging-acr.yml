@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        image: [server, agent, ui]
+        image: [server, agent, mcp, ui]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -166,8 +166,8 @@ jobs:
             .source_sha == $sha and
             (.terminal_config.cols | type == "number") and
             (.terminal_config.web_max_font_size | type == "number") and
-            (.images | keys == ["agent","server","ui"]) and
-            (. as $doc | all(["agent","server","ui"][];
+            (.images | keys == ["agent","mcp","server","ui"]) and
+            (. as $doc | all(["agent","mcp","server","ui"][];
               . as $role |
               ($doc.images[$role].tag == ($role+"-"+$short)) and
               ($doc.images[$role].digests[$ghcr] | test("^sha256:[a-f0-9]{64}$"))
@@ -180,7 +180,7 @@ jobs:
             docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$1"
           }
           images='{}'
-          for role in agent server ui; do
+          for role in agent mcp server ui; do
             ghcr_digest="$(digest "${GHCR_IMAGE}:${role}-${SHORT_SHA}")"
             acr_digest="$(digest "${ACR_IMAGE}:${role}-${SHORT_SHA}")"
             expected_ghcr="$(jq -r --arg role "$role" --arg ghcr "$GHCR_IMAGE" '.images[$role].digests[$ghcr]' "$SOURCE")"
@@ -209,7 +209,7 @@ jobs:
   # Deploy to the retained staging environment (gitops/environments/staging).
   # ArgoCD consumes the gitops branch; no more kustomize commits on main.
   deploy-staging-gitops:
-    # Staging pulls exclusively from ACR, so wait for all three independent
+    # Staging pulls exclusively from ACR, so wait for all four independent
     # mirrors (both platforms) before advancing ArgoCD desired state.
     needs: [verify-source, provenance]
     runs-on: ubuntu-24.04

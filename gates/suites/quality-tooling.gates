@@ -28,6 +28,7 @@ repo-health-selftest
 repo-metrics-selftest
 runtime-image-tools
 mcp-image-default
+mcp-standalone-image
 compose-storage-contract
 gitops-storage-contract
 protocol-json-contract
@@ -61,6 +62,7 @@ tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
 runtime-image-tools-selftest
+mcp-standalone-image-selftest
 acr-mirror-deadline-selftest
 compose-storage-contract-selftest
 gitops-storage-contract-selftest
