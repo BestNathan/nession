@@ -80,3 +80,5 @@ This revises **the same existing** `project-session-3025/` mock, not a duplicate
 **Verification:** JavaScript source parses, and a dependency-free event simulation verified Managed selection, effective preview, Host runtime change, explicit Prepare and creation (4/4 checks). Actual Chromium click-through/viewport/keyboard/screenshot testing, exact Pages manifest publication and production Acceptance remain **unverified** for this new revision. Historical browser/Pages evidence in the older sections applies only to the pinned prior source, not the modified JS.
 
 **Source:** `prototype/project-session-3025/`. Candidate Pages URL `https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html` is **not yet verified** at this revision; the source commit is pinned in #3794.
+
+**ENV preview revision:** Managed Session simulation now also exposes an explicit ENV selector (Use Project defaults / Custom ENV / No environment); its choice appears in the effective resource preview and invalidates a prior mock Prepare result. The production ENV semantics remain owned by #3649, and this design experiment cannot supersede that contract.
