@@ -26,15 +26,18 @@ async function api(route) {
   return response.json();
 }
 
-function selectRun(runs, { workflow, name, sha }) {
-  const matching = (runs.workflow_runs ?? []).filter((item) =>
+function matchingRuns(runs, { workflow, name, sha }) {
+  return (runs.workflow_runs ?? []).filter((item) =>
     item.path?.split('@')[0] === workflow && item.name === name &&
     item.head_sha === sha && item.head_branch === 'staging' &&
-    item.event === 'push' && item.repository?.full_name === REPO);
-  const selected = matching.sort((a, b) =>
+    item.event === 'push' && item.repository?.full_name === REPO).sort((a, b) =>
     (b.run_number ?? 0) - (a.run_number ?? 0) ||
     (b.run_attempt ?? 0) - (a.run_attempt ?? 0) ||
-    (b.id ?? 0) - (a.id ?? 0))[0];
+    (b.id ?? 0) - (a.id ?? 0));
+}
+
+function selectRun(runs, { workflow, name, sha }) {
+  const selected = matchingRuns(runs, { workflow, name, sha })[0];
   // Publication is asynchronous with this Case. An absent or still-running
   // producer is Pending, never a fabricated Pass or a misleading Fail.
   if (!selected) return { pending: name + ' run has not started for staging ' + sha };
@@ -151,15 +154,43 @@ async function main() {
     digests[platform.platform.architecture] = platform.digest;
   }
 
-  // The authenticated ACR lane published and verified the same role. Its
-  // success is GitHub-owned run/job/step metadata, not Case-authored prose.
+  // The authenticated ACR lane mirrors the same role. Its success is
+  // GitHub-owned run/job/step metadata, not Case-authored prose. The lane is
+  // snapshot-bound: it refuses to advance GitOps after staging moves to
+  // another SHA. In that supersession case the exact-SHA mirror cannot exist,
+  // so the proof requires the same lane to mirror the MCP role at the current
+  // staging head and records the supersession explicitly.
   const acrRuns = await api('/actions/workflows/deploy-staging-acr.yml/runs?head_sha=' + sha + '&per_page=100');
-  const acrSelection = selectRun(acrRuns, {
+  const acrWorkflow = {
     workflow: '.github/workflows/deploy-staging-acr.yml',
-    name: 'Deploy / Staging ACR', sha,
-  });
-  if (acrSelection.pending) return pendingResult(acrSelection.pending);
-  const acr = acrSelection.run;
+    name: 'Deploy / Staging ACR',
+  };
+  const exactAcr = matchingRuns(acrRuns, { ...acrWorkflow, sha })[0];
+  let acr;
+  let acrSupersededBy = null;
+  if (exactAcr?.status === 'completed' && exactAcr.conclusion === 'success') {
+    acr = exactAcr;
+  } else {
+    const head = (await api('/branches/staging')).commit?.sha;
+    assert.match(String(head || ''), HEX40, 'authenticated staging head is unavailable');
+    if (head === sha) {
+      if (!exactAcr) return pendingResult(acrWorkflow.name + ' run has not started for staging ' + sha);
+      if (exactAcr.status !== 'completed') {
+        return pendingResult(acrWorkflow.name + ' run ' + exactAcr.id + ' is still ' + exactAcr.status);
+      }
+      throw new Error(acrWorkflow.name + ' run ' + exactAcr.id + ' concluded ' + exactAcr.conclusion);
+    }
+    const headSelection = selectRun(
+      await api('/actions/workflows/deploy-staging-acr.yml/runs?head_sha=' + head + '&per_page=100'),
+      { ...acrWorkflow, sha: head },
+    );
+    if (headSelection.pending) {
+      return pendingResult('ACR lane for superseding staging head ' + head.slice(0, 7) +
+        ': ' + headSelection.pending);
+    }
+    acr = headSelection.run;
+    acrSupersededBy = head;
+  }
   const acrJobs = await jobsOf(acr);
   const mirrored = succeededJob(acrJobs, 'mirror-acr (mcp)');
   succeededStep(mirrored, 'Mirror and verify multi-arch mcp image');
@@ -188,14 +219,22 @@ async function main() {
   const indexDigest = indexResponse.headers.get('docker-content-digest');
   assert.match(indexDigest ?? '', HEX64, 'registry did not return an immutable mcp index digest');
 
+  const acrEvidence = acrSupersededBy
+    ? 'exact-SHA ACR lane was refused after staging advanced to ' +
+      acrSupersededBy.slice(0, 7) + '; the same authenticated lane at ' +
+      acrSupersededBy.slice(0, 7) + ' succeeded: run ' + acr.id +
+      ' mirror-acr (mcp) + provenance + deploy-staging-gitops'
+    : 'Deploy / Staging ACR run ' + acr.id +
+      ': mirror-acr (mcp) + provenance + deploy-staging-gitops succeeded';
   console.log(JSON.stringify({
     status: 'pass',
-    summary: 'staging release published mcp-' + ref + ' as a two-architecture GHCR index bound to the exact source SHA and the authenticated ACR lane mirrored it',
+    summary: 'staging release published mcp-' + ref + ' as a two-architecture GHCR index bound to the exact source SHA; the authenticated ACR lane mirrored the MCP role' +
+      (acrSupersededBy ? ' at the superseding staging head ' + acrSupersededBy.slice(0, 7) : ''),
     evidence: [
       { type: 'ci', value: 'Release / Staging Artifacts run ' + release.id + ' attempt ' + release.run_attempt + ' published mcp ' + ref + ' from ' + sha },
       { type: 'registry', value: 'ghcr.io/bestnathan/nession:mcp-' + ref + ' index ' + indexDigest + ' platforms amd64=' + digests.amd64 + ' arm64=' + digests.arm64 },
       { type: 'provenance', value: 'both platform configs carry org.opencontainers.image.revision=' + sha + '; merge/provenance steps succeeded' },
-      { type: 'ci', value: 'Deploy / Staging ACR run ' + acr.id + ': mirror-acr (mcp) + provenance + deploy-staging-gitops succeeded' },
+      { type: 'ci', value: acrEvidence },
       { type: 'runtime', value: 'staging source verifier requires both MCP jobs and its ten-job negative self-test passed' },
     ],
   }));
