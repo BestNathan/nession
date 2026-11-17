@@ -22,7 +22,7 @@
   const rowAction=(label,action,disabled=false)=>'<button type="button" class="im-link" data-action="'+h(action)+'"'+(disabled?' disabled':'')+'>'+h(label)+'</button>';
   const agentName="nession-dev";
   const stateOf = s => {
-    if(!s.im) s.im={query:"",role:"all",status:"all",libraryPage:0,librarySize:6,selected:null,
+    if(!s.im) s.im={query:"",repository:"all",status:"all",libraryPage:0,librarySize:6,selected:null,
       tag:null,tagName:"",tagExpected:null,tagPhase:"edit",tagMessage:"",
       buildMode:"closed",buildKind:"github",buildAlias:"",buildRepo:"https://github.com/BestNathan/nession",
       buildRef:"main",buildDirectory:"/authorized/workspace",buildRepresentation:"flattened",
@@ -64,7 +64,7 @@
   const viewFor=s=>stateOf(s);
   const catalog = s=>{
     const ui=viewFor(s);let all=s.images.slice();
-    if(ui.role!=="all")all=all.filter(im=>im.kind===ui.role);
+    if(ui.repository!=="all")all=all.filter(im=>im.repository===ui.repository);
     if(ui.status!=="all")all=all.filter(im=>im.status===ui.status);
     if(ui.query.trim()){const q=ui.query.toLowerCase().trim();all=all.filter(im=>[im.name,im.repository,im.digest,im.kind,imageMeta(im).source,(im.tags||[]).join(" ")].some(z=>String(z||"").toLowerCase().includes(q)));}
     all.sort((a,b)=>a.name.localeCompare(b.name));
@@ -80,7 +80,7 @@
       '<div class="im-resource-actions">'+rowAction("Copy digest","im:copy:"+im.id)+rowAction("Manage tags","im:tag:"+im.id,!serverUp(s))+'</div></div>'+
       '<div class="im-detail-grid">'+
       section("Identity",'<dl class="im-facts">'+fact("Repository",im.repository)+fact("Tags",tagHead)+fact("Platform",m.platform||"Unknown")+fact("Representation",m.format||"Unknown")+fact("Created",m.created||"Unknown")+'</dl>')+
-      section("Source & dependencies",'<dl class="im-facts">'+fact("Source",m.source||"Unknown")+fact("Layers",m.layers==null?"Unknown":String(m.layers))+fact("Size",bytes(im.size_bytes))+fact("Closure",m.format==="referenced multi-blob"?"Metadata + "+(m.layers-1)+" external blob(s)":"Self-contained image")+'</dl>')+
+      section("Source & dependencies",'<dl class="im-facts">'+fact("Source",m.source||"Unknown")+fact("Layers",m.layers==null?"Unknown":String(m.layers))+fact("Size",bytes(im.size_bytes))+fact("Closure",m.format==="referenced multi-blob"?"Metadata + "+(m.layers-1)+" external blob(s)":"Self-contained image")+fact("Default target",im.default_mount||"Not declared")+fact("OCI Config",m.config||"Not exposed in legacy descriptor")+fact("EROFS packaging",m.packaging||"Deterministic · see Build provenance")+'</dl>')+
       section("References",'<p class="im-muted">A Tag is movable. Project and Session image references stay pinned to an immutable manifest.</p>'+
         (refs.length?'<ul class="im-reference-list">'+refs.map(x=>'<li>'+h(x)+'</li>').join("")+'</ul>':'<p class="im-empty-inline">No known active consumers</p>'))+
       section("Availability",'<dl class="im-facts">'+fact("Server",statusOf(im))+fact("Agent · "+agentName,cache)+fact("Runtime",reason||"Compatible with current Agent")+'</dl>')+
@@ -144,7 +144,7 @@
       note(ui.notice,"info")+
       '<div class="im-toolbar im-library-toolbar">'+
       '<div class="im-search"><span aria-hidden="true">⌕</span>'+input("query",ui.query,"Search name, tag, repository or digest","search")+'</div>'+
-      select("role",ui.role,[["all","All roles"],["Base Runtime","Base runtime"],["Toolchain","Toolchains"],["Project Source","Project source"]])+
+      select("repository",ui.repository,[["all","All repositories"]].concat(Array.from(new Set(s.images.map(im=>im.repository))).sort().map(x=>[x,x])))+
       select("status",ui.status,[["all","All states"],["ready","Ready"],["building","Building"],["failed","Failed"]])+'</div>'+
       libraryRows(s)+'</div>';
   }
@@ -280,7 +280,7 @@
     if(!key)return false;
     const ui=viewFor(s),value=target.value;
     if(key==="query"){ui.query=value;ui.libraryPage=0;}
-    else if(key==="role"){ui.role=value;ui.libraryPage=0;}
+    else if(key==="repository"){ui.repository=value;ui.libraryPage=0;}
     else if(key==="status"){ui.status=value;ui.libraryPage=0;}
     else if(key==="tagName"){ui.tagName=value;ui.tagMessage="";}
     else if(key==="buildAlias")ui.buildAlias=value;
@@ -310,7 +310,7 @@
     const find=()=>s.images.find(im=>im.id===id),build=()=>s.builds.find(b=>b.id===id);
     if(part==="go-builds"){s.sub.images="builds";ui.buildMode="open";}
     else if(part==="open"){ui.selected=ui.selected===id?null:id;ui.tag=null;ui.notice="";}
-    else if(part==="filters-reset"){ui.query="";ui.role="all";ui.status="all";ui.libraryPage=0;}
+    else if(part==="filters-reset"){ui.query="";ui.repository="all";ui.status="all";ui.libraryPage=0;}
     else if(part==="library-page"){ui.libraryPage=Math.max(0,ui.libraryPage+Number(id));ui.selected=null;}
     else if(part==="copy"){
       const revision=find()?.digest;
@@ -335,7 +335,7 @@
     else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";}
     else if(part==="tag-unlink"){const im=find();if(!im||ui.tagPhase!=="unlink"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: the Tag changed before unlink. Nothing was removed.";return true;}o.tags=o.tags.filter(t=>t!==ui.tagName);ui.tag=null;ui.notice="Tag unlinked; immutable Manifest, consumer pins and Blob Store remain.";
     } else if(part==="distribution"){s.sub.images="distribution";ui.cacheSelected=id;}
-    else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.role="all";ui.status="all";ui.selected=id;ui.libraryPage=Math.max(0,Math.floor(catalog(s).findIndex(im=>im.id===id)/ui.librarySize));}
+    else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.repository="all";ui.status="all";ui.selected=id;ui.libraryPage=Math.max(0,Math.floor(catalog(s).findIndex(im=>im.id===id)/ui.librarySize));}
     else if(part==="cache-open"){ui.cacheSelected=ui.cacheSelected===id?null:id;}
     else if(part==="cache-prepare"){const im=find();if(!im||!serverUp(s)||!agentUp(s)||im.status!=="ready")return true;const t=transfer(s,im);if(["Verified","Downloading","Verifying"].includes(t.phase))return true;s.transfers[im.id]={state:"downloading",received:t.received||0,total:im.size_bytes};s.cache[im.id]="preparing";ui.cacheSelected=id;}
     else if(part==="consume"){const im=find(),reason=im&&runtimeReason(s,im);if(!im||reason)return true;if(im.kind==="Base Runtime"){s.rootImage=id;s.rootMode="image";}else{s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;}s.area="policies";s.sub.policies="filesystem";s.preflight="none";s.error="";}
@@ -373,7 +373,7 @@
     else if(part==="build-page"){ui.buildPage=Math.max(0,ui.buildPage+Number(id));ui.expandedBuild=null;}
     else if(part==="build-cancel"){const b=build();if(b&&["running","queued"].includes(b.status)){b.status="canceled";b.diagnostic="Canceled; snapshot retained according to Server retention (synthetic).";}}
     else if(part==="build-retry"){const b=build();if(b&&["failed","canceled"].includes(b.status)){b.status="queued";b.stage=null;b.attempt++;b.elapsed_ms=0;b.diagnostic="New attempt queued; previous diagnostic retained in durable record (synthetic).";}}
-    else if(part==="build-image"){const b=build();s.sub.images="library";ui.query="";ui.role="all";ui.status="all";const im=s.images.find(im=>im.name===b?.name);ui.selected=im?.id||null;ui.libraryPage=im?Math.floor(catalog(s).findIndex(x=>x.id===im.id)/ui.librarySize):0;ui.notice=im?"Published Image selected.":"This historical mock does not contain a live Image for the completed build."; }
+    else if(part==="build-image"){const b=build();s.sub.images="library";ui.query="";ui.repository="all";ui.status="all";const im=s.images.find(im=>im.name===b?.name);ui.selected=im?.id||null;ui.libraryPage=im?Math.floor(catalog(s).findIndex(x=>x.id===im.id)/ui.librarySize):0;ui.notice=im?"Published Image selected.":"This historical mock does not contain a live Image for the completed build."; }
     return true;
   }
   window.NessionImagesDesign={create:function(getState){return {
