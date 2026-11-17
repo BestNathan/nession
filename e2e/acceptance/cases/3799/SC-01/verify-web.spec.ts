@@ -1,8 +1,8 @@
-// #3799 SC-01: at Web 1180/1024 and App 390/375 the Server Catalog Library can
+// #3799 SC-01 (Web half): at Web 1180/1024 the Server Catalog Library can
 // search and paginate, and one row expands inline to actual Repository, Tag,
-// Manifest, platform, source, representation/closure and reference impact.
-// Absent catalog metadata and an unobserved Agent cache stay explicitly
-// unknown instead of being shown as ready.
+// Manifest, platform, representation/closure and reference impact. Absent
+// catalog metadata and an unobserved Agent cache stay explicitly unknown
+// instead of being shown as ready.
 import { expect, test, type Page } from '@playwright/test';
 
 /** One DetailFact's value cell; the fact wrapper also contains its label. */
@@ -17,20 +17,10 @@ async function openWebLibrary(page: Page): Promise<void> {
   await expect(page.getByTestId('images-panel')).toBeVisible();
 }
 
-async function openAppLibrary(page: Page): Promise<void> {
-  await page.goto('/#/fixture/app?images=lifecycle');
-  await page.getByTestId('app-layer-root').waitFor();
-  await page.getByTestId('app-header-workspace').click();
-  await page.getByTestId('workspace-tool-sandbox').click();
-  await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
-  await page.getByTestId('sandbox-section-images').click();
-  await expect(page.getByTestId('images-panel')).toBeVisible();
-}
-
 test('SC-01: the Server Catalog Library searches, paginates and expands inline', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(110_000);
   const sha = String(process.env.NESSION_ACCEPTANCE_TARGET_SHA ?? '');
   expect(sha).toMatch(/^[0-9a-f]{40}$/);
   const observed: string[] = [];
@@ -92,28 +82,9 @@ test('SC-01: the Server Catalog Library searches, paginates and expands inline',
     await expect(page.getByTestId('images-page-label')).toHaveText('51–100 of 236');
     await page.getByTestId('images-previous').click();
     await expect(page.getByTestId('images-page-label')).toHaveText('1–50 of 236');
-    observed.push(`${viewport.width}x${viewport.height}: Web Library search/pagination/inline detail`);
-  }
-
-  for (const viewport of [
-    { width: 390, height: 844 },
-    { width: 375, height: 812 },
-  ]) {
-    await page.setViewportSize(viewport);
-    await openAppLibrary(page);
-    await expect(page.getByTestId('app-page-header')).toHaveCount(1);
-    await expect(page.getByTestId('app-page-back')).toBeVisible();
-    await expect(page.getByTestId('image-row')).toHaveCount(50);
-    const row = await page.getByTestId('image-row').first().boundingBox();
-    expect(row?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await page.getByTestId('image-row').first().click();
-    await expect(page.getByTestId('image-detail-row')).toBeVisible();
-    await expect(page.getByTestId('images-detail')).toBeVisible();
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - window.innerWidth,
+    observed.push(
+      `${viewport.width}x${viewport.height}: Web Library search/pagination/inline detail`,
     );
-    expect(overflow).toBeLessThanOrEqual(1);
-    observed.push(`${viewport.width}x${viewport.height}: App inline detail, one header/back, touch floor, no overflow`);
   }
 
   test.info().annotations.push({
