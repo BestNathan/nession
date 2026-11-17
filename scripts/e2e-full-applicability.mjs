@@ -74,13 +74,20 @@ function isE2EFixtureCatalog(file) {
 function isRuntime(file) {
   // Root ignore rules determine which sources/build inputs become visible to
   // the checkout (e.g. EROFS build modules). Never classify them as tooling.
+  //
+  // Container and deployment assets are also build inputs: a Dockerfile and
+  // the deploy entrypoints/Compose/nginx projection decide what the shipped
+  // process executes. Leaving them "unknown" makes an otherwise scoped
+  // main->staging batch unmergeable (measured on the #3791 MCP image sync).
   return file === '.gitignore' ||
     file.startsWith('crates/') ||
     file.startsWith('web/') ||
     file.startsWith('design/') ||
     file.startsWith('.cargo/') ||
     file === 'Cargo.toml' || file === 'Cargo.lock' ||
-    file === 'rust-toolchain.toml';
+    file === 'rust-toolchain.toml' ||
+    file === 'Dockerfile' || file.startsWith('Dockerfile.') ||
+    file.startsWith('deploy/');
 }
 
 function isTooling(file) {
@@ -249,7 +256,12 @@ function selfTest() {
       file + ' must be E2E fixture/catalog');
   }
   for (const file of ['crates/nession-agent/src/server/websocket.rs', 'web/src/App.tsx',
-    'design/tokens.json', 'Cargo.lock']) {
+    'design/tokens.json', 'Cargo.lock',
+    // #3791: container/deploy assets are runtime build inputs, not an
+    // unrecognized scope that blocks a main->staging integration batch.
+    'Dockerfile', 'Dockerfile.server', 'Dockerfile.mcp.prebuilt',
+    'deploy/docker-compose.yml', 'deploy/docker-compose.mcp.yml',
+    'deploy/mcp.example.toml', 'deploy/entrypoint-server.sh']) {
     assert.equal(categorizeChangedPath(file), 'app-runtime', file + ' must be runtime');
   }
   // #3520: the root .gitignore can expose/hide build inputs, not just docs.
@@ -268,6 +280,18 @@ function selfTest() {
   ]);
   assert.equal(historicalConvergence.category, 'mixed');
   assert.equal(historicalConvergence.applicable, true);
+  // #3791: the standalone MCP image release batch mixes tooling, a new
+  // Dockerfile and deploy samples. It must be known mixed risk, not an
+  // `unknown` scope that blocks the main->staging integration.
+  const mcpImageConvergence = classifyChangedPaths([
+    '.github/workflows/release-staging.yml',
+    'Dockerfile.mcp.prebuilt',
+    'deploy/docker-compose.mcp.yml',
+    'deploy/mcp.example.toml',
+    'scripts/mcp-standalone-image.mjs',
+  ]);
+  assert.equal(mcpImageConvergence.category, 'mixed');
+  assert.equal(mcpImageConvergence.applicable, true);
   assert.throws(() => notRequiredReceipt('a'.repeat(40), ignoreRules),
     /not-required classification/,
     'build-input ignore changes must never emit a Full Not Required receipt');
