@@ -1,6 +1,8 @@
 pub mod agent;
+pub mod agent_view;
 pub mod binding;
 pub mod canonical;
+pub mod control;
 pub mod conversation;
 pub mod mcp;
 pub mod memory;
@@ -13,4 +15,5 @@ pub mod scanner;
 pub mod security;
 pub mod server;
 pub mod session_context;
+pub mod tools;
 pub mod transcript;

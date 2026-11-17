@@ -2066,6 +2066,7 @@ dependencies = [
  "chrono",
  "dirs",
  "nession-common",
+ "nession-mcp",
  "nession-protocol",
  "reqwest 0.12.28",
  "schemars",
