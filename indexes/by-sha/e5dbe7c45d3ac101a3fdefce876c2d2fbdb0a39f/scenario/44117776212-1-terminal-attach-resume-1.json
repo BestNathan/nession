@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44117776212,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3778-p1-manifest-routing",
+    "target_sha": "e5dbe7c45d3ac101a3fdefce876c2d2fbdb0a39f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44117776212",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "4a975f2f66dd4e1dff5d392437eea0d18e3814ea768c2421a57315bf314fdd42"
+  },
+  "record": "runs/2026-11-17/44117776212-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "8827c01f7d9c02f27a9f4d7606a5300f1f61b879b33dc9ee4508a874350ae708"
+}
