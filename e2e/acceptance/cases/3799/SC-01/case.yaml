@@ -5,5 +5,7 @@ stage: staging
 runtime: full-stack-local
 verifiers:
   - type: browser
-    entry: verify.spec.ts
+    entry: verify-web.spec.ts
+  - type: browser
+    entry: verify-app.spec.ts
 result_policy: all-pass
