@@ -104,7 +104,7 @@ async function readSearchPages(extra, first) {
 }
 
 function isoDay(timestamp) {
-  assert.match(timestamp, /^\\d{4}-\\d{2}-\\d{2}$/);
+  assert.match(timestamp, /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
   return timestamp;
 }
 
@@ -282,8 +282,8 @@ function selfTestPositiveSelection() {
   assert.match(searchRoute('', 1), /sort=created&order=asc$/);
   assert.match(decodeURIComponent(searchRoute('', 1)),
     /is:issue in:body "branch: staging" "method: agent"/);
-  assert.match(decodeURIComponent(searchRoute('created:2026-11-01..2026-11-30', 2)),
-    /created:2026-11-01\\.\\.2026-11-30/);
+  assert.ok(decodeURIComponent(searchRoute('created:2026-11-01..2026-11-30', 2))
+    .includes('created:2026-11-01..2026-11-30'));
   assert.throws(() => searchRoute('', 11), { name: 'AssertionError' });
   const base = {
     number: 900,
