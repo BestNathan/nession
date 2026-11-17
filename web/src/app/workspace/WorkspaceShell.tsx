@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   capsuleExchangeStyle,
   useCapsuleExchange,
@@ -46,6 +46,14 @@ export interface WorkspaceShellProps {
    * only — the App leaves a Workspace depth through its page header's Back.
    */
   surfaceAction?: React.ReactNode;
+  /**
+   * Additional view bindings for a composition that hosts a surface outside
+   * the product capability registry (the deterministic fixtures do). A binding
+   * here still grants no navigation presence: the capsule is built from
+   * resolved capabilities, so an extra view is reachable only by the composer
+   * that opened it.
+   */
+  extraViewBindings?: readonly WorkspaceViewBinding[];
 }
 
 /**
@@ -107,6 +115,7 @@ export function WorkspaceShell({
   activeCapabilityId,
   depth = NO_DEPTH_CONTROL,
   surfaceAction,
+  extraViewBindings,
 }: WorkspaceShellProps) {
   // SC-12: the shell is the Workspace's occlusion owner — see the hook for why
   // it measures the tool bar rather than the Terminal's composer.
@@ -133,7 +142,16 @@ export function WorkspaceShell({
   });
 
   const openedPresence = presentation.opened?.presence;
-  const activeBinding = workspaceViewBindings.get(activeCapabilityId);
+  const viewBindings = useMemo(() => {
+    if (!extraViewBindings || extraViewBindings.length === 0) {
+      return workspaceViewBindings;
+    }
+    return new Map<string, WorkspaceViewBinding>([
+      ...workspaceViewBindings,
+      ...extraViewBindings.map((view) => [view.id, view] as const),
+    ]);
+  }, [extraViewBindings]);
+  const activeBinding = viewBindings.get(activeCapabilityId);
   const canRenderActive = activeBinding && openedPresence?.level !== 'hidden';
   // The two experiences' view props differ by construction (#1051): the App's
   // composition gives every view a depth control, Web's gives none. Branched

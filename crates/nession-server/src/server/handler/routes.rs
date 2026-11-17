@@ -123,6 +123,10 @@ server_routes!(handler, msg, payload;
     // Pane and execution identity.
     "server.session.sandbox.context" => "server.session.sandbox.context" => 1 => Query => handler.handle_client_session_sandbox_context(msg).await,
     "server.session.sandbox.preflight" => "server.session.sandbox.preflight" => 1 => Query => handler.handle_client_session_sandbox_preflight(msg).await,
+    // Explicit one-Agent cache preparation (#3796). It is a Session-scoped
+    // mutation: an observation read never downloads, and a second prepare
+    // queues behind the same Session rather than racing it.
+    "server.session.sandbox.image-prepare" => "server.session.sandbox.image-prepare" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_image_prepare(msg).await,
     "server.session.sandbox.enter" => "server.session.sandbox.enter" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_enter(msg).await,
     "server.session.sandbox.return-to-native" => "server.session.sandbox.return-to-native" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_return(msg).await,
     "server.session.sandbox.focus" => "server.session.sandbox.focus" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_focus(msg).await,

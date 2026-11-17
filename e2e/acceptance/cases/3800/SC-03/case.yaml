@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 3800
+criterion: SC-03
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify-fences.cjs
+  - type: runtime
+    entry: verify-runtime.cjs
+result_policy: all-pass

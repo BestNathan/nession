@@ -4,11 +4,13 @@ import type {
   ImageLibraryEntry,
   ImageLibraryRepresentation,
   ImageReferenceImpact,
+  ImageSource,
 } from './ImagesPlugin';
 import type {
   ImageCacheState,
   ImageCacheStatus,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
+import type { ImageComposeRepresentation } from '@/generated/protocol/core/server-image-build-submit/v1';
 
 export const IMAGE_PAGE_SIZE = 50;
 
@@ -29,17 +31,29 @@ export function shortDigest(digest: string | null | undefined): string {
   return `${digest.slice(0, 19)}…${digest.slice(-6)}`;
 }
 
-export function sourceLabel(image: ImageDescriptor): string {
-  switch (image.source.kind) {
+/** How one Compose result is represented (#3696, #3697). */
+export function composeRepresentationLabel(
+  representation: ImageComposeRepresentation,
+): string {
+  return representation === 'referenced' ? 'Referenced' : 'Flattened';
+}
+
+/** The truthful source declaration for one image or durable build. */
+export function imageSourceLabel(source: ImageSource): string {
+  switch (source.kind) {
     case 'github':
-      return `${image.source.repository_url}@${image.source.ref}`;
+      return `${source.repository_url}@${source.ref}`;
     case 'local_directory':
-      return image.source.path;
+      return source.path;
     case 'compose':
-      return `compose: ${image.source.sources
-        .map((source) => `${source.repository}@${source.ref}${source.destination === '' ? '' : ` -> ${source.destination}`}`)
+      return `compose (${composeRepresentationLabel(source.representation)}): ${source.sources
+        .map((entry) => `${entry.repository}@${entry.ref}${entry.destination === '' ? '' : ` -> ${entry.destination}`}`)
         .join(', ')}`;
   }
+}
+
+export function sourceLabel(image: ImageDescriptor): string {
+  return imageSourceLabel(image.source);
 }
 
 export function imageServerStatusLabel(status: ImageDescriptor['status']): string {

@@ -222,7 +222,7 @@ mod tests {
         assert!(response.servers[0].effective);
         let host = response.host.unwrap();
         assert!(host.server_configured);
-        assert_eq!(host.agent.unwrap().token_env_var, "NESSON_MCP_TOKEN");
+        assert_eq!(host.agent.unwrap().token_env_var, "NESSION_MCP_TOKEN");
     }
 
     #[tokio::test]

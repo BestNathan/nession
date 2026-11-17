@@ -8,6 +8,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
+  FormActions,
+  FormField,
+  FormGrid,
+  FormRow,
+  FormSection,
+  FormSurface,
+} from '@/components/ui/configuration-form';
+import {
   DetailEmpty,
   DetailFact,
   DetailFacts,
@@ -21,6 +29,8 @@ import {
   OperationError,
   OperationLead,
 } from '@/components/ui/operation-surface';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import type { ImageComposeRepresentation } from '@/generated/protocol/core/server-image-build-submit/v1';
 import type { WorkspaceViewProps } from '@/app/workspace/workspaceContext';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
@@ -32,12 +42,26 @@ import {
   type ImageReferenceImpact,
 } from '../ImagesPlugin';
 import {
+  BUILD_SOURCE_KINDS,
+  BUILD_SOURCE_LABEL,
+  emptyBuildSourceDraft,
+  emptyComposeSourceDraft,
+  normalizeBuildAlias,
+  validateBuildSource,
+  type BuildSourceDraft,
+  type BuildSourceErrors,
+  type BuildSourceKind,
+  type ComposeSourceDraft,
+} from '../buildSource';
+import {
   IMAGE_PAGE_SIZE,
+  composeRepresentationLabel,
   imageAliases,
   imageBuildProgressLabel,
   imageBuildStageLabel,
   imageBuildStatusLabel,
   imageServerStatusLabel,
+  imageSourceLabel,
   impactSummary,
   isTerminalBuild,
   libraryManifestDigest,
@@ -321,6 +345,11 @@ function ImagesIdentityFacts({ entry }: { entry: ImageLibraryEntry }) {
       <DetailFact label="Source" testId="images-detail-source">
         {sourceLabel(image)}
       </DetailFact>
+      {image.source.kind === 'compose' ? (
+        <DetailFact label="Compose output" testId="images-detail-compose-representation">
+          {composeRepresentationLabel(image.source.representation)}
+        </DetailFact>
+      ) : null}
       {image.source_sha ? (
         <DetailFact label="Source commit" mono testId="images-detail-source-sha">
           {image.source_sha}
@@ -583,6 +612,12 @@ function ImageBuildRow({
           <BuildStatusBadge build={build} />
         </span>
       </span>
+      <span
+        className="min-w-0 truncate text-muted-foreground"
+        data-testid="image-build-source"
+      >
+        {imageSourceLabel(build.source)}
+      </span>
       <span className="min-w-0 truncate text-muted-foreground" data-testid="image-build-stage">
         {imageBuildStageLabel(build)}
       </span>
@@ -638,28 +673,420 @@ function ImageBuildRow({
   );
 }
 
+function SourceKindToggle({
+  kind,
+  onChoose,
+}: {
+  kind: BuildSourceKind;
+  onChoose: (kind: BuildSourceKind) => void;
+}) {
+  return (
+    <ToggleGroup
+      data-testid="image-build-source-kind"
+      aria-label="Build source adapter"
+      value={[kind]}
+      onValueChange={(values) => {
+        const next = values[0];
+        if (next === 'github' || next === 'local_directory' || next === 'compose') {
+          onChoose(next);
+        }
+      }}
+      size="sm"
+      className="flex-wrap"
+    >
+      {BUILD_SOURCE_KINDS.map((candidate) => (
+        <ToggleGroupItem
+          key={candidate}
+          value={candidate}
+          data-testid={`image-build-source-${candidate}`}
+        >
+          {BUILD_SOURCE_LABEL[candidate]}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+function GithubSourceFields({
+  draft,
+  errors,
+  onChange,
+}: {
+  draft: BuildSourceDraft;
+  errors: BuildSourceErrors;
+  onChange: (patch: Partial<BuildSourceDraft>) => void;
+}) {
+  return (
+    <FormGrid>
+      <FormField
+        id="image-build-repository"
+        label="Repository"
+        error={errors.repository_url}
+        errorTestId="image-build-error-repository-url"
+      >
+        <Input
+          id="image-build-repository"
+          type="url"
+          value={draft.repositoryUrl}
+          placeholder="https://github.com/<owner>/<repo>"
+          aria-label="Build repository URL"
+          aria-invalid={errors.repository_url ? true : undefined}
+          data-testid="image-build-repository"
+          onChange={(event) => onChange({ repositoryUrl: event.target.value })}
+        />
+      </FormField>
+      <FormField
+        id="image-build-ref"
+        label="Branch or commit"
+        error={errors.ref}
+        errorTestId="image-build-error-ref"
+      >
+        <Input
+          id="image-build-ref"
+          type="text"
+          value={draft.reference}
+          placeholder="main or a full commit SHA"
+          aria-label="Build source ref"
+          aria-invalid={errors.ref ? true : undefined}
+          data-testid="image-build-ref"
+          onChange={(event) => onChange({ reference: event.target.value })}
+        />
+      </FormField>
+    </FormGrid>
+  );
+}
+
+function DirectorySourceFields({
+  draft,
+  errors,
+  onChange,
+}: {
+  draft: BuildSourceDraft;
+  errors: BuildSourceErrors;
+  onChange: (patch: Partial<BuildSourceDraft>) => void;
+}) {
+  return (
+    <FormField
+      id="image-build-path"
+      label="Directory"
+      description="An absolute path inside the Server operator's authorized image source root."
+      error={errors.path}
+      errorTestId="image-build-error-path"
+    >
+      <Input
+        id="image-build-path"
+        type="text"
+        value={draft.path}
+        placeholder="/srv/nession/sources/<name>"
+        aria-label="Build source directory"
+        aria-invalid={errors.path ? true : undefined}
+        data-testid="image-build-path"
+        onChange={(event) => onChange({ path: event.target.value })}
+      />
+    </FormField>
+  );
+}
+
+function ComposeSourceRow({
+  row,
+  index,
+  errors,
+  referenced,
+  removeDisabled,
+  onChange,
+  onRemove,
+}: {
+  row: ComposeSourceDraft;
+  index: number;
+  errors: BuildSourceErrors;
+  referenced: boolean;
+  removeDisabled: boolean;
+  onChange: (patch: Partial<ComposeSourceDraft>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <FormRow data-testid={`image-build-compose-row-${index}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+          Source Image {index + 1}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-label={`Remove source Image ${index + 1}`}
+          data-testid={`image-build-compose-remove-${index}`}
+          disabled={removeDisabled}
+          onClick={onRemove}
+        >
+          Remove
+        </Button>
+      </div>
+      <FormGrid>
+        <FormField
+          id={`image-build-compose-repository-${index}`}
+          label="Repository"
+          error={errors[`compose.${index}.repository`]}
+          errorTestId={`image-build-error-compose-${index}-repository`}
+        >
+          <Input
+            id={`image-build-compose-repository-${index}`}
+            type="text"
+            value={row.repository}
+            placeholder="catalog repository"
+            aria-label={`Compose source ${index + 1} repository`}
+            aria-invalid={errors[`compose.${index}.repository`] ? true : undefined}
+            data-testid="image-build-compose-repository"
+            onChange={(event) => onChange({ repository: event.target.value })}
+          />
+        </FormField>
+        <FormField
+          id={`image-build-compose-ref-${index}`}
+          label="Tag or digest"
+          error={errors[`compose.${index}.ref`]}
+          errorTestId={`image-build-error-compose-${index}-ref`}
+        >
+          <Input
+            id={`image-build-compose-ref-${index}`}
+            type="text"
+            value={row.reference}
+            placeholder="tag or sha256:…"
+            aria-label={`Compose source ${index + 1} reference`}
+            aria-invalid={errors[`compose.${index}.ref`] ? true : undefined}
+            data-testid="image-build-compose-ref"
+            onChange={(event) => onChange({ reference: event.target.value })}
+          />
+        </FormField>
+      </FormGrid>
+      {referenced ? null : (
+        <FormField
+          id={`image-build-compose-destination-${index}`}
+          label="Destination prefix"
+          description="Empty or / places the source at the composed root. Prefixes must not overlap."
+          error={errors[`compose.${index}.destination`]}
+          errorTestId={`image-build-error-compose-${index}-destination`}
+        >
+          <Input
+            id={`image-build-compose-destination-${index}`}
+            type="text"
+            value={row.destination}
+            placeholder="/opt/<name>"
+            aria-label={`Compose source ${index + 1} destination`}
+            aria-invalid={errors[`compose.${index}.destination`] ? true : undefined}
+            data-testid="image-build-compose-destination"
+            onChange={(event) => onChange({ destination: event.target.value })}
+          />
+        </FormField>
+      )}
+    </FormRow>
+  );
+}
+
+function ComposeSourceFields({
+  draft,
+  errors,
+  onRepresentation,
+  onRow,
+  onAdd,
+  onRemove,
+}: {
+  draft: BuildSourceDraft;
+  errors: BuildSourceErrors;
+  onRepresentation: (representation: ImageComposeRepresentation) => void;
+  onRow: (index: number, patch: Partial<ComposeSourceDraft>) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+}) {
+  const referenced = draft.representation === 'referenced';
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-testid="image-build-compose">
+      {draft.sources.map((row, index) => (
+        <ComposeSourceRow
+          key={index}
+          row={row}
+          index={index}
+          errors={errors}
+          referenced={referenced}
+          removeDisabled={draft.sources.length === 1}
+          onChange={(patch) => onRow(index, patch)}
+          onRemove={() => onRemove(index)}
+        />
+      ))}
+      <FormActions>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="image-build-compose-add"
+          onClick={onAdd}
+        >
+          Add source Image
+        </Button>
+      </FormActions>
+      {errors.compose ? (
+        <p className="text-destructive" role="alert" data-testid="image-build-error-compose">
+          {errors.compose}
+        </p>
+      ) : null}
+      <FormField
+        label="Output"
+        error={errors.representation}
+        errorTestId="image-build-error-representation"
+      >
+        <ToggleGroup
+          data-testid="image-build-representation"
+          aria-label="Compose output representation"
+          value={[draft.representation]}
+          onValueChange={(values) => {
+            const next = values[0];
+            if (next === 'flattened' || next === 'referenced') {
+              onRepresentation(next);
+            }
+          }}
+          size="sm"
+        >
+          <ToggleGroupItem
+            value="flattened"
+            data-testid="image-build-representation-flattened"
+          >
+            Flattened
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="referenced"
+            data-testid="image-build-representation-referenced"
+          >
+            Referenced
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </FormField>
+    </div>
+  );
+}
+
+function BuildSubmitActions({
+  alias,
+  error,
+  submitting,
+  onAlias,
+  onSubmit,
+}: {
+  alias: string;
+  error: string | undefined;
+  submitting: boolean;
+  onAlias: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <FormActions>
+      <FormField
+        id="image-build-alias"
+        label="Optional alias"
+        description="A mutable tag applied only after the bytes are ready."
+        error={error}
+        errorTestId="image-build-error-alias"
+        className="min-w-40 flex-1"
+      >
+        <Input
+          id="image-build-alias"
+          type="text"
+          value={alias}
+          placeholder="optional alias"
+          aria-label="Build alias"
+          aria-invalid={error ? true : undefined}
+          data-testid="image-build-alias"
+          onChange={(event) => onAlias(event.target.value)}
+        />
+      </FormField>
+      <Button
+        type="button"
+        size="sm"
+        data-testid="image-build-submit"
+        disabled={submitting}
+        onClick={onSubmit}
+      >
+        {submitting ? 'Submitting…' : 'Build image'}
+      </Button>
+    </FormActions>
+  );
+}
+
 function BuildSubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
-  const [repository, setRepository] = useState('');
-  const [reference, setReference] = useState('main');
+  const [draft, setDraft] = useState<BuildSourceDraft>(emptyBuildSourceDraft);
   const [alias, setAlias] = useState('');
+  const [errors, setErrors] = useState<BuildSourceErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const changeDraft = (patch: Partial<BuildSourceDraft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const chooseKind = (kind: BuildSourceKind) => {
+    setErrors({});
+    setError(null);
+    setDraft((current) => ({ ...current, kind }));
+  };
+
+  const chooseRepresentation = (representation: ImageComposeRepresentation) => {
+    setErrors({});
+    setDraft((current) => ({
+      ...current,
+      representation,
+      // A referenced result keeps every source at the composed root, so a
+      // destination typed for a flattened composition would only fail later.
+      sources:
+        representation === 'referenced'
+          ? current.sources.map((row) => ({ ...row, destination: '' }))
+          : current.sources,
+    }));
+  };
+
+  const changeRow = (index: number, patch: Partial<ComposeSourceDraft>) => {
+    setDraft((current) => ({
+      ...current,
+      sources: current.sources.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, ...patch } : row,
+      ),
+    }));
+  };
+
+  const addRow = () => {
+    setDraft((current) => ({
+      ...current,
+      sources: [...current.sources, emptyComposeSourceDraft()],
+    }));
+  };
+
+  const removeRow = (index: number) => {
+    setDraft((current) => ({
+      ...current,
+      sources: current.sources.filter((_, rowIndex) => rowIndex !== index),
+    }));
+  };
+
   const submit = async () => {
-    const url = repository.trim();
-    const ref = reference.trim();
-    if (!url || !ref) {
-      setError('A public GitHub repository URL and a branch or commit are required');
+    const validation = validateBuildSource(draft);
+    const normalizedAlias = normalizeBuildAlias(alias);
+    const nextErrors: BuildSourceErrors = { ...validation.errors };
+    if (normalizedAlias === null) {
+      nextErrors.alias =
+        'Use a lowercase tag of at most 128 characters starting with a letter or digit';
+    }
+    setErrors(nextErrors);
+    setError(null);
+    if (!validation.source || Object.keys(nextErrors).length > 0) {
+      // SC-01: an invalid or non-canonical source never becomes a submitted
+      // Server job. The draft stays exactly as typed.
       return;
     }
     setSubmitting(true);
-    setError(null);
     try {
-      await imagesApi.submitBuild(
-        { kind: 'github', repository_url: url, ref },
-        { alias: alias.trim() || undefined },
-      );
+      await imagesApi.submitBuild(validation.source, {
+        alias: normalizedAlias ?? undefined,
+      });
+      setDraft(emptyBuildSourceDraft());
       setAlias('');
+      setErrors({});
       onSubmitted();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : 'The build could not be submitted');
@@ -669,53 +1096,40 @@ function BuildSubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
   };
 
   return (
-    <div className="flex flex-col gap-2" data-testid="image-build-form">
-      <div className="flex flex-wrap items-center gap-1">
-        <Input
-          type="url"
-          value={repository}
-          placeholder="https://github.com/<owner>/<repo>"
-          aria-label="Build repository URL"
-          data-testid="image-build-repository"
-          className="min-w-0 flex-1"
-          onChange={(event) => setRepository(event.target.value)}
-        />
-        <Input
-          type="text"
-          value={reference}
-          placeholder="branch or commit"
-          aria-label="Build source ref"
-          data-testid="image-build-ref"
-          className="w-36"
-          onChange={(event) => setReference(event.target.value)}
-        />
-      </div>
-      <div className="flex flex-wrap items-center gap-1">
-        <Input
-          type="text"
-          value={alias}
-          placeholder="optional alias"
-          aria-label="Build alias"
-          data-testid="image-build-alias"
-          className="min-w-0 flex-1"
-          onChange={(event) => setAlias(event.target.value)}
-        />
-        <Button
-          type="button"
-          size="sm"
-          data-testid="image-build-submit"
-          disabled={submitting}
-          onClick={() => void submit()}
-        >
-          {submitting ? 'Submitting…' : 'Build image'}
-        </Button>
-      </div>
+    <FormSurface data-testid="image-build-form">
+      <FormSection
+        title="Source"
+        description="Only adapters this Server serves are listed. A build snapshots the declared source; it never runs repository scripts."
+      >
+        <SourceKindToggle kind={draft.kind} onChoose={chooseKind} />
+        {draft.kind === 'github' ? (
+          <GithubSourceFields draft={draft} errors={errors} onChange={changeDraft} />
+        ) : draft.kind === 'local_directory' ? (
+          <DirectorySourceFields draft={draft} errors={errors} onChange={changeDraft} />
+        ) : (
+          <ComposeSourceFields
+            draft={draft}
+            errors={errors}
+            onRepresentation={chooseRepresentation}
+            onRow={changeRow}
+            onAdd={addRow}
+            onRemove={removeRow}
+          />
+        )}
+      </FormSection>
+      <BuildSubmitActions
+        alias={alias}
+        error={errors.alias}
+        submitting={submitting}
+        onAlias={setAlias}
+        onSubmit={() => void submit()}
+      />
       {error ? (
         <p className="text-destructive" data-testid="image-build-submit-error">
           {error}
         </p>
       ) : null}
-    </div>
+    </FormSurface>
   );
 }
 

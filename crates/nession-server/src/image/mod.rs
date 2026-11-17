@@ -460,6 +460,10 @@ pub struct ImageManagerOptions {
     pub max_concurrent_builds: usize,
     /// The existing configured Server build root (`image_build_dir`).
     pub build_root: PathBuf,
+    /// The one Server-authorized root a `local_directory` source may name
+    /// (#3795). `None` disables the local source adapter; a browser cannot
+    /// authorize an arbitrary host path.
+    pub source_root: Option<PathBuf>,
     /// Bound for one Git/`mkfs.erofs` subprocess.
     pub build_stage_timeout: Option<Duration>,
     pub build_log_max_bytes: u64,
@@ -633,6 +637,9 @@ pub struct ImageManager {
     notifier: SharedNotifier,
     stage_timeout: Option<Duration>,
     retention_secs: u64,
+    /// The Server-authorized local source root (#3795). Only a normalized
+    /// `local_directory` path inside it may become a build.
+    source_root: Option<PathBuf>,
     /// Serializes publication, dedupe and alias application so one digest
     /// cannot gain competing ready rows or a stale alias write.
     publication: tokio::sync::Mutex<()>,
@@ -668,6 +675,7 @@ impl ImageManager {
             1,
             None,
             DEFAULT_BUILD_RETENTION_SECS,
+            None,
         ))
     }
 
@@ -687,6 +695,7 @@ impl ImageManager {
             options.max_concurrent_builds,
             options.build_stage_timeout,
             options.build_retention_secs,
+            options.source_root,
         ))
     }
 
@@ -699,6 +708,7 @@ impl ImageManager {
         max_concurrent_builds: usize,
         stage_timeout: Option<Duration>,
         retention_secs: u64,
+        source_root: Option<PathBuf>,
     ) -> Self {
         Self {
             db,
@@ -713,6 +723,7 @@ impl ImageManager {
             notifier: Arc::new(Mutex::new(None)),
             stage_timeout,
             retention_secs,
+            source_root,
             publication: tokio::sync::Mutex::new(()),
             submit_lock: tokio::sync::Mutex::new(()),
         }
@@ -734,6 +745,45 @@ impl ImageManager {
         self.builds.as_ref().ok_or_else(|| {
             ImageError::Unavailable("image build storage is unavailable".to_string())
         })
+    }
+
+    /// Authorize one normalized source against Server-owned policy (#3795).
+    ///
+    /// Git and Compose sources are authorized by their own canonical
+    /// validation. A `local_directory` source is authorized only when the
+    /// Server operator configured `image_source_root` and the path lies inside
+    /// it. The check happens at submission, before any durable build record
+    /// exists, so a browser cannot point a build at an arbitrary host path.
+    fn authorize_source(
+        &self,
+        source: &NormalizedImageSource,
+    ) -> std::result::Result<(), ImageError> {
+        let NormalizedImageSource::LocalDirectory { path } = source else {
+            return Ok(());
+        };
+        let Some(root) = self.source_root.as_deref() else {
+            return Err(ImageError::Forbidden(
+                "local directory builds are not authorized on this Server".to_string(),
+            ));
+        };
+        let source_path = Path::new(path);
+        // A missing source is a build-time failure, not an authorization
+        // bypass: the lexical check still proves the declared path is inside
+        // the operator's root. When both exist, canonicalization also refuses
+        // a symlinked source that escapes the root.
+        let contained = match (source_path.canonicalize(), root.canonicalize()) {
+            (Ok(canonical_source), Ok(canonical_root)) => {
+                canonical_source.starts_with(canonical_root)
+            }
+            _ => source_path.starts_with(root),
+        };
+        if !contained {
+            return Err(ImageError::Forbidden(
+                "local directory source is outside the Server-authorized image source root"
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Legacy synchronous `server.image.build` compatibility path.
@@ -790,6 +840,7 @@ impl ImageManager {
         let _submit = self.submit_lock.lock().await;
         let store = self.store()?.clone();
         let normalized = normalize_image_source(source)?;
+        self.authorize_source(&normalized)?;
         let alias = alias.map(normalize_alias).transpose()?;
         let request_id = client_request_id
             .map(normalize_client_request_id)
@@ -3564,9 +3615,20 @@ mod tests {
     }
 
     fn test_options(dir: &std::path::Path) -> ImageManagerOptions {
+        // Most fixtures never touch the real filesystem; a permissive root
+        // keeps them focused on build behavior. The authorization tests
+        // construct their own narrower root.
+        test_options_with_root(dir, Some(std::path::PathBuf::from("/")))
+    }
+
+    fn test_options_with_root(
+        dir: &std::path::Path,
+        source_root: Option<std::path::PathBuf>,
+    ) -> ImageManagerOptions {
         ImageManagerOptions {
             max_concurrent_builds: 2,
             build_root: dir.join("builds"),
+            source_root,
             build_stage_timeout: Some(Duration::from_secs(60)),
             build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
             build_retention_secs: DEFAULT_BUILD_RETENTION_SECS,
@@ -3576,11 +3638,24 @@ mod tests {
     async fn manager(
         dir: &std::path::Path,
     ) -> (Arc<ImageManager>, Arc<FakeBackend>, Arc<Database>) {
+        manager_with_root(dir, Some(std::path::PathBuf::from("/"))).await
+    }
+
+    async fn manager_with_root(
+        dir: &std::path::Path,
+        source_root: Option<std::path::PathBuf>,
+    ) -> (Arc<ImageManager>, Arc<FakeBackend>, Arc<Database>) {
         let db = Arc::new(Database::new(":memory:").await.unwrap());
         let blobs = BlobStore::new(dir.join("blobs")).unwrap();
         let backend = Arc::new(FakeBackend::new(blobs.clone()));
         let manager = Arc::new(
-            ImageManager::new(Arc::clone(&db), backend.clone(), blobs, test_options(dir)).unwrap(),
+            ImageManager::new(
+                Arc::clone(&db),
+                backend.clone(),
+                blobs,
+                test_options_with_root(dir, source_root),
+            )
+            .unwrap(),
         );
         (manager, backend, db)
     }
@@ -3603,6 +3678,59 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    #[tokio::test]
+    async fn a_local_source_outside_the_authorized_root_is_refused_before_a_record_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, _db) =
+            manager_with_root(dir.path(), Some(std::path::PathBuf::from("/source"))).await;
+        backend.set("/elsewhere/image", b"not authorized");
+
+        let error = manager
+            .submit_build(&local("/elsewhere/image"), None, None)
+            .await
+            .expect_err("a path outside the authorized root must be refused");
+        assert_eq!(error.kind(), "forbidden");
+        assert!(error
+            .message()
+            .contains("Server-authorized image source root"));
+        assert_eq!(manager.list_builds(0, 10).await.unwrap().total, 0);
+        assert!(manager.list(0, 10, "").await.unwrap().images.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_local_source_inside_the_authorized_root_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, _db) =
+            manager_with_root(dir.path(), Some(std::path::PathBuf::from("/source"))).await;
+        backend.set("/source/authorized", b"authorized bytes");
+
+        let image = manager
+            .build(&local("/source/authorized"), None)
+            .await
+            .expect("a path inside the authorized root is accepted");
+        assert_eq!(image.status, ImageStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn an_unconfigured_source_root_disables_local_directory_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+        let backend = Arc::new(FakeBackend::new(blobs.clone()));
+        let options = test_options_with_root(dir.path(), None);
+        let manager =
+            Arc::new(ImageManager::new(Arc::clone(&db), backend.clone(), blobs, options).unwrap());
+        backend.set("/source/a", b"bytes");
+
+        let error = manager
+            .submit_build(&local("/source/a"), None, None)
+            .await
+            .expect_err("an unconfigured source root authorizes nothing");
+        assert_eq!(error.kind(), "forbidden");
+        assert!(error.message().contains("not authorized"));
+        assert_eq!(manager.list_builds(0, 10).await.unwrap().total, 0);
     }
 
     #[tokio::test]
