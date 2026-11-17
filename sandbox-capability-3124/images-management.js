@@ -99,7 +99,10 @@
     if(ui.tagPhase==="edit"){
       body=field("Tag name",input("tagName",ui.tagName,"stable"),
       "Repository-scoped mutable pointer. This operation never rewrites a Manifest.")+
-      '<div class="im-operation-footer">'+act("Cancel","im:tag-cancel")+act("Unlink selected Tag","im:tag-remove:"+im.id,"danger",!(im.tags||[]).includes(ui.tagName))+act("Review change","im:tag-review:"+im.id,"primary")+'</div>';
+      ((im.tags||[]).length?'<div class="im-existing-tags"><span>Existing Tags</span><div>'+
+      im.tags.map(tag=>act("Unlink "+tag,"im:tag-remove:"+im.id+":"+tag,"danger")).join("")+
+      '</div></div>':"")+
+      '<div class="im-operation-footer">'+act("Cancel","im:tag-cancel")+act("Review change","im:tag-review:"+im.id,"primary")+'</div>';
     } else {
       const unlink=ui.tagPhase==="unlink",impact=(im.imMeta?.refs||[]);
       body='<div class="im-operation-summary"><div><span>Repository</span><strong>'+h(im.repository)+'</strong></div>'+
@@ -333,7 +336,7 @@
     else if(part==="tag-refresh"){const im=find();const o=im&&s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagConflictRefreshed=true;ui.tagPhase="edit";ui.tagMessage="Expected Tag refreshed. Review the operation again before confirming."; }
     else if(part==="tag-review"){const im=find();if(!im||!serverUp(s))return true;if(!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(ui.tagName)){ui.tagMessage="Invalid Tag: use lower-case letters, digits, dot, underscore or hyphen.";return true;}const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagPhase="review";ui.tagMessage="";}
     else if(part==="tag-save"){const im=find();if(!im||ui.tagPhase!=="review"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: Tag changed since review. Refresh the expected revision before retry.";return true;}if(o)o.tags=o.tags.filter(t=>t!==ui.tagName);if(!im.tags.includes(ui.tagName))im.tags.push(ui.tagName);ui.tag=null;ui.notice="Tag "+ui.tagName+" updated. Existing pinned consumers are unchanged.";}
-    else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=(im.tags||[]).includes(ui.tagName)?ui.tagName:im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";ui.tagConflictRefreshed=false;}
+    else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;const selectedTag=a.split(":")[3];ui.tagName=(im.tags||[]).includes(selectedTag)?selectedTag:im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";ui.tagConflictRefreshed=false;}
     else if(part==="tag-unlink"){const im=find();if(!im||ui.tagPhase!=="unlink"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: the Tag changed before unlink. Nothing was removed.";return true;}o.tags=o.tags.filter(t=>t!==ui.tagName);ui.tag=null;ui.notice="Tag unlinked; immutable Manifest, consumer pins and Blob Store remain.";
     } else if(part==="distribution"){s.sub.images="distribution";ui.cacheSelected=id;}
     else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.repository="all";ui.status="all";ui.selected=id;ui.libraryPage=Math.max(0,Math.floor(catalog(s).findIndex(im=>im.id===id)/ui.librarySize));}
