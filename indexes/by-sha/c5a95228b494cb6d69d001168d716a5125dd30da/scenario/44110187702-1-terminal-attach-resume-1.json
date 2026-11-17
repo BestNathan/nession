@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44110187702,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3795-build-source-adapters",
+    "target_sha": "c5a95228b494cb6d69d001168d716a5125dd30da",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44110187702",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "8d6f245e20f3826453035d549fff2c955bdb97bcc52d25cb646e6992ea0caa08"
+  },
+  "record": "runs/2026-11-17/44110187702-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "35db895349b975793a4ce614178e4bb38f5b4e2342797f9e4f1f5413a8a9865c"
+}
