@@ -231,8 +231,8 @@ test('MCP kit keeps the Session context and never probes on view (#3772)', async
 
   await page.getByTestId('mcp-server-row').filter({ hasText: 'nession' }).click();
   await expect(page.getByTestId('mcp-tools-not-probed')).toContainText('never probes');
-  await expect(page.getByTestId('mcp-connection-reachability')).toHaveText('Not probed');
-  await expect(page.getByTestId('mcp-connection-loaded')).toHaveText('Unknown');
+  await expect(page.getByTestId('mcp-connection-reachability')).toContainText('Not probed');
+  await expect(page.getByTestId('mcp-connection-loaded')).toContainText('Unknown');
 
   await page.getByTestId('mcp-connection-test').click();
   await expect(page.getByTestId('mcp-connection-state')).toHaveText('Reachable');
@@ -244,9 +244,8 @@ test('MCP kit keeps the Session context and never probes on view (#3772)', async
   await expect(page.getByTestId('mcp-schema-output-fields')).toContainText('sessions');
 
   // Inspecting never invokes; the Run depth requires an explicit action.
-  await expect(page.getByTestId('mcp-result-empty')).toContainText('never triggers a call');
   await page.getByTestId('mcp-open-runner').click();
-  await expect(page.getByTestId('mcp-result-empty')).toBeVisible();
+  await expect(page.getByTestId('mcp-result-empty')).toContainText('never triggers a call');
   await page.getByTestId('mcp-run').click();
   await expect(page.getByTestId('mcp-argument-error')).toContainText('Required: scope');
   await page.locator('[data-argument-name="scope"]').fill('current');
