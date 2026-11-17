@@ -1393,6 +1393,109 @@ fn a_recorded_cgroup_is_recoverable_after_restart() {
     }));
 }
 
+/// A legacy execution-scoped mount whose strict unmount fails must retain its
+/// durable record and execution directory for a later retry (#3695 P1-B).
+#[test]
+fn a_legacy_record_with_a_failed_unmount_is_retained_for_retry() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut settings = settings(dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let settings_root = std::fs::canonicalize(&settings.state_dir).expect("canonical state");
+    settings.state_dir = settings_root.clone();
+    let execution_id = format!("legacy-unmount-{}", std::process::id());
+    let execution_dir = settings_root.join(&execution_id);
+    let lower = execution_dir.join("legacy-lower");
+    let upper = execution_dir.join("legacy-upper");
+    let work = execution_dir.join("legacy-work");
+    let merged = execution_dir.join("legacy-merged");
+    for path in [&lower, &upper, &work] {
+        std::fs::create_dir_all(path).expect("legacy fixture directory");
+    }
+    let overlay_settings = nession_sandbox::mount::overlay::OverlaySettings::new(
+        settings.fuse_overlayfs_path.clone(),
+        settings.fusermount_path.clone(),
+    );
+    nession_sandbox::mount::overlay::mount::mount_overlay(
+        &nession_sandbox::mount::overlay::OverlayMountSpec {
+            lowers: vec![lower],
+            upper,
+            work,
+            merged: merged.clone(),
+        },
+        &overlay_settings,
+    )
+    .expect("mount the legacy fixture");
+    assert!(
+        nession_sandbox::linux::erofs::is_mounted(&merged),
+        "the legacy fixture is a real mount"
+    );
+
+    let record: nession_sandbox::ExecutionRecord = serde_json::from_value(serde_json::json!({
+        "execution_id": execution_id,
+        "session_name": "legacy-failed-unmount",
+        "instance_id": "instance-legacy",
+        "backend": "linux-bwrap",
+        "policy_digest": "digest",
+        "created_at": 0,
+        "mounts": [merged.to_string_lossy()],
+        "execution_dir": execution_dir.to_string_lossy(),
+        "restricted_network": false,
+        "agent_pid": std::process::id(),
+    }))
+    .expect("legacy record fixture");
+    let record_path = settings_root.join(format!("{execution_id}.json"));
+    std::fs::write(
+        &record_path,
+        serde_json::to_vec(&record).expect("record bytes"),
+    )
+    .expect("persist the legacy record");
+
+    // The recorded mount cannot be unmounted: cleanup must fail before it
+    // forgets the durable record or removes the occupied directory.
+    let failing_fusermount = dir.path().join("failing-fusermount");
+    executable_script(&failing_fusermount, "#!/bin/sh\nexit 1\n");
+    let mut failing = settings.clone();
+    failing.fusermount_path = failing_fusermount;
+    let mut report = nession_sandbox::CleanupReport::default();
+    let error = nession_sandbox::cleanup_record(&failing, &record, &mut report)
+        .expect_err("a failed strict unmount must fail the cleanup");
+    assert!(
+        format!("{error:#}").contains("unmount"),
+        "the failure must name the unmount boundary: {error:#}"
+    );
+    assert!(
+        nession_sandbox::linux::erofs::is_mounted(&merged),
+        "the physical mount must survive the failed cleanup"
+    );
+    assert!(
+        execution_dir.exists(),
+        "the occupied execution directory must survive"
+    );
+    assert!(
+        record_path.exists(),
+        "the durable record must survive for a restart retry"
+    );
+
+    // A retry through the working helper completes the cleanup.
+    let mut report = nession_sandbox::CleanupReport::default();
+    nession_sandbox::cleanup_record(&settings, &record, &mut report)
+        .expect("the retry must succeed once the unmount works");
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(&merged),
+        "the retry unmounts the legacy mount"
+    );
+    assert!(
+        !execution_dir.exists(),
+        "the execution directory is removed only after the unmount"
+    );
+    assert!(!record_path.exists(), "the durable record is removed last");
+    print_evidence(&serde_json::json!({
+        "legacy_unmount_failure_retained": true,
+        "legacy_unmount_retry_succeeded": true,
+    }));
+}
+
 #[test]
 fn an_execution_survives_losing_its_client_stream() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1888,6 +1991,197 @@ read base < /whiteout.txt
         "base_image_unchanged": true,
         "later_execution_isolated": true,
         "transient_recorded": true,
+    }));
+}
+
+/// A writable RootFS preparation that fails after its Base mount must keep a
+/// durable rollback record when the strict Overlay unmount fails (#3698 P1).
+/// The record is written before the physical mount is exposed; a restart
+/// cleans it only through the verified unmount and lower release.
+#[test]
+fn a_failed_transient_rootfs_preparation_keeps_a_durable_recovery_record() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = dir.path().join("images");
+    let base_source = dir.path().join("base-source");
+    for path in [&images, &base_source] {
+        std::fs::create_dir_all(path).expect("fixture directory");
+    }
+    build_base_runtime(
+        &base_source,
+        Path::new(env!("CARGO_BIN_EXE_nession-sandbox-bridge")),
+    );
+    std::fs::create_dir_all(base_source.join("opt/tool")).expect("toolchain mountpoint");
+    let base_image = images.join("base.erofs");
+    mkfs_erofs(&base_source, &base_image);
+    let base_digest = sha256_file(&base_image);
+
+    // A real, authorized toolchain file whose declared digest is different:
+    // acquisition fails after the writable Base has been mounted.
+    let toolchain_source = dir.path().join("toolchain-source");
+    std::fs::create_dir_all(&toolchain_source).expect("toolchain source");
+    std::fs::write(toolchain_source.join("tool"), "tool\n").expect("toolchain file");
+    let toolchain_image = images.join("tool.erofs");
+    mkfs_erofs(&toolchain_source, &toolchain_image);
+    let wrong_digest = format!("sha256:{}", "a".repeat(64));
+
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(images);
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let workspace_write = settings
+        .state_dir
+        .join("workspaces")
+        .join("rootfs-recovery");
+    std::fs::create_dir_all(&workspace_write).expect("bind workspace");
+
+    // The strict unmount uses fusermount. Make it fail so the transient view
+    // cannot be rolled back after the later acquisition failure.
+    let failing_fusermount = dir.path().join("failing-fusermount");
+    executable_script(&failing_fusermount, "#!/bin/sh\nexit 1\n");
+    let mut failing = settings.clone();
+    failing.fusermount_path = failing_fusermount;
+
+    let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "enabled": true,
+        "filesystem": {
+            "access": { "read": [], "write": [] },
+            "rootfs": {
+                "kind": "image",
+                "digest": format!("sha256:{base_digest}"),
+                "writable": true
+            },
+            "composition": {
+                "base": {
+                    "digest": format!("sha256:{base_digest}"),
+                    "source": base_image.to_string_lossy()
+                },
+                "base_writable": true,
+                "workspace": { "write": workspace_write.to_string_lossy() },
+                "toolchains": [{
+                    "digest": wrong_digest,
+                    "source": toolchain_image.to_string_lossy(),
+                    "target": "/opt/tool"
+                }]
+            }
+        },
+        "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+        "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+        "enforcement": "required"
+    }))
+    .expect("writable RootFS failure policy");
+    let request = LaunchRequest {
+        policy,
+        session_name: format!("rootfs-recovery-{}", std::process::id()),
+        instance_id: "instance-rootfs-recovery".to_string(),
+        working_dir: "/workspace".to_string(),
+        inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
+        tmux_socket: None,
+    };
+    let error = match prepare(&request, &failing) {
+        Ok(_) => panic!("the mismatched toolchain must fail prepare"),
+        Err(error) => error,
+    };
+    assert!(format!("{error:#}").contains("digest"), "{error:#}");
+
+    let record_paths: Vec<PathBuf> = std::fs::read_dir(&failing.state_dir)
+        .expect("state dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
+        .collect();
+    assert_eq!(
+        record_paths.len(),
+        1,
+        "the failed preparation left one recovery record"
+    );
+    let record_path = record_paths[0].clone();
+    let record: nession_sandbox::ExecutionRecord =
+        serde_json::from_slice(&std::fs::read(&record_path).expect("record bytes"))
+            .expect("decode the recovery record");
+    assert!(
+        record.recovery_pending,
+        "the record is a pending recovery identity"
+    );
+    assert!(
+        record.session_name.is_empty(),
+        "it is not a Session-backed execution"
+    );
+    let transient = record
+        .transient_rootfs
+        .clone()
+        .expect("the transient RootFS identity");
+    assert!(
+        nession_sandbox::linux::erofs::is_mounted(Path::new(&transient.mountpoint)),
+        "the un-unmountable transient view is retained"
+    );
+    assert!(
+        Path::new(&transient.upper).exists() && Path::new(&transient.work).exists(),
+        "the transient upper/work are retained"
+    );
+    assert_eq!(
+        record.shared_mounts.len(),
+        1,
+        "the lower consumer is recorded"
+    );
+    let lower = record.shared_mounts[0].clone();
+    let consumers = |settings: &SandboxSettings| {
+        settings
+            .mount_manager
+            .as_ref()
+            .expect("the shared EROFS manager")
+            .lookup(&lower.digest)
+            .map(|status| status.consumers)
+            .unwrap_or(0)
+    };
+    assert_eq!(
+        consumers(&failing),
+        1,
+        "the lower consumer is retained while the view is live"
+    );
+    let execution_dir = PathBuf::from(&record.execution_dir);
+    assert!(
+        execution_dir.exists(),
+        "the occupied execution directory survives the failed preparation"
+    );
+
+    // A restart with the working helper cleans exactly from the durable record.
+    let mut restarted = settings.clone();
+    reopen_managers(&mut restarted, dir.path(), "rootfs-recovery-restart");
+    let outcomes = nession_sandbox::reconcile(&restarted, &[]).expect("reconcile");
+    assert!(
+        outcomes.iter().any(|outcome| matches!(
+            outcome,
+            nession_sandbox::ReconcileOutcome::Cleaned(id) if id == &record.execution_id
+        )),
+        "the pending record is cleaned after restart: {outcomes:?}"
+    );
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(Path::new(&transient.mountpoint)),
+        "the restart unmounts the transient view"
+    );
+    assert!(
+        !execution_dir.exists(),
+        "the execution directory is removed last"
+    );
+    assert!(!record_path.exists(), "the recovery record is removed");
+    assert_eq!(
+        consumers(&restarted),
+        0,
+        "the lower consumer is released only after the verified unmount"
+    );
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(Path::new(&lower.mountpoint)),
+        "the physical read-only lower is reclaimed only after the verified unmount"
+    );
+    print_evidence(&serde_json::json!({
+        "pending_record_written": true,
+        "rollback_unmount_failed": true,
+        "transient_view_retained": true,
+        "lower_consumer_retained": true,
+        "restart_cleanup_succeeded": true,
+        "lower_released_after_unmount": true,
     }));
 }
 
