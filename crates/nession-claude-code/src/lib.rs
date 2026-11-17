@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_view;
 pub mod binding;
 pub mod canonical;
 pub mod conversation;
