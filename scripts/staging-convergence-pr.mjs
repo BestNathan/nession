@@ -226,7 +226,10 @@ export function revisedNativeConvergenceRisk(pr,repoRoot,baseSha,liveMainSha){
   // with only one formerly valid risk category changed by the trusted policy.
   // Arbitrary digest mismatches, altered source SHAs, and malformed markers
   // remain fail-closed, even for a bot-owned PR.
-  const priorRisk=RISK_CATEGORIES.find(category=>
+  const priorRisk=RISK_CATEGORIES.filter(category=>
+    batch.changedPaths.length>0
+      ? category!=='ancestry-only'
+      : category==='ancestry-only').find(category=>
     category!==batch.impact.category &&
     convergenceBatchDigest({...batch,impact:{...batch.impact,category}})===
       marker.digest);
