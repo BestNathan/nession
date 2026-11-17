@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| Timers · Server Definitions / Agent Placement / systemd + launchd observations · Web/App | [#3810](https://github.com/BestNathan/nession/issues/3810) · [Core #3807](https://github.com/BestNathan/nession/issues/3807) | [Interactive HTML](timer-workspace-3810/index.html) · [Scenario & fidelity](timer-workspace-3810/README.md) |
+
+
 | Session Activity · Capability reports / Working / Idle / Unknown / Needs input / Agent recovery · Web/App | [#3804](https://github.com/BestNathan/nession/issues/3804) · [Core #3800](https://github.com/BestNathan/nession/issues/3800) | [Interactive HTML](session-activity-3804/index.html) · [Scenario & fidelity](session-activity-3804/README.md) |
 
 | Shared MCP UI Kit · Config / Connection / Tool Input+Output Schema / explicit Runner · AI #3251 + Claude #3600 · Web/App | [#3772](https://github.com/BestNathan/nession/issues/3772) | [Interactive HTML](mcp-ui-kit-3772/index.html) · [Scenario & fidelity](mcp-ui-kit-3772/README.md) |

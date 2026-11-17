@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Timer Workspace · #3810</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review-root">
+<header class="np-overview">
+<nav class="np-breadcrumb" aria-label="Prototype navigation"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Timers</span></nav>
+<span class="np-eyebrow">REQUIREMENT #3810 · TIMER WORKSPACE</span>
+<div class="np-header-main"><div><h1 class="np-title">Timers · 计划与实际执行分离</h1>
+<p class="np-subtitle">Server 保存 Definition 和 Placement，Agent 安装实际 Scheduler。探索从上下文创建、选择执行节点、Pending/Ready 可见性、执行历史、Agent 局部诊断，以及 Web/App 不同的导航和表单深度。</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3810" target="_blank" rel="noopener noreferrer">UI #3810</a>
+<a href="https://github.com/BestNathan/nession/issues/3807" target="_blank" rel="noopener noreferrer">Core #3807</a>
+<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype/timer-workspace-3810" target="_blank" rel="noopener noreferrer">View source</a></div></div>
+<div class="np-meta"><span>Surface: <strong>Web Workspace / App Workspace</strong></span><span>Viewports: <strong>1180 / 1024 · 390 / 375</strong></span><span>Data: <strong>mock only, no live API</strong></span></div>
+</header>
+<main><section class="np-preview" aria-labelledby="preview-title">
+<div class="np-section-heading"><div><h2 id="preview-title">可交互产品预览 · 实际 CSS 像素</h2><p>创建任务、检查部署状态，切换宽度观察 Web Dialog 与 App 全页操作。</p></div>
+<div class="np-preview-toolbar" aria-label="Viewport controls">
+<button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button>
+<button type="button" data-np-size="1024">Web 1024</button>
+<button type="button" data-np-size="390">App 390</button>
+<button type="button" data-np-size="375">App 375</button>
+<button type="button" data-np-reset>Reset</button>
+</div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:730px">
+<div id="timer-product" class="t-product" data-mode="web">
+<div class="t-web">
+<aside class="t-sidebar" aria-label="Web Sidebar">
+<div class="t-brand"><span class="t-mark">n</span><strong>nession</strong><button class="t-icon t-expand" type="button" data-action="collapse" aria-label="Collapse Sidebar">◧</button></div>
+<div class="t-side-inner"><button class="t-side-action" type="button" data-action="new-session">＋ &nbsp; New Session</button>
+<div class="t-side-caption">Sessions</div><button class="t-side-row selected" type="button" data-action="session">◉ &nbsp; Review workspace</button><button class="t-side-row" type="button" data-action="session">◯ &nbsp; Local terminal</button>
+<div class="t-side-caption">Projects</div><button class="t-side-row" type="button" data-action="project">▦ &nbsp; nession</button>
+<div class="t-side-foot"><span class="t-dot"></span> Server connected</div></div>
+<div class="t-rail"><button type="button" class="t-icon" data-action="collapse">☰</button><button class="t-icon" data-action="new-session" type="button">＋</button><span class="t-rail-spacer"></span><span class="t-dot"></span></div>
+</aside>
+<div class="t-shell-main"><header class="t-shell-header"><span class="t-main-identity">Review workspace</span><span class="t-main-meta">Session · devbox-01</span><button type="button" class="t-plain" data-action="terminal">Terminal</button></header>
+<section class="t-workspace-panel" aria-label="WorkspacePanel"><div class="t-workspace-shell">
+<div class="t-shell-context"><span>Workspace</span><span class="t-separator">/</span><span id="web-crumb">Timers</span></div>
+<div class="t-content-scroll" id="web-content"></div>
+<div class="t-capsule"><button class="t-icon" type="button" data-action="terminal" aria-label="Return to Terminal">↶</button><div class="t-capsule-pill"><span>⌕</span><span>Workspace</span><span class="t-capsule-active">Timers</span><span class="t-capsule-end">＋</span></div></div>
+</div></section></div>
+</div>
+<div class="t-app" aria-label="AppLayout and WorkspacePanel">
+<header class="t-app-header"><button class="t-icon" type="button" data-action="app-back" aria-label="Back">‹</button><strong id="app-title">Timers</strong><span class="t-app-header-right"></span></header>
+<div class="t-app-scroll" id="app-content"></div>
+<div class="t-app-bottom"><div class="t-app-dock"><button type="button" class="t-icon" data-action="terminal" aria-label="Terminal">↶</button><span>Workspace · Timers</span><button type="button" class="t-icon" data-action="new" aria-label="New Timer">＋</button></div></div>
+</div>
+<div id="web-overlay" class="t-overlay" hidden></div>
+<div class="t-toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+</div></div>
+<p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+</section>
+<section class="np-details"><h2>设计问题与验证路径</h2><p class="np-details-lede">原型数据均为示例；这些按钮仅模拟 Agent 运行条件，不属于产品界面。</p>
+<div class="np-detail-grid"><article class="np-detail"><h3>完整交互流程</h3><ol class="np-steps">
+<li>在 Timers 列表点击 New Timer，设置 schedule、action、placement。</li>
+<li>选择 macbook-offline 并保存，观察 Server 已保存但 Agent 为 Pending。</li>
+<li>在下方将 macbook 上线；查看任务详情与部署状态变化。</li>
+<li>模拟 Run、查看历史、Pause/Resume、Edit、Delete。</li>
+<li>切换 Web / App，验证弹框与全页表单、返回路径及滚动。</li>
+</ol></article>
+<article class="np-detail"><h3>模拟 Agent / 边界</h3><p>切换目标节点的连接状况，任务的 Definition 不应丢失，也不应自动迁移到其他 Agent。</p>
+<div class="np-preview-toolbar" role="group" aria-label="Mock infrastructure controls">
+<button type="button" data-review-action="offline">macbook offline</button><button type="button" data-review-action="online">macbook online</button><button type="button" data-review-action="empty">Empty list</button><button type="button" data-np-reset>Reset</button>
+</div><p id="review-state">macbook: offline · no backend connections</p></article>
+<article class="np-detail"><h3>架构与 UX 边界</h3><p>Server owns Definition + Placement. Agent owns Binding + execution. Project 是关联者，Session 是资源关联的执行目标；Agent Detail 仅显示分配到该节点的实例。</p><p>UI 入口为现有 Workspace 上下文的候选能力，不表示生产中已经有固定全局 Timers 标签。</p></article>
+<article class="np-detail"><h3>验证与不足</h3><p>使用 Nession main 的中性色彩、Typography roles、WorkspaceShell / ResourceDetail / ConfigurationForm / OperationSurface 作为近似。UI 交互为前端内存 mock；未验证真实 Server、systemd、launchd、MCP、生产 Gate/Playwright 或 Pages 发布。</p>
+<a href="./README.md">查看场景 / Fidelity 说明</a></article></div>
+</section></main></div>
+<script defer src="./app.js"></script>
+<script defer src="../prototype-frame-2758/frame.js"></script>
+</body>
+</html>
