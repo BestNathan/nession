@@ -1,21 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FileEntry, FileOps } from '@/capabilities/files';
+import type { FileOps } from '@/capabilities/files';
 import { fuzzyMatchesFile } from './appFilesFuzzy';
-import { buildAppFilesSearchIndex } from './appFilesSearchIndex';
+import {
+  buildAppFilesSearchIndex,
+  type AppFilesSearchIncompleteReason,
+  type AppFilesSearchIndex,
+} from './appFilesSearchIndex';
 
 export type AppFilesSearchStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+/** The state Search shows before any scan has run. */
+const EMPTY_INDEX: AppFilesSearchIndex = {
+  files: [],
+  complete: true,
+  incompleteReason: null,
+};
 
 export function useAppFilesSearch(fileOps: FileOps | null, active: boolean) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<AppFilesSearchStatus>('idle');
-  const [index, setIndex] = useState<FileEntry[]>([]);
+  const [index, setIndex] = useState(EMPTY_INDEX);
   const [error, setError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     if (!active || !fileOps) {
       setStatus('idle');
-      setIndex([]);
+      setIndex(EMPTY_INDEX);
       setError(null);
       setQuery('');
       return;
@@ -24,11 +35,11 @@ export function useAppFilesSearch(fileOps: FileOps | null, active: boolean) {
     setStatus('loading');
     setError(null);
     void buildAppFilesSearchIndex(fileOps, controller.signal)
-      .then((entries) => {
+      .then((result) => {
         if (controller.signal.aborted) {
           return;
         }
-        setIndex(entries);
+        setIndex(result);
         setStatus('ready');
       })
       .catch((err: unknown) => {
@@ -47,8 +58,11 @@ export function useAppFilesSearch(fileOps: FileOps | null, active: boolean) {
     if (status !== 'ready') {
       return [];
     }
-    return index.filter((entry) => fuzzyMatchesFile(query, entry.name, entry.path));
+    return index.files.filter((entry) => fuzzyMatchesFile(query, entry.name, entry.path));
   }, [index, query, status]);
+
+  const incompleteReason: AppFilesSearchIncompleteReason | null =
+    status === 'ready' ? index.incompleteReason : null;
 
   return {
     query,
@@ -56,6 +70,9 @@ export function useAppFilesSearch(fileOps: FileOps | null, active: boolean) {
     status,
     error,
     results,
+    /** True when the scan stopped before covering the whole Workspace. */
+    incomplete: incompleteReason !== null,
+    incompleteReason,
     retry: () => {
       setRetryToken((t) => t + 1);
     },

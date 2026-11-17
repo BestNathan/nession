@@ -141,6 +141,12 @@ pub struct ExecutionRecord {
     /// read-only base consumer are released.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transient_rootfs: Option<TransientRootfsRecord>,
+    /// A durable rollback record written before a transient mount is exposed.
+    /// It describes an **incomplete preparation**, never a Session-backed
+    /// execution: reconciliation cleans it even when its Session name is
+    /// still live.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub recovery_pending: bool,
     /// The verified-mechanism names the execution reported.
     #[serde(default)]
     pub mechanisms: Vec<String>,
@@ -163,6 +169,11 @@ pub struct ExecutionRecord {
     pub agent_pid: u32,
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl ExecutionRecord {
     fn record_path(&self, settings: &SandboxSettings) -> PathBuf {
         settings
@@ -178,7 +189,11 @@ pub enum ReconcileOutcome {
     Active(Box<ExecutionRecord>),
     /// Its Session is gone; the owned resources were removed.
     Cleaned(String),
-    /// Cleanup failed and the record was kept for a later attempt.
+    /// Cleanup of a record failed and the record was kept. The record is the
+    /// retry owner: the Agent must keep tracking it until it is released.
+    CleanupFailed(Box<ExecutionRecord>, String),
+    /// An entry could not be read as an authoritative record. It is left in
+    /// place for an operator; there is no safe cleanup owner.
     Failed(String, String),
 }
 
@@ -959,6 +974,82 @@ pub(crate) fn write_record(settings: &SandboxSettings, record: &ExecutionRecord)
     })
 }
 
+/// Read the durable record for one execution id, if it exists.
+#[cfg(target_os = "linux")]
+pub(crate) fn read_record(
+    settings: &SandboxSettings,
+    execution_id: &str,
+) -> Result<Option<ExecutionRecord>> {
+    let path = settings.state_dir.join(format!("{execution_id}.json"));
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(SandboxError::Prepare(format!(
+                "read execution record {}: {error}",
+                path.display()
+            )))
+        }
+    };
+    serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+        SandboxError::Prepare(format!(
+            "decode execution record {}: {error}",
+            path.display()
+        ))
+    })
+}
+
+/// Write the durable rollback identity of an incomplete transient mount.
+///
+/// The record is written **before** the physical mount is exposed, so a failed
+/// preparation (or a failed rollback) stays retryable after a restart. A
+/// completed preparation overwrites it with the final execution record.
+#[cfg(target_os = "linux")]
+pub(crate) fn write_recovery_pending(
+    settings: &SandboxSettings,
+    execution_id: &str,
+    execution_dir: &Path,
+    transient_rootfs: TransientRootfsRecord,
+    shared_mounts: Vec<SharedMountRecord>,
+) -> Result<()> {
+    let record = ExecutionRecord {
+        execution_id: execution_id.to_string(),
+        session_name: String::new(),
+        instance_id: String::new(),
+        backend: "linux-bwrap".to_string(),
+        policy_digest: String::new(),
+        created_at: now_seconds(),
+        pane_pid: None,
+        pane_id: None,
+        window_id: None,
+        working_dir: String::new(),
+        effective_policy: None,
+        mounts: Vec::new(),
+        shared_mounts,
+        overlay: None,
+        transient_rootfs: Some(transient_rootfs),
+        recovery_pending: true,
+        channel_dir: None,
+        mechanisms: Vec::new(),
+        warnings: Vec::new(),
+        proxy_endpoint: None,
+        native_window_id: None,
+        native_pane_id: None,
+        cgroup_path: None,
+        execution_dir: execution_dir.display().to_string(),
+        restricted_network: false,
+        agent_pid: std::process::id(),
+    };
+    write_record(settings, &record)
+}
+
+/// Remove a recovery-pending record after every owned part was released.
+#[cfg(target_os = "linux")]
+pub(crate) fn remove_recovery_record(settings: &SandboxSettings, execution_id: &str) {
+    let path = settings.state_dir.join(format!("{execution_id}.json"));
+    let _ = std::fs::remove_file(path);
+}
+
 /// Remove the Agent-created writable workspace of an image composition.
 ///
 /// The workspace is created below `state_dir/sandbox-workspaces` and named
@@ -1268,7 +1359,7 @@ pub(crate) fn remove_owned_paths(
         Path::new(&record.execution_dir),
         &settings.fusermount_path,
         report,
-    );
+    )?;
     #[cfg(target_os = "linux")]
     release_shared_mounts(settings, record, report)?;
     let execution_dir = Path::new(&record.execution_dir);
@@ -1392,14 +1483,18 @@ pub fn reconcile(
                 continue;
             }
         };
-        let alive = match &record.pane_id {
-            Some(pane_id) => live_panes
-                .iter()
-                .any(|pane| pane.session_name == record.session_name && &pane.pane_id == pane_id),
-            None => live_panes
-                .iter()
-                .any(|pane| pane.session_name == record.session_name),
-        };
+        // A pending recovery record is an incomplete preparation whose only
+        // role is to make rollback retryable. It is never adopted as a live
+        // Session-backed execution, even when its Session name still exists.
+        let alive = !record.recovery_pending
+            && match &record.pane_id {
+                Some(pane_id) => live_panes.iter().any(|pane| {
+                    pane.session_name == record.session_name && &pane.pane_id == pane_id
+                }),
+                None => live_panes
+                    .iter()
+                    .any(|pane| pane.session_name == record.session_name),
+            };
         if alive {
             #[cfg(target_os = "linux")]
             {
@@ -1447,8 +1542,8 @@ pub fn reconcile(
         };
         match cleanup_record(settings, &record, &mut report) {
             Ok(()) => outcomes.push(ReconcileOutcome::Cleaned(record.execution_id)),
-            Err(error) => outcomes.push(ReconcileOutcome::Failed(
-                record.execution_id,
+            Err(error) => outcomes.push(ReconcileOutcome::CleanupFailed(
+                Box::new(record),
                 error.to_string(),
             )),
         }
@@ -1542,6 +1637,7 @@ mod tests {
             shared_mounts: Vec::new(),
             overlay: None,
             transient_rootfs: None,
+            recovery_pending: false,
             channel_dir: None,
             mechanisms: Vec::new(),
             warnings: Vec::new(),
@@ -1720,6 +1816,34 @@ mod tests {
         assert!(std::path::Path::new(&live.execution_dir).exists());
         assert!(!std::path::Path::new(&dead.execution_dir).exists());
         assert!(!dead.record_path(&settings).exists());
+    }
+
+    /// A recovery-pending record owns rollback state, not a Session. It must
+    /// be cleaned even when a Pane with its Session name is still live.
+    #[test]
+    fn a_recovery_pending_record_is_cleaned_even_when_its_session_lives() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let settings = settings(dir.path());
+        let mut record = record(dir.path(), "pending", "session");
+        record.recovery_pending = true;
+        std::fs::create_dir_all(&record.execution_dir).expect("execution dir");
+        write_record(&settings, &record).expect("record");
+        let outcomes = reconcile(
+            &settings,
+            &[LivePane {
+                session_name: "session".to_string(),
+                pane_id: "%1".to_string(),
+            }],
+        )
+        .expect("reconcile");
+        assert!(
+            outcomes
+                .iter()
+                .any(|outcome| matches!(outcome, ReconcileOutcome::Cleaned(id) if id == "pending")),
+            "a pending recovery record is cleaned, never adopted: {outcomes:?}"
+        );
+        assert!(!record.record_path(&settings).exists());
+        assert!(!std::path::Path::new(&record.execution_dir).exists());
     }
 
     #[test]

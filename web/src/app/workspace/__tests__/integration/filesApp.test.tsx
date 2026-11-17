@@ -45,6 +45,24 @@ function makeFileOps(): FileOps {
   };
 }
 
+/** A tree that exhausts Search's directory budget before collecting a file. */
+function makeDirectoryBoundFileOps(): FileOps {
+  const emptyDirs: FileEntry[] = Array.from({ length: 600 }, (_, i) => ({
+    name: `empty-${i}`,
+    path: `empty-${i}`,
+    full_path: `/empty-${i}`,
+    is_dir: true,
+    size: 0,
+    modified: 0,
+  }));
+  return {
+    ...makeFileOps(),
+    listDir: vi.fn((path: string) =>
+      Promise.resolve({ entries: path === '' ? emptyDirs : [] }),
+    ),
+  };
+}
+
 const baseCtx: WorkspaceContext = {
   session: null,
   agent: undefined,
@@ -246,6 +264,34 @@ describe('FilesAppLayout', () => {
 
     expect(lastPush(setPush)?.title).toBe('visual-language.md');
     expect(screen.queryByTestId('files-app-search')).not.toBeInTheDocument();
+  });
+
+  it('qualifies an empty result when the scan stopped before covering the Workspace', async () => {
+    const user = userEvent.setup();
+    renderLayout({ ...baseCtx, fileOps: makeDirectoryBoundFileOps() });
+    await user.click(screen.getByRole('button', { name: 'Search files' }));
+
+    await user.type(screen.getByLabelText('Search files'), 'needle');
+
+    expect(await screen.findByTestId('files-search-incomplete')).toBeInTheDocument();
+    const empty = await screen.findByTestId('files-search-empty');
+    expect(empty).toHaveTextContent(
+      'No files match "needle" in the scanned part of this Workspace.',
+    );
+    expect(screen.queryByText('No files match "needle".')).not.toBeInTheDocument();
+  });
+
+  it('keeps the plain empty message when the scan covered the whole Workspace', async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    await user.click(screen.getByRole('button', { name: 'Search files' }));
+
+    await user.type(screen.getByLabelText('Search files'), 'zzz-no-such-file');
+
+    expect(await screen.findByTestId('files-search-empty')).toHaveTextContent(
+      'No files match "zzz-no-such-file".',
+    );
+    expect(screen.queryByTestId('files-search-incomplete')).not.toBeInTheDocument();
   });
 
   it('opens the folder sheet and refreshes the list', async () => {

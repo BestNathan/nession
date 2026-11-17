@@ -3420,10 +3420,15 @@ impl AgentServer {
     /// a second path to tmux. The cluster backend reuses the Server this Agent
     /// reports to, or reports a structured "no Server" error in standalone
     /// mode.
+    ///
+    /// `tool_providers` is the Agent runtime's explicit Extension composition
+    /// (`#3778`). The catalog validates it before this returns; an invalid
+    /// contribution fails the mount.
     pub fn mount_mcp(
         &mut self,
         config: &crate::config::AgentConfig,
         agent_token: &str,
+        tool_providers: Vec<Arc<dyn nession_mcp::provider::McpToolProvider>>,
     ) -> Result<()> {
         self.mcp = crate::server::mcp::build(
             crate::server::mcp::McpHost {
@@ -3436,6 +3441,7 @@ impl AgentServer {
             Arc::clone(&self.tmux_manager),
             Arc::clone(&self.sessions),
             Arc::clone(&self.mutations),
+            tool_providers,
         )?;
         Ok(())
     }

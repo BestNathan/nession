@@ -12,7 +12,7 @@
 //!
 //! ## The entry is a reference, never a token
 //!
-//! The written header is `Authorization: Bearer ${NESSON_MCP_TOKEN}`. The
+//! The written header is `Authorization: Bearer ${NESSION_MCP_TOKEN}`. The
 //! variable's value is read from the Session to verify the endpoint and never
 //! leaves the process. A project `.mcp.json` therefore contains a reference a
 //! teammate's environment must also provide, not a shared secret.
@@ -96,7 +96,7 @@ pub(crate) async fn connect_with_cli(
             push(
                 &mut preflight,
                 "hosting_mode",
-                "An actual Nession MCP endpoint is reachable in this hosting mode",
+                "A Nession MCP endpoint is resolved for this hosting mode",
                 McpPrerequisiteStateV1::Met,
                 None,
             );
@@ -114,7 +114,7 @@ pub(crate) async fn connect_with_cli(
             push(
                 &mut preflight,
                 "hosting_mode",
-                "An actual Nession MCP endpoint is reachable in this hosting mode",
+                "A Nession MCP endpoint is resolved for this hosting mode",
                 state,
                 Some(detail),
             );
@@ -696,7 +696,7 @@ mod tests {
         assert_eq!(value["type"], "http");
         assert_eq!(
             value["headers"]["Authorization"],
-            "Bearer ${NESSON_MCP_TOKEN}"
+            "Bearer ${NESSION_MCP_TOKEN}"
         );
     }
 
@@ -800,6 +800,33 @@ mod tests {
             .any(|prerequisite| prerequisite.id == "credential_present"
                 && prerequisite.state == McpPrerequisiteStateV1::Missing));
         assert_eq!(response.preflight.credential_env, CREDENTIAL_ENV);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_mcp_token_blocks_without_writing_claude_config() {
+        let server = crate::mcp::test_support::FakeMcp::start_requiring("accepted-token").await;
+        let (temp, context) = fixture(
+            Some(McpHostContext {
+                agent: Some(McpHostEndpoint {
+                    url: server.url("/mcp"),
+                    path: "/mcp".to_string(),
+                }),
+                server_url: None,
+            }),
+            Some(Some("rejected-token".to_string())),
+        );
+        let cli = crate::mcp::test_support::FileCli::new();
+        let mut request = request(McpHostingModeV1::Agent);
+        request.confirm = true;
+        let response = connect_with_cli(&context, "agent:s", request, &cli).await;
+        assert_eq!(response.state, McpConnectStateV1::Blocked);
+        assert!(response.preflight.prerequisites.iter().any(|entry| {
+            entry.id == "credential_verified" && entry.state == McpPrerequisiteStateV1::Missing
+        }));
+        assert!(
+            !temp.path().join("home/.claude.json").exists(),
+            "failed authentication must not create a Claude entry"
+        );
     }
 
     #[tokio::test]
@@ -921,7 +948,7 @@ mod tests {
         let document: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&state_file).unwrap()).unwrap();
         let written = serde_json::to_string(&document).unwrap();
-        assert!(written.contains("Bearer ${NESSON_MCP_TOKEN}"), "{written}");
+        assert!(written.contains("Bearer ${NESSION_MCP_TOKEN}"), "{written}");
         assert!(
             !written.contains("secret-token"),
             "the token leaked: {written}"
@@ -1097,7 +1124,7 @@ mod tests {
         );
         let project = temp.path().join("project").join(".mcp.json");
         let written = std::fs::read_to_string(project).unwrap();
-        assert!(written.contains("Bearer ${NESSON_MCP_TOKEN}"), "{written}");
+        assert!(written.contains("Bearer ${NESSION_MCP_TOKEN}"), "{written}");
         assert!(!written.contains("secret-token"));
     }
 

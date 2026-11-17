@@ -27,6 +27,7 @@ use nession_common::readiness::Readiness;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_github::{GithubAgentExtension, GithubClient};
+use nession_mcp::provider::McpToolProvider;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -41,6 +42,7 @@ use crate::netdetect::build_advertised_addresses;
 use crate::netwatch;
 use crate::protocol::served_descriptors;
 use crate::server::AgentServer;
+use crate::session::activity::SessionActivityCoordinator;
 use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
@@ -286,7 +288,7 @@ pub async fn run(
     // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
     // fail-closed configuration error stops the start here, before `ready`.
     agent_server
-        .mount_mcp(&config, agent_token.as_str())
+        .mount_mcp(&config, agent_token.as_str(), compose_mcp_tool_providers())
         .context("failed to mount the MCP endpoint")?;
     let (server_handle, listen_addr) = agent_server
         .start()
@@ -342,18 +344,26 @@ pub async fn run(
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
     // server-advertised heartbeat interval (falling back to the local config).
-    let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
+    let (client_handle, heartbeat_interval_secs, activity) = if config.server_url.trim().is_empty()
+    {
         info!("No server_url configured — running in standalone mode");
-        // Serving: the P2P socket is bound and the tmux socket is pinned. There
-        // is no provider set to compose on this path, and no remote to reach.
+        // Serving: the P2P socket is bound and the tmux socket is pinned.
+        // There is no provider set to compose on this path, and no remote
+        // to reach.
         ready.announce();
-        (None, config.heartbeat_interval_secs)
+        (None, config.heartbeat_interval_secs, None)
     } else {
         let ext_registry = compose_providers(
             &agent_id,
             Arc::clone(&tmux_for_client),
             claude_mcp_host(&config, listen_addr),
         )?;
+        // Activity providers come from the same composition that serves
+        // the protocol routes (#3800), so a capability cannot contribute
+        // observations without being part of this Agent's provider set.
+        let activity =
+            SessionActivityCoordinator::new(agent_id.clone(), ext_registry.activity_providers())
+                .context("cannot compose this agent's Session Activity providers")?;
 
         // Serving: the socket is bound and the provider set composed. Announced
         // *before* the central-server connection on purpose — that one is
@@ -389,17 +399,17 @@ pub async fn run(
                     Ok((handle, server_interval)) => {
                         let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
                         info!("Connected to central server (heartbeat interval: {}s)", interval);
-                        (Some(handle), interval)
+                        (Some(handle), interval, Some(activity.clone()))
                     }
                     Err(e) => {
                         error!("Failed to connect to central server: {:#}", e);
-                        (None, config.heartbeat_interval_secs)
+                        (None, config.heartbeat_interval_secs, Some(activity.clone()))
                     }
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
                 warn!("Timed out connecting to central server after 30s, continuing without sync");
-                (None, config.heartbeat_interval_secs)
+                (None, config.heartbeat_interval_secs, Some(activity.clone()))
             }
         }
     };
@@ -459,6 +469,10 @@ pub async fn run(
             Arc::clone(&tmux_for_client),
             config.session_poll_interval_secs,
         );
+        let watcher = match activity.clone() {
+            Some(activity) => watcher.with_activity(activity),
+            None => watcher,
+        };
         let shutdown_handle = watcher.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = watcher.run().await {
@@ -580,6 +594,18 @@ pub fn compose_providers(
         ExtensionRegistry::new(agent_id.to_string(), extensions, served_descriptors()?)
             .context("cannot compose this agent's protocol providers")?,
     ))
+}
+
+/// Every MCP Tool contribution this Agent composes into its shared endpoint
+/// (`#3778`).
+///
+/// An Extension reaches the MCP catalog only by being constructed here and
+/// handed to the mount — there is no side-effect registration. The baseline
+/// catalog is always present and unchanged; no Extension contributes Tools
+/// yet, and the first consumer is the Claude control requirement (`#3779`),
+/// which adds its provider to this explicit list.
+pub fn compose_mcp_tool_providers() -> Vec<Arc<dyn McpToolProvider>> {
+    Vec::new()
 }
 
 /// What this Agent can tell the Claude MCP view about its own hosting (#3600).
