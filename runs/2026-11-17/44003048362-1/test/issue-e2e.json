@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "9bc52c7c85ca21e3027293e8ffa90429b9a441c5",
+  "run_id": 44003048362,
+  "run_attempt": 1,
+  "plan_digest": "c54187e51f03acf2cf707f9177fc78e177b8c8462691512a86505c844221db28",
+  "artifact_digest": "sha256:5f6e25416d8b4ec40045d28e037fd08809e62ed724be4125b107e6385acc4ef1",
+  "results": [
+    {
+      "id": "fixture-visual-app",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
