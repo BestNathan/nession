@@ -57,6 +57,8 @@
 
 | Shared Prototype Page Kit (review-frame components, three regions) | [#2758](https://github.com/BestNathan/nession/issues/2758) | [Interactive HTML](prototype-frame-2758/index.html) · [Reusable CSS](prototype-frame-2758/frame.css) · [Behavior](prototype-frame-2758/frame.js) |
 
+| Codex native Thread/Turn/Item Workspace + Nession AIConversation adapter | [#3789](https://github.com/BestNathan/nession/issues/3789) | [Interactive HTML](codex-workspace-3789/index.html) · [Scenario & fidelity](codex-workspace-3789/README.md) |
+
 | Prototype | Requirement | HTML |
 |---|---|---|
 | Files Workspace / source-aware selection, creation and safe edit | [#2751](https://github.com/BestNathan/nession/issues/2751) | [Interactive HTML](files-workspace-2751/index.html) · [Scenario & fidelity](files-workspace-2751/README.md) |

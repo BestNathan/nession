@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession / Codex Workspace / #3789</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<style>
+/* Product-surface design snapshot: sourced from main design/generated/web.css, 2026-11-17.
+   The review frame uses the shared prototype-frame-2758 kit; no extra product palette. */
+.product{
+--nession-background:oklch(1 0 0);--nession-foreground:oklch(.2636 .0063 258.359);
+--nession-muted:oklch(.9519 .0013 106.424);--nession-muted-foreground:oklch(.553 .0118 261.773);
+--nession-surface:oklch(.9782 .0034 247.858);--nession-border:oklch(.9274 .0027 106.451);
+--nession-primary:var(--nession-foreground);--nession-ring:var(--nession-muted-foreground);
+--nession-conversation-user-surface:var(--nession-muted);--nession-conversation-tool-surface:var(--nession-muted);
+--nession-radius-control:.625rem;--nession-radius-surface:1rem;--nession-radius-capsule:1.375rem;
+--nession-typography-title-size:16px;--nession-typography-primary-size:14px;
+--nession-typography-body-size:13px;--nession-typography-secondary-size:12.5px;
+--nession-typography-metadata-size:11.5px;--nession-typography-code-size:12.5px;
+--nession-control-md:32px;--nession-control-lg:36px;
+width:100%;height:100%;display:flex;min-height:0;overflow:hidden;background:var(--nession-background);
+font:450 var(--nession-typography-body-size)/1.44 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--nession-foreground)}
+.product *{box-sizing:border-box}
+.product button,.product input,.product textarea,.product select{font:inherit;color:inherit}
+.product button{cursor:pointer}
+.product button:disabled{cursor:not-allowed;opacity:.4}
+.product button:focus-visible,.product input:focus-visible,.product textarea:focus-visible,.product summary:focus-visible{outline:2px solid var(--nession-ring);outline-offset:2px}
+.product .muted{color:var(--nession-muted-foreground)} .product .small{font-size:var(--nession-typography-metadata-size)}
+.product .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--nession-typography-code-size);overflow-wrap:anywhere}
+.product .shell-nav{width:205px;background:var(--nession-surface);border-right:1px solid var(--nession-border);padding:22px 10px;flex:0 0 205px;display:flex;flex-direction:column;gap:5px}
+.product .shell-nav .brand{padding:0 12px 18px;font-weight:650;font-size:15px;letter-spacing:-.025em}
+.product .nav-section{padding:14px 12px 7px;color:var(--nession-muted-foreground);font-size:11px;font-weight:600}
+.product .nav-row{border:0;background:transparent;text-align:left;padding:10px 12px;border-radius:9px;min-height:40px;width:100%}
+.product .nav-row[aria-current=true]{background:var(--nession-muted);font-weight:600}
+.product .nav-sub{font-size:11px;color:var(--nession-muted-foreground);font-weight:400;display:block;margin-top:3px}
+.product .shell-foot{margin-top:auto;color:var(--nession-muted-foreground);font-size:11px;padding:10px 12px;border-top:1px solid var(--nession-border)}
+.product .shell-content{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column}
+.product .app-head{display:none;flex:0 0 54px;align-items:center;padding:0 12px;gap:8px;border-bottom:1px solid var(--nession-border)}
+.product .app-head button{min-width:44px;min-height:44px;border:0;background:none;text-align:left;font-size:20px}
+.product .app-head strong{font-size:var(--nession-typography-title-size);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.product .capability{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}
+.product .cap-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 24px 11px}
+.product h1{margin:0;font-size:var(--nession-typography-title-size);font-weight:600;letter-spacing:-.015em}
+.product h2{font-size:var(--nession-typography-primary-size);font-weight:600;margin:0}
+.product h3{font-size:var(--nession-typography-secondary-size);font-weight:600;margin:0}
+.product p{margin:5px 0 0}
+.product .cap-label{font-size:11px;color:var(--nession-muted-foreground)}
+.product .top-tabs{display:flex;gap:4px;padding:0 24px 10px;border-bottom:1px solid var(--nession-border);overflow-x:auto;scrollbar-width:thin;flex-shrink:0}
+.product .top-tabs button,.product .subtabs button{border:0;background:none;min-height:32px;border-radius:8px;padding:7px 12px;white-space:nowrap;font-size:12.5px;color:var(--nession-muted-foreground)}
+.product .top-tabs button[aria-selected=true],.product .subtabs button[aria-selected=true]{background:var(--nession-muted);font-weight:600;color:var(--nession-foreground)}
+.product .workspace-core{display:flex;min-height:0;min-width:0;flex:1;overflow:hidden}
+.product .threads-pane{width:255px;flex:0 0 255px;background:var(--nession-surface);border-right:1px solid var(--nession-border);overflow-y:auto;padding:16px 9px 110px}
+.product .pane-title{display:flex;align-items:center;justify-content:space-between;padding:0 9px 11px}
+.product .pane-title .count{font-size:11px;color:var(--nession-muted-foreground)}
+.product .thread-row{width:100%;text-align:left;background:none;border:0;border-radius:9px;padding:12px 10px;margin:1px 0;display:block}
+.product .thread-row:hover,.product .thread-row[aria-current=true]{background:var(--nession-muted)}
+.product .thread-row strong{font-size:12.5px;font-weight:550;display:block;line-height:1.35}
+.product .thread-row[aria-current=true] strong{font-weight:600}
+.product .thread-row small{font-size:11px;color:var(--nession-muted-foreground);display:block;margin-top:6px}
+.product .thread-row .indicator{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.56;margin-right:6px}
+.product .main-pane{min-width:0;flex:1;overflow-y:auto;padding:18px 24px 110px;overscroll-behavior:contain}
+.product .inspector{flex:0 0 242px;width:242px;background:var(--nession-background);border-left:1px solid var(--nession-border);overflow-y:auto;padding:18px 17px 105px}
+.product .header-line{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.product .header-line h2{font-size:var(--nession-typography-title-size)}
+.product .actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.product .button{min-height:32px;padding:6px 11px;background:var(--nession-background);border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);font-size:12px;font-weight:550}
+.product .button.primary{background:var(--nession-primary);color:var(--nession-background);border-color:var(--nession-primary)}
+.product .button.quiet{border-color:transparent;background:transparent}
+.product .button:hover:not(:disabled){background:var(--nession-muted);color:var(--nession-foreground)}
+.product .button.primary:hover:not(:disabled){background:var(--nession-foreground);color:var(--nession-background);opacity:.86}
+.product .meta{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;color:var(--nession-muted-foreground);font-size:11px}
+.product .section{padding-top:19px;margin-top:19px;border-top:1px solid var(--nession-border)}
+.product .subtabs{display:flex;gap:5px;padding:15px 0 10px;overflow-x:auto}
+.product .turn-row,.product .item-row{display:block;text-align:left;width:100%;border:0;background:transparent;padding:12px 10px;border-radius:8px;line-height:1.45}
+.product .turn-row{margin-bottom:5px}
+.product .turn-row[aria-current=true],.product .item-row[aria-current=true],.product .turn-row:hover,.product .item-row:hover{background:var(--nession-muted)}
+.product .row-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.product .row-title{font-size:12.5px;font-weight:570}
+.product .row-desc{color:var(--nession-muted-foreground);font-size:11.5px;margin-top:4px;display:block}
+.product .soft-status{display:inline-block;font-size:10.5px;color:var(--nession-muted-foreground);font-weight:500;white-space:nowrap}
+.product .item-list{margin-top:7px;border-left:1px solid var(--nession-border);padding-left:12px}
+.product .kv{display:grid;grid-template-columns:94px minmax(0,1fr);gap:8px 8px;padding:9px 0;border-bottom:1px solid var(--nession-border);font-size:12px}
+.product .kv span:first-child{color:var(--nession-muted-foreground)}
+.product .kv span:last-child{overflow-wrap:anywhere}
+.product pre{font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--nession-surface);border:1px solid var(--nession-border);border-radius:8px;padding:12px;max-height:260px;overflow:auto}
+.product .conversation{max-width:640px;margin:0 auto}
+.product .user-bubble{margin:12px 0 20px auto;max-width:78%;width:fit-content;padding:11px 14px;background:var(--nession-conversation-user-surface);border-radius:14px;font-size:13px}
+.product .work-summary{border:0;background:transparent;color:var(--nession-muted-foreground);cursor:pointer;font-size:12px;padding:7px 0;text-align:left}
+.product .work-line{font-size:11.5px;color:var(--nession-muted-foreground);padding:5px 0 5px 12px}
+.product .answer{font-size:13.5px;line-height:1.66;margin:12px 0 20px}
+.product .status-line{margin-top:13px;padding:10px 12px;background:var(--nession-surface);border-radius:9px;font-size:12px;line-height:1.5}
+.product .empty{padding:38px 8px;text-align:center;color:var(--nession-muted-foreground);font-size:12.5px;max-width:360px;margin:auto}
+.product .stack{display:flex;flex-direction:column;gap:11px}
+.product .field{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.product .field label{font-weight:600}
+.product .field input,.product .field textarea{min-height:36px;padding:9px 10px;background:var(--nession-background);border:1px solid var(--nession-border);border-radius:9px;width:100%}
+.product .field textarea{resize:vertical;min-height:94px}
+.product .capsule-zone{position:absolute;bottom:12px;left:0;right:0;pointer-events:none;display:flex;align-items:center;justify-content:center;gap:8px}
+.product .capsule{pointer-events:auto;display:flex;gap:5px;background:var(--nession-background);padding:7px 9px;border:1px solid var(--nession-border);border-radius:var(--nession-radius-capsule);box-shadow:0 2px 12px #00000012}
+.product .capsule button{min-width:36px;min-height:32px;border-radius:10px;background:none;border:0;padding:5px 11px;font-size:12px}
+.product .capsule button[aria-current=true]{background:var(--nession-muted);font-weight:600}
+.product .capsule .go-terminal{width:33px;padding:5px;border:1px solid var(--nession-border);border-radius:50%}
+.product .scrim{position:absolute;z-index:9;inset:0;background:oklch(0 0 0 / .27);display:flex;align-items:center;justify-content:center}
+.product .modal{width:min(440px,calc(100% - 26px));max-height:87%;display:flex;flex-direction:column;overflow:hidden;border-radius:15px;background:var(--nession-background);box-shadow:0 15px 45px #0002}
+.product .modal-head{padding:16px 19px 12px;font-size:15px;font-weight:600;border-bottom:1px solid var(--nession-border)}
+.product .modal-body{padding:18px 19px;overflow:auto}
+.product .modal-foot{padding:12px 19px;border-top:1px solid var(--nession-border);display:flex;gap:8px;justify-content:flex-end}
+.product.is-app .shell-nav{display:none}
+.product.is-app .app-head{display:flex}
+.product.is-app .cap-top{padding:13px 16px 9px}
+.product.is-app .top-tabs{padding:0 13px 9px}
+.product.is-app .threads-pane{width:100%;flex:1;padding:13px 12px 108px}
+.product.is-app .main-pane{padding:15px 17px 114px}
+.product.is-app .inspector{width:100%;flex:1;border-left:0;padding:16px 17px 115px}
+.product.is-app .workspace-core{display:block;overflow:hidden;position:relative}
+.product.is-app .threads-pane,.product.is-app .main-pane,.product.is-app .inspector{height:100%;overflow:auto}
+.product.is-app .button{min-height:44px}
+.product.is-app .top-tabs button,.product.is-app .subtabs button{min-height:44px}
+.product.is-app .capsule-zone{bottom:10px}
+.product.is-app .capsule button{min-height:44px}
+.product.is-app .kv{grid-template-columns:95px minmax(0,1fr)}
+.product.is-app .modal{width:100%;max-height:78%;border-radius:15px 15px 0 0;margin-top:auto}
+.product.is-app .scrim{align-items:flex-end}
+.product [hidden]{display:none!important}
+</style>
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+<header class="np-overview">
+  <div class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">Nession / Prototype Gallery</a><span>·</span><span>Codex Workspace</span></div>
+  <span class="np-eyebrow">Requirement #3789 · Native Codex domain · Nession experience</span>
+  <div class="np-header-main"><div><h1 class="np-title">Codex · Thread / Turn / Item</h1><p class="np-subtitle">保留 Codex 原生业务语义；仅在展示 AI 对话时通过 Adapter 投影到 Nession AIConversation。预览所有操作均为模拟。</p></div>
+  <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3789">Issue #3789</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype">Source</a></div></div>
+  <div class="np-meta"><span>Surface <strong>Workspace / Codex</strong></span><span>Data <strong>Synthetic</strong></span><span>Version <strong>2026-11-17</strong></span><span>Proof <strong>Browser / Pages pending</strong></span></div>
+</header>
+<section class="np-preview">
+  <div class="np-section-heading"><div><h2>Interactive product preview</h2><p>Web 1180 / 1024 · App 390 / 375 · true CSS pixels</p></div>
+    <div class="np-preview-toolbar">
+      <button data-np-size="1180" aria-pressed="true">Web 1180</button><button data-np-size="1024">Web 1024</button>
+      <button data-np-size="390">App 390</button><button data-np-size="375">App 375</button>
+      <label for="scenario">Fixture</label>
+      <select id="scenario" aria-label="Fixture scenario"><option value="ready">Ready</option><option value="active">Active turn</option><option value="approval">Approval required</option><option value="offline">Agent offline</option><option value="unavailable">Unsupported version</option><option value="empty">No threads</option></select>
+      <button data-np-reset>Reset</button>
+    </div>
+  </div>
+  <div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px">
+    <div class="product" id="product">
+      <aside class="shell-nav" aria-label="Sessions" data-owner="WebLayout Sidebar">
+        <div class="brand">Nession</div><div class="nav-section">AGENT</div>
+        <button class="nav-row" type="button" data-act="session" data-id="dev" aria-current="true">● main · connected<span class="nav-sub">Development / dev</span></button>
+        <button class="nav-row" type="button" data-act="session" data-id="work" aria-current="false">○ staging · connected<span class="nav-sub">Workspace / work</span></button>
+        <div class="nav-section">SESSIONS</div><button class="nav-row" type="button" data-act="session" data-id="dev">dev<span class="nav-sub">Rust · current</span></button>
+        <button class="nav-row" type="button" data-act="session" data-id="work">work<span class="nav-sub">Other session</span></button>
+        <div class="shell-foot">Session-first navigation · shell-owned</div>
+      </aside>
+      <div class="shell-content">
+        <div class="app-head" data-owner="WorkspacePanel AppPageHeader"><button id="app-back" data-act="back" aria-label="Back">‹</button><strong id="app-title">Codex</strong></div>
+        <div class="capability">
+          <div class="cap-top"><div><h1>Codex</h1><div class="cap-label" id="context-label">Current Session · dev · agent-main</div></div>
+          <div class="actions"><span id="runtime-state" class="soft-status">Ready</span><button type="button" class="button primary" data-act="new">+ New thread</button></div></div>
+          <nav class="top-tabs" id="top-tabs" aria-label="Codex sections"></nav>
+          <div class="workspace-core" id="workspace-core">
+            <aside class="threads-pane" id="threads-pane" aria-label="Native Codex Thread list"></aside>
+            <main class="main-pane" id="main-pane"></main>
+            <aside class="inspector" id="inspector" aria-label="Codex Item inspector"></aside>
+          </div>
+          <div class="capsule-zone" data-owner="WorkspaceShell CapsuleZone"><div class="capsule"><button class="go-terminal" data-act="terminal" aria-label="Open Terminal">⌘</button><button data-act="cap" data-id="files">Files</button><button data-act="cap" data-id="git">Git</button><button data-act="cap" data-id="codex" aria-current="true">Codex</button></div></div>
+          <div id="dialog-root"></div>
+        </div>
+      </div>
+    </div>
+  </div></div><p class="np-stage-label"><span data-np-current-size>1180 CSS px · 1:1</span> · Mock content · No provider calls</p>
+</section>
+<section class="np-details">
+<h2>Ownership and interaction verification</h2><p class="np-details-lede">审查范围：Codex 原生管理与 Nession AIConversation 单向投影，不是第二套聊天系统。</p>
+<div class="np-detail-grid">
+<div class="np-detail"><h3>1 · Native Codex inspector</h3><ol class="np-steps"><li>选择 Thread，查看 Turn 和 Item</li><li>选 Item 查看原生 ID、状态、Raw JSON</li><li>显式 New / Resume / Start Turn；审批只能用户确认</li></ol></div>
+<div class="np-detail"><h3>2 · Shared AIConversation</h3><p>切换 Thread 的 “Conversation” 仅重新渲染同一原生 Thread 数据的 <code>AIConversationAdapter</code> 投影。Raw、审批和完整 Native Item 始终保留。</p></div>
+<div class="np-detail"><h3>3 · Product ownership</h3><p>Web Shell 负责 Session 导航；App WorkspacePanel 负责唯一 Back；WorkspaceShell 负责 Capsule；Codex Extension 仅绘制内部资源内容。MCP Tool Inspector 使用 #3772 共享组件。</p></div>
+<div class="np-detail"><h3>4 · Fidelity limits</h3><p>Thread/Turn/Item 均为脱敏模拟数据；没有 Codex App Server、审批权限、持久化或网络。生成 CSS token 值的局部快照不等于真正 React 组件的像素一致。</p></div>
+</div>
+<details class="np-inspector"><summary>Acceptance / test states</summary><pre>Web 1180 → Thread → Item/Raw → Conversation → Session switch
+App 390 → Thread → Turn → Item → one Back → Thread → list
+Fixtures: ready, active, approval required, offline, unsupported, empty
+Required: no hidden controls, no automatic MCP/providercalls, correct IDs
+Browser/Pages exact SHA publication and production acceptance: PENDING</pre></details>
+</section>
+</div>
+<script>
+(function(){
+'use strict';
+var base=[
+ {id:'thr_83a2',name:'Review current changes',status:'idle',cwd:'/workspace/nession',
+  turns:[{id:'turn_204',status:'completed',items:[
+   {id:'item_10',kind:'userMessage',label:'Review changes',detail:'Review the current changes and identify possible regressions.'},
+   {id:'item_11',kind:'reasoning',label:'Reasoning summary',detail:'Consider protocol boundaries and test coverage.'},
+   {id:'item_12',kind:'commandExecution',label:'cargo test',detail:'cargo test --workspace\\nTest result: 124 passed'},
+   {id:'item_13',kind:'agentMessage',label:'Summary',detail:'The checks passed. One boundary should remain provider-native.'}
+  ]}]},
+ {id:'thr_b40c',name:'Investigate workflow failure',status:'idle',cwd:'/workspace/nession',
+  turns:[{id:'turn_317',status:'completed',items:[
+   {id:'item_20',kind:'userMessage',label:'Investigate failing workflow',detail:'Inspect the failed workflow run.'},
+   {id:'item_21',kind:'fileChange',label:'workflow.yml',detail:'Proposed CI adjustment, pending verification.'},
+   {id:'item_22',kind:'unknown:futureItem',label:'Native unknown item',detail:'Upstream kind is not recognized by the presentation adapter; keep raw.'}
+  ]}]},
+ {id:'thr_6f21',name:'Refactor session runtime',status:'notLoaded',cwd:'/workspace/agent',
+  turns:[{id:'turn_412',status:'completed',items:[
+   {id:'item_30',kind:'userMessage',label:'Improve runtime',detail:'Review session lifecycle.'},
+   {id:'item_31',kind:'agentMessage',label:'Completed',detail:'Runtime review complete.'}
+  ]}]}
+];
+var state={threads:clone(base),selected:0,turn:0,item:0,section:'threads',sub:'native',scenario:'ready',mode:'web',depth:'list',session:'dev',dialog:null,message:'',showRaw:false};
+var $=function(q){return document.querySelector(q)};
+function clone(v){return JSON.parse(JSON.stringify(v))}
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function selected(){return state.threads[state.selected]||null}
+function turn(){var t=selected();return t&&t.turns[state.turn]||null}
+function item(){var t=turn();return t&&t.items[state.item]||null}
+function readableStatus(s){return ({idle:'Idle',active:'Active turn',waitingOnApproval:'Waiting for approval',notLoaded:'Not loaded',completed:'Completed',interrupted:'Interrupted'})[s]||s}
+function disableState(){return state.scenario==='offline'||state.scenario==='unavailable'}
+function button(label,act,cls,disabled,extra){return '<button type="button" class="button '+(cls||'')+'" data-act="'+act+'" '+(disabled?'disabled':'')+' '+(extra||'')+'>'+esc(label)+'</button>'}
+function changeScenario(kind){state.scenario=kind;state.threads=clone(base);state.selected=0;state.turn=0;state.item=0;state.depth='list';state.section='threads';state.sub='native';state.message='';
+ if(kind==='active'){state.threads[0].status='active';state.threads[0].turns[0].status='inProgress'}
+ if(kind==='approval'){state.threads[0].status='waitingOnApproval';state.threads[0].turns[0].status='inProgress';state.threads[0].turns[0].items.splice(3,0,{id:'item_approval',kind:'approval',label:'Run command approval',detail:'Permission requested for a workspace command.'})}
+ if(kind==='empty'){state.threads=[]}
+ render()
+}
+function render(){
+var app=state.mode==='app';var prod=$('#product');prod.classList.toggle('is-app',app);
+var t=selected(),u=turn(),i=item(),unavailable=disableState();
+$('#context-label').textContent='Current Session · '+state.session+' · agent-main';
+$('#runtime-state').textContent=state.scenario==='offline'?'Agent offline':state.scenario==='unavailable'?'Unsupported Codex':state.scenario==='approval'?'Approval requested':state.scenario==='active'?'Turn active':'Ready';
+var tabs=['threads','mcp','skills','configuration'];$('#top-tabs').innerHTML=tabs.map(function(s){return '<button type="button" role="tab" aria-selected="'+(state.section===s)+'" data-act="section" data-id="'+s+'">'+({threads:'Threads',mcp:'MCP',skills:'Skills',configuration:'Configuration'})[s]+'</button>'}).join('');
+var newBtn=$('[data-act="new"]');if(newBtn)newBtn.disabled=unavailable;
+if(state.section!=='threads'){
+$('#threads-pane').hidden=true;$('#inspector').hidden=true;$('#main-pane').hidden=false;
+$('#main-pane').innerHTML=renderResource();
+}else{
+$('#threads-pane').innerHTML='<div class="pane-title"><h3>Threads</h3><span class="count">'+state.threads.length+'</span></div>'+
+ (state.threads.length?state.threads.map(function(v,n){return '<button class="thread-row" data-act="pick" data-id="'+n+'" aria-current="'+(state.selected===n)+'"><strong>'+esc(v.name)+'</strong><small><span class="indicator"></span>'+readableStatus(v.status)+' · '+esc(v.id)+'</small></button>'}).join(''):'<div class="empty">No Threads in this Session.</div>');
+$('#threads-pane').hidden=app&&state.depth!=='list';
+$('#main-pane').hidden=app&&(state.depth==='list'||state.depth==='item');
+$('#inspector').hidden=app&&state.depth!=='item';
+if(unavailable){
+$('#main-pane').innerHTML='<div class="empty"><h2>'+ (state.scenario==='offline'?'Agent offline':'Unsupported Codex version')+'</h2><p>Native Codex runtime unavailable; history and status are not guessed.</p></div>';
+$('#inspector').innerHTML='';
+}else{
+$('#main-pane').innerHTML=t?renderThread(t,u):'<div class="empty">Select a native Codex Thread or start one explicitly.</div>';
+$('#inspector').innerHTML=i?renderItem(i):'<div class="empty">Select an Item to inspect its native data.</div>';
+}
+}
+$('#app-title').textContent=state.section==='threads'?(state.depth==='item'?'Item':state.depth==='thread'?(t?t.name:'Thread'):'Codex'):'Codex · '+state.section;
+$('#app-back').disabled=state.section==='threads'&&state.depth==='list';
+$('#dialog-root').innerHTML=state.dialog?renderDialog():'';
+}
+function renderThread(t,u){
+var top='<div class="header-line"><div><h2>'+esc(t.name)+'</h2><p class="muted small mono">'+esc(t.id)+'</p></div><div class="actions">'+button('Resume','resume','quiet',t.status==='active'||t.status==='waitingOnApproval')+button('Start turn','turn','primary',t.status==='active'||t.status==='waitingOnApproval')+'</div></div>';
+var status='<div class="meta"><span>Thread: '+readableStatus(t.status)+'</span><span>cwd: '+esc(t.cwd)+'</span><span>'+t.turns.length+' turns</span></div>';
+if(state.message)status+='<div class="status-line" role="status">'+esc(state.message)+'</div>';
+var sub='<nav class="subtabs" aria-label="Thread presentation"><button role="tab" aria-selected="'+(state.sub==='native')+'" data-act="sub" data-id="native">Turns &amp; Items</button><button role="tab" aria-selected="'+(state.sub==='conversation')+'" data-act="sub" data-id="conversation">Conversation</button><button role="tab" aria-selected="'+(state.sub==='rollout')+'" data-act="sub" data-id="rollout">Rollout</button></nav>';
+var b='';
+if(state.sub==='conversation'){b='<div class="conversation"><p class="muted small">Nession AIConversation · projection only</p>'+t.turns.map(function(tr){var user=tr.items.find(function(x){return x.kind==='userMessage'}),assistant=tr.items.filter(function(x){return x.kind==='agentMessage'}),work=tr.items.filter(function(x){return x.kind!=='userMessage'&&x.kind!=='agentMessage'});return (user?'<div class="user-bubble">'+esc(user.detail)+'</div>':'')+
+'<details><summary class="work-summary">Worked · '+work.length+' source Items (expand)</summary>'+work.map(function(w){return '<div class="work-line">'+esc(w.kind)+': '+esc(w.label)+'</div>'}).join('')+'</details>'+
+assistant.map(function(a){return '<div class="answer">'+esc(a.detail)+'</div>'}).join('')+(tr.status==='inProgress'?'<div class="status-line">Turn in progress — no completed answer claimed.</div>':'')}).join('')+'</div>';}
+else if(state.sub==='rollout'){b='<h3>Codex Rollout · raw source projection</h3><p class="muted small">Original records remain available independent of AIConversation.</p><pre>'+esc(JSON.stringify({thread_id:t.id,turns:t.turns},null,2))+'</pre>';}
+else{b='<div class="section"><div class="header-line"><h3>Turns</h3><span class="small muted">Native Codex</span></div>';
+b+=t.turns.map(function(tr,tn){return '<button class="turn-row" data-act="pickturn" data-id="'+tn+'" aria-current="'+(state.turn===tn)+'"><span class="row-top"><span class="row-title mono">'+esc(tr.id)+'</span><span class="soft-status">'+readableStatus(tr.status)+'</span></span><span class="row-desc">'+tr.items.length+' Items · click to inspect</span></button>'}).join('');
+if(u){b+='<div class="section"><div class="header-line"><h3>Items · '+esc(u.id)+'</h3><span class="muted small">'+u.items.length+' native records</span></div><div class="item-list">'+u.items.map(function(v,n){return '<button class="item-row" data-act="pickitem" data-id="'+n+'" aria-current="'+(state.item===n)+'"><span class="row-top"><span class="row-title">'+esc(v.label)+'</span><span class="soft-status mono">'+esc(v.kind)+'</span></span><span class="row-desc">'+esc(v.id)+' · '+esc(v.detail.slice(0,80))+'</span></button>'}).join('')+'</div></div>';
+if(u.status==='inProgress'){b+='<div class="section">'+button('Interrupt turn','interrupt','quiet',false)+ (t.status==='waitingOnApproval'?button('Review approval','approval','primary',false):'')+'</div>';}
+} b+='</div>';}
+return top+status+sub+b;
+}
+function renderItem(i){
+var raw=JSON.stringify({id:i.id,type:i.kind,content:i.detail,metadata:{provider:'codex',source:'fixture'}},null,2);
+return '<div class="header-line"><div><h2>Item detail</h2><p class="muted small mono">'+esc(i.id)+'</p></div></div>'+
+'<div class="section"><div class="kv"><span>Native type</span><span class="mono">'+esc(i.kind)+'</span></div><div class="kv"><span>Turn</span><span class="mono">'+esc(turn()?turn().id:'')+'</span></div><div class="kv"><span>Status</span><span>'+readableStatus(turn()?turn().status:'unknown')+'</span></div></div>'+
+'<div class="section"><h3>Payload</h3><p>'+esc(i.detail)+'</p></div>'+
+'<div class="section"><h3>Raw JSON</h3><p class="muted small">Every native/unknown item keeps a Raw inspector.</p><pre>'+esc(raw)+'</pre></div>';
+}
+function renderResource(){
+if(state.scenario==='offline'||state.scenario==='unavailable')return '<div class="empty">Codex resources unavailable for the selected Session.</div>';
+if(state.section==='mcp')return '<h2>Codex MCP</h2><p class="muted small">Project/effective MCP client configuration · shared #3772 MCP UI Kit presentation</p><div class="section"><div class="kv"><span>Server</span><span>nession</span></div><div class="kv"><span>Scope</span><span>Project (native Codex)</span></div><div class="kv"><span>Configured</span><span>Yes</span></div><div class="kv"><span>Connected</span><span>Not probed</span></div><div class="kv"><span>Active</span><span>Unknown</span></div></div><div class="section">'+button('Test connection','resource-action','quiet',false)+'</div>';
+if(state.section==='skills')return '<h2>Codex Skills</h2><p class="muted small">Current project only · non-project resources are owned by AI Workspace #3251</p><div class="section"><div class="kv"><span>Skill</span><span>nession-development</span></div><div class="kv"><span>Source</span><span>Project</span></div><div class="kv"><span>Status</span><span>Discoverable</span></div></div>';
+return '<h2>Codex Configuration</h2><p class="muted small">Native effective configuration with source, no Claude-shaped schema.</p><div class="section"><div class="kv"><span>Model</span><span>Current Codex model</span></div><div class="kv"><span>Approval</span><span>On request</span></div><div class="kv"><span>Sandbox</span><span>Workspace write</span></div><div class="kv"><span>Source</span><span>Project + user effective resolution</span></div></div>';
+}
+function renderDialog(){
+var title=state.dialog==='new'?'New Codex Thread':state.dialog==='turn'?'Start Turn':state.dialog==='approval'?'Review command approval':'Confirm action';
+var form=state.dialog==='new'?'<div class="field"><label for="new-title">Thread title</label><input id="new-title" placeholder="Describe your work" maxlength="90" required></div>':
+state.dialog==='turn'?'<div class="field"><label for="prompt">Prompt</label><textarea id="prompt" placeholder="Ask Codex to work on this Thread..." required></textarea></div>':
+'<p>Approve a simulated command for this Thread? Codex cannot approve itself.</p><p class="muted small">This is a local mock; no real command is executed.</p>';
+return '<div class="scrim" role="presentation"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="modal-head" id="dialog-title">'+title+'</div><div class="modal-body">'+form+'</div><div class="modal-foot">'+button('Cancel','cancel','quiet',false)+(state.dialog==='approval'?button('Deny','deny','quiet',false):'')+button(state.dialog==='new'?'Create thread':state.dialog==='turn'?'Start turn':'Approve','confirm','primary',false)+'</div></div></div>';
+}
+function applyAct(act,id){
+if(act==='pick'){state.selected=Number(id);state.turn=0;state.item=0;state.sub='native';state.depth=state.mode==='app'?'thread':'list';state.message=''}
+else if(act==='pickturn'){state.turn=Number(id);state.item=0;state.depth=state.mode==='app'?'thread':state.depth}
+else if(act==='pickitem'){state.item=Number(id);state.depth=state.mode==='app'?'item':state.depth}
+else if(act==='sub'){state.sub=id;state.depth=state.mode==='app'?'thread':state.depth}
+else if(act==='section'){state.section=id;state.depth='list';state.message=''}
+else if(act==='new'||act==='turn'||act==='approval'){if(disableState())return;state.dialog=act}
+else if(act==='resume'){if(selected()){selected().status='idle';state.message='Thread resumed (simulated), ID unchanged: '+selected().id;state.depth=state.mode==='app'?'thread':state.depth}}
+else if(act==='interrupt'){if(turn()){turn().status='interrupted';selected().status='idle';state.message='Turn interrupted (simulated), result not fabricated.'}}
+else if(act==='back'){if(state.dialog)state.dialog=null;else if(state.depth==='item')state.depth='thread';else if(state.depth==='thread')state.depth='list';else if(state.section!=='threads')state.section='threads'}
+else if(act==='cancel'){state.dialog=null}
+else if(act==='deny'){state.dialog=null;if(selected()){selected().status='idle';state.message='Approval denied (simulated).'}}
+else if(act==='confirm'){
+ if(state.dialog==='new'){
+  var name=$('#new-title');if(!name||!name.value.trim()){name&&name.focus();return}
+  var next='thr_mock_'+(state.threads.length+1);state.threads.unshift({id:next,name:name.value.trim(),status:'idle',cwd:'/workspace/nession',turns:[]});state.selected=0;state.depth=state.mode==='app'?'thread':'list';state.message='Thread created (simulated): '+next;
+ }else if(state.dialog==='turn'){
+  var prompt=$('#prompt');if(!prompt||!prompt.value.trim()){prompt&&prompt.focus();return}
+  if(selected()){
+   var k='turn_mock_'+(selected().turns.length+1);selected().turns.push({id:k,status:'inProgress',items:[{id:'item_prompt_'+k,kind:'userMessage',label:'New prompt',detail:prompt.value.trim()}]});state.turn=selected().turns.length-1;state.item=0;selected().status='active';state.message='Turn started (simulated): '+k+' · execution not completed';
+  }
+ }else if(state.dialog==='approval'){if(selected()){selected().status='active';state.message='User approved (mock only); no command executed.'}}
+ state.dialog=null;
+}
+else if(act==='session'){state.session=id;state.threads=clone(base);state.selected=0;state.turn=0;state.item=0;state.depth='list';state.section='threads';state.message='Session changed. All Codex selections and drafts cleared.'}
+else if(act==='resource-action'){state.message='Explicit test simulated; no network connection was opened.';$('#main-pane').insertAdjacentHTML('beforeend','<div class="status-line">Mock connection probe only. Client-loaded state stays unknown.</div>');return}
+else if(act==='terminal'||act==='cap'){state.message='Shell-owned navigation preview only. No Terminal attach or capability switch was executed.'}
+render();
+if(state.dialog){var f=$('#new-title')||$('#prompt')||$('#dialog-root .button');if(f)f.focus()}
+}
+$('#product').addEventListener('click',function(e){var b=e.target.closest('button[data-act]');if(!b||b.disabled)return;applyAct(b.dataset.act,b.dataset.id)});
+$('#product').addEventListener('keydown',function(e){if(e.key==='Escape'&&state.dialog){state.dialog=null;render()}});
+$('#scenario').addEventListener('change',function(e){changeScenario(e.target.value)});
+document.querySelector('[data-np-root]').addEventListener('np:resize',function(e){state.mode=e.detail.width<=430?'app':'web';state.depth='list';state.dialog=null;render()});
+render();
+})();
+</script>
+<script src="../prototype-frame-2758/frame.js"></script>
+</body></html>
