@@ -27,6 +27,7 @@ use nession_common::readiness::Readiness;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_github::{GithubAgentExtension, GithubClient};
+use nession_mcp::provider::McpToolProvider;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -286,7 +287,7 @@ pub async fn run(
     // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
     // fail-closed configuration error stops the start here, before `ready`.
     agent_server
-        .mount_mcp(&config, agent_token.as_str())
+        .mount_mcp(&config, agent_token.as_str(), compose_mcp_tool_providers())
         .context("failed to mount the MCP endpoint")?;
     let (server_handle, listen_addr) = agent_server
         .start()
@@ -580,6 +581,18 @@ pub fn compose_providers(
         ExtensionRegistry::new(agent_id.to_string(), extensions, served_descriptors()?)
             .context("cannot compose this agent's protocol providers")?,
     ))
+}
+
+/// Every MCP Tool contribution this Agent composes into its shared endpoint
+/// (`#3778`).
+///
+/// An Extension reaches the MCP catalog only by being constructed here and
+/// handed to the mount — there is no side-effect registration. The baseline
+/// catalog is always present and unchanged; no Extension contributes Tools
+/// yet, and the first consumer is the Claude control requirement (`#3779`),
+/// which adds its provider to this explicit list.
+pub fn compose_mcp_tool_providers() -> Vec<Arc<dyn McpToolProvider>> {
+    Vec::new()
 }
 
 /// What this Agent can tell the Claude MCP view about its own hosting (#3600).

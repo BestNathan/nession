@@ -12,6 +12,7 @@
 //! fixture has no Server, which is exactly SC-07's local-tools-still-work case.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +23,9 @@ use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::McpConfig;
+use nession_mcp::provider::{McpToolProvider, ToolProviderError};
+use nession_mcp::tool::{parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
+use nession_mcp::ToolError;
 use nession_runtime::lane::KeyedLane;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -102,6 +106,15 @@ async fn start_agent_with_mcp_using(
     mutations: Arc<KeyedLane<ResourceKey>>,
     tool_timeout_secs: u64,
 ) -> (SocketAddr, nession_agent::server::ServerHandle) {
+    start_agent_with_providers(mutations, tool_timeout_secs, Vec::new()).await
+}
+
+/// Start the real Agent listener with an explicit MCP Tool composition.
+async fn start_agent_with_providers(
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    tool_timeout_secs: u64,
+    tool_providers: Vec<Arc<dyn McpToolProvider>>,
+) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
@@ -142,7 +155,9 @@ async fn start_agent_with_mcp_using(
         },
         ..Default::default()
     };
-    server.mount_mcp(&config, TOKEN).expect("mount MCP");
+    server
+        .mount_mcp(&config, TOKEN, tool_providers)
+        .expect("mount MCP");
     let (handle, addr) = server.start().await.expect("start");
     tokio::time::sleep(Duration::from_millis(50)).await;
     (addr, handle)
@@ -243,9 +258,94 @@ async fn call_tool(addr: SocketAddr, session: &str, name: &str, arguments: Value
     response.json()["result"].clone()
 }
 
+async fn list_tools(addr: SocketAddr, session: &str) -> Vec<Value> {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/list",
+        "params": {}
+    })
+    .to_string();
+    let response = send(addr, "POST", Some(TOKEN), Some(session), &body)
+        .await
+        .expect("tools response");
+    assert_eq!(response.status, 200, "{}", response.body);
+    response.json()["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .clone()
+}
+
 fn text_of(result: &Value) -> Value {
     let text = result["content"][0]["text"].as_str().expect("text content");
     serde_json::from_str(text).expect("tool text is JSON")
+}
+
+/// A fixture Extension Tool contributed through the explicit provider seam
+/// (`#3778` SC-01). It owns its typed input/output contract and execution;
+/// the Agent only composes the provider and the shared MCP host advertises it.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct ExtensionEchoOutput {
+    /// The message the Extension echoed.
+    message: String,
+    /// The provider that answered.
+    provider: String,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ExtensionEchoInput {
+    /// The message to echo.
+    message: String,
+}
+
+struct ExtensionEchoTool;
+
+#[async_trait::async_trait]
+impl ToolHandler for ExtensionEchoTool {
+    fn name(&self) -> &'static str {
+        "fixture_extension_echo"
+    }
+
+    fn description(&self) -> &'static str {
+        "Echo one message through the shared MCP catalog"
+    }
+
+    fn input_schema(&self) -> serde_json::Map<String, Value> {
+        schema_for::<ExtensionEchoInput>()
+    }
+
+    fn output_schema(&self) -> serde_json::Map<String, Value> {
+        schema_for::<ExtensionEchoOutput>()
+    }
+
+    async fn call(
+        &self,
+        _context: &ToolContext,
+        arguments: serde_json::Map<String, Value>,
+    ) -> Result<Value, ToolError> {
+        let input = parse_arguments::<ExtensionEchoInput>(arguments)?;
+        reply_value(&ExtensionEchoOutput {
+            message: input.message,
+            provider: "fixture-extension".to_string(),
+        })
+    }
+}
+
+#[derive(Default)]
+struct FixtureExtensionProvider {
+    enumerations: AtomicUsize,
+}
+
+impl McpToolProvider for FixtureExtensionProvider {
+    fn provider_name(&self) -> &str {
+        "fixture-extension"
+    }
+
+    fn tools(&self) -> Result<Vec<Arc<dyn ToolHandler>>, ToolProviderError> {
+        self.enumerations.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![Arc::new(ExtensionEchoTool)])
+    }
 }
 
 #[tokio::test]
@@ -343,6 +443,97 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
     assert_eq!(text_of(&killed)["name"], name);
+
+    let _ = handle.shutdown().await;
+}
+
+/// `#3778` SC-01: the Agent's explicit provider composition reaches the shared
+/// endpoint with its typed contract intact, while the eleven baseline Tools
+/// keep their exact advertised definitions.
+#[tokio::test]
+async fn agent_mcp_composes_an_extension_tool_into_the_shared_catalog() {
+    let provider = Arc::new(FixtureExtensionProvider::default());
+    let (addr, handle) = start_agent_with_providers(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        vec![provider.clone()],
+    )
+    .await;
+    let session = initialize(addr).await;
+
+    let tools = list_tools(addr, &session).await;
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    let baseline = nession_mcp::tools::TOOL_NAMES;
+    assert_eq!(
+        &names[..baseline.len()],
+        baseline,
+        "the baseline catalog and its order must not change"
+    );
+    assert_eq!(names.len(), baseline.len() + 1);
+
+    let fixture = tools
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .expect("the contributed Tool is advertised");
+    assert_eq!(
+        fixture["description"],
+        "Echo one message through the shared MCP catalog"
+    );
+    let input = &fixture["inputSchema"];
+    assert_eq!(input["type"], "object");
+    assert_eq!(input["additionalProperties"], false);
+    assert_eq!(input["properties"]["message"]["type"], "string");
+    assert_eq!(
+        input["properties"]["message"]["description"],
+        "The message to echo."
+    );
+    assert!(input["required"]
+        .as_array()
+        .expect("required")
+        .iter()
+        .any(|field| field == "message"));
+    let output = &fixture["outputSchema"];
+    assert_eq!(output["type"], "object");
+    assert_eq!(output["properties"]["message"]["type"], "string");
+    assert_eq!(output["properties"]["provider"]["type"], "string");
+    assert_eq!(
+        output["properties"]["provider"]["description"],
+        "The provider that answered."
+    );
+
+    let called = call_tool(
+        addr,
+        &session,
+        "fixture_extension_echo",
+        json!({ "message": "hello" }),
+    )
+    .await;
+    assert_eq!(called["isError"], false, "{called}");
+    let expected = json!({ "message": "hello", "provider": "fixture-extension" });
+    assert_eq!(text_of(&called), expected);
+    assert_eq!(called["structuredContent"], expected);
+
+    let refused = call_tool(
+        addr,
+        &session,
+        "fixture_extension_echo",
+        json!({ "wrong": "hello" }),
+    )
+    .await;
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(
+        refused.get("structuredContent").is_none(),
+        "a refused call must not carry success structuredContent"
+    );
+
+    assert_eq!(
+        provider.enumerations.load(Ordering::SeqCst),
+        1,
+        "tools/list and tools/call must not rebuild the catalog"
+    );
 
     let _ = handle.shutdown().await;
 }

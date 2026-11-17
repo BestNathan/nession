@@ -2041,6 +2041,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rustls 0.22.4",
  "rustls-pemfile",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",

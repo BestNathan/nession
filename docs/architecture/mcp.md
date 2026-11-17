@@ -28,7 +28,7 @@ MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
 
 ## Tools
 
-The advertised catalog has eleven Tools:
+The baseline catalog has eleven Tools:
 
 | Semantic owner | Tool | Operation |
 |---|---|---|
@@ -43,6 +43,9 @@ The advertised catalog has eleven Tools:
 | Agent | `nession_agent_list_sessions` | the named Agent's live Session state |
 | Agent | `nession_agent_create_session` | `agent.session.create` on the named Agent |
 | Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent |
+
+A host that composes Extension contributions (`#3778`) advertises them after
+these under the same typed contract.
 
 `nession_server_list_agents` answers from the Server's registry — registration,
 heartbeat and advertised addresses — not from a live query of an Agent. The
@@ -118,6 +121,8 @@ output contract fails publication.
 crates/nession-mcp/src/
 ├── lib.rs
 ├── service.rs             # protocol/transport adapter, auth, deadlines
+├── catalog.rs             # McpCatalog: immutable generations, explicit swap
+├── provider.rs            # McpToolProvider: Extension-contributed Tools
 ├── registry.rs            # ToolRegistry: register/list/lookup/call
 ├── tool.rs                # ToolHandler / ToolContext contracts
 ├── backend.rs             # semantic backend seams
@@ -125,7 +130,7 @@ crates/nession-mcp/src/
 ├── protocol.rs            # claimed versions and endpoint defaults
 ├── http.rs                # standalone HTTP host request classification
 └── tools/
-    ├── mod.rs             # module declarations + explicit registration ONLY
+    ├── mod.rs             # module declarations + baseline registration ONLY
     ├── nession_server_list_agents.rs
     ├── nession_agent_list_sessions.rs
     ├── nession_agent_create_session.rs
@@ -141,20 +146,45 @@ crates/nession-mcp/src/
 ```
 
 Every Tool is **one file named exactly like the MCP Tool**, flat under
-`tools/` (no `tools/server` or `tools/agent` directories). The module owns its
-name, description, typed argument contract, typed success output contract,
-emitted JSON Schemas and focused tests; each schema is generated from the same
-`serde` type the Tool parses or returns, so `additionalProperties: false` and
-runtime validation cannot drift. `tools/mod.rs` only declares modules and
-registers their handlers with one `ToolRegistry`; there is no central
-`match name` dispatch and no automatic or macro registration.
+`tools/` in its owning crate (no `tools/server` or `tools/agent` directories).
+The module owns its name, description, typed argument contract, typed success
+output contract, emitted JSON Schemas and focused tests; each schema is
+generated from the same `serde` type the Tool parses or returns, so
+`additionalProperties: false` and runtime validation cannot drift.
+`tools/mod.rs` only declares modules and registers the baseline handlers with
+one `ToolRegistry`; there is no central `match name` dispatch and no automatic
+or macro registration. A contributed Tool follows the same one-file contract
+in its Extension's crate.
 
-The registry is built **once at service startup**. Duplicate Tool names and any
-missing or placeholder output contract fail startup. An unknown Tool call is a
+The baseline `ToolRegistry` is built **once at service startup**. The advertised
+catalog is one immutable generation: those baseline Tools plus, on a host that
+composes Extension contributions, the Tools each explicitly listed
+`McpToolProvider` (see `crates/nession-mcp/src/provider.rs`) returns. A
+generation is built and validated in full before it becomes visible — a
+provider that cannot enumerate its Tools, a name claimed by multiple semantic
+owners, or a missing/placeholder output contract rejects the update and leaves
+the previous generation in place. Only an explicit host reconfiguration
+(Extension install/enable/disable/reconfigure, an incompatible schema change or
+a capability-manifest update) atomically swaps generations and advances the
+monotonic revision; `tools/list` and `tools/call` only read the current
+generation and never re-enumerate a provider. An unknown Tool call is a
 tool-level argument error, not a transport failure. A host may omit an
 unconfigured optional backend's Tools only by an explicit, tested policy; a
 temporarily offline target keeps the Tool listed and answers with a truthful
 unavailable error, never a changed identity or schema.
+
+### Extension-contributed Tools (`#3778`)
+
+The Extension owns a contributed Tool's semantics and its typed contract; the
+owning Agent composes the `McpToolProvider` explicitly and executes the Tool;
+the Server remains the authority for Agent discovery, authorization and
+routing; `nession-mcp` owns MCP protocol, catalog validation, authentication,
+concurrency, deadlines and result shape. There is **no** separate MCP server per
+Extension and no second Session management plane. `nession-mcp` never depends
+on `nession-agent`, `nession-server`, `nession-common` or a concrete provider,
+and a provider is never reached by side-effect registration. Live runtime state
+— a Session appearing, an Extension switching between idle and busy, a
+transient disconnect — is not a catalog mutation.
 
 `McpService` owns the protocol lifecycle, transport, inbound authentication,
 Origin policy, body size, concurrency and deadlines. A handler only validates
@@ -226,10 +256,11 @@ acceptance proof:
   versions above. There is no fake modern negotiation over a legacy lifecycle.
 - Tool parameters may be mirrored into `Mcp-Param-{Name}` headers through the
   `x-mcp-header` schema extension. The validation mechanism is implemented and
-  tested; none of the four baseline Tools annotates a parameter today, so none
+  tested; none of the baseline Tools annotates a parameter today, so none
   requires such a header.
-- `tools/list` carries `ttlMs` and `cacheScope: private`: the catalog is fixed
-  for the process and is not shared across authorization contexts.
+- `tools/list` carries `ttlMs` and `cacheScope: private`: the catalog changes
+  only on an explicit host reconfiguration, never per request, and is not
+  shared across authorization contexts.
 - GET and DELETE on the MCP endpoint are `405`; no session is minted or echoed.
 
 ### `2025-03-26`
