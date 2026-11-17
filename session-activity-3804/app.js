@@ -99,6 +99,13 @@
     renderList("web");
     renderList("app");
     var s = selected();
+    if (!s) appLayer = "sessions";
+    byId("web-composer").hidden = !s;
+    byId("app-composer").hidden = !s;
+    if (!s) {
+      text("web-terminal-copy", "No Sessions yet. Use New Session to begin.\n");
+      text("app-terminal-copy", "No Sessions yet. Use New Session to begin.\n");
+    }
     text("web-active-title", s ? s.title : "Sessions");
     text("app-active-title", s ? s.title : "Sessions");
     text("web-workspace-title", s ? s.title : "Workspace");
@@ -315,8 +322,12 @@
       var input = byId("kill-field");
       if(!s || !input || input.value.trim() !== s.name){toast("Enter the exact tmux Session name");return;}
       sessions=sessions.filter(function(x){return x.id !== s.id;});
-      if(selectedId===s.id)selectedId=sessions.length?sessions[0].id:null;
-      closeDialog();render();toast("Mock Session removed");
+      var wasSelected = selectedId === s.id;
+      if (wasSelected) selectedId = sessions.length ? sessions[0].id : null;
+      closeDialog();
+      if (wasSelected && selectedId) navigateSession(selectedId);
+      else render();
+      toast("Mock Session removed");
     }
   }
 
