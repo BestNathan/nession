@@ -2068,6 +2068,10 @@ fn a_failed_transient_rootfs_preparation_keeps_a_durable_recovery_record() {
         0,
         "the lower consumer is released only after the verified unmount"
     );
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(Path::new(&lower.mountpoint)),
+        "the physical read-only lower is reclaimed only after the verified unmount"
+    );
     print_evidence(&serde_json::json!({
         "pending_record_written": true,
         "rollback_unmount_failed": true,
