@@ -500,6 +500,10 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::String,
     },
     FieldSpec {
+        key: "image_source_root",
+        kind: FieldKind::String,
+    },
+    FieldSpec {
         key: "image_max_concurrent_builds",
         kind: FieldKind::UsizeNonZero,
     },

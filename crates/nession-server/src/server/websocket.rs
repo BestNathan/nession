@@ -142,6 +142,8 @@ impl WebSocketServer {
             ImageManagerOptions {
                 max_concurrent_builds: config.image_max_concurrent_builds,
                 build_root: std::path::PathBuf::from(&config.image_build_dir),
+                source_root: (!config.image_source_root.trim().is_empty())
+                    .then(|| std::path::PathBuf::from(config.image_source_root.trim())),
                 build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
                     .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),
                 build_log_max_bytes: config.image_build_log_max_bytes,

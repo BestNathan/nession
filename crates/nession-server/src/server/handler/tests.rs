@@ -61,6 +61,7 @@ impl TestDeps {
                 crate::image::ImageManagerOptions {
                     max_concurrent_builds: 1,
                     build_root,
+                    source_root: Some(std::env::temp_dir()),
                     build_stage_timeout: Some(std::time::Duration::from_secs(30)),
                     build_log_max_bytes: crate::image::DEFAULT_BUILD_LOG_MAX_BYTES,
                     build_retention_secs: crate::image::DEFAULT_BUILD_RETENTION_SECS,
