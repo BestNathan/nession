@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44110184570,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3796-agent-image-prepare",
+    "target_sha": "466b1aa3bfb704c0e32000d7486d77e167a4bf52",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44110184570",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "6147ae1cb119b0f0dee5f65c8d1063fd11d537bcd962b870f3c7a0209e665653"
+  },
+  "record": "runs/2026-11-17/44110184570-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "547c8feef9f8672c19b42ea82229e5f7b214520684461ba5b9e1648f395eea1a"
+}
