@@ -626,6 +626,22 @@ impl SandboxRuntime {
                     ReconcileOutcome::Cleaned(execution_id) => {
                         tracing::info!(%execution_id, "removed leftover Sandbox resources");
                     }
+                    ReconcileOutcome::CleanupFailed(record, error) => {
+                        tracing::warn!(
+                            execution = %record.execution_id,
+                            "could not clean a recovered Sandbox execution; tracking it for a \
+                             bounded retry: {error}"
+                        );
+                        let key = execution_key(&record);
+                        executions.insert(
+                            key,
+                            TrackedExecution::CleanupPending {
+                                record,
+                                attempts: 1,
+                                next_attempt: Instant::now() + cleanup_retry_delay(1),
+                            },
+                        );
+                    }
                     ReconcileOutcome::Failed(execution_id, error) => {
                         tracing::warn!(
                             %execution_id,
@@ -1083,5 +1099,77 @@ mod tests {
             CLEANUP_RETRY_MAX,
             "the delay is capped"
         );
+    }
+
+    /// A startup cleanup failure hands the record to the reaper instead of
+    /// logging it without a retry owner.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_failed_startup_reconciliation_is_tracked_for_retry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = SandboxRuntime::new(settings(dir.path()));
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state).expect("state dir");
+        let state = std::fs::canonicalize(&state).expect("canonical state");
+        let execution_dir = state.join("execution-reconcile");
+        let overlay = execution_dir.join("rootfs-overlay");
+        std::fs::create_dir_all(overlay.join("work")).expect("work");
+        std::os::unix::fs::symlink(overlay.join("work"), overlay.join("upper"))
+            .expect("symlink upper");
+        let record: ExecutionRecord = serde_json::from_value(serde_json::json!({
+            "execution_id": "execution-reconcile",
+            "session_name": "sandbox-gone",
+            "instance_id": "instance-test",
+            "backend": "test",
+            "policy_digest": "digest",
+            "created_at": 0,
+            "transient_rootfs": {
+                "mountpoint": overlay.join("merged"),
+                "upper": overlay.join("upper"),
+                "work": overlay.join("work"),
+            },
+            "execution_dir": execution_dir,
+            "restricted_network": false,
+            "agent_pid": std::process::id(),
+        }))
+        .expect("record fixture");
+        std::fs::write(
+            state.join("execution-reconcile.json"),
+            serde_json::to_vec(&record).expect("record bytes"),
+        )
+        .expect("persist the record");
+
+        runtime.reconcile(&[]).expect("reconcile");
+
+        {
+            let executions = runtime.executions.lock().expect("executions");
+            match executions.values().next() {
+                Some(TrackedExecution::CleanupPending {
+                    record, attempts, ..
+                }) => {
+                    assert_eq!(record.execution_id, "execution-reconcile");
+                    assert_eq!(*attempts, 1, "the first startup failure is tracked");
+                }
+                _ => panic!("a failed startup cleanup must be tracked for retry"),
+            }
+        }
+
+        // The recorded failure is retried through the same tracked identity.
+        std::fs::remove_file(overlay.join("upper")).expect("remove symlink");
+        std::fs::create_dir_all(overlay.join("upper")).expect("restore upper");
+        let key = runtime
+            .executions
+            .lock()
+            .expect("executions")
+            .keys()
+            .next()
+            .cloned()
+            .expect("a tracked key");
+        let report = match runtime.cleanup_entry(&key) {
+            Ok(report) => report.expect("the record was tracked"),
+            Err(error) => panic!("the retry must succeed: {error:#}"),
+        };
+        assert_eq!(report.execution_id, "execution-reconcile");
+        assert!(runtime.executions.lock().expect("executions").is_empty());
     }
 }

@@ -178,7 +178,11 @@ pub enum ReconcileOutcome {
     Active(Box<ExecutionRecord>),
     /// Its Session is gone; the owned resources were removed.
     Cleaned(String),
-    /// Cleanup failed and the record was kept for a later attempt.
+    /// Cleanup of a record failed and the record was kept. The record is the
+    /// retry owner: the Agent must keep tracking it until it is released.
+    CleanupFailed(Box<ExecutionRecord>, String),
+    /// An entry could not be read as an authoritative record. It is left in
+    /// place for an operator; there is no safe cleanup owner.
     Failed(String, String),
 }
 
@@ -1447,8 +1451,8 @@ pub fn reconcile(
         };
         match cleanup_record(settings, &record, &mut report) {
             Ok(()) => outcomes.push(ReconcileOutcome::Cleaned(record.execution_id)),
-            Err(error) => outcomes.push(ReconcileOutcome::Failed(
-                record.execution_id,
+            Err(error) => outcomes.push(ReconcileOutcome::CleanupFailed(
+                Box::new(record),
                 error.to_string(),
             )),
         }
