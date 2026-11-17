@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| Claude App · conversation-first work, Browse resource sheet, push/Raw/MCP/config, 375/390/430px | [#3829](https://github.com/BestNathan/nession/issues/3829) | [Interactive HTML](claude-app-3829/index.html) · [Scenario & fidelity](claude-app-3829/README.md) |
+
+
 | Timers · Server Definitions / Agent Placement / systemd + launchd observations · Web/App | [#3810](https://github.com/BestNathan/nession/issues/3810) · [Core #3807](https://github.com/BestNathan/nession/issues/3807) | [Interactive HTML](timer-workspace-3810/index.html) · [Scenario & fidelity](timer-workspace-3810/README.md) |
 
 
