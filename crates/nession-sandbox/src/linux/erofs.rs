@@ -152,12 +152,15 @@ fn require_dir(base: &Path, relative: &Path) -> Result<()> {
 /// This handles records written before #3582, when the writable Overlay was
 /// execution-scoped. A manager-owned Overlay mountpoint is never passed here:
 /// reconciliation releases it through the Overlay manager instead.
+/// A mount that cannot be strictly unmounted is an error: the caller must
+/// retain the durable record and the execution directory rather than forget
+/// resources the Agent still owns.
 pub fn unmount_recorded(
     paths: &[String],
     execution_dir: &Path,
     fusermount: &Path,
     report: &mut crate::exec::CleanupReport,
-) {
+) -> Result<()> {
     let owned_root =
         std::fs::canonicalize(execution_dir).unwrap_or_else(|_| execution_dir.to_path_buf());
     for raw in paths {
@@ -174,13 +177,19 @@ pub fn unmount_recorded(
                 Ok(()) => report
                     .evidence
                     .push(("reconciled-unmount".to_string(), raw.clone())),
-                Err(error) => report.evidence.push((
-                    "reconcile-unmount-failed".to_string(),
-                    format!("{raw}: {error}"),
-                )),
+                Err(error) => {
+                    report.evidence.push((
+                        "reconcile-unmount-failed".to_string(),
+                        format!("{raw}: {error}"),
+                    ));
+                    return Err(SandboxError::Cleanup(format!(
+                        "could not unmount the recorded execution mount {raw}: {error:#}"
+                    )));
+                }
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

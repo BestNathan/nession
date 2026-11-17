@@ -1393,6 +1393,109 @@ fn a_recorded_cgroup_is_recoverable_after_restart() {
     }));
 }
 
+/// A legacy execution-scoped mount whose strict unmount fails must retain its
+/// durable record and execution directory for a later retry (#3695 P1-B).
+#[test]
+fn a_legacy_record_with_a_failed_unmount_is_retained_for_retry() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut settings = settings(dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let settings_root = std::fs::canonicalize(&settings.state_dir).expect("canonical state");
+    settings.state_dir = settings_root.clone();
+    let execution_id = format!("legacy-unmount-{}", std::process::id());
+    let execution_dir = settings_root.join(&execution_id);
+    let lower = execution_dir.join("legacy-lower");
+    let upper = execution_dir.join("legacy-upper");
+    let work = execution_dir.join("legacy-work");
+    let merged = execution_dir.join("legacy-merged");
+    for path in [&lower, &upper, &work] {
+        std::fs::create_dir_all(path).expect("legacy fixture directory");
+    }
+    let overlay_settings = nession_sandbox::mount::overlay::OverlaySettings::new(
+        settings.fuse_overlayfs_path.clone(),
+        settings.fusermount_path.clone(),
+    );
+    nession_sandbox::mount::overlay::mount::mount_overlay(
+        &nession_sandbox::mount::overlay::OverlayMountSpec {
+            lowers: vec![lower],
+            upper,
+            work,
+            merged: merged.clone(),
+        },
+        &overlay_settings,
+    )
+    .expect("mount the legacy fixture");
+    assert!(
+        nession_sandbox::linux::erofs::is_mounted(&merged),
+        "the legacy fixture is a real mount"
+    );
+
+    let record: nession_sandbox::ExecutionRecord = serde_json::from_value(serde_json::json!({
+        "execution_id": execution_id,
+        "session_name": "legacy-failed-unmount",
+        "instance_id": "instance-legacy",
+        "backend": "linux-bwrap",
+        "policy_digest": "digest",
+        "created_at": 0,
+        "mounts": [merged.to_string_lossy()],
+        "execution_dir": execution_dir.to_string_lossy(),
+        "restricted_network": false,
+        "agent_pid": std::process::id(),
+    }))
+    .expect("legacy record fixture");
+    let record_path = settings_root.join(format!("{execution_id}.json"));
+    std::fs::write(
+        &record_path,
+        serde_json::to_vec(&record).expect("record bytes"),
+    )
+    .expect("persist the legacy record");
+
+    // The recorded mount cannot be unmounted: cleanup must fail before it
+    // forgets the durable record or removes the occupied directory.
+    let failing_fusermount = dir.path().join("failing-fusermount");
+    executable_script(&failing_fusermount, "#!/bin/sh\nexit 1\n");
+    let mut failing = settings.clone();
+    failing.fusermount_path = failing_fusermount;
+    let mut report = nession_sandbox::CleanupReport::default();
+    let error = nession_sandbox::cleanup_record(&failing, &record, &mut report)
+        .expect_err("a failed strict unmount must fail the cleanup");
+    assert!(
+        format!("{error:#}").contains("unmount"),
+        "the failure must name the unmount boundary: {error:#}"
+    );
+    assert!(
+        nession_sandbox::linux::erofs::is_mounted(&merged),
+        "the physical mount must survive the failed cleanup"
+    );
+    assert!(
+        execution_dir.exists(),
+        "the occupied execution directory must survive"
+    );
+    assert!(
+        record_path.exists(),
+        "the durable record must survive for a restart retry"
+    );
+
+    // A retry through the working helper completes the cleanup.
+    let mut report = nession_sandbox::CleanupReport::default();
+    nession_sandbox::cleanup_record(&settings, &record, &mut report)
+        .expect("the retry must succeed once the unmount works");
+    assert!(
+        !nession_sandbox::linux::erofs::is_mounted(&merged),
+        "the retry unmounts the legacy mount"
+    );
+    assert!(
+        !execution_dir.exists(),
+        "the execution directory is removed only after the unmount"
+    );
+    assert!(!record_path.exists(), "the durable record is removed last");
+    print_evidence(&serde_json::json!({
+        "legacy_unmount_failure_retained": true,
+        "legacy_unmount_retry_succeeded": true,
+    }));
+}
+
 #[test]
 fn an_execution_survives_losing_its_client_stream() {
     let dir = tempfile::tempdir().expect("tempdir");

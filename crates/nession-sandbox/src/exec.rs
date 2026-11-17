@@ -1268,7 +1268,7 @@ pub(crate) fn remove_owned_paths(
         Path::new(&record.execution_dir),
         &settings.fusermount_path,
         report,
-    );
+    )?;
     #[cfg(target_os = "linux")]
     release_shared_mounts(settings, record, report)?;
     let execution_dir = Path::new(&record.execution_dir);
