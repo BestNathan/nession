@@ -459,3 +459,64 @@ Compose intentionally carries no published Agent default bearer token. Set
 `AGENT_TOKEN` to a unique secret to select your own, or leave it unset to use
 the Agent's durable token provisioned under `NESSION_HOME` (`/data` in Compose).
 Never publish a shared fixture token on an exposed MCP port.
+
+### Standalone OCI image (#3791)
+
+The standalone host is also published as its own image role, independently of
+Server/Agent. It is the `nession-mcp` program and `StandaloneConfig` above —
+this image adds no MCP runtime, Tool, transport, routing or configuration
+owner. It coexists with the embedded mode (#3705) because the two answer the
+same question for different topologies: embedded serves MCP from a Server or
+Agent that already exists; standalone lets an MCP access layer be deployed,
+versioned, scaled, stopped and rolled back on machines that run no Server or
+Agent.
+
+**Artifact.** `Dockerfile.mcp.prebuilt` packages only the architecture-matched
+`nession-mcp` binary on `debian:bookworm-slim` with CA certificates and a
+`curl` liveness probe. The `mcp-bin` build context uses `cargo zigbuild` for
+`linux/amd64` and `linux/arm64`; the build fails if the binary is absent or its
+ELF machine does not match the target architecture. The image carries no
+Server/Agent binary, nginx, Web bundle, tmux, EROFS helper, Sandbox launcher,
+Node/Claude toolchain, configuration or token. It runs as uid/gid 10001 with
+no writable state and exposes port `9090`; the binary remains PID 1 and its
+existing `SIGTERM` handling drains connections.
+
+**Release identity.** CI publishes the same workspace version family:
+`mcp-<short-sha>` from a staging push and `mcp-<workspace-version>` from a
+production release, each a multi-arch OCI index with `amd64`/`arm64` platform
+manifests and `org.opencontainers.image.revision` set to the exact source SHA.
+The staging build-provenance document and the authenticated staging source
+verifier include `mcp`; the ACR mirror lane copies the already-published index
+and records its digest. A missing or failed MCP image job fails publication and
+deployment verification rather than being silently skipped. The image is
+**not** added to the Server/Agent/UI GitOps kustomizations: GitOps rollout rules
+are unchanged by this role.
+
+**Configuration and security.** Mount an operator-managed document read-only at
+`/etc/nession/mcp.toml` (the default), or pass `--config` /
+`NESSION_MCP_CONFIG`. Start from `deploy/mcp.example.toml`; its required
+credentials are empty so an unedited document fails closed. In a container,
+bind `0.0.0.0:9090` and state `allowed_hosts` explicitly for any public
+ingress; with an unspecified bind the Host allowlist is disabled, while the
+inbound bearer token and Origin policy stay mandatory. MCP clients do not send
+an `Origin` header; a browser client must be named in `allowed_origins`.
+Terminate TLS at a trusted proxy or configure the listener's
+`tls_cert_path`/`tls_key_path`. The inbound MCP token is distinct from every
+outbound credential and is never forwarded. `[backend.server]` (the real
+Server's `/ws` endpoint and credential) remains required; `[backend.agent]` only
+narrows the Agent target. Absent, unparsable or incomplete configuration exits
+before serving.
+
+**Health.** The image health check only asks the listener for an HTTP response
+(a `401` without a token counts, because it proves the process is alive). It
+does not authenticate, does not call a Tool and does not report remote-backend
+readiness; a Server outage surfaces as `tools/call` errors.
+
+**Independent lifecycle.** `deploy/docker-compose.mcp.yml` is a standalone
+Compose sample with profile `mcp`, a read-only configuration bind, dropped
+capabilities and a required image reference. It is not a service in
+`deploy/docker-compose.yml`, so `docker compose up` never installs MCP with
+Server/Agent. Deploy it on a separate machine, Compose project or Kubernetes
+workload with its own Secret, ingress and lifecycle. Roll back by pinning a
+previous `mcp-*` tag or, preferably, an immutable digest; no Server/Agent/UI
+rollout changes are required.

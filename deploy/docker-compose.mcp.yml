@@ -1,0 +1,35 @@
+# Standalone Nession MCP host — independent Compose sample (#3791).
+#
+# This service is intentionally NOT part of `deploy/docker-compose.yml`: the
+# MCP host has its own lifecycle and is not deployed with Server/Agent.
+# Start, stop, version or scale it without touching Server/Agent/UI.
+#
+# Usage:
+#   NESSION_MCP_IMAGE=ghcr.io/<owner>/nession:mcp-<short-sha> \
+#   NESSION_MCP_CONFIG_FILE=$PWD/mcp.toml \
+#     docker compose -f deploy/docker-compose.mcp.yml up -d
+#
+# The image is published by CI (`mcp-<short-sha>` on staging,
+# `mcp-<workspace-version>` on production). Pin a tag or, preferably, a
+# digest. The configuration file must be a Secret/read-only mount; see
+# deploy/mcp.example.toml and docs/architecture/mcp.md.
+
+services:
+  mcp:
+    image: "${NESSION_MCP_IMAGE:?set NESSION_MCP_IMAGE to a pinned nession mcp image tag or digest}"
+    profiles: ["mcp"]
+    ports:
+      - "${MCP_HTTP_PORT:-9090}:9090"
+    environment:
+      NESSION_MCP_CONFIG: /etc/nession/mcp.toml
+    volumes:
+      - type: bind
+        source: "${NESSION_MCP_CONFIG_FILE:?set NESSION_MCP_CONFIG_FILE to the operator mcp.toml}"
+        target: /etc/nession/mcp.toml
+        read_only: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
