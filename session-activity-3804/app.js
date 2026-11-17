@@ -336,6 +336,12 @@
     if(menuAct){var id=menuTarget;var kind=menuAct.dataset.menuAction;closeMenu(false);showDialog(kind,id);return;}
     var dialogAct=e.target.closest("[data-dialog]");
     if(dialogAct){handleDialogAction(dialogAct.dataset.dialog);return;}
+    var cap=e.target.closest("[data-capability]");
+    if(cap){
+      var name=cap.dataset.capability;
+      dialog(name+" · Workspace",'<p>'+encode(name)+' belongs to the current Session Workspace. This is a read-only mock; no Agent operation runs.</p>','<button type="button" class="n-primary" data-dialog="cancel">Done</button>');
+      return;
+    }
     var select=e.target.closest("[data-select]");
     if(select){navigateSession(select.dataset.select);return;}
     var menu=e.target.closest("[data-menu]");
