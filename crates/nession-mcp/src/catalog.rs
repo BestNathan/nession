@@ -845,6 +845,32 @@ mod tests {
     }
 
     #[test]
+    fn a_runtime_manifest_does_not_change_the_source_pinned_export_catalog() {
+        // The Pages/Documents projection is built from the static baseline
+        // registry, not from a live Agent catalog (`#3778` invariant 6). A
+        // dynamic manifest can change what an endpoint advertises; it can
+        // never replace the Rust-owned contract source.
+        let export = || -> Vec<Value> {
+            crate::tools::registry()
+                .expect("baseline registry")
+                .list()
+                .iter()
+                .map(|tool| serde_json::to_value(tool).expect("serialized Tool"))
+                .collect()
+        };
+        let before = export();
+        let provider = provider_of_one("fixtures", "fixture_echo");
+        let manifest = McpCatalog::with_providers(&[provider as Arc<dyn McpToolProvider>])
+            .expect("catalog")
+            .manifest();
+        assert_eq!(manifest.tools.len(), 1);
+        let _ = McpCatalog::from_manifest(&manifest).expect("routed catalog");
+        let after = export();
+        assert_eq!(after, before);
+        assert_eq!(after.len(), crate::tools::TOOL_NAMES.len());
+    }
+
+    #[test]
     fn providers_are_enumerated_only_by_explicit_composition() {
         let provider = provider_of_one("fixtures", "fixture_echo");
         let catalog = McpCatalog::with_providers(&[provider.clone() as Arc<dyn McpToolProvider>])
