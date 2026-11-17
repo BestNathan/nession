@@ -23,7 +23,7 @@
   const agentName="nession-dev";
   const stateOf = s => {
     if(!s.im) s.im={query:"",repository:"all",status:"all",libraryPage:0,librarySize:6,selected:null,
-      tag:null,tagName:"",tagExpected:null,tagPhase:"edit",tagMessage:"",
+      tag:null,tagName:"",tagExpected:null,tagPhase:"edit",tagMessage:"",tagConflictRefreshed:false,
       buildMode:"closed",buildKind:"github",buildAlias:"",buildRepo:"https://github.com/BestNathan/nession",
       buildRef:"main",buildDirectory:"/authorized/workspace",buildRepresentation:"flattened",
       compose:[{id:"rust",destination:"/opt/rust"},{id:"source",destination:"/workspace/source"}],
@@ -70,7 +70,7 @@
     all.sort((a,b)=>a.name.localeCompare(b.name));
     return all;
   };
-  const tagConflict=(s,owner,ui)=>s.fixture==="tag-conflict"||!!s.tagConflict||(owner?.digest||null)!==ui.tagExpected;
+  const tagConflict=(s,owner,ui)=>(((s.fixture==="tag-conflict"||!!s.tagConflict)&&!ui.tagConflictRefreshed)||(owner?.digest||null)!==ui.tagExpected);
   function catalogDetail(s,im){
     const ui=viewFor(s),m=imageMeta(im),reason=runtimeReason(s,im),cache=cacheOf(s,im);
     const refs=m.refs||[];
@@ -327,13 +327,13 @@
         });
       } else ui.notice="Clipboard unavailable. Select the Digest text in the detail to copy.";
     }
-    else if(part==="tag"){const im=find();if(im&&serverUp(s)){ui.tag=id;ui.tagName=(im.tags||[])[0]||"stable";ui.tagExpected=(s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName))||{}).digest||null;ui.tagPhase="edit";ui.tagMessage="";}}
+    else if(part==="tag"){const im=find();if(im&&serverUp(s)){ui.tag=id;ui.tagName=(im.tags||[])[0]||"stable";ui.tagExpected=(s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName))||{}).digest||null;ui.tagPhase="edit";ui.tagMessage="";ui.tagConflictRefreshed=false;}}
     else if(part==="tag-cancel"){ui.tag=null;ui.tagMessage="";}
     else if(part==="tag-back"){ui.tagPhase="edit";ui.tagMessage="";}
-    else if(part==="tag-refresh"){const im=find();const o=im&&s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagMessage="Expected Tag refreshed; review before confirming."; }
+    else if(part==="tag-refresh"){const im=find();const o=im&&s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagConflictRefreshed=true;ui.tagPhase="edit";ui.tagMessage="Expected Tag refreshed. Review the operation again before confirming."; }
     else if(part==="tag-review"){const im=find();if(!im||!serverUp(s))return true;if(!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(ui.tagName)){ui.tagMessage="Invalid Tag: use lower-case letters, digits, dot, underscore or hyphen.";return true;}const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));ui.tagExpected=o?.digest||null;ui.tagPhase="review";ui.tagMessage="";}
     else if(part==="tag-save"){const im=find();if(!im||ui.tagPhase!=="review"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: Tag changed since review. Refresh the expected revision before retry.";return true;}if(o)o.tags=o.tags.filter(t=>t!==ui.tagName);if(!im.tags.includes(ui.tagName))im.tags.push(ui.tagName);ui.tag=null;ui.notice="Tag "+ui.tagName+" updated. Existing pinned consumers are unchanged.";}
-    else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=(im.tags||[]).includes(ui.tagName)?ui.tagName:im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";}
+    else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=(im.tags||[]).includes(ui.tagName)?ui.tagName:im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";ui.tagConflictRefreshed=false;}
     else if(part==="tag-unlink"){const im=find();if(!im||ui.tagPhase!=="unlink"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: the Tag changed before unlink. Nothing was removed.";return true;}o.tags=o.tags.filter(t=>t!==ui.tagName);ui.tag=null;ui.notice="Tag unlinked; immutable Manifest, consumer pins and Blob Store remain.";
     } else if(part==="distribution"){s.sub.images="distribution";ui.cacheSelected=id;}
     else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.repository="all";ui.status="all";ui.selected=id;ui.libraryPage=Math.max(0,Math.floor(catalog(s).findIndex(im=>im.id===id)/ui.librarySize));}
