@@ -1078,9 +1078,13 @@ mod tests {
         // credential model, and `server.image.access` left with it — image
         // blobs are read with the Server Token as a bearer credential rather
         // than through an access-grant wire.
+        // Up by one for #3796: `agent.session.sandbox.image-prepare` is the
+        // explicit, user-authorized cache action the Server forwards for one
+        // current Session. It prepares one already-cataloged identity and
+        // never starts a download from an observation read.
         assert_eq!(
             manifest.protocols.len(),
-            40,
+            41,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

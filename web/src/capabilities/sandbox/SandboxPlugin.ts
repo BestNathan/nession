@@ -9,6 +9,11 @@ import {
 import { WIRE as ENTER_WIRE } from '@/generated/protocol/core/server-session-sandbox-enter/v1';
 import { WIRE as FOCUS_WIRE } from '@/generated/protocol/core/server-session-sandbox-focus/v1';
 import { WIRE as PREFLIGHT_WIRE } from '@/generated/protocol/core/server-session-sandbox-preflight/v1';
+import {
+  WIRE as IMAGE_PREPARE_WIRE,
+  type SandboxImagePrepareIntent,
+  type SandboxImagePrepareResponse,
+} from '@/generated/protocol/core/server-session-sandbox-image-prepare/v1';
 import { WIRE as RETURN_WIRE } from '@/generated/protocol/core/server-session-sandbox-return-to-native/v1';
 
 import type { PluginSurface, TransportPlugin } from '@/platform/socket/types';
@@ -80,6 +85,25 @@ export class SandboxPlugin implements TransportPlugin {
       throw new Error(response.error ?? 'Agent image cache progress is unavailable');
     }
     return response.cache_observations;
+  }
+
+  /**
+   * One explicit, user-authorized prepare/resume/retry of one Image identity
+   * in the current Session Agent's cache (#3796).
+   *
+   * The response is the Agent's authoritative aggregate observation for the
+   * identity's required closure. An observation-only read never reaches this
+   * method: the user chooses the intent.
+   */
+  async imagePrepare(
+    sessionId: string,
+    digest: string,
+    intent: SandboxImagePrepareIntent,
+  ): Promise<SandboxImagePrepareResponse> {
+    return this.requireConnection().request<SandboxImagePrepareResponse>(
+      IMAGE_PREPARE_WIRE,
+      { session_id: sessionId, digest, intent },
+    );
   }
 
   /** Validate one draft against the exact context generation. */
