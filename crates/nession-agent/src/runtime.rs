@@ -22,6 +22,7 @@
 use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_claude_code::session_context::{McpHostContext, McpHostEndpoint};
+use nession_claude_code::tools::ClaudeCodeToolProvider;
 use nession_common::extension::AgentExtension;
 use nession_common::readiness::Readiness;
 use nession_common::system;
@@ -32,6 +33,7 @@ use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+use crate::claude_control::AgentClaudeControl;
 use crate::claude_session_context::TmuxSessionContext;
 use crate::config::AgentConfig;
 use crate::connection::ServerClient;
@@ -288,7 +290,11 @@ pub async fn run(
     // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
     // fail-closed configuration error stops the start here, before `ready`.
     agent_server
-        .mount_mcp(&config, agent_token.as_str(), compose_mcp_tool_providers())
+        .mount_mcp(
+            &config,
+            agent_token.as_str(),
+            compose_mcp_tool_providers(&agent_id, Arc::clone(&tmux_for_client)),
+        )
         .context("failed to mount the MCP endpoint")?;
     // The composed contribution catalog and the context its handlers receive
     // (#3778). The central connection advertises the manifest on registration
@@ -613,11 +619,17 @@ pub fn compose_providers(
 ///
 /// An Extension reaches the MCP catalog only by being constructed here and
 /// handed to the mount — there is no side-effect registration. The baseline
-/// catalog is always present and unchanged; no Extension contributes Tools
-/// yet, and the first consumer is the Claude control requirement (`#3779`),
-/// which adds its provider to this explicit list.
-pub fn compose_mcp_tool_providers() -> Vec<Arc<dyn McpToolProvider>> {
-    Vec::new()
+/// catalog is always present and unchanged. The Claude Code Extension is the
+/// first consumer (`#3779`): its Tools execute through this Agent's own tmux
+/// Session state, process membership and on-demand CLI observation.
+pub fn compose_mcp_tool_providers(
+    agent_id: &str,
+    tmux: Arc<SessionManager>,
+) -> Vec<Arc<dyn McpToolProvider>> {
+    vec![Arc::new(ClaudeCodeToolProvider::new(
+        agent_id,
+        Arc::new(AgentClaudeControl::new(agent_id, tmux)),
+    ))]
 }
 
 /// What this Agent can tell the Claude MCP view about its own hosting (#3600).
@@ -816,5 +828,18 @@ mod tests {
             !manifest.is_empty(),
             "the runtime must advertise at least the units it routes itself"
         );
+    }
+
+    /// The Claude control Tools reach the shared MCP catalog only through this
+    /// explicit composition (`#3779`).
+    #[test]
+    fn the_runtime_composes_the_claude_control_tools() {
+        let providers = compose_mcp_tool_providers("agent-test", Arc::new(SessionManager::new()));
+        let names: Vec<String> = providers
+            .iter()
+            .flat_map(|provider| provider.tools().expect("provider tools"))
+            .map(|tool| tool.name().to_string())
+            .collect();
+        assert_eq!(names, vec!["nession_claude_status".to_string()]);
     }
 }
