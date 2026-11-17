@@ -115,8 +115,8 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/overlay-system-3142" target="_blank" rel="noopener noreferrer">View Overlay System source (GitHub) ↗</a>
 <a class="card" href="./sandbox-capability-3124/index.html" aria-label="Open unified Sandbox Images Workspaces and Policies Web App prototype">
 <small>Requirements #3408 / #3407 / #3405 · Session Sandbox · Web / App</small>
-<h2>Sandbox · Overview / Images / Workspaces / Policies <span aria-hidden="true">↗</span></h2>
-<p>在原有 sandbox-capability-3124 目录中修订：Session 作用域入口；Images 使用 Server 全局镜像 Registry、构建与 Agent Cache 观察；Workspaces 是 Agent 可命名、可复用的资源；Policies 保留 filesystem/network 并按 linux_namespace/cgroup_v2/seccomp 直接导航。Filesystem 展示 identity Access、显式 Source→Target Mount、隐式 RootFS / 与 Workspace /workspace 的映射。</p>
+<h2>Sandbox · EROFS resource workflows / Images / Workspaces / Policies <span aria-hidden="true">↗</span></h2>
+<p>保留 Session 内 Sandbox 的四节导航：可模拟 Host RootFS + EROFS Toolchain + 持久 Workspace；Library 显示角色/平台/Agent Cache/Composite 兼容性；Builds 选择 Git/Directory/Archive/OCI/Compose 并浏览历史，Distribution Prepare/Resume，Workspaces 检视 Lower/Upper/Lease。全部仅为交互原型，不表示后端已支持新组合。</p>
 <span class="tag">Interactive HTML · Contextual keyword help (hover/focus/tap) · Web 1180/1024 · App 390/375 · Session-scoped · Mock only</span>
 <span class="ia-status">Candidate design on the shared prototype branch; Web/App Chromium and latest Pages publication revision must be independently verified. Previous six-peer policy Tabs are superseded.</span>
 </a>
@@ -131,8 +131,8 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/session-operation-surfaces-3089" target="_blank" rel="noopener noreferrer">View Session surfaces prototype source (GitHub) ↗</a>
 <a class="card" href="./project-session-3025/index.html" aria-label="Open Project and managed EROFS Session creation prototype">
 <small>Requirements #3025 / #3021 / #3022 · Sidebar Projects / Project Detail</small>
-<h2>Project · EROFS · Session creation <span aria-hidden="true">↗</span></h2>
-<p>Web Sidebar 或 App Sessions 可直接打开独立 Project 详情；在详情中配置 Git Source、已有工作目录和 EROFS 镜像，随后创建 Existing / Managed Session。包括无 Session、缓存失败及返回导航。</p>
+<h2>Project · Session resource preparation &amp; snapshot <span aria-hidden="true">↗</span></h2>
+<p>Project 详情 → 创建 Session：可模拟 Host/EROFS Base、Toolchain、Managed/Project Location Workspace 和 Project Image 的有效资源预览，显式 Prepare/失败恢复后 Create；旧 Session 的镜像引用不会被新 Project 版本静默替换。</p>
 <span class="tag">Interactive HTML · Web 1180/1024 · App 390/375 · Mock only</span>
 <span class="ia-status">Project 导航与业务语义仍有效；旧版窄 Create Session 弹框的 Web/App 呈现已由 #3089 新原型取代 · 真浏览器视觉对比待验证</span>
 </a>

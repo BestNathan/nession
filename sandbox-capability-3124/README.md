@@ -94,3 +94,18 @@ The mock does **not** establish that a registry-provided image default mount fie
 ## Non-goals
 
 No production Web/App changes, schema/codegen edits, global navigation implementation, EROFS builds/downloads, host mounts, Native fallback, new security guarantees, Project CRUD, database writes, real Session creation, or second prototype registry.
+## 2026-11-17 · New user-flow design revision (#3792, #3793, #3795, #3796, #3797, #3798)
+
+The existing `sandbox-capability-3124` prototype was **revised in place**, retaining the four Session-scoped sections, Web/App ownership hierarchy and original HTML/JS assets. The accepted prior IA (#3408) remains the navigation owner. New candidate interactions:
+
+- Overview **Use Host + Rust + Workspace** selects Local Host RootFS, verified Rust Toolchain at /opt/rust, and persistent Agent-managed Workspace with an EROFS Lower; Policies → Filesystem previews the resulting mapping and exercises a mocked Preflight/Enter. Main currently rejects some Host-root EROFS combinations: this is candidate #3792 behavior, NOT delivered kernel functionality.
+- Images Library continues to expand details **under the selected row**, now also presenting type / OCI platform, current Agent cache phase, and explicit incompatible Referenced Composite / Darwin / missing-cache reasons; unsupported actions are disabled (#3793/#3784).
+- Builds exposes Git, Directory, Archive, OCI, Compose source choices. Source declarations are mock-only; Directory uses a safe illustrative authorized prefix, OCI requires a pinned reference, Compose chooses Flattened or Referenced. Existing list states and simulated stage/cancel/retry remain. A status filter plus three-record pages allow browsing older synthetic history (#3795/#3798).
+- Distribution retains Agent-local Prepare/Resume and truthful downloading/verifying/verified mock transitions. None of these controls dispatches real transfers (#3796).
+- Workspaces permits opening resource **Details** independently from **Use**, including immutable Lower, persistent Upper, bytes, active Lease count and mount state. The in-use Workspace remains undeletable (#3797).
+
+**Current product vs candidate:** source locations checked in `web/src/capabilities/{sandbox,images}/components`, `web/src/app/workspace/capabilities.ts`, `docs/design/{information-architecture,visual-language,workspace}.md`; the production behavior remains the accepted #3405/#3435/#3695/3698 contracts until new Issues are implemented and independently verified. Demo values are not real cache bytes, native mount observations, authorized image paths or measurements.
+
+**Prototype validation:** JavaScript parsed successfully and a sandboxed, dependency-free synthetic DOM event smoke traversed Overview → Host+Toolchain+Workspace → Validate, incompatible Composite Library detail, Compose submit, filtered Build history and Workspace Lease inspection (8 checks, all observed true). This does not replace Chromium geometry/accessibility inspection, publisher readback or production Acceptance; those remain **unverified** for this revision. Existing historical Chromium/Pages receipts in this README refer only to prior prototype source revisions.
+
+**Shared branch source:** `prototype/sandbox-capability-3124/`; live Pages URL `https://bestnathan.github.io/nession/prototypes/sandbox-capability-3124/index.html` is **not yet verified against this revision**. Owning new Issues hold the pinned immutable source SHA once published.

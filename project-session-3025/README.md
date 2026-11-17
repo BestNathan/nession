@@ -70,3 +70,13 @@ This mock is revised in place for [#3137](https://github.com/BestNathan/nession/
 - **OperationSurface** — Project Settings/Create use one action line with secondary actions before the primary Save/Create; the delete confirmation keeps its destructive action separated.
 
 The mock reflects the production `web/src/components/ui/{resource-detail,configuration-form,operation-surface}.tsx` owners; React remains authoritative. Browser walkthrough and Pages publication must be renewed for this SHA before this revision is described as live.
+
+## 2026-11-17 · Managed Session effective-resource preview (#3794)
+
+This revises **the same existing** `project-session-3025/` mock, not a duplicate Project navigation model. Project Details → New Session → **按需制备 EROFS** now exposes a **Host RootFS / EROFS Base Runtime** choice, independent managed / Project Location Workspace choice, Node/Rust Toolchain checkboxes, pinned Project Image and a derived **Effective resource preview** (Runtime, Workspace, Project Image, Toolchains, Agent and Prepare state). The user explicitly selects Prepare and Create; failure retains the draft. On simulated success the new mock Session stores a pinned resource snapshot, preserving original Project reference semantics (#3794, #3062, #3649).
+
+**Difference vs current production:** shipped `useCreateSessionForm` currently handles Agent/Project Location/ENV but not this effective image/toolchain Workspace picker; `ProjectDetail` still contains a static Managed-unavailable dialog. The mock's Host+EROFS combination is a desired #3792 behavior, NOT current Linux runtime proof or authorized downloads. The current Project form's prior view and ENV model are retained; #3089 owns the final Web/App dialog geometry and #3649 owns ENV inheritance UI. No new global Images surface, no separate ProjectEnvironment.
+
+**Verification:** JavaScript source parses, and a dependency-free event simulation verified Managed selection, effective preview, Host runtime change, explicit Prepare and creation (4/4 checks). Actual Chromium click-through/viewport/keyboard/screenshot testing, exact Pages manifest publication and production Acceptance remain **unverified** for this new revision. Historical browser/Pages evidence in the older sections applies only to the pinned prior source, not the modified JS.
+
+**Source:** `prototype/project-session-3025/`. Candidate Pages URL `https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html` is **not yet verified** at this revision; the source commit is pinned in #3794.
