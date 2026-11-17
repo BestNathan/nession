@@ -3135,6 +3135,51 @@ wires: &["agent.file.cwd"],
         },
         Unit {
             owner: "core",
+            id: "server.session.sandbox.image-prepare",
+            version: 1,
+            wires: &["server.session.sandbox.image-prepare"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxImagePreparePayload>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareIntent>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareResponse>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxImagePrepareCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxImagePreparePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxImagePreparePayload>,
+            )),
+            response: Some((
+                "SessionSandboxImagePrepareReply",
+                nession_protocol::contracts::session::v1::SandboxImagePrepareResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.image-prepare",
+            version: 1,
+            wires: &["agent.session.sandbox.image-prepare"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxImagePreparePayload>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareIntent>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxImagePrepareCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxImagePreparePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxImagePreparePayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
             id: "server.session.sandbox.preflight",
             version: 1,
             wires: &["server.session.sandbox.preflight"],
