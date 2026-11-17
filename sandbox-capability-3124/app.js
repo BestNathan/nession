@@ -786,7 +786,15 @@
     var err=view.querySelector(".cand-alert.success");if(err)err.hidden=true;
     var enter=view.querySelector('[data-action="enter"]');if(enter)enter.disabled=true;
   });
-  view.addEventListener("change",function(e){if(handleField(e.target))render();});
+  view.addEventListener("change",function(e){
+    if(!handleField(e.target))return;
+    // Text inputs already update draft state on input. Re-rendering on blur can
+    // detach the button being clicked and swallow an operation confirmation.
+    // Selects and checkboxes change composition, so they still render now.
+    if(e.target.tagName==="INPUT"&&e.target.type!=="checkbox")return;
+    if(e.target.tagName==="TEXTAREA")return;
+    render();
+  });
   root.querySelectorAll("[data-fixture]").forEach(function(b){
     b.addEventListener("click",function(){
       var newFixture=b.getAttribute("data-fixture");
