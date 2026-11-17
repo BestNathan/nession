@@ -9,7 +9,7 @@
   var view=document.getElementById("sandbox-product");
   var inspector=document.getElementById("sandbox-inspector");
   if(!root||!device||!view)return;
-  function image(id,name,kind,letter,mount){var sizes={base:24000000,base2:21000000,rust:104000000,node:48000000,source:58000000};return {id:id,name:name,kind:kind,digest:"sha256:"+letter.repeat(64),status:"ready",default_mount:mount||null,size_bytes:sizes[id]||35000000};}
+  function image(id,name,kind,letter,mount){var sizes={base:24000000,base2:21000000,rust:104000000,node:48000000,source:58000000};return {id:id,name:name,kind:kind,digest:"sha256:"+letter.repeat(64),status:"ready",repository:kind==="Base Runtime"?"nession/base":kind==="Project Source"?"nession/projects":"nession/tools",tags:[id],reference_count:id==="rust"?2:id==="source"?1:0,default_mount:mount||null,size_bytes:sizes[id]||35000000};}
   var initialImages=[
     image("base","minimal-glibc-runtime","Base Runtime","a"),
     image("base2","alpine-runtime","Base Runtime","f"),
@@ -39,7 +39,7 @@
       rootMode:"host",rootImage:"base",tools:[],toolTarget:"/opt/rust",mountTargets:{rust:"/opt/rust",node:"/opt/node",source:"/opt/nession-source"},mountToAdd:"rust",workspaceLower:false,workspaceManualName:"",readPaths:"",writePaths:"",
       home:"ephemeral",network:"deny",namespace:{pid:true,ipc:true,user:true,uts:false,cgroup:false},
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:null,imageAction:"",
-      step:0,tip:null,fsInspect:false,buildOpen:false,buildKind:"github",buildSourceValue:"https://github.com/BestNathan/nession",buildRepresentation:"flattened",buildError:"",buildFilter:"all",buildPage:0,inspectWorkspace:"ws:busy"};
+      step:0,tip:null,fsInspect:false,tagEditor:null,tagDraft:"",tagExpected:null,tagStage:"idle",tagNotice:"",tagConflict:false,buildOpen:false,buildKind:"github",buildSourceValue:"https://github.com/BestNathan/nession",buildRepresentation:"flattened",buildError:"",buildFilter:"all",buildPage:0,inspectWorkspace:"ws:busy"};
   }
   function seedHistory(state){
     state.builds.push({id:"build-117",name:"old-release",status:"succeeded",stage:"publishing",elapsed_ms:65000,files:410,bytes:2900000,attempt:1,diagnostic:"Published"},{id:"build-116",name:"invalid-archive",status:"failed",stage:"validating",elapsed_ms:3500,files:0,bytes:0,attempt:2,diagnostic:"Archive escaped authorized root"},{id:"build-115",name:"old-source",status:"canceled",stage:"snapshotting",elapsed_ms:14000,files:14,bytes:18000,attempt:1,diagnostic:"Canceled"});
@@ -204,6 +204,27 @@
       facts+(s.preflight==="passed"?alert("Validation passed.","success"):"")+
       (s.preflight==="failed"?alert(s.error,"danger"):"")+(s.notice?alert(s.notice):"")+buttons);
   }
+  function tagOwner(repository,tag){
+    return s.images.find(function(im){return im.repository===repository&&(im.tags||[]).includes(tag)})||null;
+  }
+  function tagControls(im){
+    if(s.tagEditor!==im.id){
+      return '<div class="cand-actions">'+action("Manage Tag","image-tag:"+im.id,"",!online())+
+        ((im.tags||[]).length?action("Remove Tag","image-tag-remove:"+im.id,"",!online()):"")+'</div>';
+    }
+    var active=s.tagStage==="confirm"||s.tagStage==="unlink-confirm";
+    var owner=tagOwner(im.repository,s.tagDraft);
+    var oldOwner=owner?short(owner.digest):"Unassigned";
+    var form=s.tagStage==="edit"?'<div class="cand-field"><label>Repository tag</label><input data-field="tagDraft" aria-label="Image repository tag" value="'+h(s.tagDraft)+'" placeholder="e.g. stable"></div>':
+      '<p class="cand-job-measure">Tag: <strong>'+h(s.tagDraft)+'</strong> · Current: '+h(oldOwner)+' → '+short(im.digest)+'</p>'+
+      '<p class="cand-job-measure">Impact: '+(im.reference_count||0)+' pinned consumer(s). Unlink/move changes only Tag. Immutable Manifest, live pins and cached bytes are not deleted.</p>';
+    var next=s.tagStage==="edit"?action("Review change","image-tag-review:"+im.id,"primary"):
+      s.tagStage==="confirm"?action("Confirm CAS tag move","image-tag-save:"+im.id,"primary"):
+      action("Confirm unlink","image-tag-unlink:"+im.id,"danger");
+    return '<div class="cand-tag-editor">'+form+
+      (s.tagNotice?alert(s.tagNotice,s.tagNotice.startsWith("Conflict")?"danger":"info"):"")+
+      '<div class="cand-actions">'+action("Cancel","image-tag-cancel")+next+'</div></div>';
+  }
   function imageLibrary(){
     // A single list is the owning surface: detail expands inside its row.
     // Never render a second detail card below the entire list.
@@ -217,10 +238,11 @@
           '<div class="cand-image-details-grid">'+
             '<div><span>Digest</span><code>'+h(im.digest)+'</code></div>'+
             '<div><span>Type / Platform</span><strong>'+h(im.kind)+' · '+h(im.platform||'linux/amd64')+'</strong></div>'+
-            '<div><span>Agent cache</span>'+statusChip(cache)+'</div>'+
+            '<div><span>Repository / Tags</span><strong>'+h(im.repository)+' · '+h((im.tags||[]).join(', ')||'No tags')+'</strong></div>'+            '<div><span>Manifest revision</span><code>'+h(im.digest)+'</code></div>'+            '<div><span>Reference impact</span><strong>'+h(im.reference_count||0)+' pinned user(s); Tag unlink retains bytes</strong></div>'+            '<div><span>Agent cache</span>'+statusChip(cache)+'</div>'+
             '<div><span>'+(im.kind==="Base Runtime"?"RootFS target":"Default mount")+'</span><code>'+h(im.kind==="Base Runtime"?"/":im.default_mount||"—")+'</code></div>'+
           '</div>'+
           (problem?alert(problem,'danger'):alert('Runtime compatible · current Agent','success'))+
+          tagControls(im)+
           '<div class="cand-actions">'+
             (im.kind==="Base Runtime"
               ? action("Use as RootFS","image-root:"+im.id,"primary",!!problem||!isEditable())
@@ -575,6 +597,7 @@
     if(fieldName){
       var val=t.value;
       if(fieldName==="newWorkspaceName")s.newWorkspaceName=val;
+      else if(fieldName==="tagDraft"){s.tagDraft=val;s.tagNotice="";}
       else if(fieldName==="selectedWorkspace"){s.selectedWorkspace=val;dirty();}
       else if(["rootMode","rootImage","toolTarget","mountToAdd","workspaceManualName","readPaths","writePaths","home","network","cgroup","buildSourceValue"].includes(fieldName)){
         s[fieldName]=val;dirty();
@@ -600,6 +623,39 @@
     return false;
   }
   function doAction(a){
+    if(a==="image-tag-cancel"){s.tagEditor=null;s.tagStage="idle";s.tagNotice="";return;}
+    if(a.indexOf("image-tag-remove:")===0){
+      var im=imageBy(a.slice(17));
+      if(!im||!online()||!(im.tags||[]).length)return;
+      s.tagEditor=im.id;s.tagDraft=im.tags[0];s.tagExpected=im.digest;
+      s.tagStage="unlink-confirm";s.tagNotice="";return;
+    }
+    if(a.indexOf("image-tag:")===0){
+      var im=imageBy(a.slice(10));if(!im||!online())return;
+      s.tagEditor=im.id;s.tagDraft=(im.tags||[])[0]||"stable";s.tagExpected=(tagOwner(im.repository,s.tagDraft)||{}).digest||null;
+      s.tagStage="edit";s.tagNotice="";return;
+    }
+    if(a.indexOf("image-tag-review:")===0){
+      var im=imageBy(a.slice(17));if(!im||s.tagEditor!==im.id)return;
+      if(!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(s.tagDraft)){s.tagNotice="Invalid tag name; only lower-case letters/digits/dot/underscore/hyphen.";return;}
+      s.tagExpected=(tagOwner(im.repository,s.tagDraft)||{}).digest||null;
+      s.tagStage="confirm";s.tagNotice="";return;
+    }
+    if(a.indexOf("image-tag-save:")===0){
+      var im=imageBy(a.slice(15));if(!im||s.tagEditor!==im.id||s.tagStage!=="confirm")return;
+      var cur=tagOwner(im.repository,s.tagDraft);
+      if(s.tagConflict||((cur||{}).digest||null)!==s.tagExpected){s.tagNotice="Conflict: repository Tag changed since review; refresh and retry.";return;}
+      if(cur)cur.tags=cur.tags.filter(function(t){return t!==s.tagDraft;});
+      if(!im.tags.includes(s.tagDraft))im.tags.push(s.tagDraft);
+      s.tagEditor=null;s.tagStage="idle";s.tagNotice="Tag now references selected immutable Manifest.";return;
+    }
+    if(a.indexOf("image-tag-unlink:")===0){
+      var im=imageBy(a.slice(17));if(!im||s.tagEditor!==im.id||s.tagStage!=="unlink-confirm")return;
+      var cur=tagOwner(im.repository,s.tagDraft);
+      if(s.tagConflict||!cur||cur.digest!==s.tagExpected){s.tagNotice="Conflict: repository Tag changed before unlink; no changes made.";return;}
+      cur.tags=cur.tags.filter(function(t){return t!==s.tagDraft;});
+      s.tagEditor=null;s.tagStage="idle";s.tagNotice="Tag unlinked; pinned Manifest and live CAS blobs remain protected.";return;
+    }
     if(a==="demo-host"){s.rootMode="host";s.tools=["rust"];s.selectedWorkspace="ws:prior";s.workspaceLower=true;s.mountTargets.rust="/opt/rust";s.area="policies";s.sub.policies="filesystem";dirty();return;}
     if(a==="fs-inspect"){s.fsInspect=!s.fsInspect;return;}
     if(a.indexOf("fs-mode:")===0){if(isEditable()){s.rootMode=a.slice(8);dirty();}return;}
@@ -635,7 +691,7 @@
       s.session=a.slice(8);s.selectedWorkspace=s.session==="sandbox-review"?"project:nession":"auto";
       s.surface="workspace";s.area="overview";s.depth="root";s.inside=false;dirty();return;
     }
-    if(a.indexOf("image:")===0){var id=a.slice(6);s.selectedImage=s.selectedImage===id?null:id;return;}
+    if(a.indexOf("image:")===0){var id=a.slice(6);s.selectedImage=s.selectedImage===id?null:id;s.tagEditor=null;s.tagNotice="";return;}
     if(a.indexOf("image-root:")===0){var id=a.slice(11);if(imageBy(id)&&imageBy(id).kind==="Base Runtime"&&s.cache[id]==="verified"&&isEditable()){s.rootImage=id;s.rootMode="image";s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a.indexOf("image-tool:")===0){var id=a.slice(11),im=imageBy(id);if(im&&im.kind!=="Base Runtime"&&!imageIssue(im)&&isEditable()){s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;s.area="policies";s.sub.policies="filesystem";dirty();}return;}
     if(a==="build-start"){s.buildOpen=!s.buildOpen;s.buildError="";return;}
@@ -734,7 +790,8 @@
       s=defaults();seedHistory(s);s.width=previous.width;s.mode=previous.mode;
       s.fixture=newFixture;
       if(newFixture==="inside"){s.inside=true;s.effective=effectiveDraft();}
-      if(newFixture==="macos"){s.namespace={pid:false,ipc:false,user:false,uts:false,cgroup:false};s.network="deny";}
+      if(newFixture==="tag-conflict"){s.tagConflict=true;}
+       if(newFixture==="macos"){s.namespace={pid:false,ipc:false,user:false,uts:false,cgroup:false};s.network="deny";}
       if(newFixture==="no-session"){s.surface="terminal";}
       root.querySelectorAll("[data-fixture]").forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});
       render();
