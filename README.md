@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| Shared MCP UI Kit · Config / Connection / Tool Input+Output Schema / explicit Runner · AI #3251 + Claude #3600 · Web/App | [#3772](https://github.com/BestNathan/nession/issues/3772) | [Interactive HTML](mcp-ui-kit-3772/index.html) · [Scenario & fidelity](mcp-ui-kit-3772/README.md) |
+
+
 | Claude Transcript · all JSONL records visible, Web/App semantic rows + per-row Raw inspector | [#3726](https://github.com/BestNathan/nession/issues/3726) | [Interactive HTML](claude-transcript-3726/index.html) · [Scenario & fidelity](claude-transcript-3726/README.md) |
 
 | Project default ENV → Session inherit / custom / none, Web/App | [#3649](https://github.com/BestNathan/nession/issues/3649) | [Interactive HTML](project-env-3649/index.html) · [Scenario & fidelity](project-env-3649/README.md) |
