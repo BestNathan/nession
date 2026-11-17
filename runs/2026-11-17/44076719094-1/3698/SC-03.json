@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a376d5b3f3cd457cdbb5c3ce7a15219458a685b61ec44bdd8a729c45b4289b05",
+  "run_id": 44076719094,
+  "run_attempt": 1,
+  "issue": 3698,
+  "criterion": "SC-03",
+  "criterion_text": "A managed persistent Workspace reused by two Sessions retains one physical writable view, survives restart and refuses reordered/different/missing Lower without data loss; Project Location Direct Bind ownership remains unchanged.",
+  "stage": "staging",
+  "target_sha": "ab4120cd1485bdbc5e3721f454a2a910f2366a84",
+  "contract_sha256": "7924108fed66744783de994dc2ed4ee1dbafa303867166207a938056523009d4",
+  "case_revision": "ab4120cd1485bdbc5e3721f454a2a910f2366a84",
+  "case_tree_sha": "9f532588225d6605d73896324098b378fa5300e3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T11:48:02.428Z",
+  "finished_at": "2026-11-17T11:48:58.859Z",
+  "duration_ms": 56431,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A managed persistent Workspace keeps one ordered lower key and durable upper across restart, refuses reordered/missing lowers, and leaves Project Location Bind ownership unchanged",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA ab4120cd1485bdbc5e3721f454a2a910f2366a84 on Linux kernel 7.0.0-1014-aws: a managed Workspace reused its exact ordered two-lower identity across an Agent-owner restart with the durable edit intact; a reordered and a missing lower were both refused without data loss. A Project Location remains a direct user-owned Bind and never receives an Overlay upper"
+        }
+      ],
+      "duration_ms": 50582,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44076719094,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ab4120cd1485bdbc5e3721f454a2a910f2366a84",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44076719094",
+    "record_path": "runs/2026-11-17/44076719094-1/3698/SC-03.json",
+    "source_result_sha256": "1d2334087b06571105beaec32a2e68e3c8a5956109ae0c6e188d480f7b3a600c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44076719094-1",
+    "sha256": "1d2334087b06571105beaec32a2e68e3c8a5956109ae0c6e188d480f7b3a600c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44076719094",
+    "durability": "time-limited; object archival not configured"
+  }
+}
