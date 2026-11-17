@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ "$#" -lt 4 || "$#" -gt 5 ]]; then
-  echo "Usage: $0 <source-image> <destination-image> <server-agent-tag-suffix> <ui-tag-suffix> [server|agent|ui]" >&2
+  echo "Usage: $0 <source-image> <destination-image> <server-agent-mcp-tag-suffix> <ui-tag-suffix> [server|agent|mcp|ui]" >&2
   exit 2
 fi
 
@@ -17,8 +17,11 @@ image_kind="${5:-all}"
 case "${image_kind}" in
   server) tags=("server-${runtime_version}") ;;
   agent) tags=("agent-${runtime_version}") ;;
+  # Standalone MCP host (#3791): same workspace version family, independent
+  # deployment lifecycle. This only copies the already-published image.
+  mcp) tags=("mcp-${runtime_version}") ;;
   ui) tags=("ui-${ui_version}") ;;
-  all) tags=("server-${runtime_version}" "agent-${runtime_version}" "ui-${ui_version}") ;;
+  all) tags=("server-${runtime_version}" "agent-${runtime_version}" "mcp-${runtime_version}" "ui-${ui_version}") ;;
   *) echo "ERROR: Invalid image kind: ${image_kind}" >&2; exit 2 ;;
 esac
 

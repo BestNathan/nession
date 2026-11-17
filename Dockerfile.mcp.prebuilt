@@ -1,0 +1,69 @@
+# Minimal standalone MCP host image (#3791).
+#
+# Packages only the pre-built, architecture-matched `nession-mcp` binary and
+# its runtime dependencies. It deliberately does not inherit the Server/Agent
+# runtime stages: no nginx, Web bundle, tmux, EROFS helpers, Sandbox launcher
+# or Node/Claude toolchain. The binary is the existing standalone host
+# (`crates/nession-mcp/src/bin/nession-mcp.rs`); this image adds no MCP
+# runtime, Tool, transport or configuration owner.
+#
+# CI is the only builder/publisher (`nession-cicd`). The `mcp-bin` build
+# context supplies the binary for the target architecture, and the probe below
+# fails the build when it is absent or built for the other architecture.
+
+FROM debian:bookworm-slim AS runtime
+ARG DEBIAN_FRONTEND=noninteractive
+
+# CA certificates for outbound TLS to the configured Nession Server. `curl` is
+# only the unprivileged liveness probe; it never calls an MCP operation.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Distinct unprivileged runtime identity. The operator-provided configuration
+# and any TLS material are mounted read-only; the process writes no state.
+RUN groupadd --system --gid 10001 nession && \
+    useradd --system --uid 10001 --gid nession \
+        --home-dir /nonexistent --shell /usr/sbin/nologin nession && \
+    mkdir -p /etc/nession
+
+ARG NESSION_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.title="Nession MCP" \
+      org.opencontainers.image.description="Standalone Nession MCP access layer over a remote Nession Server" \
+      org.opencontainers.image.source="https://github.com/BestNathan/nession" \
+      org.opencontainers.image.revision="${NESSION_SOURCE_REVISION}"
+
+# Fail closed on a missing executable or an architecture mismatch. ELF
+# e_machine is at byte offset 18: 0x003e is x86-64, 0x00b7 is AArch64.
+ARG TARGETARCH
+COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp
+RUN set -eux; \
+    test -x /usr/local/bin/nession-mcp; \
+    machine="$(od -An -t x1 -j 18 -N 2 /usr/local/bin/nession-mcp | tr -d ' \n')"; \
+    case "${TARGETARCH}" in \
+      amd64) expected=3e00 ;; \
+      arm64) expected=b700 ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    test "$machine" = "$expected" || { \
+        echo "nession-mcp binary architecture ${machine} does not match ${TARGETARCH}" >&2; \
+        exit 1; \
+    }
+
+WORKDIR /etc/nession
+USER 10001:10001
+
+# The documented container port. The operator's [mcp] listen_address must bind
+# 0.0.0.0 and match it when the service is published.
+EXPOSE 9090
+
+# Liveness only: any HTTP response proves the listener process is alive. A 401
+# is expected without a bearer token and does not execute a Tool. This is not
+# remote-backend readiness; a Server outage is reported by Tool calls.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["curl", "-s", "-o", "/dev/null", "http://127.0.0.1:9090/"]
+
+# `mcp.toml` in WORKDIR is the default; `--config` and NESSION_MCP_CONFIG
+# override it. The image ships no configuration or token, so a container with
+# no mounted document exits before serving (fail closed).
+ENTRYPOINT ["/usr/local/bin/nession-mcp"]
