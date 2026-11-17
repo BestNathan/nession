@@ -19,7 +19,7 @@ const CHECKS = Object.freeze([
     path: '.github/workflows/acceptance-case-smoke.yml',
     name: 'Acceptance / Case Smoke', job: 'case-smoke',
     steps: ['Validate canonical Case contracts and generic selection',
-      'Select PR-linked Case-method proofs'] },
+      'Select PR-linked Case-method proofs (trusted main policy)'] },
 ]);
 
 const positive = value => Number.isSafeInteger(value) && value > 0;
