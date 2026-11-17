@@ -71,10 +71,12 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   source beneath the Agent EROFS image root; it never fetches, extracts or
   resolves a logical image.
 - The compatibility root is an empty tmpfs + Base Runtime at `/`; `/workspace`
-  is a read-only Project image merged with a bounded writable upper/work via
+  is a read-only lower set merged with a bounded writable upper/work via
   `fuse-overlayfs` (or a direct bind when no Project image exists). Toolchains
   are read-only and only `/opt/<name>`. Do not add arbitrary overlapping-root
-  ordering or an image with a writable upper inside it.
+  ordering. A writable RootFS is an explicit opt-in via
+  `filesystem.rootfs.writable` + prepared `base_writable`; its execution-owned
+  upper/work must never become durable or mutate the image.
 - Mount helpers are unprivileged FUSE only (`erofsfuse`, `fuse-overlayfs`,
   `fusermount3`). Never substitute a kernel loop mount, extraction, container
   layer, tmpfs or Native fallback when a helper/capability is absent; report
@@ -90,13 +92,15 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   consumer and a strict, bounded unmount. The manager root is not the
   execution directory.
 - The writable `/workspace` Merged View is **shared and lease-managed**
-  (#3582). The Sandbox-owned
+  (#3582, moved by #3695). The Sandbox-owned
   `nession_sandbox::mount::overlay::OverlayMountManager` owns one physical
   `fuse-overlayfs` mount per managed Workspace for an Agent
   identity/mount namespace, derived from an authorized Workspace root. The
   Sandbox acquires an identified consumer lease and records its durable
   binding (never a caller mountpoint); multiple Sessions may bind the same
-  Merged View. A lease carries no unmount authority. Only the manager
+  Merged View. The manager holds every ordered read-only lower lease (#3698);
+  a reordered, different or missing set fails closed rather than reusing the
+  durable upper. A lease carries no unmount authority. Only the manager
   unmounts, only after the last consumer, and a failed unmount retains the
   live mount, the read-only lower lease and the durable upper. The Sandbox
   never creates a per-execution Overlay and never falls back to Native.

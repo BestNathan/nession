@@ -20,6 +20,32 @@ GitHub bypass is **ruleset-wide**. Putting `update`, `deletion` and `non_fast_fo
 
 Rulesets compose, so the dedicated App may fast-forward but cannot delete, force-push or introduce merge commits; everyone else cannot update the ref at all. Administrative changes to the rulesets themselves remain an emergency governance capability, requiring independent audit. GitHub docs: [Ruleset layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets) and [REST schema](https://docs.github.com/en/rest/repos/rules).
 
+## Disposable proposal ref lifecycle (#3773)
+
+A `refs/heads/knowledge-proposals/<slug>` branch is a *temporary publication
+candidate*, not a second Knowledge database. Its exact commit remains reachable
+through the protected append-only `refs/heads/knowledge` history after a
+successful Publisher CAS fast-forward and remote SHA readback.
+
+The trusted main-owned `Store / Knowledge Publisher` performs bounded
+post-publication garbage collection using
+`scripts/knowledge-proposal-cleanup.mjs`. It only scans the exact proposal
+prefix, fetches the current `knowledge` history, proves each proposed tip
+is an ancestor of the observed published ledger HEAD (or equal), re-reads the
+proposal ref and uses an expected-tip Git `--force-with-lease` deletion.
+A moved, unmerged, malformed or already absent proposal cannot be deleted
+mistakenly. `main`, `staging` and the protected `knowledge` ref are
+outside the deletion allowlist. No candidate data/code is executed.
+
+The cleanup uses the same environment-restricted dedicated Knowledge App
+token; the general `GITHUB_TOKEN` remains read-only. A cleanup failure is
+reported separately and does **not** rewrite a successful publication receipt.
+The main-push activation sweep runs when this trusted workflow/cleanup script
+first lands; `workflow_dispatch` permits a main-only recovery sweep if
+needed. The exact ref lineage and GitHub Run/job/branch readback, not the
+workflow definition alone, establish that historical refs have been deleted.
+No cleanup rewrites the Knowledge log, index, articles or Git history.
+
 ## Dedicated Knowledge Publisher App v1 — identity and deployment design (2026-11-09)
 
 This is **one new GitHub App identity, not a new service, model, or publishing framework**. Existing `PUBLISHER_APP_ID` / `PUBLISHER_APP_PRIVATE_KEY` are used for Agent/PR publication; `RUN_STORE_WRITER_APP_ID` / `RUN_STORE_WRITER_APP_PRIVATE_KEY` are for Run Store writes. **Neither identity or key may be reused** for Knowledge. The canonical validator and `scripts/knowledge-ledger-publish.mjs` remain the sole data-contract and push implementation.

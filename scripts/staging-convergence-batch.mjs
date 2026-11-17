@@ -82,8 +82,27 @@ export function planBatch({branch,main_sha,lane_sha,integration_head,repoRoot=pr
   const newIds=ids.filter(id=>head.has(id)&&!base.has(id));
   const regressionIds=ids.filter(id=>head.has(id)&&base.has(id));
   const changedPaths=[...changed].sort();
-  if(!changedPaths.length)throw Error('empty integration batch');
-  const impact=classifyChangedPaths(changedPaths);
+  let impact;
+  if(changedPaths.length){
+    impact=classifyChangedPaths(changedPaths);
+  }else{
+    // #3769: a promotion merge can introduce only Main ancestry, with no
+    // content absent from the lane. This still needs a protected two-parent
+    // PR/merge; it must not invent a changed path or browser obligation.
+    // Prove both the exact integration tree and the historical E2E catalog
+    // before classifying this as ancestry-only rather than treating an
+    // unexplained empty path extraction as permission to merge.
+    const laneTree=localGit('rev-parse',lane_sha+'^{tree}');
+    const integrationTree=localGit('rev-parse',integration_head+'^{tree}');
+    const expectedTree=localGit('merge-tree','--write-tree',
+      lane_sha,main_sha).split(/\s+/)[0];
+    if(laneTree!==integrationTree||integrationTree!==expectedTree||
+       newIds.length||regressionIds.length||removed.length||
+       JSON.stringify(headIds)!==JSON.stringify(baseIds))
+      throw Error('empty integration batch without exact same-tree proof');
+    impact={applicable:false,category:'ancestry-only',
+      reason:'exact-source-ancestry-with-no-content-change',changed_paths:[]};
+  }
   return {branch,main_sha,lane_sha,integration_head,identity,
     changedPaths,impact,newIds,regressionIds,removed,headIds,baseIds};
 }
@@ -297,6 +316,7 @@ function selfTest(){
     fs.mkdirSync('e2e/tests/browser',{recursive:true});
     fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
     git('add','.');git('commit','-qm','base');
+    const baseCommit=git('rev-parse','HEAD');
     git('checkout','-qb','staging');
     fs.writeFileSync('README.md','Staging-only change\\n');
     git('add','.');git('commit','-qm','staging own commit');
@@ -338,6 +358,28 @@ function selfTest(){
       'promotion-merge lane content is not a new sync change');
     assert.equal(sync.changedPaths.includes('scripts/post-promotion.mjs'),true,
       'post-promotion main changes remain audited');
+    // #3769 reproduction: Main's sole unique commit is a promotion merge
+    // whose result is already contained in Staging. The new Main ancestry
+    // still needs integrating, but there is no new file or E2E obligation.
+    const ancestryMain=git('commit-tree',git('rev-parse',lane+'^{tree}'),
+      '-p',baseCommit,'-p',lane,'-m','promotion without new content');
+    const ancestryTree=git('merge-tree','--write-tree',
+      lane,ancestryMain).split('\n')[0];
+    const ancestryIntegration=git('commit-tree',ancestryTree,
+      '-p',lane,'-p',ancestryMain,'-m','ancestry-only sync');
+    const noContent=planBatch({branch:'staging',main_sha:ancestryMain,
+      lane_sha:lane,integration_head:ancestryIntegration});
+    assert.deepEqual(noContent.changedPaths,[]);
+    assert.equal(noContent.impact.category,'ancestry-only');
+    assert.equal(noContent.impact.applicable,false);
+    assert.deepEqual(noContent.newIds,[]);
+    assert.deepEqual(noContent.regressionIds,[]);
+    assert.deepEqual(noContent.removed,[]);
+    assert.equal(git('rev-parse',ancestryIntegration+'^{tree}'),
+      git('rev-parse',lane+'^{tree}'),'ancestry sync changes no content');
+    assert.throws(()=>planBatch({branch:'staging',
+      main_sha:lane,lane_sha:ancestryMain,
+      integration_head:ancestryIntegration}),/parent identity/);
   }finally{
     process.chdir(original);
     fs.rmSync(tmp,{recursive:true,force:true});

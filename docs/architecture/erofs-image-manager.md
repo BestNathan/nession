@@ -27,7 +27,7 @@ EROFS is a **global immutable resource**, not a `ProjectEnvironment`.
 | `image_digest` reference on a Project | Project declaration (`projects.image_digest`) |
 | Build worker and `mkfs.erofs` | Server Image Manager (consumes the crate's builder) |
 | Sandbox policy | `nession-sandbox`; it never clones Git or manages a registry |
-| Runtime provisioning / mounting | Follow-up managed-location and Sandbox work (#2681, #3024) |
+| Runtime provisioning / mounting | Sandbox runtime composition (`nession_sandbox::mount`, #3695); physical read-only EROFS leases remain `nession_erofs::mount_manager` (#3449) |
 
 A Project only references a digest. Deleting a Project never deletes shared
 bytes, and two Projects may reference one physical image.
@@ -43,7 +43,7 @@ not a second authority:
 | `store` | content-addressed `sha256/<hex>` files, `.tmp` publication, atomic rename, usage | Server Image Manager |
 | `build` | controlled Git/local snapshot, fixed `mkfs.erofs` argv, `Packaging` mechanics | Server Image Manager |
 | `cache` | authenticated ranged download/resume, verify-before-publish, identity namespace, pin/eviction, diagnostics | Agent adapter (`crates/nession-agent/src/erofs_cache.rs`) |
-| `mount` (Linux) | unprivileged `erofsfuse` probe/mount/unmount primitive with an owned handle | Sandbox composition (`crates/nession-sandbox/src/linux/erofs.rs`) |
+| `mount` (Linux) | unprivileged `erofsfuse` probe/mount/unmount primitive with an owned handle | Sandbox `ErofsRoBackend` (`crates/nession-sandbox/src/mount/backends.rs`) |
 
 The crate has no `nession-protocol` dependency. The Server translates the
 versioned `ImageSource`/`ImagePackaging` DTO into the crate's mechanical inputs
@@ -53,6 +53,13 @@ composition, execution records and teardown. The crate never owns image roles,
 Project identity, registry metadata, authorization, download origins or
 Session orchestration.
 
+Image Compose is an **Image-producing** source: it publishes a new immutable
+Manifest-addressed Image and never prepares a Session view. Sandbox runtime
+composition consumes prepared Image paths/leases and produces a `MountPlan` +
+`MountedView`; it publishes nothing. The canonical boundary and delivery graph
+are in
+[OCI/EROFS image infrastructure](oci-erofs-image-infrastructure.md#two-compositions-two-output-resources)
+(#3693).
 
 ## Sources
 
@@ -101,6 +108,10 @@ V1 accepts three source shapes:
    `erofsfuse --device` arguments and pins every component for the physical
    view lifetime. Sandbox runtime composition of a referenced Composite is
    not part of this requirement (#3697) and fails closed if selected.
+   Delivered: flattened Compose by #3696 (PR #3703 at `fbc4aa2e`)
+   and referenced Composite by #3697 (PR #3709 at `47507cf4`); their native
+   Cases are recorded in the
+   [composition delivery table](oci-erofs-image-infrastructure.md#composition-and-mount-delivery-3693).
 
 A branch is resolved **once** by the shallow clone; the resolved commit is
 recorded as `source_sha`. Git runs with no system/global config, no prompt, no

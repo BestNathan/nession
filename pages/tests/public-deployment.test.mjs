@@ -81,3 +81,30 @@ test('same-main-SHA but stale CDN bytes must not end bounded publisher polling',
  assert.match(yaml,/\[\[ "\$EXPECTED_WORKFLOW_HTML_SHA256" =~ \^\[a-f0-9\]\{64\}\$ \]\]/);
  assert.match(yaml,/\[\[ "\$EXPECTED_AGENT_SOURCE" =~ \^\(available\|truncated\|unavailable\)\$ \]\]/);
 });
+
+test('MCP public readback delegates typed-v2 validation and preserves exact-byte guards',async()=>{
+ const yaml=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
+ const start=yaml.indexOf('if [[ -n "$EXPECTED_MCP_JSON_SHA256" ]]; then');
+ const end=yaml.indexOf('echo "MCP Documents published:',start);
+ assert.ok(start>=0&&end>start,'MCP exact-byte readback must be guarded');
+ const readback=yaml.slice(start,end);
+ // #3735 migrated the producer to schema v2. The publisher must consume
+ // its canonical validator instead of independently pinning the old v1.
+ assert.match(readback,/import \{validMcpPublication\} from "\.\/pages\/scripts\/mcp-reconcile\.mjs"/);
+ assert.match(readback,/!validMcpPublication\(data\)/);
+ assert.doesNotMatch(readback,/\.schema_version\s*==\s*1/);
+ for(const invariant of [
+   'data.source.sha !== process.argv[2]',
+   'data.semantic_sha256 !== process.argv[3]',
+   'data.tools.length !== Number(process.argv[4])',
+   '"$EXPECTED_MCP_SOURCE_SHA" "$EXPECTED_MCP_SEMANTIC_SHA256" "$EXPECTED_MCP_TOOLS"',
+   '"$EXPECTED_MCP_JSON_SHA256"',
+   '"$EXPECTED_MCP_UI_SHA256"',
+   'sha256sum "$mcp_readback"',
+   'sha256sum "$mcp_ui_readback"',
+   'mcp_ready=true',
+   '[[ "$mcp_ready" == true ]] ||',
+ ]) assert.ok(readback.includes(invariant),'MCP readback invariant lost: '+invariant);
+ assert.match(readback,/for attempt in \{1\.\.18\}; do/,'readback must remain bounded');
+ assert.match(readback,/MCP Documents public HTTPS bytes differ from validated build artifact/);
+});
