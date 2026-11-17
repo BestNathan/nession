@@ -284,7 +284,7 @@ function selfTestPositiveSelection() {
     /is:issue in:body "branch: staging" "method: agent"/);
   assert.match(decodeURIComponent(searchRoute('created:2026-11-01..2026-11-30', 2)),
     /created:2026-11-01\\.\\.2026-11-30/);
-  assert.throws(() => searchRoute('', 11), /AssertionError/);
+  assert.throws(() => searchRoute('', 11), { name: 'AssertionError' });
   const base = {
     number: 900,
     body: '## Acceptance Plan\nacceptance:\n  SC-01:\n    when: merged\n    branch: staging\n    method: agent\n  SC-02:\n    when: merged\n    branch: main\n    method: agent\n' +
