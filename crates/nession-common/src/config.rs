@@ -110,6 +110,12 @@ pub struct ServerConfig {
     /// Private workspace for Git checkout + `mkfs.erofs` builds (#3022).
     #[serde(default = "default_image_build_dir")]
     pub image_build_dir: String,
+    /// The one absolute directory a `local_directory` build source may name
+    /// (#3795). Empty disables the local source adapter: a browser cannot
+    /// authorize an arbitrary host path. Git and Compose sources are not
+    /// affected.
+    #[serde(default)]
+    pub image_source_root: String,
     /// Maximum concurrent EROFS builds. Bounded so a burst of requests cannot
     /// exhaust the host's disk or process table.
     #[serde(default = "default_image_max_concurrent_builds")]
@@ -355,6 +361,11 @@ impl ServerConfig {
         if self.image_blob_dir.trim().is_empty() || self.image_build_dir.trim().is_empty() {
             anyhow::bail!("image_blob_dir and image_build_dir must not be empty");
         }
+        if !self.image_source_root.trim().is_empty()
+            && !std::path::Path::new(self.image_source_root.trim()).is_absolute()
+        {
+            anyhow::bail!("image_source_root must be an absolute path when set");
+        }
         if !(1..=8).contains(&self.image_max_concurrent_builds) {
             anyhow::bail!("image_max_concurrent_builds must be in [1, 8]");
         }
@@ -425,6 +436,7 @@ impl Default for ServerConfig {
             db_path: default_db_path(),
             image_blob_dir: default_image_blob_dir(),
             image_build_dir: default_image_build_dir(),
+            image_source_root: String::new(),
             image_max_concurrent_builds: default_image_max_concurrent_builds(),
             image_gc_interval_secs: default_image_gc_interval(),
             image_gc_max_candidates: default_image_gc_max_candidates(),
@@ -631,6 +643,29 @@ mod tests {
         assert_eq!(default_heartbeat_interval(), 10);
         assert_eq!(default_heartbeat_timeout(), 30);
         assert!(!default_db_path().is_empty());
+    }
+
+    /// The local source adapter is opt-in and must name an absolute root
+    /// (#3795); an empty value disables it rather than authorizing `/`.
+    #[test]
+    fn image_source_root_is_empty_by_default_and_must_be_absolute() {
+        let default = ServerConfig::default();
+        assert!(default.image_source_root.is_empty());
+        default
+            .validate()
+            .expect("the default disables the adapter");
+
+        let mut config = ServerConfig {
+            image_source_root: "relative/sources".to_string(),
+            ..Default::default()
+        };
+        let error = config
+            .validate()
+            .expect_err("a relative root is not a Server-authorized root");
+        assert!(error.to_string().contains("image_source_root"), "{error}");
+
+        config.image_source_root = "/srv/nession/sources".to_string();
+        config.validate().expect("an absolute root is accepted");
     }
 
     #[test]
