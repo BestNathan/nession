@@ -682,38 +682,49 @@
 <button data-demo-progress="transfer-next">推进下载 / 校验</button>
 </div>
 </section>
-<section class="np-details"><h2>Design contract &amp; verification</h2>
-<p class="np-details-lede">本原型复用 <code>sandbox-capability-3124/</code> 目录。Filesystem 按五项真实配置对象组织，不再采用全局模式切换遮挡其它字段，也不为所有标题添加帮助提示。产品预览只呈现资源、路径、权限、配置和操作；详细设计约束留在原型外。所有 Image、Build、Workspace 与 Sandbox Enter 均为模拟数据与交互。</p>
+<section class="np-details">
+<h2>Images · Information architecture &amp; interaction contract</h2>
+<p class="np-details-lede">本次按 Nession 的 ResourceDetail / ConfigurationForm / OperationSurface 三种内容语法重构 Images 管理。产品 UI 由 Sandbox 所属 Workspace 承载；此处是原型评审说明，绝不出现在实际 Session 页面中。所有 Catalog、Build、Agent 与 Tag 数据都是本地模拟。</p>
 <div class="np-detail-grid">
-<article class="np-detail"><h3>01 · Sandbox + Images (#3408)</h3><ol class="np-steps">
-<li>从当前 Session 进入 Sandbox，查看 Overview。Images → Library 是纯列表：点击镜像行在该行下方展开详情，再次点击收起；同一时间只展开一项，不在列表尾部放独立详情卡片。Builds / Distribution 保持原有入口，Server Ready 与当前 Agent Cache 分别显示。</li>
-<li>在 Library 选择 Runtime 或 Toolchain 可跳转 Filesystem。切换同 Server 的另一个 Session，不会生成第二份 Images Registry。</li>
-<li>Web 一级导航位于 Sandbox Header 右侧、二级导航在选中管理区的局部 Sidebar；App 内使用紧凑横向导航但不新增第二个 App Back。</li>
-</ol></article>
-<article class="np-detail"><h3>Build / Distribution · 进度来源</h3>
-<p><strong>Builds（Server）：</strong><code>staging</code> 已有 #3334 持久任务和 <code>submit/get/list/cancel/retry</code>、状态事件。展示阶段、实际文件/字节计数、耗时、诊断；<code>mkfs.erofs</code> 未提供可验证的百分比，因此使用不确定进度状态，不生成假百分比。<code>main</code> 目前仍是旧同步接口。</p>
-<p><strong>Distribution（当前 Agent）：</strong>现有 Cache 支持 Range、部分文件与 SHA-256 校验，但现有 Agent 状态没有按 Digest 的下载字节进度。候选方案是用当前 Agent 的缓存分片大小、下载实时字节数以及 Server Image 总大小生成 <code>received/total</code>，独立区分 Resumable、Downloading、Verifying、Verified。<strong>下载 100% 不代表镜像已验证可用。</strong></p>
-<p>原型外面的「推进构建阶段」「推进下载 / 校验」仅驱动模拟状态，不是产品控件，更不是实际后端接口或真实传输。</p>
-</article>
-<article class="np-detail"><h3>02 · Agent Workspaces (#3407)</h3><ol class="np-steps">
-<li>Session <code>sandbox-review</code> 有 Project Existing Location，默认使用 Agent 上的该目录。切换 Session <code>fix-terminal</code> 后无 Project Location，使用按 Session 名自动分配。</li>
-<li>在 Workspaces 里模拟创建命名资源、同名复用、查看列表及删除确认；Project Location 只引用不删除，Managed Resource 在 Sandbox 退出后仍可列出。</li>
-<li>Filesystem 引用 Workspace，Agent 解析实际目录；映射目标隐含为 <code>/workspace</code>。</li>
-</ol></article>
-<article class="np-detail"><h3>03 · Filesystem IA (#3405)</h3>
+<article class="np-detail"><h3>01 · 信息架构与权责</h3>
 <ol class="np-steps">
-<li><strong>RootFS</strong>：目标固定 <code>/</code>；选 Local（无镜像）或仅限当前 Agent 已验证缓存的 <code>base_runtime</code> EROFS 镜像。</li>
-<li><strong>Mounts</strong>：默认空；从非 <code>base_runtime</code> EROFS 中逐项添加，默认目标来自镜像元数据，允许手动改挂载点。</li>
-<li><strong>Workspace</strong>：固定 <code>/workspace</code>，也是 Enter 后默认工作目录。引用不可修改的 Project Location，或 Agent 管理的 Workspace（自动按 Session 名、已存在、手动新命名）。</li>
-<li><strong>Access</strong>：只读 / 读写各自是独立路径列表，一行一个路径，始终同路径 <code>P→P</code> 映射。</li>
-<li><strong>Preview</strong>：永远显示根、附加挂载、Workspace 和 Access 的最终来源、目标与权限；路径修改时实时同步。</li>
-</ol>
-<p>当前生产 V1 的 <code>filesystem.access</code> 与 EROFS Composition 仍然互斥，额外挂载点仅支持受限 <code>/opt/&lt;name&gt;</code>；本原型展示新声明的配置 IA，不能作为运行时已支持的证明。镜像的 <code>default_mount</code> 元数据尚需协议落地，Home 不再是 Filesystem Policy 编辑区。</p></article>
-<article class="np-detail"><h3>Images-first · UI / IA redesign · #3799 / #3795 / #3798 / #3796</h3><ol class="np-steps"><li>Library 使用单列表和本行内展开的 ResourceDetail：展示 Repository / Tag、Manifest / Index、OCI 平台、来源、不可变层与外部设备依赖、已知消费者、Server 与 Agent 独立状态。禁止列表尾部再开详情面板。</li><li>Tag 管理是内联 OperationSurface：选择 Tag → Review 预期旧 Digest、影响范围 → Confirm CAS Move；并发冲突拒绝写入。成功修改的只是可变 Tag，不是 Image 内容。</li><li>Builds 区分来源选择、配置、提交、任务状态与历史：GitHub/Local Directory/Compose 可演示，Archive/OCI 因当前 Build Source DTO 尚未支持而显式禁用；Compose 支持有序 Source、目标路径和 Flattened/Referenced 的候选配置。</li><li>Distribution 区分 Server Ready、当前 Agent Cache 和 Runtime Compatibility；仅对选中 Agent 提供 Prepare/Resume/Retry，Verifying 阶段不允许标为 Mount Ready。所见数据和操作均为本地模拟，不能代表生产 API 已交付。</li></ol></article><article class="np-detail"><h3>2026-11-17 · 使用路径优化 (#3792–#3798)</h3><ol class="np-steps"><li>Local RootFS + EROFS Toolchain + Managed Workspace 候选：保留 Base Runtime 的可选性，不把宿主 / 等同 Linux 隔离。</li><li>Image 展示 OCI 平台、当前 Agent Cache 和不支持的 Referenced Composite，不把 Server Ready 当作可执行。</li><li>Builds 新增 Git、Directory、Archive、OCI、Image Compose 的源声明与 Flattened/Referenced 选项；历史状态过滤、分页及失败重试。</li><li>Distribution 保留独立 Prepare/Resume/Verifying；Workspaces Details 展示 Lower / Upper / Lease，使用中的 Workspace 不可删。</li></ol></article><article class="np-detail"><h3>04 · 产品文案边界</h3>
-<p>Policy 编辑区只显示配置项、实际可编辑的值、目标路径及状态。RootFS、Mounts、Workspace、Access、Preview 都是普通标题，不需要每个都有 ⓘ。仅对真正有歧义的术语提供按需解释；详细设计、运行时差异、验收边界集中留在这块原型外说明。安全错误和缓存不可用必须在产品界面直接展示。</p></article>
-<article class="np-detail"><h3>Fidelity &amp; negative states</h3>
-<p>模拟 Agent 离线、macOS、不支持 cgroup/seccomp、Image Cache absent、没有 Session、预检失败、启动失败、Inside 只读等场景。Shell 结构依据 main 现有 WebLayout / Sidebar + ShellMain → WorkspaceShell 与 AppLayers → one AppPageHeader，候选变化仅在 Sandbox 内部。</p>
-<p>Web/App 1:1 尺寸是展示目标，**未声明与生产 UI 的像素完全一致**。Mock 静态自测、真实 Chromium 交互、Pages 发布 SHA 和生产 Acceptance 需独立记录；本页面的模拟按钮不是原生 Kernel/EROFS 验证。</p>
+<li><strong>入口：</strong>Session → Workspace → Sandbox → Images。Images 的 Catalog 全局共享，但不增加全局 Sidebar 目的地；Web 使用 Sandbox 内部左侧局部导航，App 使用同一宿主 Header/Back 下的横向局部导航。</li>
+<li><strong>Library / Server：</strong>Repository、Tag、Manifest/Index、Config/Layer、来源、依赖闭包、被引用状态。Tag 是可变指针；Image 是不可变 Manifest 身份。Server Catalog 和 GC 是唯一资源所有者。</li>
+<li><strong>Builds / Server：</strong>新镜像创建、Source 类型、Compose、异步任务、状态、历史与重试。Build 状态由 Server 的持久 Job 记录拥有，不能靠前端定时器推断。</li>
+<li><strong>Distribution / 当前 Agent：</strong>只观察和准备当前 Session 所属 Agent 的内容缓存。Server Ready ≠ Agent Verified ≠ Runtime Compatible；没有全局 Agent 分发调度器。</li>
+</ol></article>
+<article class="np-detail"><h3>02 · Library / ResourceDetail</h3>
+<ol class="np-steps">
+<li>一个紧凑列表按 Repository、Status、文本检索过滤；行内展示 Name、Repository / Tag、表示格式、大小与 Server 状态。点击行在<strong>同一行下方</strong>展开详情，再次点击收起，同时仅展开一个镜像。</li>
+<li>详情按 Identity → Source &amp; Dependencies → References → Availability 分组；Manifest Digest 使用 mono，未知 Config/Index 字段标记为 Unknown，不将 Legacy DTO 中不存在的元数据伪造成已观测。</li>
+<li>Tag 操作在当前行内展开 OperationSurface：编辑名称 → Review 旧 Digest / 新 Digest / 影响 → Confirm CAS；Tag Unlink 也必须独立 Review 和 Confirm。并发修改拒绝并允许 Refresh expected Tag 后再次 Review。</li>
+<li>Tag 更新、解绑不触碰 CAS Blob、Agent Cache、运行中的 Mount 或 Project/Session pin。当前 Agent 离线时仍允许 Server Catalog 管理；Server 离线则禁止变更。</li>
+</ol></article>
+<article class="np-detail"><h3>03 · Builds / ConfigurationForm</h3>
+<ol class="np-steps">
+<li>“New image” 是本区域唯一主操作，打开有独立标题、Source choice、分组字段、错误提示与提交底栏的配置表单。GitHub、受授权 Server Directory、Compose 为当前 Build Source DTO 支持类型。</li>
+<li>Compose 展示有序 Source rows（Image、目标目录、排序、删除、添加），输出可选择 Flattened 或 Referenced。重复 Source、目标重叠、越界路径与不支持的 Referenced 组合会明确拒绝。</li>
+<li>Archive / OCI 来源在原型中<strong>禁用并标注 pending</strong>；底层转换能力不意味着当前 Server Build Submit 协议已支持。需要 #3795 先补齐协议和鉴权。</li>
+<li>Build 活动列表展示状态、Stage、Attempt、真实阶段计数与诊断；可以过滤和翻页、查看任务详情、Cancel、Retry。未知 mkfs.erofs 包装进度只显示不确定阶段，不造总体百分比。</li>
+</ol></article>
+<article class="np-detail"><h3>04 · Distribution / observed facts</h3>
+<ol class="np-steps">
+<li>顶部明确“Agent · nession-dev”，每个 Image 行单独展示 Server 状态与 Agent Cache 状态，不合并成一个 Ready。</li>
+<li>按行展开：Manifest 身份、实际字节进度、校验状态和 Runtime Compatibility；只有 SHA-256 Verified 后才可标记 Agent Cache 可用，而 Runtime 还要检查平台和 Composite mount closure。</li>
+<li>Absent、Resumable、Failed 的显式 Prepare / Resume / Retry；Downloading 和 Verifying 只能观察阶段，不允许误报已挂载。</li>
+<li>Agent 离线显示 Unknown；Server 离线时不允许开始新资源准备。所有进度与成功均为模拟，原型不发起真实网络或 IO。</li>
+</ol></article>
+<article class="np-detail"><h3>05 · Nession 设计语言 / Web + App</h3>
+<ol class="np-steps">
+<li><strong>Hierarchy:</strong> 资源列表优先，不使用卡片墙、统计大屏或独立尾部详情面板。靠留白、分隔线和主次文字表达结构；Read-only 事实不伪装成 disabled Inputs。</li>
+<li><strong>Tokens:</strong> 语义 Background / Surface / Border / Foreground / Muted，mono 只用于 Digest、ID、技术指标。Radius-Control 用于按钮/输入，Radius-Surface 用于主动展开的 OperationSurface。</li>
+<li><strong>Color:</strong> 默认 Ready/Verified 为中性事实；只用 warning/error 强调进度阻塞、故障、CAS 冲突。每个区域最多一个主动主操作。</li>
+<li><strong>Web:</strong> 1180/1024 的资源表格多列排布；<strong>App:</strong> 390/375 保留宿主唯一 Header，内容折叠为单列，点击/确认保持 44px 操作带；Preview 的实际 CSS px 不缩放。</li>
+</ol></article>
+<article class="np-detail"><h3>06 · Verification &amp; fidelity</h3>
+<p>此版本基于 <code>docs/design/visual-language.md</code>、<code>docs/design/information-architecture.md</code>、<code>docs/design/design-system/patterns/{resource-detail,configuration-form,operation-surface}.md</code>，以及当前 <code>web/src/capabilities/images/</code> / <code>sandbox/</code> 的责任边界。</p>
+<p>已进行脚本语法和本地模拟 DOM 事件验证：Library 行内展开、Repo 过滤、Tag Review/Unlink/CAS Conflict Recovery、Build Source/Compose/Cancel/Retry/History、Agent Prepare/Resume、Server/Agent Offline、App/Web 模式切换。<strong>没有实际浏览器截图、几何测量或 Pages 版本 readback，不能声称 Chromium Web/App 视觉验收通过。</strong></p>
+<p>现有生产 Web Build Submit DTO 仍以 GitHub、Local Directory、Compose 为主；Tag mutation、更多 Catalog 详情和 Agent 主动 Prepare 均由对应 P0 Issue 负责实施。原型不是实际 Server API、Agent IO 或 Linux EROFS/OverlayFS 挂载的证明。</p>
 <details class="np-inspector"><summary>Inspect synthetic mock state</summary><pre id="sandbox-inspector">initializing…</pre></details>
 </article>
 </div>
