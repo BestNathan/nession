@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a825c38754b5ffab492b06fa484a05161a8c91e814b2a66bebee57d2a851f5b0",
+  "run_id": 44109260823,
+  "run_attempt": 1,
+  "issue": 3800,
+  "criterion": "SC-02",
+  "criterion_text": "With two live tmux Panes and two independent fake providers, changing one from idle to working produces working; all observed idle produces idle; an unknown without working produces unknown; a specialized provider reporting idle is not overridden by generic foreground-process working, and ownership switches deterministically.",
+  "stage": "staging",
+  "target_sha": "0e167fd5f1229e47a8990c47fca150119925f7d5",
+  "contract_sha256": "3b35f3e518d9cdafc8eda249dd918257762e61dffd3f674551062e30f7b426a8",
+  "case_revision": "0e167fd5f1229e47a8990c47fca150119925f7d5",
+  "case_tree_sha": "0104a8e613d4d936a211cb1222bc6fc714426b14",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-17T15:03:08.587Z",
+  "finished_at": "2026-11-17T15:04:01.735Z",
+  "duration_ms": 53147,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Session Activity aggregates every observed Pane and resolves ownership semantically, not by provider order",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0e167fd5f1229e47a8990c47fca150119925f7d5: two live fake Pane providers aggregated working/idle/unknown as any-working > any-unknown > all-idle; a specialized idle or unknown owner was not overridden by a generic Shell working claim; two specialized claims for one Pane produced unknown with no owner"
+        }
+      ],
+      "duration_ms": 47256,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44109260823,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0e167fd5f1229e47a8990c47fca150119925f7d5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44109260823",
+    "record_path": "runs/2026-11-17/44109260823-1/3800/SC-02.json",
+    "source_result_sha256": "a939c4c3c72843b02bb3af2d0821cef01a2884dafb790b36b5d218c858a4f6cb"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44109260823-1",
+    "sha256": "a939c4c3c72843b02bb3af2d0821cef01a2884dafb790b36b5d218c858a4f6cb",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44109260823",
+    "durability": "time-limited; object archival not configured"
+  }
+}
