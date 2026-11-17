@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_failure_admission_state",
+  "fingerprint": "e2e1:d35aca95381acb9188fe6280a5fb203dd4e728e0914f855259d347d7af55f5ca",
+  "version": 1,
+  "epoch": 1,
+  "status": "claimed",
+  "analysis_id": "d35aca95381acb9188fe6280a5fb203dd4e728e0914f855259d347d7af55f5ca:1",
+  "lease_expires_at": "2026-11-17T01:33:11.063Z",
+  "dispatch_intent": {
+    "id": "d35aca95381acb9188fe6280a5fb203dd4e728e0914f855259d347d7af55f5ca:1",
+    "status": "pending"
+  },
+  "bug_issue": null,
+  "first_source": {
+    "run_id": 43992364550,
+    "run_attempt": 1,
+    "target_sha": "313e4871357744a5f958b948b17fe991c839ae65"
+  },
+  "latest_observation": {
+    "run_id": 43992364550,
+    "run_attempt": 1,
+    "target_sha": "313e4871357744a5f958b948b17fe991c839ae65"
+  },
+  "prior_bug_issue": null
+}
