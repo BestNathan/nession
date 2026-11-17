@@ -2727,6 +2727,105 @@ wires: &["server.commands.update"],
                 schema_of::<nession_protocol::contracts::image::v1::ImageGetResponsePayload>,
             )),
         },
+        // Server Catalog Library and mutable Tag lifecycle (#3799). The
+        // Library read projects Manifest/Index identity, representation,
+        // closure and known reference impact; Tag mutations are CAS-guarded
+        // logical references and never delete CAS bytes.
+        Unit {
+            owner: "core",
+            id: "server.image.library.list",
+            version: 1,
+            wires: &["server.image.library.list"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryListResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryEntry>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryRepresentation>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryLayer>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageReferenceImpact>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageComposeSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageComposeRepresentation>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageStatus>(cfg),
+            ],
+            request: Some((
+                "ImageLibraryListCall",
+                nession_protocol::contracts::image::v1::ImageLibraryListPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageLibraryListPayload>,
+            )),
+            response: Some((
+                "ImageLibraryListReply",
+                nession_protocol::contracts::image::v1::ImageLibraryListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageLibraryListResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.tag.set",
+            version: 1,
+            wires: &["server.image.tag.set"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagSetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagSetResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagUpdate>(cfg),
+            ],
+            request: Some((
+                "ImageTagSetCall",
+                nession_protocol::contracts::image::v1::ImageTagSetPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagSetPayload>,
+            )),
+            response: Some((
+                "ImageTagSetReply",
+                nession_protocol::contracts::image::v1::ImageTagSetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagSetResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.tag.remove",
+            version: 1,
+            wires: &["server.image.tag.remove"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagRemovePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagRemoveResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageReferenceImpact>(cfg),
+            ],
+            request: Some((
+                "ImageTagRemoveCall",
+                nession_protocol::contracts::image::v1::ImageTagRemovePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagRemovePayload>,
+            )),
+            response: Some((
+                "ImageTagRemoveReply",
+                nession_protocol::contracts::image::v1::ImageTagRemoveResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagRemoveResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.impact.get",
+            version: 1,
+            wires: &["server.image.impact.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageImpactPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageImpactResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageReferenceImpact>(cfg),
+            ],
+            request: Some((
+                "ImageImpactGetCall",
+                nession_protocol::contracts::image::v1::ImageImpactPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageImpactPayload>,
+            )),
+            response: Some((
+                "ImageImpactGetReply",
+                nession_protocol::contracts::image::v1::ImageImpactResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageImpactResponsePayload>,
+            )),
+        },
         // Asynchronous directory-backed build lifecycle (#3334). The legacy
         // `server.image.build` v1 above stays the synchronous compatibility
         // path; these units submit, observe, cancel and retry the same durable
