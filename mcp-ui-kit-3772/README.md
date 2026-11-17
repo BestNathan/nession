@@ -15,19 +15,36 @@ Can a **single reusable MCP component kit** express configuration management, co
 - **App:** `AppLayout/AppLayers → WorkspacePanel → one AppPageHeader → WorkspaceShell → capability content`. The App Back belongs to the host; the mock reproduces depth `Server list → Tool list → Inspector → Runner → Terminal` without a second in-content Back/header. Web/App share semantic components but differ in composition.
 - **AI #3251 context:** currently selected Session Agent, **non-project** native config only. No independent Agent selector or cross-Agent aggregation; current Session is the only target. Project entries are hidden here.
 - **Claude #3600 context:** Claude extension owns Local and Project scope; user/global management stays with #3251. The host selector is **outside the product viewport** (review fixture) and never represents a new Workspace-level Agent switcher.
-- **Visual baseline:** CSS geometry/palette is adapted from the live `claude-mcp-3600` prototype, which is a source-aligned approximation of `design/generated/web.css`. This mock uses the shared `prototype-frame-2758` review harness, 1180/1024 Web and 390/375 App 1:1 CSS viewports. Real current production pixel parity is **not** established.
+- **Visual baseline (revised 2026-11-17 after review):** The product preview now uses an explicit snapshot of the **canonical values and roles** in `design/generated/web.css` (semantic background/surface/navigation, foreground/muted, border, radius, control height, Web/App title/body/metadata/code typography). It follows the **ResourceDetail** identity/fact/section grammar, **ConfigurationForm** field/validation rhythm, and **OperationSurface** action/dismissal. The review page still uses shared `prototype-frame-2758`; 1180/1024 Web and 390/375 App stay at 1:1 CSS widths. This is a source-aligned **mock implementation of the recipes**, not a claim of actual React recipe reuse or current production pixel parity.
 - **Shared recipes consumed by the implementation:** ResourceDetail, ConfigurationForm, OperationSurface; UI kit should not publish a second token or overlay system.
 
 ## Representative fixture / interaction paths
 
-1. Open Web 1180, select `nession`. Inspect `session.list` readable property fields and full Raw JSON input/output schema. Output Schema is **contract**, not runtime output.
-2. Enter Tool Runner, edit scope/limit through form or JSON mode, run explicitly, switch Result between **Structured / Content / Raw**, inspect call history. No tool executes merely by selection.
+1. Open Web 1180, select `nession` → `session.list`. The **Contract** view shows tool identity, description, **Input Schema** and **Output Schema** as simple readable parameter/type/description rows, with separately expandable raw JSON. Output Schema is **contract**, not runtime output.
+2. Open the **Run** depth (not stacked under the default Inspector). Edit scope/limit through form or JSON mode; run explicitly, switch Result between **Structured / Content / Raw**, inspect call history. No tool executes merely by selection.
 3. Select `session.rename`, populate its title, press Run: a separate confirmation appears for potential mutation; Cancel preserves the draft. Confirm yields synthetic result only.
 4. Select `github` (stdio): configured and independently probed are distinct. Explicit Test gives a consent reminder before synthetic connection; then its external `search_repositories` Tool displays **Output Schema not advertised** while preserving raw results.
 5. Select Config: add/edit/remove definition using adapter-allowed scope. AI only allows user, Claude allows local/project. Invalid URL and name collision do not mutate state; removal requires confirmation.
 6. Select Connection: distinguish configured, independently probed/reachable, negotiated protocol, credential binding, and loaded-in-client unknown. External fixture Offline and Missing Credential block run/test; Error fixture produces isError.
 7. Switch Web 1180 → App 390 → Web 1024 without refreshing. In App navigate Server list → Tools → Inspector → Runner and back with **host-owned AppPageHeader**. Switch Session through outside control (App) or shell Session list (Web), which clears stale draft/result and reports offline separately from empty.
 8. Reset should restore the initial known `AI` fixture and initial viewport. External fixture state is intentionally outside the Nession product UI.
+
+## Preview visual-language correction (2026-11-17)
+
+**Product-owner feedback:** overall information architecture is accepted, but the *actual preview work region* was stylistically arbitrary and did not read like Nession. This revision modifies the **same owning prototype**, not the overall Workspace navigation.
+
+| Before: visual drift | After: Nession design mapping |
+| --- | --- |
+| Ad-hoc 10px metadata, 12px default body, oversized tool cards | Generated Web/App typography roles: Title, Primary, Body, Secondary, Metadata, Caption, Code; readable technical IDs and input properties |
+| Nested bordered panels for Schema, result, and notices | ResourceDetail whitespace-first sections and aligned fact/parameter rows; code tinted only inside Raw blocks; borders only for real input/separation |
+| Inspect, Runner, Connection and Config buttons all equally prominent | Contextual **Contract / Run / Connection** local navigation; one primary action in the active operation; secondary actions recede |
+| All schemas + args + result + history rendered in one long view | **Contract** is the landing view, **Run** holds the draft and result/history; Output Schema never confused with execution data |
+| Uniform Web micro-controls reduced touch legibility on App | Generated App role sizes and control-height tokens (44px touch floor); App host-owned header and depth retained |
+| Warning-style card for healthy connection | Connection is quiet secondary context; missing auth/offline becomes a clear local failure without a global banner |
+
+**Design owners inspected:** `web/src/components/ui/resource-detail.tsx`, `configuration-form.tsx`, `operation-surface.tsx`, `button.tsx`, `web/src/shared/typography/chromeRoles.ts`, `web/src/app/workspace/WorkspaceShell.tsx`, `design/generated/web.css`, and the corresponding `docs/design/design-system/patterns` references.
+
+**Verification at this revision:** JavaScript syntax and a synthetic in-memory UI transition harness checked 16 paths: default Contract vs Run, explicit invocation and raw result, cancellation, App depth/Back and Web return, unknown Output Schema and offline blocking. **This is not rendered Chromium/Playwright pixel or focus/touch proof.** Real 1180/1024/390/375 browser measurements, screenshots and Pages manifest HTTPS SHA readback remain Pending.
 
 ## Mock versus real behavior
 
