@@ -24,7 +24,7 @@
   const stateOf = s => {
     if(!s.im) s.im={query:"",role:"all",status:"all",libraryPage:0,librarySize:6,selected:null,
       tag:null,tagName:"",tagExpected:null,tagPhase:"edit",tagMessage:"",
-      buildMode:"closed",buildKind:"github",buildAlias:"nession-dev",buildRepo:"https://github.com/BestNathan/nession",
+      buildMode:"closed",buildKind:"github",buildAlias:"",buildRepo:"https://github.com/BestNathan/nession",
       buildRef:"main",buildDirectory:"/authorized/workspace",buildRepresentation:"flattened",
       compose:[{id:"rust",destination:"/opt/rust"},{id:"source",destination:"/workspace/source"}],
       buildError:"",buildStatus:"all",buildPage:0,buildPageSize:4,expandedBuild:null,
@@ -43,7 +43,7 @@
       const extra=overrides[im.id]||{};
       if(!im.imMeta)im.imMeta={...extra};
       if(!im.tags)im.tags=im.revision?[im.revision]:[im.id];
-      if(!im.repository)im.repository=extra.repository||"nession/generated";
+      im.repository=extra.repository||im.repository||"nession/generated";
     });
     return s.im;
   };
@@ -198,7 +198,7 @@
       '<span class="im-chevron">'+(expanded?"⌃":"⌄")+'</span></button>'+
       (expanded?'<div class="im-record-detail" id="im-build-detail-'+h(b.id)+'"><div class="im-detail-grid">'+
         section("Build execution",'<dl class="im-facts">'+fact("Stage",b.stage||"Queued")+fact("Attempt",String(b.attempt))+fact("Elapsed",Math.round((b.elapsed_ms||0)/1000)+" s")+fact("Measurements",progress)+'</dl>')+
-        section("Source and diagnostics",'<dl class="im-facts">'+fact("Declared source",b.source_kind||"Git/Directory/Compose · mock")+fact("Diagnostic",b.diagnostic||"No events recorded")+'</dl>')+'</div>'+
+        section("Source and diagnostics",'<dl class="im-facts">'+fact("Declared source",b.source_kind||"Historical source not recorded in mock")+fact("Diagnostic",b.diagnostic||"No events recorded")+'</dl>')+'</div>'+
         (active?'<div class="im-indeterminate" aria-label="Stage progress unknown"><span></span></div><p class="im-muted">Building · real file/byte counters shown above; packaging percentage unknown.</p>':"")+
         (b.status==="failed"?note(b.diagnostic||"Build failed","error"):"")+
         '<div class="im-detail-actions">'+
@@ -312,7 +312,21 @@
     else if(part==="open"){ui.selected=ui.selected===id?null:id;ui.tag=null;ui.notice="";}
     else if(part==="filters-reset"){ui.query="";ui.role="all";ui.status="all";ui.libraryPage=0;}
     else if(part==="library-page"){ui.libraryPage=Math.max(0,ui.libraryPage+Number(id));ui.selected=null;}
-    else if(part==="copy"){ui.notice="Digest selected: "+(find()?.digest||"Unknown")+". Browser clipboard is intentionally not simulated; select text in the detail to copy.";}
+    else if(part==="copy"){
+      const revision=find()?.digest;
+      if(!revision){ui.notice="No published Digest available.";return true;}
+      if(typeof navigator!=="undefined"&&navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(revision).then(function(){
+          ui.notice="Digest copied to clipboard.";
+          const dest=document.querySelector(".im-library .im-notice");
+          if(dest)dest.textContent=ui.notice;
+        }).catch(function(){
+          ui.notice="Clipboard permission denied. Select the Digest text in the detail to copy.";
+          const dest=document.querySelector(".im-library .im-notice");
+          if(dest)dest.textContent=ui.notice;
+        });
+      } else ui.notice="Clipboard unavailable. Select the Digest text in the detail to copy.";
+    }
     else if(part==="tag"){const im=find();if(im&&serverUp(s)){ui.tag=id;ui.tagName=(im.tags||[])[0]||"stable";ui.tagExpected=(s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName))||{}).digest||null;ui.tagPhase="edit";ui.tagMessage="";}}
     else if(part==="tag-cancel"){ui.tag=null;ui.tagMessage="";}
     else if(part==="tag-back"){ui.tagPhase="edit";ui.tagMessage="";}
@@ -321,7 +335,7 @@
     else if(part==="tag-remove"){const im=find();if(!im||!serverUp(s)||!(im.tags||[]).length)return true;ui.tag=id;ui.tagName=im.tags[0];ui.tagExpected=im.digest;ui.tagPhase="unlink";ui.tagMessage="";}
     else if(part==="tag-unlink"){const im=find();if(!im||ui.tagPhase!=="unlink"||!serverUp(s))return true;const o=s.images.find(x=>x.repository===im.repository&&(x.tags||[]).includes(ui.tagName));if(tagConflict(s,o,ui)){ui.tagMessage="Conflict: the Tag changed before unlink. Nothing was removed.";return true;}o.tags=o.tags.filter(t=>t!==ui.tagName);ui.tag=null;ui.notice="Tag unlinked; immutable Manifest, consumer pins and Blob Store remain.";
     } else if(part==="distribution"){s.sub.images="distribution";ui.cacheSelected=id;}
-    else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.role="all";ui.status="all";ui.libraryPage=0;ui.selected=id;}
+    else if(part==="cache-library"){s.sub.images="library";ui.query="";ui.role="all";ui.status="all";ui.selected=id;ui.libraryPage=Math.max(0,Math.floor(catalog(s).findIndex(im=>im.id===id)/ui.librarySize));}
     else if(part==="cache-open"){ui.cacheSelected=ui.cacheSelected===id?null:id;}
     else if(part==="cache-prepare"){const im=find();if(!im||!serverUp(s)||!agentUp(s)||im.status!=="ready")return true;const t=transfer(s,im);if(["Verified","Downloading","Verifying"].includes(t.phase))return true;s.transfers[im.id]={state:"downloading",received:t.received||0,total:im.size_bytes};s.cache[im.id]="preparing";ui.cacheSelected=id;}
     else if(part==="consume"){const im=find(),reason=im&&runtimeReason(s,im);if(!im||reason)return true;if(im.kind==="Base Runtime"){s.rootImage=id;s.rootMode="image";}else{s.tools=Array.from(new Set(s.tools.concat(id)));s.mountTargets[id]=s.mountTargets[id]||im.default_mount||"/opt/"+id;}s.area="policies";s.sub.policies="filesystem";s.preflight="none";s.error="";}
@@ -349,7 +363,7 @@
       if(error){ui.buildError=error;return true;}
       const id="build-"+(200+s.builds.length);
       const names={github:"GitHub snapshot",local_directory:"Authorized directory",compose:"Image Compose"};
-      s.builds.unshift({id:id,name:ui.buildAlias||"untagged-image",status:"queued",stage:null,elapsed_ms:0,files:null,bytes:null,attempt:1,
+      s.builds.unshift({id:id,name:ui.buildAlias||(ui.buildKind==="compose"?"composed-image":ui.buildKind==="github"?"github-source-image":"directory-source-image"),status:"queued",stage:null,elapsed_ms:0,files:null,bytes:null,attempt:1,
         source_kind:names[ui.buildKind]+" · "+(ui.buildKind==="compose"?ui.compose.map(x=>x.id+"→"+x.destination).join(", "):ui.buildKind==="github"?ui.buildRepo+" @ "+ui.buildRef:ui.buildDirectory),
         representation:ui.buildKind==="compose"?ui.buildRepresentation:"single-layer",
         diagnostic:"Queued in Server-owned durable Build directory (synthetic)"});
@@ -359,7 +373,7 @@
     else if(part==="build-page"){ui.buildPage=Math.max(0,ui.buildPage+Number(id));ui.expandedBuild=null;}
     else if(part==="build-cancel"){const b=build();if(b&&["running","queued"].includes(b.status)){b.status="canceled";b.diagnostic="Canceled; snapshot retained according to Server retention (synthetic).";}}
     else if(part==="build-retry"){const b=build();if(b&&["failed","canceled"].includes(b.status)){b.status="queued";b.stage=null;b.attempt++;b.elapsed_ms=0;b.diagnostic="New attempt queued; previous diagnostic retained in durable record (synthetic).";}}
-    else if(part==="build-image"){const b=build();s.sub.images="library";ui.query="";ui.role="all";ui.status="all";const im=s.images.find(im=>im.name===b?.name);ui.selected=im?.id||null;ui.notice=im?"Published Image selected.":"This historical mock does not contain a live Image for the completed build."; }
+    else if(part==="build-image"){const b=build();s.sub.images="library";ui.query="";ui.role="all";ui.status="all";const im=s.images.find(im=>im.name===b?.name);ui.selected=im?.id||null;ui.libraryPage=im?Math.floor(catalog(s).findIndex(x=>x.id===im.id)/ui.librarySize):0;ui.notice=im?"Published Image selected.":"This historical mock does not contain a live Image for the completed build."; }
     return true;
   }
   window.NessionImagesDesign={create:function(getState){return {
