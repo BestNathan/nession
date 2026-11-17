@@ -56,10 +56,15 @@ function observedLog(log){
   return result;
 }
 export function attestKnowledgeProposalCleanup({
-  repo,stage,issue,targetSha,run,jobs,log,remaining,ledger,ancestry,
+  repo,stage,issue,targetSha,targetAncestry,run,jobs,log,remaining,ledger,ancestry,
 }){
+  const fromImplementation=targetSha===PIN.main ||
+    (SHA.test(targetSha)&&targetAncestry?.base_commit?.sha===PIN.main&&
+      targetAncestry.merge_base_commit?.sha===PIN.main&&
+      targetAncestry.status==='ahead'&&
+      targetAncestry.behind_by===0);
   check(shouldCollectProposalCleanup(issue,stage)&&repo===REPO&&
-    targetSha===PIN.main,'not the accepted implementation target');
+    fromImplementation,'not the accepted implementation target/descendant');
   check(run?.id===PIN.run&&run.run_attempt===1&&
     run.name==='Store / Knowledge Publisher'&&
     run.path==='.github/workflows/store-knowledge-publisher.yml'&&
@@ -121,7 +126,7 @@ export async function collectKnowledgeProposalCleanup({
   repo,stage,issue,targetSha,get,getLog,
 }){
   if(!shouldCollectProposalCleanup(issue,stage))return null;
-  check(repo===REPO&&targetSha===PIN.main,'wrong post-merge target');
+  check(repo===REPO&&SHA.test(targetSha),'wrong post-merge target');
   const api='/repos/'+REPO;
   const [run,jobs,remaining,ledger]=await Promise.all([
     get(api+'/actions/runs/'+PIN.run),
@@ -129,13 +134,15 @@ export async function collectKnowledgeProposalCleanup({
     get(api+'/git/matching-refs/heads/knowledge-proposals/'),
     get(api+'/git/ref/heads/knowledge'),
   ]);
+  const targetAncestry=targetSha===PIN.main?null:
+    await get(api+'/compare/'+PIN.main+'...'+targetSha);
   const [log,...ancestry]=await Promise.all([
     getLog(api+'/actions/jobs/'+PIN.job+'/logs'),
     ...Object.values(PIN.refs).map(sha=>
       get(api+'/compare/'+sha+'...'+PIN.ledger)),
   ]);
   return attestKnowledgeProposalCleanup({
-    repo,stage,issue,targetSha,run,jobs,log,remaining,ledger,ancestry,
+    repo,stage,issue,targetSha,targetAncestry,run,jobs,log,remaining,ledger,ancestry,
   });
 }
 export function selfTestKnowledgeProposalCleanup(){
@@ -167,10 +174,14 @@ export function selfTestKnowledgeProposalCleanup(){
   const prove=(change={})=>attestKnowledgeProposalCleanup({...mock,...change});
   assert.equal(prove().deleted_count,4);
   assert.equal(prove().establishes_sc_verdict,false);
+  assert.equal(prove({targetSha:'c'.repeat(40),targetAncestry:{
+    base_commit:{sha:PIN.main},merge_base_commit:{sha:PIN.main},
+    status:'ahead',ahead_by:1,behind_by:0,
+  }}).deleted_count,4);
   assert.equal(shouldCollectProposalCleanup(3773,'pr'),false);
   assert.equal(shouldCollectProposalCleanup(3156,'post-merge'),false);
   const bad=[
-    {targetSha:'f'.repeat(40)},{run:{...mock.run,run_attempt:2}},
+    {targetSha:'f'.repeat(40)},{targetSha:'c'.repeat(40)},{run:{...mock.run,run_attempt:2}},
     {run:{...mock.run,event:'workflow_dispatch'}},
     {run:{...mock.run,head_branch:'staging'}},
     {run:{...mock.run,head_sha:'b'.repeat(40)}},
