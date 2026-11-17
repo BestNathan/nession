@@ -291,6 +291,50 @@ mod tests {
         }
     }
 
+    /// A second owner's Tool that reuses a name with a different contract.
+    struct DifferentContractTool(&'static str);
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct DifferentInput {
+        /// A different argument.
+        other: String,
+    }
+
+    #[derive(serde::Serialize, schemars::JsonSchema)]
+    struct DifferentOutput {
+        /// A different result.
+        different: bool,
+    }
+
+    #[async_trait]
+    impl ToolHandler for DifferentContractTool {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+
+        fn description(&self) -> &'static str {
+            "same name, different contract"
+        }
+
+        fn input_schema(&self) -> Map<String, Value> {
+            schema_for::<DifferentInput>()
+        }
+
+        fn output_schema(&self) -> Map<String, Value> {
+            schema_for::<DifferentOutput>()
+        }
+
+        async fn call(
+            &self,
+            _context: &ToolContext,
+            arguments: Map<String, Value>,
+        ) -> Result<Value, ToolError> {
+            let input = parse_arguments::<DifferentInput>(arguments)?;
+            Ok(json!({ "different": !input.other.is_empty() }))
+        }
+    }
+
     struct FixtureProvider {
         name: &'static str,
         tools: Vec<Arc<dyn ToolHandler>>,
@@ -455,12 +499,22 @@ mod tests {
     #[test]
     fn two_providers_cannot_claim_one_name_with_different_contracts() {
         let first = provider_of_one("first", "fixture_echo");
-        let second = provider_of_one("second", "fixture_echo");
+        let second = FixtureProvider::new(
+            "second",
+            vec![Arc::new(DifferentContractTool("fixture_echo")) as Arc<dyn ToolHandler>],
+        );
         let error = match McpCatalog::with_providers(&[first, second]) {
-            Ok(_) => panic!("a second owner must be refused even with the same schema"),
+            Ok(_) => panic!("a second owner with a conflicting contract must be refused"),
             Err(error) => error,
         };
-        assert!(matches!(error, CatalogError::NameConflict { name, .. } if name == "fixture_echo"));
+        match error {
+            CatalogError::NameConflict { name, owners } => {
+                assert_eq!(name, "fixture_echo");
+                assert!(owners.contains("provider `first`"), "{owners}");
+                assert!(owners.contains("provider `second`"), "{owners}");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 
     #[test]
@@ -513,7 +567,10 @@ mod tests {
 
         let error = match catalog.reconfigure(&[
             provider_of_one("fixtures", "fixture_echo"),
-            provider_of_one("intruder", "fixture_echo"),
+            FixtureProvider::new(
+                "intruder",
+                vec![Arc::new(DifferentContractTool("fixture_echo")) as Arc<dyn ToolHandler>],
+            ),
         ]) {
             Ok(_) => panic!("a conflicting regeneration must be refused"),
             Err(error) => error,
