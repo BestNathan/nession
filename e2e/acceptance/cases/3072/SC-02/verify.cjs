@@ -18,7 +18,9 @@ const INDEX = 'indexes/by-sha/' + STAGING_SOURCE +
   '/deployment/42805092603-1-staging.json';
 
 async function get(route) {
-  assert.match(route, /^\/repos\/BestNathan\/nession\//);
+  assert.ok(route.startsWith('/repos/' + REPO + '/') ||
+    route.startsWith('/search/issues?q=' + encodeURIComponent('repo:' + REPO + ' ')),
+  'unexpected GitHub read-only route');
   const response = await fetch('https://api.github.com' + route, {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -57,10 +59,79 @@ function hasStep(j, name) {
   'unverified native step: ' + name);
 }
 
-// A real positive Staging wake can come from any natural linked Issue/PR.
-// Bounded one-page discovery prevents permanent reliance on an obsolete SHA.
-const MAX_RECENT_ISSUES = 100;
-const MAX_CANDIDATES = 12;
+// Only GitHub-native Issue text is candidate discovery; original Run/Job,
+// protected staging PR, exact-SHA Store and Kubernetes sources decide truth.
+// Searching the latest 100 ordinary Issues loses historical evidence as Issue
+// activity grows. Search all matching Issue contracts, including closed Issues.
+// GitHub Search caps accessible results at 1,000, so split overloaded ranges
+// recursively by immutable Issue creation day rather than truncating silently.
+const SEARCH_PAGE_SIZE = 100;
+const SEARCH_LIMIT = 1000;
+const SEARCH_QUERY = 'repo:' + REPO +
+  ' is:issue in:body "branch: staging" "method: agent"';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function searchRoute(extra, page) {
+  assert.ok(Number.isSafeInteger(page) && page > 0 && page <= 10);
+  const query = SEARCH_QUERY + (extra ? ' ' + extra : '');
+  return '/search/issues?q=' + encodeURIComponent(query) +
+    '&per_page=' + SEARCH_PAGE_SIZE + '&page=' + page +
+    '&sort=created&order=asc';
+}
+
+async function readSearchPages(extra, first) {
+  assert.ok(Number.isSafeInteger(first?.total_count) &&
+    first.total_count >= 0);
+  assert.ok(first.total_count <= SEARCH_LIMIT,
+    'GitHub search overflow must be partitioned, never truncated');
+  assert.ok(Array.isArray(first.items) &&
+    first.items.length <= SEARCH_PAGE_SIZE);
+  const issues = [...first.items];
+  const pages = Math.ceil(first.total_count / SEARCH_PAGE_SIZE);
+  for (let page = 2; page <= pages; page++) {
+    const next = await get(searchRoute(extra, page));
+    assert.ok(Array.isArray(next?.items) &&
+      next.items.length <= SEARCH_PAGE_SIZE);
+    issues.push(...next.items);
+  }
+  // GitHub search may be indexed concurrently; reject ambiguous pagination
+  // rather than accidentally treating a partial scan as proof of no source.
+  assert.equal(new Set(issues.map(issue => issue.number)).size, issues.length,
+    'duplicate Issue in historical source discovery');
+  assert.ok(issues.length >= first.total_count,
+    'incomplete GitHub Issue search pagination');
+  return issues;
+}
+
+function isoDay(timestamp) {
+  assert.match(timestamp, /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
+  return timestamp;
+}
+
+async function discoverRange(start, end) {
+  const extra = 'created:' + isoDay(start) + '..' + isoDay(end);
+  const first = await get(searchRoute(extra, 1));
+  if (first.total_count <= SEARCH_LIMIT) return readSearchPages(extra, first);
+  const from = Date.parse(start + 'T00:00:00Z');
+  const until = Date.parse(end + 'T00:00:00Z');
+  assert.ok(Number.isFinite(from) && Number.isFinite(until) && from < until,
+    'more than 1000 source candidates in one creation day');
+  const mid = from + Math.floor(Math.floor((until - from) / DAY_MS) / 2) * DAY_MS;
+  const leftEnd = new Date(mid).toISOString().slice(0, 10);
+  const rightStart = new Date(mid + DAY_MS).toISOString().slice(0, 10);
+  return [
+    ...await discoverRange(start, leftEnd),
+    ...await discoverRange(rightStart, end),
+  ];
+}
+
+async function discoverHistoricalIssueCandidates() {
+  const first = await get(searchRoute('', 1));
+  if (first.total_count <= SEARCH_LIMIT) return readSearchPages('', first);
+  const earliest = first.items?.[0]?.created_at?.slice(0, 10);
+  assert.ok(earliest, 'cannot partition Issue search without oldest creation date');
+  return discoverRange(earliest, new Date().toISOString().slice(0, 10));
+}
 
 function section(body, title) {
   const lines = String(body ?? '').split(/\r?\n/);
@@ -132,11 +203,11 @@ async function nativeAttempt(runId, attempt) {
 async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
   const { parsePreMergeIssueNumbers } = await import(
     pathToFileURL(path.join(ROOT, 'scripts/requirement-acceptance.mjs')).href);
-  const issues = await get(resource('/issues?state=all&sort=updated' +
-    '&direction=desc&per_page=' + MAX_RECENT_ISSUES));
-  assert.ok(Array.isArray(issues) && issues.length <= MAX_RECENT_ISSUES);
+  const issues = await discoverHistoricalIssueCandidates();
+  // Do not cap the candidate rows before authenticating the native Waker.
+  // Historical proof remains discoverable after unrelated Issue churn.
   const candidates = issues.filter(issue => !issue.pull_request)
-    .flatMap(stagingAgentRows).slice(0, MAX_CANDIDATES);
+    .flatMap(stagingAgentRows).sort((a, b) => b.runId - a.runId);
   for (const row of candidates) {
     const wakerMeta = await get(resource('/actions/runs/' + row.runId));
     if (wakerMeta.name !== 'Acceptance / Post-Run Waker') continue;
@@ -152,10 +223,10 @@ async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
     hasStep(selector, 'Authenticate completed Staging attestation ingestion');
     hasStep(selector, 'Select pending exact-SHA merged-Staging Agent criteria');
     const prefix = 'evaluate-staging (' + row.issue + ')';
-    matchedJob(waker.jobs,
+    const evaluator = matchedJob(waker.jobs,
       n => n.startsWith(prefix + ' /') && n.endsWith('/ Execute acceptance'),
       'matched exact-Issue Staging Agent evaluator', waker.run.run_attempt);
-    matchedJob(waker.jobs,
+    const updater = matchedJob(waker.jobs,
       n => n.startsWith(prefix + ' /') && n.endsWith('/ Deterministic Issue updater'),
       'matched canonical Issue updater', waker.run.run_attempt);
 
@@ -200,13 +271,20 @@ async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
         wakerAttempt: waker.run.run_attempt,
         source: source.run.id, sourceAttempt: source.run.run_attempt,
         record: index.record, index: entry.path,
-        observedAt: attested.observed_at, pr: linked[0].number };
+        observedAt: attested.observed_at, pr: linked[0].number,
+        evaluator: evaluator.name, updater: updater.name };
     }
   }
   return null;
 }
 
 function selfTestPositiveSelection() {
+  assert.match(searchRoute('', 1), /sort=created&order=asc$/);
+  assert.match(decodeURIComponent(searchRoute('', 1)),
+    /is:issue in:body "branch: staging" "method: agent"/);
+  assert.ok(decodeURIComponent(searchRoute('created:2026-11-01..2026-11-30', 2))
+    .includes('created:2026-11-01..2026-11-30'));
+  assert.throws(() => searchRoute('', 11), { name: 'AssertionError' });
   const base = {
     number: 900,
     body: '## Acceptance Plan\nacceptance:\n  SC-01:\n    when: merged\n    branch: staging\n    method: agent\n  SC-02:\n    when: merged\n    branch: main\n    method: agent\n' +
