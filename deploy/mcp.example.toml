@@ -1,0 +1,51 @@
+# Standalone Nession MCP host configuration example (#3791).
+#
+# Copy this document into an operator-managed Secret/ConfigMap, fill every
+# REQUIRED empty value, and mount it read-only at /etc/nession/mcp.toml (or
+# pass it with `--config` / NESSION_MCP_CONFIG). The image never contains a
+# configuration, credential or default bearer token.
+#
+# With any REQUIRED value left empty this document fails closed at startup.
+# The inbound token and the outbound credentials are separate secrets; never
+# reuse the MCP inbound token as a Server/Agent credential.
+
+[mcp]
+# Bind every interface inside the container so the published port is
+# reachable. An unspecified bind disables the Host allowlist, so a public
+# ingress must state `allowed_hosts` explicitly below.
+listen_address = "0.0.0.0:9090"
+
+# REQUIRED: the bearer token MCP clients present. This is the only credential
+# the inbound endpoint verifies and it is never forwarded to a backend.
+auth_token = ""
+
+# The authorities (Host header values) this endpoint accepts. Keep this
+# explicit for any public ingress; add the ingress DNS name here.
+allowed_hosts = ["mcp.example.com"]
+
+# Browser origins allowed to call the endpoint. MCP clients do not send an
+# Origin header; leave this empty to refuse every browser origin, or name the
+# exact scheme/host/port a browser client uses.
+allowed_origins = []
+
+# Optional native TLS for the listener. Prefer a TLS-terminating proxy when
+# the platform already owns certificates. Both paths must be readable by the
+# container user (uid 10001) and configured together.
+# tls_cert_path = "/etc/nession/tls/tls.crt"
+# tls_key_path = "/etc/nession/tls/tls.key"
+
+[backend.server]
+# REQUIRED: the real Nession Server WebSocket endpoint. This is the canonical
+# route for Server-owned Tools and, by default, for Agent-owned Session Tools.
+endpoint = "wss://nession.example.com/ws"
+
+# REQUIRED: the outbound Server credential. It is not the inbound MCP token.
+auth_token = ""
+
+# Optional: manage one Agent directly instead of routing through the Server.
+# `[backend.server]` stays required either way; this only narrows the Agent
+# target and refuses any other agent_id.
+# [backend.agent]
+# endpoint = "ws://127.0.0.1:19091/ws"
+# auth_token = ""
+# agent_id = "agent-..."

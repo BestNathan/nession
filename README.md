@@ -354,9 +354,14 @@ Published multi-arch images (on version bumps via CI):
 
 - `ghcr.io/bestnathan/nession:server-<version>`
 - `ghcr.io/bestnathan/nession:agent-<version>`
+- `ghcr.io/bestnathan/nession:mcp-<version>` (standalone MCP host, independently deployed)
 - `ghcr.io/bestnathan/nession:ui-<web-version>`
 
 `deploy/docker-compose.yml` wires server + agent + UI together for local runs.
+`deploy/docker-compose.mcp.yml` is the independent standalone MCP sample; it
+has its own lifecycle and is not part of that stack. See
+[docs/architecture/mcp.md](docs/architecture/mcp.md#standalone-oci-image-3791)
+for configuration, auth, ingress and rollback.
 
 ---
 
