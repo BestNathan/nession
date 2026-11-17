@@ -629,15 +629,16 @@
   .nession-ui .app .cand-section-head{margin-top:0}
 }
 </style>
+<link rel="stylesheet" href="./images-management.css">
 </head>
 <body data-nession-prototype-frame="v1">
 <div class="np-page" data-np-root>
 <header class="np-overview">
 <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox · revised</span></nav>
-<span class="np-eyebrow">SESSION WORKSPACE · SANDBOX · WEB / APP · DESIGN CANDIDATE</span>
+<span class="np-eyebrow">SESSION WORKSPACE · IMAGES MANAGEMENT · WEB / APP · P0 DESIGN CANDIDATE</span>
 <div class="np-header-main">
-<div><h1 class="np-title">Sandbox · Images · Workspaces · Policies</h1>
-<p class="np-subtitle">Session 依然是 Sandbox 的入口；Images 复用 Server 全局 Registry，Workspaces 是 Agent 可命名的可复用资源，Policies 直接展示 Filesystem / Network / 原生隔离能力。Web 顶部右侧一级导航，进入管理区再使用局部 Sidebar；App 保留唯一的主页面 Header 与 Back。</p></div>
+<div><h1 class="np-title">Images management · Library / Builds / Distribution</h1>
+<p class="np-subtitle">Images 是 Server 管理的全局不可变资源，但仍作为当前 Session 的 Sandbox 内部能力呈现。按 Nession ResourceDetail、ConfigurationForm 与 OperationSurface 重设计 Library、Builds、Distribution；Web 保持局部二级导航，App 保持唯一的宿主 Header 与 Back。</p></div>
 <div class="np-links">
 <a href="https://github.com/BestNathan/nession/issues/3799">Image Library Management #3799</a><a href="https://github.com/BestNathan/nession/issues/3792">Host RootFS #3792</a><a href="https://github.com/BestNathan/nession/issues/3793">Picker #3793</a><a href="https://github.com/BestNathan/nession/issues/3795">Build #3795</a><a href="https://github.com/BestNathan/nession/issues/3796">Prepare #3796</a><a href="https://github.com/BestNathan/nession/issues/3797">Workspace #3797</a><a href="https://github.com/BestNathan/nession/issues/3798">History #3798</a><a href="https://github.com/BestNathan/nession/issues/3408">Prior #3408</a>
 <a href="https://github.com/BestNathan/nession/issues/3407">Workspaces #3407</a>
@@ -649,7 +650,7 @@
 </header>
 <main>
 <section class="np-preview">
-<div class="np-section-heading"><div><h2>Interactive product preview</h2><p>从 Overview 选择 Host + Rust + Workspace，再在 Filesystem 验证可写 /workspace；Images 展示兼容性与授权下载，Builds 可切换 Source 与 Compose、浏览历史。所有操作为模拟。</p></div>
+<div class="np-section-heading"><div><h2>Interactive product preview</h2><p>进入 Images：Library 按行展开 Repository / Tag / Manifest / 依赖 / 引用，操作需 Review/Confirm；Builds 有来源配置、Compose 顺序与异步任务详情；Distribution 仅针对当前 Agent 观测、准备与验证。操作均为模拟。</p></div>
 <div class="np-preview-toolbar">
 <button data-np-size="1180" aria-pressed="true">Web 1180</button>
 <button data-np-size="1024">Web 1024</button>
@@ -669,7 +670,8 @@
 <button data-fixture="no-cgroup" aria-pressed="false">No cgroup</button>
 <button data-fixture="no-seccomp" aria-pressed="false">No seccomp</button>
 <button data-fixture="macos" aria-pressed="false">macOS Seatbelt</button>
-<button data-fixture="offline" aria-pressed="false">Agent Offline</button><button data-fixture="tag-conflict" aria-pressed="false">Concurrent Tag update (CAS conflict)</button>
+<button data-fixture="offline" aria-pressed="false">Agent Offline</button>
+<button data-fixture="server-offline" aria-pressed="false">Server Unavailable</button><button data-fixture="tag-conflict" aria-pressed="false">Concurrent Tag update (CAS conflict)</button>
 <button data-fixture="preflight-fail" aria-pressed="false">Preflight Reject</button>
 <button data-fixture="enter-fail" aria-pressed="false">Enter Failure</button>
 <button data-fixture="no-session" aria-pressed="false">No Session</button>
@@ -707,7 +709,7 @@
 <li><strong>Preview</strong>：永远显示根、附加挂载、Workspace 和 Access 的最终来源、目标与权限；路径修改时实时同步。</li>
 </ol>
 <p>当前生产 V1 的 <code>filesystem.access</code> 与 EROFS Composition 仍然互斥，额外挂载点仅支持受限 <code>/opt/&lt;name&gt;</code>；本原型展示新声明的配置 IA，不能作为运行时已支持的证明。镜像的 <code>default_mount</code> 元数据尚需协议落地，Home 不再是 Filesystem Policy 编辑区。</p></article>
-<article class="np-detail"><h3>Images-first · 2026-11-17 · #3799</h3><ol class="np-steps"><li>Images → Library 仍是原行下展开详情，可检查 Repository/Tag、Manifest Digest、平台、Agent Cache 与引用影响。</li><li>对同一镜像展开 Manage Tag：输入名称 → Review CAS 预期 Digest → Confirm；若标签被并发修改，则拒绝更新并提示重新检查。</li><li>Remove Tag 必须在原行下确认，明确仅断开逻辑引用、保留活跃 Project/Session Pins 与 CAS Blob。选择外部测试条件 Concurrent Tag update 验证冲突。</li><li>这些纯前端模拟动作不是已实现的 Server Tag 写接口；Catalog 是唯一 Tag/GC 事实源。</li></ol></article><article class="np-detail"><h3>2026-11-17 · 使用路径优化 (#3792–#3798)</h3><ol class="np-steps"><li>Local RootFS + EROFS Toolchain + Managed Workspace 候选：保留 Base Runtime 的可选性，不把宿主 / 等同 Linux 隔离。</li><li>Image 展示 OCI 平台、当前 Agent Cache 和不支持的 Referenced Composite，不把 Server Ready 当作可执行。</li><li>Builds 新增 Git、Directory、Archive、OCI、Image Compose 的源声明与 Flattened/Referenced 选项；历史状态过滤、分页及失败重试。</li><li>Distribution 保留独立 Prepare/Resume/Verifying；Workspaces Details 展示 Lower / Upper / Lease，使用中的 Workspace 不可删。</li></ol></article><article class="np-detail"><h3>04 · 产品文案边界</h3>
+<article class="np-detail"><h3>Images-first · UI / IA redesign · #3799 / #3795 / #3798 / #3796</h3><ol class="np-steps"><li>Library 使用单列表和本行内展开的 ResourceDetail：展示 Repository / Tag、Manifest / Index、OCI 平台、来源、不可变层与外部设备依赖、已知消费者、Server 与 Agent 独立状态。禁止列表尾部再开详情面板。</li><li>Tag 管理是内联 OperationSurface：选择 Tag → Review 预期旧 Digest、影响范围 → Confirm CAS Move；并发冲突拒绝写入。成功修改的只是可变 Tag，不是 Image 内容。</li><li>Builds 区分来源选择、配置、提交、任务状态与历史：GitHub/Local Directory/Compose 可演示，Archive/OCI 因当前 Build Source DTO 尚未支持而显式禁用；Compose 支持有序 Source、目标路径和 Flattened/Referenced 的候选配置。</li><li>Distribution 区分 Server Ready、当前 Agent Cache 和 Runtime Compatibility；仅对选中 Agent 提供 Prepare/Resume/Retry，Verifying 阶段不允许标为 Mount Ready。所见数据和操作均为本地模拟，不能代表生产 API 已交付。</li></ol></article><article class="np-detail"><h3>2026-11-17 · 使用路径优化 (#3792–#3798)</h3><ol class="np-steps"><li>Local RootFS + EROFS Toolchain + Managed Workspace 候选：保留 Base Runtime 的可选性，不把宿主 / 等同 Linux 隔离。</li><li>Image 展示 OCI 平台、当前 Agent Cache 和不支持的 Referenced Composite，不把 Server Ready 当作可执行。</li><li>Builds 新增 Git、Directory、Archive、OCI、Image Compose 的源声明与 Flattened/Referenced 选项；历史状态过滤、分页及失败重试。</li><li>Distribution 保留独立 Prepare/Resume/Verifying；Workspaces Details 展示 Lower / Upper / Lease，使用中的 Workspace 不可删。</li></ol></article><article class="np-detail"><h3>04 · 产品文案边界</h3>
 <p>Policy 编辑区只显示配置项、实际可编辑的值、目标路径及状态。RootFS、Mounts、Workspace、Access、Preview 都是普通标题，不需要每个都有 ⓘ。仅对真正有歧义的术语提供按需解释；详细设计、运行时差异、验收边界集中留在这块原型外说明。安全错误和缓存不可用必须在产品界面直接展示。</p></article>
 <article class="np-detail"><h3>Fidelity &amp; negative states</h3>
 <p>模拟 Agent 离线、macOS、不支持 cgroup/seccomp、Image Cache absent、没有 Session、预检失败、启动失败、Inside 只读等场景。Shell 结构依据 main 现有 WebLayout / Sidebar + ShellMain → WorkspaceShell 与 AppLayers → one AppPageHeader，候选变化仅在 Sandbox 内部。</p>
@@ -718,6 +720,7 @@
 </section></main>
 <footer class="np-footer">Nession · #3799 / #3792 / #3793 / #3795 / #3796 / #3797 / #3798 · Prototype is a decision artifact, not production acceptance evidence.</footer>
 </div>
+<script src="./images-management.js"></script>
 <script src="./app.js"></script>
 <script src="../prototype-frame-2758/frame.js"></script>
 </body></html>
