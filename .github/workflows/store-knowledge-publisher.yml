@@ -13,6 +13,13 @@ on:
   workflow_run:
     workflows: ['Store / Knowledge Proposal Signal']
     types: [completed]
+  # Activation sweep on the merged workflow and explicit owner-operated recovery.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/store-knowledge-publisher.yml'
+      - 'scripts/knowledge-proposal-cleanup.mjs'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -76,6 +83,7 @@ jobs:
           node scripts/knowledge-publisher-request.mjs self-test
           node scripts/knowledge-publisher-policy.mjs self-test
           node scripts/knowledge-ledger-publish.mjs self-test
+          node scripts/knowledge-proposal-cleanup.mjs self-test
           node scripts/knowledge-publisher-request.mjs prepare \
             "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/knowledge-candidate"
 
@@ -213,3 +221,63 @@ jobs:
           path: ${{ runner.temp }}/knowledge-publisher-receipt.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Clean up published Knowledge proposal branches
+        if: success()
+        continue-on-error: true
+        shell: bash
+        env:
+          KNOWLEDGE_GIT_TOKEN: ${{ steps.writer.outputs.token }}
+        run: |
+          # Housekeeping cannot turn an independently verified publish into
+          # a failure or suppress the publication receipt.
+          node scripts/knowledge-proposal-cleanup.mjs cleanup
+
+  # First main activation and explicit recovery without creating a second
+  # Knowledge writer or granting write access to the generic GITHUB_TOKEN.
+  cleanup:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment: knowledge-publish
+    steps:
+      - name: Checkout exact trusted main cleanup implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify cleanup contract and effective Knowledge writer protection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KNOWLEDGE_PUBLISHER_APP_ID: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/knowledge-proposal-cleanup.mjs self-test
+          node scripts/knowledge-publisher-policy.mjs check
+      - name: Mint dedicated Knowledge App token for bounded disposal
+        id: cleanup-writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.KNOWLEDGE_PUBLISHER_APP_PRIVATE_KEY }}
+          owner: BestNathan
+          repositories: nession
+          permission-contents: write
+      - name: Delete already published proposals with exact-SHA ref leases
+        shell: bash
+        env:
+          KNOWLEDGE_GIT_TOKEN: ${{ steps.cleanup-writer.outputs.token }}
+        run: |
+          set -euo pipefail
+          node scripts/knowledge-proposal-cleanup.mjs cleanup
