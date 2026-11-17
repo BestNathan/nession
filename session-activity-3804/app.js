@@ -33,6 +33,7 @@
   var log = ["Generation 1: initial synthetic Activity snapshot"];
   var toastHandle = null;
   var projectDialog = false;
+  var dialogSessionId = null;
 
   function byId(id) { return document.getElementById(id); }
   function text(id, value) { var el = byId(id); if (el) el.textContent = value; }
@@ -167,11 +168,12 @@
 
   function closeDialog() {
     var d = byId("dialog-layer");
-    d.hidden = true;d.replaceChildren();projectDialog = false;
+    d.hidden = true;d.replaceChildren();projectDialog = false;dialogSessionId = null;
   }
-  function dialog(title,body,footer) {
+  function dialog(title,body,footer,targetId) {
     closeMenu(false);
     var layer = byId("dialog-layer");
+    dialogSessionId = targetId || selectedId;
     layer.innerHTML =
       '<section class="n-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">' +
       '<header class="n-dialog-head"><h2 id="dialog-title">' + encode(title) + '</h2>' +
@@ -206,16 +208,16 @@
         (activity.stale ? ' (last known, no longer verified)' : '') +
         '</dd><dt>Instance</dt><dd>' + encode(s.instance) + '</dd></dl>' +
         '<p>Activity is independent of Session lifecycle, attachment and Agent connectivity. Metadata is unchanged by state updates.</p>';
-      dialog("Session details · " + s.title,description,'<button class="n-primary" type="button" data-dialog="cancel">Done</button>');
+      dialog("Session details · " + s.title,description,'<button class="n-primary" type="button" data-dialog="cancel">Done</button>',s.id);
     } else if (kind === "edit" && s) {
-      dialog("Edit Session details",field("title-field","Display title",s.title,"Title"),footer("Save title","save-title"));
+      dialog("Edit Session details",field("title-field","Display title",s.title,"Title"),footer("Save title","save-title"),s.id);
     } else if (kind === "attach" && s) {
       dialog("Attach settings",'<p>Renderer: WebGL. This is a simulated configuration view for <strong>' +
         encode(s.name) + '</strong>; opening settings does not attach or select the Session.</p>',
-        footer("Save settings","save-settings"));
+        footer("Save settings","save-settings"),s.id);
     } else if (kind === "kill" && s) {
       dialog("Kill session",'<p>This only removes a synthetic row from the preview. Enter the exact tmux name:</p>' +
-        field("kill-field","Exact Session name","",s.name),footer("Kill mock session","kill","n-danger"));
+        field("kill-field","Exact Session name","",s.name),footer("Kill mock session","kill","n-danger"),s.id);
     } else if (kind === "new") {
       dialog("New Session",'<p>Create a local synthetic row; no real Agent or tmux will be changed.</p>' +
         field("new-field","Session name","","new-session"),footer("Create mock Session","create"));
@@ -291,7 +293,7 @@
     if (action === "cancel") {closeDialog();return;}
     if (action === "save-title") {
       var edit = byId("title-field");
-      var s = session(menuTarget || selectedId);
+      var s = session(dialogSessionId || selectedId);
       if (!s || !edit || !edit.value.trim()) {toast("Enter a display title");return;}
       s.title = edit.value.trim();closeDialog();render();toast("Display title changed in mock");
       return;
@@ -309,7 +311,7 @@
       return;
     }
     if (action === "kill") {
-      var s = session(menuTarget || selectedId);
+      var s = session(dialogSessionId || selectedId);
       var input = byId("kill-field");
       if(!s || !input || input.value.trim() !== s.name){toast("Enter the exact tmux Session name");return;}
       sessions=sessions.filter(function(x){return x.id !== s.id;});
@@ -364,7 +366,6 @@
   });
   byId("dialog-layer").addEventListener("click",function(e){
     if(e.target===byId("dialog-layer"))closeDialog();
-    else{var b=e.target.closest("[data-dialog]");if(b)handleDialogAction(b.dataset.dialog);}
   });
   document.addEventListener("click",function(e){
     if(!root.contains(e.target) && !byId("session-actions").hidden)closeMenu(false);
