@@ -129,3 +129,9 @@
 .t-product[data-mode="app"] .t-run-row{grid-template-columns:minmax(0,1fr) 70px;gap:4px}.t-product[data-mode="app"] .t-run-row .t-run-time{display:none}
 .t-product[data-mode="app"] .t-detail-top .t-primary{font-size:19px}
 .t-product[data-mode="app"] .t-inline-actions{gap:6px}
+
+/* Terminal is sibling to Workspace inside Web ShellMain; App renders its own spatial Terminal layer. */
+.t-terminal-pane{min-height:0;flex:1;overflow:auto;background:var(--nession-background);padding:30px}
+.t-terminal-preview{padding:16px 12px;font-family:Menlo,Consolas,monospace;font-size:12px;min-height:230px;background:var(--nession-background)}
+.t-terminal-preview pre{font-family:inherit;font-size:12px;line-height:1.8;white-space:pre-wrap;margin:14px 0 27px}
+.t-terminal-path{color:var(--nession-muted-foreground);font-size:11px}
