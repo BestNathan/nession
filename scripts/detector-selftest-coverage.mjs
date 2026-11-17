@@ -29,6 +29,7 @@ const pairs = [
   ['gate-consumer-parity', ['gate-consumer-parity'], 'tooling'],
   ['workflow-conventions', ['workflow-conventions'], 'tooling'],
   ['runtime-image-tools', ['runtime-image-tools-selftest'], 'tooling'],
+  ['mcp-standalone-image', ['mcp-standalone-image-selftest'], 'tooling'],
   ['compose-storage-contract', ['compose-storage-contract-selftest'], 'tooling'],
   ['gitops-storage-contract', ['gitops-storage-contract-selftest'], 'tooling'],
 ];

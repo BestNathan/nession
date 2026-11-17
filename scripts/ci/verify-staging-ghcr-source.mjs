@@ -7,8 +7,8 @@ const REPO = 'BestNathan/nession';
 const PATH = '.github/workflows/release-staging.yml';
 const SHA = /^[a-f0-9]{40}$/;
 const JOBS = [
-  'docker-server-amd64', 'docker-agent-amd64', 'docker-ui-amd64',
-  'docker-server-arm64', 'docker-agent-arm64', 'docker-ui-arm64',
+  'docker-server-amd64', 'docker-agent-amd64', 'docker-mcp-amd64', 'docker-ui-amd64',
+  'docker-server-arm64', 'docker-agent-arm64', 'docker-mcp-arm64', 'docker-ui-arm64',
   'merge', 'provenance',
 ];
 function deny(message) { throw Error('staging GHCR source: ' + message); }
@@ -81,10 +81,10 @@ export function selfTest() {
     assert.throws(() => verifyRelease(run, {...inventory, jobs: jobs.map(job =>
       job.name === name ? {...job, conclusion: 'failure'} : job)}, sha));
   }
-  assert.throws(() => verifyRelease(run, {jobs: jobs.slice(1), total_count: 7}, sha));
+  assert.throws(() => verifyRelease(run, {jobs: jobs.slice(1), total_count: 9}, sha));
   assert.throws(() => verifyRelease(run, {...inventory, jobs: jobs.map(job =>
     job.name === 'merge' ? {...job, steps: []} : job)}, sha));
-  console.log('Staging GHCR source identity, eight jobs and negative fixtures passed');
+  console.log('Staging GHCR source identity, ten jobs and negative fixtures passed');
 }
 
 async function main() {

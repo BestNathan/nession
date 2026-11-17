@@ -182,10 +182,11 @@ jobs:
           # head_commit is absent on workflow_dispatch — fall back to run start.
           BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.pushed_at }}
         run: |
-          cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent
-          mkdir -p /tmp/server-bin /tmp/agent-bin
+          cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession-mcp
+          mkdir -p /tmp/server-bin /tmp/agent-bin /tmp/mcp-bin
           cp target/x86_64-unknown-linux-gnu/release/nession-server /tmp/server-bin/
           cp target/x86_64-unknown-linux-gnu/release/nession-agent /tmp/agent-bin/
+          cp target/x86_64-unknown-linux-gnu/release/nession-mcp /tmp/mcp-bin/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -196,6 +197,11 @@ jobs:
         with:
           name: agent-bin-amd64
           path: /tmp/agent-bin/nession-agent
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-bin-amd64
+          path: /tmp/mcp-bin/nession-mcp
           retention-days: 1
 
   build-arm64:
@@ -236,10 +242,11 @@ jobs:
           # head_commit is absent on workflow_dispatch — fall back to run start.
           BUILD_TIME: ${{ github.event.head_commit.timestamp || github.event.repository.pushed_at }}
         run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent
-          mkdir -p /tmp/server-bin /tmp/agent-bin
+          cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31 --bin nession-server --bin nession-agent --bin nession-mcp
+          mkdir -p /tmp/server-bin /tmp/agent-bin /tmp/mcp-bin
           cp target/aarch64-unknown-linux-gnu/release/nession-server /tmp/server-bin/
           cp target/aarch64-unknown-linux-gnu/release/nession-agent /tmp/agent-bin/
+          cp target/aarch64-unknown-linux-gnu/release/nession-mcp /tmp/mcp-bin/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -251,9 +258,14 @@ jobs:
           name: agent-bin-arm64
           path: /tmp/agent-bin/nession-agent
           retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-bin-arm64
+          path: /tmp/mcp-bin/nession-mcp
+          retention-days: 1
 
   # ═══════════════════════════════════════════════════════════════════
-  # Phase 4 — Docker (6 parallel: server/agent/ui × amd64/arm64)
+  # Phase 4 — Docker (8 parallel: server/agent/mcp/ui × amd64/arm64)
   # ═══════════════════════════════════════════════════════════════════
 
   # ── amd64 ──────────────────────────────────────────────────────────
@@ -329,6 +341,41 @@ jobs:
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
+
+  # Standalone MCP host (#3791). A fourth image role with its own lifecycle;
+  # nothing about this job adds the service to Server/Agent GitOps workloads.
+  docker-mcp-amd64:
+    needs: [versions, build-amd64]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: mcp-bin-amd64, path: /tmp/mcp-bin }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "SHORT_SHA=${{ needs.versions.outputs.short_sha }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mcp.prebuilt
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMG }}:mcp-${{ env.SHORT_SHA }}-amd64
+          cache-from: type=gha,scope=nession-build-amd64
+          cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_SOURCE_REVISION=${{ github.sha }}
+          build-contexts: |
+            mcp-bin=/tmp/mcp-bin
 
   docker-ui-amd64:
     needs: [versions, build-web]
@@ -435,6 +482,39 @@ jobs:
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
+  docker-mcp-arm64:
+    needs: [versions, build-arm64]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: mcp-bin-arm64, path: /tmp/mcp-bin }
+      - run: |
+          echo "IMG=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession" >> $GITHUB_ENV
+          echo "SHORT_SHA=${{ needs.versions.outputs.short_sha }}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mcp.prebuilt
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMG }}:mcp-${{ env.SHORT_SHA }}-arm64
+          cache-from: type=gha,scope=nession-build-arm64
+          cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_SOURCE_REVISION=${{ github.sha }}
+          build-contexts: |
+            mcp-bin=/tmp/mcp-bin
+
   docker-ui-arm64:
     needs: [versions, build-web]
     runs-on: ubuntu-24.04-arm
@@ -472,8 +552,8 @@ jobs:
   merge:
     needs:
       [versions,
-       docker-server-amd64, docker-agent-amd64, docker-ui-amd64,
-       docker-server-arm64, docker-agent-arm64, docker-ui-arm64]
+       docker-server-amd64, docker-agent-amd64, docker-mcp-amd64, docker-ui-amd64,
+       docker-server-arm64, docker-agent-arm64, docker-mcp-arm64, docker-ui-arm64]
     runs-on: ubuntu-24.04
     permissions:
       packages: write
@@ -489,7 +569,7 @@ jobs:
           IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
           SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
 
-          for prefix in server agent ui; do
+          for prefix in server agent mcp ui; do
             docker buildx imagetools create -t ${IMG}:${prefix}-${SHORT_SHA} \
               ${IMG}:${prefix}-${SHORT_SHA}-amd64 ${IMG}:${prefix}-${SHORT_SHA}-arm64
           done
@@ -519,7 +599,7 @@ jobs:
             docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$1"
           }
           images='{}'
-          for role in agent server ui; do
+          for role in agent mcp server ui; do
             ghcr_digest="$(digest "${GHCR_IMAGE}:${role}-${SHORT_SHA}")"
             images="$(jq -c --arg role "$role" --arg tag "${role}-${SHORT_SHA}" \
               --arg ghcr "$GHCR_IMAGE" --arg ghcr_digest "$ghcr_digest" \
