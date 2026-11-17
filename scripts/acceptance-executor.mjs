@@ -19,6 +19,9 @@ import {
   requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
+import {collectPrCiTriad, requiresPrCiTriad, enforcePrCiTriad, selfTestPrCiTriad}
+  from './acceptance-pr-ci-triad.mjs';
+
 export { normalizeAcceptanceResult };
 import {
   extractSection,
@@ -623,6 +626,9 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   if (requiresPrRustQualityEvidence(context)) {
     context.pr_rust_quality = collectPrRustQuality(context.target_ref);
   }
+  if (requiresPrCiTriad(context)) {
+    context.pr_ci_triad = collectPrCiTriad(context.target_ref);
+  }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
 }
@@ -635,7 +641,8 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
   const gated = enforceLiveFullFailure(context,
-    enforcePrRustQuality(context, enforcePrWebQuality(context, normalized)));
+    enforcePrRustQuality(context, enforcePrWebQuality(context,
+      enforcePrCiTriad(context, normalized))));
   fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
 }
 
@@ -712,6 +719,7 @@ function fixtureBody() {
 }
 
 function selfTest() {
+  assert.equal(selfTestPrCiTriad(), true);
   // Both issue kinds use the same trusted Acceptance context/projector.
   // Discussions without an eligible label remain out of scope.
   for (const labels of [['bug'], [{ name: 'bug' }], ['requirement'], [{ name: 'requirement' }]]) {
