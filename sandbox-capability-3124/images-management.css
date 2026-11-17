@@ -88,6 +88,10 @@
 .nession-ui .im-operation-head h3,.nession-ui .im-operation-head h4{margin:0;font-size:14px;font-weight:680;letter-spacing:-.02em}
 .nession-ui .im-operation-head p{font-size:11px;color:var(--im-secondary);margin:4px 0 0;line-height:1.5}
 .nession-ui .im-operation .im-state{flex:none}
+.nession-ui .im-existing-tags{display:flex;align-items:start;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 0 0;margin-top:12px;border-top:1px solid var(--im-line)}
+.nession-ui .im-existing-tags>span{font-size:10px;font-weight:650;color:var(--im-secondary);padding-top:7px}
+.nession-ui .im-existing-tags>div{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.nession-ui .im-existing-tags .im-action{min-height:32px;padding:6px 9px}
 .nession-ui .im-operation-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;padding:15px 0 12px}
 .nession-ui .im-operation-summary>div{display:flex;flex-direction:column;min-width:0;gap:4px}
 .nession-ui .im-operation-summary span{font-size:10px;color:var(--im-muted)}
