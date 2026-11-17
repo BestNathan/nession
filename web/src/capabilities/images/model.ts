@@ -1,4 +1,11 @@
-import type { ImageBuildDescriptor, ImageDescriptor, ImageSource } from './ImagesPlugin';
+import type {
+  ImageBuildDescriptor,
+  ImageDescriptor,
+  ImageLibraryEntry,
+  ImageLibraryRepresentation,
+  ImageReferenceImpact,
+  ImageSource,
+} from './ImagesPlugin';
 import type {
   ImageCacheState,
   ImageCacheStatus,
@@ -74,6 +81,62 @@ export function cacheStateLabel(state: ImageCacheState): string {
     case 'unavailable':
       return 'Agent cache unavailable';
   }
+}
+
+/** The row title for one Library revision: a Tag, then an alias, then its id. */
+export function libraryTitle(entry: ImageLibraryEntry): string {
+  return entry.tags[0] ?? imageAliases(entry.image)[0] ?? entry.image.image_id;
+}
+
+/** The Server Catalog repository, or an explicit unknown. */
+export function libraryRepository(entry: ImageLibraryEntry): string {
+  return entry.repository === '' ? 'Unknown repository' : entry.repository;
+}
+
+/** The repository Tag list, or the explicit absence of one. */
+export function libraryTagsLabel(entry: ImageLibraryEntry): string {
+  return entry.tags.length > 0 ? entry.tags.join(', ') : 'No tag';
+}
+
+/** The immutable Manifest/Index/Composite digest, or an explicit unknown. */
+export function libraryManifestDigest(entry: ImageLibraryEntry): string {
+  return entry.manifest_digest ?? 'Unknown manifest';
+}
+
+/** How the revision represents its EROFS bytes. */
+export function representationLabel(
+  representation: ImageLibraryRepresentation,
+): string {
+  switch (representation) {
+    case 'single_layer':
+      return 'Single layer';
+    case 'flattened':
+      return 'Flattened compose';
+    case 'referenced':
+      return 'Referenced composite';
+    case 'unknown':
+      return 'Unknown representation';
+  }
+}
+
+/** One truthful one-line reference summary; never invents a zero. */
+export function impactSummary(impact: ImageReferenceImpact | null | undefined): string {
+  if (!impact) {
+    return 'Reference impact not observed';
+  }
+  if (impact.unknown) {
+    return 'Reference impact unknown; changes fail closed';
+  }
+  const parts = [
+    `${impact.project_pins} Project pin${impact.project_pins === 1 ? '' : 's'}`,
+    `${impact.session_pins} Session pin${impact.session_pins === 1 ? '' : 's'}`,
+    `${impact.leases} lease${impact.leases === 1 ? '' : 's'}`,
+    `${impact.compose_references} Compose reference${impact.compose_references === 1 ? '' : 's'}`,
+  ];
+  if (impact.other_tags.length > 0) {
+    parts.push(`other tags: ${impact.other_tags.join(', ')}`);
+  }
+  return parts.join(' · ');
 }
 
 /** A digest→status lookup for a set of selected images. */

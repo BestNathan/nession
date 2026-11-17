@@ -100,7 +100,12 @@ Sandbox is discovered only inside a selected Session. Its capability-local
 sections are Overview, Images, Workspaces and Policies. The Server Images
 registry remains global and is rendered inside this Session context rather than
 as a separate Workspace capability; Images exposes Library, Builds and the
-current Agent's Distribution observations. Agent-owned Workspaces are a
+current Agent's Distribution observations. The Library is a managed Server
+Catalog surface: it searches and pages Repository revisions, expands one
+row-local ResourceDetail, and performs authorized CAS-guarded Tag create,
+move and logical unlink with a reference-impact review. Tag management changes
+only the mutable reference; it never rebinds a pinned Session/Project revision,
+deletes CAS bytes or evicts Agent cache. Agent-owned Workspaces are a
 resource section with list/create/delete, not the logical Nession Workspace;
 Policies owns the five native/portable entries (Filesystem, Network, Linux
 Namespace, Cgroup v2, Seccomp), and the Filesystem editor always presents

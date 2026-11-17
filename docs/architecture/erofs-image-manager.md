@@ -292,11 +292,25 @@ sweep over registry rows.
 
 | Unit | Policy | Meaning |
 |---|---|---|
-| `server.image.list` | Query | Complete inventory, newest first, paginated and searchable |
+| `server.image.list` | Query | Complete legacy inventory, newest first, paginated and searchable |
 | `server.image.get` | Query | Exactly one of `digest` or `alias` |
+| `server.image.library.list` | Query | Server Catalog Library page: Repository/Tags, Manifest identity, platform, representation and closure |
+| `server.image.impact.get` | Query | Known Project/Session pins, other Tags, leases and Compose references for one Tag |
+| `server.image.tag.set` | Inline | CAS-guarded Tag create (expected absent) or move (exact expected digest) |
+| `server.image.tag.remove` | Inline | CAS-guarded logical Tag unlink with explicit reference-impact confirmation |
 
 All require an authenticated client. The contract types and validation live in
 `nession-protocol::contracts::image::v1`.
+
+The Library units separate the three identities the UI must not conflate: the
+legacy digest/alias registry row, the immutable Manifest/Index/Composite digest
+from the catalog, and the mutable repository-scoped Tag. A legacy row without a
+readable catalog identity is returned with explicit unknown metadata; no
+platform, representation or reference count is invented from the legacy
+descriptor. Tag mutations require the target to be a published Manifest, Index
+or Composite and never touch a pinned consumer. Removal is a logical unlink:
+known references require `accept_reference_impact`, unobservable impact fails
+closed, and CAS bytes/GC roots remain untouched.
 
 `server.image.list` takes an absolute `offset`, a `limit` (default 200 for an
 older client, maximum 200) and an optional case-sensitive `query` over alias,

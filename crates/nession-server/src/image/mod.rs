@@ -35,6 +35,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 
 use nession_erofs::build::Packaging as ErofsPackaging;
+use nession_erofs::catalog::{
+    reference, repository as catalog_repository, tag, ObjectKind, StoredObject,
+};
 use nession_erofs::oci::config::{ImageConfig, RuntimeConfig};
 use nession_erofs::oci::descriptor::{Descriptor, Platform};
 use nession_erofs::{
@@ -46,9 +49,11 @@ use nession_protocol::contracts::image::v1::{
     is_valid_image_digest, normalize_alias, normalize_client_request_id, normalize_image_build_id,
     normalize_image_digest, normalize_image_source, validate_packaging, ImageBuildDescriptor,
     ImageBuildProgress, ImageBuildStage, ImageBuildStatus, ImageComposeRepresentation,
-    ImageDescriptor, ImagePackaging, ImageSource, ImageStatus, NormalizedComposeSource,
-    NormalizedImageSource, IMAGE_BLOB_PATH_PREFIX, IMAGE_BUILD_LIST_MAX_LIMIT,
-    IMAGE_DIAGNOSTIC_MAX_CHARS, IMAGE_LIST_MAX_LIMIT,
+    ImageDescriptor, ImageLibraryEntry, ImageLibraryLayer, ImageLibraryRepresentation,
+    ImagePackaging, ImageReferenceImpact, ImageSource, ImageStatus, ImageTagRemovePayload,
+    ImageTagSetPayload, ImageTagUpdate, NormalizedComposeSource, NormalizedImageSource,
+    IMAGE_BLOB_PATH_PREFIX, IMAGE_BUILD_LIST_MAX_LIMIT, IMAGE_DIAGNOSTIC_MAX_CHARS,
+    IMAGE_LIBRARY_MAX_LIMIT, IMAGE_LIST_MAX_LIMIT,
 };
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 
@@ -223,6 +228,12 @@ pub enum ImageError {
     Forbidden(String),
     Unavailable(String),
     BuildFailed(String),
+    /// A Tag Compare-and-Set failed because the Tag moved.
+    Conflict(String),
+    /// The operation has known references and needs explicit confirmation.
+    ImpactRequired(String),
+    /// Reference impact could not be observed, so the operation fails closed.
+    ImpactUnknown(String),
 }
 
 impl ImageError {
@@ -233,6 +244,9 @@ impl ImageError {
             Self::Forbidden(_) => "forbidden",
             Self::Unavailable(_) => "unavailable",
             Self::BuildFailed(_) => "build_failed",
+            Self::Conflict(_) => "conflict",
+            Self::ImpactRequired(_) => "impact_required",
+            Self::ImpactUnknown(_) => "impact_unknown",
         }
     }
 
@@ -242,7 +256,10 @@ impl ImageError {
             | Self::NotFound(message)
             | Self::Forbidden(message)
             | Self::Unavailable(message)
-            | Self::BuildFailed(message) => message,
+            | Self::BuildFailed(message)
+            | Self::Conflict(message)
+            | Self::ImpactRequired(message)
+            | Self::ImpactUnknown(message) => message,
         }
     }
 }
@@ -261,6 +278,37 @@ pub struct ImageListPage {
     pub images: Vec<ImageDescriptor>,
     pub total: u64,
     pub next_offset: Option<u32>,
+}
+
+/// The Server build repository. A build publishes an untagged Manifest here;
+/// it is the only repository an image can name when no Tag names it.
+pub const DEFAULT_CATALOG_REPOSITORY: &str = "builds";
+
+/// One page of the Server Catalog Library (#3799).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageLibraryPage {
+    pub entries: Vec<ImageLibraryEntry>,
+    pub total: u64,
+    pub next_offset: Option<u32>,
+}
+
+/// How one revision represents its EROFS bytes (#3799).
+fn library_representation(row: &ImageRow, manifest: &StoredObject) -> ImageLibraryRepresentation {
+    if manifest.kind == ObjectKind::Composite {
+        return ImageLibraryRepresentation::Referenced;
+    }
+    match serde_json::from_str::<ImageSource>(&row.source_json) {
+        Ok(ImageSource::Compose {
+            representation: ImageComposeRepresentation::Referenced,
+            ..
+        }) => ImageLibraryRepresentation::Referenced,
+        Ok(ImageSource::Compose {
+            representation: ImageComposeRepresentation::Flattened,
+            ..
+        }) => ImageLibraryRepresentation::Flattened,
+        Ok(_) => ImageLibraryRepresentation::SingleLayer,
+        Err(_) => ImageLibraryRepresentation::Unknown,
+    }
 }
 
 /// One page of the durable build inventory.
@@ -2090,6 +2138,459 @@ impl ImageManager {
             }
         };
         self.descriptor_with_aliases(&row, used_alias).await
+    }
+
+    /// Read one Server Catalog Library page (#3799).
+    ///
+    /// The legacy registry owns the paginated image inventory; the catalog
+    /// supplies the Manifest/Index identity, Tags, representation, closure and
+    /// known reference impact for each row. A repository filter scans the
+    /// query-filtered registry and keeps only revisions reachable from that
+    /// repository's Tags; `builds` is the Server build repository and therefore
+    /// names every untagged build identity.
+    pub async fn library(
+        &self,
+        offset: u32,
+        limit: u32,
+        query: &str,
+        repository: &str,
+    ) -> std::result::Result<ImageLibraryPage, ImageError> {
+        let limit = limit.clamp(1, IMAGE_LIBRARY_MAX_LIMIT);
+        let repository = repository.trim();
+        let (rows, total) = if repository.is_empty() || repository == DEFAULT_CATALOG_REPOSITORY {
+            let total = self
+                .db
+                .count_images(query)
+                .await
+                .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+            let rows = self
+                .db
+                .list_images_page(u64::from(offset), u64::from(limit), query)
+                .await
+                .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+            (rows, total)
+        } else {
+            let allowed = self.repository_legacy_digests(repository).await?;
+            if allowed.is_empty() {
+                return Ok(ImageLibraryPage {
+                    entries: Vec::new(),
+                    total: 0,
+                    next_offset: None,
+                });
+            }
+            let all_total = self
+                .db
+                .count_images(query)
+                .await
+                .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+            let mut matched = Vec::new();
+            let mut cursor = 0u64;
+            while cursor < all_total {
+                let page = self
+                    .db
+                    .list_images_page(cursor, u64::from(IMAGE_LIST_MAX_LIMIT), query)
+                    .await
+                    .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+                if page.is_empty() {
+                    break;
+                }
+                cursor += u64::try_from(page.len()).unwrap_or(0);
+                for row in page {
+                    if row
+                        .digest
+                        .as_ref()
+                        .is_some_and(|digest| allowed.contains(digest))
+                    {
+                        matched.push(row);
+                    }
+                }
+            }
+            let total = u64::try_from(matched.len()).unwrap_or(u64::MAX);
+            let start = usize::try_from(offset)
+                .unwrap_or(usize::MAX)
+                .min(matched.len());
+            let end = start
+                .saturating_add(usize::try_from(limit).unwrap_or(usize::MAX))
+                .min(matched.len());
+            (matched.get(start..end).unwrap_or_default().to_vec(), total)
+        };
+
+        let aliases = self
+            .db
+            .list_image_aliases()
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+        let mut aliases_by_digest: HashMap<String, Vec<String>> = HashMap::new();
+        for (alias, digest) in aliases {
+            aliases_by_digest.entry(digest).or_default().push(alias);
+        }
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let digest_aliases = row
+                .digest
+                .as_ref()
+                .and_then(|digest| aliases_by_digest.get(digest))
+                .cloned()
+                .unwrap_or_default();
+            entries.push(self.library_entry(row, digest_aliases).await?);
+        }
+        let consumed = u32::try_from(entries.len()).unwrap_or(u32::MAX);
+        let next_offset = if u64::from(offset) + u64::from(consumed) < total {
+            Some(offset.saturating_add(consumed))
+        } else {
+            None
+        };
+        Ok(ImageLibraryPage {
+            entries,
+            total,
+            next_offset,
+        })
+    }
+
+    /// Create or move one Tag with an expected-previous Compare-and-Set.
+    pub async fn tag_set(
+        &self,
+        payload: &ImageTagSetPayload,
+    ) -> std::result::Result<ImageTagUpdate, ImageError> {
+        catalog_repository::validate_repository_name(&payload.repository)
+            .map_err(|e| ImageError::Invalid(format!("invalid repository: {e:#}")))?;
+        tag::validate_tag(&payload.tag)
+            .map_err(|e| ImageError::Invalid(format!("invalid tag: {e:#}")))?;
+        if !is_valid_image_digest(&payload.digest) {
+            return Err(ImageError::Invalid(
+                "a Tag target must be an immutable sha256 digest".to_string(),
+            ));
+        }
+        if let Some(expected) = &payload.expected_digest {
+            if !is_valid_image_digest(expected) {
+                return Err(ImageError::Invalid(
+                    "the expected previous Tag digest is not a sha256 digest".to_string(),
+                ));
+            }
+        }
+        let conn = self.db.connection();
+        let target = reference::get_object(conn, &payload.digest)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?
+            .ok_or_else(|| {
+                ImageError::NotFound("the Tag target is not published in the catalog".to_string())
+            })?;
+        if !matches!(
+            target.kind,
+            ObjectKind::Manifest | ObjectKind::Index | ObjectKind::Composite
+        ) {
+            return Err(ImageError::Invalid(
+                "a Tag may only name a Manifest, Index or Composite".to_string(),
+            ));
+        }
+        let expectation = match &payload.expected_digest {
+            Some(expected) => tag::TagExpectation::Exact(expected.clone()),
+            None => tag::TagExpectation::Absent,
+        };
+        tag::set_tag(
+            conn,
+            &payload.repository,
+            &payload.tag,
+            &payload.digest,
+            &expectation,
+            now_i64(),
+        )
+        .await
+        .map(|update| ImageTagUpdate {
+            repository: update.repository,
+            tag: update.tag,
+            previous: update.previous,
+            digest: update.digest,
+        })
+        .map_err(|error| {
+            let message = format!("{error:#}");
+            if message.contains("already exists") || message.contains("conflict") {
+                ImageError::Conflict(message)
+            } else {
+                ImageError::Invalid(message)
+            }
+        })
+    }
+
+    /// Remove one Tag only when it still resolves to the expected digest.
+    ///
+    /// Removal is a logical unlink: it never deletes CAS bytes, moves a running
+    /// consumer or evicts Agent cache. Known references require explicit
+    /// confirmation; unobservable impact fails closed.
+    pub async fn tag_remove(
+        &self,
+        payload: &ImageTagRemovePayload,
+    ) -> std::result::Result<ImageReferenceImpact, ImageError> {
+        catalog_repository::validate_repository_name(&payload.repository)
+            .map_err(|e| ImageError::Invalid(format!("invalid repository: {e:#}")))?;
+        tag::validate_tag(&payload.tag)
+            .map_err(|e| ImageError::Invalid(format!("invalid tag: {e:#}")))?;
+        if !is_valid_image_digest(&payload.expected_digest) {
+            return Err(ImageError::Invalid(
+                "the expected Tag digest is not a sha256 digest".to_string(),
+            ));
+        }
+        let conn = self.db.connection();
+        let current = tag::get_tag(conn, &payload.repository, &payload.tag)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?
+            .ok_or_else(|| ImageError::NotFound("Tag not found".to_string()))?;
+        if current != payload.expected_digest {
+            return Err(ImageError::Conflict(format!(
+                "tag conflict for {}:{}: expected {}, found {current}",
+                payload.repository, payload.tag, payload.expected_digest
+            )));
+        }
+        let manifest = reference::get_object(conn, &current)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?
+            .ok_or_else(|| {
+                ImageError::NotFound("the Tag target is not published in the catalog".to_string())
+            })?;
+        if !matches!(
+            manifest.kind,
+            ObjectKind::Manifest | ObjectKind::Index | ObjectKind::Composite
+        ) {
+            return Err(ImageError::Invalid(
+                "a Tag may only name a Manifest, Index or Composite".to_string(),
+            ));
+        }
+        let impact = self.tag_impact_for_manifest(&manifest, None).await?;
+        if impact.unknown {
+            return Err(ImageError::ImpactUnknown(
+                "reference impact is not observable; refusing to unlink".to_string(),
+            ));
+        }
+        if impact.requires_confirmation() && !payload.accept_reference_impact {
+            return Err(ImageError::ImpactRequired(
+                "Tag removal has references; review and confirm the reference impact".to_string(),
+            ));
+        }
+        let removed = tag::delete_tag_if_matches(
+            conn,
+            &payload.repository,
+            &payload.tag,
+            &payload.expected_digest,
+        )
+        .await
+        .map_err(|e| ImageError::Unavailable(format!("catalog write failed: {e:#}")))?;
+        if !removed {
+            return Err(ImageError::Conflict(
+                "the Tag changed during removal".to_string(),
+            ));
+        }
+        Ok(impact)
+    }
+
+    /// Known reference impact for one repository Tag.
+    pub async fn tag_impact(
+        &self,
+        repository: &str,
+        tag: &str,
+    ) -> std::result::Result<ImageReferenceImpact, ImageError> {
+        catalog_repository::validate_repository_name(repository)
+            .map_err(|e| ImageError::Invalid(format!("invalid repository: {e:#}")))?;
+        tag::validate_tag(tag).map_err(|e| ImageError::Invalid(format!("invalid tag: {e:#}")))?;
+        let conn = self.db.connection();
+        let digest = tag::get_tag(conn, repository, tag)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?
+            .ok_or_else(|| ImageError::NotFound("Tag not found".to_string()))?;
+        let manifest = reference::get_object(conn, &digest)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?
+            .ok_or_else(|| {
+                ImageError::NotFound("the Tag target is not published in the catalog".to_string())
+            })?;
+        self.tag_impact_for_manifest(&manifest, Some((repository, tag)))
+            .await
+    }
+
+    /// The digest a Tag currently resolves to, for conflict readback.
+    pub async fn tag_current(&self, repository: &str, tag: &str) -> Option<String> {
+        tag::get_tag(self.db.connection(), repository, tag)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    async fn library_entry(
+        &self,
+        row: &ImageRow,
+        aliases: Vec<String>,
+    ) -> std::result::Result<ImageLibraryEntry, ImageError> {
+        let image = self.descriptor(row, None, aliases)?;
+        let mut entry = ImageLibraryEntry {
+            image,
+            repository: String::new(),
+            tags: Vec::new(),
+            manifest_digest: None,
+            media_type: None,
+            kind: None,
+            platform: None,
+            representation: ImageLibraryRepresentation::Unknown,
+            layers: Vec::new(),
+            closure: Vec::new(),
+            impact: None,
+        };
+        let Some(digest) = row.digest.as_deref() else {
+            return Ok(entry);
+        };
+        let conn = self.db.connection();
+        let manifests = reference::manifest_ancestors(conn, digest)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog identity read failed: {e:#}")))?;
+        let Some(manifest) = manifests.first() else {
+            return Ok(entry);
+        };
+        entry.manifest_digest = Some(manifest.digest.clone());
+        entry.media_type = Some(manifest.media_type.clone());
+        entry.kind = Some(manifest.kind.as_str().to_string());
+        let tags = reference::tags_for_manifest(conn, &manifest.digest)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog tag read failed: {e:#}")))?;
+        entry.repository = tags
+            .first()
+            .map(|(repository, _)| repository.clone())
+            .unwrap_or_else(|| DEFAULT_CATALOG_REPOSITORY.to_string());
+        entry.tags = tags.iter().map(|(_, tag)| tag.clone()).collect();
+        if let Ok(edges) = reference::references_of(conn, &manifest.digest).await {
+            entry.layers = edges
+                .into_iter()
+                .map(|(object, role)| ImageLibraryLayer {
+                    digest: object.digest,
+                    media_type: object.media_type,
+                    size_bytes: object.size_bytes,
+                    role,
+                })
+                .collect();
+        }
+        entry.closure = reference::reachable_erofs_digests(conn, &manifest.digest)
+            .await
+            .unwrap_or_default();
+        entry.platform = self.manifest_platform(manifest).await.ok().flatten();
+        entry.representation = library_representation(row, manifest);
+        entry.impact = Some(match self.tag_impact_for_manifest(manifest, None).await {
+            Ok(mut impact) => {
+                // The Library row already lists every Tag; "other tags" is a
+                // relative fact for one Tag operation, not a row fact.
+                impact.other_tags.clear();
+                impact
+            }
+            Err(_) => ImageReferenceImpact {
+                manifest_digest: manifest.digest.clone(),
+                unknown: true,
+                ..ImageReferenceImpact::default()
+            },
+        });
+        Ok(entry)
+    }
+
+    /// The manifest platform, read from the CAS Config blob it names.
+    async fn manifest_platform(
+        &self,
+        manifest: &StoredObject,
+    ) -> std::result::Result<Option<String>, ImageError> {
+        if manifest.kind != ObjectKind::Manifest {
+            return Ok(None);
+        }
+        let conn = self.db.connection();
+        let edges = reference::references_of(conn, &manifest.digest)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog read failed: {e:#}")))?;
+        let Some((config, _)) = edges.iter().find(|(_, role)| role == "config") else {
+            return Ok(None);
+        };
+        let bytes = self
+            .blobs
+            .read(&config.digest)
+            .map_err(|e| ImageError::Unavailable(format!("config blob read failed: {e:#}")))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| ImageError::Unavailable(format!("config blob is not JSON: {e:#}")))?;
+        let os = value.get("os").and_then(serde_json::Value::as_str);
+        let architecture = value
+            .get("architecture")
+            .and_then(serde_json::Value::as_str);
+        Ok(os
+            .zip(architecture)
+            .map(|(os, arch)| format!("{os}/{arch}")))
+    }
+
+    /// Known reference impact for one immutable revision.
+    async fn tag_impact_for_manifest(
+        &self,
+        manifest: &StoredObject,
+        exclude_tag: Option<(&str, &str)>,
+    ) -> std::result::Result<ImageReferenceImpact, ImageError> {
+        let conn = self.db.connection();
+        let now = now_i64();
+        let counts = reference::pin_counts(conn, &manifest.digest, now)
+            .await
+            .map_err(|e| ImageError::ImpactUnknown(format!("pin read failed: {e:#}")))?;
+        let tags = reference::tags_for_manifest(conn, &manifest.digest)
+            .await
+            .map_err(|e| ImageError::ImpactUnknown(format!("tag read failed: {e:#}")))?;
+        let other_tags = tags
+            .iter()
+            .filter(|(repository, tag)| {
+                exclude_tag.is_none_or(|(excluded_repository, excluded_tag)| {
+                    !(repository == excluded_repository && tag == excluded_tag)
+                })
+            })
+            .map(|(_, tag)| tag.clone())
+            .collect();
+        let leases = self
+            .db
+            .active_image_lease_count(&manifest.digest, now)
+            .await
+            .map_err(|e| ImageError::ImpactUnknown(format!("lease read failed: {e:#}")))?;
+        let parents = reference::parents_of(conn, &manifest.digest)
+            .await
+            .map_err(|e| ImageError::ImpactUnknown(format!("reference read failed: {e:#}")))?;
+        let mut compose_references = 0u64;
+        for parent in parents {
+            if let Some(object) = reference::get_object(conn, &parent)
+                .await
+                .map_err(|e| ImageError::ImpactUnknown(format!("catalog read failed: {e:#}")))?
+            {
+                if matches!(object.kind, ObjectKind::Composite | ObjectKind::Index) {
+                    compose_references += 1;
+                }
+            }
+        }
+        Ok(ImageReferenceImpact {
+            manifest_digest: manifest.digest.clone(),
+            project_pins: counts.project,
+            session_pins: counts.session,
+            other_tags,
+            leases: counts.leases() + leases,
+            compose_references,
+            unknown: false,
+        })
+    }
+
+    async fn repository_legacy_digests(
+        &self,
+        repository: &str,
+    ) -> std::result::Result<HashSet<String>, ImageError> {
+        catalog_repository::validate_repository_name(repository)
+            .map_err(|e| ImageError::Invalid(format!("invalid repository: {e:#}")))?;
+        let conn = self.db.connection();
+        let manifests = reference::repository_manifest_digests(conn, repository)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("catalog tag read failed: {e:#}")))?;
+        let mut digests = HashSet::new();
+        for manifest in manifests {
+            for digest in reference::reachable_erofs_digests(conn, &manifest)
+                .await
+                .map_err(|e| {
+                    ImageError::Unavailable(format!("catalog closure read failed: {e:#}"))
+                })?
+            {
+                digests.insert(digest);
+            }
+        }
+        Ok(digests)
     }
 
     /// Resolve one Project's referenced digest to its authorized blob route.
@@ -4281,5 +4782,174 @@ mod tests {
                 .await,
             Err(ImageError::NotFound(_))
         ));
+    }
+
+    /// #3799 SC-02/SC-03: Tag create/move/remove is CAS-guarded, and a logical
+    /// unlink never deletes pinned/reachable objects or bypasses GC roots.
+    #[tokio::test]
+    async fn library_tags_use_compare_and_swap_and_unlink_never_deletes_pins() {
+        use nession_erofs::catalog::gc::{sweep, GcPolicy};
+        use nession_erofs::catalog::pin::{self, ConsumerKind};
+
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/tag-a", b"tag lifecycle bytes A");
+        backend.set("/source/tag-b", b"tag lifecycle bytes B");
+        let first = manager.build(&local("/source/tag-a"), None).await.unwrap();
+        let second = manager.build(&local("/source/tag-b"), None).await.unwrap();
+        let first_digest = first.digest.clone().unwrap();
+        let second_digest = second.digest.clone().unwrap();
+        let conn = db.connection();
+        let first_manifest = reference::manifest_ancestors(conn, &first_digest)
+            .await
+            .unwrap()
+            .first()
+            .expect("first catalog manifest")
+            .digest
+            .clone();
+        let second_manifest = reference::manifest_ancestors(conn, &second_digest)
+            .await
+            .unwrap()
+            .first()
+            .expect("second catalog manifest")
+            .digest
+            .clone();
+
+        let set = |digest: &str, expected: Option<&str>| ImageTagSetPayload {
+            repository: "nession/fixture".to_string(),
+            tag: "stable".to_string(),
+            digest: digest.to_string(),
+            expected_digest: expected.map(str::to_string),
+        };
+        let created = manager.tag_set(&set(&first_manifest, None)).await.unwrap();
+        assert_eq!(created.previous, None);
+        assert_eq!(
+            manager
+                .tag_current("nession/fixture", "stable")
+                .await
+                .as_deref(),
+            Some(first_manifest.as_str())
+        );
+
+        // Re-creating an existing Tag without its expected digest is a
+        // conflict, never a silent overwrite.
+        assert!(matches!(
+            manager.tag_set(&set(&first_manifest, None)).await,
+            Err(ImageError::Conflict(_))
+        ));
+        // A stale expected digest refuses and leaves the Tag unchanged.
+        assert!(matches!(
+            manager
+                .tag_set(&set(
+                    &second_manifest,
+                    Some("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+                ))
+                .await,
+            Err(ImageError::Conflict(_))
+        ));
+        assert_eq!(
+            manager
+                .tag_current("nession/fixture", "stable")
+                .await
+                .as_deref(),
+            Some(first_manifest.as_str())
+        );
+        // The exact expected previous digest moves the Tag.
+        let moved = manager
+            .tag_set(&set(&second_manifest, Some(&first_manifest)))
+            .await
+            .unwrap();
+        assert_eq!(moved.previous.as_deref(), Some(first_manifest.as_str()));
+        assert_eq!(
+            manager
+                .tag_current("nession/fixture", "stable")
+                .await
+                .as_deref(),
+            Some(second_manifest.as_str())
+        );
+
+        // A durable Project pin makes the unlink impact observable and
+        // requires explicit confirmation.
+        pin::pin(
+            conn,
+            ConsumerKind::Project,
+            "project-fixture",
+            &second_manifest,
+            now_i64(),
+            None,
+        )
+        .await
+        .unwrap();
+        let impact = manager
+            .tag_impact("nession/fixture", "stable")
+            .await
+            .unwrap();
+        assert_eq!(impact.project_pins, 1);
+        assert!(!impact.unknown);
+        assert!(impact.requires_confirmation());
+        assert!(matches!(
+            manager
+                .tag_remove(&ImageTagRemovePayload {
+                    repository: "nession/fixture".to_string(),
+                    tag: "stable".to_string(),
+                    expected_digest: second_manifest.clone(),
+                    accept_reference_impact: false,
+                })
+                .await,
+            Err(ImageError::ImpactRequired(_))
+        ));
+        // A stale expected digest is still a conflict even with confirmation.
+        assert!(matches!(
+            manager
+                .tag_remove(&ImageTagRemovePayload {
+                    repository: "nession/fixture".to_string(),
+                    tag: "stable".to_string(),
+                    expected_digest: first_manifest.clone(),
+                    accept_reference_impact: true,
+                })
+                .await,
+            Err(ImageError::Conflict(_))
+        ));
+
+        let removed_impact = manager
+            .tag_remove(&ImageTagRemovePayload {
+                repository: "nession/fixture".to_string(),
+                tag: "stable".to_string(),
+                expected_digest: second_manifest.clone(),
+                accept_reference_impact: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(removed_impact.project_pins, 1);
+        assert!(manager
+            .tag_current("nession/fixture", "stable")
+            .await
+            .is_none());
+
+        // The logical unlink deleted no CAS object and released no pin.
+        assert!(reference::get_object(conn, &second_manifest)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(reference::get_object(conn, &second_digest)
+            .await
+            .unwrap()
+            .is_some());
+        let pins = reference::pin_counts(conn, &second_manifest, now_i64())
+            .await
+            .unwrap();
+        assert_eq!(pins.project, 1, "the Project pin survives the Tag unlink");
+
+        // GC retains the pinned closure after the unlink.
+        let report = sweep(conn, &backend.blobs, now_i64(), &GcPolicy::default(), &[])
+            .await
+            .unwrap();
+        assert_eq!(report.deleted_objects, 0);
+        assert!(report.reachable_objects >= 2);
+        let protected = nession_erofs::catalog::gc::protected_digests(conn, now_i64())
+            .await
+            .unwrap();
+        assert!(protected.contains(&second_manifest));
+        assert!(protected.contains(&second_digest));
     }
 }
