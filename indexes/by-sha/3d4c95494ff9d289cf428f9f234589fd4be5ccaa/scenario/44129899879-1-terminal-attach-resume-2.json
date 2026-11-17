@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44129899879,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3779-claude-mcp-control",
+    "target_sha": "3d4c95494ff9d289cf428f9f234589fd4be5ccaa",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44129899879",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ec1cee1ee9630975a701cb20543d268b5812f3ba79ecff764281a2c27be2a3db"
+  },
+  "record": "runs/2026-11-17/44129899879-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "963ca247686fa103a6b54427ebaab7cdd9c6ac486ee682a82f76b8141e8b7d29"
+}
