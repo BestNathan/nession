@@ -13,7 +13,7 @@
 //!
 //! ## The credential is a reference
 //!
-//! The written entry names `NESSON_MCP_TOKEN` through Claude's `${VAR}`
+//! The written entry names `NESSION_MCP_TOKEN` through Claude's `${VAR}`
 //! expansion. The token's **value** is read from the Session's own environment
 //! to verify it against the endpoint, and it never appears in this protocol, in
 //! a project `.mcp.json`, in logs or in a CLI argument. When the variable is
@@ -41,7 +41,7 @@ pub const WIRE: &str = "claude-code.mcp-connect";
 pub const DEFAULT_SERVER_NAME: &str = "nession";
 
 /// The Session environment variable the written entry references.
-pub const CREDENTIAL_ENV: &str = "NESSON_MCP_TOKEN";
+pub const CREDENTIAL_ENV: &str = "NESSION_MCP_TOKEN";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn the_default_name_and_credential_variable_are_stated_once() {
         assert_eq!(DEFAULT_SERVER_NAME, "nession");
-        assert_eq!(CREDENTIAL_ENV, "NESSON_MCP_TOKEN");
+        assert_eq!(CREDENTIAL_ENV, "NESSION_MCP_TOKEN");
         assert_eq!(
             McpConnectPreflightV1::bare(McpHostingModeV1::Agent).credential_env,
             CREDENTIAL_ENV

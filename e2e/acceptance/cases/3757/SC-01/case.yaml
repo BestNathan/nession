@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 3757
+criterion: SC-01
+stage: staging
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: env.cjs
+  - type: runtime
+    entry: connect.cjs
+result_policy: all-pass
