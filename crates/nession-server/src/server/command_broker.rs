@@ -89,6 +89,18 @@ pub struct DeletionGuard {
     _gate: OwnedMutexGuard<()>,
 }
 
+/// Proof that a connection's state update holds its Agent's registration gate
+/// and that the connection is still the Agent's current generation.
+///
+/// Produced by [`CommandBroker::begin_address_update`]. An address update is a
+/// read-modify-write of the registry's `AgentInfo`, so the generation check and
+/// the write must be one ordered transition: holding this guard keeps a newer
+/// registration from publishing between them, and a registration that already
+/// completed makes the guard acquisition fail before any write (#3723).
+pub struct AddressUpdateGuard {
+    _gate: OwnedMutexGuard<()>,
+}
+
 /// Bridges client requests to agent control connections.
 ///
 /// Uses a nested map: agent_id → (request_id → oneshot::Sender).
@@ -224,6 +236,42 @@ impl CommandBroker {
         DeletionGuard {
             _gate: gate.lock_owned().await,
         }
+    }
+
+    /// Take the per-Agent gate that [`Self::begin_registration`] also uses and
+    /// verify that `generation` is still the current one.
+    ///
+    /// This is the fencing primitive for a connection's **state update** (an
+    /// address update), as distinct from a registration: it never raises the
+    /// high-water mark, because an update does not create a new authority. The
+    /// gate is what makes the generation check and the caller's registry write
+    /// one ordered transition; a check before the gate would be a TOCTOU
+    /// (#3723).
+    ///
+    /// Returns `None` — with the gate released — when a newer connection has
+    /// already registered the Agent. The caller must then make no registry or
+    /// database mutation, and must not publish the update.
+    #[must_use = "the guard releases the per-agent registration gate when dropped; hold it until the update write is complete"]
+    pub async fn begin_address_update(
+        &self,
+        agent_id: &str,
+        generation: ConnectionGeneration,
+    ) -> Option<AddressUpdateGuard> {
+        let gate = {
+            let mut gates = self.registration_gates.lock().await;
+            Arc::clone(gates.entry(agent_id.to_string()).or_default())
+        };
+        let gate_guard = gate.lock_owned().await;
+
+        if !self.is_current_generation(agent_id, generation).await {
+            debug!(
+                "CommandBroker: refusing address update for agent {} by {} — a newer generation owns it",
+                agent_id, generation
+            );
+            return None;
+        }
+
+        Some(AddressUpdateGuard { _gate: gate_guard })
     }
 
     /// Point an agent's control channel at this connection's sender.

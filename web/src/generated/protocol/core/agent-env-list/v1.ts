@@ -22,7 +22,11 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type ClientEnvListPayload = Record<symbol, never>;
-export type ClientEnvListResponsePayload = { files: Array<EnvFileInfo>, 
+export type ClientEnvListResponsePayload = { 
+/**
+ * Metadata for every ENV file the Server and its online Agents know.
+ */
+files: Array<EnvFileInfo>, 
 /**
  * Set only when the Server refuses before listing anything — an
  * unauthenticated caller is told why rather than handed a silently empty
@@ -67,7 +71,11 @@ export type EnvSource = "server" | "agent";
 export type EnvListCall = Record<symbol, never>;
 
 /** The payload the provider answers with. */
-export type EnvListReply = { files: Array<EnvFileInfo>, 
+export type EnvListReply = { 
+/**
+ * Metadata for every ENV file the Server and its online Agents know.
+ */
+files: Array<EnvFileInfo>, 
 /**
  * Set only when the Server refuses before listing anything — an
  * unauthenticated caller is told why rather than handed a silently empty

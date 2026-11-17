@@ -2,6 +2,7 @@ import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
 import type {
   GitBranchesResponse,
+  GitCommit,
   GitCommitResponse,
   GitCreateCommitResponse,
   GitDiffResponse,
@@ -64,6 +65,23 @@ type FixtureGitMutationOverlapWindow = Window & {
     requests: () => number;
     settled: () => boolean;
     release: (fail?: boolean) => void;
+  };
+};
+
+/**
+ * Deterministic controls the `git=history-overlap` scenario exposes (#3751).
+ *
+ * The first older page is held until the Case releases it. The Case can switch
+ * Session or refresh the first page first, then assert the held answer changed
+ * nothing — no timer decides when the stale continuation settles.
+ */
+type FixtureGitHistoryOverlapWindow = Window & {
+  fixtureGitHistoryOverlap?: {
+    /** How many first pages this Session has been served (refresh increments). */
+    firstPageRequests: (session: string) => number;
+    olderRequests: () => number;
+    olderSettled: () => boolean;
+    releaseOlder: () => void;
   };
 };
 
@@ -266,6 +284,9 @@ function mutateFixtureRepository(
  *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
  *     held until the Case releases it, so a manual Refresh can answer first
  *     with the newer repository state (#2787)
+ *   /#/fixture/workspace?capability=git&git=history-overlap → two Sessions with
+ *     distinct pageable histories; the first older page is held until the Case
+ *     releases it, after a Session move or a replaced first page (#3751)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
@@ -274,6 +295,9 @@ export function fixtureGitSurface(search: string): PluginSurface {
   }
   if (scenario === 'mutation-overlap') {
     return mutationOverlapGitSurface();
+  }
+  if (scenario === 'history-overlap') {
+    return historyOverlapGitSurface();
   }
   const status =
     scenario === 'clean'
@@ -628,6 +652,234 @@ function mutationOverlapGitSurface(): PluginSurface {
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
     },
   );
+}
+
+/**
+ * The `git=history-overlap` surface (#3751).
+ *
+ * Two Sessions have distinct histories, and every page is addressable by the
+ * cursor the previous page handed out: a first page is served per Session and
+ * per generation (a refresh is the next generation), while an older page is
+ * derived from the cursor's session and generation. The first older request is
+ * held until the Case releases it, so the Case — not a timer — decides whether
+ * a stale continuation is even offered a chance to render.
+ */
+function historyOverlapGitSurface(): PluginSurface {
+  const firstPageRequests = new Map<string, number>();
+  // A cursor is an opaque commit OID on the wire; the fixture records which
+  // page handed it out so an older request is answered from the cursor itself.
+  const cursors = new Map<string, { session: string; generation: number }>();
+  let olderRequests = 0;
+  let olderSettled = false;
+  let held: {
+    session: string;
+    generation: number;
+    resolve: (value: GitLogResponse) => void;
+  } | null = null;
+
+  const publish = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    (window as FixtureGitHistoryOverlapWindow).fixtureGitHistoryOverlap = {
+      firstPageRequests: (session: string) => firstPageRequests.get(session) ?? 0,
+      olderRequests: () => olderRequests,
+      olderSettled: () => olderSettled,
+      releaseOlder: () => {
+        const current = held;
+        held = null;
+        if (!current) {
+          return;
+        }
+        current.resolve(historyOverlapOlderPage(current.session, current.generation));
+        setTimeout(() => {
+          olderSettled = true;
+          publish();
+        }, 0);
+      },
+    };
+  };
+  publish();
+
+  return fixtureGitPluginSurface(
+    <T>(type: string, payload: Record<string, unknown>): Promise<T> => {
+      if (type === 'git.status') {
+        return Promise.resolve(CHANGED_STATUS as T);
+      }
+      if (type === 'git.log') {
+        const session = String(payload.session ?? '');
+        const before = typeof payload.before === 'string' ? payload.before : null;
+        if (!before) {
+          const generation = (firstPageRequests.get(session) ?? 0) + 1;
+          firstPageRequests.set(session, generation);
+          const cursor = historyOverlapCursorFor(session, generation);
+          cursors.set(cursor, { session, generation });
+          publish();
+          return Promise.resolve(
+            historyOverlapFirstPage(session, generation, cursor) as T,
+          );
+        }
+        // Answer what the *cursor* names, not merely the Session the request
+        // claims: a continuation that rolled back to another list's cursor is
+        // then visibly that list's page, which is what the Case must catch.
+        const fromCursor = cursors.get(before) ?? { session, generation: 1 };
+        olderRequests += 1;
+        publish();
+        if (olderRequests === 1) {
+          return new Promise<T>((resolve) => {
+            held = {
+              session: fromCursor.session,
+              generation: fromCursor.generation,
+              resolve: (value) => resolve(value as T),
+            };
+            publish();
+          });
+        }
+        return Promise.resolve(
+          historyOverlapOlderPage(fromCursor.session, fromCursor.generation) as T,
+        );
+      }
+      if (type === 'git.diff') {
+        return Promise.resolve(
+          diffFor(
+            String(payload.path),
+            'changed',
+            // The same snapshot `CHANGED_STATUS` declares; the union type does
+            // not let the fixture read it off the answer directly.
+            fixtureSnapshot('fixture-changed-0', 'fixture-head-changed'),
+          ) as T,
+        );
+      }
+      if (type === 'git.preview') {
+        return Promise.resolve(
+          previewFor(
+            String(payload.path),
+            String(payload.expected),
+            'changed',
+            payload.want === 'media' ? 'media' : 'text',
+          ) as T,
+        );
+      }
+      if (type === 'git.commit') {
+        return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
+      }
+      if (type === 'git.branches') {
+        return Promise.resolve(branchesFor(payload.limit) as T);
+      }
+      if (type === 'git.worktrees') {
+        return Promise.resolve(WORKTREES as T);
+      }
+      return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
+    },
+  );
+}
+
+/**
+ * The second of the two Sessions the `history-overlap` scenario moves between;
+ * the first is the fixture's default (`devbox-01:fix-terminal-reconnect`).
+ */
+const HISTORY_OVERLAP_B = 'devbox-01:design-system';
+
+/**
+ * One page is the agent's default count for a request that names no limit —
+ * `DEFAULT_LOG_LIMIT` in `crates/nession-git/src/security.rs`. A page smaller
+ * than that with a continuation is not a shape the agent produces.
+ */
+const HISTORY_OVERLAP_PAGE = 50;
+
+function historyOverlapLabel(session: string): 'A' | 'B' {
+  return session === HISTORY_OVERLAP_B ? 'B' : 'A';
+}
+
+function historyOverlapHash(
+  session: string,
+  generation: number,
+  index: number,
+): string {
+  const seed = `${historyOverlapLabel(session)}${generation}:${index}`;
+  let hash = '';
+  for (let offset = 0; hash.length < 40; offset += 1) {
+    const code =
+      seed.charCodeAt(offset % seed.length) + offset * 13 + generation * 7 + index * 3;
+    hash += (code % 256).toString(16).padStart(2, '0');
+  }
+  return hash.slice(0, 40);
+}
+
+function historyOverlapCommit(
+  session: string,
+  generation: number,
+  index: number,
+  subject: string,
+): GitCommit {
+  const hash = historyOverlapHash(session, generation, index);
+  return {
+    hash,
+    short_hash: hash.slice(0, 7),
+    author: 'Fixture Dev',
+    relative_date: '1 hour ago',
+    date: '2026-11-16T10:00:00+08:00',
+    subject: `${historyOverlapLabel(session)} ${subject}`,
+    refs: '',
+  };
+}
+
+function historyOverlapFirstPage(
+  session: string,
+  generation: number,
+  cursor: string,
+): GitLogResponse {
+  const commits = Array.from({ length: HISTORY_OVERLAP_PAGE }, (_, offset) =>
+    historyOverlapCommit(
+      session,
+      generation,
+      offset + 1,
+      `first page ${generation} commit ${offset + 1}`,
+    ),
+  );
+  return {
+    state: 'ok',
+    history: {
+      commits,
+      limit: HISTORY_OVERLAP_PAGE,
+      truncated_bytes: 0,
+      truncated: false,
+      end_of_history: false,
+      next_cursor: cursor,
+    },
+  };
+}
+
+function historyOverlapOlderPage(
+  session: string,
+  generation: number,
+): GitLogResponse {
+  const commits = Array.from({ length: HISTORY_OVERLAP_PAGE }, (_, offset) =>
+    historyOverlapCommit(
+      session,
+      generation,
+      HISTORY_OVERLAP_PAGE + offset + 1,
+      `older page ${generation} commit ${offset + 1}`,
+    ),
+  );
+  return {
+    state: 'ok',
+    history: {
+      commits,
+      limit: HISTORY_OVERLAP_PAGE,
+      truncated_bytes: 0,
+      truncated: false,
+      end_of_history: true,
+    },
+  };
+}
+
+/**
+ * The cursor a first page hands out: an opaque commit OID on the wire, stable
+ * for its Session and generation and distinct from the page's rows.
+ */
+function historyOverlapCursorFor(session: string, generation: number): string {
+  return historyOverlapHash(session, generation, 0);
 }
 
 /** The work tree the fixture pretends to be in — a Peek names its basename. */

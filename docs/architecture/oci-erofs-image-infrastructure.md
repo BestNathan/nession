@@ -12,8 +12,8 @@
 > [Global EROFS Image Manager](erofs-image-manager.md) and the current Agent
 > cache by [Agent EROFS cache](agent-erofs-cache.md). The v1 object model, CAS,
 > catalog, distribution/cache and physical mount manager are delivered; Image
-> Compose and Sandbox runtime mount composition are delivered on staging by the
-> children in [Composition and mount delivery](#composition-and-mount-delivery-3693).
+> Compose and Sandbox runtime mount composition are delivered by the children
+> in [Composition and mount delivery](#composition-and-mount-delivery-3693).
 > Where this document and an un-migrated deployment differ, this document is
 > the contract, not evidence that a particular runner installed it.
 
@@ -445,7 +445,7 @@ single-layer Images and must not wait for the referenced Composite format.
 `#3697` does not depend on `#3695`: its physical mount support belongs to
 `nession_erofs::mount_manager`, which already owns digest-keyed leases.
 
-| Child | Delivered on staging | PR-stage evidence | Native Linux proof |
+| Child | Delivery PR | PR-stage evidence | Native Linux proof |
 |---|---|---|---|
 | [#3695](https://github.com/BestNathan/nession/issues/3695) | PR [#3725](https://github.com/BestNathan/nession/pull/3725) at `0d8fda4825829f2ad64eb4cfc0192d2e15fa07f8` | Agent run `43852186904` at `9cad89f59b91ad873b108aaf93e77051b18ab08a` (SC-01/SC-04) | Acceptance / Cases run `43853127951` at `0d8fda48` (SC-02/SC-03) |
 | [#3696](https://github.com/BestNathan/nession/issues/3696) | PR [#3703](https://github.com/BestNathan/nession/pull/3703) at `fbc4aa2e4faa8e03040f42b3d492c969d906bde4`; Case setup PR [#3710](https://github.com/BestNathan/nession/pull/3710) at `e84fb5dfb92e2442984d28ba0143883834ad1616` | Agent run `43815815870` at `10c3e3f3fe03d688fb69cf515f659a4101b51429` (SC-01/SC-02) | Acceptance / Cases run `43813771715` at `e84fb5df` (SC-03) |

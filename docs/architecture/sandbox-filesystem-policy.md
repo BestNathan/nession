@@ -10,7 +10,7 @@ declaration is materialized against the Agent-prepared composition; a field
 with no matching prepared source fails closed, and `filesystem.access` remains
 mutually exclusive with a composed root. Access-only declarations remain
 independent. The typed mount domain and ordered
-multi-lower/writable RootFS extensions are delivered by #3695/#3698 on staging.
+multi-lower/writable RootFS extensions are delivered by #3695/#3698.
 
 The current execution architecture remains
 [Sandbox policy and execution isolation](sandbox-policy-and-execution.md). Its
@@ -274,7 +274,8 @@ fifth always-visible item is the derived **Preview**, not a Home policy.
 | Mounted image (RootFS or extra mount) | Agent prepares cache path; Sandbox mounts | Server registry + Agent cache; Sandbox owns the mount only | Unmounted; bytes remain | Bytes remain | Execution cleanup unmounts; cache owns bytes |
 | Project Location | Project declaration (external) | User/Project, never the Agent Manager | Yes | Yes | Never by Workspace management |
 | Managed Workspace | Agent Workspace Manager `get_or_create` | Agent, under its durable storage root | Yes | Yes | Explicit delete when unmounted and unreferenced; never execution cleanup |
-| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession_sandbox::mount::overlay` (#3582/#3695) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
+| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession_sandbox::mount::overlay` (#3582, #3695, #3698 ordered lowers) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
+| Transient writable RootFS upper/work | Sandbox `prepare` under the execution directory | Sandbox execution record; one per execution | No | No | Execution cleanup after a strict, verified unmount; never the EROFS cache or another execution |
 | Execution mounts and mountpoints | Sandbox `prepare` | Sandbox execution record | No | No | Cleanup/reconciliation, in reverse order |
 | `/home`, `/tmp`, `/run/nession` runtime paths | Backend | Execution | No | No | Execution cleanup |
 
@@ -306,7 +307,9 @@ belong to the implementation; the rejection itself is the invariant.
 | Deleting a managed Workspace that is mounted or leased | Delete is refused while any attachment/lease exists |
 | A Session is rebound to a different Agent while its bound Workspace ID/location belongs to the old Agent | The explicit reference is unavailable on the new Agent; there is no silent re-allocation or copy |
 | Nonempty `access` together with an image-backed root/mount/workspace | The first implementation preserves V1's one-root-owner rule; the combination fails closed at its field path |
-| Any declaration while the host lacks `erofsfuse`, `/dev/fuse`, `fuse-overlayfs` (when a lower is used) or a usable cache root | Backend missing is `UnsupportedPolicy`, never Native fallback |
+| Any declaration while the host lacks `erofsfuse`, `/dev/fuse`, `fuse-overlayfs` (when ordered lowers or a writable RootFS are used) or a usable cache root | Backend missing is `UnsupportedPolicy`, never Native fallback |
+| A writable RootFS is declared but the prepared composition is not writable (or vice versa) | The declaration and Agent materialization must agree; a client setting is never silently ignored |
+| More than 16 ordered Workspace lowers, a repeated lower digest, or a reordered set against the durable compatibility key | The ordered set is bounded and order-sensitive; refuse instead of guessing precedence |
 | Agent offline during preparation or a grant expires mid-transfer | Observed as unavailable/unknown or failed; never reported as verified/mount-ready |
 
 ## Editor projection (Filesystem)
@@ -335,7 +338,8 @@ belong outside the product viewport.
 
 ## Current compatibility
 
-The declaration is executable only through the Agent-prepared composition. A
+The following remain true and must not be weakened: a RootFS/mount/Workspace
+declaration is executable only through the Agent-prepared composition, and a
 client field that names an image/Workspace the Agent did not prepare is
 refused; unknown fields are rejected rather than ignored.
 
@@ -343,26 +347,32 @@ refused; unknown fields are rejected rather than ignored.
   carrying both is refused. A nonempty `access` object cannot be combined with
   an image-backed root, mounts or a prepared Workspace.
 - A composition requires one Base Runtime at `/`, a writable workspace, and
-  zero or more toolchains at exactly `/opt/<lowercase-name>`. A declared
-  `filesystem.rootfs.writable` must match the prepared
-  `SandboxFilesystemComposition.base_writable`.
-- The composed root is an empty tmpfs plus a Base Runtime bind; `/workspace`
-  is a bind or one or more ordered read-only lowers merged with an Agent-owned
-  writable upper/work through one shared, manager-owned `fuse-overlayfs`
-  Merged View (#3582/#3695/#3698); several Sessions may bind that same view,
-  and the Sandbox creates no per-execution Workspace Overlay. A writable
-  RootFS is an explicit opt-in whose transient upper/work is execution-owned
-  and removed after a verified unmount. `/home` and `/tmp` are private tmpfs.
+  zero or more toolchains at exactly `/opt/<lowercase-name>`.
+- The composed root is an empty tmpfs plus the Base Runtime. By default the
+  Base is a read-only bind; when the declaration explicitly sets
+  `rootfs.writable`, it is merged with an execution-owned transient
+  upper/work that is strictly unmounted and removed by cleanup (#3698). The
+  immutable image bytes never change and are never shared as writable state.
+- `/workspace` is a bind or one or more ordered read-only lowers merged with
+  an Agent-managed durable upper/work through one shared, manager-owned
+  `fuse-overlayfs` Merged View (#3582, #3698). The first lower has the highest
+  priority; the ordered Blob digest set is the durable compatibility key, and
+  reordered, different or missing lowers fail closed. Several Sessions may
+  bind the same view, and the Sandbox creates no per-execution Workspace
+  Overlay. `/home` and `/tmp` are private tmpfs.
 - Image sources are verified local files beneath the Agent-authorized EROFS
   image root. The Sandbox re-verifies every digest before mounting; the
   physical read-only mount/lease belongs to `nession_erofs::mount_manager`.
-- Existing access-only declarations and legacy single-lower Workspace payloads
-  remain valid. A legacy `workspace.image` decodes as a one-element ordered
-  lower set.
+- A client-supplied `rootfs`, `mounts` or `workspace` declaration never names
+  a host source path or mountpoint. The Server resolves digests and the Agent
+  prepares local views; the Sandbox re-verifies them. The Server and Agent
+  reject unknown fields, and they must not ignore a declaration they cannot
+  install.
 
-The native proof for the mount domain and ordered/writable extensions is owned
-by the #3695/#3698 staging Cases; the earlier #3024/#3124 cases remain the
-access-only and prepared-composition baseline.
+The typed MountPlan/backends (#3695) and the ordered-lower/writable-RootFS
+extension (#3698) own the runtime execution of this declaration. They reuse
+the existing #3024 EROFS/Sandbox Case lane and do not introduce a second
+mount backend, image registry or Workspace registry.
 
 ## References
 

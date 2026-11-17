@@ -108,7 +108,7 @@ V1 accepts three source shapes:
    `erofsfuse --device` arguments and pins every component for the physical
    view lifetime. Sandbox runtime composition of a referenced Composite is
    not part of this requirement (#3697) and fails closed if selected.
-   Delivered on staging: flattened Compose by #3696 (PR #3703 at `fbc4aa2e`)
+   Delivered: flattened Compose by #3696 (PR #3703 at `fbc4aa2e`)
    and referenced Composite by #3697 (PR #3709 at `47507cf4`); their native
    Cases are recorded in the
    [composition delivery table](oci-erofs-image-infrastructure.md#composition-and-mount-delivery-3693).

@@ -20,7 +20,7 @@ function link(value,href,cls='',external=false){
 }
 export function validMcpSnapshot(data){
   const stable=data?.upstream?.stable;
-  return data?.schema_version===1&&data?.status==='available'&&
+  return data?.schema_version===2&&data?.status==='available'&&
     DIGEST.test(data.semantic_sha256||'')&&
     data.source?.repository==='BestNathan/nession'&&data.source?.branch==='main'&&
     SHA.test(data.source?.sha||'')&&
@@ -38,9 +38,11 @@ export function validMcpSnapshot(data){
     data.tools.every(t=>NAME.test(t?.name||'')&&
       typeof t.description==='string'&&t.description.length<=4000&&
       t.inputSchema?.type==='object'&&JSON.stringify(t.inputSchema).length<=50000&&
-      (t.outputSchema===undefined||(t.outputSchema!==null&&
-        typeof t.outputSchema==='object'&&!Array.isArray(t.outputSchema)&&
-        JSON.stringify(t.outputSchema).length<=50000)));
+      t.outputSchema?.type==='object'&&!Array.isArray(t.outputSchema)&&
+      t.outputSchema.properties&&typeof t.outputSchema.properties==='object'&&
+      !Array.isArray(t.outputSchema.properties)&&
+      Object.keys(t.outputSchema.properties).length>0&&
+      JSON.stringify(t.outputSchema).length<=50000);
 }
 // A bounded, read-only renderer for public JSON Schema. Only local refs resolve;
 // ambiguous unions remain explicit rather than invented field contracts.
@@ -152,9 +154,8 @@ function renderFields(schema,kind){
       const meta=el('div','','documents-mcp-field-meta');
       meta.append(el('code',field.path,'documents-mcp-field-name'),
         el('span',field.type,'documents-mcp-type'));
-      if(kind==='Input')
-        meta.append(el('span',field.required?'Required':'Optional',
-          'documents-mcp-required'+(field.required?' is-required':'')));
+      meta.append(el('span',field.required?'Required':'Optional',
+        'documents-mcp-required'+(field.required?' is-required':'')));
       row.append(meta,
         el('p',field.description||'Description not declared in the source JSON Schema.','documents-mcp-field-description'));
       if(field.values)row.append(el('p','Allowed: '+field.values,'documents-mcp-values'));
@@ -215,7 +216,8 @@ export function renderMcpDocuments(root,data,hash='#/documents/mcp'){
     results.replaceChildren();
     const q=state.query.trim().toLocaleLowerCase();
     const found=data.tools.filter(t=>!q||[
-      t.name,t.description,JSON.stringify(t.inputSchema)].join(' ').toLocaleLowerCase().includes(q));
+      t.name,t.description,JSON.stringify(t.inputSchema),
+      JSON.stringify(t.outputSchema)].join(' ').toLocaleLowerCase().includes(q));
     counter.textContent=found.length+' / '+data.tools.length+' REGISTERED TOOLS';
     for(const tool of found){
       const a=link('', '#/documents/mcp?tool='+encodeURIComponent(tool.name),

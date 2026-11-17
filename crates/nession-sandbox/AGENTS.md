@@ -77,12 +77,6 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   ordering. A writable RootFS is an explicit opt-in via
   `filesystem.rootfs.writable` + prepared `base_writable`; its execution-owned
   upper/work must never become durable or mutate the image.
-- Runtime composition is typed (#3695): `mount::plan` binds a
-  `MountSource::{Erofs, Overlay, Bind}` to an in-Sandbox target and never
-  carries a host mountpoint; `mount::backends` delegates through
-  `MountBackend::acquire`/`MountedView`; `mount::view` owns recovery bindings
-  and consumer-only release. Do not add a raw `mount(source, target)` path or a
-  third backend family.
 - Mount helpers are unprivileged FUSE only (`erofsfuse`, `fuse-overlayfs`,
   `fusermount3`). Never substitute a kernel loop mount, extraction, container
   layer, tmpfs or Native fallback when a helper/capability is absent; report
@@ -98,7 +92,7 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   consumer and a strict, bounded unmount. The manager root is not the
   execution directory.
 - The writable `/workspace` Merged View is **shared and lease-managed**
-  (#3582/#3695). The Sandbox-owned
+  (#3582, moved by #3695). The Sandbox-owned
   `nession_sandbox::mount::overlay::OverlayMountManager` owns one physical
   `fuse-overlayfs` mount per managed Workspace for an Agent
   identity/mount namespace, derived from an authorized Workspace root. The
@@ -108,13 +102,26 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   a reordered, different or missing set fails closed rather than reusing the
   durable upper. A lease carries no unmount authority. Only the manager
   unmounts, only after the last consumer, and a failed unmount retains the
-  live mount, the lower leases and the durable upper. The Sandbox never
-  creates a per-execution Workspace Overlay and never falls back to Native.
-- TEMPORARY execution-owned resources, including a writable RootFS
-  `upper`/`work`/`merged`, remain under the execution directory and are
-  recorded. Cleanup releases only this execution's own consumer identities;
-  a transient RootFS is unmounted, then its upper/work removed, then its Base
-  lower released. Reconciliation never trusts an arbitrary record path, never
+  live mount, the read-only lower lease and the durable upper. The Sandbox
+  never creates a per-execution Overlay and never falls back to Native.
+- **Typed MountPlan and backends (#3695, #3698).** `mount::plan::MountPlan`
+  binds prepared host views to independent in-Sandbox targets. Its typed
+  `MountSource` is `Erofs`, `Overlay` or `Bind`; the plan never carries a host
+  mountpoint. `ErofsRoBackend` delegates to
+  `nession_erofs::mount_manager::MountManager::acquire`; `OverlayBackend`
+  consumes a manager-authorized Workspace identity and its ordered lowers;
+  `TransientRootfsBackend` merges the immutable Base with an
+  execution-owned, disposable upper/work; `BindBackend` consumes an
+  Agent-validated canonical directory. `mount::view::MountedView` retains the
+  identified consumer lease and its serialized recovery binding, and release
+  is explicit and idempotent. The Workspace Overlay holds every ordered lower
+  lease for its lifetime; a reordered, different or missing set fails closed.
+  A transient RootFS is strictly unmounted before its upper/work and lower
+  consumer are released. A missing backend is an explicit
+  `UnsupportedPolicy`, never a per-execution fallback.
+- TEMPORARY execution-owned resources remain under the execution directory
+  and are recorded. Cleanup releases only this execution's own consumer
+  identities; reconciliation never trusts an arbitrary record path, never
   deletes durable Workspace bytes and never unmounts a manager-owned
   physical mount.
 

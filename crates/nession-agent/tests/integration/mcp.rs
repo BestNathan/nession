@@ -264,6 +264,11 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     .await;
     assert_eq!(created["isError"], false, "{created}");
     assert_eq!(text_of(&created)["name"], name);
+    assert_eq!(
+        created["structuredContent"],
+        text_of(&created),
+        "a successful Tool call carries the declared structured output"
+    );
 
     let listed = call_tool(
         addr,
@@ -273,7 +278,9 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     )
     .await;
     assert_eq!(listed["isError"], false, "{listed}");
+    let structured = listed["structuredContent"].clone();
     let listed = text_of(&listed);
+    assert_eq!(structured, listed, "text must represent structuredContent");
     assert!(
         listed["sessions"]
             .as_array()
@@ -298,6 +305,10 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     )
     .await;
     assert_eq!(camel["isError"], true, "{camel}");
+    assert!(
+        camel.get("structuredContent").is_none(),
+        "an error result must not carry success structuredContent"
+    );
     let camel_text = camel["content"][0]["text"].as_str().expect("text content");
     assert!(
         camel_text.contains("agent_id"),

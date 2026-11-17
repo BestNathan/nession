@@ -19,7 +19,7 @@ pub const TERMINAL_PROGRESS_NOTIFICATIONS_V1: &str = "terminal-progress-notifica
 /// accepted, duplicate or stale report is bookkeeping, and the only Agent
 /// reaction is the exception-only [`TerminalReconcileRequiredPayload`].
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalOutputProgressPayload {
     pub session_name: String,
@@ -35,7 +35,7 @@ pub struct TerminalOutputProgressPayload {
 /// authenticated subscription, never an inference from ordinary
 /// `applied_through < head_seq` lag.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalReconcileReason {
@@ -56,7 +56,7 @@ pub enum TerminalReconcileReason {
 
 /// What the current subscriber should do about a reconcile notice (#2877).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalReconcileAction {
@@ -74,7 +74,7 @@ pub enum TerminalReconcileAction {
 /// once per unresolved episode, and never answered: it is a notification with
 /// no ACK. A stale, malformed or foreign notice must not start recovery.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalReconcileRequiredPayload {
     pub session_name: String,
@@ -106,7 +106,7 @@ pub struct TerminalReconcileRequiredPayload {
 /// pre-baseline output or treats queue dequeue as parser completion.
 /// Independent from the Agent -> browser terminal *input* ACK (#1307).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalOutputAppliedPayload {
     pub session_name: String,
@@ -117,7 +117,7 @@ pub struct TerminalOutputAppliedPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalInputPayload {
     pub session_name: String,
@@ -190,7 +190,7 @@ pub struct TerminalInputPayload {
 /// nor safely re-sendable, and states that to the user rather than replaying a
 /// command that may already have run.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalInputAckPayload {
     pub session_name: String,
@@ -207,7 +207,7 @@ pub struct TerminalInputAckPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalResizePayload {
     pub session_name: String,
@@ -253,7 +253,7 @@ pub struct TerminalResizePayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalOutputPayload {
     pub session_name: String,
@@ -293,7 +293,7 @@ pub struct TerminalOutputPayload {
 /// A tmux capture-pane is asynchronous to the Agent stream: it is Unverified
 /// even when its text is complete and its xterm write callback has fired.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalCheckpointCutConsistency {
@@ -304,7 +304,7 @@ pub enum TerminalCheckpointCutConsistency {
 /// The representation a capture can restore, independently of its cut.
 /// A tmux pane's text/modes cannot be a full VT/emulator checkpoint.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalCheckpointFidelity {
@@ -314,7 +314,7 @@ pub enum TerminalCheckpointFidelity {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalBootstrapPayload {
     /// How many lines of history the bootstrap was asked for. Reported so a
@@ -363,14 +363,14 @@ pub struct TerminalBootstrapPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalControlAcquirePayload {
     pub session_name: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalControlAcquireResponse {
     pub session_name: String,
@@ -390,7 +390,7 @@ pub struct TerminalControlAcquireResponse {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalControlChangedPayload {
     pub session_name: String,
@@ -406,7 +406,7 @@ pub struct TerminalControlChangedPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum TerminalStreamEventPayload {
@@ -434,7 +434,7 @@ pub enum TerminalStreamEventPayload {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalStreamResumePayload {
     pub session_name: String,
@@ -471,7 +471,7 @@ pub struct TerminalStreamResumePayload {
 /// Explicit Agent disposition for resuming a contiguous terminal timeline.
 /// A missing field is an older provider, never implicit success.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalResumeRecovery {
@@ -481,7 +481,7 @@ pub enum TerminalResumeRecovery {
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalStreamResumeResponse {
     pub session_name: String,

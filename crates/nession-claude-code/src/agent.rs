@@ -2,8 +2,10 @@
 //! for this provider (`#678`).
 //!
 //! Handles `claude-code.list`, `claude-code.read`, `claude-code.conversations`,
-//! `claude-code.messages`, `claude-code.transcripts` and
-//! `claude-code.transcript-items`, relayed from the server via CommandBroker.
+//! `claude-code.messages`, `claude-code.transcripts`,
+//! `claude-code.transcript-items` (legacy semantic projection),
+//! `claude-code.transcript-records` and `claude-code.transcript-record`
+//! (#3726 raw access), relayed from the server via CommandBroker.
 //! Each operation decodes its typed request once and answers with the contract's
 //! typed response, so `Value` lives only at the dispatcher edge — the same
 //! shape `nession-git` uses, for the same reason.
@@ -50,6 +52,13 @@ use crate::protocol::transcript_items::v1::{
     TranscriptItemsRequestV1, TranscriptItemsResponseV1, TranscriptItemsStateV1,
     TranscriptParseStatsV1,
 };
+use crate::protocol::transcript_record::v1::{
+    TranscriptRecordRequestV1, TranscriptRecordResponseV1, TranscriptRecordStateV1,
+};
+use crate::protocol::transcript_records::v1::{
+    TranscriptRecordV1, TranscriptRecordsRequestV1, TranscriptRecordsResponseV1,
+    TranscriptRecordsStateV1,
+};
 use crate::protocol::transcripts::v1::{
     TranscriptBindingV1, TranscriptItemV1, TranscriptKindV1, TranscriptsRequestV1,
     TranscriptsResponseV1, TranscriptsStateV1,
@@ -57,8 +66,9 @@ use crate::protocol::transcripts::v1::{
 use crate::protocol::{
     conversations, list, mcp_connect, mcp_mutate, mcp_server, mcp_servers,
     memory as memory_protocol, memory_read, messages as messages_protocol, read, transcript_items,
-    transcripts,
+    transcript_record, transcript_records, transcripts,
 };
+use crate::records;
 use crate::scanner;
 use crate::security;
 use crate::session_context::SessionContext;
@@ -600,6 +610,224 @@ impl ClaudeCodeAgentExtension {
         })?)
     }
 
+    /// Answer `claude-code.transcript-records` (#3726).
+    ///
+    /// One explicitly named transcript, one page of **raw JSONL lines**. The
+    /// provider reads the lines and nothing else: it does not classify them,
+    /// parse nested content or pair tool calls with results. Those are frontend
+    /// rendering decisions, and keeping them there is what makes every physical
+    /// record visible regardless of what this version understands.
+    ///
+    /// A cursor names both the transcript and a file generation. A cursor from
+    /// another transcript or a replaced file is `stale_cursor` and carries no
+    /// records, so stale offsets are never applied to different bytes.
+    async fn handle_transcript_records(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: TranscriptRecordsRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(e) => {
+                return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
+                    format!("bad_request: {e}"),
+                ))?)
+            }
+        };
+
+        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+            return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
+                TranscriptRecordsStateV1::Unavailable,
+            ))?);
+        };
+
+        let found = conversation::transcripts_at(&cwd);
+        let Some(chosen) = found
+            .iter()
+            .find(|t| t.claude_session_id == request.transcript_id)
+            .cloned()
+        else {
+            return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
+                TranscriptRecordsStateV1::NotFound,
+            ))?);
+        };
+
+        let (end_offset, expected_generation) = match &request.cursor {
+            None => (u64::MAX, None),
+            Some(raw) => match records::decode_ref(raw) {
+                Some(decoded) if decoded.transcript_id == request.transcript_id => {
+                    (decoded.offset, Some(decoded.generation))
+                }
+                // A cursor this provider did not issue, or one issued for a
+                // different transcript, names no page here. Fail closed rather
+                // than reading whichever transcript happens to be selected.
+                _ => {
+                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
+                        TranscriptRecordsStateV1::StaleCursor,
+                    ))?)
+                }
+            },
+        };
+
+        let limit = TranscriptRecordsResponseV1::page_limit(request.limit);
+        let has_cursor = request.cursor.is_some();
+        let page =
+            match read_raw_page_blocking(chosen.clone(), end_offset, expected_generation, limit)
+                .await
+            {
+                Ok(page) => page,
+                // The reader reports every unusable cursor as `InvalidInput`; the
+                // caller asked to continue from a boundary this file no longer has.
+                Err(ReadFailure::Read(e))
+                    if has_cursor && e.kind() == std::io::ErrorKind::InvalidInput =>
+                {
+                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
+                        TranscriptRecordsStateV1::StaleCursor,
+                    ))?);
+                }
+                Err(ReadFailure::Read(e)) => {
+                    debug!("claude-code raw transcript read failed: {e}");
+                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
+                        "the transcript could not be read",
+                    ))?);
+                }
+                Err(ReadFailure::Task(e)) => {
+                    debug!("claude-code raw transcript read task failed: {e}");
+                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
+                        "the transcript read did not complete",
+                    ))?);
+                }
+            };
+
+        let is_bound = self
+            .bound_conversation(&request.session_id, &found)
+            .await
+            .is_some_and(|b| b.claude_session_id == chosen.claude_session_id);
+        let activity = activity_of(
+            self.context
+                .session_claude_active(&request.session_id)
+                .await,
+            is_bound,
+        );
+
+        let records: Vec<TranscriptRecordV1> = page
+            .records
+            .into_iter()
+            .map(|record| TranscriptRecordV1 {
+                record_ref: records::encode_ref(
+                    &chosen.claude_session_id,
+                    record.offset,
+                    &page.generation,
+                ),
+                offset: record.offset,
+                size_bytes: record.size_bytes,
+                raw: record.raw,
+            })
+            .collect();
+
+        Ok(serde_json::to_value(TranscriptRecordsResponseV1 {
+            state: TranscriptRecordsStateV1::Ready,
+            transcript: Some(transcript_item(&chosen)),
+            activity: Some(activity),
+            records,
+            next_cursor: page.next_offset.map(|offset| {
+                records::encode_ref(&chosen.claude_session_id, offset, &page.generation)
+            }),
+            has_more: page.has_more,
+            partial_tail: page.partial_tail,
+            error: None,
+        })?)
+    }
+
+    /// Answer `claude-code.transcript-record` (#3726).
+    ///
+    /// The bounded full-record read for a page placeholder. The opaque
+    /// reference carries the transcript identity, byte offset and generation;
+    /// the identity is resolved against the Session's authorized transcripts
+    /// before anything is opened, and the generation is re-checked before any
+    /// bytes are returned.
+    async fn handle_transcript_record(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: TranscriptRecordRequestV1 = match serde_json::from_value(payload) {
+            Ok(request) => request,
+            Err(e) => {
+                return Ok(serde_json::to_value(TranscriptRecordResponseV1::error(
+                    format!("bad_request: {e}"),
+                ))?)
+            }
+        };
+
+        let Some(decoded) = records::decode_ref(&request.record_ref) else {
+            return Ok(serde_json::to_value(TranscriptRecordResponseV1::bare(
+                TranscriptRecordStateV1::NotFound,
+            ))?);
+        };
+
+        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+            return Ok(serde_json::to_value(TranscriptRecordResponseV1::bare(
+                TranscriptRecordStateV1::Unavailable,
+            ))?);
+        };
+
+        let found = conversation::transcripts_at(&cwd);
+        let Some(chosen) = found
+            .iter()
+            .find(|t| t.claude_session_id == decoded.transcript_id)
+            .cloned()
+        else {
+            // The reference does not name a transcript visible to this Session.
+            // Never fall back to the transcript that happens to be bound.
+            return Ok(serde_json::to_value(TranscriptRecordResponseV1::bare(
+                TranscriptRecordStateV1::NotFound,
+            ))?);
+        };
+
+        let limit = TranscriptRecordResponseV1::chunk_limit(request.limit);
+        let chunk = match read_record_blocking(
+            chosen,
+            decoded.generation,
+            decoded.offset,
+            request.offset.unwrap_or(0),
+            limit,
+        )
+        .await
+        {
+            Ok(chunk) => chunk,
+            Err(ReadFailure::Read(e)) => {
+                debug!("claude-code raw record read failed: {e}");
+                return Ok(serde_json::to_value(TranscriptRecordResponseV1::error(
+                    "the record could not be read",
+                ))?);
+            }
+            Err(ReadFailure::Task(e)) => {
+                debug!("claude-code raw record read task failed: {e}");
+                return Ok(serde_json::to_value(TranscriptRecordResponseV1::error(
+                    "the record read did not complete",
+                ))?);
+            }
+        };
+
+        match chunk {
+            records::RecordRead::Ready {
+                raw,
+                offset,
+                size_bytes,
+                has_more,
+                next_offset,
+            } => Ok(serde_json::to_value(TranscriptRecordResponseV1 {
+                state: TranscriptRecordStateV1::Ready,
+                record_ref: Some(request.record_ref),
+                raw: Some(raw),
+                offset: Some(offset),
+                size_bytes: Some(size_bytes),
+                has_more: Some(has_more),
+                next_offset: Some(next_offset),
+                error: None,
+            })?),
+            records::RecordRead::StaleGeneration => Ok(serde_json::to_value(
+                TranscriptRecordResponseV1::bare(TranscriptRecordStateV1::StaleGeneration),
+            )?),
+            records::RecordRead::NotFound => Ok(serde_json::to_value(
+                TranscriptRecordResponseV1::bare(TranscriptRecordStateV1::NotFound),
+            )?),
+        }
+    }
+
     /// Answer `claude-code.messages` (#1222).
     ///
     /// One explicitly named conversation, or `not_found`. **Never a
@@ -866,6 +1094,48 @@ async fn read_transcript_page_blocking(
     .map_err(ReadFailure::Read)
 }
 
+/// Read a raw record page off the async worker.
+async fn read_raw_page_blocking(
+    conversation: conversation::Discovered,
+    offset: u64,
+    expected_generation: Option<String>,
+    limit: u32,
+) -> Result<records::RawPage, ReadFailure> {
+    tokio::task::spawn_blocking(move || {
+        records::read_page(
+            &conversation,
+            Some(offset),
+            expected_generation.as_deref(),
+            limit as usize,
+        )
+    })
+    .await
+    .map_err(ReadFailure::Task)?
+    .map_err(ReadFailure::Read)
+}
+
+/// Read one raw record chunk off the async worker.
+async fn read_record_blocking(
+    conversation: conversation::Discovered,
+    generation: String,
+    line_offset: u64,
+    chunk_offset: u64,
+    chunk_limit: u32,
+) -> Result<records::RecordRead, ReadFailure> {
+    tokio::task::spawn_blocking(move || {
+        records::read_record(
+            &conversation,
+            &generation,
+            line_offset,
+            chunk_offset,
+            chunk_limit,
+        )
+    })
+    .await
+    .map_err(ReadFailure::Task)?
+    .map_err(ReadFailure::Read)
+}
+
 /// A discovered transcript as the wire item. The provider-internal id is the
 /// item's `id` for the same reason `conversation_item` does it: inside this
 /// provider's namespace the longer name says nothing the shorter one does not.
@@ -1002,6 +1272,8 @@ impl AgentExtension for ClaudeCodeAgentExtension {
             messages_protocol::COMMAND => self.handle_messages(payload).await,
             transcripts::COMMAND => self.handle_transcripts(payload).await,
             transcript_items::COMMAND => self.handle_transcript_items(payload).await,
+            transcript_records::COMMAND => self.handle_transcript_records(payload).await,
+            transcript_record::COMMAND => self.handle_transcript_record(payload).await,
             memory_protocol::COMMAND => self.handle_memory(payload).await,
             memory_read::COMMAND => self.handle_memory_read(payload).await,
             mcp_servers::COMMAND => self.handle_mcp_servers(payload).await,
@@ -1042,6 +1314,16 @@ mod tests {
                 messages_protocol::ID,
             ),
             (
+                transcript_records::v1::WIRE,
+                transcript_records::COMMAND,
+                transcript_records::ID,
+            ),
+            (
+                transcript_record::v1::WIRE,
+                transcript_record::COMMAND,
+                transcript_record::ID,
+            ),
+            (
                 memory_protocol::v1::WIRE,
                 memory_protocol::COMMAND,
                 memory_protocol::ID,
@@ -1076,6 +1358,8 @@ mod tests {
                 messages_protocol::v1::WIRE.to_string(),
                 transcripts::v1::WIRE.to_string(),
                 transcript_items::v1::WIRE.to_string(),
+                transcript_records::v1::WIRE.to_string(),
+                transcript_record::v1::WIRE.to_string(),
                 memory_protocol::v1::WIRE.to_string(),
                 memory_read::v1::WIRE.to_string(),
                 mcp_servers::v1::WIRE.to_string(),
@@ -1736,6 +2020,328 @@ mod tests {
             Some(2),
             "the unknown record is still drawn, with its upstream name: {value}"
         );
+    }
+
+    // ---- the raw transcript handlers (#3726) ------------------------------
+
+    /// A page's `records` as the wire returns them.
+    fn raw_records(value: &Value) -> &[Value] {
+        value["records"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn a_raw_page_carries_every_line_in_source_order() {
+        // The contract of the whole view: one page entry per physical line,
+        // including a type this build does not model and a line that is not
+        // JSON. Nothing is classified, paired away or dropped.
+        let lines = vec![
+            spoken("u1", "user", "hello"),
+            r#"{"type":"new-runtime-diagnostic","uuid":"q1","detail":"future"}"#.to_string(),
+            "not json at all".to_string(),
+            spoken("u2", "user", "goodbye"),
+        ];
+        let (_root, _guard) = projects_with_lines("aaa", &lines);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let value = extension
+            .handle_transcript_records(
+                serde_json::json!({"session_id": "agent:s", "transcript_id": "aaa"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ready", "{value}");
+        let records = raw_records(&value);
+        assert_eq!(records.len(), lines.len(), "{value}");
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record["raw"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            lines,
+            "the page changed or reordered a source line: {value}"
+        );
+        let refs: Vec<&str> = records
+            .iter()
+            .map(|record| record["record_ref"].as_str().unwrap())
+            .collect();
+        let unique: std::collections::HashSet<&str> = refs.iter().copied().collect();
+        assert_eq!(unique.len(), refs.len(), "two records shared a reference");
+        assert!(
+            records
+                .windows(2)
+                .all(|pair| pair[0]["offset"].as_u64() < pair[1]["offset"].as_u64()),
+            "records are not in source order: {value}"
+        );
+        assert_eq!(value["has_more"], false);
+        assert_eq!(value["partial_tail"], false);
+    }
+
+    #[tokio::test]
+    async fn a_raw_cursor_walks_every_record_exactly_once() {
+        let lines = vec![
+            spoken("u1", "user", "one"),
+            spoken("u2", "user", "two"),
+            spoken("u3", "user", "three"),
+        ];
+        let (_root, _guard) = projects_with_lines("aaa", &lines);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let first = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 2,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(raw_records(&first).len(), 2);
+        assert_eq!(first["has_more"], true);
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a continuation")
+            .to_string();
+
+        let second = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 2,
+                "cursor": cursor,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(second["state"], "ready", "{second}");
+        let older = raw_records(&second);
+        assert_eq!(older.len(), 1, "the older page repeated a record: {second}");
+        assert_eq!(older[0]["raw"], spoken("u1", "user", "one"));
+        assert_eq!(second["has_more"], false);
+    }
+
+    #[tokio::test]
+    async fn a_cursor_from_another_transcript_is_refused() {
+        // A cursor is resource-scoped. Applying one transcript's byte offset to
+        // another would return a line the caller never navigated to.
+        let lines = vec![spoken("u1", "user", "one"), spoken("u2", "user", "two")];
+        let (root, _guard) = projects_with_lines("aaa", &lines);
+        let other = serde_json::json!({
+            "type": "user",
+            "uuid": "b1",
+            "cwd": BOUND_CWD,
+            "sessionId": "bbb",
+            "message": {"role": "user", "content": "other"},
+        })
+        .to_string();
+        std::fs::write(
+            root.path().join("-work-bound").join("bbb.jsonl"),
+            format!("{other}\n"),
+        )
+        .expect("write the other transcript");
+
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+        let first = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+            }))
+            .await
+            .unwrap();
+        let cursor = first["next_cursor"].as_str().expect("a continuation");
+
+        let wrong = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "bbb",
+                "cursor": cursor,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(wrong["state"], "stale_cursor", "{wrong}");
+        assert!(raw_records(&wrong).is_empty(), "{wrong}");
+    }
+
+    #[tokio::test]
+    async fn a_stale_generation_is_refused_rather_than_applied_to_new_bytes() {
+        let lines = vec![spoken("u1", "user", "one"), spoken("u2", "user", "two")];
+        let (root, _guard) = projects_with_lines("aaa", &lines);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+        let first = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+            }))
+            .await
+            .unwrap();
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a continuation")
+            .to_string();
+
+        // Replace the file after the cursor was issued. The first line changes,
+        // so the generation changes; the old offset no longer names the same
+        // bytes.
+        let path = root.path().join("-work-bound").join("aaa.jsonl");
+        let replacement = format!(
+            "{}\n{}\n",
+            spoken("u9", "user", "replaced"),
+            spoken("u8", "user", "also replaced")
+        );
+        std::fs::write(&path, replacement).expect("replace the transcript");
+
+        let stale = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "cursor": cursor,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stale["state"], "stale_cursor", "{stale}");
+        assert!(raw_records(&stale).is_empty(), "{stale}");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_line_is_a_placeholder_that_reads_back_completely() {
+        let huge = "z".repeat(64 * 1024 * 2 + 17);
+        // Written with `cwd`/`sessionId` ahead of the huge body, the way Claude
+        // orders a real line: discovery reads a bounded head, and a synthetic
+        // alphabetical key order would push the identity past that window.
+        let line = format!(
+            r#"{{"type":"user","uuid":"u1","cwd":"{BOUND_CWD}","sessionId":"aaa","message":{{"role":"user","content":"{huge}"}}}}"#
+        );
+        // A normal first record keeps discovery's bounded head readable; the
+        // oversized line is the *second* record, which is exactly the shape a
+        // real transcript takes when a tool result explodes.
+        let lines = [spoken("u0", "user", "start"), line.clone()];
+        let (_root, _guard) = projects_with_lines("aaa", &lines);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let page = extension
+            .handle_transcript_records(
+                serde_json::json!({"session_id": "agent:s", "transcript_id": "aaa"}),
+            )
+            .await
+            .unwrap();
+        let record = raw_records(&page)
+            .iter()
+            .find(|record| record.get("raw").is_none())
+            .expect("the oversized record is a placeholder");
+        assert!(
+            record.get("raw").is_none(),
+            "an oversized record was carried inline: {page}"
+        );
+        assert_eq!(record["size_bytes"].as_u64(), Some(line.len() as u64));
+
+        let record_ref = record["record_ref"].as_str().expect("a reference");
+        let mut assembled = String::new();
+        let mut offset = 0_u64;
+        loop {
+            let chunk = extension
+                .handle_transcript_record(serde_json::json!({
+                    "session_id": "agent:s",
+                    "record_ref": record_ref,
+                    "offset": offset,
+                }))
+                .await
+                .unwrap();
+            assert_eq!(chunk["state"], "ready", "{chunk}");
+            let raw = chunk["raw"].as_str().expect("a chunk");
+            assembled.push_str(raw);
+            offset = chunk["next_offset"].as_u64().expect("a next offset");
+            if chunk["has_more"] != true {
+                break;
+            }
+        }
+        assert_eq!(assembled, line, "the record was truncated or reordered");
+        assert_eq!(
+            offset,
+            record["size_bytes"].as_u64().unwrap(),
+            "the assembled length does not match the reported size"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reference_for_an_unvisible_transcript_is_not_found() {
+        let (_root, _guard) = projects_with_lines("aaa", &[spoken("u1", "user", "one")]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+        let foreign = records::encode_ref("not-visible", 0, "0123456789abcdef");
+
+        let value = extension
+            .handle_transcript_record(serde_json::json!({
+                "session_id": "agent:s",
+                "record_ref": foreign,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(value["state"], "not_found", "{value}");
+        assert!(value.get("raw").is_none(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn a_raw_page_withholds_an_unfinished_trailing_line() {
+        let (root, _guard) = projects_with_lines("aaa", &[spoken("u1", "user", "one")]);
+        let path = root.path().join("-work-bound").join("aaa.jsonl");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .expect("open transcript");
+        use std::io::Write as _;
+        file.write_all(b"{\"type\":\"user\",\"uuid\":\"u2\",\"mess")
+            .expect("append a partial record");
+
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+        let value = extension
+            .handle_transcript_records(
+                serde_json::json!({"session_id": "agent:s", "transcript_id": "aaa"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            raw_records(&value).len(),
+            1,
+            "an unfinished line became a record"
+        );
+        assert_eq!(value["partial_tail"], true, "{value}");
+    }
+
+    #[tokio::test]
+    async fn a_raw_error_response_names_no_transcript_content_or_path() {
+        let (root, _guard) = projects_with_lines("aaa", &[spoken("u1", "user", "secret body")]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+        let other = serde_json::json!({
+            "type": "user",
+            "uuid": "b1",
+            "cwd": BOUND_CWD,
+            "sessionId": "bbb",
+            "message": {"role": "user", "content": "other secret"},
+        })
+        .to_string();
+        std::fs::write(
+            root.path().join("-work-bound").join("bbb.jsonl"),
+            format!("{other}\n"),
+        )
+        .expect("write the other transcript");
+
+        let not_found = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "missing",
+            }))
+            .await
+            .unwrap();
+        let json = not_found.to_string();
+        assert!(!json.contains("secret body"), "{json}");
+        assert!(
+            !json.contains(".jsonl") && !json.contains("subagents"),
+            "{json}"
+        );
+        assert_eq!(not_found["state"], "not_found", "{json}");
     }
 
     /// A project holding one session and the subagents it spawned.
