@@ -1,18 +1,22 @@
 # Sandbox filesystem declaration model
 
-Status: **Policy direction recorded by
-[#3405](https://github.com/BestNathan/nession/issues/3405); not executable on
-`main` yet.** The current V1 contract still accepts only
-`filesystem.access` or the Agent-prepared `filesystem.composition`, and the two
-remain mutually exclusive. The executable declaration, mount-plan compiler and
-native proof belong to the follow-up implementation Requirement. This document
-is the source of truth for the declaration semantics that implementation must
-consume; it does not claim that any host currently installs them.
+Status: **Declaration semantics delivered by
+[#3405](https://github.com/BestNathan/nession/issues/3405) and executed by
+[#3435](https://github.com/BestNathan/nession/issues/3435) (PR
+[#3437](https://github.com/BestNathan/nession/pull/3437)). A RootFS, mount or
+Workspace declaration executes only through the prepared composition.**
+A client RootFS/mount/Workspace
+declaration is materialized against the Agent-prepared composition; a field
+with no matching prepared source fails closed, and `filesystem.access` remains
+mutually exclusive with a composed root. Access-only declarations remain
+independent. The typed mount domain and ordered
+multi-lower/writable RootFS extensions are delivered by #3695/#3698.
 
 The current execution architecture remains
 [Sandbox policy and execution isolation](sandbox-policy-and-execution.md). Its
 [prepared EROFS root composition](sandbox-policy-and-execution.md#prepared-erofs-root-composition-3024)
-section is still the mechanics owner until the implementation lands.
+and [typed mount plan](sandbox-policy-and-execution.md#typed-mount-plan-and-backends-3695)
+sections own the mechanics.
 
 ## One owner per layer
 
@@ -62,7 +66,7 @@ and an image mount is not an `access` entry.
 |---|---|---|---|---|
 | `filesystem.rootfs` | `local` (the backend's host-root baseline) or one immutable `base_runtime` EROFS digest | `/`, fixed and implicit | Fixed RootFS mapping `source → /`; at most one root owner | Read-only for an image root |
 | `filesystem.mounts[]` | One immutable **non-`base_runtime`** EROFS digest | Explicit validated absolute `target` | Authorized Source → Target mapping | Read-only in the first implementation |
-| `filesystem.workspace` | One Agent resource reference: current Project's Existing Location or an Agent-managed Workspace | `/workspace`, fixed and implicit | Agent-resolved resource → `/workspace`; an optional Project EROFS lower may be merged through a bounded writable Overlay | Writable |
+| `filesystem.workspace` | One Agent resource reference: current Project's Existing Location or an Agent-managed Workspace | `/workspace`, fixed and implicit | Agent-resolved resource → `/workspace`; zero or more ordered Project EROFS lowers may be merged through a bounded writable Overlay | Writable |
 | `filesystem.access.read[]` | One validated existing Agent host path `P` | **The same path `P`** | Identity mapping `P → P` | Read-only |
 | `filesystem.access.write[]` | One validated existing Agent host path `P` | **The same path `P`** | Identity mapping `P → P` | Read/write; write implies visible |
 
@@ -73,8 +77,8 @@ paths](#runtime-owned-paths)).
 
 ### Converged client declaration
 
-The following field names and semantics are the convergence decision for the
-follow-up implementation. They extend the existing `filesystem` object; they do
+The following field names and semantics are the delivered convergence
+decision (#3405/#3435). They extend the existing `filesystem` object; they do
 not rename `filesystem`, `filesystem.access`, `access.read` or `access.write`.
 
 ```jsonc
@@ -270,7 +274,7 @@ fifth always-visible item is the derived **Preview**, not a Home policy.
 | Mounted image (RootFS or extra mount) | Agent prepares cache path; Sandbox mounts | Server registry + Agent cache; Sandbox owns the mount only | Unmounted; bytes remain | Bytes remain | Execution cleanup unmounts; cache owns bytes |
 | Project Location | Project declaration (external) | User/Project, never the Agent Manager | Yes | Yes | Never by Workspace management |
 | Managed Workspace | Agent Workspace Manager `get_or_create` | Agent, under its durable storage root | Yes | Yes | Explicit delete when unmounted and unreferenced; never execution cleanup |
-| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession-sandbox::mount::overlay` (#3582, #3695, #3698 ordered lowers) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
+| Workspace Overlay upper/work | Agent Workspace Manager on first lower-backed use | Agent Workspace Manager for managed storage; one physical Merged View per Workspace owned by `nession_sandbox::mount::overlay` (#3582, #3695, #3698 ordered lowers) | Per the workspace kind; a managed upper persists | Per the workspace kind | Workspace deletion policy (refused while an Overlay/lease/record uses it), never the EROFS cache or execution cleanup |
 | Transient writable RootFS upper/work | Sandbox `prepare` under the execution directory | Sandbox execution record; one per execution | No | No | Execution cleanup after a strict, verified unmount; never the EROFS cache or another execution |
 | Execution mounts and mountpoints | Sandbox `prepare` | Sandbox execution record | No | No | Cleanup/reconciliation, in reverse order |
 | `/home`, `/tmp`, `/run/nession` runtime paths | Backend | Execution | No | No | Execution cleanup |
@@ -332,12 +336,16 @@ standalone Home editor, an outer Host-vs-Composition switch, or a raw
 host-source/mount-command field. Architecture rationale and mock limitations
 belong outside the product viewport.
 
-## Current V1 compatibility
+## Current compatibility
 
-The following remain true and must not be weakened by this design document:
+The following remain true and must not be weakened: a RootFS/mount/Workspace
+declaration is executable only through the Agent-prepared composition, and a
+client field that names an image/Workspace the Agent did not prepare is
+refused; unknown fields are rejected rather than ignored.
 
-- `SandboxFilesystemPolicy` accepts `access` and an Agent-prepared
-  `composition`; carrying both is refused.
+- `SandboxFilesystemPolicy` accepts `access` or a prepared `composition`;
+  carrying both is refused. A nonempty `access` object cannot be combined with
+  an image-backed root, mounts or a prepared Workspace.
 - A composition requires one Base Runtime at `/`, a writable workspace, and
   zero or more toolchains at exactly `/opt/<lowercase-name>`.
 - The composed root is an empty tmpfs plus the Base Runtime. By default the
@@ -353,7 +361,8 @@ The following remain true and must not be weakened by this design document:
   bind the same view, and the Sandbox creates no per-execution Workspace
   Overlay. `/home` and `/tmp` are private tmpfs.
 - Image sources are verified local files beneath the Agent-authorized EROFS
-  image root. The Sandbox re-verifies every digest before mounting.
+  image root. The Sandbox re-verifies every digest before mounting; the
+  physical read-only mount/lease belongs to `nession_erofs::mount_manager`.
 - A client-supplied `rootfs`, `mounts` or `workspace` declaration never names
   a host source path or mountpoint. The Server resolves digests and the Agent
   prepares local views; the Sandbox re-verifies them. The Server and Agent
@@ -379,6 +388,14 @@ mount backend, image registry or Workspace registry.
   root composition and native proof lane.
 - [#3582](https://github.com/BestNathan/nession/issues/3582) — one shared
   writable Workspace Overlay with durable Upper ownership.
+- [#3693](https://github.com/BestNathan/nession/issues/3693) — Image Compose
+  versus Sandbox runtime composition boundary.
+- [#3695](https://github.com/BestNathan/nession/issues/3695) — typed mount
+  plan/backends and Workspace Overlay ownership migration.
+- [#3698](https://github.com/BestNathan/nession/issues/3698) — ordered
+  multi-lower Workspace and opt-in writable RootFS.
+- [#3435](https://github.com/BestNathan/nession/issues/3435) — executable
+  Filesystem RootFS/mounts/Workspace declaration.
 - [#3062](https://github.com/BestNathan/nession/issues/3062) — Managed Session
   preparation.
 - [#3161](https://github.com/BestNathan/nession/issues/3161) — per-policy

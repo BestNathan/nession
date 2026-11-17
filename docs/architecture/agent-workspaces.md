@@ -1,13 +1,14 @@
 # Agent-owned managed Workspaces
 
-Status: **Registry/API (#3407), managed `/workspace` attachment (#3405) and
-one shared writable Overlay per managed Workspace (#3582).** The Agent owns
+Status: **Registry/API (#3407), managed `/workspace` attachment (#3405), one
+shared writable Overlay per managed Workspace (#3582), and the Sandbox-owned
+mount domain with ordered multi-lower identity (#3695/#3698).** The Agent owns
 the registry, names, stable identities, durable bytes, the durable Overlay
 upper/work, the ordered lower compatibility key and attachment leases; the
 physical Merged View is owned by
-`nession_sandbox::mount::overlay::OverlayMountManager` (#3695).
-Project Location selection and the Web/App inventory remain owned by their
-referenced Requirements.
+`nession_sandbox::mount::overlay::OverlayMountManager` (#3695). Project Location
+selection and the Web/App inventory remain owned by their referenced
+Requirements.
 
 ## Ownership
 
@@ -16,8 +17,8 @@ referenced Requirements.
 | Managed Workspace registry, stable IDs, names, durable directories, leases and deletion | Agent Workspace Manager (`crates/nession-agent/src/workspace_manager.rs`) |
 | Project Existing Location `{agent_id, path}` | Project declaration; the Agent only validates/references it; never copied or deleted here |
 | Authenticated routing and Session target authorization | Server (`server.workspace.*` → `agent.workspace.*`) |
-| Filesystem policy selection and `/workspace` mounting | `nession-sandbox` / the follow-up #3405 implementation |
-| Physical writable Merged View per managed Workspace | `nession-sandbox::mount::overlay::OverlayMountManager` (#3582, moved by #3695) |
+| Filesystem policy selection and `/workspace` mounting | `nession-sandbox` (typed mount plan/backends, #3405/#3695) |
+| Physical writable Merged View per managed Workspace | `nession_sandbox::mount::overlay::OverlayMountManager` (#3582, moved by #3695) |
 | Sandbox execution lifecycle | `nession-sandbox`; it owns execution isolation and records, not the durable workspace bytes |
 
 A managed Workspace is **not** the logical Nession Workspace, a Project, an
@@ -120,13 +121,15 @@ declaration is refused, and no branch silently falls back.
 A managed Workspace becomes the composition's writable `/workspace`; the
 execution holds an attachment lease and cleanup releases it without deleting
 durable bytes. The selected directory is Agent-owned, so it is also the
-durable Overlay upper: when the Project pins a source EROFS image, the Server
-adds it as the workspace lower, and the shared Overlay manager merges
-`lowerdir=<Project image>` with
-`upperdir=<workspace>/upper, workdir=<workspace>/work`. The Workspace Manager
-records the ordered lower Blob set on first attachment; a later attachment
-with a different or missing set is refused instead of merging a different
-Project image into the same durable upper (#3407 SC-04, #3582).
+durable Overlay upper: when the Project pins one or more source EROFS images,
+the Server adds them as ordered workspace lowers, and the Sandbox-owned Overlay
+manager merges
+`lowerdir=<first>:<second>:…` with
+`upperdir=<workspace>/upper, workdir=<workspace>/work` (#3695/#3698). The
+Workspace Manager records the ordered lower Blob set on first attachment; a
+later attachment with a reordered, different or missing set is refused instead
+of merging a different Project image into the same durable upper (#3407 SC-04,
+#3582, #3698).
 
 Several Sessions may attach the same managed Workspace concurrently. They
 share one physical Merged View and see each other's writes with normal
@@ -191,10 +194,11 @@ Server-cached claim.
 
 - Project Location selection is limited to the current Project's declaration
   on the current Agent; there is no cross-Agent copy or fallback. A managed
-  Workspace with a lower is pinned to that lower until the Workspace is
-  deleted/recreated; changing the Project image requires a new Workspace.
-- A managed Workspace is exclusive for RW attachment in the first
-  implementation; concurrent sharing needs a separate decision.
+  Workspace with one or more lowers is pinned to that exact ordered set until
+  the Workspace is deleted/recreated; changing or reordering the Project image
+  set requires a new Workspace.
+- Concurrent attachments share one physical Merged View and ordinary
+  filesystem last-writer semantics; Nession does not merge conflicting writes.
 - The Agent data directory must be a durable mount. A container writable layer
   is not a durable workspace store; the manager does not redirect to one.
 - The Web/App inventory and selection surface are P3.
@@ -207,6 +211,10 @@ Server-cached claim.
   policy and `/workspace` mapping.
 - [#3408](https://github.com/BestNathan/nession/issues/3408) — Sandbox
   navigation and the Workspaces section.
+- [#3695](https://github.com/BestNathan/nession/issues/3695) — typed mount
+  domain and Workspace Overlay ownership migration.
+- [#3698](https://github.com/BestNathan/nession/issues/3698) — ordered
+  multi-lower Workspace identity and writable RootFS.
 - [Sandbox policy and execution isolation](sandbox-policy-and-execution.md) —
   current execution and mount mechanics.
 - [Product model](../design/product-model.md) — logical Workspace versus
