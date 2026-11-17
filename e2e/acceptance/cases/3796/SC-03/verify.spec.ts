@@ -37,16 +37,25 @@ test('SC-03: eligible Prepare/Resume/Retry and truthful phase progression', asyn
   // A durable partial offers Resume, not Prepare or Retry. The fixture keeps
   // one digest partial, so the row is located by its own affordance.
   await openDistribution(page, 'sandbox=agent-cache-resumable');
-  const partialRow = page
+  const resumableRow = page
     .getByTestId('sandbox-distribution-row')
     .filter({ has: page.getByTestId('sandbox-distribution-resume') });
-  await expect(partialRow).toHaveCount(1);
-  await expect(partialRow.getByTestId('sandbox-distribution-phase')).toHaveText(
+  await expect(resumableRow).toHaveCount(1);
+  await expect(resumableRow.getByTestId('sandbox-distribution-phase')).toHaveText(
     'Resumable partial',
   );
-  await expect(partialRow.getByTestId('sandbox-distribution-prepare')).toHaveCount(0);
-  await partialRow.getByTestId('sandbox-distribution-resume').click();
-  await expect(partialRow.getByTestId('sandbox-distribution-phase')).toHaveText('Downloading');
+  await expect(resumableRow.getByTestId('sandbox-distribution-prepare')).toHaveCount(0);
+  // The Resume action removes the affordance, so the row is tracked by the
+  // stable image identity instead of by the button that just disappeared.
+  const resumableDigest = await resumableRow.getAttribute('data-image-digest');
+  expect(resumableDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  await resumableRow.getByTestId('sandbox-distribution-resume').click();
+  const partialRow = page.locator(
+    `[data-testid="sandbox-distribution-row"][data-image-digest="${resumableDigest}"]`,
+  );
+  await expect(partialRow.getByTestId('sandbox-distribution-phase')).toHaveText(
+    /Downloading|Verifying/,
+  );
 
   // A failed cache offers Retry.
   await openDistribution(page, 'sandbox=agent-cache-failed');
