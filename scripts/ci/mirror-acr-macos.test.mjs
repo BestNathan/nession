@@ -55,7 +55,7 @@ function fixture(fail) {
     fs.writeFileSync(fake, mock, {mode: 0o755});
     const resultDir = path.join(tmp, 'result');
     const entry = fileURLToPath(new URL('./mirror-acr-macos.mjs', import.meta.url));
-    const out = spawnSync(process.execPath, [entry, sha, 'server', '5', '1'], {
+    const result = spawnSync(process.execPath, [entry, sha, 'server', '5', '1'], {
       encoding: 'utf8',
       timeout: 15000,
       env: {...process.env, PATH: tmp + path.delimiter + process.env.PATH,
