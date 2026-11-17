@@ -41,8 +41,10 @@
       cgroup:"",seccomp:false,preflight:"none",error:"",notice:"",inside:false,effective:null,selectedImage:null,imageAction:"",
       step:0,tip:null,fsInspect:false,buildOpen:false,buildKind:"github",buildSourceValue:"https://github.com/BestNathan/nession",buildRepresentation:"flattened",buildError:"",buildFilter:"all",buildPage:0,inspectWorkspace:"ws:busy"};
   }
-  var s=defaults();
-  s.builds.push({id:"build-117",name:"old-release",status:"succeeded",stage:"publishing",elapsed_ms:65000,files:410,bytes:2900000,attempt:1,diagnostic:"Published"},{id:"build-116",name:"invalid-archive",status:"failed",stage:"validating",elapsed_ms:3500,files:0,bytes:0,attempt:2,diagnostic:"Archive escaped authorized root"},{id:"build-115",name:"old-source",status:"canceled",stage:"snapshotting",elapsed_ms:14000,files:14,bytes:18000,attempt:1,diagnostic:"Canceled"});
+  function seedHistory(state){
+    state.builds.push({id:"build-117",name:"old-release",status:"succeeded",stage:"publishing",elapsed_ms:65000,files:410,bytes:2900000,attempt:1,diagnostic:"Published"},{id:"build-116",name:"invalid-archive",status:"failed",stage:"validating",elapsed_ms:3500,files:0,bytes:0,attempt:2,diagnostic:"Archive escaped authorized root"},{id:"build-115",name:"old-source",status:"canceled",stage:"snapshotting",elapsed_ms:14000,files:14,bytes:18000,attempt:1,diagnostic:"Canceled"});
+  }
+  var s=defaults();seedHistory(s);
   var sections=[["overview","Overview"],["images","Images"],["workspaces","Workspaces"],["policies","Policies"]];
   var subs={
     images:[["library","Image Library"],["builds","Builds"],["distribution","Distribution"]],
@@ -729,7 +731,7 @@
     b.addEventListener("click",function(){
       var newFixture=b.getAttribute("data-fixture");
       var previous=s;
-      s=defaults();s.width=previous.width;s.mode=previous.mode;
+      s=defaults();seedHistory(s);s.width=previous.width;s.mode=previous.mode;
       s.fixture=newFixture;
       if(newFixture==="inside"){s.inside=true;s.effective=effectiveDraft();}
       if(newFixture==="macos"){s.namespace={pid:false,ipc:false,user:false,uts:false,cgroup:false};s.network="deny";}
@@ -752,6 +754,6 @@
     render();
   });
   // Frame initializes after this script, dispatching initial resize.
-  window.__sandboxPrototype={getState:function(){return s;},reset:function(){s=defaults();render();},validate:check};
+  window.__sandboxPrototype={getState:function(){return s;},reset:function(){s=defaults();seedHistory(s);render();},validate:check};
   render();
 })();
