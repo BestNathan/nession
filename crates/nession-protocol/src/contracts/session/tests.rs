@@ -797,3 +797,68 @@ fn unknown_managed_fields_are_refused() {
         "an unknown toolchain key must be refused"
     );
 }
+
+/// #3796: the prepare request carries the user's explicit intent instead of
+/// inferring a download from an observation read, and an unknown field is a
+/// contract error rather than a silently ignored hint.
+#[test]
+fn an_image_prepare_request_carries_an_explicit_intent() {
+    use crate::contracts::image::v1::{ImageCacheObservation, ImageCachePhase};
+
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let payload: ClientSessionSandboxImagePreparePayload =
+        serde_json::from_value(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "resume",
+        }))
+        .expect("a resume request is valid");
+    assert_eq!(payload.intent, SandboxImagePrepareIntent::Resume);
+    assert_eq!(payload.digest, digest);
+    assert_eq!(
+        serde_json::to_value(&payload).unwrap()["intent"],
+        serde_json::json!("resume")
+    );
+
+    assert!(
+        serde_json::from_value::<ClientSessionSandboxImagePreparePayload>(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "prepare",
+            "download": true,
+        }))
+        .is_err(),
+        "an extra field must not silently change a cache mutation"
+    );
+    assert!(
+        serde_json::from_value::<ClientSessionSandboxImagePreparePayload>(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "download",
+        }))
+        .is_err(),
+        "an unknown intent is refused rather than guessed"
+    );
+
+    let observation = ImageCacheObservation {
+        contract_version: crate::contracts::image::v1::IMAGE_CACHE_OBSERVATION_VERSION,
+        digest: format!("sha256:{}", "b".repeat(64)),
+        phase: ImageCachePhase::Verifying,
+        downloaded_bytes: Some(5),
+        total_bytes: Some(10),
+        active: true,
+        updated_at: 1,
+        detail: None,
+    };
+    observation.validate().unwrap();
+    let reply = SandboxImagePrepareResponse {
+        success: true,
+        error: None,
+        error_kind: None,
+        observation: Some(observation.clone()),
+        observations: vec![observation],
+    };
+    let round_trip: SandboxImagePrepareResponse =
+        serde_json::from_value(serde_json::to_value(&reply).unwrap()).unwrap();
+    assert_eq!(round_trip, reply);
+}
