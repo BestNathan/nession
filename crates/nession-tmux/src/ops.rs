@@ -699,15 +699,23 @@ pub struct PaneSummary {
     pub window_active: bool,
     /// Whether this Pane is active inside its Window.
     pub pane_active: bool,
+    /// The Pane's current foreground command (`#{pane_current_command}`).
+    ///
+    /// Runtime observation, read fresh on every listing: it names what tmux
+    /// believes is running in the Pane right now, not the Pane's shell. Absent
+    /// when tmux reports an empty command.
+    pub pane_current_command: Option<String>,
 }
 
 /// The `list-panes -a` format `list_panes` parses.
 ///
 /// `|` is the delimiter because tmux converts tab characters in format strings
 /// to underscores. `window_name` is last and the split is capped, so a `|`
-/// inside it stays part of the name instead of shifting the row. Session names
-/// are resolved by id through [`SESSION_ID_FORMAT`] for the same reason.
-const PANE_LIST_FORMAT: &str = "#{session_id}|#{window_id}|#{window_index}|#{pane_id}|#{pane_index}|#{pane_pid}|#{pane_tty}|#{window_linked}|#{window_active}|#{pane_active}|#{window_name}";
+/// inside it stays part of the name instead of shifting the row — a Window
+/// name is user text and the one field that legitimately contains the
+/// delimiter. Session names are resolved by id through [`SESSION_ID_FORMAT`]
+/// for the same reason.
+const PANE_LIST_FORMAT: &str = "#{session_id}|#{window_id}|#{window_index}|#{pane_id}|#{pane_index}|#{pane_pid}|#{pane_tty}|#{window_linked}|#{window_active}|#{pane_active}|#{pane_current_command}|#{window_name}";
 
 /// The `list-sessions` format that maps a stable Session id to its name.
 const SESSION_ID_FORMAT: &str = "#{session_id}|#{session_name}";
@@ -717,8 +725,8 @@ fn pane_summary_from_line(
     line: &str,
     session_names: &HashMap<String, String>,
 ) -> Option<PaneSummary> {
-    let parts: Vec<&str> = line.splitn(11, '|').collect();
-    if parts.len() != 11 {
+    let parts: Vec<&str> = line.splitn(12, '|').collect();
+    if parts.len() != 12 {
         return None;
     }
     let session_id = parts.first().copied().unwrap_or_default().to_string();
@@ -739,7 +747,12 @@ fn pane_summary_from_line(
         window_linked: parts.get(7).copied() == Some("1"),
         window_active: parts.get(8).copied() == Some("1"),
         pane_active: parts.get(9).copied() == Some("1"),
-        window_name: parts.get(10).copied().unwrap_or_default().to_string(),
+        pane_current_command: parts
+            .get(10)
+            .copied()
+            .filter(|command| !command.is_empty())
+            .map(str::to_string),
+        window_name: parts.get(11).copied().unwrap_or_default().to_string(),
     })
 }
 
@@ -1677,8 +1690,8 @@ mod tests {
         // groups by pane_id so the process is not counted twice.
         let session_names = names(&[("$0", "alpha"), ("$1", "beta")]);
         let rows: Vec<PaneSummary> = [
-            "$0|@1|1|%1|0|35225|/dev/ttys016|1|1|1|win2",
-            "$1|@1|1|%1|0|35225|/dev/ttys016|1|1|1|win2",
+            "$0|@1|1|%1|0|35225|/dev/ttys016|1|1|1|bash|win2",
+            "$1|@1|1|%1|0|35225|/dev/ttys016|1|1|1|bash|win2",
         ]
         .into_iter()
         .filter_map(|line| pane_summary_from_line(line, &session_names))
@@ -1735,17 +1748,18 @@ mod tests {
         // window_name is last and the split is capped, so a `|` in it stays in
         // the name rather than shifting the fields before it.
         let row = pane_summary_from_line(
-            "$0|@0|0|%0|0|123|/dev/ttys001|0|1|1|a|b|c",
+            "$0|@0|0|%0|0|123|/dev/ttys001|0|1|1|bash|a|b|c",
             &names(&[("$0", "s")]),
         )
         .expect("a well-formed row");
         assert_eq!(row.window_name, "a|b|c");
+        assert_eq!(row.pane_current_command.as_deref(), Some("bash"));
         assert_eq!(row.pane_pid, Some(123));
     }
 
     #[test]
     fn pane_rows_survive_a_missing_root_pid_and_tty() {
-        let row = pane_summary_from_line("$0|@0|0|%0|0|||0|1|1|shell", &names(&[("$0", "s")]))
+        let row = pane_summary_from_line("$0|@0|0|%0|0|||0|1|1|bash|shell", &names(&[("$0", "s")]))
             .expect("a pane without a live root is still a pane");
         assert_eq!(row.pane_pid, None);
         assert_eq!(row.pane_tty, None);
@@ -1753,8 +1767,11 @@ mod tests {
 
     #[test]
     fn pane_rows_fall_back_to_the_session_id_when_the_name_query_raced() {
-        let row = pane_summary_from_line("$7|@0|0|%0|0|1|/dev/pts/1|0|0|1|shell", &HashMap::new())
-            .expect("the pane row is still usable");
+        let row = pane_summary_from_line(
+            "$7|@0|0|%0|0|1|/dev/pts/1|0|0|1|bash|shell",
+            &HashMap::new(),
+        )
+        .expect("the pane row is still usable");
         assert_eq!(row.session_id, "$7");
         assert_eq!(row.session_name, "$7");
     }

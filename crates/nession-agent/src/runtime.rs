@@ -42,6 +42,7 @@ use crate::netdetect::build_advertised_addresses;
 use crate::netwatch;
 use crate::protocol::served_descriptors;
 use crate::server::AgentServer;
+use crate::session::activity::SessionActivityCoordinator;
 use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
@@ -343,18 +344,26 @@ pub async fn run(
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
     // server-advertised heartbeat interval (falling back to the local config).
-    let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
+    let (client_handle, heartbeat_interval_secs, activity) = if config.server_url.trim().is_empty()
+    {
         info!("No server_url configured — running in standalone mode");
-        // Serving: the P2P socket is bound and the tmux socket is pinned. There
-        // is no provider set to compose on this path, and no remote to reach.
+        // Serving: the P2P socket is bound and the tmux socket is pinned.
+        // There is no provider set to compose on this path, and no remote
+        // to reach.
         ready.announce();
-        (None, config.heartbeat_interval_secs)
+        (None, config.heartbeat_interval_secs, None)
     } else {
         let ext_registry = compose_providers(
             &agent_id,
             Arc::clone(&tmux_for_client),
             claude_mcp_host(&config, listen_addr),
         )?;
+        // Activity providers come from the same composition that serves
+        // the protocol routes (#3800), so a capability cannot contribute
+        // observations without being part of this Agent's provider set.
+        let activity =
+            SessionActivityCoordinator::new(agent_id.clone(), ext_registry.activity_providers())
+                .context("cannot compose this agent's Session Activity providers")?;
 
         // Serving: the socket is bound and the provider set composed. Announced
         // *before* the central-server connection on purpose — that one is
@@ -390,17 +399,17 @@ pub async fn run(
                     Ok((handle, server_interval)) => {
                         let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
                         info!("Connected to central server (heartbeat interval: {}s)", interval);
-                        (Some(handle), interval)
+                        (Some(handle), interval, Some(activity.clone()))
                     }
                     Err(e) => {
                         error!("Failed to connect to central server: {:#}", e);
-                        (None, config.heartbeat_interval_secs)
+                        (None, config.heartbeat_interval_secs, Some(activity.clone()))
                     }
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
                 warn!("Timed out connecting to central server after 30s, continuing without sync");
-                (None, config.heartbeat_interval_secs)
+                (None, config.heartbeat_interval_secs, Some(activity.clone()))
             }
         }
     };
@@ -460,6 +469,10 @@ pub async fn run(
             Arc::clone(&tmux_for_client),
             config.session_poll_interval_secs,
         );
+        let watcher = match activity.clone() {
+            Some(activity) => watcher.with_activity(activity),
+            None => watcher,
+        };
         let shutdown_handle = watcher.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = watcher.run().await {

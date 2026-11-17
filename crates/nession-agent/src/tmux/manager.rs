@@ -622,6 +622,16 @@ impl SessionManager {
             .collect())
     }
 
+    /// Every Pane on this Agent's private tmux server, in tmux's own terms.
+    ///
+    /// One row per Session→Window membership, so a linked Window appears once
+    /// per Session. A consumer that wants Pane resources groups by `pane_id`;
+    /// one that wants membership keeps the rows (the same contract
+    /// [`nession_tmux::ops::TmuxOps::list_panes`] states). Read-only.
+    pub async fn list_panes(&self) -> Result<Vec<nession_tmux::ops::PaneSummary>> {
+        self.sdk_ops().list_panes().await
+    }
+
     /// The Nession-owned instance identity for a tmux Session (#2789, #2974).
     ///
     /// Stored as the `@nession_instance_id` tmux user option, so it outlives an

@@ -1,6 +1,7 @@
 //! Session watcher that polls tmux for session changes and notifies the server.
 
 use crate::connection::ServerClientHandle;
+use crate::session::activity::{contexts_from_tmux, SessionActivityCoordinator};
 use crate::tmux::manager::{SessionInfo, SessionManager};
 use anyhow::Result;
 use std::collections::HashMap;
@@ -104,6 +105,10 @@ pub struct SessionWatcher {
     poll_interval: Duration,
     /// Previous session state, keyed by session name.
     prev_sessions: HashMap<String, SessionInfo>,
+    /// The Agent's Session Activity coordinator (#3800), when this runtime
+    /// composed one. The watcher refreshes it from verified tmux facts and
+    /// never derives activity itself.
+    activity: Option<Arc<SessionActivityCoordinator>>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
 }
@@ -126,9 +131,45 @@ impl SessionWatcher {
             tmux,
             poll_interval: Duration::from_secs(poll_interval_secs),
             prev_sessions: HashMap::new(),
+            activity: None,
             shutdown_tx,
             shutdown_rx,
         }
+    }
+
+    /// Attach the Agent's Session Activity coordinator (#3800).
+    ///
+    /// Without one the watcher publishes Session inventory only; with one it
+    /// refreshes the Activity projection after every **successful** tmux
+    /// enumeration. A failed enumeration is never passed on as an empty
+    /// inventory — that would retire every Pane's activity.
+    pub fn with_activity(mut self, activity: Arc<SessionActivityCoordinator>) -> Self {
+        self.activity = Some(activity);
+        self
+    }
+
+    /// Refresh the coordinator from the Session list this poll already read.
+    ///
+    /// The Pane listing is a second query rather than derived from
+    /// `SessionInfo`: only the active Pane's command is in the Session row, and
+    /// aggregating "every actual Session Pane" needs all of them. Its failure
+    /// keeps the previous Activity snapshot instead of manufacturing an empty
+    /// one.
+    async fn reconcile_activity(&self, sessions: &[SessionInfo]) {
+        let Some(activity) = &self.activity else {
+            return;
+        };
+        let panes = match self.tmux.list_panes().await {
+            Ok(panes) => panes,
+            Err(error) => {
+                warn!(
+                    "Session Activity Pane enumeration failed; keeping the previous snapshot: {error:#}"
+                );
+                return;
+            }
+        };
+        let contexts = contexts_from_tmux(sessions, &panes);
+        let _ = activity.reconcile(&contexts).await;
     }
 
     /// Get a handle that can be used to shut down this watcher.
@@ -189,6 +230,11 @@ impl SessionWatcher {
                     return Ok(());
                 }
             };
+
+            // Activity is Agent-local and does not depend on the current
+            // reconnect intent; refresh it from this verified enumeration
+            // before publication, which may still fail and retry.
+            self.reconcile_activity(&current_sessions).await;
 
             // Successful enumeration is not a completed re-sync. Every frame
             // must be accepted by the outbound owner before the intent is
@@ -269,6 +315,8 @@ impl SessionWatcher {
                 return Ok(());
             }
         };
+
+        self.reconcile_activity(&current_sessions).await;
 
         // Build a map of current sessions for easy lookup.
         let mut current_map: HashMap<String, SessionInfo> = HashMap::new();
@@ -501,9 +549,15 @@ mod tests {
 mod enumeration_failure {
     use super::*;
     use crate::connection::outbox::OutboxFrames;
+    use crate::session::activity::{
+        ActivityLevel, ActivityState, SessionActivityContext, SessionActivityProvider,
+        WorkloadClass,
+    };
     use crate::test_support::{FakeTmux, FAKE_TIMEOUT};
     use crate::tmux::cmd::TmuxCmd;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::SystemTime;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     /// Point a manager at a binary that does not exist yet.
@@ -606,6 +660,101 @@ mod enumeration_failure {
             updates.push((name.to_string(), status.to_string(), instance_id));
         }
         updates
+    }
+
+    /// A provider that records each probe and answers one static idle level.
+    struct CountingProvider {
+        probes: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionActivityProvider for CountingProvider {
+        fn id(&self) -> &'static str {
+            "fixture-shell"
+        }
+
+        fn class(&self) -> WorkloadClass {
+            WorkloadClass::GenericShell
+        }
+
+        async fn probe(
+            &self,
+            _context: &SessionActivityContext,
+        ) -> anyhow::Result<Option<ActivityLevel>> {
+            self.probes.fetch_add(1, Ordering::Relaxed);
+            Ok(Some(ActivityLevel {
+                state: ActivityState::Idle,
+                attention: None,
+                workload_ref: None,
+                source_generation: 1,
+                observed_at: SystemTime::now(),
+            }))
+        }
+    }
+
+    /// A fake tmux that answers both listings, so the activity refresh can be
+    /// driven without a real server.
+    const ACTIVITY_LISTING: &str = "\
+case \"$1\" in\n\
+list-sessions)\n\
+  case \"$3\" in\n\
+    '#{session_id}|#{session_name}') printf '%s\\n' '$0|dev' ;;\n\
+    *) printf '%s\\n' 'dev|inc-1|1000|1|0|80|24|/tmp|bash' ;;\n\
+  esac ;;\n\
+list-panes) printf '%s\\n' '$0|@1|1|%1|0|123|/dev/ttys001|0|1|1|bash|w' ;;\n\
+esac\n";
+
+    #[tokio::test]
+    async fn the_watcher_refreshes_activity_only_from_a_successful_pane_enumeration() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        FakeTmux::new(dir.path(), ACTIVITY_LISTING);
+        let (handle, _frames) = ServerClientHandle::test_handle(true);
+        let probes = Arc::new(AtomicUsize::new(0));
+        let activity = SessionActivityCoordinator::new(
+            "agent-a",
+            vec![Arc::new(CountingProvider {
+                probes: Arc::clone(&probes),
+            })],
+        )
+        .expect("one provider composes");
+        let mut watcher = SessionWatcher::new(handle, Arc::new(manager_at(dir.path())), 5)
+            .with_activity(Arc::clone(&activity));
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        let snapshot = activity.snapshot("dev").expect("the Session is observed");
+        assert_eq!(snapshot.session_instance_id, "inc-1");
+        assert_eq!(snapshot.state, ActivityState::Idle);
+        assert_eq!(probes.load(Ordering::Relaxed), 1);
+
+        // A failed Pane enumeration must keep the previous projection rather
+        // than reading as an observed empty inventory.
+        FakeTmux::new(
+            dir.path(),
+            "if [ \"$1\" = list-panes ]; then echo 'boom' >&2; exit 1; fi\n\
+             printf '%s\\n' 'dev|inc-1|1000|1|0|80|24|/tmp|bash'\n",
+        );
+        watcher
+            .poll_and_sync()
+            .await
+            .expect("poll with failed panes");
+        assert_eq!(
+            activity.snapshot("dev").map(|snapshot| snapshot.state),
+            Some(ActivityState::Idle),
+            "the previous activity survives a failed Pane enumeration"
+        );
+        assert_eq!(
+            probes.load(Ordering::Relaxed),
+            1,
+            "a failed enumeration does not probe providers with invented facts"
+        );
+
+        // An observed empty inventory retires the Session's activity.
+        FakeTmux::new(dir.path(), "exit 0\n");
+        watcher.poll_and_sync().await.expect("empty poll");
+        assert!(
+            activity.snapshot("dev").is_none(),
+            "a Session absent from the verified inventory has no activity"
+        );
     }
 
     #[tokio::test]
