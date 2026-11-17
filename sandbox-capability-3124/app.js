@@ -226,39 +226,7 @@
       (s.tagNotice?alert(s.tagNotice,s.tagNotice.startsWith("Conflict")?"danger":"info"):"")+
       '<div class="cand-actions">'+action("Cancel","image-tag-cancel")+next+'</div></div>';
   }
-  function imageLibrary(){
-    // A single list is the owning surface: detail expands inside its row.
-    // Never render a second detail card below the entire list.
-    var items=s.images.map(function(im,i){
-      var expanded=s.selectedImage===im.id;
-      var detailId="cand-image-detail-"+i;
-      var cache=online()?(s.cache[im.id]||"absent"):"unknown";
-      var problem=imageIssue(im);
-      var details=expanded?
-        '<div class="cand-image-detail" id="'+detailId+'" role="region" aria-label="'+h(im.name)+' details">'+
-          '<div class="cand-image-details-grid">'+
-            '<div><span>Digest</span><code>'+h(im.digest)+'</code></div>'+
-            '<div><span>Type / Platform</span><strong>'+h(im.kind)+' · '+h(im.platform||'linux/amd64')+'</strong></div>'+
-            '<div><span>Repository / Tags</span><strong>'+h(im.repository)+' · '+h((im.tags||[]).join(', ')||'No tags')+'</strong></div>'+            '<div><span>Manifest revision</span><code>'+h(im.digest)+'</code></div>'+            '<div><span>Reference impact</span><strong>'+h(im.reference_count||0)+' pinned user(s); Tag unlink retains bytes</strong></div>'+            '<div><span>Agent cache</span>'+statusChip(cache)+'</div>'+
-            '<div><span>'+(im.kind==="Base Runtime"?"RootFS target":"Default mount")+'</span><code>'+h(im.kind==="Base Runtime"?"/":im.default_mount||"—")+'</code></div>'+
-          '</div>'+
-          (problem?alert(problem,'danger'):alert('Runtime compatible · current Agent','success'))+
-          tagControls(im)+
-          '<div class="cand-actions">'+
-            (im.kind==="Base Runtime"
-              ? action("Use as RootFS","image-root:"+im.id,"primary",!!problem||!isEditable())
-              : action("Mount in Filesystem","image-tool:"+im.id,"primary",!!problem||!isEditable()))+
-          '</div>'+
-        '</div>':"";
-      return '<div class="cand-image-entry'+(expanded?' expanded':'')+'">'+
-        '<button type="button" class="cand-image-trigger" data-action="image:'+h(im.id)+'" aria-expanded="'+expanded+'"'+(expanded?' aria-controls="'+detailId+'"':"")+'>'+
-          '<span class="cand-image-summary"><strong>'+h(im.name)+'</strong><small>'+h(im.kind)+' · '+short(im.digest)+'</small></span>'+
-          statusChip(im.status)+'<span class="cand-image-chevron" aria-hidden="true">'+(expanded?'⌃':'⌄')+'</span>'+
-        '</button>'+details+'</div>';
-    }).join("");
-    return sectionHead("Image Library","")+
-      '<div class="cand-image-list">'+(items||'<div class="fs-empty">No images</div>')+'</div>';
-  }
+  // Image Library row renderer is now owned by images-management.js (no duplicate renderer).
   function sizeLabel(bytes){
     if(bytes==null)return "—";
     if(bytes>=1000000000)return (bytes/1000000000).toFixed(2)+" GB";
@@ -271,68 +239,7 @@
     return s.transfers[im.id]||{state:s.cache[im.id]==="verified"?"verified":"absent",
       received:s.cache[im.id]==="verified"?im.size_bytes:0,total:im.size_bytes};
   }
-  function buildEditor(){
-    var kinds=[["github","GitHub"],["directory","Directory"],["archive","Archive"],["oci","OCI"],["compose","Image Compose"]];
-    var options=kinds.map(function(o){return action(o[1],"build-kind:"+o[0],s.buildKind===o[0]?"muted":"");}).join("");
-    var hintValue=s.buildKind==="github"?"https://github.com/owner/repo":s.buildKind==="directory"?"/authorized/source":s.buildKind==="archive"?"https://example.com/source.tar.gz":s.buildKind==="oci"?"registry/name@sha256:…":"rust-toolchain + nession-source (pinned)";
-    return card("New Build","Existing Server Image Manager; no shell execution in mock.",
-      '<div class="cand-actions">'+options+'</div>'+
-      (s.buildKind==="compose"?'<div class="cand-actions">'+action("Flattened","build-representation:flattened",s.buildRepresentation==="flattened"?"muted":"")+action("Referenced","build-representation:referenced",s.buildRepresentation==="referenced"?"muted":"")+'</div>':
-        '<div class="cand-field"><label>Source declaration</label><input aria-label="Build source" data-field="buildSourceValue" value="'+h(s.buildSourceValue)+'" placeholder="'+h(hintValue)+'"></div>')+
-      (s.buildError?alert(s.buildError,"danger"):"")+
-      '<div class="cand-actions">'+action("Cancel","build-start")+action("Submit Build","build-submit","primary",!online())+'</div>');
-  }
-  function imageBuilds(){
-    var filtered=s.builds.filter(function(b){return s.buildFilter==="all"||b.status===s.buildFilter;});
-    var pageCount=Math.max(1,Math.ceil(filtered.length/3));s.buildPage=Math.min(s.buildPage,pageCount-1);
-    var rows=filtered.slice(s.buildPage*3,(s.buildPage+1)*3).map(function(b){
-      var active=b.status==="running"||b.status==="queued",terminal=!active;
-      var counts=(b.files!=null?b.files.toLocaleString()+" files":"Files pending")+
-        " · "+(b.bytes!=null?sizeLabel(b.bytes):"Bytes pending");
-      return '<section class="cand-job" data-build-id="'+h(b.id)+'">'+
-        '<div class="cand-job-head"><div><strong>'+h(b.name)+'</strong><small>'+h(b.id)+' · Attempt '+h(b.attempt||1)+'</small></div>'+statusChip(b.status)+'</div>'+
-        '<div class="cand-job-stage"><span>'+h(active?buildStageLabel(b.stage):b.status==="succeeded"?"Published":b.status==="failed"?"Failed":b.status==="canceled"?"Canceled":b.status)+'</span>'+
-        '<span>'+Math.round((b.elapsed_ms||0)/1000)+'s elapsed</span></div>'+
-        (active?'<div class="cand-progress-track indeterminate" aria-label="Running build stage; no reliable percentage"><span></span></div>':"")+
-        '<div class="cand-job-measure">'+h(counts)+'</div>'+
-        (b.diagnostic?'<div class="cand-job-diagnostic '+(b.status==="failed"?"error":"")+'">'+h(b.diagnostic)+'</div>':"")+
-        '<div class="cand-actions">'+(active?action("Cancel","build-cancel:"+b.id,"",!online()):"")+
-          (b.status==="failed"||b.status==="canceled"?action("Retry","build-retry:"+b.id,"",!online()):"")+'</div></section>';
-    }).join("");
-    return sectionHead("Builds","",action(s.buildOpen?"Close build editor":"+ New build","build-start","primary",!online()))+
-      (s.buildOpen?buildEditor():"")+
-      '<div class="cand-actions">'+["all","running","succeeded","failed","canceled"].map(function(k){return action(k,"build-filter:"+k,s.buildFilter===k?"muted":"");}).join("")+'</div>'+
-      '<div class="cand-job-list">'+(rows||'<p class="fs-empty">No matching Build records</p>')+'</div>'+
-      '<div class="cand-actions">'+action("Previous","build-page:-1","",s.buildPage===0)+action("Next","build-page:1","",s.buildPage>=pageCount-1)+'<span>Page '+(s.buildPage+1)+' / '+pageCount+'</span></div>';
-  }
-  function distribution(){
-    var rows=s.images.map(function(im){
-      var cacheStatus=online()?(s.cache[im.id]||"absent"):"unknown";
-      var transfer=transferFor(im),ready=cacheStatus==="verified";
-      var label=!online()?"Unknown":ready?"Verified":transfer.state==="downloading"?"Downloading":
-        transfer.state==="verifying"?"Verifying":transfer.state==="resumable"?"Resumable":
-        transfer.state==="failed"?"Failed":"Not cached";
-      var received=ready?im.size_bytes:Math.min(transfer.received||0,im.size_bytes);
-      var total=im.size_bytes;
-      var measurable=!ready&&online()&&(transfer.state==="downloading"||transfer.state==="resumable"||transfer.state==="verifying");
-      var pct=measurable&&total>0?Math.round(received/total*100):null;
-      var measure=measurable?'<div class="cand-transfer-measure"><span>'+h(sizeLabel(received))+' / '+h(sizeLabel(total))+'</span><strong>'+pct+'%</strong></div>'+
-        '<progress class="cand-transfer-progress" aria-label="'+h(im.name)+' transfer bytes" value="'+received+'" max="'+total+'"></progress>':"";
-      var verified=ready?'<div class="cand-job-measure">Verified · '+h(sizeLabel(total))+' · SHA-256 matched</div>':"";
-      return '<section class="cand-job" data-transfer-image="'+h(im.id)+'">'+
-        '<div class="cand-job-head"><div><strong>'+h(im.name)+'</strong><small>'+short(im.digest)+'</small></div>'+statusChip(label.toLowerCase().replaceAll(" ","-"))+'</div>'+
-        '<div class="cand-job-stage"><span>'+label+'</span><span>Agent · nession-dev</span></div>'+
-        measure+verified+
-        (transfer.state==="verifying"?'<div class="cand-job-measure">Checking SHA-256 · not mount-ready</div>':"")+
-        (transfer.state==="resumable"?'<div class="cand-job-measure">Partial file preserved · transfer not active</div>':"")+
-        (!ready&&online()&&transfer.state!=="downloading"&&transfer.state!=="verifying"?
-          '<div class="cand-actions">'+action(transfer.state==="resumable"?"Resume":"Prepare","cache:"+im.id,"",false)+'</div>':"")+
-        '</section>';
-    }).join("");
-    return sectionHead("Distribution","",statusChip(online()?"available":"unknown"))+
-      '<div class="cand-distribution-context"><span>Current Agent</span><strong>nession-dev</strong><span>Server source: ready registry</span></div>'+
-      '<div class="cand-job-list">'+rows+'</div>';
-  }
+  // Builds and Distribution renderers is now owned by images-management.js (no duplicate renderer).
   function demoBuildStep(){
     var b=s.builds.find(function(item){return item.status==="queued"||item.status==="running"});
     if(!b)return;
