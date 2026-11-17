@@ -1,0 +1,5 @@
+# Repository-approved custom self-hosted runner labels.
+# This does not provision a runner or authorize untrusted code execution.
+self-hosted-runner:
+  labels:
+    - hs-mac
