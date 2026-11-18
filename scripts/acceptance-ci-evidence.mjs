@@ -3019,6 +3019,15 @@ async function selfTest() {
     ]]]),
   });
 
+  // #3843: the exact source-attested cross-Issue proof reaches the immutable
+  // Acceptance context but is never invented for unrelated Issues.
+  const source3843=normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedIssueAudit3843Readback:{status:'authenticated-repair-readback',
+      source_run_id:ISSUE_AUDIT_3843_PROOF.sourceRunId}});
+  assert.equal(source3843.authenticated_issue_audit_3843_readback.source_run_id,
+    ISSUE_AUDIT_3843_PROOF.sourceRunId);
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40)})
+    .authenticated_issue_audit_3843_readback,undefined);
   assert.equal(evidence.kind, 'acceptance_ci_evidence');
   assert.equal(evidence.provider_wake_evidence,null);
   assert.deepEqual(normalizeCiEvidence({targetSha:'a'.repeat(40),
