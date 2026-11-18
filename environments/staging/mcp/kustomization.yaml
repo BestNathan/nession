@@ -11,6 +11,7 @@ commonLabels:
   env: staging
 
 resources:
+  - sealed-tls.json
   - sealed-secret.json
   - deployment.yaml
   - service.yaml
