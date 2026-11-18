@@ -112,8 +112,7 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     // overwrite that receipt unless an explicit trusted supersession exists.
     // Keep Pending/Fail and inconsistent checkbox/report states selectable.
     .filter((criterion) => normalizedStage!=='pr' ||
-      !criterion.checked || !['pass','n/a'].includes(
-        String(contract.rows.get(criterion.id).result).toLowerCase()))
+      !acceptedPrSourceRef(criterion,contract.rows.get(criterion.id)))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
@@ -804,6 +803,13 @@ function selfTest() {
   assert.deepEqual(buildAcceptanceContext(anchoredIssue,'post-merge',{
     targetRef:exactB,runId:3,
   }).criteria.map(x=>x.criterion),['SC-03']);
+  // A user-edited Pass without a canonical projected exact-source receipt
+  // is NOT an accepted result and must not disappear from audit visibility.
+  const inventedPass=anchoredBody.replace(
+    'run 1; ref '+exactA+'; source agent-qwen; evidence',
+    'human-provided text without source Run');
+  assert.deepEqual(buildAcceptanceContext({...anchoredIssue,body:inventedPass},
+    'pr',{targetRef:exactB,runId:2}).criteria.map(x=>x.criterion),['SC-01']);
   // Only checkbox+accepted outcome freezes a prior source; an inconsistent
   // checkbox/report pair does not silently disappear from repair visibility.
   assert.deepEqual(buildAcceptanceContext({...anchoredIssue,
