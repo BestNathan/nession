@@ -488,9 +488,11 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-list')).toBeVisible();
-    // The directory counts arrive one `listDir` at a time, so the screenshot
-    // waits for the last row's meta rather than racing it.
-    await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
+    // The row exists only after `listDir` has answered, so its presence is the
+    // settled signal. It carries no child count: the App list stopped
+    // enumerating every child directory for a subtitle in #3451, and this
+    // assertion used to wait for the removed "1 item" meta.
+    await expect(page.getByTestId('file-row-web')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,
