@@ -63,16 +63,20 @@ test.describe('App push composition', () => {
     await gotoFixtureApp(page, '?conversation=list-stale');
     await page.getByTestId('app-header-workspace').first().click();
     await page.getByTestId('workspace-tool-claude-code').click();
+    await expect(page.getByTestId('claude-code-app-workspace')).toBeVisible();
 
+    // The conversation-first App starts on the open thread. The thread's own
+    // failure carries the one control that reloads both halves.
     const retry = page
       .getByTestId('conversation-unavailable')
       .getByRole('button', { name: 'Retry' });
     await expect(retry).toBeVisible();
     await retry.click();
 
-    // Push starts on the open thread. Enter the list through the same control a
-    // reader uses; the warning must not be a Web/master-detail-only semantic.
-    await page.getByTestId('conversation-show-list').click();
+    // Enter the directory through the same control a reader uses: the App's
+    // one list entry, not a Web/master-detail-only semantic.
+    await page.getByTestId('claude-app-all-conversations').click();
+    await expect(page.getByTestId('claude-app-conversations')).toBeVisible();
 
     const notice = page.getByTestId('conversation-list-error');
     await expect(notice).toBeVisible();
