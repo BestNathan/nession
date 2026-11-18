@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import readline from 'node:readline';
 import { fetchGitHubIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { validateIssueAuditCandidate } from './lib/agent/tools/gh/issue/validate.mjs';
+import { recordPreflightCheck, selfTestPreflightReceipts } from './lib/agent/tools/gh/issue/preflight-receipt.mjs';
 
 export const NAME='validate_issue_proposal';
 const MAX_BYTES=144*1024,MAX_CALLS=3;
@@ -22,7 +23,7 @@ const schema={
       }},
   },
 };
-export function makeAuditMcpHandler({issueNumber,readIssue,maxCalls=MAX_CALLS}) {
+export function makeAuditMcpHandler({issueNumber,readIssue,maxCalls=MAX_CALLS,recordCheck=recordPreflightCheck}) {
   if(!Number.isSafeInteger(issueNumber)||issueNumber<1||typeof readIssue!=='function')
     throw Error('Audit MCP requires a fixed positive Issue and a read-only source');
   let calls=0;
@@ -64,6 +65,14 @@ export function makeAuditMcpHandler({issueNumber,readIssue,maxCalls=MAX_CALLS}) 
           const issue=await readIssue(issueNumber);
           if(issue?.number!==issueNumber)throw Error('Mismatch in trusted Issue readback');
           const verdict=validateIssueAuditCandidate(issue,input.proposal);
+          try {
+            // Bounded runner-local receipt; no candidate text or secrets.
+            await recordCheck({issueNumber,proposal:input.proposal,verdict,sequence:calls});
+          }catch{
+            return reply({isError:true,content:[{type:'text',
+              text:JSON.stringify({ok:false,code:'ISSUE_AUDIT_PREFLIGHT_RECORD_UNAVAILABLE',
+                findings:['Selfcheck evidence cannot be recorded; no validation attestation']})}]});
+          }
           return reply({isError:!verdict.ok,content:[{type:'text',text:JSON.stringify(verdict)}]});
         }catch(_error){
           // Distinguish a broken GitHub/tooling read from a model proposal.
@@ -89,7 +98,8 @@ function fixture(){
 }
 export async function selfTestAuditMcp(){
   const source=fixture();
-  const h=makeAuditMcpHandler({issueNumber:3855,readIssue:async n=>{
+  selfTestPreflightReceipts();
+  const h=makeAuditMcpHandler({issueNumber:3855,recordCheck:()=>{},readIssue:async n=>{
     assert.equal(n,3855);return source;
   }});
   const ping=await h({jsonrpc:'2.0',id:1,method:'initialize',params:{}});
@@ -113,7 +123,7 @@ export async function selfTestAuditMcp(){
   const forged=await h({jsonrpc:'2.0',id:7,method:'tools/call',
     params:{name:'run_shell',arguments:{command:'rm -rf /'}}});
   assert.equal(forged.error.code,-32602);
-  const sourceFail=makeAuditMcpHandler({issueNumber:3855,
+  const sourceFail=makeAuditMcpHandler({issueNumber:3855,recordCheck:()=>{},
     readIssue:()=>{throw Error('private 403 token string');}});
   const untrustedRead=await sourceFail(req(8,{}));
   assert.equal(JSON.parse(untrustedRead.result.content[0].text).code,
