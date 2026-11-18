@@ -1,61 +1,23 @@
 #!/usr/bin/env node
-// #2010 OS sandbox must be an explicit container, never a pretend SDK toggle.
+// #3845: the Cursor Worker is a native Node process with no Docker precondition.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {spawnSync} from 'node:child_process';
-
-const file='.github/workflows/agent-develop.yml';
-const text=fs.readFileSync(file,'utf8');
-const block=text.split('      - name: Execute real Developer in isolated Docker with no host credentials\n')[1]?.split('\n      - name: Upload canonical')[0];
-assert.ok(block,'isolated execution step missing');
-function safe(workflow) {
-  const needed=[
-    'docker run --rm --read-only',
-    '--cap-drop=ALL',
-    '--security-opt=no-new-privileges',
-    '--pids-limit=256',
-    '--memory=4g',
-    '--network=bridge',
-    '-e NESSION_DEVELOPER_ISOLATED=docker-v1',
-    '-v "$GITHUB_WORKSPACE:/trusted-code:ro"',
-    '-v "$RUNNER_TEMP/development-checkout:/workspace:rw"',
-    '-v "$RUNNER_TEMP/development-sdk:/sdk:ro"',
-    '-v "$RUNNER_TEMP/development-admission.json:/admission.json:ro"',
-    '-v "$RUNNER_TEMP/development-output:/output:rw"',
-    '-e GITHUB_WORKSPACE=/workspace',
-    '-e CURSOR_SDK_ROOT=/sdk',
-    '-e CURSOR_RIPGREP_PATH=/usr/bin/rg',
-    'nession-cursor-worker-rg:local',
-    'node scripts/lib/agent/orchestration/development-worker.mjs',
-  ];
-  const denied=['-e STORE_APP_TOKEN','-e STORE_WRITER_PRIVATE_KEY',
-    '-e ACTIONS_DISPATCH_TOKEN','-e GITHUB_TOKEN','-e GH_TOKEN',
-    '-v "$HOME','-v "/var/run/docker.sock','--privileged','--cap-add'];
-  return needed.every(x=>workflow.includes(x))&&!denied.some(x=>workflow.includes(x));
-}
-const dockerfile=fs.readFileSync('scripts/lib/agent/orchestration/cursor-worker.Dockerfile','utf8');
-assert.match(dockerfile,/^FROM node:24-bookworm$/m);
-assert.match(dockerfile,/apt-get install -y --no-install-recommends ripgrep/);
-assert.doesNotMatch(dockerfile,/^(?:COPY|ADD|ARG|ENV)\b/m);
-assert.match(text,/Build trusted isolated Cursor runtime with ripgrep/);
-assert.match(text,/docker build --pull=false --tag nession-cursor-worker-rg:local/);
-assert.match(text,/docker run --rm --network=none --read-only --cap-drop=ALL/);
-assert.equal(safe(block),true);
-for(const flag of ['--read-only','--cap-drop=ALL','nession-cursor-worker-rg:local','-e CURSOR_SDK_ROOT=/sdk','-e CURSOR_RIPGREP_PATH=/usr/bin/rg',
-  '-v "$GITHUB_WORKSPACE:/trusted-code:ro"','-e NESSION_DEVELOPER_ISOLATED=docker-v1'])
-  assert.equal(safe(block.replace(flag,'')),false);
+const worker=fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8');
+assert.match(worker,/Node Developer requires absolute Runner workspace, SDK and temp paths/);
+assert.match(worker,/sandbox:false,prompt/);
+assert.doesNotMatch(worker,/\/\.dockerenv|NSESSION_DEVELOPER_ISOLATED|docker-v1/);
+assert.match(worker,/assertUnprivilegedDeveloperEnvironment\(process.env\)/);
 const result=spawnSync(process.execPath,[
   'scripts/lib/agent/orchestration/development-worker.mjs','/dev/null','/tmp/no-output',
 ],{env:{GITHUB_REPOSITORY:'BestNathan/nession',GITHUB_ACTIONS:'true'},
   encoding:'utf8',timeout:5000});
 assert.notEqual(result.status,0);
-assert.match(result.stderr,/OS-isolated Docker worker is mandatory/);
-// The existing agent-provider-contract Gate owns both positive and negative
-// Cursor runtime evidence. A Provider that fails after invoke must still
-// produce canonical, sanitized telemetry without claiming a checkpoint.
+assert.match(result.stderr,/Node Developer requires absolute Runner workspace/);
+// Provider failure after invocation must still produce sanitized telemetry.
 const telemetry=spawnSync(process.execPath,[
   'scripts/lib/agent/orchestration/development-failure-telemetry-selftest.mjs',
 ],{encoding:'utf8',timeout:15000});
 assert.equal(telemetry.status,0,telemetry.stderr);
 assert.match(telemetry.stdout,/Cursor failed Provider telemetry:/);
-console.log('Developer Docker boundary: exact secretless mounts, no host privileged capability and no-host fail-closed verified');
+console.log('Cursor Developer Node runtime: no mandatory SDK sandbox or Docker; privileged credentials still rejected');
