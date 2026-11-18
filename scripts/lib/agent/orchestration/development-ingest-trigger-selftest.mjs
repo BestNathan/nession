@@ -3,7 +3,8 @@
 // comments, untrusted Action inputs and forked runs cannot mint receipts.
 import assert from 'node:assert/strict';
 import {assertQwenBotWakeSource,resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
-  NATIVE_RECOVERY_RUN,NATIVE_RECOVERY_SHA,NATIVE_RECOVERY_INGEST_COMMAND}
+  NATIVE_RECOVERY_RUN,NATIVE_RECOVERY_SHA,NATIVE_RECOVERY_INGEST_COMMAND,
+  QWEN_3784_INGEST_COMMENT}
   from './development-ingest.mjs';
 const runId=39288961865;
 const environment={
@@ -162,31 +163,64 @@ for(const bad of [
   {event:{...qwenRepair5,issue:{number:2951}}},
 ])assert.throws(()=>resolveTrustedIngestSource({...{
   environment:qwenEnv,event:qwenEvent},...bad}));
-// #3589: the bot/main Worker wake is only a Run locator. A Developer
-// Implement uses the main source commit, but a signed Repair consumes the
-// separately published PR SHA. The complete Store and original signed ticket
-// remain authoritative in ingestQwenVerifiedCandidate.
+// #3885: the bot-main wake only locates the authenticated Worker. The
+// signed Implement source may be any genuine ancestor of the Worker main SHA;
+// a superficially valid but unrelated commit must still be rejected. Repair
+// consumes the published PR SHA and remains Store/Publisher-bound.
 const workflowSha='a'.repeat(40);
+const olderTrustedMain='c'.repeat(40);
 const reviewHead='b'.repeat(40);
+const unrelatedBranch='d'.repeat(40);
 const wakeRun={head_sha:workflowSha};
+const isMainAncestor=(source,worker)=>
+  worker===workflowSha&&[workflowSha,olderTrustedMain].includes(source);
 const qwenImplement={inputs:{agent_id:'dev-qwen-01',task:'implement',
   input_sha:workflowSha}};
+const olderImplement={inputs:{...qwenImplement.inputs,input_sha:olderTrustedMain}};
 const qwenRepair={inputs:{agent_id:'dev-qwen-01',task:'repair',
   input_sha:reviewHead}};
-assert.deepEqual(assertQwenBotWakeSource({run:wakeRun,claim:qwenImplement}),
+const wake=claim=>assertQwenBotWakeSource({run:wakeRun,claim,isMainAncestor});
+assert.deepEqual(wake(qwenImplement),
   {task:'implement',source_sha:workflowSha});
-assert.deepEqual(assertQwenBotWakeSource({run:wakeRun,claim:qwenRepair}),
+assert.deepEqual(wake(olderImplement),
+  {task:'implement',source_sha:olderTrustedMain});
+assert.deepEqual(wake(qwenRepair),
   {task:'repair',source_sha:reviewHead});
 for(const claim of [
   {...qwenImplement,inputs:{...qwenImplement.inputs,input_sha:reviewHead}},
+  {...qwenImplement,inputs:{...qwenImplement.inputs,input_sha:unrelatedBranch}},
   {...qwenRepair,inputs:{...qwenRepair.inputs,input_sha:workflowSha}},
   {...qwenRepair,inputs:{...qwenRepair.inputs,agent_id:'dev-cursor-01'}},
   {...qwenRepair,inputs:{...qwenRepair.inputs,task:'review'}},
   {...qwenRepair,inputs:{...qwenRepair.inputs,input_sha:'invalid'}},
   {...qwenRepair,inputs:{...qwenRepair.inputs,input_sha:null}},
-])assert.throws(()=>assertQwenBotWakeSource({run:wakeRun,claim}),
-  /signed exact-SHA Qwen/);
+])assert.throws(()=>wake(claim),/signed trusted-main Qwen/);
 assert.throws(()=>assertQwenBotWakeSource({
-  run:{head_sha:'invalid'},claim:qwenRepair}),/signed exact-SHA Qwen/);
+  run:wakeRun,claim:olderImplement,isMainAncestor:()=>false}),
+  /signed trusted-main Qwen/);
+assert.throws(()=>assertQwenBotWakeSource({
+  run:{head_sha:'invalid'},claim:qwenRepair}),/signed trusted-main Qwen/);
+// #3784: a repeated Model Run is forbidden; the Owner comment locates only
+// the existing successful Worker, exact Run ID + Issue, independently
+// checked against signed claim, Store and immutable result Artifact.
+const recovered3784={...qwenV2Issue,issue:{number:3784,state:'open'},
+  comment:{...qwenV2Issue.comment,body:QWEN_3784_INGEST_COMMENT}};
+assert.deepEqual(resolveTrustedIngestSource({
+  environment:qwenEnv,event:recovered3784}),
+  {run_id:44259490499,source:null,qwen_recovery:true,
+    issue:3784,attempt:1});
+for(const bad of [
+  {event:{...recovered3784,issue:{number:3785,state:'open'}}},
+  {event:{...recovered3784,comment:{...recovered3784.comment,
+    body:QWEN_3784_INGEST_COMMENT+' '}}},
+  {event:{...recovered3784,comment:{...recovered3784.comment,
+    body:QWEN_3784_INGEST_COMMENT.replace('44259490499','44259490500')}}},
+  {event:{...recovered3784,comment:{...recovered3784.comment,
+    user:{login:'external'}}}},
+  {environment:{...qwenEnv,GITHUB_ACTOR:'attacker'}},
+  {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
+])assert.throws(()=>resolveTrustedIngestSource({
+  environment:qwenEnv,event:recovered3784,...bad}),
+  /owner|exact|trusted|Ingest/);
 
 console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment, manual Qwen Worker Run and event denial passed');
