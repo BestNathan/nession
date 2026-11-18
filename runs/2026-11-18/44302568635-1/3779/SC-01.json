@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "53d333947d1a79393333ab03f76c74939fbcbc6d0ade8d6af267c78d80a97a11",
+  "run_id": 44302568635,
+  "run_attempt": 1,
+  "issue": 3779,
+  "criterion": "SC-01",
+  "criterion_text": "For supported Claude CLI versions, querying a concrete Nession Session returns accurate on-demand PID-matched `busy|waiting|idle`, `waiting_for` and conversation ID when supplied; unsupported CLI, ambiguous process or missing identity answers unknown/unavailable instead of a guessed state, without requiring a new state-tracking Hook.",
+  "stage": "staging",
+  "target_sha": "cb0b3bc0b123bbcba32939d2583546d1da295bc7",
+  "contract_sha256": "72f43c6842f09676bd559c020c6187ad69329f8c99d80bc452734ce04dcd63a8",
+  "case_revision": "cb0b3bc0b123bbcba32939d2583546d1da295bc7",
+  "case_tree_sha": "9dbf0888f5368aa5d126133d2709a33ed438d169",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T12:22:05.830Z",
+  "finished_at": "2026-11-18T12:23:13.301Z",
+  "duration_ms": 67470,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the CLI answer parser and every non-verified observation are pinned in source; the live verifier drives the real CLI path",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the captured `agents --json` shape (2.1.326 fixture, not an admission gate) parsed into typed busy/waiting/idle and background states; unknown values survived verbatim, a missing sessionId stayed null, an unlisted version was interpreted by its answer, an older CLI without the command was unsupported, and absent/unsupported/cannot-observe were each distinct and never reported as idle"
+        }
+      ],
+      "duration_ms": 22359,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-live.cjs",
+      "result": "Fail",
+      "summary": "the live Session to become observable did not happen within 30000ms",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the live external-CLI path did not establish the criterion"
+        }
+      ],
+      "duration_ms": 39007,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44302568635,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "5f5b91dbfb7ca58f14c21552558b54c007ed9f05",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "cb0b3bc0b123bbcba32939d2583546d1da295bc7",
+        "stage": "staging",
+        "issue": 3779,
+        "criterion": "SC-01",
+        "job_id": 134795786410,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44302568635",
+    "record_path": "runs/2026-11-18/44302568635-1/3779/SC-01.json",
+    "source_result_sha256": "e99f2f8cad4252dd888102311649a66a0cabd54b3d58178f30dcaaedf64fecef"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44302568635-1",
+    "sha256": "e99f2f8cad4252dd888102311649a66a0cabd54b3d58178f30dcaaedf64fecef",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44302568635",
+    "durability": "time-limited; object archival not configured"
+  }
+}
