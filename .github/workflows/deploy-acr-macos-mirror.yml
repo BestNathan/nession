@@ -55,8 +55,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+          REQUESTED_IMAGE: ${{ inputs.image }}
         run: |
-          node scripts/ci/verify-staging-ghcr-source.mjs verify-mirror "$REQUESTED_SOURCE_SHA"
+          node scripts/ci/verify-staging-ghcr-source.mjs verify-mirror "$REQUESTED_SOURCE_SHA" "$REQUESTED_IMAGE"
 
   mirror:
     needs: verify-source
