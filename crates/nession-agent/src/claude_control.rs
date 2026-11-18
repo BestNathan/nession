@@ -30,6 +30,7 @@ use nession_claude_code::control::{
     ClaudeStatusObservation, EnterMode, EnterOutcome, EnterRequest, EnterStatus, SubmitOutcome,
     SubmitRequest, SubmitStatus,
 };
+use nession_claude_code::process::is_claude_cli_process;
 
 use crate::tmux::manager::SessionManager;
 
@@ -101,9 +102,7 @@ impl AgentClaudeControl {
             .panes
             .iter()
             .flat_map(|pane| pane.processes.iter())
-            .any(|process| {
-                process.executable.contains("claude") || process.command.contains("claude")
-            });
+            .any(|process| is_claude_cli_process(&process.executable, &process.command));
         if !has_claude {
             return ClaudeStatusObservation::not_running(observed_at);
         }

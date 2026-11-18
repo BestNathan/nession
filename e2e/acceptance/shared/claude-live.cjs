@@ -530,12 +530,18 @@ async function createSession(stack) {
     working_dir: stack.workspace,
   });
   const target = { agent_id: stack.agentId, session_id: stack.sessionId };
-  await waitFor('the live Session to become observable', async () => {
-    const current = await stack.mcp.call('nession_claude_status', target);
-    return current.observation === 'verified' && current.process === 'not_running'
-      ? current
-      : null;
-  }, { timeoutMs: 30_000, intervalMs: 500 });
+  let last = null;
+  try {
+    await waitFor('the live Session to become observable', async () => {
+      last = await stack.mcp.call('nession_claude_status', target);
+      return last.observation === 'verified' && last.process === 'not_running'
+        ? last
+        : null;
+    }, { timeoutMs: 30_000, intervalMs: 500 });
+  } catch (error) {
+    throw new Error(error.message + '; create=' + JSON.stringify(created) +
+      '; last_status=' + JSON.stringify(last));
+  }
   return { target, created };
 }
 

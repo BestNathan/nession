@@ -33,9 +33,21 @@ run(({ evidence }) => {
     'agent_view::tests::a_missing_binary_is_absent',
     'agent_view::tests::malformed_or_non_array_output_is_cannot_observe',
   ]);
+  const identity = crateTests(
+    'nession-claude-code',
+    ['--lib', 'process::'],
+    600000,
+    isolatedTmuxEnv('nession-3779-sc01-identity'),
+  );
+  assertRan(identity, [
+    'process::tests::the_native_npm_binary_is_the_cli',
+    'process::tests::a_shell_script_wrapper_named_claude_is_the_cli',
+    'process::tests::a_session_shell_adapter_path_that_mentions_claude_is_not_the_cli',
+    'process::tests::an_argument_that_mentions_claude_is_not_the_cli',
+  ]);
   evidence.push({
     type: 'runtime',
-    value: 'the captured `agents --json` shape (2.1.326 fixture, not an admission gate) parsed into typed busy/waiting/idle and background states; unknown values survived verbatim, a missing sessionId stayed null, an unlisted version was interpreted by its answer, an older CLI without the command was unsupported, and absent/unsupported/cannot-observe were each distinct and never reported as idle',
+    value: 'the captured `agents --json` shape (2.1.326 fixture, not an admission gate) parsed into typed busy/waiting/idle and background states; unknown values survived verbatim, a missing sessionId stayed null, an unlisted version was interpreted by its answer, an older CLI without the command was unsupported, and absent/unsupported/cannot-observe were each distinct and never reported as idle; the executable/argv0/script identity rule accepts the real CLI shapes and rejects a Session adapter path or an argument that merely contains "claude"',
   });
-  return 'the CLI answer parser and every non-verified observation are pinned in source; the live verifier drives the real CLI path';
+  return 'the CLI answer parser, its non-verified observations and the Claude process identity rule are pinned in source; the live verifier drives the real CLI path';
 });
