@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "7b6a198e7d5f356d177014fba6972a7a72e32583",
+  "run_id": 44238674038,
+  "run_attempt": 1,
+  "plan_digest": "19244940b06066c1d0df79325ab9bfd6f024fbc210be8f8a8f28d213163be1f9",
+  "artifact_digest": "sha256:79ca274febfd82b2f8000ad97efd298387bbee92ea78f8a1902e8db703242d02",
+  "results": [
+    {
+      "id": "app-session-operations",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "sidebar-session-first",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
