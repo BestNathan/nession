@@ -2,6 +2,7 @@
 // Offline one-to-one SealedSecret producer from raw GitHub Environment Secret.
 // Names and paths come ONLY from this reviewed allowlist (#3912).
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { X509Certificate } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -106,6 +107,63 @@ export function addResource(yaml, resource) {
   return yaml.replace(/^resources:\s*\r?\n/m, 'resources:\n  - sealed-secret.json\n');
 }
 
+
+export function validateChangedPaths(changedPaths, environment, secretName) {
+  const target = getTarget(environment, secretName);
+  const expected = new Set([target.resource, target.kustomization]);
+  if (!Array.isArray(changedPaths) ||
+      changedPaths.some(p => typeof p !== 'string' || !expected.has(p))) {
+    throw new Error('GitOps checkout contains changes outside this exact Secret target');
+  }
+  return changedPaths;
+}
+
+function publish(root, environment, secretName) {
+  const target = getTarget(environment, secretName);
+  if (!root || !fs.existsSync(path.join(root, '.git'))) {
+    throw new Error('GitOps checkout required for bounded desired-state publication');
+  }
+  // The GitOps branch checkout is data only: never execute any code from it.
+  const git = (...args) => execFileSync('git', args, {
+    cwd: root, encoding: 'utf8', timeout: 30000,
+    stdio: ['ignore', 'pipe', 'pipe']
+  }).trim();
+  if (git('branch', '--show-current') !== 'gitops') {
+    throw new Error('Publication must target the checked-out gitops branch');
+  }
+  const paths = git('status', '--porcelain=v1', '--untracked-files=all')
+    .split('\n').filter(Boolean).map(line => line.slice(3));
+  validateChangedPaths(paths, environment, secretName);
+  if (!paths.includes(target.resource)) {
+    throw new Error('Expected encrypted SealedSecret resource was not generated');
+  }
+  const sealed = JSON.parse(fs.readFileSync(path.join(root, target.resource), 'utf8'));
+  validateSealed(sealed, environment, secretName);
+  git('add', '--', target.resource, target.kustomization);
+  if (!git('diff', '--cached', '--name-only')) {
+    console.log('Encrypted GitOps desired state already up-to-date');
+    return;
+  }
+  git('-c', 'user.name=github-actions[bot]',
+      '-c', 'user.email=github-actions[bot]@users.noreply.github.com',
+      'commit', '-m', 'secrets(' + environment + '): seal ' + secretName + ' (#3912)');
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      git('pull', '--rebase', 'origin', 'gitops');
+      git('push', 'origin', 'HEAD:gitops');
+      console.log('Published only strict, encrypted GitOps desired state');
+      return;
+    } catch {
+      if (fs.existsSync(path.join(root, '.git/rebase-merge')) ||
+          fs.existsSync(path.join(root, '.git/rebase-apply'))) {
+        try { git('rebase', '--abort'); } catch { /* fail closed */ }
+        throw new Error('GitOps rebase conflict; refusing to publish ciphertext');
+      }
+    }
+  }
+  throw new Error('Failed to publish encrypted desired state after bounded retries');
+}
+
 function execute() {
   const [operation, environment, secretName, root] = process.argv.slice(2);
   const target = getTarget(environment, secretName);
@@ -127,6 +185,10 @@ function execute() {
     console.log('Prepared single raw Secret using controller public sealing cert');
     return;
   }
+  if (operation === 'publish') {
+    publish(root, environment, secretName);
+    return;
+  }
   if (operation === 'stage') {
     if (!root || !fs.existsSync(path.join(root, '.git'))) throw new Error('GitOps checkout absent');
     const overlay = path.join(root, target.kustomization);
@@ -142,7 +204,7 @@ function execute() {
     console.log('Staged one encrypted SealedSecret in allowlisted GitOps overlay');
     return;
   }
-  throw new Error('Expected verify, prepare or stage');
+  throw new Error('Expected verify, prepare, stage or publish');
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   try { execute(); } catch (error) {
