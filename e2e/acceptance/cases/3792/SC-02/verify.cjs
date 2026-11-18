@@ -5,10 +5,21 @@
 // source is refused before any mount, and the persistent Workspace survives.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { run } = require('../../../shared/control-mode-cases.cjs');
+const { run, checked } = require('../../../shared/control-mode-cases.cjs');
 const {
   probeCapabilities, runLinuxRuntimeTest, runtimeEvidence, pending, capabilityLine,
 } = require('../../../shared/sandbox-cases.cjs');
+
+try {
+  checked('sudo', ['apt-get', 'update', '-qq'], 120000);
+  checked(
+    'sudo',
+    ['apt-get', 'install', '-y', '-qq', 'erofs-utils', 'erofsfuse', 'fuse3', 'fuse-overlayfs'],
+    300000,
+  );
+} catch (error) {
+  console.error('could not install EROFS helpers: ' + error.message);
+}
 
 const capabilities = probeCapabilities();
 if (!capabilities.backend) {
