@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "cb0b3bc0b123bbcba32939d2583546d1da295bc7",
+  "run_id": 44300726345,
+  "run_attempt": 1,
+  "plan_digest": "0fada9e2fdd05187d9a7ec1dce9c564f083ac25adfa6dfe9fc8f6a41c2c67ed5",
+  "artifact_digest": "sha256:6ce58dadefe6f9da5e06df2217572b01cad9e3de727e256d516b41655d29caac",
+  "results": [
+    {
+      "id": "conversation-list-state",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 14
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 23,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 156
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 110
+    },
+    {
+      "id": "transcript-geometry",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 78
+    }
+  ]
+}
