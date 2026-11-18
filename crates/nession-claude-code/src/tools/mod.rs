@@ -2,9 +2,14 @@
 //!
 //! One flat file per Tool, named exactly like the MCP Tool. The module owns its
 //! contract and validation; execution is delegated to the Agent-supplied
-//! [`crate::control::ClaudeControl`].
+//! [`crate::control::ClaudeControl`] for live control, and to the Agent's
+//! existing Conversation/Transcript Protocol Units through
+//! [`crate::conversation_reader::ClaudeConversationReader`] for reads.
 
 pub mod nession_claude_enter;
+pub mod nession_claude_get_conversation;
+pub mod nession_claude_get_transcript;
+pub mod nession_claude_list_conversations;
 pub mod nession_claude_status;
 pub mod nession_claude_submit;
 
@@ -15,6 +20,7 @@ use nession_mcp::tool::non_empty;
 use nession_mcp::{ToolError, ToolHandler};
 
 use crate::control::{ClaudeControl, ClaudeSessionTarget};
+use crate::conversation_reader::ClaudeConversationReader;
 
 /// Validate the Agent/Session target every Claude Tool names.
 ///
@@ -45,18 +51,24 @@ pub(crate) fn validate_target(
     })
 }
 
-/// Every Claude control Tool, composed explicitly by the owning Agent.
+/// Every Claude control and read Tool, composed explicitly by the owning Agent.
 pub struct ClaudeCodeToolProvider {
     local_agent_id: String,
     control: Arc<dyn ClaudeControl>,
+    reader: Arc<dyn ClaudeConversationReader>,
 }
 
 impl ClaudeCodeToolProvider {
-    /// Build the provider for one Agent's control backend.
-    pub fn new(local_agent_id: impl Into<String>, control: Arc<dyn ClaudeControl>) -> Self {
+    /// Build the provider for one Agent's control backend and Unit readers.
+    pub fn new(
+        local_agent_id: impl Into<String>,
+        control: Arc<dyn ClaudeControl>,
+        reader: Arc<dyn ClaudeConversationReader>,
+    ) -> Self {
         Self {
             local_agent_id: local_agent_id.into(),
             control,
+            reader,
         }
     }
 }
@@ -78,8 +90,26 @@ impl McpToolProvider for ClaudeCodeToolProvider {
             )),
             Arc::new(nession_claude_submit::NessionClaudeSubmit::new(
                 self.local_agent_id.clone(),
-                self.control.clone(),
+                Arc::clone(&self.control),
             )),
+            Arc::new(
+                nession_claude_list_conversations::NessionClaudeListConversations::new(
+                    self.local_agent_id.clone(),
+                    Arc::clone(&self.reader),
+                ),
+            ),
+            Arc::new(
+                nession_claude_get_conversation::NessionClaudeGetConversation::new(
+                    self.local_agent_id.clone(),
+                    Arc::clone(&self.reader),
+                ),
+            ),
+            Arc::new(
+                nession_claude_get_transcript::NessionClaudeGetTranscript::new(
+                    self.local_agent_id.clone(),
+                    Arc::clone(&self.reader),
+                ),
+            ),
         ])
     }
 }

@@ -644,9 +644,17 @@ pub fn compose_mcp_tool_providers(
     agent_id: &str,
     tmux: Arc<SessionManager>,
 ) -> Vec<Arc<dyn McpToolProvider>> {
+    // The read Tools execute this Agent's **existing** conversation/transcript
+    // Protocol Units through the same stateless extension the protocol routes
+    // use, over the same tmux Session truth (`#3779` P3). There is no second
+    // discovery or transcript parser behind the MCP surface.
+    let reader = Arc::new(ClaudeCodeAgentExtension::new(Arc::new(
+        TmuxSessionContext::new(Arc::clone(&tmux)),
+    )));
     vec![Arc::new(ClaudeCodeToolProvider::new(
         agent_id,
         Arc::new(AgentClaudeControl::new(agent_id, tmux)),
+        reader,
     ))]
 }
 
@@ -891,7 +899,10 @@ mod tests {
             vec![
                 "nession_claude_status",
                 "nession_claude_enter",
-                "nession_claude_submit"
+                "nession_claude_submit",
+                "nession_claude_list_conversations",
+                "nession_claude_get_conversation",
+                "nession_claude_get_transcript"
             ]
         );
     }

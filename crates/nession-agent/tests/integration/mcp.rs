@@ -115,6 +115,23 @@ async fn start_agent_with_providers(
     tool_timeout_secs: u64,
     tool_providers: Vec<Arc<dyn McpToolProvider>>,
 ) -> (SocketAddr, nession_agent::server::ServerHandle) {
+    start_agent_with_provider_factory(mutations, tool_timeout_secs, |_| tool_providers).await
+}
+
+/// Start the real Agent listener with a provider composition that receives the
+/// listener's own tmux Session manager.
+///
+/// A provider that executes a Session-scoped Protocol Unit must observe the
+/// same tmux truth the MCP endpoint serves; handing it a second manager would
+/// make the test pass against Sessions the endpoint never created.
+async fn start_agent_with_provider_factory<F>(
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    tool_timeout_secs: u64,
+    tool_providers: F,
+) -> (SocketAddr, nession_agent::server::ServerHandle)
+where
+    F: FnOnce(Arc<SessionManager>) -> Vec<Arc<dyn McpToolProvider>>,
+{
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
@@ -156,7 +173,7 @@ async fn start_agent_with_providers(
         ..Default::default()
     };
     server
-        .mount_mcp(&config, TOKEN, tool_providers)
+        .mount_mcp(&config, TOKEN, tool_providers(Arc::clone(&tmux)))
         .expect("mount MCP");
     let (handle, addr) = server.start().await.expect("start");
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -547,6 +564,179 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     assert_eq!(killed["isError"], false, "{killed}");
     assert_eq!(text_of(&killed)["name"], name);
 
+    let _ = handle.shutdown().await;
+}
+
+/// `#3779` SC-04: the three Conversation/Transcript read Tools are contributed
+/// through the Agent's own catalog and execute the **existing** Protocol Units
+/// against the same tmux Session truth the endpoint serves.
+///
+/// The empty Session is the real reader's answer at this Session's strict cwd:
+/// `ready` with no conversations, then `not_found` for an id that names no
+/// conversation and no transcript. None of the three substitutes another
+/// conversation, and none carries a filesystem path.
+#[tokio::test]
+async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
+    let (addr, handle) = start_agent_with_provider_factory(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        |tmux| nession_agent::runtime::compose_mcp_tool_providers(TEST_AGENT_ID, tmux),
+    )
+    .await;
+    let session = initialize(addr).await;
+
+    let tools = list_tools(addr, &session).await;
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    for name in [
+        "nession_claude_status",
+        "nession_claude_enter",
+        "nession_claude_submit",
+        "nession_claude_list_conversations",
+        "nession_claude_get_conversation",
+        "nession_claude_get_transcript",
+    ] {
+        assert!(names.contains(&name), "{name} is missing from {names:?}");
+    }
+
+    let list_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "nession_claude_list_conversations")
+        .expect("list Tool");
+    assert_eq!(list_tool["inputSchema"]["additionalProperties"], false);
+    for field in ["state", "items", "binding", "next_cursor", "has_more"] {
+        assert!(
+            list_tool["outputSchema"]["properties"].get(field).is_some(),
+            "the list contract is missing {field}"
+        );
+    }
+    let conversation_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "nession_claude_get_conversation")
+        .expect("conversation Tool");
+    for field in ["items", "conversation", "partial_tail", "skipped"] {
+        assert!(
+            conversation_tool["outputSchema"]["properties"]
+                .get(field)
+                .is_some(),
+            "the conversation contract is missing {field}"
+        );
+    }
+    let transcript_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "nession_claude_get_transcript")
+        .expect("transcript Tool");
+    for field in ["page", "record"] {
+        assert!(
+            transcript_tool["outputSchema"]["properties"]
+                .get(field)
+                .is_some(),
+            "the transcript contract is missing {field}"
+        );
+    }
+    assert!(
+        !transcript_tool["outputSchema"]
+            .to_string()
+            .contains("\"path\""),
+        "the transcript contract must not expose a file path"
+    );
+
+    let name = unique_session_name("claude-read");
+    let created = call_tool(
+        addr,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let target = format!("{TEST_AGENT_ID}:{name}");
+
+    let listed = call_tool(
+        addr,
+        &session,
+        "nession_claude_list_conversations",
+        json!({ "agent_id": TEST_AGENT_ID, "session_id": target }),
+    )
+    .await;
+    assert_eq!(listed["isError"], false, "{listed}");
+    let listed = text_of(&listed);
+    assert_eq!(listed["state"], "ready", "{listed}");
+    assert!(
+        listed["items"]
+            .as_array()
+            .is_none_or(std::vec::Vec::is_empty),
+        "a cwd with no Claude conversations is an empty ready list: {listed}"
+    );
+
+    let unknown = call_tool(
+        addr,
+        &session,
+        "nession_claude_get_conversation",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "session_id": target,
+            "conversation_id": "550e8400-e29b-41d4-a716-446655440000"
+        }),
+    )
+    .await;
+    assert_eq!(unknown["isError"], false, "{unknown}");
+    let unknown = text_of(&unknown);
+    assert_eq!(unknown["state"], "not_found", "{unknown}");
+    assert!(
+        unknown.get("conversation").is_none(),
+        "an unknown id must not select another conversation: {unknown}"
+    );
+
+    let transcript = call_tool(
+        addr,
+        &session,
+        "nession_claude_get_transcript",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "session_id": target,
+            "conversation_id": "550e8400-e29b-41d4-a716-446655440000"
+        }),
+    )
+    .await;
+    assert_eq!(transcript["isError"], false, "{transcript}");
+    let transcript = text_of(&transcript);
+    assert_eq!(transcript["page"]["state"], "not_found", "{transcript}");
+    assert!(transcript.get("record").is_none(), "{transcript}");
+
+    let record = call_tool(
+        addr,
+        &session,
+        "nession_claude_get_transcript",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "session_id": target,
+            "record_ref": "not-a-real-reference"
+        }),
+    )
+    .await;
+    assert_eq!(record["isError"], false, "{record}");
+    assert_eq!(text_of(&record)["record"]["state"], "not_found", "{record}");
+
+    let foreign = call_tool(
+        addr,
+        &session,
+        "nession_claude_list_conversations",
+        json!({ "agent_id": "another-agent", "session_id": "another-agent:dev" }),
+    )
+    .await;
+    assert_eq!(foreign["isError"], true, "{foreign}");
+
+    let killed = call_tool(
+        addr,
+        &session,
+        "nession_agent_kill_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
     let _ = handle.shutdown().await;
 }
 
