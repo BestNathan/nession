@@ -1089,9 +1089,30 @@ impl TmuxOps {
     /// tmux context). No caller's *class* changed — `EnvManager` still
     /// propagates, `SessionManager`'s legacy stage 2 still ignores.
     pub async fn send_keys(&self, session: &str, keys: &str) -> Result<()> {
+        self.run_send_keys(&send_keys_args(session, keys), session)
+            .await
+    }
+
+    /// Type one **literal** line into `session`'s active pane and press Enter:
+    /// `tmux send-keys -l -t <session> -- <text>` followed by
+    /// `tmux send-keys -t <session> Enter`.
+    ///
+    /// [`Self::send_keys`] is the key-name form, where an argument such as
+    /// `Up` means the arrow key. A user prompt is content, not a key name, so
+    /// it must never be interpreted: `-l` makes tmux send the characters
+    /// verbatim, and the separate `Enter` is the only key this operation
+    /// presses.
+    pub async fn send_literal_line(&self, session: &str, text: &str) -> Result<()> {
+        self.run_send_keys(&["send-keys", "-l", "-t", session, "--", text], session)
+            .await?;
+        self.run_send_keys(&["send-keys", "-t", session, "Enter"], session)
+            .await
+    }
+
+    async fn run_send_keys(&self, args: &[&str], session: &str) -> Result<()> {
         let output = self
             .command
-            .output(&send_keys_args(session, keys))
+            .output(args)
             .await
             .with_context(|| format!("failed to spawn tmux send-keys for session {session}"))?;
         if output.status.success() {

@@ -886,6 +886,13 @@ mod tests {
             .flat_map(|provider| provider.tools().expect("provider tools"))
             .map(|tool| tool.name().to_string())
             .collect();
-        assert_eq!(names, vec!["nession_claude_status".to_string()]);
+        assert_eq!(
+            names,
+            vec![
+                "nession_claude_status",
+                "nession_claude_enter",
+                "nession_claude_submit"
+            ]
+        );
     }
 }

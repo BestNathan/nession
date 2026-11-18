@@ -45,6 +45,30 @@ Any other version is `Unverified` and yields `CannotObserve` until a capture
 and its fixtures are added. Older or vendor-fork CLIs therefore cannot be
 silently interpreted with the verified shape.
 
+## Control: enter and submit
+
+`nession_claude_enter` selects a conversation explicitly:
+
+* `mode: new` chooses a fresh UUID **before** launch (shell path:
+  `claude --session-id <uuid>`) or uses in-process `/clear` only when Claude is
+  verifiably idle. A preexisting Claude is never overwritten.
+* `mode: resume` requires an explicit `conversation_id` (shell:
+  `claude --resume <id>`, in-process: `/resume <id>`); it never means "the
+  newest".
+* Busy, waiting or unknown activity is refused. Enter and submit share one
+  write lock per Agent, so two calls cannot be concurrent writers to one
+  transcript.
+* The result is `entered` only after the resulting conversation id is verified;
+  otherwise `pending` with a read-back instruction. Nothing is reported as
+  entered on a guess.
+
+`nession_claude_submit` requires the verified idle conversation and the
+caller's expected `conversation_id` (a stale mismatch refuses). It sends one
+literal prompt line and answers `input_sent` with the verified actual id. That
+is a **delivery** phase, not an execution result: there is no operation id, no
+result object and no `get_result`. An unconfirmed send is `unknown` and must be
+read back through the conversation readers before retrying.
+
 ## Not this module
 
 * No new Hook state, no hook-maintained activity store and no expanded plugin

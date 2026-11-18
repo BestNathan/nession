@@ -121,4 +121,100 @@ impl ClaudeStatusObservation {
 pub trait ClaudeControl: Send + Sync {
     /// Observe one Session's Claude state on demand.
     async fn status(&self, target: &ClaudeSessionTarget) -> ClaudeStatusObservation;
+
+    /// Enter a new or explicitly selected Claude conversation (`#3779` P1b).
+    async fn enter(&self, request: EnterRequest) -> EnterOutcome;
+
+    /// Send one prompt to the verified idle Claude conversation (`#3779` P2).
+    async fn submit(&self, request: SubmitRequest) -> SubmitOutcome;
+}
+
+/// How `enter` selects the conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EnterMode {
+    /// Start a new conversation with a newly chosen UUID.
+    New,
+    /// Resume an explicitly selected conversation.
+    Resume,
+}
+
+/// An `enter` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnterRequest {
+    /// The owning Agent and Nession Session.
+    pub target: ClaudeSessionTarget,
+    /// New or resume.
+    pub mode: EnterMode,
+    /// The selected conversation; required for `Resume`, absent for `New`.
+    pub conversation_id: Option<String>,
+}
+
+/// What `enter` achieved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EnterStatus {
+    /// Claude is in the requested conversation and it was verified.
+    Entered,
+    /// The command was sent but the resulting conversation is not yet verified.
+    Pending,
+    /// Nothing was sent (busy/waiting/unknown target, or an unsupported path).
+    Refused,
+}
+
+/// The typed `enter` answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct EnterOutcome {
+    /// The actual conversation Claude is in, when verified.
+    pub conversation_id: Option<String>,
+    /// Entered / pending / refused.
+    pub status: EnterStatus,
+    /// Process state after the attempt.
+    pub process: ClaudeProcessState,
+    /// Activity after the attempt.
+    pub activity: ClaudeActivityState,
+    /// How the resulting state was observed.
+    pub observation: ClaudeObservation,
+    /// A bounded reason for a non-entered answer.
+    pub detail: Option<String>,
+    /// RFC 3339 timestamp of the observation.
+    pub observed_at: String,
+}
+
+/// A `submit` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmitRequest {
+    /// The owning Agent and Nession Session.
+    pub target: ClaudeSessionTarget,
+    /// The verified conversation the caller expects; a stale mismatch refuses.
+    pub conversation_id: String,
+    /// One prompt line.
+    pub prompt: String,
+}
+
+/// The truthful delivery phase. This is not an execution result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmitStatus {
+    /// The input reached the interactive Claude process's PTY.
+    InputSent,
+    /// Nothing was sent (wrong/stale conversation, busy/waiting/unknown).
+    Refused,
+    /// Delivery could not be confirmed; read the conversation back before retrying.
+    Unknown,
+}
+
+/// The typed `submit` answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SubmitOutcome {
+    /// The verified actual conversation the input was addressed to.
+    pub conversation_id: Option<String>,
+    /// The delivery phase.
+    pub status: SubmitStatus,
+    /// How the target state was observed.
+    pub observation: ClaudeObservation,
+    /// A bounded reason for a non-sent answer.
+    pub detail: Option<String>,
+    /// RFC 3339 timestamp of the observation.
+    pub observed_at: String,
 }
