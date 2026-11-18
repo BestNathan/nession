@@ -197,13 +197,13 @@ jobs:
       - name: Run the read-only Reviewer Slice directly with Node.js
         env:
           NESSION_REVIEW_ACTION_ID: ${{ inputs.action_id }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CURSOR_API_KEY: ${{ needs.prepare.outputs.reviewer == 'review-cursor-01' && secrets.CURSOR_API_KEY || '' }}
           CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
           CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
           CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ needs.prepare.outputs.reviewer == 'review-qwen-01' && secrets.ANTHROPIC_AUTH_TOKEN || '' }}
+          ANTHROPIC_API_KEY: ${{ needs.prepare.outputs.reviewer == 'review-qwen-01' && secrets.ANTHROPIC_API_KEY || '' }}
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL }}
         run: |
