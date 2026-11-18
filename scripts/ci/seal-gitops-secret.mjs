@@ -22,7 +22,7 @@ const TARGETS = Object.freeze({
       name: 'nession-mcp-staging-tls',
       keys: Object.freeze(['tls.crt', 'tls.key']),
       type: 'kubernetes.io/tls',
-      hostname: 'staging.mcp.nession.bestnathan.top',
+      hostname: 'staging-mcp-nession.bestnathan.top',
       resource: 'environments/staging/mcp/sealed-tls.json',
       kustomization: 'environments/staging/mcp/kustomization.yaml'
     })
