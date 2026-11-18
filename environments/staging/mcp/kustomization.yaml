@@ -11,6 +11,7 @@ commonLabels:
   env: staging
 
 resources:
+  - sealed-secret.json
   - deployment.yaml
   - service.yaml
   # Public ingress is intentionally NOT activated before a trusted TLS
