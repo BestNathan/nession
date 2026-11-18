@@ -175,7 +175,8 @@ test('TLS PEM rejects unrelated identity, mismatch, extra material and expiring 
     const raw = a.crt + a.key;
     assert.throws(() => parseTlsPemBundle(raw, 'other.example.com'));
     assert.throws(() => parseTlsPemBundle(raw, 'staging.mcp.nession.bestnathan.top'));
-    assert.throws(() => parseTlsPemBundle((() => { const oldCert = generateTlsFixture(tmp, 'old-host', 'staging.mcp.nession.bestnathan.top'); return oldCert.crt + oldCert.key; })(), tlsHostname));
+    const oldHostCert = generateTlsFixture(tmp, 'old-host', 'staging.mcp.nession.bestnathan.top');
+    assert.throws(() => parseTlsPemBundle(oldHostCert.crt + oldHostCert.key, tlsHostname));
     assert.throws(() => parseTlsPemBundle(a.crt + b.key, tlsHostname));
     assert.throws(() => parseTlsPemBundle(a.crt + a.key + b.key, tlsHostname));
     assert.throws(() => parseTlsPemBundle(a.crt, tlsHostname));
