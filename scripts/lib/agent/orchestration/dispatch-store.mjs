@@ -12,6 +12,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordAttestedQwenPreflightFailure,qwenPreflightSuccessorId,
   recordAttestedQwenPreflightFailureV2,qwenPreflightSuccessorIdV2,
   recordAttestedQwenPreflightFailureV3,qwenPreflightSuccessorIdV3,
+  recordAttestedQwenCliFailure,qwenCliSuccessorId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
@@ -33,6 +34,7 @@ import {publish} from '../../../run-store-cas-push.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V2 as QWEN_KEY_FAILURE_V2,
   SOURCE_V3 as QWEN_KEY_FAILURE_V3} from './qwen-preflight-failure.mjs';
+import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
 
 const REF='agent-store';
 function fail(message){throw Error('trusted dispatch Store: '+message);}
@@ -620,6 +622,53 @@ export function recoverAttestedQwenPreflightV3({remote,source}){
     return {status:'recovered',issue:original.issue,
       action_id:successorId,state_version:state.version,
       store_commit_sha:published.commit_sha};
+  });
+}
+
+// #3885: retire exactly one source-attested production Node Qwen CLI failure,
+// then publish a unique pending successor. No original Run retry and no model
+// call occurs within this Store writer transaction.
+export function recoverAttestedQwenCliFailure({remote,source}){
+  const f=QWEN_CLI_FAILURE;
+  if(source?.verified!==true||source.issue!==f.issue||
+     source.action_id!==f.action_id||source.run_id!==f.run_id||
+     source.attempt!==1||source.source_sha!==f.source_sha||
+     source.run_head_sha!==f.run_head_sha||
+     source.failure_code!==f.failure_code)
+    fail('exact authenticated Qwen CLI failure proof required');
+  return withStore(remote,dir=>{
+    const record=readIssueWorkflowState(dir,f.issue);
+    if(!record.state)fail('missing Qwen CLI failure Issue Store state');
+    const old=record.state.outbox.find(x=>x.id===f.action_id);
+    const successorId=qwenCliSuccessorId(f.issue,f.action_id,f.run_id);
+    if(old?.status==='failed'){
+      const next=record.state.outbox.find(x=>x.id===successorId);
+      if(old.receipt?.source_run_id!==f.run_id||
+         old.receipt?.failure_code!==f.failure_code||
+         !next||!['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting Qwen CLI failure recovery replay');
+      return {status:'replayed',issue:f.issue,action_id:successorId,
+        state_version:record.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(record.version!==3||old?.status!=='dispatched'||
+       old.receipt?.status!=='verified'||
+       old.receipt.source_run_id!==f.run_id||
+       old.task.agent_id!=='dev-qwen-01'||
+       old.task.sha!==f.source_sha)
+      fail('original failed Qwen Store source changed');
+    // The first Worker uploaded Claim + diagnostic telemetry only; require
+    // no committed candidate/native checkpoint or result before recovery.
+    const folder=path.join(dir,'roles/developer/dev-qwen-01/issues/'+f.issue);
+    if(fs.existsSync(path.join(folder,'head.json'))||
+       fs.existsSync(path.join(folder,'runs/'+f.run_id+'-1.json'))||
+       fs.existsSync(path.join(folder,'checkpoints')))
+      fail('cannot recover Qwen CLI Worker with accepted native checkpoint');
+    const state=recordAttestedQwenCliFailure(record.state,record.version,source);
+    const published=persist(dir,state,record.version,f.issue);
+    if(published.replayed)
+      fail('new Qwen CLI failure recovery unexpectedly replayed Store CAS');
+    return {status:'recovered',issue:f.issue,action_id:successorId,
+      state_version:state.version,store_commit_sha:published.commit_sha};
   });
 }
 
