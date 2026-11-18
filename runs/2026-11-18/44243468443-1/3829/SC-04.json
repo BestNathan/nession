@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "24c930c3d60d025d85ff0e0a12e0c929bd0be0919bff56232e66f4ecb92eb24a",
+  "run_id": 44243468443,
+  "run_attempt": 1,
+  "issue": 3829,
+  "criterion": "SC-04",
+  "criterion_text": "Exact/unbound/empty/unavailable/offline/loading/error states are represented honestly; foreground CLI detection never masquerades as authoritative working/idle status; Session changes invalidate stale details without unmounting Terminal.",
+  "stage": "staging",
+  "target_sha": "cba19b3f14e8f4845c9f3effed3756d3d25cfd1d",
+  "contract_sha256": "643fdfda282dc67412e3913db72ab3f42b77756822ddf53c2418810cfe1070f4",
+  "case_revision": "cba19b3f14e8f4845c9f3effed3756d3d25cfd1d",
+  "case_tree_sha": "6e754302f1021bd44650d81060e1b0ac591d1fbc",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T05:23:49.091Z",
+  "finished_at": "2026-11-18T05:24:01.168Z",
+  "duration_ms": 12077,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=19"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 19
+      },
+      "duration_ms": 3241,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Loading is not confused with no binding, a Session change retires pushed state, and no foreground-command observation becomes a work claim, at the exact target SHA.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=cba19b3f14e8f4845c9f3effed3756d3d25cfd1d profile=full-stack-local"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/capabilities/claude-code/components/__tests__/integration/ClaudeCodeAppWorkspace.test.tsx: shows the directory loading state instead of claiming no binding; retires a pushed depth when the Session changes; never labels a foreground Claude process as working activity"
+        }
+      ],
+      "duration_ms": 2983,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44243468443,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cba19b3f14e8f4845c9f3effed3756d3d25cfd1d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44243468443",
+    "record_path": "runs/2026-11-18/44243468443-1/3829/SC-04.json",
+    "source_result_sha256": "d5ce6c8bf99eae23eb5f7b657863b610e4ab600eef8e3f4d74406f5acb332991"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44243468443-1",
+    "sha256": "d5ce6c8bf99eae23eb5f7b657863b610e4ab600eef8e3f4d74406f5acb332991",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44243468443",
+    "durability": "time-limited; object archival not configured"
+  }
+}

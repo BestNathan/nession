@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "dc4327bbff27bcce02a299c164ae9409cd483b28f5ea54280d9a9d904620aa71",
+  "run_id": 44243468443,
+  "run_attempt": 1,
+  "issue": 3829,
+  "criterion": "SC-05",
+  "criterion_text": "Reuse shared AIConversation, Transcript Raw, MCP, Memory and configuration owners; Web presentation is not regressed, and no provider-private data is exposed by the App layer.",
+  "stage": "staging",
+  "target_sha": "cba19b3f14e8f4845c9f3effed3756d3d25cfd1d",
+  "contract_sha256": "643fdfda282dc67412e3913db72ab3f42b77756822ddf53c2418810cfe1070f4",
+  "case_revision": "cba19b3f14e8f4845c9f3effed3756d3d25cfd1d",
+  "case_tree_sha": "39834e32c493b7330af479f30626ca99501b8350",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T05:24:01.168Z",
+  "finished_at": "2026-11-18T05:24:18.265Z",
+  "duration_ms": 17097,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=10"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 10
+      },
+      "duration_ms": 2682,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Web kept its existing Claude presentation while App reached the shared conversation, Memory, MCP, Configuration and transcript owners, at the exact target SHA.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=cba19b3f14e8f4845c9f3effed3756d3d25cfd1d profile=full-stack-local"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/capabilities/claude-code/components/__tests__/integration/ClaudeCodeWorkspace.test.tsx: opens on the conversation, and keeps configuration one section away; keeps the browser heading on web and defers the app heading to AppPageHeader"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/capabilities/claude-code/components/__tests__/integration/ClaudeCodeAppWorkspace.test.tsx: reads a directory conversation without replacing the bound root, and Back restores it; pushes a memory file and restores the list selection; pushes Configuration files as one column and keeps the scope inside it; pushes an MCP server and its inspected tool schema, with no second Back"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/shared/ai-conversation/__tests__/integration/ConversationView.test.tsx: pushes the detail over the list on a narrow surface"
+        }
+      ],
+      "duration_ms": 8567,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44243468443,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cba19b3f14e8f4845c9f3effed3756d3d25cfd1d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44243468443",
+    "record_path": "runs/2026-11-18/44243468443-1/3829/SC-05.json",
+    "source_result_sha256": "e3682e26043ad060d82811c8d3c5300dadbde87b5051c14fea33fd96cf792c22"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44243468443-1",
+    "sha256": "e3682e26043ad060d82811c8d3c5300dadbde87b5051c14fea33fd96cf792c22",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44243468443",
+    "durability": "time-limited; object archival not configured"
+  }
+}
