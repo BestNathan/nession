@@ -312,7 +312,7 @@ fn resolve_credential_value(
         }
         *token = value.to_string();
     }
-    if token.starts_with("$"+"{") && token.ends_with('}') {
+    if token.starts_with(concat!("$", "{")) && token.ends_with('}') {
         anyhow::bail!("{field_name} is an unresolved placeholder: supply the fixed credential environment variable");
     }
     Ok(())
