@@ -47,7 +47,9 @@ const issue={number:2274,state:'open',title:'Fix tracked application source',
   body:'Accept a bounded patch after reading code'};
 const prompt=qwenDeveloperPrompt(issue,admission);
 assert.match(prompt,/Fix tracked application source/);
-assert.match(prompt,/Read\/Edit\/Write/);
+assert.match(prompt,/Read\/Grep\/Glob\/Edit\/Write/);
+assert.match(prompt,/Grep\/Glob are read-only discovery/);
+assert.match(prompt,/No Bash, shell, MCP/);
 assert.match(prompt,/The trusted Publisher/);
 for(const extra of [
   {GITHUB_TOKEN:'leaked'}, {STORE_APP_TOKEN:'unsafe'},
