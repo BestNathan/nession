@@ -15,9 +15,9 @@ resources:
   - sealed-secret.json
   - deployment.yaml
   - service.yaml
-  # Public ingress is intentionally NOT activated before a trusted TLS
-  # Secret, DNS and HTTPS redirect are independently verified. The ingress
-  # definition is kept in ingress.yaml for that explicit activation PR.
+  # Explicit staging MCP activation (#3902); HTTPS TLS Secret is provided
+  # by the separate protected SealedSecret GitOps workflow.
+  - ingress.yaml
 
 images:
   - name: ghcr.io/bestnathan/nession-mcp
