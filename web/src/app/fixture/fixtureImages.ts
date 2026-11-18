@@ -114,6 +114,7 @@ export type FixtureImagesScenario =
   | 'error'
   | 'buildfail'
   | 'lifecycle'
+  | 'picker'
   | 'buildhistory';
 
 interface FixtureLibraryMeta {
@@ -122,6 +123,8 @@ interface FixtureLibraryMeta {
   manifest_digest: string;
   media_type: string;
   kind: string;
+  image_kind: string | null;
+  mount_default: string | null;
   platform: string;
   representation: ImageLibraryRepresentation;
   layers: ImageLibraryLayer[];
@@ -154,6 +157,8 @@ function libraryMeta(
     manifest_digest: manifest,
     media_type: 'application/vnd.oci.image.manifest.v1+json',
     kind: 'manifest',
+    image_kind: null,
+    mount_default: null,
     platform: 'linux/amd64',
     representation: 'single_layer',
     layers: [layer],
@@ -177,6 +182,7 @@ function scenario(search: string): FixtureImagesScenario {
     || value === 'error'
     || value === 'buildfail'
     || value === 'lifecycle'
+    || value === 'picker'
     || value === 'buildhistory'
     ? value
     : 'canonical';
@@ -290,6 +296,44 @@ function stateFor(selected: FixtureImagesScenario): FixtureState {
     images.push(fixtureImage(1, 'fixture-build-latest', 'ready'));
   }
   const library = new Map<string, FixtureLibraryMeta>();
+  if (selected === 'picker') {
+    library.set(
+      images[0].image_id,
+      libraryMeta(images[0], {
+        image_kind: 'base_runtime',
+        platform: 'linux/amd64',
+      }),
+    );
+    library.set(
+      images[1].image_id,
+      libraryMeta(images[1], {
+        image_kind: 'tool',
+        mount_default: '/opt/node',
+        platform: 'linux/amd64',
+      }),
+    );
+    library.set(
+      images[2].image_id,
+      libraryMeta(images[2], {
+        image_kind: 'tool',
+        platform: 'linux/arm64',
+      }),
+    );
+    library.set(
+      images[3].image_id,
+      libraryMeta(images[3], {
+        image_kind: 'tool',
+        representation: 'referenced',
+      }),
+    );
+    library.set(
+      images[4].image_id,
+      libraryMeta(images[4], {
+        image_kind: 'directory',
+        platform: 'linux/amd64',
+      }),
+    );
+  }
   if (selected === 'lifecycle') {
     const managed = images[images.length - 1];
     library.set(
@@ -449,6 +493,8 @@ function libraryEntries(state: FixtureState, query: string, repository: string):
           manifest_digest: null,
           media_type: null,
           kind: null,
+          image_kind: null,
+          mount_default: null,
           platform: null,
           representation: 'unknown' as const,
           layers: [],
@@ -462,6 +508,8 @@ function libraryEntries(state: FixtureState, query: string, repository: string):
         manifest_digest: meta.manifest_digest,
         media_type: meta.media_type,
         kind: meta.kind,
+        image_kind: meta.image_kind,
+        mount_default: meta.mount_default,
         platform: meta.platform,
         representation: meta.representation,
         layers: [...meta.layers],

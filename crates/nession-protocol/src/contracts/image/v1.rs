@@ -497,6 +497,14 @@ pub struct ImageLibraryEntry {
     /// `manifest`, `index` or `composite`, when readable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// The advisory `io.nession.kind` role, when the Manifest annotations are
+    /// readable: `base_runtime`, `tool` or `directory` (#3793).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_kind: Option<String>,
+    /// The advisory `io.nession.mount.default` target, when readable and
+    /// valid. It is a default suggestion, never an authorization (#3793).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mount_default: Option<String>,
     /// `os/arch`, when the catalog records or verifies a platform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,

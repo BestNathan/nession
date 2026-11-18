@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Image as ImageIcon, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FormSection } from '@/components/ui/configuration-form';
-import { shortDigest, type ImageDescriptor } from '@/capabilities/images';
+import { shortDigest, type ImageLibraryEntry } from '@/capabilities/images';
 import type {
   ImageCacheObservation,
   SandboxCurrentContext,
@@ -20,6 +20,8 @@ import { SandboxImageSelectDialog } from './SandboxImageSelectDialog';
 
 export interface SandboxFilesystemRootfsProps {
   context: SandboxCurrentContext;
+  sessionId: string | null;
+  targetPlatform: string | null;
   rootfs: SandboxFilesystemRoot | undefined;
   observation: ImageCacheObservation | undefined;
   onChange: (rootfs: SandboxFilesystemRoot | undefined) => void;
@@ -33,6 +35,8 @@ export interface SandboxFilesystemRootfsProps {
  */
 export function SandboxFilesystemRootfs({
   context,
+  sessionId,
+  targetPlatform,
   rootfs,
   observation,
   onChange,
@@ -41,11 +45,11 @@ export function SandboxFilesystemRootfs({
   const image = rootfs?.kind === 'image' ? rootfs : null;
   const local = !image;
 
-  const choose = (selected: ImageDescriptor) => {
-    if (!selected.digest) {
+  const choose = (entry: ImageLibraryEntry) => {
+    if (!entry.image.digest) {
       return;
     }
-    onChange({ kind: 'image', digest: selected.digest });
+    onChange({ kind: 'image', digest: entry.image.digest });
   };
 
   return (
@@ -134,6 +138,9 @@ export function SandboxFilesystemRootfs({
       <SandboxImageSelectDialog
         open={dialogOpen}
         title="Select a Base Runtime image"
+        role="base"
+        sessionId={sessionId}
+        targetPlatform={targetPlatform}
         requireTarget={false}
         submitLabel="Use as RootFS"
         onSelect={(selected) => choose(selected)}
