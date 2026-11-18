@@ -1,72 +1,107 @@
-# Protected GitHub Environment → SealedSecret (#3912)
+# GitHub Environments -> one SealedSecret per raw Secret (#3912)
 
-The private Sealed Secrets controller key remains inside Kubernetes. The
-main-owned GitHub Actions workflow only needs the controller's PUBLIC sealing
-certificate. It does not need kubectl or a Kubernetes credential.
+One GitHub Environment Secret maps to exactly one Kubernetes Secret and one
+encrypted SealedSecret Kubernetes resource. The GitHub Secret holds the original
+raw text, **not JSON, base64, or a multi-secret bundle**.
 
-## First target: staging-mcp
+## Environment naming convention
 
-Target mapping is fixed in scripts/ci/seal-gitops-secret.mjs:
-- GitHub Environment: staging-mcp
-- K8s Secret: nession / nession-mcp-config-staging, Opaque, key mcp.toml
-- Encrypted output: gitops/environments/staging/mcp/sealed-secret.json
-- Kustomize enrollment: gitops/environments/staging/mcp/kustomization.yaml
+GitHub Environment names must match GitOps environment directory names:
+- staging -> gitops/environments/staging
+- staging-01 -> gitops/environments/staging-01
+- preprod -> gitops/environments/preprod
+- production -> gitops/environments/production
 
-Future resources are added through reviewed allowlist/workflow changes, not
-through arbitrary workflow inputs.
+The workflow currently permits **only staging/MCP_CONFIG_TOML**. Additional
+pairs need a reviewed registry entry and workflow choice; inputs may not define
+an arbitrary namespace, output path, or secret name. Multiple independent
+GitHub Secrets can coexist under the same GitHub Environment without being
+merged into a single Kubernetes Secret.
 
-## Owner setup
+## Registered resource
 
-1. Read the PUBLIC certificate from the existing controller Service in nitops:
+| GitHub Environment | GitHub Secret | Kubernetes Secret | data key | GitOps encrypted resource |
+|---|---|---|---|---|
+| staging | MCP_CONFIG_TOML | nession/nession-mcp-config-staging | mcp.toml | environments/staging/mcp/sealed-secret.json |
 
-   kubeseal --fetch-cert --controller-namespace kube-system \
-     --controller-name sealed-secrets-controller > public.pem
+The target registry in scripts/ci/seal-gitops-secret.mjs is the sole owner of
+the allowed mapping and Kustomize overlay path.
 
-   Verify its SHA256 fingerprint against the trusted controller; never export
-   the Sealed Secrets controller PRIVATE key to GitHub.
+## IMPORTANT: SSH public keys are not sealing certificates
 
-2. Create protected GitHub Environment "staging-mcp" with required reviewers
-   and main-branch restriction. Add public variable
-   SEALED_SECRETS_CERT_B64 = base64-encoded public.pem (single line).
-   Put it at the repository level to reuse a single cluster sealing certificate
-   across environments, or override it at Environment level if targets use
-   different clusters. The private controller key never goes to GitHub.
-   Example: base64 < public.pem | tr -d '\n'
+The proposed line beginning with "ssh-ed25519 AAAA..." and ending
+"argocd-nitops" is an **SSH public key**, probably used for Argo CD
+repository access. It CANNOT be used with kubeseal to encrypt a SealedSecret.
+It does not match the Sealed Secrets controller's own encryption key.
 
-3. Add Environment Secret K8S_SECRET_DATA_JSON as a JSON map. It must contain
-   EXACTLY one key, "mcp.toml", with the entire private TOML configuration.
-   The TOML needs [mcp], [backend.server], both different nonempty auth tokens,
-   listen_address = "0.0.0.0:9090", and a Host allowlist including
-   staging.mcp.nession.bestnathan.top. Use the config template from GitOps
-   PR #3905 but fill credentials inside GitHub's protected Environment only.
+The controller deployed in BestNathan/nitops is
+kube-system/sealed-secrets-controller. Fetch its **public X.509 RSA
+certificate**, not its private key or Argo CD SSH key, from a trusted machine
+with Kubernetes access:
 
-4. Merge GitOps staging MCP overlay PR #3905 before running the workflow.
-   The new pod may be pending until its sealed config is reconciled. The first
-   workflow run adds sealed-secret.json and registers it in Kustomization.
+~~~sh
+kubeseal --controller-name sealed-secrets-controller \
+  --controller-namespace kube-system --fetch-cert > sealed-secrets-public.pem
+openssl x509 -in sealed-secrets-public.pem -noout -subject -fingerprint -sha256 -enddate
+~~~
 
-5. In Actions run "Deploy / Seal GitOps Secret" from main with target staging-mcp.
-   The protected Environment approval then permits offline sealing and the
-   encrypted GitOps commit. Argo CD and the Sealed Secrets controller reconcile
-   the resulting ordinary Kubernetes Secret.
+The PEM begins with "-----BEGIN CERTIFICATE-----". Set the GitHub Actions
+Repository Variable SEALED_SECRETS_CERT_PEM to that **raw PEM text**.
+An Environment Variable with the same name can override it when deploying
+another cluster. The workflow validates RSA X.509 and rejects SSH keys,
+private keys, expired/invalid certificates. The Sealed Secrets controller
+private key must remain in Kubernetes, with an independent secure backup.
 
-## Security and lifecycle
+That public certificate is DIFFERENT from the TLS certificate needed by
+the public Nession MCP HTTPS Ingress. ACME/cert-manager or a trusted
+gateway certificate remains a separate prerequisite.
 
-- The workflow is main-only and uses a target allowlist; it never executes code
-  from the gitops branch, reads unrelated Environment Secrets, or prints tokens.
-- Ordinary K8s Secret JSON exists only in restrictive runner temporary files,
-  cleaned on step exit. GitOps receives only encrypted SealedSecret JSON.
-- Strict scope binds ciphertext to exact namespace AND Secret name. Do not
-  use cluster-wide or namespace-wide modes.
-- SealedSecret encryption is randomized: repeated invocations can produce a new
-  ciphertext even if credentials are unchanged. The Kustomize resource entry
-  is idempotent; run only for explicit provisioning and credential rotation.
-- When the sealing controller renews its keypair, update the GitHub Environment
-  public certificate from the live controller and re-seal as appropriate.
-  Preserve an encrypted recovery backup of controller private keys outside
-  GitHub; do not freeze key rotation permanently.
-- The sealing certificate is unrelated to the ingress HTTPS certificate.
-  Public HTTPS still requires a trusted CA chain (for example ACME/cert-manager).
-- Existing committed Server tokens and TLS private keys must be rotated; a
-  SealedSecret cannot reverse previous plaintext disclosure.
-- Verify the real SealedSecrets reconciliation, MCP pod startup and authenticated
-  off-cluster /mcp handshake independently of Actions success.
+## First-time setup and operation
+
+1. In Nession GitHub Settings -> Environments, create/protect the Environment
+   **staging** (not "staging-mcp"). Require owner approval and restrict
+   deployment branches to trusted main. This Environment will contain every
+   independently managed staging Secret.
+2. Create Repository Variable SEALED_SECRETS_CERT_PEM, using the full raw PEM
+   fetched from the **live Sealed Secrets controller** as above.
+3. Create one Environment Secret MCP_CONFIG_TOML. Paste the ORIGINAL, private,
+   multiline TOML config text directly, using the template in
+   gitops/environments/staging/mcp/mcp.example.toml. It must use distinct
+   nonempty MCP inbound and Server backend tokens; include the exact
+   staging.mcp.nession.bestnathan.top Host; set 0.0.0.0:9090 and the actual
+   staging Server endpoint. No JSON quotes, escaping, or base64.
+4. Merge MCP GitOps overlay PR #3905, then merge the workflow PR #3913.
+   A new MCP Pod may remain pending until its missing Secret is reconciled.
+5. In GitHub Actions select "Deploy / Seal GitOps Secret", with
+   environment = staging and secret = MCP_CONFIG_TOML, on main.
+   The protected Environment is approved, then the workflow validates the
+   public cert and exact registry mapping, uses the one selected Secret,
+   runs pinned kubeseal offline with strict scope, and commits only the
+   encrypted sealed-secret.json file and Kustomize resource reference
+   under gitops/environments/staging/mcp.
+6. Argo CD reconciles the encrypted SealedSecret object. The existing
+   controller converts it into the Kubernetes Opaque Secret. Verify Secret
+   reconciliation, MCP Pod readiness, then an authenticated MCP request from
+   outside the cluster.
+
+## Security / rotation contract
+
+- GitHub Actions does not receive the Sealed Secrets controller private key
+  or any kubeconfig; the public cert is safe to distribute.
+- GitHub Environment Secrets are not readable as plaintext via GitHub's
+  REST API; they are injected only into an authorized workflow execution.
+- One workflow invocation seals one registered raw GitHub Secret. Never
+  print it or store the plaintext Kubernetes Secret in GitOps/artifacts.
+- A temporary plaintext Secret document exists only in 0600 runner files and
+  is removed after the sealing step. The checked-in resource contains
+  only encryptedData and strict resource identity.
+- Strict sealing binds ciphertext to the precise namespace and Secret name.
+  The output file path is restricted to the same GitOps environment.
+- Re-running may produce different ciphertext due to encryption randomness,
+  but never duplicates the Kustomize resource reference.
+- Controller key rotation: update the public PEM variable and re-seal affected
+  entries as needed; securely back up the controller's private key material.
+- Previously committed plaintext Server tokens and nitops TLS private keys
+  need coordinated rotation. Re-encryption does not reverse their exposure.
+- GitOps Sync / CI success is NOT evidence of a live usable Kubernetes Secret,
+  public HTTPS TLS, or an authenticated remote MCP handshake.
