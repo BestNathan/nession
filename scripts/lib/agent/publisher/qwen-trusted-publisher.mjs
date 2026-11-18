@@ -42,12 +42,12 @@ function jsonFile(file,max=32*1024*1024){
     fs.readFileSync(file)));}
   catch{fail('invalid trusted source JSON');}
 }
-function zipJson(zip,name){
+export function zipJson(zip,name){
   try{return JSON.parse(new TextDecoder('utf8',{fatal:true})
     .decode(readWorkerZipMember(zip,name)));}
   catch{fail('unsafe original Worker ZIP member '+name);}
 }
-function zipVerified(file,artifact,max){
+export function zipVerified(file,artifact,max){
   const st=fs.lstatSync(file);
   if(!st.isFile()||st.isSymbolicLink()||!positive(st.size)||
       st.size>max||st.size!==artifact.size_in_bytes||
@@ -58,7 +58,7 @@ function zipVerified(file,artifact,max){
     fail('original GitHub Artifact digest mismatch');
   return bytes;
 }
-function artifactFor(artifacts,run,name,max){
+export function artifactFor(artifacts,run,name,max){
   if(artifacts?.total_count!==artifacts?.artifacts?.length||
       artifacts.total_count>100)
     fail('incomplete paginated GitHub Worker Artifact list');
