@@ -47,6 +47,12 @@ pub const SERVER_AGENT_LIST: &str = "server.agent.list";
 /// `server.session.list` — sessions, optionally scoped to one agent.
 pub const SERVER_SESSION_LIST: &str = "server.session.list";
 
+/// `server.project.list` — every Project declaration the Server owns.
+pub const SERVER_PROJECT_LIST: &str = "server.project.list";
+
+/// `server.project.get` — one Project declaration by identity.
+pub const SERVER_PROJECT_GET: &str = "server.project.get";
+
 /// `server.session.attach` — ask the Server how to reach a session.
 pub const SERVER_SESSION_ATTACH: &str = "server.session.attach";
 

@@ -19,12 +19,17 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::{AgentConfig, AttachMode};
+use nession_agent::connection::{ServerClient, ServerClientHandle};
+use nession_agent::extension::ExtensionRegistry;
 use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::{McpConfig, ServerConfig};
-use nession_server::db::Database;
+use nession_common::SecretString;
+use nession_protocol::contracts::agent::v1::AgentMetadata;
+use nession_protocol::contracts::project::v1::{ProjectLocation, ProjectSessionDefaults};
+use nession_server::db::{Database, ProjectRow};
 use nession_server::server::WebSocketServer;
 use rand::Rng;
 use rmcp::model::{CallToolRequestParams, ProtocolVersion};
@@ -42,6 +47,10 @@ const SERVER_TOKEN: &str = "server-token";
 const AGENT_TOKEN: &str = "agent-token";
 const AGENT_ID: &str = "standalone-agent";
 const CLUSTER_AGENT: &str = "cluster-agent";
+/// A real tmux-backed Agent registered over the central Server connection.
+const PROJECT_AGENT: &str = "project-agent";
+/// A syntactically valid Server-minted Project identity.
+const PROJECT_ID: &str = "project-123e4567-e89b-42d3-a456-426614174000";
 
 struct ChildGuard(Child);
 
@@ -115,7 +124,9 @@ impl HttpResponse {
     }
 }
 
-async fn start_server_with_mcp(mcp_enabled: bool) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+async fn start_server_with_mcp(
+    mcp_enabled: bool,
+) -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<Database>) {
     start_server_with_heartbeat(mcp_enabled, 10, 60).await
 }
 
@@ -123,7 +134,7 @@ async fn start_server_with_heartbeat(
     mcp_enabled: bool,
     heartbeat_interval_secs: u64,
     heartbeat_timeout_secs: u64,
-) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+) -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<Database>) {
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         auth_token: SERVER_TOKEN.to_string(),
@@ -147,7 +158,8 @@ async fn start_server_with_heartbeat(
         ..Default::default()
     };
     let db = Database::new(":memory:").await.expect("database");
-    let mut server = WebSocketServer::new(config, Arc::new(db))
+    let db = Arc::new(db);
+    let mut server = WebSocketServer::new(config, Arc::clone(&db))
         .await
         .expect("server");
     let addr = server.local_addr().expect("address");
@@ -157,7 +169,7 @@ async fn start_server_with_heartbeat(
             .await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    (addr, handle)
+    (addr, handle, db)
 }
 
 async fn start_agent(
@@ -206,6 +218,101 @@ async fn start_agent(
     let (handle, addr) = server.start().await.expect("start agent");
     tokio::time::sleep(Duration::from_millis(50)).await;
     (addr, handle)
+}
+
+/// Register a real tmux-backed Agent with the Server over its central
+/// connection.
+///
+/// The Server's canonical `server.session.create`/list routes then reach this
+/// Agent's real `SessionManager`, which is what makes the Project-context
+/// proof a Server+Agent+tmux runtime Case rather than a projection test.
+async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Arc<SessionManager>) {
+    let tmux = Arc::new(SessionManager::new());
+    let metadata = AgentMetadata {
+        tmux_version: "3.3".to_string(),
+        os_version: "test".to_string(),
+        nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
+    };
+    let registry = ExtensionRegistry::new(
+        PROJECT_AGENT,
+        Vec::new(),
+        nession_agent::protocol::served_descriptors().expect("served descriptors"),
+    )
+    .expect("extension registry");
+    let client = ServerClient::new(
+        format!("ws://{server_addr}"),
+        SERVER_TOKEN,
+        PROJECT_AGENT,
+        "test-host",
+        "127.0.0.1",
+        19998,
+        None,
+        Vec::new(),
+        None,
+        metadata,
+        Arc::clone(&tmux),
+        "/tmp".to_string(),
+        Some(Arc::new(registry)),
+        SecretString::new(AGENT_TOKEN),
+        nession_agent::execution::mutation_scheduler(),
+    );
+    let (handle, _interval) = client.connect_and_run().await.expect("register agent");
+    (handle, tmux)
+}
+
+/// Send one authenticated Server request on a fresh WebSocket.
+///
+/// This is how a Web client reaches the real `server_routes!` table. The
+/// connection is closed after the reply; only the reply payload is returned.
+async fn server_call(addr: SocketAddr, wire: &str, payload: Value) -> Value {
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("server socket");
+    let (mut sink, mut stream) = ws.split();
+    let auth = json!({
+        "msg_type": "server.auth",
+        "id": "auth-1",
+        "timestamp": 0,
+        "payload": { "auth_token": SERVER_TOKEN, "client_id": "project-test" }
+    });
+    sink.send(WsMessage::Text(auth.to_string()))
+        .await
+        .expect("send auth");
+    let reply = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(frame)) = stream.next().await {
+            let parsed: Value =
+                serde_json::from_str(frame.to_text().expect("text frame")).expect("auth JSON");
+            if parsed["id"] == "auth-1" {
+                return parsed;
+            }
+        }
+        panic!("the Server closed before answering auth");
+    })
+    .await
+    .expect("auth reply timeout");
+    assert_eq!(reply["payload"]["status"], "success", "{reply}");
+
+    let id = format!("call-{}", uuid::Uuid::new_v4());
+    let request = json!({ "msg_type": wire, "id": id, "timestamp": 0, "payload": payload });
+    sink.send(WsMessage::Text(request.to_string()))
+        .await
+        .expect("send request");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(frame)) = stream.next().await {
+            let parsed: Value =
+                serde_json::from_str(frame.to_text().expect("text frame")).expect("reply JSON");
+            if parsed["id"] == id.as_str() {
+                return parsed["payload"].clone();
+            }
+        }
+        panic!("the Server closed before answering {wire}");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{wire} reply timeout"))
 }
 
 fn spawn_standalone(config_path: &Path) -> ChildGuard {
@@ -575,7 +682,7 @@ async fn terminate_and_wait(child: &mut Child) {
 
 #[tokio::test]
 async fn standalone_routes_agent_session_tools_through_the_server() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -596,7 +703,7 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 
     let session = initialize_with(mcp_addr, MCP_TOKEN).await;
     let tools = tools_of(mcp_addr, MCP_TOKEN).await;
-    assert_eq!(tools.as_array().expect("tools").len(), 11);
+    assert_eq!(tools.as_array().expect("tools").len(), 15);
 
     let agents = call_tool(
         mcp_addr,
@@ -689,8 +796,361 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 /// Server, keep the durable revision safe under a stale writer, and never put
 /// ENV values in a result.
 #[tokio::test]
+async fn project_context_sessions_use_server_association_and_real_agent_runtime() {
+    let (server_addr, server_task, db) = start_server_with_mcp(true).await;
+    let (agent_handle, tmux) = register_real_agent(server_addr).await;
+
+    let project_dir = tempfile::tempdir().expect("project directory");
+    let project_path = project_dir.path().to_string_lossy().into_owned();
+    db.insert_project(&ProjectRow {
+        project_id: PROJECT_ID.to_string(),
+        name: "MCP Project".to_string(),
+        description: Some("a Project-context Session test".to_string()),
+        source: None,
+        locations: vec![ProjectLocation {
+            agent_id: PROJECT_AGENT.to_string(),
+            path: project_path.clone(),
+        }],
+        session_defaults: Some(ProjectSessionDefaults {
+            shell: None,
+            env_profile_ids: vec!["base.env".to_string()],
+            sandbox_policy_ref: None,
+        }),
+        image_digest: None,
+        created_at: 1,
+        updated_at: 2,
+    })
+    .await
+    .expect("insert Project");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut child = spawn_standalone(&config_path);
+    let mcp_addr = await_listen_addr(&mut child.0).await;
+    let session = initialize_with(mcp_addr, MCP_TOKEN).await;
+
+    let env = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({ "name": "base.env", "content": "PUBLIC=1\n" }),
+    )
+    .await;
+    assert_eq!(env["isError"], false, "{env}");
+
+    // Discovery is Server-owned and independent of the Agent's live state.
+    let projects = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_list",
+        json!({}),
+    )
+    .await;
+    assert_eq!(projects["isError"], false, "{projects}");
+    let projects = text_of(&projects);
+    assert!(
+        projects["projects"]
+            .as_array()
+            .expect("projects")
+            .iter()
+            .any(|project| project["project_id"] == PROJECT_ID),
+        "{projects}"
+    );
+
+    let project = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_get",
+        json!({ "project_id": PROJECT_ID }),
+    )
+    .await;
+    assert_eq!(project["isError"], false, "{project}");
+    assert_eq!(text_of(&project)["locations"][0]["path"], project_path);
+
+    // SC-02/SC-03: create through the Project, inheriting its ENV defaults,
+    // and confirm the persisted association through both MCP projections.
+    let name = unique_name("project");
+    let created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": PROJECT_ID,
+            "agent_id": PROJECT_AGENT,
+            "name": name,
+            "target": { "kind": "existing", "working_dir": project_path }
+        }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let created = text_of(&created);
+    assert_eq!(created["project_id"], PROJECT_ID);
+    assert_eq!(created["session_id"], format!("{PROJECT_AGENT}:{name}"));
+
+    let scoped = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": PROJECT_ID, "force": true }),
+    )
+    .await;
+    assert_eq!(scoped["isError"], false, "{scoped}");
+    let scoped = text_of(&scoped);
+    assert!(
+        scoped["sessions"]
+            .as_array()
+            .expect("project sessions")
+            .iter()
+            .any(|entry| entry["name"] == name && entry["agent_id"] == PROJECT_AGENT),
+        "{scoped}"
+    );
+
+    let agent_sessions = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    assert_eq!(agent_sessions["isError"], false, "{agent_sessions}");
+    let agent_sessions = text_of(&agent_sessions);
+    let project_entry = agent_sessions["sessions"]
+        .as_array()
+        .expect("agent sessions")
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .cloned()
+        .expect("the Project Session is live on the Agent");
+    assert_eq!(project_entry["project_id"], PROJECT_ID);
+    let instance_before = project_entry["instance_id"].clone();
+
+    // A Session created through the Agent seam is explicitly unassociated.
+    let plain = unique_name("plain");
+    let plain_created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": PROJECT_AGENT, "name": plain }),
+    )
+    .await;
+    assert_eq!(plain_created["isError"], false, "{plain_created}");
+    let agent_sessions = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    let agent_sessions = text_of(&agent_sessions);
+    let plain_entry = agent_sessions["sessions"]
+        .as_array()
+        .expect("agent sessions")
+        .iter()
+        .find(|entry| entry["name"] == plain)
+        .cloned()
+        .expect("the plain Session is live on the Agent");
+    assert_eq!(
+        plain_entry["project_id"],
+        Value::Null,
+        "a confirmed non-association must be explicit null"
+    );
+
+    // SC-04: Web reassociation moves both projections without touching the
+    // Agent's Session runtime.
+    let rebind = server_call(
+        server_addr,
+        "server.session.project.set",
+        json!({
+            "session_id": format!("{PROJECT_AGENT}:{plain}"),
+            "project_id": PROJECT_ID
+        }),
+    )
+    .await;
+    assert_eq!(rebind["success"], true, "{rebind}");
+
+    let scoped = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": PROJECT_ID, "force": true }),
+    )
+    .await;
+    let scoped = text_of(&scoped);
+    let scoped_names: Vec<&str> = scoped["sessions"]
+        .as_array()
+        .expect("project sessions")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert!(scoped_names.contains(&plain.as_str()), "{scoped}");
+    assert!(scoped_names.contains(&name.as_str()), "{scoped}");
+
+    let unbind = server_call(
+        server_addr,
+        "server.session.project.set",
+        json!({
+            "session_id": format!("{PROJECT_AGENT}:{name}"),
+            "project_id": null
+        }),
+    )
+    .await;
+    assert_eq!(unbind["success"], true, "{unbind}");
+
+    let scoped = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": PROJECT_ID, "force": true }),
+    )
+    .await;
+    let scoped = text_of(&scoped);
+    let scoped_names: Vec<&str> = scoped["sessions"]
+        .as_array()
+        .expect("project sessions")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert!(!scoped_names.contains(&name.as_str()), "{scoped}");
+    assert!(scoped_names.contains(&plain.as_str()), "{scoped}");
+
+    let agent_sessions = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    let agent_sessions = text_of(&agent_sessions);
+    let project_entry = agent_sessions["sessions"]
+        .as_array()
+        .expect("agent sessions")
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .cloned()
+        .expect("the unbound Session is still live");
+    assert_eq!(project_entry["project_id"], Value::Null);
+    assert_eq!(
+        project_entry["instance_id"], instance_before,
+        "Web membership changes must not replace the Session incarnation"
+    );
+    let live = tmux.list_sessions().await.expect("tmux sessions");
+    assert!(
+        live.iter().any(|session| session.name == name),
+        "Web membership changes must not touch the Agent Session runtime"
+    );
+
+    // SC-02: the Server remains the validator. An undeclared location, an
+    // unknown Project and a Managed target without a Project image are
+    // refusals, never unqualified successful creates.
+    let undeclared = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": PROJECT_ID,
+            "agent_id": PROJECT_AGENT,
+            "name": unique_name("undeclared"),
+            "target": { "kind": "existing", "working_dir": "/not/a/declared/location" }
+        }),
+    )
+    .await;
+    assert_eq!(undeclared["isError"], true, "{undeclared}");
+    assert!(
+        undeclared["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not an Existing Location"),
+        "{undeclared}"
+    );
+
+    let unknown_project = "project-223e4567-e89b-42d3-a456-426614174000";
+    let unknown = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": unknown_project,
+            "agent_id": PROJECT_AGENT,
+            "name": unique_name("unknown"),
+            "target": { "kind": "existing", "working_dir": project_path }
+        }),
+    )
+    .await;
+    assert_eq!(unknown["isError"], true, "{unknown}");
+    assert!(
+        unknown["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not found"),
+        "{unknown}"
+    );
+
+    let missing = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_get",
+        json!({ "project_id": unknown_project }),
+    )
+    .await;
+    assert_eq!(missing["isError"], true, "{missing}");
+
+    let managed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": PROJECT_ID,
+            "agent_id": PROJECT_AGENT,
+            "name": unique_name("managed"),
+            "target": {
+                "kind": "managed",
+                "base_digest": format!("sha256:{}", "a".repeat(64))
+            }
+        }),
+    )
+    .await;
+    assert_eq!(managed["isError"], true, "{managed}");
+    assert!(
+        managed["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("does not pin an EROFS image"),
+        "{managed}"
+    );
+
+    for session_name in [&name, &plain] {
+        let _ = call_tool(
+            mcp_addr,
+            MCP_TOKEN,
+            &session,
+            "nession_agent_kill_session",
+            json!({ "agent_id": PROJECT_AGENT, "name": session_name }),
+        )
+        .await;
+    }
+    let _ = agent_handle.shutdown().await;
+    terminate_and_wait(&mut child.0).await;
+    server_task.abort();
+}
+
+#[tokio::test]
 async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1010,7 +1470,7 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
 /// and a save that does not advance the Session binding.
 #[tokio::test]
 async fn standalone_manages_env_files_with_canonical_guards() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1262,7 +1722,7 @@ async fn standalone_manages_env_files_with_canonical_guards() {
 
 #[tokio::test]
 async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, false).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let config_path = write_direct_config(dir.path(), server_addr, agent_addr);
@@ -1309,6 +1769,19 @@ async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
     .await;
     assert_eq!(wrong["isError"], true);
 
+    // Project Tools are Server-owned even in explicit direct-Agent mode: the
+    // configured Server answers them and the direct Agent route never does.
+    let projects = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_list",
+        json!({}),
+    )
+    .await;
+    assert_eq!(projects["isError"], false, "{projects}");
+    assert_eq!(text_of(&projects)["projects"], json!([]));
+
     let killed = call_tool(
         mcp_addr,
         MCP_TOKEN,
@@ -1327,7 +1800,7 @@ async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
 /// SC-03: all three hosts serve one catalog, byte for byte.
 #[tokio::test]
 async fn all_three_hosts_share_one_tool_catalog() {
-    let (server_addr, server_task) = start_server_with_mcp(true).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(true).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, true).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let config_path = write_routed_config(dir.path(), server_addr);
@@ -1338,7 +1811,7 @@ async fn all_three_hosts_share_one_tool_catalog() {
     let agent_tools = tools_of(agent_addr, AGENT_TOKEN).await;
     let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
 
-    assert_eq!(server_tools.as_array().expect("tools").len(), 11);
+    assert_eq!(server_tools.as_array().expect("tools").len(), 15);
     let names: Vec<_> = server_tools
         .as_array()
         .expect("tools")
@@ -1349,6 +1822,10 @@ async fn all_three_hosts_share_one_tool_catalog() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_project_list",
+            "nession_server_project_get",
+            "nession_server_project_session_list",
+            "nession_server_project_session_create",
             "nession_server_env_list",
             "nession_server_env_get",
             "nession_server_env_write",
@@ -1579,7 +2056,7 @@ async fn register_extension_agent(
 async fn extension_tool_routes_to_the_named_agent_across_hosts() {
     // A one-second liveness window makes the offline transition observable in
     // this test without a sixty-second wait.
-    let (server_addr, server_task) = start_server_with_heartbeat(true, 1, 1).await;
+    let (server_addr, server_task, _db) = start_server_with_heartbeat(true, 1, 1).await;
     let (first_agent, first_log) = register_extension_agent(
         server_addr,
         CLUSTER_AGENT,
@@ -1845,7 +2322,7 @@ impl ClientHandler for ToolListWatcher {
 /// generation, and a stateless modern client sees the same revision.
 #[tokio::test]
 async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_not_churn() {
-    let (server_addr, server_task) = start_server_with_heartbeat(true, 1, 1).await;
+    let (server_addr, server_task, _db) = start_server_with_heartbeat(true, 1, 1).await;
     let uri = format!("http://{server_addr}/mcp");
     let (changed_tx, mut changed_rx) = tokio::sync::mpsc::unbounded_channel();
     let legacy = ToolListWatcher {
@@ -1862,7 +2339,7 @@ async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_n
 
     let first = legacy.list_tools(None).await.expect("tools/list");
     let first_revision = catalog_revision(&first);
-    assert_eq!(first.tools.len(), 11);
+    assert_eq!(first.tools.len(), 15);
 
     // Reading and calling do not alter the catalog generation.
     let _ = legacy
@@ -1871,7 +2348,7 @@ async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_n
         .expect("tools/call");
     let stable = legacy.list_tools(None).await.expect("tools/list");
     assert_eq!(catalog_revision(&stable), first_revision);
-    assert_eq!(stable.tools.len(), 11);
+    assert_eq!(stable.tools.len(), 15);
 
     // Ordinary Session runtime work is not a catalog event either.
     let _ = legacy
@@ -1887,7 +2364,7 @@ async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_n
         .expect("session create");
     let after_session = legacy.list_tools(None).await.expect("tools/list");
     assert_eq!(catalog_revision(&after_session), first_revision);
-    assert_eq!(after_session.tools.len(), 11);
+    assert_eq!(after_session.tools.len(), 15);
 
     // Installing a manifest is an explicit catalog change: the connected
     // legacy session receives the list-change notification and the next list

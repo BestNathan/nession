@@ -48,7 +48,7 @@ run(({ evidence }) => {
   });
   evidence.push({
     type: 'runtime',
-    value: 'exact SHA ' + sha + ': the source-pinned export catalog stayed the eleven baseline Tools after a dynamic manifest was composed and advertised',
+    value: 'exact SHA ' + sha + ': the source-pinned export catalog stayed the Rust-owned baseline Tools after a dynamic manifest was composed and advertised',
   });
 
   return 'Explicit manifest updates were observable through revision and legacy notification; ordinary runtime work did not churn the catalog; the static export source remained independent.';

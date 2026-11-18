@@ -12,12 +12,13 @@
 //! bearer auth and JSON responses.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use nession_common::config::{McpConfig, ServerConfig};
-use nession_server::db::Database;
+use nession_protocol::contracts::project::v1::{ProjectLocation, ProjectSessionDefaults};
+use nession_server::db::{Database, ProjectRow};
 use nession_server::server::WebSocketServer;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -89,7 +90,7 @@ impl HttpResponse {
     }
 }
 
-async fn start_server(mcp: McpConfig) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+async fn start_server(mcp: McpConfig) -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<Database>) {
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         auth_token: "server-test-token".to_string(),
@@ -110,7 +111,8 @@ async fn start_server(mcp: McpConfig) -> (SocketAddr, tokio::task::JoinHandle<()
         ..Default::default()
     };
     let db = Database::new(":memory:").await.expect("database");
-    let mut server = WebSocketServer::new(config, Arc::new(db))
+    let db = Arc::new(db);
+    let mut server = WebSocketServer::new(config, Arc::clone(&db))
         .await
         .expect("server");
     let addr = server.local_addr().expect("address");
@@ -120,7 +122,7 @@ async fn start_server(mcp: McpConfig) -> (SocketAddr, tokio::task::JoinHandle<()
             .await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    (addr, handle)
+    (addr, handle, db)
 }
 
 fn enabled_mcp() -> McpConfig {
@@ -301,7 +303,7 @@ async fn answer_command(
 
 #[tokio::test]
 async fn mcp_disabled_registers_no_http_route() {
-    let (addr, _server) = start_server(McpConfig::default()).await;
+    let (addr, _server, _db) = start_server(McpConfig::default()).await;
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }).to_string();
     let response = send(addr, "POST", "/mcp", Some(TOKEN), None, &body)
         .await
@@ -319,7 +321,7 @@ async fn mcp_disabled_registers_no_http_route() {
 /// Upgrade extractor rather than upgraded or silently closed.
 #[tokio::test]
 async fn http_routes_are_explicit_and_methods_are_bounded() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
 
     let unmatched = send(addr, "GET", "/not-a-route", None, None, "")
         .await
@@ -391,7 +393,7 @@ async fn http_routes_are_explicit_and_methods_are_bounded() {
 
 #[tokio::test]
 async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
 
     let anonymous = send(
         addr,
@@ -436,6 +438,10 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_project_list",
+            "nession_server_project_get",
+            "nession_server_project_session_list",
+            "nession_server_project_session_create",
             "nession_server_env_list",
             "nession_server_env_get",
             "nession_server_env_write",
@@ -467,7 +473,7 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
 
 #[tokio::test]
 async fn embedded_mcp_does_not_displace_the_websocket_connection() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
     let session = initialize(addr).await;
 
     // A Web client's handshake and management calls still use the same
@@ -517,7 +523,7 @@ async fn embedded_mcp_does_not_displace_the_websocket_connection() {
 
 #[tokio::test]
 async fn embedded_mcp_answers_server_owned_discovery_from_the_registry() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
     let session = initialize(addr).await;
 
     let agents = call_tool(addr, &session, "nession_server_list_agents", json!({})).await;
@@ -532,7 +538,7 @@ async fn embedded_mcp_answers_server_owned_discovery_from_the_registry() {
 
 #[tokio::test]
 async fn embedded_mcp_node_tools_route_to_the_named_agent() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
     let (mut agent_sink, mut agent_stream) =
         register_agent(addr, "agent-1", "127.0.0.1", 19999).await;
     // The register acknowledgement.
@@ -545,7 +551,7 @@ async fn embedded_mcp_node_tools_route_to_the_named_agent() {
                 continue;
             };
             match parsed["msg_type"].as_str() {
-                Some("agent.session.list") => {
+                Some("agent.session.list") | Some("agent.session.report") => {
                     answer_command(
                         &mut agent_sink,
                         &frame,
@@ -621,8 +627,179 @@ async fn embedded_mcp_node_tools_route_to_the_named_agent() {
 }
 
 #[tokio::test]
+async fn embedded_mcp_project_tools_use_server_ownership() {
+    let (addr, _server, db) = start_server(enabled_mcp()).await;
+    let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+    db.insert_project(&ProjectRow {
+        project_id: project_id.to_string(),
+        name: "Server Project".to_string(),
+        description: None,
+        source: None,
+        locations: vec![ProjectLocation {
+            agent_id: "agent-1".to_string(),
+            path: "/srv/project".to_string(),
+        }],
+        session_defaults: Some(ProjectSessionDefaults {
+            shell: None,
+            env_profile_ids: Vec::new(),
+            sandbox_policy_ref: None,
+        }),
+        image_digest: None,
+        created_at: 1,
+        updated_at: 2,
+    })
+    .await
+    .expect("insert Project");
+
+    let (mut agent_sink, mut agent_stream) =
+        register_agent(addr, "agent-1", "127.0.0.1", 19999).await;
+    let _ = agent_stream.next().await;
+    let sessions: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let task_sessions = Arc::clone(&sessions);
+    let server_task = tokio::spawn(async move {
+        while let Some(Ok(frame)) = agent_stream.next().await {
+            let Ok(text) = frame.to_text() else { continue };
+            let Ok(parsed) = serde_json::from_str::<Value>(text) else {
+                continue;
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or_default();
+            let snapshot = |names: &[String]| -> Value {
+                json!(names
+                    .iter()
+                    .map(|name| json!({
+                        "name": name,
+                        "created_at": now,
+                        "window_count": 1,
+                        "attached_clients": 0,
+                        "width": 96,
+                        "height": 24
+                    }))
+                    .collect::<Vec<_>>())
+            };
+            match parsed["msg_type"].as_str() {
+                Some("agent.session.create") => {
+                    let name = parsed["payload"]["name"].as_str().unwrap_or("work");
+                    task_sessions
+                        .lock()
+                        .expect("sessions")
+                        .push(name.to_string());
+                    answer_command(&mut agent_sink, &frame, json!({ "session_name": name })).await;
+                }
+                Some("agent.session.kill") => {
+                    let name = parsed["payload"]["name"].as_str().unwrap_or_default();
+                    task_sessions
+                        .lock()
+                        .expect("sessions")
+                        .retain(|existing| existing != name);
+                    answer_command(&mut agent_sink, &frame, json!({})).await;
+                }
+                Some("agent.session.list") | Some("agent.session.report") => {
+                    let names = task_sessions.lock().expect("sessions").clone();
+                    answer_command(
+                        &mut agent_sink,
+                        &frame,
+                        json!({ "sessions": snapshot(&names) }),
+                    )
+                    .await;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let session = initialize(addr).await;
+    let projects = call_tool(addr, &session, "nession_server_project_list", json!({})).await;
+    assert_eq!(projects["isError"], false, "{projects}");
+    assert!(
+        text_of(&projects)["projects"]
+            .as_array()
+            .expect("projects")
+            .iter()
+            .any(|project| project["project_id"] == project_id),
+        "{projects}"
+    );
+
+    let project = call_tool(
+        addr,
+        &session,
+        "nession_server_project_get",
+        json!({ "project_id": project_id }),
+    )
+    .await;
+    assert_eq!(project["isError"], false, "{project}");
+    assert_eq!(text_of(&project)["locations"][0]["path"], "/srv/project");
+
+    let created = call_tool(
+        addr,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": project_id,
+            "agent_id": "agent-1",
+            "name": "project-dev",
+            "target": { "kind": "existing", "working_dir": "/srv/project" }
+        }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    assert_eq!(text_of(&created)["project_id"], project_id);
+
+    let scoped = call_tool(
+        addr,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": project_id }),
+    )
+    .await;
+    assert_eq!(scoped["isError"], false, "{scoped}");
+    let scoped = text_of(&scoped);
+    assert_eq!(scoped["sessions"][0]["name"], "project-dev");
+    assert_eq!(scoped["sessions"][0]["agent_id"], "agent-1");
+
+    let plain = call_tool(
+        addr,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": "agent-1", "name": "plain-shell" }),
+    )
+    .await;
+    assert_eq!(plain["isError"], false, "{plain}");
+
+    let listed = call_tool(
+        addr,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": "agent-1" }),
+    )
+    .await;
+    assert_eq!(listed["isError"], false, "{listed}");
+    let listed = text_of(&listed);
+    let project_entry = listed["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["name"] == "project-dev")
+        .cloned()
+        .expect("the Project Session");
+    assert_eq!(project_entry["project_id"], project_id);
+    let plain_entry = listed["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["name"] == "plain-shell")
+        .cloned()
+        .expect("the plain Session");
+    assert_eq!(plain_entry["project_id"], Value::Null);
+
+    server_task.abort();
+}
+
+#[tokio::test]
 async fn embedded_mcp_refuses_an_unknown_session() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
     let response = send(addr, "POST", "/mcp", Some(TOKEN), Some("unknown"), &body)
         .await
@@ -632,7 +809,7 @@ async fn embedded_mcp_refuses_an_unknown_session() {
 
 #[tokio::test]
 async fn embedded_mcp_terminates_a_session_and_then_refuses_it() {
-    let (addr, _server) = start_server(enabled_mcp()).await;
+    let (addr, _server, _db) = start_server(enabled_mcp()).await;
     let session = initialize(addr).await;
     let deleted = send(addr, "DELETE", "/mcp", Some(TOKEN), Some(&session), "")
         .await
