@@ -11,8 +11,19 @@ import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
-import { publishIssueAuditFeedback, selfTestIssueAuditFeedback } from './lib/agent/tools/gh/issue/review-feedback.mjs';
+import { publishIssueAuditFeedback, resolveIssueAuditFeedback, selfTestIssueAuditFeedback } from './lib/agent/tools/gh/issue/review-feedback.mjs';
+import { readPreflightChecks } from './lib/agent/tools/gh/issue/preflight-receipt.mjs';
 import { selfTestAuditMcp } from './issue-audit-check-mcp.mjs';
+
+// A tool-less format/contract continuation can replace the model proposal.
+ // Its final candidate was NOT checked by the preceding MCP invocation.
+function finalPreflightEvidence(preflight,formatRepairAttempted=false,contractRepairAttempted=false){
+  return {...(preflight??{observed:false,calls:0,passed:0,
+    final_candidate_checked:false,codes:[],
+    evidence_kind:'local-readonly-mcp-proposal-checks'}),
+    final_candidate_checked:!!preflight?.final_candidate_checked&&
+      !formatRepairAttempted&&!contractRepairAttempted};
+}
 
 function envNumber(name) {
   const raw = process.env[name];
@@ -119,6 +130,9 @@ function appendSummary(record) {
       `- Estimated cost: ${record.agent.estimated_cost_usd == null ? 'N/A' : '$' + record.agent.estimated_cost_usd.toFixed(6)}`,
       `- Turns: ${record.agent.num_turns ?? 'N/A'}`,
       `- Contract repair invoked: ${record.agent.contract_repair_attempted ? 'yes' : 'no'}`,
+      `- MCP candidate selfchecks observed: ${record.agent.preflight?.calls ?? 'not observed'}`,
+      `- MCP selfchecks passed: ${record.agent.preflight?.passed ?? 'not observed'}`,
+      `- Final candidate independently selfchecked: ${record.agent.preflight?.final_candidate_checked ? 'yes' : 'no / not observed'}`,
       `- Duration: ${record.agent.duration_ms == null ? 'N/A' : record.agent.duration_ms + ' ms'}`,
     );
   }
@@ -188,6 +202,7 @@ function writeRecord(outDir, record) {
           agent_duration_ms: agent.duration_ms ?? null,
         },
         result: { status: record.result,
+          ...(agent.preflight ? {preflight_validation:agent.preflight} : {}),
           ...(record.review ? {rejection_code: record.review.code} : {}),
         },
       }),
@@ -265,10 +280,22 @@ function runAgent(issue) {
     throw error;
   }
   if (!parsed) throw new Error('Claude Code succeeded but returned no parseable JSON');
-  return issueAuditStructuredEnvelope(parsed);
+  const checked=readPreflightChecks({
+    issueNumber:issue.number,finalProposal:parsed.structured_output,
+  });
+  return {...issueAuditStructuredEnvelope(parsed),preflight:checked};
 }
 
 async function selfTest() {
+  const witnessed={observed:true,calls:2,passed:1,final_candidate_checked:true,
+    codes:['ISSUE_AUDIT_CONTRACT_REJECTED','VALID_CANDIDATE'],
+    evidence_kind:'local-readonly-mcp-proposal-checks'};
+  assert.equal(finalPreflightEvidence(witnessed).final_candidate_checked,true);
+  assert.equal(finalPreflightEvidence(witnessed,true,false).final_candidate_checked,false,
+    'format-only second pass was never independently MCP checked');
+  assert.equal(finalPreflightEvidence(witnessed,false,true).final_candidate_checked,false,
+    'contract correction cannot borrow a prior selfcheck receipt');
+  assert.equal(finalPreflightEvidence(null).observed,false);
   const sample = {
     usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 20, cache_creation_input_tokens: 3 },
     total_cost_usd: 0.01, session_id: 's1', num_turns: 2, duration_ms: 100,
@@ -371,7 +398,10 @@ async function main() {
   const missingTier = !readVerificationTier(issue).explicit;
   const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true';
   if (before.ok && !missingTier && !reevaluate) {
-    writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false }, errors: [] });
+    const record={schema_version:1,issue:{number:issue.number,title:issue.title,url:issue.url},
+      trigger,result:'contract-pass',agent:{invoked:false},errors:[]};
+    writeRecord(outDir,record);
+    await resolveIssueAuditFeedback(record);
     return;
   }
 
@@ -406,6 +436,9 @@ async function main() {
     const rejection = describeIssueAuditRejection(error);
     const message = rejection?.reason ?? (error instanceof Error ? error.message : String(error));
     const failed = claude ?? (error && typeof error === 'object' ? error.claudeResult ?? null : null);
+    const preflight=failed?.preflight??readPreflightChecks({
+      issueNumber,finalProposal:failed?.structured_output??null,
+    });
     const usage = failed ? extractUsage(failed,repairEnvelope,contractEnvelope) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
     const estimated = estimateCost(usage);
     writeRecord(outDir, {
@@ -436,6 +469,7 @@ async function main() {
         terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
         error: rejection ? null : message,
         rejection_code: rejection?.code ?? null,
+        preflight:finalPreflightEvidence(preflight,repairAttempted,contractRepairAttempted),
       },
       errors: after.errors,
     });
@@ -471,6 +505,7 @@ async function main() {
       model_requests: 1 + Number(repairAttempted) + Number(contractRepairAttempted),
         contract_repair_attempted: contractRepairAttempted,
       format_repair_attempted: repairAttempted,
+      preflight:finalPreflightEvidence(claude.preflight,repairAttempted,contractRepairAttempted),
       started_at: agentStartedAt.toISOString(),
       finished_at: new Date().toISOString(),
       duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime())),
@@ -483,6 +518,7 @@ async function main() {
     errors: after.errors,
   };
   writeRecord(outDir, record);
+  if(record.result==='repaired')await resolveIssueAuditFeedback(record);
   if (!after.ok || !readVerificationTier(afterIssue).explicit) process.exitCode = 2;
 }
 
