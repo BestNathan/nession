@@ -151,7 +151,13 @@ assert.ok(developer.includes('needs: [claim, restore]'));
 assert.ok(developer.includes('!cancelled() &&'));
 assert.ok(!developer.includes('      always() &&'));
 assert.ok(developer.includes("needs.restore.result == 'success'"));
-assert.ok(developer.includes('-v "$RUNNER_TEMP/development-native:/resume:ro"'));
+// The restored native bytes are read from Runner temp by the same direct Node
+// Worker. There must be no Docker mount or container-only resume path.
+assert.ok(developer.includes('node scripts/lib/agent/orchestration/development-worker.mjs'));
+assert.ok(!developer.includes('-v "$RUNNER_TEMP/development-native:/resume:ro"'));
+const cursorWorker=fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8');
+assert.ok(cursorWorker.includes("path.join(process.env.RUNNER_TEMP,'development-native'"));
+assert.ok(!cursorWorker.includes("fs.readdirSync('/resume')"));
 assert.ok(fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8')
   .includes('const nativeStore=CURSOR_JSONL_PATH;'));
 assert.ok(fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8')
