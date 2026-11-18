@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "18eb15ad4e12b3d41d0246415eeced0180548922",
+  "run_id": 44316937629,
+  "run_attempt": 1,
+  "plan_digest": "756c92d5719e24a23990b02d8618a316bdf61e557eb663fbc60a4a555d16e59d",
+  "artifact_digest": "sha256:8d46036bb4c81688c5c284531f37fe6f2fa3c7b9dc297c639288b07bac2ab894",
+  "results": [
+    {
+      "id": "project-sidebar-detail",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 50
+    }
+  ]
+}
