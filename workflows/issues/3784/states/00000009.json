@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "issue": 3784,
+  "version": 9,
+  "phase": "ready",
+  "target_sha": null,
+  "repair_attempts": 0,
+  "transitions": [],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "11ecfaa5fe0cc391b31f1d3ec5ce89cdb833856ad484f940b9e720da33282d34",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "76ed2d01195ad31ecdef97bc40ffa9f6d48427e6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "11ecfaa5fe0cc391b31f1d3ec5ce89cdb833856ad484f940b9e720da33282d34",
+        "source_run_id": 44250586057,
+        "source_attempt": 1,
+        "failure_code": "qwen_node_cli_invocation_failed"
+      }
+    },
+    {
+      "id": "3687526b2196cbad0db36ff935cc29a97f89d84e85494bdebe1c08503fa86549",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "76ed2d01195ad31ecdef97bc40ffa9f6d48427e6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "3687526b2196cbad0db36ff935cc29a97f89d84e85494bdebe1c08503fa86549",
+        "source_run_id": 44256663685,
+        "source_attempt": 1,
+        "failure_code": "qwen_native_readonly_discovery_rejected"
+      }
+    },
+    {
+      "id": "39c01222a8d00fa30bf681908ff6065f66cb74c96dc7314b16fbe6de0219f8bc",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "76ed2d01195ad31ecdef97bc40ffa9f6d48427e6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "39c01222a8d00fa30bf681908ff6065f66cb74c96dc7314b16fbe6de0219f8bc",
+        "source_run_id": 44259490499
+      }
+    }
+  ]
+}
