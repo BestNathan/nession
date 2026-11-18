@@ -13,7 +13,9 @@ commonLabels:
 resources:
   - deployment.yaml
   - service.yaml
-  - ingress.yaml
+  # Public ingress is intentionally NOT activated before a trusted TLS
+  # Secret, DNS and HTTPS redirect are independently verified. The ingress
+  # definition is kept in ingress.yaml for that explicit activation PR.
 
 images:
   - name: ghcr.io/bestnathan/nession-mcp
