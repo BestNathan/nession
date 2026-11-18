@@ -3,7 +3,7 @@
 // These receipts are observational, not GitHub Issue/E2E authorization.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -84,8 +84,20 @@ export function selfTestPreflightReceipts(){
     assert.deepEqual(proof.codes,['ISSUE_AUDIT_CONTRACT_REJECTED','VALID_CANDIDATE']);
     assert.ok(!readFileSync(preflightReceiptPath(3855,env),'utf8')
       .includes('Requirement: Runner'));
-    assert.throws(()=>readPreflightChecks({issueNumber:3856,env,
-      finalProposal:corrected}),/^(?!x)/); // different target never borrows another receipt
+    assert.equal(readPreflightChecks({issueNumber:3856,env,
+      finalProposal:corrected}).observed,false,'other Issue cannot borrow a receipt');
+    const file=preflightReceiptPath(3855,env),saved=readFileSync(file,'utf8');
+    const malformed=saved.replace('"issue":3855','"issue":3856');
+    writeFileSync(file,malformed);
+    assert.throws(()=>readPreflightChecks({...options,finalProposal:corrected}),
+      /Unauthenticated or inconsistent/);
+    writeFileSync(file,saved);
+    recordPreflightCheck({...options,sequence:3,proposal:corrected,
+      verdict:{ok:true,code:'VALID_CANDIDATE'}});
+    assert.equal(readPreflightChecks({...options,finalProposal:corrected}).calls,3);
+    assert.throws(()=>recordPreflightCheck({...options,sequence:4,
+      proposal:corrected,verdict:{ok:true,code:'VALID_CANDIDATE'}}),
+      /Invalid bounded/);
   }finally{rmSync(dir,{recursive:true,force:true});}
   console.log('Issue Audit preflight local receipts: bounded, source-bound and final-proposal digest fixtures passed');
 }
