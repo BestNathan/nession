@@ -1,6 +1,7 @@
 # ---- Build stages (shared with server via Docker build context) ----
 
 # Stage 1: Prepare cargo-chef recipe
+ARG AGENT_DEBIAN_BASE_IMAGE=debian:bookworm-20261104-slim
 FROM rust:1.96-bullseye AS planner
 WORKDIR /build
 RUN cargo install cargo-chef --locked
@@ -63,7 +64,13 @@ RUN apt-get update && \
         ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 COPY deploy/build-erofs-utils.sh /usr/local/bin/build-erofs-utils.sh
+# Shared source identity for Server and Agent; overrides must supply BOTH
+# release version and checksum, which the build script verifies fail-closed.
+ARG EROFS_UTILS_VERSION=1.9.4
+ARG EROFS_UTILS_SHA256=7d135aa2550326a5acf20f53c518aea5a8900015ce50700044e40f818c31dd80
 RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
+    EROFS_UTILS_VERSION="${EROFS_UTILS_VERSION}" \
+    EROFS_UTILS_SHA256="${EROFS_UTILS_SHA256}" \
     /usr/local/bin/build-erofs-utils.sh
 
 # Stage 6: Agent runtime base (#3178)
@@ -89,11 +96,26 @@ RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
 # three were affected. The builder stages above stay on `rust:1.96-bullseye` on
 # purpose: they install nothing, and a binary linked against glibc 2.31 runs
 # fine on bookworm's 2.36.
-FROM debian:bookworm-slim AS runtime-tools
+# Versioned Debian runtime; a dated tag is selected explicitly so rebuilding
+# the same commit cannot silently migrate Debian minor releases.
+FROM ${AGENT_DEBIAN_BASE_IMAGE} AS runtime-tools
 ARG DEBIAN_FRONTEND=noninteractive
+ARG AGENT_NGINX_VERSION=1.22.1-9+deb12u10
+ARG AGENT_CA_CERTIFICATES_VERSION=20250419~deb12u2
+ARG AGENT_CURL_VERSION=7.88.1-10+deb12u15
+ARG AGENT_GETTEXT_BASE_VERSION=0.21-12
+ARG AGENT_GIT_VERSION=1:2.39.5-0+deb12u3
+ARG AGENT_BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
+ARG AGENT_FUSE3_VERSION=3.14.0-4
+ARG AGENT_FUSE_OVERLAYFS_VERSION=1.10-1
+# Explicit Debian package versions, not floating apt latest. Removed package
+# revisions fail closed; upgrades require an explicit reviewed ARG change.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        nginx ca-certificates curl gettext-base git bubblewrap fuse3 fuse-overlayfs && \
+        "nginx=${AGENT_NGINX_VERSION}" "ca-certificates=${AGENT_CA_CERTIFICATES_VERSION}" \
+        "curl=${AGENT_CURL_VERSION}" "gettext-base=${AGENT_GETTEXT_BASE_VERSION}" \
+        "git=${AGENT_GIT_VERSION}" "bubblewrap=${AGENT_BUBBLEWRAP_VERSION}" \
+        "fuse3=${AGENT_FUSE3_VERSION}" "fuse-overlayfs=${AGENT_FUSE_OVERLAYFS_VERSION}" && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 COPY --from=erofs-utils-builder /usr/local/bin/erofsfuse /usr/local/bin/erofsfuse
@@ -111,28 +133,33 @@ ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 # Uses multi-arch binaries: v3.6b, linux-amd64 / linux-arm64.
 # Pinned to 3.6b (same version as Homebrew on macOS) — SGR mouse works correctly.
 ARG TARGETARCH
-RUN TMUX_ARCH=$(case "${TARGETARCH}" in amd64) echo "x86_64" ;; arm64) echo "arm64" ;; *) echo "x86_64" ;; esac) && \
-    TMUX_VERSION="3.6b" && \
-    curl -fsSL "https://github.com/tmux/tmux-builds/releases/download/v${TMUX_VERSION}/tmux-${TMUX_VERSION}-linux-${TMUX_ARCH}.tar.gz" \
+ARG AGENT_TMUX_VERSION=3.6b
+RUN TMUX_ARCH=$(case "${TARGETARCH}" in amd64) echo "x86_64" ;; arm64) echo "arm64" ;; *) exit 2 ;; esac) && \
+    curl -fsSL "https://github.com/tmux/tmux-builds/releases/download/v${AGENT_TMUX_VERSION}/tmux-${AGENT_TMUX_VERSION}-linux-${TMUX_ARCH}.tar.gz" \
         -o /tmp/tmux.tar.gz && \
     tar -xzf /tmp/tmux.tar.gz -C /usr/local/bin/ && \
     chmod +x /usr/local/bin/tmux && \
     rm /tmp/tmux.tar.gz && \
-    tmux -V
+    test "$(tmux -V)" = "tmux ${AGENT_TMUX_VERSION}"
 
 # Node.js 22 + Claude Code (baked in instead of k8s init container).
 # Replaces the old initContainer-based install which re-downloaded
 # on every pod recreation because emptyDir doesn't survive across
 # deployments.
+# Pinned NodeSource package and pinned Claude Code (no implicit latest).
+# Keep this expensive stable toolchain *before* the volatile Web/binary COPY.
+ARG AGENT_NODEJS_VERSION=22.23.5-1nodesource1
+ARG AGENT_CLAUDE_CODE_VERSION=2.1.323
+# Disable post-start self-update: runtime must execute exactly the image version.
+ENV DISABLE_AUTOUPDATER=1
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    npm config set registry https://registry.npmmirror.com && \
-    npm install -g @anthropic-ai/claude-code && \
-    apt-get purge -y curl && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends "nodejs=${AGENT_NODEJS_VERSION}" && \
+    test "$(node --version)" = "v${AGENT_NODEJS_VERSION%%-*}" && \
+    npm config set registry https://registry.npmjs.org && \
+    npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${AGENT_CLAUDE_CODE_VERSION}" && \
+    node -e 'const p=require("child_process").execFileSync("npm",["ls","-g","--json","--depth=0"],{encoding:"utf8"});const installed=JSON.parse(p).dependencies?.["@anthropic-ai/claude-code"]?.version;if(installed!==process.argv[1])process.exit(1)' "${AGENT_CLAUDE_CODE_VERSION}" && \
+    rm -rf /root/.npm /var/lib/apt/lists/*
 
 # Claude Code one-time init config (skips onboarding on first run)
 RUN mkdir -p /root/.claude && \

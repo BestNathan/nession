@@ -6,6 +6,12 @@ name: Release / Staging Artifacts
 # for the Actions cache quota.
 env:
   RUSTC_WRAPPER: ""
+  AGENT_DEBIAN_BASE_IMAGE: "debian:bookworm-20261104-slim"
+  AGENT_NODEJS_VERSION: "22.23.5-1nodesource1"
+  AGENT_CLAUDE_CODE_VERSION: "2.1.323"
+  AGENT_TMUX_VERSION: "3.6b"
+  EROFS_UTILS_VERSION: "1.9.4"
+  EROFS_UTILS_SHA256: "7d135aa2550326a5acf20f53c518aea5a8900015ce50700044e40f818c31dd80"
 
 
 on:
@@ -297,8 +303,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build-amd64
-          cache-to: type=gha,scope=nession-build-amd64,mode=min
+          cache-from: type=gha,scope=nession-build-server-amd64
+          cache-to: type=gha,scope=nession-build-server-amd64,mode=min
           build-args: |
             NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
             NESSION_TERMINAL_WEB_FONT_SIZE=${{ needs.versions.outputs.terminal_web_font_size }}
@@ -334,10 +340,16 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build-amd64
-          cache-to: type=gha,scope=nession-build-amd64,mode=min
+          cache-from: type=gha,scope=nession-build-agent-amd64
+          cache-to: type=gha,scope=nession-build-agent-amd64,mode=min
           build-args: |
             NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
+            AGENT_DEBIAN_BASE_IMAGE=${{ env.AGENT_DEBIAN_BASE_IMAGE }}
+            AGENT_NODEJS_VERSION=${{ env.AGENT_NODEJS_VERSION }}
+            AGENT_CLAUDE_CODE_VERSION=${{ env.AGENT_CLAUDE_CODE_VERSION }}
+            AGENT_TMUX_VERSION=${{ env.AGENT_TMUX_VERSION }}
+            EROFS_UTILS_VERSION=${{ env.EROFS_UTILS_VERSION }}
+            EROFS_UTILS_SHA256=${{ env.EROFS_UTILS_SHA256 }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -370,8 +382,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:mcp-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build-amd64
-          cache-to: type=gha,scope=nession-build-amd64,mode=min
+          cache-from: type=gha,scope=nession-build-mcp-amd64
+          cache-to: type=gha,scope=nession-build-mcp-amd64,mode=min
           build-args: |
             NESSION_SOURCE_REVISION=${{ github.sha }}
           build-contexts: |
@@ -403,8 +415,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-amd64
-          cache-from: type=gha,scope=nession-build-amd64
-          cache-to: type=gha,scope=nession-build-amd64,mode=min
+          cache-from: type=gha,scope=nession-build-ui-amd64
+          cache-to: type=gha,scope=nession-build-ui-amd64,mode=min
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -437,8 +449,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build-arm64
-          cache-to: type=gha,scope=nession-build-arm64,mode=min
+          cache-from: type=gha,scope=nession-build-server-arm64
+          cache-to: type=gha,scope=nession-build-server-arm64,mode=min
           build-args: |
             NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
             NESSION_TERMINAL_WEB_FONT_SIZE=${{ needs.versions.outputs.terminal_web_font_size }}
@@ -474,10 +486,16 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build-arm64
-          cache-to: type=gha,scope=nession-build-arm64,mode=min
+          cache-from: type=gha,scope=nession-build-agent-arm64
+          cache-to: type=gha,scope=nession-build-agent-arm64,mode=min
           build-args: |
             NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
+            AGENT_DEBIAN_BASE_IMAGE=${{ env.AGENT_DEBIAN_BASE_IMAGE }}
+            AGENT_NODEJS_VERSION=${{ env.AGENT_NODEJS_VERSION }}
+            AGENT_CLAUDE_CODE_VERSION=${{ env.AGENT_CLAUDE_CODE_VERSION }}
+            AGENT_TMUX_VERSION=${{ env.AGENT_TMUX_VERSION }}
+            EROFS_UTILS_VERSION=${{ env.EROFS_UTILS_VERSION }}
+            EROFS_UTILS_SHA256=${{ env.EROFS_UTILS_SHA256 }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -508,8 +526,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:mcp-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build-arm64
-          cache-to: type=gha,scope=nession-build-arm64,mode=min
+          cache-from: type=gha,scope=nession-build-mcp-arm64
+          cache-to: type=gha,scope=nession-build-mcp-arm64,mode=min
           build-args: |
             NESSION_SOURCE_REVISION=${{ github.sha }}
           build-contexts: |
@@ -541,8 +559,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMG }}:ui-${{ env.SHORT_SHA }}-arm64
-          cache-from: type=gha,scope=nession-build-arm64
-          cache-to: type=gha,scope=nession-build-arm64,mode=min
+          cache-from: type=gha,scope=nession-build-ui-arm64
+          cache-to: type=gha,scope=nession-build-ui-arm64,mode=min
           build-contexts: |
             web-dist=/tmp/web-dist
 
