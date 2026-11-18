@@ -6,7 +6,8 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
-  QWEN_CLI_RECOVERY_COMMENT,assertOwnerReviewDispatchRole}
+  QWEN_CLI_RECOVERY_COMMENT,QWEN_TOOL_RECOVERY_COMMENT,
+  assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -181,6 +182,29 @@ for(const mutation of [
   assert.throws(()=>assertDispatchAuthority({...cliRecovery,...mutation}),
     /authenticated owner\/main/);
 }
+
+// #3885 second post-model failure: a one-shot Owner Issue comment is
+// independently bound to the actual Run's signed Store Action (never arbitrary).
+const toolFailure=(await import('./qwen-tool-policy-failure.mjs')).SOURCE;
+const toolsCommentEvent={...cliCommentEvent,
+  comment:{...cliCommentEvent.comment,id:6972000002,body:QWEN_TOOL_RECOVERY_COMMENT}};
+const toolsRecovery={...cliRecovery,event:toolsCommentEvent,
+  actionId:toolFailure.action_id};
+assert.equal(assertDispatchAuthority(toolsRecovery).issue,3784);
+for(const mutation of [
+  {issue:3885},
+  {actionId:cliFailure.action_id},
+  {event:{...toolsCommentEvent,issue:{number:3784,state:'closed'}}},
+  {event:{...toolsCommentEvent,action:'edited'}},
+  {event:{...toolsCommentEvent,comment:{...toolsCommentEvent.comment,
+    body:QWEN_TOOL_RECOVERY_COMMENT+' '}}},
+  {event:{...toolsCommentEvent,comment:{...toolsCommentEvent.comment,
+    user:{login:'external'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'github-actions[bot]'}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+])
+  assert.throws(()=>assertDispatchAuthority({...toolsRecovery,...mutation}),
+    /authenticated owner\\/main/);
 
 const actualAction=await import('./outbox.mjs').then(m=>
   m.failedDeveloperRetryActionId(1997,
@@ -445,3 +469,4 @@ console.log('Controller dispatch: trusted run binding, fork/retry/role denial, H
 await import('./qwen-reviewer-source-selftest.mjs');
 await import('./qwen-preflight-recovery-selftest.mjs');
 await import('./qwen-cli-failure-selftest.mjs');
+await import('./qwen-tool-policy-failure-selftest.mjs');
