@@ -105,3 +105,4 @@ gateway certificate remains a separate prerequisite.
   need coordinated rotation. Re-encryption does not reverse their exposure.
 - GitOps Sync / CI success is NOT evidence of a live usable Kubernetes Secret,
   public HTTPS TLS, or an authenticated remote MCP handshake.
+\n## Main-merge one-time bootstrap (#3912)\n\nA restricted `push` trigger runs when `.github/workflows/deploy-seal-gitops-secret.yml` itself is merged to `main`. This trigger selects only the registered `staging/MCP_CONFIG_TOML` resource. GitHub Environment protection/approval still applies, and the validated GitOps MCP overlay must exist before the run. Unrelated pushes to `main` do NOT regenerate the ciphertext. On later credential changes use the existing manual `workflow_dispatch` and select the specific registered resource. The producer has no access to the SealedSecrets controller private key or to Kubernetes credentials.\n
