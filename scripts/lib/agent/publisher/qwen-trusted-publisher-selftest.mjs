@@ -86,7 +86,9 @@ for(const bad of [
 }
 // A Worker cannot invent a PR HEAD. Only a producer that already verified
 // the original ZIP/claim and Publisher's exact GitHub readback can compose v2.
-const attReceipt={...receipt,source_sha:'a'.repeat(40)};
+// Signed task source is a different historical main SHA from the Worker
+// workflow code. This real #3784 shape must produce a Developer v2 receipt.
+const attReceipt={...receipt,source_sha:'7'.repeat(40)};
 const action=attReceipt.action_id;
 const claim={inputs:{task:'implement',agent_id:'dev-qwen-01',
   issue_number:String(attReceipt.issue),action_id:action,
@@ -109,15 +111,20 @@ const readback={kind:'authenticated_qwen_publisher_pr_receipt',
   branch:'agent/2274/qwen-'+action.slice(0,16)};
 const make=(override={})=>composeQwenDeveloperResult({
   receipt:attReceipt,claim,worker,originalResult,
-  resultJsonBytes,readback,publisherRunId:89001,...override});
+  resultJsonBytes,readback,publisherRunId:89001,
+  signedSourceSha:attReceipt.source_sha,...override});
 const good=make();
 assert.equal(good.schema_version,2);
-assert.equal(good.source.input_sha,worker.head_sha);
+assert.equal(good.source.input_sha,attReceipt.source_sha);
+assert.notEqual(good.source.input_sha,worker.head_sha);
 assert.equal(good.source.output_sha,readback.head_sha);
 assert.equal(good.implementing_pr.head_sha_at_attestation,readback.head_sha);
 assert.equal(good.artifact.id,originalResult.id);
 for(const bad of [
   {claim:{inputs:{...claim.inputs,input_sha:'e'.repeat(40)}}},
+  {signedSourceSha:'e'.repeat(40)},
+  {signedSourceSha:worker.head_sha},
+  {signedSourceSha:null},
   {worker:{...worker,run_attempt:2}},
   {worker:{...worker,repository:{full_name:'evil/repo'}}},
   {worker:{...worker,path:'.github/workflows/foreign.yml'}},
