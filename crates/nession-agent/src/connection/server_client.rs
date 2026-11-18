@@ -4007,8 +4007,15 @@ fn workspace_descriptor(
         auto_created: workspace.auto_created,
         created_at: workspace.created_at,
         last_used_at: workspace.last_used_at,
+        updated_at: workspace.updated_at,
         path: None,
         detail: workspace.detail,
+        lower_digests: workspace.lower_digests,
+        overlay_storage: workspace.overlay_storage,
+        used_bytes: workspace.used_bytes,
+        consumers: workspace.consumers,
+        mounted: workspace.mounted,
+        lease_count: workspace.lease_count,
     }
 }
 

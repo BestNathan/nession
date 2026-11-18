@@ -25,6 +25,15 @@ function seed(): FixtureWorkspacesState {
         auto_created: false,
         created_at: CREATED_AT,
         last_used_at: CREATED_AT + 60,
+        updated_at: CREATED_AT + 60,
+        lower_digests: [
+          `sha256:${'c'.repeat(64)}`,
+        ],
+        overlay_storage: true,
+        used_bytes: 2_097_152,
+        consumers: [],
+        mounted: false,
+        lease_count: 0,
       },
       {
         workspace_id: 'ws_00000000-0000-4000-8000-000000000002',
@@ -35,7 +44,31 @@ function seed(): FixtureWorkspacesState {
         auto_created: true,
         created_at: CREATED_AT,
         last_used_at: CREATED_AT + 120,
+        updated_at: CREATED_AT + 120,
+        lower_digests: [
+          `sha256:${'d'.repeat(64)}`,
+          `sha256:${'e'.repeat(64)}`,
+        ],
+        overlay_storage: true,
+        used_bytes: 4_194_304,
+        consumers: ['fixture-session'],
+        mounted: true,
+        lease_count: 1,
         detail: 'Leased by the active execution.',
+      },
+      {
+        workspace_id: 'project_location:devbox-01:/Users/nathan/code/nession',
+        name: 'nession',
+        namespace: 'project:project-00000000-0000-4000-8000-000000000001',
+        kind: 'project_location',
+        status: 'unobserved',
+        auto_created: false,
+        created_at: CREATED_AT,
+        last_used_at: CREATED_AT + 180,
+        updated_at: CREATED_AT + 180,
+        path: '/Users/nathan/code/nession',
+        detail:
+          'User-owned Project Existing Location; the Agent never creates, copies or deletes it.',
       },
     ],
   };
@@ -89,6 +122,12 @@ function answerWorkspaces(
     const workspace = state.workspaces.find((item) => item.workspace_id === workspaceId);
     if (!workspace) {
       return Promise.resolve({ success: false, error: 'Workspace not found' });
+    }
+    if (workspace.kind === 'project_location') {
+      return Promise.resolve({
+        success: false,
+        error: 'Project Existing Locations are user-owned and never deleted here',
+      });
     }
     if (workspace.status === 'in_use') {
       return Promise.resolve({

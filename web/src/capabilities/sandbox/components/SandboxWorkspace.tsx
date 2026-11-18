@@ -9,6 +9,7 @@ import type {
 import type { ImageCacheObservation } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
+import { agentDisplayName } from '@/shared/lib/format';
 import { useSandboxContext, type SandboxContextState } from '../hooks/useSandboxContext';
 import { useSandboxDraft, type SandboxDraftState } from '../hooks/useSandboxDraft';
 import { useImageCacheObservations } from '../hooks/useImageCacheObservations';
@@ -170,7 +171,12 @@ function SandboxContent({
     return <SandboxImagesPanel experience={ctx.experience} sessionId={sessionId} />;
   }
   if (activeSection === 'workspaces') {
-    return <SandboxWorkspacesPanel sessionId={sessionId} />;
+    return (
+      <SandboxWorkspacesPanel
+        sessionId={sessionId}
+        agentLabel={ctx.agent ? agentDisplayName(ctx.agent) : 'This Session’s Agent'}
+      />
+    );
   }
   if (context.status === 'inside') {
     if (activeSection === 'policies') {

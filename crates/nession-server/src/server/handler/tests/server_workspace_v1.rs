@@ -147,6 +147,70 @@ async fn workspace_list_relays_the_agent_inventory() {
 }
 
 #[tokio::test]
+async fn workspace_list_names_the_sessions_project_location_as_unobserved() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    h.db.insert_project(&crate::db::ProjectRow {
+        project_id: "project-1".to_string(),
+        name: "Fixtures".to_string(),
+        description: None,
+        source: None,
+        locations: vec![nession_protocol::contracts::project::v1::ProjectLocation {
+            agent_id: "a1".to_string(),
+            path: "/srv/nession".to_string(),
+        }],
+        session_defaults: None,
+        image_digest: None,
+        created_at: 10,
+        updated_at: 20,
+    })
+    .await
+    .unwrap();
+    h.db.upsert_session_project_binding(&crate::db::SessionProjectBindingRow {
+        session_id: "a1:s1".to_string(),
+        agent_id: "a1".to_string(),
+        project_id: "project-1".to_string(),
+        incarnation_id: String::new(),
+        agent_created_at: 0,
+        revision: 1,
+        updated_at: 1,
+    })
+    .await
+    .unwrap();
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.workspace.list",
+        json!({ "session_id": "a1:s1" }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.workspace.list",
+            json!({ "success": true, "workspaces": [descriptor()] }),
+        )
+        .await
+    };
+    let (action, _sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], true);
+    let workspaces = reply["payload"]["workspaces"].as_array().unwrap();
+    assert_eq!(workspaces.len(), 2);
+    let location = workspaces
+        .iter()
+        .find(|workspace| workspace["kind"] == "project_location")
+        .expect("the Project Existing Location is named");
+    assert_eq!(location["status"], "unobserved");
+    assert_eq!(location["path"], "/srv/nession");
+    assert_eq!(location["namespace"], "project:project-1");
+    assert_eq!(location["name"], "nession");
+    assert_eq!(location["updated_at"], 20);
+    assert!(location.get("lower_digests").is_none());
+    assert!(location.get("consumers").is_none());
+}
+
+#[tokio::test]
 async fn workspace_list_refuses_an_invalid_descriptor() {
     let mut h = handler_with_online_agent().await;
     register_session(&h, "a1:s1").await;

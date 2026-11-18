@@ -286,19 +286,38 @@ test.describe('Web 1180', () => {
     await openWebSandbox(page);
     await openSection(page, 'workspaces');
     await expect(page.getByTestId('sandbox-workspaces')).toBeVisible();
-    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
+
+    // Selecting a row expands its observed detail in place (#3797 SC-01).
+    const available = page
+      .getByTestId('sandbox-workspace-row')
+      .filter({ hasText: 'fixture-workspace' });
+    await available.getByTestId('sandbox-workspace-row-select').click();
+    const detail = page.getByTestId('sandbox-workspace-detail');
+    await expect(detail).toContainText('Agent-managed');
+    await expect(detail.getByTestId('sandbox-workspace-detail-bytes')).toContainText('bytes');
+    await expect(detail.getByTestId('sandbox-workspace-detail-lowers')).toContainText(
+      'sha256:',
+    );
+
+    // A Project Existing Location is user-owned and has no delete action.
+    const location = page
+      .getByTestId('sandbox-workspace-row')
+      .filter({ hasText: 'user-owned' });
+    await expect(location.getByTestId('sandbox-workspace-no-delete')).toBeVisible();
+    await expect(location.getByTestId('sandbox-workspace-delete')).toHaveCount(0);
 
     await page.getByTestId('sandbox-workspaces-create-name').fill('demo');
     await page.getByTestId('sandbox-workspaces-create').click();
-    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
+    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(4);
 
+    // Delete is refused before the Agent is asked while the Workspace is leased.
     const leased = page
       .getByTestId('sandbox-workspace-row')
       .filter({ hasText: 'fixture-session-auto' });
-    await leased.getByTestId('sandbox-workspace-delete').click();
-    await page.getByTestId('sandbox-workspace-delete-confirm').click();
-    await expect(page.getByTestId('sandbox-workspaces-action-error')).toContainText('leased');
-    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
+    await expect(leased.getByTestId('sandbox-workspace-delete')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-workspace-delete-confirm')).toHaveCount(0);
+    await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(4);
   });
 
   test('Distribution separates an active transfer from verified bytes (#3412, #3408 SC-02)', async ({
