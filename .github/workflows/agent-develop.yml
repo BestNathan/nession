@@ -270,7 +270,7 @@ jobs:
             "$RUNNER_TEMP/development-admission.json" "$RUNNER_TEMP/development-output"
       - name: Upload canonical immutable Agent telemetry
         # A real Cursor Provider failure is still a model execution. Preserve
-        # the sanitized canonical outcome even when the Docker step exits 1.
+        # the sanitized canonical outcome even when the Node Worker step exits 1.
         # A failure before model invocation has no telemetry; do not invent it.
         if: always()
         uses: actions/upload-artifact@v4
@@ -398,7 +398,7 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # The trusted host derives the public sealing key from the
-          # already-existing private Restore key; Docker never receives it.
+          # already-existing private Restore key; the model receives only the public key.
           QWEN_RESUME_PRIVATE_KEY_B64: ${{ secrets.QWEN_RESUME_PRIVATE_KEY_B64 }}
           CONFIGURED_QWEN_PUBLIC_KEY_B64: ${{ vars.QWEN_RESUME_PUBLIC_KEY_B64 }}
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
@@ -459,7 +459,7 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/qwen-source" rev-parse HEAD)" = "$SOURCE_SHA"
           git -C "$RUNNER_TEMP/qwen-source" remote remove origin
           mkdir -m 700 "$RUNNER_TEMP/qwen-context"
-      - name: Fetch only bounded read-only Issue context outside model container
+      - name: Fetch only bounded read-only Issue context before Node model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -470,7 +470,7 @@ jobs:
             "$RUNNER_TEMP/qwen-context/issue.json" > /dev/null
       # #1664 SC-05: the trusted host alone reads GitHub comments and the
       # public orphan Store. Only one canonical Reviewer projection is passed
-      # to Docker as task context; API tokens and other comments never enter it.
+      # to the model as task context; API tokens and other comments never enter it.
       - name: Attest latest committed Qwen Reviewer Issue comment before Repair
         if: inputs.task == 'repair'
         env:
@@ -525,7 +525,7 @@ jobs:
         with:
           name: development-qwen-transfer-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/qwen-transfer
-      - name: Open Qwen native Session on trusted host before model Docker
+      - name: Restore Qwen native Session before Node model execution
         if: inputs.resume_from != ''
         env:
           QWEN_RESUME_PRIVATE_KEY_B64: ${{ secrets.QWEN_RESUME_PRIVATE_KEY_B64 }}
@@ -585,7 +585,7 @@ jobs:
 
   # #3491: separate no-model job. A GITHUB_TOKEN-started Worker does not
   # emit a downstream workflow_run, but explicit workflow_dispatch is allowed.
-  # Qwen and every model/container step retain read-only permissions. The
+  # Qwen and every model Worker step retain read-only permissions. The
   # Store owner independently waits for completed success and attests the
   # original immutable Artifacts and Outbox before any Store App token.
   wake-qwen-result:
