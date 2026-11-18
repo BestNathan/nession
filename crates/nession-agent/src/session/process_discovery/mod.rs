@@ -696,6 +696,34 @@ fn platform_details(_pid: u32) -> ProcessDetails {
     ProcessDetails::default()
 }
 
+/// The process groups of one observed PID: `(own group, terminal foreground
+/// group)`.
+///
+/// A Pane root's own group is the interactive shell's group; its terminal
+/// foreground group is whichever job the terminal currently drives. When those
+/// differ, a foreground job is running. This is one bounded per-platform read
+/// (a `/proc` stat on Linux, one `PROC_PIDTBSDINFO` call on macOS), not a
+/// process-table scan, and `None` means the process is gone or has no
+/// controlling terminal — never a guessed group.
+pub(crate) fn process_groups(pid: u32) -> Option<(u32, u32)> {
+    platform_process_groups(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_process_groups(pid: u32) -> Option<(u32, u32)> {
+    linux::process_groups(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_process_groups(pid: u32) -> Option<(u32, u32)> {
+    macos::process_groups(pid)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn platform_process_groups(_pid: u32) -> Option<(u32, u32)> {
+    None
+}
+
 #[cfg(target_os = "linux")]
 fn platform_sample(pids: &[u32]) -> HashMap<u32, Sample> {
     linux::sample(pids)

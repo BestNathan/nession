@@ -1,7 +1,7 @@
 # Session Activity ownership
 
-Status: **delivered on `staging` for #3800 (P0)**. Claude (#3801), Shell
-(#3802) and the Server/Web/App projection (#3804) are downstream issues; this
+Status: **delivered on `staging` for #3800 (P0) and #3802 (Shell)**. Claude
+(#3801) and the Server/Web/App projection (#3804) are downstream issues; this
 document owns the domain contract they consume.
 
 Session Activity answers one question — **is this Session's work happening
@@ -92,12 +92,46 @@ tmux enumeration, from `list_sessions` plus `list_panes`:
 
 The Pane row carries `#{pane_current_command}` as foreground evidence
 (`nession-tmux::PaneSummary::pane_current_command`). That field is a fact, not
-an activity classifier: interpreting it belongs to #3802's Shell provider.
+an activity classifier.
 
-## Explicit non-goals (P0)
+## Shell provider (#3802)
+
+`session::activity::shell::ShellActivityProvider` is the Agent's one generic
+Shell claimant. It answers from the **Pane root's process groups**
+(`session::process_discovery::process_groups`, one bounded `/proc` stat read on
+Linux or one `PROC_PIDTBSDINFO` call on macOS):
+
+| Evidence | Level |
+|---|---|
+| root's own group == terminal foreground group, command is a known shell | `idle` |
+| the two groups differ, command is a known shell | `working` |
+| command is not a shell | `working` (the foreground process *is* the work) |
+| command is a specialized CLI (`claude`, `codex`, `qwen`) | `None` — yield |
+| groups unavailable, no Pane root, or no command | `None` → `unknown` |
+
+This makes a silent `sleep`, a pipeline, an interactive TUI, a `bash -c` child
+named `bash`, `fg` and SIGINT behave correctly without a single timing
+heuristic: the foreground group, not output volume, decides. A backgrounded
+`&` job leaves the shell's group in the foreground, so it is `idle`, as the
+issue requires. A builtin runs in the shell's own group and is not fabricated
+into a foreground job. A non-shell foreground command remains `working` even
+when the group read fails, because the command itself is foreground evidence.
+
+The yield list prevents a Shell `working` claim for an agent CLI on an Agent
+that does not compose that capability's adapter; with no specialized provider
+the Pane is `unknown`, which is truthful. It is **not** a second Claude status
+engine — the Claude provider (#3801) must still verify its own workload.
+
+Linux and macOS share the contract. A host where the read is unavailable
+reports `unknown`; macOS runtime accuracy is not claimed from Linux tests.
+The provider is composed by `runtime::compose_activity_providers` beside the
+Extension providers, so the composition is one explicit list.
+
+## Explicit non-goals (P0/#3802)
 
 - No wire type, Server projection or Web/App indicator (#3804).
 - No real Claude/Codex status reader (#3801, reusing #3779).
-- No Shell prompt hook or process-group classifier (#3802).
+- No shell prompt hook or OSC 133 integration; the process-group fallback is
+  the current detector.
 - No background-job, CPU, output-volume or attachment-based inference.
 - No durable activity history and no new persistent store.
