@@ -7,6 +7,9 @@ import { expect, test, type Page } from '@playwright/test';
 async function openFilesystem(page: Page, scenario = ''): Promise<void> {
   const suffix = scenario ? `&sandbox=${scenario}` : '';
   await page.goto(`/#/fixture/workspace?capability=sandbox${suffix}`);
+  // A same-hash goto does not reload; each viewport and the later macos
+  // scenario must start from a fresh fixture state.
+  await page.reload();
   await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
   await page.getByTestId('sandbox-section-policies').click();
   await page.getByTestId('sandbox-tab-filesystem').click();
