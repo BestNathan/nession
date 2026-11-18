@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "0a37567c7f0d5a2ad276e840da94193cfd9e64c8",
+  "run_id": 44318555240,
+  "run_attempt": 1,
+  "plan_digest": "05f5f4ff106255fc995d6e2b61e043dc9dfc87c2ecafd6f285b0bb006a034efd",
+  "artifact_digest": "sha256:d1a4df8416de7b16c40a54fb265bb3213760a5c7a4d5ff10785728550f70f4d9",
+  "results": [
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 268
+    }
+  ]
+}
