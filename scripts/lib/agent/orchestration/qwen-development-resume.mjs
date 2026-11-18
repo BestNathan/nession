@@ -2,7 +2,7 @@
 // #2274: independent trusted pre-model Qwen Session restore. PREPARE holds
 // only Store AES authority and produces ciphertext-only transfer; OPEN holds
 // only the dedicated Qwen native private key and reconstructs the exact JSONL
-// before the unprivileged Docker model process starts.
+// before the authorized Node model process starts.
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -18,6 +18,8 @@ import {openClaudeNativeSession} from '../providers/claude-native-store.mjs';
 const HEX=/^[a-f0-9]{64}$/;
 const SHA=/^[a-f0-9]{40}$/;
 const hash=s=>createHash('sha256').update(s).digest('hex');
+const expectedWorkspace=()=>path.join(fs.realpathSync(process.env.RUNNER_TEMP),
+  'qwen-source');
 function fail(m){throw Error('trusted Qwen native restore: '+m);}
 function read(file){
   const stat=fs.lstatSync(file);
@@ -55,7 +57,7 @@ export function validateQwenNativeTransfer(admission,plan,transfer,record){
       record?.kind!=='claude-native-encrypted-snapshot'||
       record.ciphertext_sha256!==transfer.ciphertext_sha256||
       JSON.stringify(record.metadata)!==JSON.stringify(m)||
-      m?.cwd_sha256!==hash('/workspace'))
+      m?.cwd_sha256!==hash(expectedWorkspace()))
     fail('transfer not bound to original native project and recipient');
   const compatible=verifyQwenNativeContinuation(admission,plan,m);
   return compatible;
