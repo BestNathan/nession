@@ -55,6 +55,72 @@ export function completeIssueUpdateProposal(current, proposal) {
   };
 }
 
+// #3843: When an Issue declares zero E2E tests but omits the required empty
+// Report, preserve the exact source-owned declarations outside model-authored
+// semantic Markdown. All other malformed E2E shapes retain the normal guarded
+// proposal path; this narrow adapter never invents selections or evidence.
+export function isNoneOnlyMissingE2EReport(body) {
+  const source = parseIssueE2E(body);
+  return source?.selectedIds?.length === 0 &&
+    source.newNone !== null && source.regressionNone !== null &&
+    source.rows?.size === 0 &&
+    source.errors?.length === 1 &&
+    source.errors[0] === 'missing ## E2E Report';
+}
+
+export function completeNoneOnlyE2EBody(currentBody, semanticBody) {
+  if (!isNoneOnlyMissingE2EReport(currentBody)) {
+    throw rejectedAuditProposal('ISSUE_AUDIT_PROPOSAL_REJECTED',
+      'body_without_e2e is only permitted for a none-only E2E source missing its Report');
+  }
+  if (typeof semanticBody !== 'string' || !semanticBody.trim()) {
+    throw rejectedAuditProposal('ISSUE_AUDIT_FIELD_CONTRACT',
+      'body_without_e2e must contain nonempty non-E2E Issue content');
+  }
+  // Reject, rather than silently discard, any attempted model-authored E2E
+  // blocks. This ensures a changed explanation or fabricated row never gets
+  // laundered into an apparently safe repair.
+  if (/^\s*##\s+E2E\s+(Verification|Report)\s*$/im.test(semanticBody)) {
+    throw rejectedAuditProposal('ISSUE_AUDIT_E2E_PROTECTED',
+      'body_without_e2e must not include protected E2E sections');
+  }
+  const lines = String(currentBody).replace(/\r\n?/g, '\n').split('\n');
+  let start = -1;
+  let end = lines.length;
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const delimiter = lines[i].match(/^\s*(`{3,}|~{3,})/);
+    if (delimiter) {
+      const token = delimiter[1];
+      if (!fence) fence = {char: token[0], length: token.length};
+      else if (fence.char === token[0] && token.length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    if (lines[i].trim() === '## E2E Verification') {
+      if (start !== -1) {
+        throw rejectedAuditProposal('ISSUE_AUDIT_E2E_PROTECTED',
+          'Duplicate source E2E Verification blocks cannot be repaired by Issue Audit');
+      }
+      start = i;
+    } else if (start >= 0 && /^##\s/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  if (start < 0) {
+    throw rejectedAuditProposal('ISSUE_AUDIT_E2E_PROTECTED',
+      'Source E2E Verification heading is not safely extractable');
+  }
+  const sourceDeclaration = lines.slice(start, end).join('\n').trim();
+  const completed = semanticBody.trimEnd() + '\n\n' + sourceDeclaration +
+    '\n\n## E2E Report\n| ID | Type | Result | Evidence |\n|---|---|---|---|';
+  // The canonical protected-field owner still decides, including digest and
+  // originally declared none justifications.
+  enforceE2EReadOnly(currentBody, completed);
+  return completed;
+}
+
 export function candidateIssue(issue, title, body, contractLabels) {
   const preserved = issueLabelNames(issue).filter((name) => !CONTRACT_LABELS.has(name));
   const labels = [...new Set([...preserved, ...contractLabels])];
