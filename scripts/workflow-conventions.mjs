@@ -76,6 +76,7 @@ export const CATALOG = [
   ['release-staging-convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
+  ['deploy-seal-gitops-secret', 'deploy-seal-gitops-secret.yml', 'Deploy / Seal GitOps Secret', 'deploy-seal-gitops-secret.yml', 'Deploy / Seal GitOps Secret', 'delivery'],
   ['deploy-identity', 'deploy-identity.yml', 'Deploy / Identity', 'deploy-identity.yml', 'Deploy / Identity', 'delivery'],
   ['deploy-staging-acr', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'delivery'],
   ['deploy-acr-macos-mirror', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'delivery'],
