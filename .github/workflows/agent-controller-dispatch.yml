@@ -67,6 +67,16 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body, '/nession dispatch-review issue=')) ||
+        # Single source-attested Qwen CLI failure (Run 44250586057).
+        # The trusted Controller still independently verifies original
+        # Run/Job/Artifacts/log and committed Store CAS before another POST.
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 3784 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession recover-qwen-cli issue=3784 run=44250586057') ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
          github.event.issue.number == 3433 &&
@@ -142,6 +152,8 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
+          # This includes original post-model failure, Store CAS and replay negatives.
+          node scripts/lib/agent/orchestration/qwen-cli-failure-selftest.mjs
           node scripts/lib/agent/orchestration/publisher-reviewer-wake-selftest.mjs
           node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
