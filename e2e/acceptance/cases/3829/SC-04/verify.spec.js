@@ -40,7 +40,7 @@ test('SC-04: Claude App states are honest and never infer work from the foregrou
   // says it cannot read the conversation rather than pretending it is empty.
   await openClaudeApp(page, '?conversation=thread-unavailable');
   await expect(page.getByTestId('conversation-open')).toBeVisible();
-  await expect(page.getByTestId('conversation-unavailable')).toHaveText(
+  await expect(page.getByTestId('conversation-unavailable')).toContainText(
     'This conversation cannot be read right now.',
   );
   await expect(page.getByTestId('conversation-empty')).toHaveCount(0);

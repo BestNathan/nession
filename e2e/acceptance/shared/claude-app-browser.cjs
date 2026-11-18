@@ -11,6 +11,10 @@
  * `?pane=…`); it never names a resolved screen.
  */
 async function openClaudeApp(page, search = '') {
+  // A repeated `goto` to the same URL+hash does not reload the SPA, so a
+  // second Case step would land on the Workspace layer the first one left
+  // open. Clearing the document first makes each open a fresh fixture mount.
+  await page.goto('about:blank');
   await page.goto('/#/fixture/app' + search);
   await page.getByTestId('app-layer-root').waitFor({ timeout: 30_000 });
   await page.getByTestId('app-header-workspace').first().waitFor({ timeout: 30_000 });

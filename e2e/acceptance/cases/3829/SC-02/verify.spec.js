@@ -12,7 +12,7 @@ const {
   back,
 } = require('../../../shared/claude-app-browser.cjs');
 
-async function header(page) {
+function header(page) {
   return page.getByTestId('app-page-header');
 }
 

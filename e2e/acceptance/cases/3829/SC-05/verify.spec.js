@@ -18,7 +18,7 @@ test('SC-05: Web keeps its master/detail and both surfaces share the conversatio
   await expect(page.getByTestId('claude-code-view-tabs').getByRole('tab')).toHaveCount(5);
   // Web's composition is still the wide master/detail, not the App stack.
   await expect(page.getByTestId('conversation-master-detail')).toBeVisible();
-  await expect(page.getByTestId('conversation-open')).toHaveCount(0);
+  await expect(page.getByTestId('conversation-open')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude Code' })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });

@@ -46,8 +46,8 @@ test('SC-03: 375/390/430 widths keep controls touch-safe and restore reading pos
 
     const header = await page.getByTestId('app-page-header').boundingBox();
     expect(header).not.toBeNull();
-    expect(header.left).toBeGreaterThanOrEqual(0);
-    expect(header.right).toBeLessThanOrEqual(width + 1);
+    expect(header.x).toBeGreaterThanOrEqual(0);
+    expect(header.x + header.width).toBeLessThanOrEqual(width + 1);
 
     // The conversation title wraps inside the page rather than widening it.
     const title = await page.getByTestId('conversation-open').locator('h2').first().boundingBox();
@@ -59,8 +59,8 @@ test('SC-03: 375/390/430 widths keep controls touch-safe and restore reading pos
     await openBrowse(page);
     const sheet = await page.getByTestId('claude-browse-sheet').boundingBox();
     expect(sheet).not.toBeNull();
-    expect(sheet.left).toBeGreaterThanOrEqual(0);
-    expect(sheet.right).toBeLessThanOrEqual(width + 1);
+    expect(sheet.x).toBeGreaterThanOrEqual(0);
+    expect(sheet.x + sheet.width).toBeLessThanOrEqual(width + 1);
     const browseTargets = await visibleBoxes(
       page,
       '[data-testid^="claude-browse-"]:not([data-testid="claude-browse-sheet"])',
