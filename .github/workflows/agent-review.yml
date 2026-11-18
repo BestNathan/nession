@@ -4,8 +4,8 @@ env:
   NSESSION_AGENT_WORKFLOW_ID: agent-review
 
 # Trusted, read-only Reviewer Slice. Owner/main dispatch only. The admission is
-# prepared from independently fetched facts + the committed Store intent, and
-# the model runs inside an OS-isolated container with only Read/Grep.
+# prepared from independently fetched facts + the committed Store intent.
+# The model runs directly on the trusted Node Runner with only Read/Grep tools.
 on:
   workflow_dispatch:
     inputs:
