@@ -109,3 +109,12 @@ test('Git porcelain parser preserves leading tracked-status columns', () => {
   assert.throws(() => validateChangedPaths(
     parseGitStatusPaths(' M environments/staging/nession/secret.yaml\n'), environment, secret));
 });
+
+test('Git porcelain staged status and mixed status preserve exact file identities', () => {
+  const root = 'environments/staging/mcp/';
+  const rows = ['M  ' + root + 'kustomization.yaml',
+    '?? ' + root + 'sealed-secret.json', ''];
+  const parsed = parseGitStatusPaths(rows.join('\n'));
+  assert.deepEqual(parsed, [root + 'kustomization.yaml', root + 'sealed-secret.json']);
+  assert.deepEqual(validateChangedPaths(parsed, environment, secret), parsed);
+});
