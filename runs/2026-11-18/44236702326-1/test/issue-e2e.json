@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "87f107e20984bd518a8eefea91cb858f3fcf810e",
+  "run_id": 44236702326,
+  "run_attempt": 1,
+  "plan_digest": "4320d88f0ada93478fff5e01cc34871ebc1cfacbd0444c81745e39efe900a912",
+  "artifact_digest": "sha256:be336af706d1b114ec8fffbf2bab64c485710ce44093249d595478e4a9413d8d",
+  "results": [
+    {
+      "id": "conversation-list-state",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 12
+    },
+    {
+      "id": "conversation-thread-state",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    },
+    {
+      "id": "transcript-geometry",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 66
+    }
+  ]
+}
