@@ -14,14 +14,15 @@ async function expectWebProjectDetail(page: import('@playwright/test').Page) {
   await expect(page.getByTestId('project-source-ref')).toHaveText('main');
   await expect(page.getByTestId('project-location-row')).toHaveCount(1);
   await expect(page.getByTestId('project-image-digest')).toContainText('sha256:');
-  // The Managed entry is present but fails closed: no EROFS/Sandbox runtime
-  // exists yet, so it must never create a Native Session as a substitute.
-  await page.getByTestId('project-detail-managed-session').click();
-  const managed = page.getByTestId('project-managed-unavailable');
-  await expect(managed).toBeVisible();
-  await expect(managed).toContainText('no Native fallback was attempted');
-  await managed.getByRole('button', { name: 'Close' }).first().click();
-  await expect(managed).toHaveCount(0);
+  // #3794 supersedes the unconditional Managed stub: New Session carries the
+  // explicit Host vs Managed runtime choice, and no Native substitute exists.
+  await expect(page.getByTestId('project-detail-managed-session')).toHaveCount(0);
+  await page.getByTestId('project-detail-create-session').click();
+  const createDialog = page.getByRole('dialog').filter({ hasText: 'Create Session in' });
+  await expect(createDialog.getByTestId('session-runtime-native')).toBeVisible();
+  await expect(createDialog.getByTestId('session-runtime-managed')).toBeVisible();
+  await createDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(createDialog).toHaveCount(0);
   await expect(page.getByTestId('session-item-row')).toHaveCount(6);
 
   // The standalone detail does not select, attach or replace the Session row.
