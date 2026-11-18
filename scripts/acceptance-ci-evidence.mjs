@@ -1679,7 +1679,8 @@ async function collectCommand(workspace, outFile) {
   // A successful sibling Audit of the implementing #3843 is NOT this proof.
   const authenticatedIssueAudit3843Readback =
     process.env.ACCEPTANCE_STAGE==='post-merge' &&
-    Number(process.env.ISSUE_NUMBER)===ISSUE_AUDIT_3843_PROOF.acceptanceIssue
+    Number(process.env.ISSUE_NUMBER)===ISSUE_AUDIT_3843_PROOF.acceptanceIssue &&
+    sha===ISSUE_AUDIT_3843_PROOF.sourceSha
     ? await collectIssueAuditReadback({
       repo,targetSha:sha,sourceRunId:ISSUE_AUDIT_3843_PROOF.sourceRunId,
       targetIssueNumber:ISSUE_AUDIT_3843_PROOF.targetIssueNumber,
