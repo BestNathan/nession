@@ -65,22 +65,26 @@ https://staging.mcp.nession.bestnathan.top/mcp
 1. Create/verify the public DNS A/AAAA/CNAME record
    `staging.mcp.nession.bestnathan.top` pointing to the externally reachable
    **Higress gateway**. A GitOps Ingress manifest does not create public DNS.
-2. Provision a valid, publicly trusted, unexpired TLS certificate with SAN
-   `staging.mcp.nession.bestnathan.top`, including the full intermediate
-   chain, in the **operator-owned** Kubernetes TLS Secret
-   `nession-mcp-staging-tls` in namespace `nession`. No certificate private
-   key is committed to Git. If the cluster's existing Higress-managed
-   certificate automation provisions that exact Secret, reuse that owner;
-   otherwise create it securely, for example:
-   ```sh
-   kubectl -n nession create secret tls nession-mcp-staging-tls \
-     --cert=/secure/path/fullchain.pem --key=/secure/path/privkey.pem \
-     --dry-run=client -o yaml | kubectl apply -f -
-   ```
-3. Run the protected GitHub Environment SealedSecret workflow described
-   above and verify the controller reconciles the resulting
-   `nession-mcp-config-staging` Secret. The Host allowlist must include the
-   public hostname and inbound/outbound bearer tokens must differ.
+2. Provision a valid publicly trusted TLS certificate with SAN
+   `staging.mcp.nession.bestnathan.top` and its matching private key.
+   **Use the reviewed SealedSecret workflow**, not plaintext `kubectl create
+   secret`, when GitOps owns this Secret. First reconcile any existing
+   cert-manager/Higress/nitops owner of that exact name to avoid two writers.
+   Once [#3936](https://github.com/BestNathan/nession/issues/3936)
+   has shipped on main, put the original PEM bundle (leaf, ordered
+   intermediates, then matching unencrypted private key) into GitHub
+   Environment `staging` Secret `MCP_TLS_PEM_BUNDLE`, and manually run
+   `Deploy / Seal GitOps Secret` selecting `staging/MCP_TLS_PEM_BUNDLE`.
+   That produces encrypted `sealed-tls.json` in this overlay and instructs
+   the Sealed Secrets controller to create a `kubernetes.io/tls` Secret
+   `nession/nession-mcp-staging-tls` with `tls.crt` + `tls.key`.
+   See `docs/engineering/sealed-secret-generation.md` on main for validation,
+   rotation and expiration requirements. The key never enters plaintext Git.
+3. Verify **both** Kubernetes Secrets exist after Argo CD/Sealed Secrets
+   reconcile: `nession-mcp-config-staging` and
+   `nession-mcp-staging-tls`. Also verify DNS and actual publicly trusted
+   TLS from an external client. Host allowlist must include the public
+   hostname, and inbound/outbound bearer tokens must differ.
 4. **Only after steps 1-3 pass**, add `ingress.yaml` to this overlay's
    `kustomization.yaml` resources in a separate reviewed GitOps activation.
    Verify the existing Higress Controller reconciles this Ingress and TLS
@@ -115,7 +119,12 @@ not an assumption from a PR merge or Argo CD Synced status.
 
 ## Verification and rollback
 
+Read-only resource checks (do not print full TLS Secret YAML, which exposes
+base64-decodable private key material):
+
 ```sh
+kubectl -n nession get sealedsecret nession-mcp-staging-tls
+kubectl -n nession get secret nession-mcp-staging-tls -o jsonpath='{.type}{"\\n"}'
 kubectl -n nession rollout status deployment/nession-mcp-staging
 kubectl -n nession get deploy/nession-mcp-staging svc/nession-mcp-staging
 kubectl -n nession port-forward service/nession-mcp-staging 9090:9090
