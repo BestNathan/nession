@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a66a65b70f961ef7868d3874d96a88109ac21d4b1aa1ae186bb70382870ce939",
+  "run_id": 44355944226,
+  "run_attempt": 1,
+  "issue": 3791,
+  "criterion": "SC-02",
+  "criterion_text": ": In an isolated CI container with no co-located Server/Agent process, mounting the documented Secret/config and pointing at a reachable test Nession Server permits authenticated MCP initialize/discovery, `tools/list` and a safe read via the canonical Server route; missing/wrong inbound token, invalid Host/Origin and missing outbound configuration fail closed, credentials do not appear in image metadata/logs, and SIGTERM terminates the MCP process.",
+  "stage": "staging",
+  "target_sha": "d42910963a7554fc6ca2bcdde26938f6b7151fb4",
+  "contract_sha256": "d8a7484a3ac14683b76cd12354c5d1090f303686211486248413a55354f78bd2",
+  "case_revision": "d42910963a7554fc6ca2bcdde26938f6b7151fb4",
+  "case_tree_sha": "f01dadafd59886dc468968151fb41100e4aaa1ad",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T17:15:49.417Z",
+  "finished_at": "2026-11-18T17:16:29.126Z",
+  "duration_ms": 39709,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify-build-binary.cjs",
+      "result": "Pass",
+      "summary": "Built the standalone MCP host and test Server at the exact target SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: cargo build -p nession-mcp -p nession-server completed for the isolated container Case"
+        }
+      ],
+      "duration_ms": 19822,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-build-image.cjs",
+      "result": "Pass",
+      "summary": "Built the dedicated standalone MCP image at the exact target SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: Dockerfile.mcp.prebuilt built with the architecture-matched nession-mcp binary"
+        }
+      ],
+      "duration_ms": 12865,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Isolated MCP container preserves authentication, Host/Origin policy, the canonical Server route and fail-closed startup",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: container nession-3791-sc02-7392: missing/wrong bearer 401, foreign Origin and Host refused"
+        },
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: legacy 2025-03-26: initialize + tools/list (15) + nession_server_list_agents via the Server route"
+        },
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: modern 2026-07-28: server/discover + nession_server_list_agents via the Server route"
+        },
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: image metadata/logs carry no credential; org.opencontainers.image.revision=d42910963a7554fc6ca2bcdde26938f6b7151fb4"
+        },
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: container payload excludes Server/Agent/nginx/Web/tmux/Node/EROFS binaries"
+        },
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: absent config, empty inbound token and missing [backend.server] all exit non-zero before serving"
+        },
+        {
+          "type": "runtime",
+          "value": "staging d42910963a7554fc6ca2bcdde26938f6b7151fb4: SIGTERM: docker stop drained in 34ms, exit code 0"
+        }
+      ],
+      "duration_ms": 1121,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44355944226,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d42910963a7554fc6ca2bcdde26938f6b7151fb4",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44355944226",
+    "record_path": "runs/2026-11-18/44355944226-1/3791/SC-02.json",
+    "source_result_sha256": "9850e7153a7a97379ff811b22b49f53db534a10f91602f9bc8ea4274de814dc7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44355944226-1",
+    "sha256": "9850e7153a7a97379ff811b22b49f53db534a10f91602f9bc8ea4274de814dc7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44355944226",
+    "durability": "time-limited; object archival not configured"
+  }
+}
