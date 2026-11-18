@@ -9,7 +9,9 @@ const HEX=/^[a-f0-9]{64}$/;
 const QWEN=/^qwen[a-z0-9._-]*$/i;
 const VERSION=/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$/;
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][0-9a-f]{3}-[a-f0-9]{12}$/i;
-const TOOLS=Object.freeze(['Read','Edit','Write']);
+// Read-only repository discovery is necessary for real coding tasks. The
+// model may not execute Bash/MCP/network or any host-authority tool.
+const TOOLS=Object.freeze(['Read','Grep','Glob','Edit','Write']);
 function fail(message){throw Error('Qwen Developer policy: '+message);}
 function checksum(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 
