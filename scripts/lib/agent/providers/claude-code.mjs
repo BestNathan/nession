@@ -49,7 +49,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export function buildClaudeCliArgs({
   prompt, model, maxTurns, allowedTools, disallowedTools,
   sessionId = null, resumeSessionId = null, restricted = false, tools = null,
-  jsonSchema = null,
+  jsonSchema = null, mcpConfig = null,
 }) {
   // A resumed Agent is the SAME native session, never --continue or --fork-session.
   if (sessionId && resumeSessionId) throw new Error('Claude cannot seed and resume at once');
@@ -66,9 +66,25 @@ export function buildClaudeCliArgs({
     }
     args.push('--json-schema', JSON.stringify(jsonSchema));
   }
+  if (mcpConfig !== null) {
+    // Only this pre-registered fixed-target read-only checker is available
+    // in the Audit runner; user/Issue text never chooses an MCP server.
+    const server=mcpConfig?.mcpServers?.nession_audit;
+    if(Object.keys(mcpConfig?.mcpServers??{}).join(',')!=='nession_audit'||
+       server?.command!=='node'||
+       JSON.stringify(server.args)!==JSON.stringify(['scripts/issue-audit-check-mcp.mjs'])||
+       !/^[1-9][0-9]*$/.test(String(server.env?.ISSUE_AUDIT_FIXED_ISSUE_ID??''))||
+       Object.keys(server.env??{}).join(',')!=='ISSUE_AUDIT_FIXED_ISSUE_ID')
+      throw Error('Unapproved Issue Audit MCP server configuration');
+    args.push('--mcp-config',JSON.stringify(mcpConfig),'--strict-mcp-config',
+      '--permission-mode','dontAsk');
+  }
   if (tools !== null) {
     if (typeof tools !== 'string') throw new Error('invalid Claude explicit tools policy');
-    args.push('--tools', tools, '--disallowedTools', 'mcp__*');
+    if(mcpConfig!==null && tools!=='Read,Glob,Grep,mcp__nession_audit__validate_issue_proposal')
+      throw Error('Unapproved Issue Audit MCP tools allowlist');
+    args.push('--tools', tools);
+    if(mcpConfig===null)args.push('--disallowedTools','mcp__*');
   }
   if (sessionId) args.push('--session-id', sessionId);
   if (resumeSessionId) args.push('--resume', resumeSessionId);
@@ -78,13 +94,13 @@ export function buildClaudeCliArgs({
 export function runClaudeCli({
   prompt, model, maxTurns, allowedTools, disallowedTools, cwd, env,
   sessionId = null, resumeSessionId = null, configDir = null, restricted = false,
-  tools = null, jsonSchema = null, spawn = spawnSync,
+  tools = null, jsonSchema = null, mcpConfig = null, spawn = spawnSync,
 }) {
   if ((sessionId || resumeSessionId) && !configDir) {
     throw new Error('Durable Claude requires an isolated CLAUDE_CONFIG_DIR');
   }
   const args = buildClaudeCliArgs({prompt,model,maxTurns,allowedTools,disallowedTools,
-    sessionId,resumeSessionId,restricted,tools,jsonSchema});
+    sessionId,resumeSessionId,restricted,tools,jsonSchema,mcpConfig});
   const cliEnv = {...process.env,...env,DISABLE_AUTOUPDATER:'1',
     ANTHROPIC_MODEL:model,ANTHROPIC_DEFAULT_SONNET_MODEL:model};
   if (configDir) cliEnv.CLAUDE_CONFIG_DIR=configDir;
