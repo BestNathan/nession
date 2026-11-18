@@ -43,7 +43,7 @@ test('one GitHub Secret raw text is copied byte-for-byte into one Kubernetes Sec
 });
 
 test('Argo CD SSH public keys are not Sealed Secrets public certificates', () => {
-  assert.throws(() => validatePublicCert('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOipQ6S8G8lfxK89iKF7O2UVGnHU5XyVOaSuGiP1vdDr argocd-nitops'));
+  assert.throws(() => validatePublicCert('ssh-ed25519 AAAAC3NzaDummyTestPublicKeyMaterial argocd-deploy-key'));
   assert.throws(() => validatePublicCert('-----BEGIN PRIVATE KEY-----\nZmFrZQ==\n-----END PRIVATE KEY-----'));
 });
 
