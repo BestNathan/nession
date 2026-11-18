@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Independent MCP staging workload. This overlay is updated in the SAME GitOps
+# commit as environments/staging/nession by scripts/gitops-commit.sh (#3902).
+# Do not add to base/nession or production.
+namespace: nession
+
+commonLabels:
+  app: nession
+  env: staging
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+images:
+  - name: ghcr.io/bestnathan/nession-mcp
+    newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
+    newTag: mcp-73e9859

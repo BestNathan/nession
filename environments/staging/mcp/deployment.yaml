@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-mcp-staging
+  labels:
+    app: nession
+    component: mcp
+    env: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nession
+      component: mcp
+      env: staging
+  template:
+    metadata:
+      labels:
+        app: nession
+        component: mcp
+        env: staging
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nession-mcp
+          image: ghcr.io/bestnathan/nession-mcp:main
+          imagePullPolicy: Always
+          ports:
+            - name: mcp
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: NESSION_MCP_CONFIG
+              value: /etc/nession/mcp.toml
+          volumeMounts:
+            - name: mcp-config
+              mountPath: /etc/nession/mcp.toml
+              subPath: mcp.toml
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # The TCP listener is the process-health boundary; MCP HTTP
+          # requires bearer auth, and backend Server outages are not a reason
+          # to restart this stateless access layer.
+          startupProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 2
+            failureThreshold: 20
+          livenessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+      volumes:
+        # Operator-managed Secret, intentionally NOT checked into GitOps.
+        # Missing Secret prevents pod startup; never fall back to anonymous MCP.
+        - name: mcp-config
+          secret:
+            secretName: nession-mcp-config-staging
+            items:
+              - key: mcp.toml
+                path: mcp.toml

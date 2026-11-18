@@ -1,0 +1,24 @@
+# Copy to a private file, fill BOTH credentials and provision a Kubernetes
+# Secret named nession-mcp-config-staging in namespace nession. Do not commit
+# the filled configuration. The inbound MCP bearer must differ from the Server
+# backend credential.
+[mcp]
+listen_address = "0.0.0.0:9090"
+auth_token = ""
+path = "/mcp"
+# Only internal Kubernetes names + local port-forward. Add public hosts only
+# if a separate approved HTTPS ingress is established later.
+allowed_hosts = [
+  "nession-mcp-staging",
+  "nession-mcp-staging.nession.svc",
+  "nession-mcp-staging.nession.svc.cluster.local",
+  "localhost",
+  "127.0.0.1"
+]
+# No browser origins by default. Native MCP clients omit Origin.
+allowed_origins = []
+
+[backend.server]
+# The existing staging Server's internal WebSocket listener.
+endpoint = "ws://nession-server-staging:18080"
+auth_token = ""
