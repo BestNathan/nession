@@ -19,6 +19,13 @@ const admission={authorized:true,role:'developer',task:'implement',
   issue:2274,action_id:'a'.repeat(64),input_sha:'b'.repeat(40),run_id:401,
   agent_id:'dev-qwen-01',provider:'claude-code',environment:'dev-claude-qwen'};
 const plan=bindQwenDeveloper(admission,registry,env,{cliVersion:'2.1.34'});
+assert.notEqual(plan.harness_digest,createHash('sha256').update(JSON.stringify({
+  schema_version:1,role:'developer',provider:'claude-code',
+  agent_id:'dev-qwen-01',environment:'dev-claude-qwen',
+  model:env.ANTHROPIC_MODEL,endpoint:'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+  cli_version:'2.1.34',tools:['Read','Edit','Write'],
+  native_format:'claude-jsonl-v1',sandbox:'docker-v1',
+})).digest('hex'),'Old Docker-native Session must not silently resume as Node');
 assert.equal(plan.model,env.ANTHROPIC_MODEL);
 assert.equal(plan.provider,'claude-code');
 assert.equal(plan.environment,'dev-claude-qwen');

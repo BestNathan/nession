@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // #2137/#1664 SC-04: production adapter for the bounded read-only Reviewer
 // Slice. The trusted workflow stages the admitted PR commit and the verified
-// admission file; this process receives ONLY the Cursor provider key inside an
-// OS-isolated container, never a GitHub/Store/Publisher credential.
+// admission file; this Node Worker receives only Provider credentials,
+// never GitHub/Store/Publisher writer credentials.
 //
 // The workflow must make admission.target_sha reachable in GITHUB_WORKSPACE
 // (trusted fetch) before starting this process. This module performs no
@@ -46,16 +46,15 @@ export function readReviewAdmission(file) {
   return assertReviewerAdmission(task, { agent_id: identity.agent_id });
 }
 
-// Same OS-isolation contract as the Developer slice: no host SDK sandbox,
-// no ambient credentials, only the disposable container and provider key.
-// A Cursor SDK mount is required only for the cursor provider.
-export function assertIsolatedReviewerProcess(env, { dockerenv = false, provider = null } = {}) {
+// The workflow owns admitted target/identity. The Node Worker requires ordinary
+// absolute Runner directories, not Docker or a supported SDK local sandbox.
+export function assertReviewerWorkerEnvironment(env, { provider = null } = {}) {
   assertUnprivilegedReviewerEnvironment(env);
-  if (env.NESSION_REVIEWER_ISOLATED !== 'docker-v1' || env.GITHUB_WORKSPACE !== '/workspace' ||
-      env.RUNNER_TEMP !== '/tmp' || !dockerenv)
-    fail('OS-isolated Docker worker is mandatory, not local SDK sandbox');
-  if (provider === 'cursor' && env.CURSOR_SDK_ROOT !== '/sdk')
-    fail('missing mounted Cursor SDK for the cursor provider');
+  if (!path.isAbsolute(env.GITHUB_WORKSPACE ?? '') ||
+      !path.isAbsolute(env.RUNNER_TEMP ?? ''))
+    fail('Node Reviewer requires absolute Runner workspace and temp paths');
+  if (provider === 'cursor' && !path.isAbsolute(env.CURSOR_SDK_ROOT ?? ''))
+    fail('missing installed Cursor SDK root for the cursor provider');
 }
 
 // Adapts the real Cursor SDK to the Slice's injected runner contract. The
@@ -195,7 +194,7 @@ export function writeReviewTelemetry({ outDir, admission, slice, identity, taskI
 
 async function main() {
   if (process.argv.length !== 4) fail('usage: verified-admission.json output-directory');
-  assertIsolatedReviewerProcess(process.env, { dockerenv: fs.existsSync('/.dockerenv') });
+  assertReviewerWorkerEnvironment(process.env);
   const admission = readReviewAdmission(process.argv[2]);
   const taskId = process.env.NESSION_REVIEW_ACTION_ID;
   if (!HEX64.test(taskId ?? '')) fail('missing signed reviewer action ID');
@@ -203,8 +202,7 @@ async function main() {
   const runAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
   const identity = resolveReviewerIdentity(admission.agent_id);
   const provider = identity.provider;
-  assertIsolatedReviewerProcess(process.env,
-    { dockerenv: fs.existsSync('/.dockerenv'), provider });
+  assertReviewerWorkerEnvironment(process.env, { provider });
   const out = path.resolve(process.argv[3]);
   const temp = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'nession-review-'));
   const workspace = path.join(temp, 'workspace');
