@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2cbc48082a341214ca1501b51e3318f07cc19dc0ce674d9c3c3428c3b5c870dc",
+  "run_id": 44254659744,
+  "run_attempt": 1,
+  "issue": 3793,
+  "criterion": "SC-01",
+  "criterion_text": "Role-specific picker excludes incompatible Base from Toolchain and vice versa, shows platform and Server Ready separately from Agent verified/absent/resumable status, and never offers a Referenced Composite as executable when the backend lacks its closure.",
+  "stage": "staging",
+  "target_sha": "7f488a6ba7de0575e8d25f0d81bf0ee03b909789",
+  "contract_sha256": "5218ae777e5bf36b52ef65e2419db87d7c57cba766042f8a7ae12d4ac668b8f8",
+  "case_revision": "7f488a6ba7de0575e8d25f0d81bf0ee03b909789",
+  "case_tree_sha": "4012e4357ae4e28cabb9287441b609b344f846f4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T06:56:58.070Z",
+  "finished_at": "2026-11-18T06:57:11.652Z",
+  "duration_ms": 13582,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-web.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=45"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 45
+      },
+      "duration_ms": 4321,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-app.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=19"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 19
+      },
+      "duration_ms": 3372,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44254659744,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "7f488a6ba7de0575e8d25f0d81bf0ee03b909789",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44254659744",
+    "record_path": "runs/2026-11-18/44254659744-1/3793/SC-01.json",
+    "source_result_sha256": "62c568cea5961bc934fca76d1ee5095c6c2f79e15718a5bc89b115f5da3d53dd"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44254659744-1",
+    "sha256": "62c568cea5961bc934fca76d1ee5095c6c2f79e15718a5bc89b115f5da3d53dd",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44254659744",
+    "durability": "time-limited; object archival not configured"
+  }
+}
