@@ -1,122 +1,152 @@
 #!/usr/bin/env node
-// SealedSecret producer. Trusted main workflow only; never print plaintext (#3912).
+// Offline one-to-one SealedSecret producer from raw GitHub Environment Secret.
+// Names and paths come ONLY from this reviewed allowlist (#3912).
 import fs from 'node:fs';
 import path from 'node:path';
+import { X509Certificate } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const TARGETS = Object.freeze({
-  'staging-mcp': {
-    namespace: 'nession', name: 'nession-mcp-config-staging',
-    keys: ['mcp.toml'], type: 'Opaque',
-    resource: 'environments/staging/mcp/sealed-secret.json',
-    kustomization: 'environments/staging/mcp/kustomization.yaml'
-  }
+  staging: Object.freeze({
+    MCP_CONFIG_TOML: Object.freeze({
+      namespace: 'nession',
+      name: 'nession-mcp-config-staging',
+      key: 'mcp.toml',
+      type: 'Opaque',
+      resource: 'environments/staging/mcp/sealed-secret.json',
+      kustomization: 'environments/staging/mcp/kustomization.yaml'
+    })
+  })
 });
-export function getTarget(name) {
-  if (!Object.hasOwn(TARGETS, name)) throw new Error('target is not allowlisted');
-  return TARGETS[name];
-}
-export function parsePayload(raw, targetName) {
-  const target = getTarget(targetName);
-  if (!raw || Buffer.byteLength(raw) > 131072) throw new Error('missing/oversize Environment Secret');
-  let obj;
-  try { obj = JSON.parse(raw); } catch { throw new Error('Environment Secret is not valid JSON'); }
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('JSON payload must be an object');
-  const keys = Object.keys(obj).sort();
-  if (JSON.stringify(keys) !== JSON.stringify([...target.keys].sort())) throw new Error('unexpected Secret keys');
-  for (const key of keys) if (typeof obj[key] !== 'string' || !obj[key]) throw new Error('Secret values must be nonempty strings');
-  if (targetName === 'staging-mcp') {
-    const toml = obj['mcp.toml'];
-    if (!toml.includes('[mcp]') || !toml.includes('[backend.server]') ||
-        !toml.includes('staging.mcp.nession.bestnathan.top') ||
-        (toml.match(/^\s*auth_token\s*=/gm) || []).length < 2 ||
-        /^\s*auth_token\s*=\s*""\s*$/m.test(toml)) {
-      throw new Error('staging MCP auth/Host configuration is incomplete');
-    }
+
+export function getTarget(environment, secretName) {
+  const target = TARGETS[environment]?.[secretName];
+  if (!target) throw new Error('unregistered GitOps environment and Secret pairing');
+  if (!target.resource.startsWith('environments/' + environment + '/') ||
+      !target.kustomization.startsWith('environments/' + environment + '/')) {
+    throw new Error('target registry GitOps environment mismatch');
   }
-  return obj;
+  return target;
 }
-export function makeSecret(name, payload) {
-  const target = getTarget(name);
-  const data = {};
-  for (const key of target.keys) data[key] = Buffer.from(payload[key]).toString('base64');
-  return { apiVersion: 'v1', kind: 'Secret',
+
+export function validateRaw(raw) {
+  if (typeof raw !== 'string' || raw.length === 0 ||
+      Buffer.byteLength(raw, 'utf8') > 131072 || raw.includes('\0')) {
+    throw new Error('missing, oversized or invalid raw Environment Secret');
+  }
+  return raw;
+}
+
+export function createPlainSecret(environment, secretName, raw) {
+  const target = getTarget(environment, secretName);
+  return {
+    apiVersion: 'v1', kind: 'Secret',
     metadata: { name: target.name, namespace: target.namespace },
-    type: target.type, data };
+    type: target.type,
+    data: { [target.key]: Buffer.from(validateRaw(raw), 'utf8').toString('base64') }
+  };
 }
-export function publicCert(base64) {
-  if (!base64 || !/^[A-Za-z0-9+/=\s]+$/.test(base64) || base64.length > 131072) {
-    throw new Error('invalid public certificate encoding');
-  }
-  const pem = Buffer.from(base64, 'base64').toString('utf8');
-  if (!pem.includes('-----BEGIN CERTIFICATE-----') ||
+
+export function validatePublicCert(pem) {
+  if (typeof pem !== 'string' || pem.length > 131072 ||
+      !pem.includes('-----BEGIN CERTIFICATE-----') ||
       !pem.includes('-----END CERTIFICATE-----') || pem.includes('PRIVATE KEY')) {
-    throw new Error('a public sealing certificate is required, not a private key');
+    throw new Error('Sealed Secrets requires its controller X.509 public certificate, not an SSH key');
+  }
+  let cert;
+  try { cert = new X509Certificate(pem); }
+  catch { throw new Error('Invalid X.509 public certificate'); }
+  if (cert.publicKey.asymmetricKeyType !== 'rsa') {
+    throw new Error('Sealed Secrets requires its controller RSA public certificate');
+  }
+  if (new Date(cert.validTo).getTime() <= Date.now() + 86400000) {
+    throw new Error('Sealing certificate expired or expires within 24 hours');
   }
   return pem;
 }
-export function checkSealed(doc, name) {
-  const target = getTarget(name);
+
+export function validateSealed(doc, environment, secretName) {
+  const target = getTarget(environment, secretName);
   if (doc?.apiVersion !== 'bitnami.com/v1alpha1' || doc?.kind !== 'SealedSecret' ||
-      doc?.metadata?.name !== target.name || doc?.metadata?.namespace !== target.namespace) {
-    throw new Error('SealedSecret identity mismatch');
+      doc?.metadata?.namespace !== target.namespace ||
+      doc?.metadata?.name !== target.name) {
+    throw new Error('SealedSecret Kubernetes identity mismatch');
   }
-  const enc = doc.spec?.encryptedData;
-  if (!enc || typeof enc !== 'object' || Array.isArray(enc) ||
-      JSON.stringify(Object.keys(enc).sort()) !== JSON.stringify([...target.keys].sort()) ||
-      Object.values(enc).some(x => typeof x !== 'string' || !x)) {
-    throw new Error('invalid encryptedData');
+  const encrypted = doc.spec?.encryptedData;
+  if (!encrypted || typeof encrypted !== 'object' || Array.isArray(encrypted) ||
+      Object.keys(encrypted).length !== 1 ||
+      typeof encrypted[target.key] !== 'string' || !encrypted[target.key]) {
+    throw new Error('SealedSecret must have exactly one matching encrypted data key');
   }
-  const tmpl = doc.spec?.template;
-  if ((tmpl?.metadata?.name && tmpl.metadata.name !== target.name) ||
-      (tmpl?.metadata?.namespace && tmpl.metadata.namespace !== target.namespace) ||
-      (tmpl?.type && tmpl.type !== target.type) ||
-      tmpl?.data || tmpl?.stringData || doc.spec?.data || doc.spec?.stringData) {
-    throw new Error('unsafe SealedSecret template');
+  const template = doc.spec?.template;
+  if ((template?.metadata?.name && template.metadata.name !== target.name) ||
+      (template?.metadata?.namespace && template.metadata.namespace !== target.namespace) ||
+      (template?.type && template.type !== target.type) ||
+      template?.data || template?.stringData ||
+      doc.spec?.data || doc.spec?.stringData) {
+    throw new Error('Unsafe SealedSecret plaintext/template metadata');
   }
-  for (const m of [doc.metadata, tmpl?.metadata]) {
-    const a = m?.annotations || {};
-    if (a['sealedsecrets.bitnami.com/cluster-wide'] === 'true' ||
-        a['sealedsecrets.bitnami.com/namespace-wide'] === 'true' ||
-        (a['sealedsecrets.bitnami.com/scope'] && a['sealedsecrets.bitnami.com/scope'] !== 'strict')) {
-      throw new Error('only strict scope is permitted');
+  for (const m of [doc.metadata, template?.metadata]) {
+    const annotations = m?.annotations || {};
+    if (annotations['sealedsecrets.bitnami.com/cluster-wide'] === 'true' ||
+        annotations['sealedsecrets.bitnami.com/namespace-wide'] === 'true' ||
+        (annotations['sealedsecrets.bitnami.com/scope'] &&
+         annotations['sealedsecrets.bitnami.com/scope'] !== 'strict')) {
+      throw new Error('Only strict SealedSecret scope is permitted');
     }
   }
   return doc;
 }
-export function addResource(yaml) {
-  if (!/^resources:\s*$/m.test(yaml)) throw new Error('target overlay is not a Kustomization');
+
+export function addResource(yaml, resource) {
+  const filename = path.posix.basename(resource);
+  if (filename !== 'sealed-secret.json') throw new Error('unsupported resource name');
+  if (!/^resources:\s*$/m.test(yaml)) throw new Error('Kustomization resources list absent');
   if (/^\s*-\s*sealed-secret\.json\s*$/m.test(yaml)) return yaml;
   return yaml.replace(/^resources:\s*\r?\n/m, 'resources:\n  - sealed-secret.json\n');
 }
+
 function execute() {
-  const [mode, name, root] = process.argv.slice(2);
-  const target = getTarget(name);
+  const [operation, environment, secretName, root] = process.argv.slice(2);
+  const target = getTarget(environment, secretName);
+  if (operation === 'verify') {
+    console.log('Exact GitOps environment / Secret registration verified');
+    return;
+  }
   const temp = process.env.RUNNER_TEMP;
-  if (!temp) throw new Error('runner temp directory required');
+  if (!temp) throw new Error('RUNNER_TEMP is required');
   const work = path.join(temp, 'nession-seal');
-  if (mode === 'prepare') {
-    const payload = parsePayload(process.env.K8S_SECRET_DATA_JSON, name);
-    const cert = publicCert(process.env.SEALED_SECRETS_CERT_B64);
+  if (operation === 'prepare') {
+    const value = validateRaw(process.env.SEAL_RAW_VALUE);
+    const cert = validatePublicCert(process.env.SEALED_SECRETS_CERT_PEM);
     fs.mkdirSync(work, { mode: 0o700 });
-    fs.writeFileSync(path.join(work, 'cert.pem'), cert, { mode: 0o600, flag: 'wx' });
-    fs.writeFileSync(path.join(work, 'secret.json'), JSON.stringify(makeSecret(name, payload)), { mode: 0o600, flag: 'wx' });
-    console.log('Prepared offline sealing inputs for allowlisted target');
-  } else if (mode === 'stage') {
-    if (!root || !fs.existsSync(path.join(root, '.git'))) throw new Error('GitOps checkout missing');
+    fs.writeFileSync(path.join(work, 'cert.pem'), cert, { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(path.join(work, 'secret.json'),
+      JSON.stringify(createPlainSecret(environment, secretName, value)),
+      { flag: 'wx', mode: 0o600 });
+    console.log('Prepared single raw Secret using controller public sealing cert');
+    return;
+  }
+  if (operation === 'stage') {
+    if (!root || !fs.existsSync(path.join(root, '.git'))) throw new Error('GitOps checkout absent');
     const overlay = path.join(root, target.kustomization);
-    if (!fs.existsSync(overlay)) throw new Error('GitOps target overlay missing; merge workload overlay first');
+    if (!fs.existsSync(overlay)) throw new Error('Target GitOps overlay absent');
     let doc;
     try { doc = JSON.parse(fs.readFileSync(path.join(work, 'sealed.json'), 'utf8')); }
-    catch { throw new Error('kubeseal did not emit JSON'); }
-    const sealed = checkSealed(doc, name);
+    catch { throw new Error('kubeseal output is not JSON'); }
+    validateSealed(doc, environment, secretName);
     const old = fs.readFileSync(overlay, 'utf8');
-    const next = addResource(old);
-    fs.writeFileSync(path.join(root, target.resource), JSON.stringify(sealed, null, 2) + '\n');
-    if (old !== next) fs.writeFileSync(overlay, next);
-    console.log('Staged only encrypted GitOps resource: ' + target.resource);
-  } else throw new Error('expected prepare or stage');
+    const next = addResource(old, target.resource);
+    fs.writeFileSync(path.join(root, target.resource), JSON.stringify(doc, null, 2) + '\n');
+    if (next !== old) fs.writeFileSync(overlay, next);
+    console.log('Staged one encrypted SealedSecret in allowlisted GitOps overlay');
+    return;
+  }
+  throw new Error('Expected verify, prepare or stage');
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  try { execute(); } catch (e) { console.error('SealedSecret step failed: ' + e.message); process.exitCode = 1; }
+  try { execute(); } catch (error) {
+    console.error('SealedSecret generation failed: ' + error.message);
+    process.exitCode = 1;
+  }
 }
