@@ -282,7 +282,6 @@ impl StandaloneConfig {
     }
 }
 
-
 fn resolve_credential(
     token: &mut String,
     env_name: &str,
@@ -376,7 +375,7 @@ mod credential_tests {
 
     #[test]
     fn unresolved_placeholder_is_not_a_valid_bearer_token() {
-        let mut token = format!("{}{}", "$", "{NESSION_MCP_INBOUND_TOKEN}");
+        let mut token = concat!("$", "{NESSION_MCP_INBOUND_TOKEN}").to_string();
         assert!(
             resolve_credential_value(
                 &mut token,
