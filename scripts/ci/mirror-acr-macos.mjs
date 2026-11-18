@@ -55,10 +55,10 @@ function check(condition, message) { if (!condition) throw Error(message); }
 
 // Raw regctl stdout/stderr is kept in memory only. It can contain signed URLs;
 // never print or save it. The only exposed failure data is a fixed class.
-function command(args, {stdin = '', timeoutMs = 90000} = {}) {
+function command(args, {stdin = '', timeoutMs = 90000, env = process.env} = {}) {
   return new Promise(resolve => {
     const start = performance.now();
-    const child = spawn('regctl', args, {stdio: ['pipe', 'pipe', 'pipe']});
+    const child = spawn('regctl', args, {env, stdio: ['pipe', 'pipe', 'pipe']});
     let stdout = '', diagnostic = '', timedOut = false, done = false;
     const add = (current, chunk) => (current + String(chunk)).slice(0, 262144);
     child.stdout.on('data', chunk => { stdout = add(stdout, chunk); });
@@ -82,8 +82,8 @@ function command(args, {stdin = '', timeoutMs = 90000} = {}) {
   });
 }
 
-async function must(args, timeoutMs = 90000, stdin = '') {
-  const result = await command(args, {timeoutMs, stdin});
+async function must(args, timeoutMs = 90000, stdin = '', env = process.env) {
+  const result = await command(args, {timeoutMs, stdin, env});
   if (!result.ok) {
     throw Error(failureClass(result.code, result.timedOut, result.diagnostic));
   }
@@ -103,39 +103,78 @@ async function logIn(registry, username, token) {
   await must(['registry', 'login', registry, '--user', username, '--pass-stdin'], 90000, token);
 }
 
+// A phase is a measured wall-clock operation, not an inferred byte transfer.
+// The OCI client, not this script, owns architecture and blob scheduling.
+function markPhase(owner, name, started, outcome, detail = {}) {
+  const phase = {name, elapsed_seconds: seconds(started), outcome, ...detail};
+  owner.phases.push(phase);
+  console.log('ACR_MAC_MIRROR_PHASE_V1 ' + JSON.stringify({
+    image: owner.name || null, ...phase,
+  }));
+  return phase;
+}
+
+async function measure(owner, name, run) {
+  const started = performance.now();
+  try {
+    const value = await run();
+    markPhase(owner, name, started, 'success');
+    return value;
+  } catch (error) {
+    markPhase(owner, name, started, 'failure');
+    throw error;
+  }
+}
+
 function appendSummary(result) {
   const output = process.env.GITHUB_STEP_SUMMARY;
   if (!output) return;
   const lines = [
-    '## macOS ACR mirror timing',
+    '## macOS ACR native OCI mirror timing',
     '',
     '- Source SHA: ' + result.source_sha,
     '- Authenticated GHCR source run: ' + result.source_run_id + '/' + result.source_run_attempt,
     '- Runner: ' + result.runner,
-    '- Start (UTC): ' + result.started_at,
-    '- End (UTC): ' + result.finished_at,
-    '- Result: **' + result.status + '**',
-    '- Total runner elapsed: **' + result.total_elapsed_seconds + ' s** (includes login, registry discovery, copies and verification)',
+    '- Started/finished (UTC): ' + result.started_at + ' / ' + result.finished_at,
+    '- Role concurrency limit: ' + result.max_concurrent_images,
+    '- Status: **' + result.status + '**',
+    '- Whole script (monotonic): **' + result.total_elapsed_seconds + ' s**',
+    '- Sum of individual role durations (may overlap): ' + result.sum_role_elapsed_seconds + ' s',
     '',
-    '| Image | amd64 copy (s) | arm64 copy (s) | Role total (s) | Result |',
-    '|---|---:|---:|---:|---|',
+    '| Image | Source digest (s) | Source index (s) | OCI transfer + index (s) | Destination verify (s) | Role total (s) | Attempts | Result |',
+    '|---|---:|---:|---:|---:|---:|---:|---|',
   ];
+  const phaseSum = (role, name) => role.phases
+    .filter(phase => phase.name === name)
+    .reduce((total, phase) => total + phase.elapsed_seconds, 0)
+    .toFixed(3);
   for (const role of result.roles) {
-    const arch = name => {
-      const item = role.arches.find(x => x.arch === name);
-      return item ? item.elapsed_seconds.toFixed(3) : '—';
-    };
-    lines.push('| ' + role.name + ' | ' + arch('amd64') + ' | ' +
-      arch('arm64') + ' | ' + role.elapsed_seconds.toFixed(3) +
-      ' | ' + role.status + ' |');
+    lines.push('| ' + role.name + ' | ' + phaseSum(role, 'source_digest') +
+      ' | ' + phaseSum(role, 'source_index') +
+      ' | ' + phaseSum(role, 'oci_transfer_and_index') +
+      ' | ' + phaseSum(role, 'destination_verify') +
+      ' | ' + role.elapsed_seconds.toFixed(3) +
+      ' | ' + role.attempts.length + ' | ' + role.status + ' |');
+    for (const arch of role.arches) {
+      lines.push('- ' + role.name + '/' + arch.arch + ': source ' +
+        (arch.source_digest || 'unknown') + ', destination ' +
+        (arch.destination_digest || 'unknown') + ', ' + arch.status);
+    }
     for (const attempt of role.attempts) {
-      lines.push('- ' + role.name + '/' + attempt.arch + ' attempt ' +
-        attempt.attempt + ': ' + attempt.elapsed_seconds + ' s, ' + attempt.outcome +
+      lines.push('- ' + role.name + ' native OCI attempt ' + attempt.attempt +
+        ': ' + attempt.elapsed_seconds + ' s, ' + attempt.outcome +
         ', chunk ' + attempt.chunk_bytes + ' bytes');
     }
   }
-  lines.push('', 'Duration uses the runner monotonic clock; copy time is measured over real regctl subprocesses. No throughput estimate is claimed (ACR may reuse existing blobs).',
-    'This manual benchmark **does not update GitOps or certify a Staging deployment**.');
+  lines.push('', '### Registry authentication / setup');
+  for (const phase of result.phases) {
+    lines.push('- ' + phase.name + ': ' + phase.elapsed_seconds + ' s (' + phase.outcome + ')');
+  }
+  lines.push('', '**Measurement boundary:** OCI transfer-and-index includes the regctl-owned ' +
+    'platform selection, destination Blob reuse/check, Blob copy and final index publication. ' +
+    'The CLI does not expose each internal sub-operation duration; do not infer actual ' +
+    'transferred bytes or bandwidth from layer/manifest sizes. Role totals overlap when ' +
+    'concurrency is greater than one. This manual benchmark does not deploy Staging.');
   if (result.error) lines.push('Failure class: ' + result.error);
   fs.appendFileSync(output, lines.join('\n') + '\n');
 }
@@ -152,18 +191,30 @@ export async function execute({sourceSha, image, sourceRunId, sourceRunAttempt,
     env.GITHUB_REF === 'refs/heads/main' && env.GITHUB_EVENT_NAME === 'workflow_dispatch',
     'untrusted_workflow_context');
   check(Boolean(env.GITHUB_RUN_ID && env.GITHUB_RUN_ATTEMPT), 'missing_workflow_identity');
+  const concurrency = Number(env.MIRROR_MAX_CONCURRENT_IMAGES || '2');
+  check(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4,
+    'invalid_mirror_role_concurrency');
+
   const jobStart = performance.now();
+  const selected = image === 'all' ? ROLES : [image];
   const result = {
-    schema_version: 1, kind: 'nession_mac_acr_mirror_benchmark',
+    schema_version: 2, kind: 'nession_mac_acr_mirror_benchmark',
     source_sha: sourceSha, source_run_id: Number(sourceRunId),
     source_run_attempt: Number(sourceRunAttempt),
     workflow_run_id: String(env.GITHUB_RUN_ID),
     workflow_run_attempt: String(env.GITHUB_RUN_ATTEMPT),
     runner: String(env.RUNNER_NAME || 'unknown'),
+    max_concurrent_images: Math.min(concurrency, selected.length),
     started_at: stamp(), finished_at: null, total_elapsed_seconds: 0,
-    status: 'failure', roles: [], error: null,
+    sum_role_elapsed_seconds: 0, phases: [],
+    status: 'failure', roles: selected.map(name => ({
+      name, status: 'pending', elapsed_seconds: 0, phases: [],
+      arches: [], attempts: [], error: null,
+    })), error: null,
   };
-  const outputDir = env.MIRROR_RESULT_DIR || path.join(env.RUNNER_TEMP || os.tmpdir(), 'acr-mac-mirror');
+
+  const outputDir = env.MIRROR_RESULT_DIR ||
+    path.join(env.RUNNER_TEMP || os.tmpdir(), 'acr-mac-mirror');
   const tmp = fs.mkdtempSync(path.join(env.RUNNER_TEMP || os.tmpdir(), 'nession-regctl-'));
   fs.chmodSync(tmp, 0o700);
   const previousConfig = process.env.REGCTL_CONFIG;
@@ -171,63 +222,98 @@ export async function execute({sourceSha, image, sourceRunId, sourceRunAttempt,
   process.env.REGCTL_CONFIG = path.join(tmp, 'regctl.json');
   process.env.DOCKER_CONFIG = path.join(tmp, 'docker');
   fs.mkdirSync(process.env.DOCKER_CONFIG, {mode: 0o700});
+
+  async function mirrorRole(role) {
+    const report = result.roles.find(r => r.name === role);
+    const roleStart = performance.now();
+    const tag = role + '-' + sourceSha.slice(0, 7);
+    const sourceTag = SOURCE + ':' + tag;
+    const target = TARGET + ':' + tag;
+    const roleConfig = path.join(tmp, 'regctl-' + role + '.json');
+    try {
+      // Each regctl process reads an isolated configuration: retrying a
+      // smaller chunk in one role cannot race another role's registry setting.
+      // regctl may persist login credentials in REGCTL_CONFIG or in
+      // DOCKER_CONFIG; both stores are job-private. A missing regctl file is
+      // valid, and registry set can initialize the per-role config.
+      if (fs.existsSync(process.env.REGCTL_CONFIG)) {
+        fs.copyFileSync(process.env.REGCTL_CONFIG, roleConfig);
+        fs.chmodSync(roleConfig, 0o600);
+      }
+      const roleEnv = {...process.env, REGCTL_CONFIG: roleConfig};
+      const sourceDigestResult = await measure(report, 'source_digest', () =>
+        must(['image', 'digest', sourceTag]));
+      const sourceDigest = sourceDigestResult.stdout.trim();
+      check(DIGEST.test(sourceDigest), 'invalid_source_index_digest');
+      report.source_index_digest = sourceDigest;
+      const pinnedSource = SOURCE + '@' + sourceDigest;
+      const expected = await measure(report, 'source_index', () => readPlatforms(pinnedSource));
+      // OCI owns platform selection, child manifest copying, Blob de-duplication
+      // and index publication. No architecture-level copy loop lives here.
+      for (const arch of ARCHES) {
+        report.arches.push({arch, source_digest: expected[arch],
+          destination_digest: null, status: 'pending'});
+      }
+
+      let copied = false;
+      for (let attempt = 0; attempt < CHUNKS.length; attempt++) {
+        const chunk = CHUNKS[attempt];
+        await measure(report, 'registry_chunk_config', () =>
+          must(['registry', 'set', REGISTRY,
+            '--blob-max', '1048576', '--blob-chunk', String(chunk)], 90000, '', roleEnv));
+        const start = performance.now();
+        const copy = await invoke([
+          'index', 'create', target, '--ref', pinnedSource,
+          '--platform', 'linux/amd64', '--platform', 'linux/arm64',
+        ], {timeoutMs: 720000, env: roleEnv});
+        const outcome = copy.ok ? 'success' :
+          failureClass(copy.code, copy.timedOut, copy.diagnostic);
+        const phase = markPhase(report, 'oci_transfer_and_index', start, outcome,
+          {attempt: attempt + 1, chunk_bytes: chunk});
+        const record = {attempt: attempt + 1, chunk_bytes: chunk,
+          elapsed_seconds: phase.elapsed_seconds, outcome};
+        report.attempts.push(record);
+        console.log('ACR_MAC_MIRROR_ATTEMPT_V2 ' +
+          JSON.stringify({image: role, ...record}));
+        if (copy.ok) { copied = true; break; }
+        if (outcome === 'credential_or_permission_rejected' || outcome === 'copy_error') break;
+      }
+      check(copied, 'native_oci_copy_failed');
+      const observed = await measure(report, 'destination_verify', () => readPlatforms(target));
+      for (const arch of report.arches) {
+        arch.destination_digest = observed[arch.arch];
+        arch.status = arch.source_digest === arch.destination_digest ? 'success' : 'failure';
+      }
+      check(samePlatforms(expected, observed), 'destination_platform_digest_mismatch');
+      report.status = 'success';
+    } catch (e) {
+      report.error = String(e.message || e).replace(/[^a-zA-Z0-9_ -]/g, '').slice(0, 120);
+      report.status = 'failure';
+    } finally {
+      report.elapsed_seconds = seconds(roleStart);
+      console.log('ACR_MAC_MIRROR_ROLE_V1 ' + JSON.stringify({
+        image: role, elapsed_seconds: report.elapsed_seconds,
+        status: report.status, error: report.error,
+      }));
+    }
+  }
+
   try {
     check(env.GHCR_USERNAME && env.GHCR_TOKEN && env.ACR_USERNAME && env.ACR_PASSWORD,
       'missing_registry_credentials');
-    // Never output raw auth results or user-supplied secrets.
-    await logIn('ghcr.io', env.GHCR_USERNAME, env.GHCR_TOKEN);
-    await logIn(REGISTRY, env.ACR_USERNAME, env.ACR_PASSWORD);
-    const selected = image === 'all' ? ROLES : [image];
-    const short = sourceSha.slice(0, 7);
-    for (const role of selected) {
-      const roleStart = performance.now();
-      const report = {name: role, status: 'failure', elapsed_seconds: 0,
-        arches: [], attempts: [], error: null};
-      result.roles.push(report);
-      try {
-        const tag = role + '-' + short;
-        const source = SOURCE + ':' + tag;
-        const target = TARGET + ':' + tag;
-        const expected = await readPlatforms(source);
-        for (const arch of ARCHES) {
-          const archStart = performance.now();
-          const destArch = target + '-' + arch;
-          let success = false;
-          for (let i = 0; i < CHUNKS.length; i++) {
-            const chunk = CHUNKS[i];
-            await must(['registry', 'set', REGISTRY,
-              '--blob-max', '1048576', '--blob-chunk', String(chunk)]);
-            const copy = await invoke(['image', 'copy', SOURCE + '@' + expected[arch], destArch],
-              {timeoutMs: 360000});
-            const outcome = copy.ok ? 'success' :
-              failureClass(copy.code, copy.timedOut, copy.diagnostic);
-            const attempt = {arch, attempt: i + 1, chunk_bytes: chunk,
-              elapsed_seconds: copy.elapsed_seconds, outcome};
-            report.attempts.push(attempt);
-            console.log('ACR_MAC_MIRROR_ATTEMPT_V1 ' + JSON.stringify({
-              image: role, ...attempt}));
-            if (copy.ok) { success = true; break; }
-            if (outcome === 'credential_or_permission_rejected' || outcome === 'copy_error') break;
-          }
-          report.arches.push({arch, elapsed_seconds: seconds(archStart),
-            status: success ? 'success' : 'failure'});
-          if (!success) throw Error('copy_failed_' + arch);
-        }
-        await must(['index', 'create', target, '--ref', target + '-amd64',
-          '--ref', target + '-arm64']);
-        const observed = await readPlatforms(target);
-        check(samePlatforms(expected, observed), 'destination_platform_digest_mismatch');
-        report.status = 'success';
-      } catch (e) {
-        // Only errors composed from fixed internal strings/classes are reported.
-        report.error = String(e.message || e).replace(/[^a-zA-Z0-9_ -]/g, '').slice(0, 120);
-      } finally {
-        report.elapsed_seconds = seconds(roleStart);
-        console.log('ACR_MAC_MIRROR_ROLE_V1 ' + JSON.stringify({
-          image: role, elapsed_seconds: report.elapsed_seconds, status: report.status,
-          error: report.error}));
+    await measure(result, 'ghcr_login', () =>
+      logIn('ghcr.io', env.GHCR_USERNAME, env.GHCR_TOKEN));
+    await measure(result, 'acr_login', () =>
+      logIn(REGISTRY, env.ACR_USERNAME, env.ACR_PASSWORD));
+    // The next-index increment is synchronous; workers each own an entire role.
+    // Preserve stable selected-role ordering in JSON regardless of completion order.
+    let next = 0;
+    await Promise.all(Array.from({length: result.max_concurrent_images}, async () => {
+      while (next < selected.length) {
+        const role = selected[next++];
+        await mirrorRole(role);
       }
-    }
+    }));
     result.status = result.roles.every(r => r.status === 'success') ? 'success' : 'failure';
     if (result.status !== 'success') result.error = 'one_or_more_image_mirrors_failed';
   } catch (e) {
@@ -235,14 +321,22 @@ export async function execute({sourceSha, image, sourceRunId, sourceRunAttempt,
   } finally {
     result.finished_at = stamp();
     result.total_elapsed_seconds = seconds(jobStart);
+    result.sum_role_elapsed_seconds = Number(result.roles.reduce(
+      (total, role) => total + role.elapsed_seconds, 0).toFixed(3));
     fs.mkdirSync(outputDir, {recursive: true});
     fs.writeFileSync(path.join(outputDir, 'result.json'), JSON.stringify(result, null, 2) + '\n');
     appendSummary(result);
     fs.rmSync(tmp, {recursive: true, force: true});
+    if (previousConfig === undefined) delete process.env.REGCTL_CONFIG;
+    else process.env.REGCTL_CONFIG = previousConfig;
+    if (previousDocker === undefined) delete process.env.DOCKER_CONFIG;
+    else process.env.DOCKER_CONFIG = previousDocker;
   }
   console.log('ACR_MAC_MIRROR_RESULT_V1 ' + JSON.stringify({
     status: result.status, source_sha: result.source_sha,
-    total_elapsed_seconds: result.total_elapsed_seconds, error: result.error}));
+    total_elapsed_seconds: result.total_elapsed_seconds,
+    error: result.error,
+  }));
   if (result.status !== 'success') process.exitCode = 1;
   return result;
 }

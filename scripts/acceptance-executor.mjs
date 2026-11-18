@@ -11,7 +11,7 @@ import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import {enforceLiveFullFailure,requiresLiveFullFailureProof} from './acceptance-main-full-failure-bug-evidence.mjs';
 import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
-import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
+import { verifiedIssueAuditCriterion, verifiedIssueAudit3843Criterion, SIDEBAR_AUDIT_REPAIR_PROOF, ISSUE_AUDIT_3843_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
   collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
   enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
@@ -107,6 +107,13 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
   const criteria = [...contract.criteria.values()]
     .filter((criterion) => canonicalAcceptanceStage(contract.rows.get(criterion.id).stage) === normalizedStage)
     .filter((criterion) => eligible(contract.plan?.get(criterion.id)))
+    // An independently accepted PR-stage SC is pinned to its original
+    // implementing PR head. A later linked PR must not re-evaluate or
+    // overwrite that receipt unless an explicit trusted supersession exists.
+    // Keep Pending/Fail and inconsistent checkbox/report states selectable.
+    .filter((criterion) => options.skipAcceptedPrCriteria!==true ||
+      normalizedStage!=='pr' ||
+      !acceptedPrSourceRef(criterion,contract.rows.get(criterion.id)))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
@@ -610,6 +617,9 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     deployment,
     ciEvidence,
     method: 'agent',
+    // Only a LIVE PR Agent evaluation skips previously source-accepted SCs.
+    // Historical Case/CI readback must still see those original criteria.
+    skipAcceptedPrCriteria: true,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   // The trusted prepare step has read-only Actions credentials. Read the
@@ -636,8 +646,8 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
 function normalizeCommand(contextFile, rawFile, outFile, source) {
   const context = JSON.parse(fs.readFileSync(contextFile, 'utf8'));
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
-  const normalized = verifiedIssueAuditCriterion(
-    context, normalizeAcceptanceResult(context, raw, source));
+  const normalized = verifiedIssueAudit3843Criterion(context, verifiedIssueAuditCriterion(
+    context, normalizeAcceptanceResult(context, raw, source)));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
   const gated = enforceLiveFullFailure(context,
@@ -757,6 +767,63 @@ function selfTest() {
   assert.match(passedBody, /\| SC-01 \| staging \| Pass \| run 100; ref abc123;/);
   assert.match(passedBody, /Keep this paragraph exactly\./);
   assert.equal(validateRequirementBody(passedBody, { mode: 'merge' }).ok, true);
+
+  // #3857: a later PR addressing only a pending post-merge criterion
+  // must not redispatch already accepted PR-head SCs on a foreign SHA.
+  const exactA='a'.repeat(40),exactB='b'.repeat(40);
+  const anchoredBody=[
+    '## Success Criteria',
+    '- [x] SC-01 original behavior accepted',
+    '- [x] SC-02 immutable E2E protection accepted',
+    '- [ ] SC-03 live post-merge Audit readback pending',
+    '- [x] SC-04 exact-head CI accepted',
+    '## Acceptance Plan',
+    '\x60\x60\x60yaml',
+    'acceptance:',
+    '  SC-01:','    when: pr','    method: agent',
+    '  SC-02:','    when: pr','    method: agent',
+    '  SC-03:','    when: merged','    branch: main','    method: agent',
+    '  SC-04:','    when: pr','    method: agent',
+    '\x60\x60\x60',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-01 | Pass | run 1; ref '+exactA+'; source agent-qwen; evidence |',
+    '| SC-02 | Pass | run 1; ref '+exactA+'; source agent-qwen; evidence |',
+    '| SC-03 | Pending | trusted main readback pending |',
+    '| SC-04 | Pass | run 1; ref '+exactA+'; source agent-qwen; evidence |',
+  ].join('\n');
+  const anchoredIssue={number:3843,title:'Bug: audit readback',body:anchoredBody};
+  const foreignPr=buildAcceptanceContext(anchoredIssue,'pr',{
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
+  });
+  assert.deepEqual(foreignPr.criteria,[],'accepted PR receipts are not re-evaluated');
+  assert.deepEqual(buildAcceptanceContext(anchoredIssue,'pr',{
+    targetRef:exactA,runId:1,method:'agent',
+  }).criteria.map(x=>x.criterion),['SC-01','SC-02','SC-04'],
+  'historical readers must retain accepted source criteria; Case-mode contract is exercised separately');
+  const pendingPr=buildAcceptanceContext({...anchoredIssue,
+    body:anchoredBody.replace('- [x] SC-02 immutable',
+      '- [ ] SC-02 immutable').replace('| SC-02 | Pass |','| SC-02 | Pending |')},'pr',{
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
+  });
+  assert.deepEqual(pendingPr.criteria.map(x=>x.criterion),['SC-02']);
+  assert.deepEqual(buildAcceptanceContext(anchoredIssue,'post-merge',{
+    targetRef:exactB,runId:3,
+  }).criteria.map(x=>x.criterion),['SC-03']);
+  // A user-edited Pass without a canonical projected exact-source receipt
+  // is NOT an accepted result and must not disappear from audit visibility.
+  const inventedPass=anchoredBody.replace(
+    'run 1; ref '+exactA+'; source agent-qwen; evidence',
+    'human-provided text without source Run');
+  assert.deepEqual(buildAcceptanceContext({...anchoredIssue,body:inventedPass},
+    'pr',{targetRef:exactB,runId:2,skipAcceptedPrCriteria:true}).criteria.map(x=>x.criterion),['SC-01']);
+  // Only checkbox+accepted outcome freezes a prior source; an inconsistent
+  // checkbox/report pair does not silently disappear from repair visibility.
+  assert.deepEqual(buildAcceptanceContext({...anchoredIssue,
+    body:anchoredBody.replace('- [x] SC-04','- [ ] SC-04')},'pr',{
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
+  }).criteria.map(x=>x.criterion),['SC-04']);
 
   const post = buildAcceptanceContext({ ...issue, body: passedBody }, 'post-merge', {
     targetRef: 'def456', deployment: 'production', runId: 101,
@@ -885,6 +952,47 @@ function selfTest() {
   ])assert.equal(verifiedIssueAuditCriterion({...auditContext,
     ci_evidence:{authenticated_issue_audit_repair_readback:tampered}},
     uncertain).criteria[0].result,'Pending');
+
+  // #3843: An exact owner-command, Agent job and repaired target readback
+  // can decide SC-03 independently; a model's unsupported Pass is rejected.
+  const repair3843=ISSUE_AUDIT_3843_PROOF,repairSha='e50fa7672740164222c1168416c1e5784927847a';
+  const completeProof={
+    status:'authenticated-repair-readback',
+    source_run_id:repair3843.sourceRunId,source_attempt:repair3843.sourceAttempt,
+    target_issue:repair3843.targetIssueNumber,source_event:'workflow_dispatch',
+    source_sha:repairSha,target_sha:repairSha,provider:'qwen',
+    source_comment_id:repair3843.sourceCommentId,
+    repair_comment_id:repair3843.repairCommentId,
+    owner_trigger_verified:true,repair_ack_verified:true,
+    issue_contract_pass:true,verified_risk_tier:'verification:integration',
+    protected_e2e_rows:0,protected_e2e_selected_ids:[],
+    protected_e2e_none_verified:true,label_event_ids:[1,2,3,4],
+    source_job_id:42,
+  };
+  const repairedContext={issue:{number:repair3843.acceptanceIssue},
+    target_ref:repairSha,stage:'post-merge',
+    ci_evidence:{authenticated_issue_audit_3843_readback:completeProof}};
+  const pendingRepair={criteria:[{criterion:'SC-03',result:'Pending',evidence:[],
+    summary:'model cannot see the cross-Issue source Run'}]};
+  assert.equal(verifiedIssueAudit3843Criterion(repairedContext,pendingRepair)
+    .criteria[0].result,'Pass');
+  assert.equal(verifiedIssueAudit3843Criterion({...repairedContext,ci_evidence:null},
+    pendingRepair).criteria[0].result,'Pending');
+  assert.throws(()=>verifiedIssueAudit3843Criterion(
+    {...repairedContext,ci_evidence:null},{criteria:[{
+      criterion:'SC-03',result:'Pass',evidence:[],summary:'untrusted claim'}]}),
+    /lacks authenticated #3837/);
+  for(const tampered of [
+    {source_run_id:0},{target_issue:3843},{source_sha:'f'.repeat(40)},
+    {source_comment_id:1},{repair_ack_verified:false},
+    {protected_e2e_rows:1},{protected_e2e_none_verified:false},
+    {label_event_ids:[]},
+  ])assert.equal(verifiedIssueAudit3843Criterion({...repairedContext,
+    ci_evidence:{authenticated_issue_audit_3843_readback:{...completeProof,...tampered}}},
+    pendingRepair).criteria[0].result,'Pending');
+  assert.equal(verifiedIssueAudit3843Criterion(repairedContext,{criteria:[{
+    criterion:'SC-03',result:'Fail',evidence:[],summary:'trusted conflicting failure'}]})
+    .criteria[0].result,'Fail');
 
   // #3545: a later read-only Agent on tooling PR #3540 cannot downgrade the
   // already accepted implementation PR #3529, even with a larger run ID.
