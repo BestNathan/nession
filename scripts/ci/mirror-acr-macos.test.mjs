@@ -153,3 +153,32 @@ test('native regctl platform selection and phase timing remain role scoped', () 
   assert.deepEqual(report.roles.map(r => r.name), ['server', 'agent', 'mcp', 'ui']);
   assert.ok(report.roles.every(role => role.attempts.every(a => a.chunk_bytes === 4194304)));
 });
+
+
+test('manual macOS mirror authenticates Staging SHA before ACR secret-scoped copy in one Job', () => {
+  const yml = fs.readFileSync(
+    fileURLToPath(new URL('../../.github/workflows/deploy-acr-macos-mirror.yml', import.meta.url)),
+    'utf8',
+  );
+  assert.match(yml, /\njobs:\n  mirror:\n/);
+  assert.match(yml, /runs-on: \[self-hosted, macOS, hs-mac\]/);
+  assert.match(yml, /github\.repository == 'BestNathan\/nession'/);
+  assert.match(yml, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(yml, /github\.event_name == 'workflow_dispatch'/);
+  assert.doesNotMatch(yml, /\n  verify-source:|needs:\s*verify-source|runs-on:\s*ubuntu/);
+  assert.equal((yml.match(/- uses: actions\/checkout@v4/g) || []).length, 1);
+  assert.equal((yml.match(/- uses: actions\/setup-node@v4/g) || []).length, 1);
+  const source = yml.indexOf('id: source');
+  const verify = yml.indexOf('node scripts/ci/verify-staging-ghcr-source.mjs verify-mirror');
+  const acrSecrets = yml.indexOf('ACR_PASSWORD: $' + '{{ secrets.ALIYUN_ACR_PASSWORD }}');
+  const copy = yml.indexOf('node scripts/ci/mirror-acr-macos.mjs');
+  assert.ok(source !== -1 && source < verify);
+  assert.ok(verify < acrSecrets && acrSecrets < copy);
+  assert.match(yml, /GH_TOKEN: \${{ github\.token }}/);
+  for (const name of ['source_sha', 'source_run_id', 'source_run_attempt']) {
+    assert.match(yml, new RegExp('steps\\.source\\.outputs\\.' + name));
+    assert.doesNotMatch(yml, new RegExp('needs\\.verify-source\\.outputs\\.' + name));
+  }
+  assert.match(yml, /if: always\(\)/);
+  assert.match(yml, /max_concurrent_images:/);
+});

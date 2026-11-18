@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // #3832: Manual macOS OCI mirror benchmark. Does NOT deploy or attest a cluster.
-// The authenticated GHCR source SHA is verified by the trusted Ubuntu preflight.
+// An earlier step in the same trusted macOS Job authenticates the GHCR source SHA.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
