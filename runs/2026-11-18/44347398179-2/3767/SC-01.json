@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b758c8ff97cefaed76a52ad143457ea4c7d7fd1c52db57987972da907d6168c9",
+  "run_id": 44347398179,
+  "run_attempt": 2,
+  "issue": 3767,
+  "criterion": "SC-01",
+  "criterion_text": ": With A commit and file selected, switching to B and resolving B's History leaves no A selection/detail/diff, dispatches no B `git.commit`/`git.diff` for A's OID, and allows selecting a B commit normally.",
+  "stage": "pr",
+  "target_sha": "6b4e0b0d395da7069d937a7e6105978738b04c36",
+  "contract_sha256": "9e41767e3676663051d8b85c9e998f50d7c7e6fa8e96c48e902069645f3fbf68",
+  "case_revision": "6b4e0b0d395da7069d937a7e6105978738b04c36",
+  "case_tree_sha": "272084e3bffdf7b0c5af89e29184720631fcca81",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T17:25:02.734Z",
+  "finished_at": "2026-11-18T17:25:06.645Z",
+  "duration_ms": 3911,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=30"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 30
+      },
+      "duration_ms": 3867,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44347398179,
+      "run_attempt": 2,
+      "event": "pull_request",
+      "head_sha": "6b4e0b0d395da7069d937a7e6105978738b04c36",
+      "head_branch": "fix/history-selection-reset",
+      "workflow_id": 378248506,
+      "source_kind": "pr-smoke",
+      "pr_binding": {
+        "pr_number": 3955,
+        "issue": 3767,
+        "head_sha": "6b4e0b0d395da7069d937a7e6105978738b04c36",
+        "case_job_id": 134990793905,
+        "artifact_id": 14452268082,
+        "quality_run_id": 44347398145,
+        "e2e_run_id": 44347398125
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44347398179",
+    "record_path": "runs/2026-11-18/44347398179-2/3767/SC-01.json",
+    "source_result_sha256": "8fe7a00cec0a568a36840a521135038cdd4ea8934572df0baff00b30ec4395c8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44347398179-2",
+    "sha256": "8fe7a00cec0a568a36840a521135038cdd4ea8934572df0baff00b30ec4395c8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44347398179",
+    "durability": "time-limited; object archival not configured"
+  }
+}
