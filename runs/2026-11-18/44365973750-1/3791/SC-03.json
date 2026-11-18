@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "53e5d8311233ae528761ecab642c4751f223a69fd1025ab34b9e5b779473e6d4",
+  "run_id": 44365973750,
+  "run_attempt": 1,
+  "issue": 3791,
+  "criterion": "SC-03",
+  "criterion_text": ": The source-pinned staging release publishes a resolvable `mcp-<short-sha>` GHCR multi-arch OCI index (and ACR mirror when enabled by the release lane); independently observed amd64/arm64 image digests and release provenance bind to the same exact source SHA, and missing/mismatched MCP artifact causes publication verification to refuse success without weakening existing role checks.",
+  "stage": "staging",
+  "target_sha": "b8ba6456136046fafa8b4d6da0da9ee8d8957020",
+  "contract_sha256": "d8a7484a3ac14683b76cd12354c5d1090f303686211486248413a55354f78bd2",
+  "case_revision": "b8ba6456136046fafa8b4d6da0da9ee8d8957020",
+  "case_tree_sha": "3fccf98e12b33278462576c1890f55f3b56d39fb",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T18:08:33.810Z",
+  "finished_at": "2026-11-18T18:08:44.039Z",
+  "duration_ms": 10228,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "staging release published mcp-b8ba645 as a two-architecture index bound to the exact source SHA; the authenticated ACR lane mirrored the MCP role",
+      "evidence": [
+        {
+          "type": "ci",
+          "value": "Release / Staging Artifacts run 44363568310 attempt 1 published mcp b8ba645 from b8ba6456136046fafa8b4d6da0da9ee8d8957020"
+        },
+        {
+          "type": "registry",
+          "value": "ghcr.io/bestnathan/nession:mcp-b8ba645 index sha256:a7f3dfd0cbcbe05b2b3dbbb23642b38c799e1b0c1133f5a156c6c5eac8acbf9e amd64=sha256:19a8dff240c1d8b41399ad342760b3bb039ab55ad86be6cd0e2dbabb3ce41736 arm64=sha256:b5b03069c9256240ea4d7dd99affb1c9ea68c255cf4ddd239771562ae536e49a revision=b8ba6456136046fafa8b4d6da0da9ee8d8957020"
+        },
+        {
+          "type": "provenance",
+          "value": "both platform configs bind revision b8ba6456136046fafa8b4d6da0da9ee8d8957020; merge/provenance steps succeeded"
+        },
+        {
+          "type": "ci",
+          "value": "Deploy / Staging ACR run 44359255031 (lane at staging 0b8fbd4) mirrored the MCP role with provenance and GitOps deployment"
+        },
+        {
+          "type": "runtime",
+          "value": "staging source verifier requires both MCP jobs and its ten-job negative self-test passed"
+        }
+      ],
+      "duration_ms": 4317,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44365973750,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "0a27731e1c6d2c61a2eb89d41034f39f68dcb09b",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "b8ba6456136046fafa8b4d6da0da9ee8d8957020",
+        "stage": "staging",
+        "issue": 3791,
+        "criterion": "SC-03",
+        "job_id": 135019662855,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44365973750",
+    "record_path": "runs/2026-11-18/44365973750-1/3791/SC-03.json",
+    "source_result_sha256": "f1156d7f787c06b948dcf086630972c5828377f5b8d021de3ae4ad0da6b1a098"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44365973750-1",
+    "sha256": "f1156d7f787c06b948dcf086630972c5828377f5b8d021de3ae4ad0da6b1a098",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44365973750",
+    "durability": "time-limited; object archival not configured"
+  }
+}
