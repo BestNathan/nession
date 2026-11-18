@@ -11,7 +11,8 @@ import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
-import { publishIssueAuditFeedback, selfTestIssueAuditFeedback } from './lib/agent/tools/gh/issue/review-feedback.mjs';
+import { publishIssueAuditFeedback, resolveIssueAuditFeedback, selfTestIssueAuditFeedback } from './lib/agent/tools/gh/issue/review-feedback.mjs';
+import { readPreflightChecks } from './lib/agent/tools/gh/issue/preflight-receipt.mjs';
 import { selfTestAuditMcp } from './issue-audit-check-mcp.mjs';
 
 function envNumber(name) {
@@ -119,6 +120,9 @@ function appendSummary(record) {
       `- Estimated cost: ${record.agent.estimated_cost_usd == null ? 'N/A' : '$' + record.agent.estimated_cost_usd.toFixed(6)}`,
       `- Turns: ${record.agent.num_turns ?? 'N/A'}`,
       `- Contract repair invoked: ${record.agent.contract_repair_attempted ? 'yes' : 'no'}`,
+      `- MCP candidate selfchecks observed: ${record.agent.preflight?.calls ?? 'not observed'}`,
+      `- MCP selfchecks passed: ${record.agent.preflight?.passed ?? 'not observed'}`,
+      `- Final candidate independently selfchecked: ${record.agent.preflight?.final_candidate_checked ? 'yes' : 'no / not observed'}`,
       `- Duration: ${record.agent.duration_ms == null ? 'N/A' : record.agent.duration_ms + ' ms'}`,
     );
   }
@@ -188,6 +192,7 @@ function writeRecord(outDir, record) {
           agent_duration_ms: agent.duration_ms ?? null,
         },
         result: { status: record.result,
+          ...(agent.preflight ? {preflight_validation:agent.preflight} : {}),
           ...(record.review ? {rejection_code: record.review.code} : {}),
         },
       }),
@@ -265,7 +270,10 @@ function runAgent(issue) {
     throw error;
   }
   if (!parsed) throw new Error('Claude Code succeeded but returned no parseable JSON');
-  return issueAuditStructuredEnvelope(parsed);
+  const checked=readPreflightChecks({
+    issueNumber:issue.number,finalProposal:parsed.structured_output,
+  });
+  return {...issueAuditStructuredEnvelope(parsed),preflight:checked};
 }
 
 async function selfTest() {
@@ -371,7 +379,10 @@ async function main() {
   const missingTier = !readVerificationTier(issue).explicit;
   const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true';
   if (before.ok && !missingTier && !reevaluate) {
-    writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false }, errors: [] });
+    const record={schema_version:1,issue:{number:issue.number,title:issue.title,url:issue.url},
+      trigger,result:'contract-pass',agent:{invoked:false},errors:[]};
+    writeRecord(outDir,record);
+    await resolveIssueAuditFeedback(record);
     return;
   }
 
@@ -406,6 +417,9 @@ async function main() {
     const rejection = describeIssueAuditRejection(error);
     const message = rejection?.reason ?? (error instanceof Error ? error.message : String(error));
     const failed = claude ?? (error && typeof error === 'object' ? error.claudeResult ?? null : null);
+    const preflight=failed?.preflight??readPreflightChecks({
+      issueNumber,finalProposal:failed?.structured_output??null,
+    });
     const usage = failed ? extractUsage(failed,repairEnvelope,contractEnvelope) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
     const estimated = estimateCost(usage);
     writeRecord(outDir, {
@@ -436,6 +450,7 @@ async function main() {
         terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
         error: rejection ? null : message,
         rejection_code: rejection?.code ?? null,
+        preflight,
       },
       errors: after.errors,
     });
@@ -471,6 +486,7 @@ async function main() {
       model_requests: 1 + Number(repairAttempted) + Number(contractRepairAttempted),
         contract_repair_attempted: contractRepairAttempted,
       format_repair_attempted: repairAttempted,
+      preflight:claude.preflight,
       started_at: agentStartedAt.toISOString(),
       finished_at: new Date().toISOString(),
       duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime())),
@@ -483,6 +499,7 @@ async function main() {
     errors: after.errors,
   };
   writeRecord(outDir, record);
+  if(record.result==='repaired')await resolveIssueAuditFeedback(record);
   if (!after.ok || !readVerificationTier(afterIssue).explicit) process.exitCode = 2;
 }
 
