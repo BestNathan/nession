@@ -65,9 +65,9 @@ pub const RECORD_INLINE_CEILING: usize = 64 * 1024;
 pub const PAGE_INLINE_BUDGET: usize = 256 * 1024;
 
 /// One raw record: identity, size and, when it fits, the original text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordV1 {
     /// Opaque, resource-scoped identity of this line.
     ///
@@ -101,7 +101,7 @@ pub struct TranscriptRecordV1 {
 /// Where a read of the requested transcript stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptRecordsStateV1 {
     /// The requested transcript was found and the page is the answer.
@@ -121,9 +121,9 @@ pub enum TranscriptRecordsStateV1 {
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordsRequestV1 {
     /// The Nession session the read is scoped to. Required: visibility is
     /// per-Session-cwd, so a request without one would be a machine-wide
@@ -146,9 +146,9 @@ pub struct TranscriptRecordsRequestV1 {
 }
 
 /// The answer.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordsResponseV1 {
     pub state: TranscriptRecordsStateV1,
 

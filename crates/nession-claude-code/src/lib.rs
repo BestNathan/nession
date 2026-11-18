@@ -4,6 +4,7 @@ pub mod binding;
 pub mod canonical;
 pub mod control;
 pub mod conversation;
+pub mod conversation_reader;
 pub mod mcp;
 pub mod memory;
 pub mod messages;

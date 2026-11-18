@@ -45,6 +45,69 @@ Any other version is `Unverified` and yields `CannotObserve` until a capture
 and its fixtures are added. Older or vendor-fork CLIs therefore cannot be
 silently interpreted with the verified shape.
 
+## Control: enter and submit
+
+`nession_claude_enter` selects a conversation explicitly:
+
+* `mode: new` chooses a fresh UUID **before** launch (shell path:
+  `claude --session-id <uuid>`) or uses in-process `/clear` only when Claude is
+  verifiably idle. A preexisting Claude is never overwritten.
+* `mode: resume` requires an explicit `conversation_id` (shell:
+  `claude --resume <id>`, in-process: `/resume <id>`); it never means "the
+  newest".
+* Busy, waiting or unknown activity is refused. Enter and submit share one
+  write lock per Agent, so two calls cannot be concurrent writers to one
+  transcript.
+* The result is `entered` only after the resulting conversation id is verified;
+  otherwise `pending` with a read-back instruction. Nothing is reported as
+  entered on a guess.
+
+`nession_claude_submit` requires the verified idle conversation and the
+caller's expected `conversation_id` (a stale mismatch refuses). It sends one
+literal prompt line and answers `input_sent` with the verified actual id. That
+is a **delivery** phase, not an execution result: there is no operation id, no
+result object and no `get_result`. An unconfirmed send is `unknown` and must be
+read back through the conversation readers before retrying.
+
+## Reading conversations and transcripts
+
+Three read Tools expose the **existing** Protocol Units; they add no second
+discovery, selection, pagination or raw-record parser:
+
+| Tool | Unit |
+|---|---|
+| `nession_claude_list_conversations` | `claude-code.conversations` |
+| `nession_claude_get_conversation` | `claude-code.messages` |
+| `nession_claude_get_transcript` | `claude-code.transcript-records` / `claude-code.transcript-record` |
+
+`crates/nession-claude-code/src/conversation_reader.rs` is the seam: it sends a
+typed request to the same `ClaudeCodeAgentExtension::handle_command` the
+Agent's Protocol routing uses and deserializes the Unit's typed reply. Each Tool
+advertises the Unit's own response type as its `outputSchema`, so the MCP
+surface cannot drift from the conversation UI's contract.
+
+* **Explicit identity only.** The list is the answer; nothing is auto-opened.
+  `get_conversation` reads exactly its `conversation_id` and answers
+  `not_found` for an unknown one rather than substituting the binding or the
+  newest transcript.
+* **Canonical paging.** `next_cursor` and `limit` are the Unit's opaque/bounded
+  values, passed through unchanged. Without a cursor the newest page is
+  returned — the bounded latest observation. Continued progress observation is
+  the same read again; there is no Tool-owned forward cursor and no result
+  object.
+* **Raw records as recorded.** A transcript page carries one record per
+  physical JSONL line, including unknown and non-JSON types, with
+  `partial_tail` for an unfinished line. A record too large for a page is a
+  `record_ref` placeholder, resolvable through the same Tool for a bounded
+  chunk; it is never truncated or dropped.
+* **No path exposure.** Transcript and record identity are opaque Unit strings;
+  the output contracts contain no transcript path. `cwd` is the Unit's own
+  Session-scoped display fact, not a transcript location.
+* **Same Agent truth.** The Agent composes the reader over the same tmux
+  Session manager the MCP endpoint serves. Every Tool refuses a foreign
+  `agent_id` or a `session_id` that is not `agent_id:session_name` before any
+  read.
+
 ## Not this module
 
 * No new Hook state, no hook-maintained activity store and no expanded plugin

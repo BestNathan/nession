@@ -296,7 +296,10 @@ fn is_claude_process(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nession_claude_code::control::ClaudeObservation;
+    use nession_claude_code::control::{
+        ClaudeObservation, EnterOutcome, EnterRequest, EnterStatus, SubmitOutcome, SubmitRequest,
+        SubmitStatus,
+    };
     use nession_common::session_activity::ForegroundFacts;
 
     fn context(pane: &str, command: Option<&str>) -> SessionActivityContext {
@@ -520,6 +523,28 @@ mod tests {
                 ClaudeActivityState::Unknown,
                 None,
             )
+        }
+
+        async fn enter(&self, _request: EnterRequest) -> EnterOutcome {
+            EnterOutcome {
+                conversation_id: None,
+                status: EnterStatus::Refused,
+                process: ClaudeProcessState::Unknown,
+                activity: ClaudeActivityState::Unknown,
+                observation: ClaudeObservation::Unknown,
+                detail: Some("not used by this fixture".to_string()),
+                observed_at: "2026-11-18T00:00:00Z".to_string(),
+            }
+        }
+
+        async fn submit(&self, _request: SubmitRequest) -> SubmitOutcome {
+            SubmitOutcome {
+                conversation_id: None,
+                status: SubmitStatus::Refused,
+                observation: ClaudeObservation::Unknown,
+                detail: Some("not used by this fixture".to_string()),
+                observed_at: "2026-11-18T00:00:00Z".to_string(),
+            }
         }
     }
 }

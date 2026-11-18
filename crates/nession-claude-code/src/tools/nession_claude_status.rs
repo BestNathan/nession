@@ -10,14 +10,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nession_mcp::tool::{non_empty, parse_arguments, reply_value, schema_for};
+use nession_mcp::tool::{parse_arguments, reply_value, schema_for};
 use nession_mcp::{ToolContext, ToolError, ToolHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::control::{
-    ClaudeActivityState, ClaudeControl, ClaudeObservation, ClaudeProcessState, ClaudeSessionTarget,
+    ClaudeActivityState, ClaudeControl, ClaudeObservation, ClaudeProcessState,
     ClaudeStatusObservation,
 };
 
@@ -99,24 +99,8 @@ impl ToolHandler for NessionClaudeStatus {
         arguments: Map<String, Value>,
     ) -> Result<Value, ToolError> {
         let input = parse_arguments::<ClaudeStatusInput>(arguments)?;
-        non_empty(&input.agent_id, "agent_id")?;
-        non_empty(&input.session_id, "session_id")?;
-        if input.agent_id != self.local_agent_id {
-            return Err(ToolError::invalid_argument(format!(
-                "this Claude provider is Agent '{}', not '{}'",
-                self.local_agent_id, input.agent_id
-            )));
-        }
-        let prefix = format!("{}:", input.agent_id);
-        if !input.session_id.starts_with(&prefix) || input.session_id.len() == prefix.len() {
-            return Err(ToolError::invalid_argument(
-                "`session_id` must name a Session on the named Agent as `agent_id:session_name`",
-            ));
-        }
-        let target = ClaudeSessionTarget {
-            agent_id: input.agent_id,
-            session_id: input.session_id,
-        };
+        let target =
+            super::validate_target(&self.local_agent_id, &input.agent_id, &input.session_id)?;
         let status = self.control.status(&target).await;
         reply_value(&output(target.agent_id, target.session_id, status))
     }
@@ -143,7 +127,10 @@ fn output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::ClaudeObservation;
+    use crate::control::{
+        ClaudeObservation, ClaudeSessionTarget, EnterOutcome, EnterRequest, EnterStatus,
+        SubmitOutcome, SubmitRequest, SubmitStatus,
+    };
     use nession_mcp::backend::{
         ClusterBackend, NodeBackend, UnavailableClusterBackend, UnavailableNodeBackend,
     };
@@ -161,6 +148,28 @@ mod tests {
                 conversation_id: Some("a460cce1-35c0-4b8f-9d5f-5ae899e72229".to_string()),
                 observation: ClaudeObservation::Verified,
                 detail: None,
+                observed_at: "2026-11-18T00:00:00Z".to_string(),
+            }
+        }
+
+        async fn enter(&self, _request: EnterRequest) -> EnterOutcome {
+            EnterOutcome {
+                conversation_id: None,
+                status: EnterStatus::Refused,
+                process: ClaudeProcessState::Unknown,
+                activity: ClaudeActivityState::Unknown,
+                observation: ClaudeObservation::Unknown,
+                detail: Some("not used by this fixture".to_string()),
+                observed_at: "2026-11-18T00:00:00Z".to_string(),
+            }
+        }
+
+        async fn submit(&self, _request: SubmitRequest) -> SubmitOutcome {
+            SubmitOutcome {
+                conversation_id: None,
+                status: SubmitStatus::Refused,
+                observation: ClaudeObservation::Unknown,
+                detail: Some("not used by this fixture".to_string()),
                 observed_at: "2026-11-18T00:00:00Z".to_string(),
             }
         }
