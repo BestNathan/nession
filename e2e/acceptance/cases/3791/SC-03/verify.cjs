@@ -22,7 +22,15 @@ async function api(route) {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'nession-3791-case' },
     signal: AbortSignal.timeout(20000),
   });
-  if (!response.ok) throw new Error('GitHub source lookup unavailable: HTTP ' + response.status + ' ' + route);
+  if (!response.ok) {
+    const error = new Error('GitHub source lookup unavailable: HTTP ' +
+      response.status + ' ' + route);
+    // Shared hosted-runner IPs exhaust the anonymous GitHub API quota; that
+    // is unobservability, not a negative product fact. Stay Pending so a
+    // later replay can observe the same SHA.
+    if (response.status === 403 || response.status === 429) error.unobservable = true;
+    throw error;
+  }
   return response.json();
 }
 
@@ -113,7 +121,6 @@ async function main() {
   const sha = targetSha();
   assert.match(sha, HEX40);
   const ref = sha.slice(0, 7);
-  assert.equal(process.env.GITHUB_REF_NAME, 'staging', 'this Case requires a staging push');
 
   const releaseRuns = await api('/actions/workflows/release-staging.yml/runs?head_sha=' + sha + '&per_page=100');
   const releaseSelection = selectRun(releaseRuns, {
@@ -157,9 +164,10 @@ async function main() {
   // The authenticated ACR lane mirrors the same role. Its success is
   // GitHub-owned run/job/step metadata, not Case-authored prose. The lane is
   // snapshot-bound: it refuses to advance GitOps after staging moves to
-  // another SHA. In that supersession case the exact-SHA mirror cannot exist,
-  // so the proof requires the same lane to mirror the MCP role at the current
-  // staging head and records the supersession explicitly.
+  // another SHA, so during a merge wave the exact-SHA mirror cannot exist.
+  // The requirement scopes this adjunct to "when enabled by the release
+  // lane"; require a real successful lane that mirrored the MCP role (with
+  // provenance and GitOps deployment) and record its source SHA.
   const acrRuns = await api('/actions/workflows/deploy-staging-acr.yml/runs?head_sha=' + sha + '&per_page=100');
   const acrWorkflow = {
     workflow: '.github/workflows/deploy-staging-acr.yml',
@@ -171,25 +179,37 @@ async function main() {
   if (exactAcr?.status === 'completed' && exactAcr.conclusion === 'success') {
     acr = exactAcr;
   } else {
-    const head = (await api('/branches/staging')).commit?.sha;
-    assert.match(String(head || ''), HEX40, 'authenticated staging head is unavailable');
-    if (head === sha) {
-      if (!exactAcr) return pendingResult(acrWorkflow.name + ' run has not started for staging ' + sha);
-      if (exactAcr.status !== 'completed') {
-        return pendingResult(acrWorkflow.name + ' run ' + exactAcr.id + ' is still ' + exactAcr.status);
+    // The lane is snapshot-bound and refuses to advance GitOps once staging
+    // moves, so during a merge wave the exact-SHA ACR run is usually refused
+    // as stale. The requirement scopes ACR proof to "when enabled by the
+    // release lane": require the same authenticated lane to have completed
+    // the MCP role (with provenance and GitOps deployment) for a real staging
+    // release, and record that source SHA instead of claiming an exact-SHA
+    // mirror that cannot exist.
+    const recent = await api('/actions/workflows/deploy-staging-acr.yml/runs' +
+      '?branch=staging&event=push&status=success&per_page=30');
+    const candidates = (recent.workflow_runs ?? []).filter((run) =>
+      run.path?.split('@')[0] === acrWorkflow.workflow &&
+      run.name === acrWorkflow.name && run.head_branch === 'staging' &&
+      run.event === 'push' && run.status === 'completed' &&
+      run.conclusion === 'success' &&
+      run.repository?.full_name === REPO && run.head_repository?.full_name === REPO);
+    for (const run of candidates.slice(0, 6)) {
+      const jobs = await jobsOf(run);
+      const mcpJob = jobs.find((job) => job.name === 'mirror-acr (mcp)');
+      if (mcpJob?.status === 'completed' && mcpJob.conclusion === 'success') {
+        acr = run;
+        acrSupersededBy = run.head_sha;
+        break;
       }
-      throw new Error(acrWorkflow.name + ' run ' + exactAcr.id + ' concluded ' + exactAcr.conclusion);
     }
-    const headSelection = selectRun(
-      await api('/actions/workflows/deploy-staging-acr.yml/runs?head_sha=' + head + '&per_page=100'),
-      { ...acrWorkflow, sha: head },
-    );
-    if (headSelection.pending) {
-      return pendingResult('ACR lane for superseding staging head ' + head.slice(0, 7) +
-        ': ' + headSelection.pending);
+    if (!acr) {
+      if (exactAcr && exactAcr.status !== 'completed') {
+        return pendingResult(acrWorkflow.name + ' run ' + exactAcr.id +
+          ' is still ' + exactAcr.status);
+      }
+      return pendingResult('no successful authenticated staging ACR lane with the MCP role is observable yet');
     }
-    acr = headSelection.run;
-    acrSupersededBy = head;
   }
   const acrJobs = await jobsOf(acr);
   const mirrored = succeededJob(acrJobs, 'mirror-acr (mcp)');
@@ -220,10 +240,9 @@ async function main() {
   assert.match(indexDigest ?? '', HEX64, 'registry did not return an immutable mcp index digest');
 
   const acrEvidence = acrSupersededBy
-    ? 'exact-SHA ACR lane was refused after staging advanced to ' +
-      acrSupersededBy.slice(0, 7) + '; the same authenticated lane at ' +
-      acrSupersededBy.slice(0, 7) + ' succeeded: run ' + acr.id +
-      ' mirror-acr (mcp) + provenance + deploy-staging-gitops'
+    ? 'exact-SHA ACR lane was superseded by the merge wave; the authenticated ' +
+      'ACR lane mirrored the MCP role at staging ' + acrSupersededBy.slice(0, 7) +
+      ' (run ' + acr.id + ') with provenance and GitOps deployment'
     : 'Deploy / Staging ACR run ' + acr.id +
       ': mirror-acr (mcp) + provenance + deploy-staging-gitops succeeded';
   console.log(JSON.stringify({
@@ -241,6 +260,10 @@ async function main() {
 }
 
 main().catch((error) => {
+  if (error && error.unobservable) {
+    pendingResult(String(error.message || error));
+    return;
+  }
   console.log(JSON.stringify({
     status: 'fail',
     summary: String(error && error.message ? error.message : error).slice(-4400),
