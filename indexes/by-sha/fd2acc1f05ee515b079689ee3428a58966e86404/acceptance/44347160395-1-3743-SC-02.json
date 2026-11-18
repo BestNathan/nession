@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "mode": "acceptance",
+  "source": {
+    "repository": "BestNathan/nession",
+    "run_id": 44347160395,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "head_sha": "fd2acc1f05ee515b079689ee3428a58966e86404",
+    "head_branch": "fix/3743-conflict-reload-dirty-guard",
+    "workflow_id": 378248506,
+    "source_kind": "pr-smoke",
+    "pr_binding": {
+      "pr_number": 3958,
+      "issue": 3743,
+      "head_sha": "fd2acc1f05ee515b079689ee3428a58966e86404",
+      "case_job_id": 134952542243,
+      "artifact_id": 14446003729,
+      "quality_run_id": 44347160384,
+      "e2e_run_id": 44347160350
+    }
+  },
+  "record": "runs/2026-11-18/44347160395-1/3743/SC-02.json",
+  "execution_id": "a259cf39b328b091cf419da974df3b9646fe91ed82917be3bc9e9685c0df56a8",
+  "target_sha": "fd2acc1f05ee515b079689ee3428a58966e86404",
+  "issue": 3743,
+  "criterion": "SC-02",
+  "stage": "pr",
+  "case_tree_sha": "f08d1c019c69c144b534813fb3e5b5a7112a0765",
+  "contract_sha256": "f49fd427c5715853208ac52c5c83b77ac022d4348d66f628a865ef040273c91f"
+}

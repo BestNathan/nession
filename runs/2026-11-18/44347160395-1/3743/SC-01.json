@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9f7a074391e75559e409c3a7c42070cc0fa2ba7856c8bcbfc658b00f03b89ece",
+  "run_id": 44347160395,
+  "run_attempt": 1,
+  "issue": 3743,
+  "criterion": "SC-01",
+  "criterion_text": ": In a mounted Web Files viewer with a dirty draft and a revision conflict, choose Reload and force `readFile` to reject. The original draft remains available and dirty, and switching files still prompts to save/discard/cancel; retry or Keep editing does not silently lose the draft.",
+  "stage": "pr",
+  "target_sha": "fd2acc1f05ee515b079689ee3428a58966e86404",
+  "contract_sha256": "f49fd427c5715853208ac52c5c83b77ac022d4348d66f628a865ef040273c91f",
+  "case_revision": "fd2acc1f05ee515b079689ee3428a58966e86404",
+  "case_tree_sha": "ce191ed1941cd522f65cedb4a6a2b8428b5500ad",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T16:30:28.957Z",
+  "finished_at": "2026-11-18T16:30:35.727Z",
+  "duration_ms": 6769,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=24"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 24
+      },
+      "duration_ms": 6697,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44347160395,
+      "run_attempt": 1,
+      "event": "pull_request",
+      "head_sha": "fd2acc1f05ee515b079689ee3428a58966e86404",
+      "head_branch": "fix/3743-conflict-reload-dirty-guard",
+      "workflow_id": 378248506,
+      "source_kind": "pr-smoke",
+      "pr_binding": {
+        "pr_number": 3958,
+        "issue": 3743,
+        "head_sha": "fd2acc1f05ee515b079689ee3428a58966e86404",
+        "case_job_id": 134952542243,
+        "artifact_id": 14446003729,
+        "quality_run_id": 44347160384,
+        "e2e_run_id": 44347160350
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44347160395",
+    "record_path": "runs/2026-11-18/44347160395-1/3743/SC-01.json",
+    "source_result_sha256": "01412d4f0ce45d9dbbf5c3f23378a93d732c14f464415405b9979926ae49df72"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44347160395-1",
+    "sha256": "01412d4f0ce45d9dbbf5c3f23378a93d732c14f464415405b9979926ae49df72",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44347160395",
+    "durability": "time-limited; object archival not configured"
+  }
+}
