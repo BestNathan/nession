@@ -1049,7 +1049,7 @@ async fn apply_legacy_attach_env(
         "legacy attach-time env snapshots for session {session_name}; translating to a binding replacement"
     );
     let profiles = profiles_from_snapshots(snapshots, "attach");
-    let revision = tmux.env().next_local_revision(session_name).await;
+    let revision = tmux.env().next_local_revision(session_name).await?;
     tmux.env()
         .apply_binding(session_name, revision, &profiles, snapshots)
         .await
