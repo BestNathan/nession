@@ -65,7 +65,7 @@ export function bindQwenDeveloper(admission,registry,environment,{
     schema_version:1,role:'developer',provider:'claude-code',
     agent_id:admission.agent_id,environment:agent.environment,
     model:selectedModel,endpoint:selectedEndpoint,cli_version:cliVersion,
-    tools:TOOLS,native_format:'claude-jsonl-v1',sandbox:'docker-v1',
+    tools:TOOLS,native_format:'claude-jsonl-v1',execution:'node-24',
   });
   return Object.freeze({
     provider:'claude-code',agent_id:admission.agent_id,

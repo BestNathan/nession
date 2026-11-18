@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // #2274: unprivileged production Qwen Developer. The signed Store Admission
-// was verified independently BEFORE this container started. The model gets
+// was verified independently BEFORE this Node process started. The model gets
 // no GitHub, Store, Controller, Publisher or checkpoint private credentials.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,7 +22,7 @@ import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry}
 
 const SHA=/^[a-f0-9]{40}$/,UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_CONTEXT=96*1024;
-function fail(x){throw Error('isolated Qwen Developer: '+x);}
+function fail(x){throw Error('Qwen Developer: '+x);}
 function read(file,max){
   const st=fs.lstatSync(file);
   if(!st.isFile()||st.isSymbolicLink()||st.size>max||st.size<1)
@@ -51,10 +51,9 @@ export function qwenWorkerAuthority(admission,env){
       env.GITHUB_RUN_ATTEMPT!=='1'||
       Number(env.GITHUB_RUN_ID)!==admission.run_id||
       !SHA.test(env.GITHUB_SHA??'')||
-      env.NESSION_DEVELOPER_ISOLATED!=='docker-v1'||
-      env.GITHUB_WORKSPACE!=='/workspace'||
-      env.RUNNER_TEMP!=='/tmp')
-    fail('Qwen execution requires exact authenticated isolated Store Run');
+      !path.isAbsolute(env.GITHUB_WORKSPACE??'')||
+      !path.isAbsolute(env.RUNNER_TEMP??''))
+    fail('Qwen execution requires exact authenticated Node Store Run');
   assertQwenModelHasNoStoreAuthority(env);
   return admission;
 }
@@ -105,15 +104,16 @@ function version(){
   return match[1];
 }
 function nativeMode(admission,plan){
-  const directory='/tmp/qwen-native';
+  const directory=path.join(process.env.RUNNER_TEMP,'qwen-native-session');
+  const resumeRoot=path.join(process.env.RUNNER_TEMP,'qwen-resume');
   if(fs.existsSync(directory))fail('native Session root already occupied');
   const resuming=Object.hasOwn(admission,'resume_from');
   if(!resuming){
-    if(fs.existsSync('/resume')&&fs.readdirSync('/resume').length)
+    if(fs.existsSync(resumeRoot)&&fs.readdirSync(resumeRoot).length)
       fail('initial Qwen Session cannot receive native bytes');
     return {configDir:directory,sessionId:randomUUID(),resuming:false};
   }
-  const proof=read('/resume/manifest.json',8192);
+  const proof=read(path.join(resumeRoot,'manifest.json'),8192);
   if(proof?.schema_version!==1||proof.kind!=='trusted-qwen-native-transfer'||
       proof.recipient_run_id!==admission.run_id||
       proof.action_id!==admission.action_id||
@@ -122,7 +122,7 @@ function nativeMode(admission,plan){
     fail('unbound native transfer, action or checkpoint');
   const compatible=verifyQwenNativeContinuation(
     admission,plan,proof.metadata);
-  const source='/resume/native';
+  const source=path.join(resumeRoot,'native');
   if(!fs.lstatSync(source).isDirectory()||
       fs.lstatSync(source).isSymbolicLink())
     fail('untrusted pre-model native destination');
@@ -130,7 +130,7 @@ function nativeMode(admission,plan){
     errorOnExist:true,dereference:false});
   return {configDir:directory,sessionId:compatible.session_id,resuming:true};
 }
-function cliCall({prompt,sessionId,resuming,plan,configDir}){
+function cliCall({prompt,sessionId,resuming,plan,configDir,workspace}){
   const argv=['-p',prompt,'--output-format','stream-json','--verbose',
     '--max-turns','10','--model',plan.model,'--strict-mcp-config',
     ...claudeCliToolPolicy(plan.tools,{restricted:true}),
@@ -141,7 +141,7 @@ function cliCall({prompt,sessionId,resuming,plan,configDir}){
   if(cliEnv.CLAUDE_CODE_SKIP_PROMPT_HISTORY==='1')
     fail('native Session persistence cannot be disabled');
   const started=Date.now();
-  const proc=spawnSync('claude',argv,{cwd:'/workspace',env:cliEnv,
+  const proc=spawnSync('claude',argv,{cwd:workspace,env:cliEnv,
     encoding:'utf8',timeout:8*60*1000,maxBuffer:8*1024*1024,
     stdio:['ignore','pipe','pipe']});
   if(proc.error||proc.status!==0)fail('Qwen CLI failed; raw model output withheld');
@@ -178,18 +178,19 @@ function telemetry({admission,plan,events,envelope,started,finished,status}){
 }
 async function main(){
   if(process.argv.length!==4)fail('usage: ADMISSION_JSON OUTPUT_DIRECTORY');
-  if(!fs.existsSync('/.dockerenv'))fail('Docker isolation mandatory');
   const admission=read(process.argv[2],8192);
   qwenWorkerAuthority(admission,process.env);
-  const registry=read('/trusted-code/automation/agents/registry.json',8192);
+  const registry=read(path.join(process.env.GITHUB_WORKSPACE,
+    'automation/agents/registry.json'),8192);
   const cliVersion=version();
   const snapshot=prepareQwenTrackedSource({admission,registry,
-    environment:process.env,cliVersion,workspace:'/workspace'});
+    environment:process.env,cliVersion,
+    workspace:path.join(process.env.RUNNER_TEMP,'qwen-source')});
   const plan=snapshot.plan;
   const {configDir,sessionId,resuming}=nativeMode(admission,plan);
-  const issue=read('/context/issue.json',MAX_CONTEXT+8192);
+  const issue=read(path.join(process.env.RUNNER_TEMP,'qwen-context','issue.json'),MAX_CONTEXT+8192);
   const review=admission.task==='repair'
-    ?read('/context/review.json',16*1024):null;
+    ?read(path.join(process.env.RUNNER_TEMP,'qwen-context','review.json'),16*1024):null;
   const prompt=qwenDeveloperPrompt(issue,admission,review);
   const publicKeyPem=Buffer.from(
     process.env.QWEN_RESUME_PUBLIC_KEY_B64??'','base64').toString('utf8');
@@ -203,11 +204,13 @@ async function main(){
       (rsa.asymmetricKeyDetails?.modulusLength??0)<2048)
     fail('configured Qwen native sealing RSA key is unsafe');
   const out=path.resolve(process.argv[3]);
-  if(out!=='/output'||!fs.lstatSync(out).isDirectory())
+  if(out!==path.join(process.env.RUNNER_TEMP,'qwen-output')||
+     !fs.lstatSync(out).isDirectory())
     fail('untrusted output destination');
   let events=[],envelope=null,started=Date.now(),status='error',error=null;
   try{
-    const called=cliCall({prompt,sessionId,resuming,plan,configDir});
+    const called=cliCall({prompt,sessionId,resuming,plan,configDir,
+      workspace:snapshot.workspace});
     ({events,envelope,started}=called);
     const patch=collectQwenDevelopmentPatch(snapshot,{events});
     const {ciphertext,proof,result}=sealQwenDevelopmentProposal({

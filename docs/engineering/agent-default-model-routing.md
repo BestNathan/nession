@@ -64,13 +64,23 @@ native tools. Its SHA-256 Harness digest intentionally excludes credentials.
 The native Resume verifier rejects source/model/CLI/Harness mismatches instead
 of silently starting another model or session.
 
+## GitHub Actions Node execution policy (#3845)
+
+The owner-approved CI Agent execution target is **Node.js 24 on the existing Actions Runner**.
+Selected Provider dependencies are installed into the job: Cursor uses `@cursor/sdk` and Qwen/DeepSeek use the npm-installed Claude Code CLI launched by Node.
+Provider tool allowlists and exact admission/telemetry/Store contracts remain; a supported OS sandbox, Docker daemon, container image or Cursor SDK local sandbox is **not** a prerequisite for a trusted-main Agent Worker. Cursor tasks explicitly omit unsupported SDK `sandboxOptions`.
+
+This is a deliberate loss of the old OS-level filesystem/process isolation, not a claim that an in-process tool allowlist supplies equivalent containment. Do not expose Store, Controller or Publisher private credentials to the model step, and never execute untrusted PR-head scripts in a privileged job.
+
+**Checkpoint compatibility:** the Qwen Harness digest now pins `execution: node-24` instead of `sandbox: docker-v1`. Existing Docker-produced native checkpoints are intentionally incompatible and fail closed; a new Node checkpoint can resume across compatible Node Runner runs using the same real workspace path, Provider CLI version, model and gateway. Do not silently restart an incompatible native Session.
+
 ## Qwen Developer runtime, evidence and activation (#2274)
 
 The main branch now contains the **implementation** of the signed production
 Qwen path, but **not proof of its activation**. These are deliberately distinct:
 
-1. `Agent / Development` runs an isolated, registered
-   `dev-qwen-01` Claude Code CLI Worker with the pinned Qwen model,
+1. `Agent / Development` runs the registered
+   `dev-qwen-01` Claude Code CLI Worker directly with Node.js 24 on the trusted Runner and the pinned Qwen model,
    a bounded Read/Edit/Write policy, a real exact-SHA Git patch and canonical
    Agent telemetry. The model never receives Store Writer, Controller or
    Publisher GitHub credentials.
