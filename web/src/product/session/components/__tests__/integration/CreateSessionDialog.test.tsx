@@ -785,7 +785,7 @@ describe('CreateSessionDialog Project mode', () => {
         project={{ ...PROJECT, locations: [] }}
       />,
     );
-    expect(screen.getByText(/No Existing Location/)).toBeInTheDocument();
+    expect(screen.getAllByText(/No Existing Location/).length).toBeGreaterThan(0);
     expect(screen.getByTestId('create-session-submit')).toBeDisabled();
   });
 });

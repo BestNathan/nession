@@ -55,7 +55,17 @@ env_selection_mode?: EnvSelectionMode | null,
  * a later Project edit never mutates this Session. Absent preserves the
  * pre-Project create path unchanged.
  */
-project_id?: string | null, };
+project_id?: string | null, 
+/**
+ * Request a Managed EROFS-backed Session (#3062, #3794). Requires
+ * `project_id` whose Project pins an image; the Server resolves and
+ * authorizes every artifact before handing the Agent preparation grants.
+ *
+ * The Web projection names immutable digests and optional `/opt/<name>`
+ * targets only. It never carries a host path, a download URL or a grant:
+ * the Server and Agent remain the executable owners.
+ */
+managed?: ClientManagedCreate | null, };
 export type ClientSessionCreateResponsePayload = { success: boolean, session_id?: string | null, error?: string | null, 
 /**
  * Non-fatal warnings from resolving/materializing the initial Environment
@@ -70,6 +80,28 @@ warnings: Array<string>,
  */
 project_id?: string | null, };
 export type EnvSelectionMode = "inherit" | "replace";
+export type ClientManagedCreate = { 
+/**
+ * The Base Runtime image mounted read-only at `/`.
+ */
+base_digest: string, 
+/**
+ * Optional read-only toolchains mounted at `/opt/<name>`.
+ */
+toolchains?: Array<ManagedToolchainRequest>, };
+export type ManagedToolchainRequest = { 
+/**
+ * `sha256:<64 lowercase hex>` of a ready Image Manager artifact.
+ */
+digest: string, 
+/**
+ * Optional user/Session override for the actual mount target.
+ *
+ * When absent, the resolved Manifest's advisory
+ * `io.nession.mount.default` proposes the target; when neither exists the
+ * create fails closed. The Sandbox owns the final target rule.
+ */
+target?: string | null, };
 export type EnvFileRef = { 
 /**
  * Filename including the `.env` suffix.
@@ -122,7 +154,17 @@ env_selection_mode?: EnvSelectionMode | null,
  * a later Project edit never mutates this Session. Absent preserves the
  * pre-Project create path unchanged.
  */
-project_id?: string | null, };
+project_id?: string | null, 
+/**
+ * Request a Managed EROFS-backed Session (#3062, #3794). Requires
+ * `project_id` whose Project pins an image; the Server resolves and
+ * authorizes every artifact before handing the Agent preparation grants.
+ *
+ * The Web projection names immutable digests and optional `/opt/<name>`
+ * targets only. It never carries a host path, a download URL or a grant:
+ * the Server and Agent remain the executable owners.
+ */
+managed?: ClientManagedCreate | null, };
 
 /** The payload the provider answers with. */
 export type SessionCreateReply = { success: boolean, session_id?: string | null, error?: string | null, 

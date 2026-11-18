@@ -26,6 +26,9 @@ function digestFor(index: number): string {
   return `sha256:${hex}${'abcdef0123456789'.repeat(4).slice(0, 60)}`.slice(0, 71);
 }
 
+/** The pinned Project Source image the canonical fixture Project owns (#3794). */
+export const FIXTURE_PROJECT_SOURCE_DIGEST = digestFor(1);
+
 function fixtureImages(): ImageDescriptor[] {
   return Array.from({ length: 235 }, (_, index) => {
     const status = index < 200 ? 'ready' : STATUSES[index % STATUSES.length];

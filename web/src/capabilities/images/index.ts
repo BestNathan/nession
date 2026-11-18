@@ -43,6 +43,7 @@ export {
   imageRoleCompatible,
   imageRoleLabel,
   libraryImageRole,
+  type ImageConsumerRole,
   imageBuildStageLabel,
   imageBuildStatusLabel,
   imageServerStatusLabel,

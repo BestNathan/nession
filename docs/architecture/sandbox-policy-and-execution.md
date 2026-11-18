@@ -336,11 +336,14 @@ the same way as the rest of the stack:
   digest + optional `{digest, target}` toolchains) requires a Project whose
   `image_digest` pins the Project Source image. The Server normalizes and
   resolves every digest through the Image Manager, requires each artifact to be
-  `ready`, mints one scoped grant per artifact (`grant_managed_access`, a
-  Server-internal path that keeps the client-facing `server.image.access`
-  Project-reference rule intact) and records the durable
-  `session_managed_context` row (`preparing` → `ready`/`failed`). An
-  `attempt_id` fences concurrent attempts for one Session name: a losing
+  `ready`, rejects a Project Source image built from a different Git Source
+  declaration than the Project now names (#3794 SC-03), mints one scoped grant
+  per artifact (`grant_managed_access`, a Server-internal path that keeps the
+  client-facing `server.image.access` Project-reference rule intact) and
+  records the durable `session_managed_context` row (`preparing` →
+  `ready`/`failed`). The normalized Git comparison ignores a trailing `.git`;
+  a full-commit Project ref is compared with the image's resolved `source_sha`.
+  An `attempt_id` fences concurrent attempts for one Session name: a losing
   attempt cannot overwrite the winner's disposition.
 - **Agent.** `agent.session.create` with the managed grants opens the durable
   identity-namespaced EROFS cache, downloads/verifies each image through the
@@ -360,9 +363,15 @@ the same way as the rest of the stack:
   `ready` Session is refused before dispatch so it cannot overwrite the
   winner. Killing a Session deletes its managed context; other Sessions'
   contexts, workspaces and shared image bytes are untouched.
-- **Visibility.** The managed section is a Rust contract only (`ts(skip)` on
-  the generated fields); the Web projection does not expose native image
-  digests or paths. Web/app product surface remains #3025's scope.
+- **Visibility.** The managed request is projected to Web/App (#3794): the
+  client names only immutable digests and optional `/opt/<name>` targets, never
+  a host path, download URL or grant. A Project New Session offers an explicit
+  Host (Existing Location) or Managed (EROFS) choice, and the Managed path
+  presents the pinned Project Source, Base, ordered Toolchains, Agent-managed
+  Workspace and effective ENV in a reviewed snapshot before the separate
+  Create. The Server/Agent remain the executable owners; an unresolved or
+  stale source refuses Review/Create instead of presenting a ready Managed
+  Session.
 
 ### Existing-Session image composition (#3181)
 
