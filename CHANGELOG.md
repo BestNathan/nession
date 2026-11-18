@@ -822,3 +822,17 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record the delivered Sandbox-owned typed MountPlan/backends, ordered multi-lower integration and opt-in writable RootFS with exact staging Acceptance Case receipts, replacing the one-lower target statement (#3693)
 - Source: https://github.com/BestNathan/nession/issues/3693
+
+## 2026-11-18T04:51:45Z | update | Session metadata and display identity ownership
+- Path: topics/engineering/session-metadata-and-display-identity-ownership.md
+- Topic: engineering
+- Categories: architecture, identity, metadata, ownership, session, web, app
+- Reason: Cross-link the new Session Activity ownership article so the Session row's fourth independent dimension is reachable from the metadata owner
+- Source: https://github.com/BestNathan/nession/issues/3800
+
+## 2026-11-18T04:51:45Z | create | Session Activity ownership
+- Path: topics/engineering/session-activity-ownership.md
+- Topic: engineering
+- Categories: agent, architecture, protocol, session, web
+- Reason: Record the delivered capability-reported Session Activity domain, semantic Pane ownership and generation fencing, the Shell and Claude providers, and the Server/Web/App projection from #3800/#3801/#3802/#3804 at merged staging 7e82d7d21
+- Source: https://github.com/BestNathan/nession/issues/3800

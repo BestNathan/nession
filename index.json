@@ -168,6 +168,20 @@
         "updated_at": "2026-11-09T12:54:48Z"
       },
       {
+        "title": "Session Activity ownership",
+        "description": "Capability-reported Session work (working/idle/unknown plus orthogonal input_required), semantic Pane ownership and generation fencing, the Shell and Claude providers, and the Server/Web/App projection delivered by #3800, #3801, #3802 and #3804",
+        "path": "topics/engineering/session-activity-ownership.md",
+        "status": "verified",
+        "categories": [
+          "agent",
+          "architecture",
+          "protocol",
+          "session",
+          "web"
+        ],
+        "updated_at": "2026-11-18T04:51:45Z"
+      },
+      {
         "title": "Session metadata and display identity ownership",
         "description": "Session-owned title, description and tags with an Agent store fenced by tmux instance identity; the display title aliases navigation without renaming tmux",
         "path": "topics/engineering/session-metadata-and-display-identity-ownership.md",
@@ -181,7 +195,7 @@
           "web",
           "app"
         ],
-        "updated_at": "2026-11-11T13:15:17Z"
+        "updated_at": "2026-11-18T04:51:45Z"
       }
     ],
     "terminal": [
@@ -411,7 +425,8 @@
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
-      "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
+      "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/engineering/session-activity-ownership.md"
     ],
     "agents": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -434,6 +449,7 @@
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
+      "topics/engineering/session-activity-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
@@ -563,6 +579,7 @@
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
+      "topics/engineering/session-activity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
@@ -614,6 +631,7 @@
     ],
     "session": [
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
+      "topics/engineering/session-activity-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md"
     ],
@@ -644,6 +662,7 @@
     "web": [
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
+      "topics/engineering/session-activity-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
