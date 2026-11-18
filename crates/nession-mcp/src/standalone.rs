@@ -30,6 +30,7 @@
 //! agent_id = "agent-..."
 //! ```
 
+use std::env::VarError;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +60,8 @@ pub struct StandaloneMcpConfig {
     pub path: String,
     /// The address this program listens on.
     pub listen_address: String,
-    /// The bearer token every MCP request must present.
+    /// The bearer token every MCP request must present (or NESSION_MCP_INBOUND_TOKEN).
+    #[serde(default)]
     pub auth_token: String,
     /// Optional TLS certificate for the MCP listener.
     #[serde(default)]
@@ -114,7 +116,8 @@ pub struct BackendConfig {
 pub struct ServerBackendConfig {
     /// The Server WebSocket URL.
     pub endpoint: String,
-    /// The Server auth token.
+    /// The Server auth token (or NESSION_MCP_BACKEND_SERVER_TOKEN).
+    #[serde(default)]
     pub auth_token: String,
     /// Optional per-call request deadline.
     #[serde(default)]
@@ -126,7 +129,8 @@ pub struct ServerBackendConfig {
 pub struct AgentBackendConfig {
     /// The Agent WebSocket URL.
     pub endpoint: String,
-    /// The Agent's configured operator token.
+    /// The Agent operator token (or NESSION_MCP_BACKEND_AGENT_TOKEN).
+    #[serde(default)]
     pub auth_token: String,
     /// The Agent id this host is allowed to manage.
     pub agent_id: String,
@@ -137,10 +141,36 @@ impl StandaloneConfig {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|error| anyhow::anyhow!("could not read {}: {error}", path.display()))?;
-        let config: Self = toml::from_str(&text)
+        let mut config: Self = toml::from_str(&text)
             .map_err(|error| anyhow::anyhow!("could not parse {}: {error}", path.display()))?;
+        config.resolve_environment_credentials()?;
         config.validate()?;
         Ok(config)
+    }
+
+    /// Resolve only fixed credential sources, never arbitrary TOML interpolation.
+    /// Local explicit auth_token fields remain supported; duplicates fail closed.
+    fn resolve_environment_credentials(&mut self) -> anyhow::Result<()> {
+        resolve_credential(
+            &mut self.mcp.auth_token,
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token",
+        )?;
+        if let Some(server) = &mut self.backend.server {
+            resolve_credential(
+                &mut server.auth_token,
+                "NESSION_MCP_BACKEND_SERVER_TOKEN",
+                "[backend.server].auth_token",
+            )?;
+        }
+        if let Some(agent) = &mut self.backend.agent {
+            resolve_credential(
+                &mut agent.auth_token,
+                "NESSION_MCP_BACKEND_AGENT_TOKEN",
+                "[backend.agent].auth_token",
+            )?;
+        }
+        Ok(())
     }
 
     /// Fail closed on a document that cannot authenticate or reach a backend.
