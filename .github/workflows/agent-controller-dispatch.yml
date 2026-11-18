@@ -40,6 +40,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # #3885: one owner-only command is admitted; the trusted Node verifier
+  # re-reads real failed Run/Artifacts/log and committed Store CAS before POST.
   trusted-dispatch:
     if: >-
       github.repository == 'BestNathan/nession' &&
@@ -67,9 +69,6 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body, '/nession dispatch-review issue=')) ||
-        # Single source-attested Qwen CLI failure (Run 44250586057).
-        # The trusted Controller still independently verifies original
-        # Run/Job/Artifacts/log and committed Store CAS before another POST.
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
          github.event.issue.number == 3784 &&
