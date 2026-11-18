@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { platforms, samePlatforms, failureClass } from './mirror-acr-macos.mjs';
+import { platforms, samePlatforms, failureClass, classifyCopyFailure, withHeartbeat } from './mirror-acr-macos.mjs';
 
 const sha = 'a'.repeat(40);
 const amd = 'sha256:' + '1'.repeat(64);
@@ -48,7 +48,14 @@ const mock = '#!/bin/sh\n' +
   '    if [ -n "$REGCTL_FIXTURE_TRACE" ]; then printf "start:%s\\n" "$3" >> "$REGCTL_FIXTURE_TRACE"; fi\n' +
   '    sleep 0.10\n' +
   '    if [ -n "$REGCTL_FIXTURE_TRACE" ]; then printf "end:%s\\n" "$3" >> "$REGCTL_FIXTURE_TRACE"; fi\n' +
-  '    if [ "$REGCTL_FIXTURE_FAIL" = "1" ]; then echo "connection reset" >&2; exit 1; fi\n' +
+  '    case "$REGCTL_FIXTURE_FAIL" in\n' +
+  '      1) echo "connection reset" >&2; exit 1 ;;\n' +
+  '      transient-once) if [ "$(grep -c "^start:" "$REGCTL_FIXTURE_TRACE")" -eq 1 ]; then echo "unexpected status code 503 https://signed.invalid/?token=test-ghcr-secret" >&2; exit 1; fi ;;\n' +
+  '      http-429) echo "response status 429 https://signed.invalid/?token=test-acr-secret" >&2; exit 1 ;;\n' +
+  '      auth) echo "HTTP 403 Forbidden https://signed.invalid/?token=test-acr-secret" >&2; exit 1 ;;\n' +
+  '      invalid) echo "manifest invalid https://signed.invalid/?token=test-acr-secret" >&2; exit 1 ;;\n' +
+  '      unknown) echo "regctl failure https://signed.invalid/?token=test-acr-secret" >&2; exit 1 ;;\n' +
+  '    esac\n' +
   '    exit 0 ;;\n' +
   'esac\n' +
   'exit 2\n';
@@ -61,6 +68,7 @@ function fixture(fail, image = 'server', concurrency = '2') {
     const resultDir = path.join(tmp, 'result');
     const trace = path.join(tmp, 'trace');
     const entry = fileURLToPath(new URL('./mirror-acr-macos.mjs', import.meta.url));
+    const mode = fail === true ? '1' : fail === false ? '0' : fail;
     const result = spawnSync(process.execPath, [entry, sha, image, '5', '1'], {
       encoding: 'utf8',
       timeout: 15000,
@@ -70,12 +78,13 @@ function fixture(fail, image = 'server', concurrency = '2') {
         RUNNER_TEMP: tmp,
         REGCTL_FIXTURE_TRACE: trace,
         MIRROR_MAX_CONCURRENT_IMAGES: concurrency,
+        MIRROR_ACR_TEST_HEARTBEAT_MS: '20',
         GHCR_USERNAME: 'test-user', GHCR_TOKEN: 'test-ghcr-secret',
         ACR_USERNAME: 'test-acr-user', ACR_PASSWORD: 'test-acr-secret',
         GITHUB_REPOSITORY: 'BestNathan/nession', GITHUB_REF: 'refs/heads/main',
         GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: '42',
         GITHUB_RUN_ATTEMPT: '1', RUNNER_NAME: 'hs-mac-fixture',
-        REGCTL_FIXTURE_FAIL: fail ? '1' : '0'},
+        REGCTL_FIXTURE_FAIL: mode},
     });
     if (concurrency === '5') return {result};
     const report = JSON.parse(fs.readFileSync(path.join(resultDir, 'result.json'), 'utf8'));
@@ -83,7 +92,8 @@ function fixture(fail, image = 'server', concurrency = '2') {
     assert.equal(report.roles.length, image === 'all' ? 4 : 1);
     assert.equal(report.max_concurrent_images, image === 'all' ? Number(concurrency) : 1);
     assert.ok(report.total_elapsed_seconds >= 0);
-    assert.equal(report.roles[0].attempts.length, fail ? 3 : 1);
+    assert.equal(report.roles[0].attempts.length,
+      mode === '1' || mode === 'http-429' ? 3 : mode === 'transient-once' ? 2 : 1);
     assert.ok(!result.stdout.includes('test-ghcr-secret'));
     assert.ok(!result.stdout.includes('test-acr-secret'));
     assert.ok(!result.stderr.includes('test-acr-secret'));
@@ -181,4 +191,118 @@ test('manual macOS mirror authenticates Staging SHA before ACR secret-scoped cop
   }
   assert.match(yml, /if: always\(\)/);
   assert.match(yml, /max_concurrent_images:/);
+});
+
+
+test('diagnostic categories parse explicit HTTP context, never bare numbers in signed URLs', () => {
+  const credential = 'https://signed.invalid/path?token=test-acr-secret-401-403';
+  assert.deepEqual(classifyCopyFailure(1, false, 'unable to fetch ' + credential), {
+    error_type: 'copy_error', http_status: null, exit_code: 1, retryable: false,
+  });
+  for (const [diagnostic, type, http_status, retryable] of [
+    ['unexpected status code 503 ' + credential, 'registry_transient_http', 503, true],
+    ['response status 429', 'registry_transient_http', 429, true],
+    ['HTTP/1.1 408 Request Timeout', 'registry_transient_http', 408, true],
+    ['HTTP 500 Internal Server Error', 'registry_transient_http', 500, true],
+    ['status: 400 bad request', 'registry_http_rejection', 400, false],
+    ['HTTP 404 Not Found', 'registry_http_rejection', 404, false],
+    ['HTTP 403 Forbidden', 'credential_or_permission_rejected', 403, false],
+    ['manifest invalid', 'invalid_registry_content', null, false],
+    ['digest mismatch', 'invalid_registry_content', null, false],
+    ['connection reset by peer', 'connection_reset', null, true],
+    ['TLS handshake timeout', 'tls_handshake_timeout', null, true],
+    ['context deadline exceeded', 'network_transport', null, true],
+    ['unrecognized failure', 'copy_error', null, false],
+  ]) {
+    const actual = classifyCopyFailure(1, false, diagnostic);
+    assert.equal(actual.error_type, type, diagnostic);
+    assert.equal(actual.http_status, http_status, diagnostic);
+    assert.equal(actual.retryable, retryable, diagnostic);
+    assert.equal(actual.exit_code, 1, diagnostic);
+    assert.ok(!JSON.stringify(actual).includes('test-acr-secret'));
+    assert.ok(!JSON.stringify(actual).includes('signed.invalid'));
+  }
+  assert.equal(classifyCopyFailure(null, true, '').error_type, 'transfer_deadline');
+  assert.equal(classifyCopyFailure(null, true, '').retryable, true);
+  assert.equal(classifyCopyFailure(127, false, '').error_type, 'tool_unavailable');
+  assert.equal(classifyCopyFailure(137, false, '').retryable, false);
+});
+
+test('safe transient HTTP failure retries only once and preserves exact digest verification', () => {
+  const {result, report} = fixture('transient-once');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(report.status, 'success');
+  assert.deepEqual(report.roles[0].attempts.map(a => a.decision), ['retry', 'success']);
+  assert.deepEqual(report.roles[0].attempts.map(a => a.chunk_bytes), [4194304, 1048576]);
+  assert.equal(report.roles[0].attempts[0].http_status, 503);
+  assert.equal(report.roles[0].attempts[0].retryable, true);
+  assert.deepEqual(report.roles[0].arches.map(x => x.status), ['success', 'success']);
+  assert.ok(!result.stdout.includes('signed.invalid'));
+  assert.ok(!JSON.stringify(report).includes('signed.invalid'));
+});
+
+test('terminal authentication, invalid manifest and unknown errors do not retry or leak secrets', () => {
+  for (const [kind, expected, http] of [
+    ['auth', 'credential_or_permission_rejected', 403],
+    ['invalid', 'invalid_registry_content', null],
+    ['unknown', 'copy_error', null],
+  ]) {
+    const {result, report, events} = fixture(kind);
+    assert.equal(result.status, 1, kind);
+    assert.equal(report.status, 'failure');
+    assert.equal(report.roles[0].error, 'native_oci_copy_failed');
+    assert.equal(report.roles[0].attempts.length, 1);
+    assert.equal(report.roles[0].attempts[0].outcome, expected);
+    assert.equal(report.roles[0].attempts[0].http_status, http);
+    assert.equal(report.roles[0].attempts[0].retryable, false);
+    assert.equal(report.roles[0].attempts[0].decision, 'stop');
+    assert.equal(events.length, 2);
+    for (const content of [result.stdout, result.stderr, JSON.stringify(report)]) {
+      assert.ok(!content.includes('signed.invalid'));
+      assert.ok(!content.includes('test-acr-secret'));
+      assert.ok(!content.includes('test-ghcr-secret'));
+    }
+  }
+});
+
+test('bounded network retries exhaust at attempt 3 and preserve safe results', () => {
+  const {result, report} = fixture('http-429');
+  assert.equal(result.status, 1);
+  assert.equal(report.roles[0].attempts.length, 3);
+  assert.deepEqual(report.roles[0].attempts.map(a => a.decision), ['retry', 'retry', 'stop']);
+  assert.ok(report.roles[0].attempts.every(a => a.http_status === 429 && a.retryable));
+  assert.ok(!result.stdout.includes('signed.invalid'));
+});
+
+test('heartbeat has monotonic elapsed time and is removed after success and failure', async () => {
+  for (const fail of [false, true]) {
+    const messages = [];
+    await (fail
+      ? assert.rejects(() => withHeartbeat({
+        image: 'agent', attempt: 1, intervalMs: 10,
+        log: msg => messages.push(msg),
+        run: () => new Promise((resolve, reject) =>
+          setTimeout(() => reject(Error('fixture_failure')), 55)),
+      }), /fixture_failure/)
+      : withHeartbeat({
+        image: 'agent', attempt: 1, intervalMs: 10,
+        log: msg => messages.push(msg),
+        run: () => new Promise(resolve => setTimeout(resolve, 55)),
+      }));
+    assert.ok(messages.length >= 2);
+    const parsed = messages.map(msg => {
+      assert.ok(msg.startsWith('ACR_MAC_MIRROR_PROGRESS_V1 '));
+      return JSON.parse(msg.slice('ACR_MAC_MIRROR_PROGRESS_V1 '.length));
+    });
+    assert.ok(parsed.every(x => x.image === 'agent' && x.attempt === 1 &&
+      x.phase === 'oci_transfer_and_index' && x.status === 'running' &&
+      Number.isFinite(x.elapsed_seconds) && x.bytes === undefined &&
+      x.percent === undefined));
+    for (let i = 1; i < parsed.length; i++) {
+      assert.ok(parsed[i].elapsed_seconds >= parsed[i - 1].elapsed_seconds);
+    }
+    const count = messages.length;
+    await new Promise(resolve => setTimeout(resolve, 35));
+    assert.equal(messages.length, count, 'interval leaked after invocation completed');
+  }
 });
