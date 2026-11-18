@@ -20,6 +20,9 @@ spec:
         component: mcp
         env: staging
     spec:
+      # Reuse the staging registry pull Secret already used by Server/Agent/UI.
+      imagePullSecrets:
+        - name: ghcr-secret
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
       securityContext:
