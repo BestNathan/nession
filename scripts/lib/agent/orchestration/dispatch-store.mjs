@@ -13,6 +13,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordAttestedQwenPreflightFailureV2,qwenPreflightSuccessorIdV2,
   recordAttestedQwenPreflightFailureV3,qwenPreflightSuccessorIdV3,
   recordAttestedQwenCliFailure,qwenCliSuccessorId,
+  recordAttestedQwenToolFailure,qwenToolSuccessorId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
@@ -35,6 +36,7 @@ import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V2 as QWEN_KEY_FAILURE_V2,
   SOURCE_V3 as QWEN_KEY_FAILURE_V3} from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
+import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
 
 const REF='agent-store';
 function fail(message){throw Error('trusted dispatch Store: '+message);}
@@ -667,6 +669,51 @@ export function recoverAttestedQwenCliFailure({remote,source}){
     const published=persist(dir,state,record.version,f.issue);
     if(published.replayed)
       fail('new Qwen CLI failure recovery unexpectedly replayed Store CAS');
+    return {status:'recovered',issue:f.issue,action_id:successorId,
+      state_version:state.version,store_commit_sha:published.commit_sha};
+  });
+}
+
+// #3885: independently attest exact failed read-only Grep tool policy and
+// retire the unique acknowledged second Worker. Never retry an old GitHub Run.
+export function recoverAttestedQwenToolFailure({remote,source}){
+  const f=QWEN_TOOL_FAILURE;
+  if(source?.verified!==true||source.issue!==f.issue||
+     source.action_id!==f.action_id||source.run_id!==f.run_id||
+     source.attempt!==1||source.source_sha!==f.source_sha||
+     source.run_head_sha!==f.run_head_sha||
+     source.failure_code!==f.failure_code)
+    fail('exact authenticated Qwen readonly-tool failure proof required');
+  return withStore(remote,dir=>{
+    const record=readIssueWorkflowState(dir,f.issue);
+    if(!record.state)fail('missing Qwen readonly-tool failure Store state');
+    const old=record.state.outbox.find(x=>x.id===f.action_id);
+    const successorId=qwenToolSuccessorId(f.issue,f.action_id,f.run_id);
+    if(old?.status==='failed'){
+      const next=record.state.outbox.find(x=>x.id===successorId);
+      if(old.receipt?.source_run_id!==f.run_id||
+         old.receipt?.failure_code!==f.failure_code||
+         !next||!['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting Qwen readonly-tool recovery replay');
+      return {status:'replayed',issue:f.issue,action_id:successorId,
+        state_version:record.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(record.version!==6||old?.status!=='dispatched'||
+       old.receipt?.status!=='verified'||
+       old.receipt.source_run_id!==f.run_id||
+       old.task.agent_id!=='dev-qwen-01'||old.task.sha!==f.source_sha)
+      fail('second failed Qwen Store source changed');
+    // The second Worker has only a signed Claim and failure Telemetry.
+    // Do not erase or supersede any accepted Patch/native checkpoint.
+    const folder=path.join(dir,'roles/developer/dev-qwen-01/issues/'+f.issue);
+    if(fs.existsSync(path.join(folder,'head.json'))||
+       fs.existsSync(path.join(folder,'runs/'+f.run_id+'-1.json'))||
+       fs.existsSync(path.join(folder,'checkpoints')))
+      fail('cannot recover Qwen tool-policy Worker with accepted checkpoint');
+    const state=recordAttestedQwenToolFailure(record.state,record.version,source);
+    const published=persist(dir,state,record.version,f.issue);
+    if(published.replayed)
+      fail('new Qwen readonly-tool recovery unexpectedly replayed Store CAS');
     return {status:'recovered',issue:f.issue,action_id:successorId,
       state_version:state.version,store_commit_sha:published.commit_sha};
   });
