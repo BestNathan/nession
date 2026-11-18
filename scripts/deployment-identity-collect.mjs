@@ -576,6 +576,17 @@ function selfTest() {
   assert.equal(positive.workloads[0].image_id,
     'ghcr.io/bestnathan/nession@sha256:' + '1'.repeat(64));
 
+  // #3953: production release provenance may include standalone MCP, even
+  // when only server/agent/ui are deployed in this environment.
+  const fourRoleProvenance = provenanceFixture();
+  fourRoleProvenance.images.mcp = {
+    tag: 'mcp-abcdef1', digest: 'sha256:' + '4'.repeat(64),
+  };
+  const published = attestFromObservations({
+    ...base, provenance: fourRoleProvenance, ...kubernetesFixtures(),
+  });
+  assert.deepEqual(published, positive);
+
   // A registry mirror may rewrite the pod status image reference while the
   // immutable role tag stays the same. The observer matches the tag suffix;
   // attestation still binds the digest to trusted provenance.
