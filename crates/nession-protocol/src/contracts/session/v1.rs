@@ -285,11 +285,13 @@ pub struct ClientSessionCreatePayload {
     /// pre-Project create path unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-    /// Request a Managed EROFS-backed Session (#3062). Requires `project_id`
-    /// whose Project pins an image; the Server resolves and authorizes every
-    /// artifact before handing the Agent preparation grants.
-    #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "schema", schemars(skip))]
+    /// Request a Managed EROFS-backed Session (#3062, #3794). Requires
+    /// `project_id` whose Project pins an image; the Server resolves and
+    /// authorizes every artifact before handing the Agent preparation grants.
+    ///
+    /// The Web projection names immutable digests and optional `/opt/<name>`
+    /// targets only. It never carries a host path, a download URL or a grant:
+    /// the Server and Agent remain the executable owners.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ClientManagedCreate>,
 }
