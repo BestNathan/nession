@@ -1,8 +1,10 @@
 # Staging-only standalone Nession MCP (#3902)
 
 This is a **separate Argo CD Application** (`nession-mcp-staging`) and a
-single stateless Deployment/ClusterIP Service (`nession-mcp-staging`) and an
-HTTPS-only public Higress Ingress in the shared `nession` namespace. Production, preprod, and staging-01 are unchanged.
+single stateless Deployment/ClusterIP Service (`nession-mcp-staging`) in the
+shared `nession` namespace. Its public Higress Ingress manifest is **staged but
+excluded from Kustomize** until DNS, CA-trusted TLS, and redirect preflight
+succeeds; plaintext HTTP must never expose a bearer token. Production, preprod, and staging-01 are unchanged.
 This service is not the embedded `/mcp` route inside Server/Agent containers.
 
 ## Image and version contract
@@ -26,8 +28,11 @@ certificate PEM** (not the SSH public key used by Argo CD, and never the
 controller private key). See `docs/engineering/sealed-secret-generation.md`
 on `main`.
 
-First merge this GitOps overlay PR, then dispatch the main-owned
-`Deploy / Seal GitOps Secret` workflow with environment `staging` and secret `MCP_CONFIG_TOML`. It seals
+First merge this GitOps overlay PR, then merge the main-owned
+`Deploy / Seal GitOps Secret` workflow PR. Its restricted main-merge bootstrap
+seals `staging/MCP_CONFIG_TOML` automatically after GitHub Environment approval;
+manual dispatch with environment `staging` and secret `MCP_CONFIG_TOML` is also
+available for subsequent rotations. It seals
 the config **offline**, commits `sealed-secret.json` to this overlay and
 adds the matching `resources` entry automatically. The existing cluster
 Sealed Secrets Controller then generates the ordinary Kubernetes Secret
@@ -46,7 +51,8 @@ either token or place it in a ConfigMap.
 
 ## Public HTTPS MCP entry point (operator prerequisites)
 
-The staging-only Ingress is `nession-mcp-staging`, with
+The staging-only Ingress definition (currently **not enabled in Kustomize**) is
+`nession-mcp-staging`, with
 `ingressClassName: higress` and the single **Exact** path `/mcp` mapped to
 the MCP Service port 9090. The supported external endpoint is:
 
@@ -75,7 +81,9 @@ https://staging.mcp.nession.bestnathan.top/mcp
    above and verify the controller reconciles the resulting
    `nession-mcp-config-staging` Secret. The Host allowlist must include the
    public hostname and inbound/outbound bearer tokens must differ.
-4. Verify the existing Higress Controller reconciles this Ingress and TLS
+4. **Only after steps 1-3 pass**, add `ingress.yaml` to this overlay's
+   `kustomization.yaml` resources in a separate reviewed GitOps activation.
+   Verify the existing Higress Controller reconciles this Ingress and TLS
    Secret, DNS resolves publicly, and its gateway is actually reachable
    from the internet. The manifest explicitly requests TLS termination and
    HTTP→HTTPS redirection using Higress-compatible
