@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # gitops-commit.sh <env> <ref>
 #
-# Points staging at ACR and other environments at GHCR images {server,agent,ui}-<ref>
-# and pushes a deploy commit ("deploy(<env>): <ref>") to the gitops branch.
+# Points staging at ACR and other environments at GHCR images {server,agent,ui}-<ref>.
+# The staging-only standalone MCP overlay follows the same exact SHA as all
+# other staging roles; non-staging environments remain three-role deployments.
+# Pushes a deploy commit ("deploy(<env>): <ref>") to the gitops branch.
 # The ONLY writer of deployment desired state; used by staging.yml (staging
 # branch auto-deploy), release.yml (production promotion) and deploy.yml
 # (manual SHA deploys). ArgoCD consumes the gitops branch (issue #592).
@@ -32,7 +34,7 @@ fi
 # remotely readable. This also guards manual staging deploys, whose workflow
 # doesn't depend on the ACR mirror job.
 if [[ "${env}" == "staging" ]]; then
-  for img in server agent ui; do
+  for img in server agent ui mcp; do
     tag="${img}-${ref}"
     # ACR can return HTTP 401 to raw curl manifest requests while the Docker
     # Registry challenge/token flow still permits anonymous image pulls.
@@ -62,6 +64,22 @@ for img in server agent ui; do
   kustomize edit set image \
     "ghcr.io/${OWNER}/nession-${img}=${TARGET_IMAGE}:${img}-${ref}"
 done
+
+# Staging hosts a separate Argo CD Application for the standalone MCP service,
+# yet both applications must advance in ONE GitOps commit to the same source SHA.
+# Refuse a partial promotion if its overlay is absent, rather than silently
+# deploying the Server/Agent/UI at a newer revision than MCP.
+if [[ "${env}" == "staging" ]]; then
+  mcp_overlay="${tmp}/environments/staging/mcp"
+  if [[ ! -f "${mcp_overlay}/kustomization.yaml" ]]; then
+    echo "missing staging MCP GitOps overlay: ${mcp_overlay}/kustomization.yaml" >&2
+    exit 1
+  fi
+  cd "${mcp_overlay}"
+  kustomize edit set image \
+    "ghcr.io/${OWNER}/nession-mcp=${TARGET_IMAGE}:mcp-${ref}"
+fi
+cd "${tmp}"
 
 if git diff --quiet; then
   echo "no tag change for $env @ $ref — nothing to commit"

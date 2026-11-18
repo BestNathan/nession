@@ -68,12 +68,26 @@ type FixtureGitMutationOverlapWindow = Window & {
   };
 };
 
+/** One recorded commit read: the target it was addressed to and the OID it named. */
+type FixtureGitHistoryRequest = {
+  agent_id: string;
+  session: string;
+  oid: string;
+};
+
+/** One recorded commit-sourced diff read, including the path it asked for. */
+type FixtureGitHistoryDiffRequest = FixtureGitHistoryRequest & { path: string };
+
 /**
- * Deterministic controls the `git=history-overlap` scenario exposes (#3751).
+ * Deterministic controls the `git=history-overlap` scenario exposes (#3751),
+ * extended with request evidence for the selection-ownership Case (#3767).
  *
  * The first older page is held until the Case releases it. The Case can switch
  * Session or refresh the first page first, then assert the held answer changed
- * nothing — no timer decides when the stale continuation settles.
+ * nothing — no timer decides when the stale continuation settles. Detail and
+ * diff reads are recorded with the target they were addressed to and the OID
+ * they named, so a Case can prove the successor was never asked about the
+ * predecessor's commit.
  */
 type FixtureGitHistoryOverlapWindow = Window & {
   fixtureGitHistoryOverlap?: {
@@ -82,6 +96,10 @@ type FixtureGitHistoryOverlapWindow = Window & {
     olderRequests: () => number;
     olderSettled: () => boolean;
     releaseOlder: () => void;
+    /** Every `git.commit` read, in order, with its target and OID. */
+    commitRequests: () => readonly FixtureGitHistoryRequest[];
+    /** Every commit-sourced `git.diff` read, in order. */
+    diffRequests: () => readonly FixtureGitHistoryDiffRequest[];
   };
 };
 
@@ -655,7 +673,139 @@ function mutationOverlapGitSurface(): PluginSurface {
 }
 
 /**
- * The `git=history-overlap` surface (#3751).
+ * Everything the `history-overlap` surface remembers between requests.
+ *
+ * The request evidence arrays are part of it because the Case reasons about
+ * the exact target and OID a read named, not about a call count alone (#3767).
+ */
+interface HistoryOverlapState {
+  firstPageRequests: Map<string, number>;
+  cursors: Map<string, { session: string; generation: number }>;
+  servedCommits: Map<string, GitCommit>;
+  commitRequests: FixtureGitHistoryRequest[];
+  diffRequests: FixtureGitHistoryDiffRequest[];
+  olderRequests: number;
+  olderSettled: boolean;
+  held: {
+    session: string;
+    generation: number;
+    resolve: (value: GitLogResponse) => void;
+  } | null;
+}
+
+/** Register every commit a page listed, so `git.commit` answers a real row. */
+function rememberHistoryOverlapPage(
+  state: HistoryOverlapState,
+  page: GitLogResponse,
+): GitLogResponse {
+  if (page.state === 'ok') {
+    for (const commit of page.history.commits) {
+      state.servedCommits.set(commit.hash, commit);
+    }
+  }
+  return page;
+}
+
+/** Serve a first page or a cursor-addressed continuation, holding the first. */
+function historyOverlapLog(
+  state: HistoryOverlapState,
+  payload: Record<string, unknown>,
+  publish: () => void,
+): Promise<GitLogResponse> {
+  const session = String(payload.session ?? '');
+  const before = typeof payload.before === 'string' ? payload.before : null;
+  if (!before) {
+    const generation = (state.firstPageRequests.get(session) ?? 0) + 1;
+    state.firstPageRequests.set(session, generation);
+    const cursor = historyOverlapCursorFor(session, generation);
+    state.cursors.set(cursor, { session, generation });
+    publish();
+    return Promise.resolve(
+      rememberHistoryOverlapPage(
+        state,
+        historyOverlapFirstPage(session, generation, cursor),
+      ),
+    );
+  }
+  // Answer what the *cursor* names, not merely the Session the request
+  // claims: a continuation that rolled back to another list's cursor is
+  // then visibly that list's page, which is what the Case must catch.
+  const fromCursor = state.cursors.get(before) ?? { session, generation: 1 };
+  state.olderRequests += 1;
+  publish();
+  if (state.olderRequests === 1) {
+    return new Promise<GitLogResponse>((resolve) => {
+      state.held = {
+        session: fromCursor.session,
+        generation: fromCursor.generation,
+        resolve,
+      };
+      publish();
+    });
+  }
+  return Promise.resolve(
+    rememberHistoryOverlapPage(
+      state,
+      historyOverlapOlderPage(fromCursor.session, fromCursor.generation),
+    ),
+  );
+}
+
+/** Record a commit-sourced file patch read, then answer it. */
+function historyOverlapDiff(
+  state: HistoryOverlapState,
+  payload: Record<string, unknown>,
+  publish: () => void,
+): Promise<GitDiffResponse> {
+  const source = payload.source as { kind?: string; oid?: string } | undefined;
+  if (source?.kind === 'commit') {
+    state.diffRequests.push({
+      agent_id: String(payload.agent_id ?? ''),
+      session: String(payload.session ?? ''),
+      oid: String(source.oid ?? ''),
+      path: String(payload.path ?? ''),
+    });
+    publish();
+  }
+  return Promise.resolve(
+    diffFor(
+      String(payload.path),
+      'changed',
+      // The same snapshot `CHANGED_STATUS` declares; the union type does
+      // not let the fixture read it off the answer directly.
+      fixtureSnapshot('fixture-changed-0', 'fixture-head-changed'),
+    ),
+  );
+}
+
+/** Record a detail read and resolve only a commit a served page listed. */
+function historyOverlapDetail(
+  state: HistoryOverlapState,
+  payload: Record<string, unknown>,
+  publish: () => void,
+): Promise<GitCommitResponse> {
+  const request: FixtureGitHistoryRequest = {
+    agent_id: String(payload.agent_id ?? ''),
+    session: String(payload.session ?? ''),
+    oid: String(payload.oid ?? ''),
+  };
+  state.commitRequests.push(request);
+  publish();
+  const commit = state.servedCommits.get(request.oid);
+  if (!commit) {
+    // The agent validates the object name against the Session's repository;
+    // a fixture must not invent a commit it never served.
+    return Promise.resolve({
+      state: 'error',
+      message: `unknown revision: ${request.oid}`,
+    });
+  }
+  return Promise.resolve(historyOverlapCommitDetail(commit));
+}
+
+/**
+ * The `git=history-overlap` surface (#3751), with selection request evidence
+ * (#3767).
  *
  * Two Sessions have distinct histories, and every page is addressable by the
  * cursor the previous page handed out: a first page is served per Session and
@@ -665,38 +815,46 @@ function mutationOverlapGitSurface(): PluginSurface {
  * a stale continuation is even offered a chance to render.
  */
 function historyOverlapGitSurface(): PluginSurface {
-  const firstPageRequests = new Map<string, number>();
-  // A cursor is an opaque commit OID on the wire; the fixture records which
-  // page handed it out so an older request is answered from the cursor itself.
-  const cursors = new Map<string, { session: string; generation: number }>();
-  let olderRequests = 0;
-  let olderSettled = false;
-  let held: {
-    session: string;
-    generation: number;
-    resolve: (value: GitLogResponse) => void;
-  } | null = null;
+  const state: HistoryOverlapState = {
+    firstPageRequests: new Map<string, number>(),
+    // A cursor is an opaque commit OID on the wire; the fixture records which
+    // page handed it out so an older request is answered from the cursor.
+    cursors: new Map<string, { session: string; generation: number }>(),
+    servedCommits: new Map<string, GitCommit>(),
+    commitRequests: [],
+    diffRequests: [],
+    olderRequests: 0,
+    olderSettled: false,
+    held: null,
+  };
 
   const publish = () => {
     if (typeof window === 'undefined') {
       return;
     }
     (window as FixtureGitHistoryOverlapWindow).fixtureGitHistoryOverlap = {
-      firstPageRequests: (session: string) => firstPageRequests.get(session) ?? 0,
-      olderRequests: () => olderRequests,
-      olderSettled: () => olderSettled,
+      firstPageRequests: (session: string) => state.firstPageRequests.get(session) ?? 0,
+      olderRequests: () => state.olderRequests,
+      olderSettled: () => state.olderSettled,
       releaseOlder: () => {
-        const current = held;
-        held = null;
+        const current = state.held;
+        state.held = null;
         if (!current) {
           return;
         }
-        current.resolve(historyOverlapOlderPage(current.session, current.generation));
+        current.resolve(
+          rememberHistoryOverlapPage(
+            state,
+            historyOverlapOlderPage(current.session, current.generation),
+          ),
+        );
         setTimeout(() => {
-          olderSettled = true;
+          state.olderSettled = true;
           publish();
         }, 0);
       },
+      commitRequests: () => state.commitRequests,
+      diffRequests: () => state.diffRequests,
     };
   };
   publish();
@@ -707,48 +865,10 @@ function historyOverlapGitSurface(): PluginSurface {
         return Promise.resolve(CHANGED_STATUS as T);
       }
       if (type === 'git.log') {
-        const session = String(payload.session ?? '');
-        const before = typeof payload.before === 'string' ? payload.before : null;
-        if (!before) {
-          const generation = (firstPageRequests.get(session) ?? 0) + 1;
-          firstPageRequests.set(session, generation);
-          const cursor = historyOverlapCursorFor(session, generation);
-          cursors.set(cursor, { session, generation });
-          publish();
-          return Promise.resolve(
-            historyOverlapFirstPage(session, generation, cursor) as T,
-          );
-        }
-        // Answer what the *cursor* names, not merely the Session the request
-        // claims: a continuation that rolled back to another list's cursor is
-        // then visibly that list's page, which is what the Case must catch.
-        const fromCursor = cursors.get(before) ?? { session, generation: 1 };
-        olderRequests += 1;
-        publish();
-        if (olderRequests === 1) {
-          return new Promise<T>((resolve) => {
-            held = {
-              session: fromCursor.session,
-              generation: fromCursor.generation,
-              resolve: (value) => resolve(value as T),
-            };
-            publish();
-          });
-        }
-        return Promise.resolve(
-          historyOverlapOlderPage(fromCursor.session, fromCursor.generation) as T,
-        );
+        return historyOverlapLog(state, payload, publish).then((value) => value as T);
       }
       if (type === 'git.diff') {
-        return Promise.resolve(
-          diffFor(
-            String(payload.path),
-            'changed',
-            // The same snapshot `CHANGED_STATUS` declares; the union type does
-            // not let the fixture read it off the answer directly.
-            fixtureSnapshot('fixture-changed-0', 'fixture-head-changed'),
-          ) as T,
-        );
+        return historyOverlapDiff(state, payload, publish).then((value) => value as T);
       }
       if (type === 'git.preview') {
         return Promise.resolve(
@@ -761,7 +881,7 @@ function historyOverlapGitSurface(): PluginSurface {
         );
       }
       if (type === 'git.commit') {
-        return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
+        return historyOverlapDetail(state, payload, publish).then((value) => value as T);
       }
       if (type === 'git.branches') {
         return Promise.resolve(branchesFor(payload.limit) as T);
@@ -821,6 +941,45 @@ function historyOverlapCommit(
     date: '2026-11-16T10:00:00+08:00',
     subject: `${historyOverlapLabel(session)} ${subject}`,
     refs: '',
+  };
+}
+
+/**
+ * One served History row's detail, with a changed file so the selection Case
+ * can cover the file selection and its commit-sourced `git.diff` (#3767).
+ *
+ * The file is derived from the row's own A/B identity: the detail and the diff
+ * are answers about the same commit the list offered, not a second canned
+ * object that could disagree with it.
+ */
+function historyOverlapCommitDetail(commit: GitCommit): GitCommitResponse {
+  const label = commit.subject.startsWith('B ') ? 'b' : 'a';
+  return {
+    state: 'ok',
+    commit: {
+      oid: commit.hash,
+      short_oid: commit.short_hash,
+      parents: [],
+      author: commit.author,
+      author_date: commit.date,
+      committer: commit.author,
+      commit_date: commit.date,
+      subject: commit.subject,
+      body: '',
+      decorations: '',
+      files: [
+        {
+          path: `src/${label}-history-overlap.ts`,
+          status: 'M',
+          binary: false,
+        },
+      ],
+      files_truncated: false,
+      files_truncated_bytes: 0,
+      message_truncated: false,
+      message_truncated_bytes: 0,
+      merge_diff_parent: '',
+    },
   };
 }
 

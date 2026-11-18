@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitHistoryView } from '../../GitHistoryView';
@@ -25,6 +25,7 @@ vi.mock('../../../GitPlugin', () => ({
 
 const mockedLog = vi.mocked(gitApi.gitLog);
 const mockedCommit = vi.mocked(gitApi.gitCommit);
+const mockedDiff = vi.mocked(gitApi.gitDiff);
 const mockedOnInvalidated = vi.mocked(gitApi.onInvalidated);
 
 const agent = { agent_id: 'a1', hostname: 'devbox' } as Agent;
@@ -138,6 +139,17 @@ describe('GitHistoryView', () => {
     mockedCommit.mockImplementation(async (req) => {
       const row = commit({ hash: req.oid, short_hash: req.oid.slice(0, 7) });
       return commitDetailFrom(row);
+    });
+    mockedDiff.mockResolvedValue({
+      state: 'ok',
+      diff: {
+        path: 'README.md',
+        text: '@@ -1 +1 @@\n-old\n+new\n',
+        binary: false,
+        truncated_bytes: 0,
+        truncated: false,
+      },
+      snapshot: { token: 'fixture', head: null, root: '/repo' },
     });
   });
 
@@ -444,5 +456,178 @@ describe('GitHistoryView', () => {
     expect(screen.getAllByTestId('git-commit-row')).toHaveLength(1);
     expect(screen.getByTestId('git-history-load-more')).toHaveTextContent('Load older commits');
     expect(screen.getByTestId('git-history-load-more')).toBeEnabled();
+  });
+
+  // #3767: the selection is a question about one repository's commit. It may
+  // not survive a Session switch or a first page that no longer lists its row,
+  // and no request for the predecessor's OID may be addressed to the successor.
+  it('drops a commit and file selection when the Session target changes (#3767 SC-01)', async () => {
+    const a1 = labeled('a', 1);
+    const a2 = labeled('a', 2);
+    const b1 = labeled('b', 1);
+    const b2 = labeled('b', 2);
+    mockedLog.mockImplementation((request) =>
+      request.session === session.session_id
+        ? Promise.resolve(paged([a1, a2]))
+        : Promise.resolve(paged([b1, b2])),
+    );
+    mockedCommit.mockImplementation(async (req) => {
+      const row = [a1, a2, b1, b2].find((candidate) => candidate.hash === req.oid);
+      return row
+        ? commitDetailFrom(row)
+        : { state: 'error' as const, message: `unknown revision: ${req.oid}` };
+    });
+
+    const view = render(<GitHistoryView ctx={ctx()} />);
+    await userEvent.click(await screen.findByText('a 1'));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('a 1');
+    await userEvent.click(screen.getByTestId('git-commit-file-row'));
+    expect(await screen.findByTestId('git-diff')).toBeInTheDocument();
+
+    expect(mockedCommit).toHaveBeenLastCalledWith({
+      agent_id: 'a1',
+      session: session.session_id,
+      oid: a1.hash,
+    });
+    expect(mockedDiff).toHaveBeenLastCalledWith({
+      agent_id: 'a1',
+      session: session.session_id,
+      path: 'README.md',
+      source: { kind: 'commit', oid: a1.hash },
+    });
+
+    // The Workspace moves to another Session while that selection is on
+    // screen. B's first page establishes B's list.
+    view.rerender(<GitHistoryView ctx={ctx(otherSession)} />);
+    expect(await screen.findByText('b 1')).toBeInTheDocument();
+
+    // No A row is current, and there is no detail or diff attached to one.
+    expect(screen.queryByTestId('git-commit-detail')).toBeNull();
+    expect(screen.queryByTestId('git-diff')).toBeNull();
+    expect(screen.getByTestId('git-commit-empty')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('git-commit-list').querySelector('[aria-current="true"]'),
+    ).toBeNull();
+
+    // The successor was never asked about the predecessor's commit — neither
+    // for its detail nor for its diff.
+    expect(mockedCommit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ session: otherSession.session_id, oid: a1.hash }),
+    );
+    expect(mockedDiff).not.toHaveBeenCalledWith(
+      expect.objectContaining({ session: otherSession.session_id }),
+    );
+
+    // B's own commit selects normally, and the detail request names B.
+    await userEvent.click(screen.getByText('b 2'));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('b 2');
+    expect(mockedCommit).toHaveBeenLastCalledWith({
+      agent_id: 'a1',
+      session: otherSession.session_id,
+      oid: b2.hash,
+    });
+    expect(
+      screen.getByTestId('git-commit-list').querySelectorAll('[aria-current="true"]'),
+    ).toHaveLength(1);
+  });
+
+  it('drops an orphaned selection when a refreshed first page no longer lists it (#3767 SC-02)', async () => {
+    const g1a = labeled('g1', 1);
+    const g1b = labeled('g1', 2);
+    const g2a = labeled('g2', 1);
+    const g2b = labeled('g2', 2);
+    const older = labeled('g2 older', 1);
+    const rows = [g1a, g1b, g2a, g2b, older];
+    let firstPageReads = 0;
+    mockedLog.mockImplementation((request) => {
+      if (request.before === 'cursor-gen2') {
+        return Promise.resolve(paged([older]));
+      }
+      firstPageReads += 1;
+      return firstPageReads === 1
+        ? Promise.resolve(paged([g1a, g1b], 'cursor-gen1'))
+        : Promise.resolve(paged([g2a, g2b], 'cursor-gen2'));
+    });
+    mockedCommit.mockImplementation(async (req) => {
+      const row = rows.find((candidate) => candidate.hash === req.oid);
+      return row
+        ? commitDetailFrom(row)
+        : { state: 'error' as const, message: `unknown revision: ${req.oid}` };
+    });
+
+    render(<GitHistoryView ctx={ctx()} />);
+    await userEvent.click(await screen.findByText('g1 1'));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('g1 1');
+    await userEvent.click(screen.getByTestId('git-commit-file-row'));
+    expect(await screen.findByTestId('git-diff')).toBeInTheDocument();
+
+    // A refresh replaces the first page with generation two, which no longer
+    // contains the selected commit. The row the detail belonged to is gone.
+    await userEvent.click(
+      within(screen.getByTestId('git-commit-list')).getByRole('button', { name: 'Refresh' }),
+    );
+    expect(await screen.findByText('g2 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('git-commit-detail')).toBeNull();
+    expect(screen.queryByTestId('git-diff')).toBeNull();
+    expect(screen.getByTestId('git-commit-empty')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('git-commit-list').querySelector('[aria-current="true"]'),
+    ).toBeNull();
+    // The replacement did not re-read the dropped commit.
+    expect(
+      mockedCommit.mock.calls.filter(([request]) => request.oid === g1a.hash),
+    ).toHaveLength(1);
+
+    // Ordinary paging and selection stay usable: selecting a refreshed commit
+    // survives loading an older page, and a commit from that appended page is
+    // itself selectable.
+    await userEvent.click(screen.getByText('g2 2'));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('g2 2');
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(await screen.findByText('g2 older 1')).toBeInTheDocument();
+    expect(screen.getByTestId('git-commit-detail')).toHaveTextContent('g2 2');
+    const currentRows = screen
+      .getByTestId('git-commit-list')
+      .querySelectorAll('[aria-current="true"]');
+    expect(currentRows).toHaveLength(1);
+    expect(currentRows[0]).toHaveTextContent('g2 2');
+
+    await userEvent.click(screen.getByText('g2 older 1'));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('g2 older 1');
+    expect(mockedCommit).toHaveBeenLastCalledWith({
+      agent_id: 'a1',
+      session: session.session_id,
+      oid: older.hash,
+    });
+  });
+
+  it('keeps a selection while a refreshed first page still lists the commit (#3767 SC-02)', async () => {
+    const first = labeled('kept', 1);
+    const second = labeled('kept', 2);
+    mockedLog.mockImplementation(() => Promise.resolve(paged([first, second])));
+    mockedCommit.mockImplementation(async (req) => {
+      const row = [first, second].find((candidate) => candidate.hash === req.oid);
+      return row
+        ? commitDetailFrom(row)
+        : { state: 'error' as const, message: `unknown revision: ${req.oid}` };
+    });
+
+    render(<GitHistoryView ctx={ctx()} />);
+    await userEvent.click(await screen.findByText('kept 2'));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('kept 2');
+
+    // The replacement answer lists the same commit, so the selection is not
+    // orphaned and must survive the refresh.
+    await userEvent.click(
+      within(screen.getByTestId('git-commit-list')).getByRole('button', { name: 'Refresh' }),
+    );
+    await waitFor(() => expect(mockedLog).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('git-commit-detail')).toHaveTextContent('kept 2');
+    expect(
+      screen.getByTestId('git-commit-list').querySelectorAll('[aria-current="true"]'),
+    ).toHaveLength(1);
+    expect(
+      mockedCommit.mock.calls.filter(([request]) => request.oid === second.hash),
+    ).toHaveLength(1);
   });
 });
