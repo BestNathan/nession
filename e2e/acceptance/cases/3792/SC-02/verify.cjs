@@ -5,6 +5,8 @@
 // source is refused before any mount, and the persistent Workspace survives.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { run, checked } = require('../../../shared/control-mode-cases.cjs');
 const {
   probeCapabilities, runLinuxRuntimeTest, runtimeEvidence, pending, capabilityLine,
@@ -20,6 +22,9 @@ try {
 } catch (error) {
   console.error('could not install EROFS helpers: ' + error.message);
 }
+
+const imageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-host-root-accept-'));
+process.env.SANDBOX_EROFS_IMAGE_ROOT = imageRoot;
 
 const capabilities = probeCapabilities();
 if (!capabilities.backend) {
