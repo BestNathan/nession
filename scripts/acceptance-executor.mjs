@@ -799,9 +799,9 @@ function selfTest() {
   });
   assert.deepEqual(foreignPr.criteria,[],'accepted PR receipts are not re-evaluated');
   assert.deepEqual(buildAcceptanceContext(anchoredIssue,'pr',{
-    targetRef:exactA,runId:1,method:'case',
+    targetRef:exactA,runId:1,method:'agent',
   }).criteria.map(x=>x.criterion),['SC-01','SC-02','SC-04'],
-  'historical and Case proof readers must retain accepted source criteria');
+  'historical readers must retain accepted source criteria; Case-mode contract is exercised separately');
   const pendingPr=buildAcceptanceContext({...anchoredIssue,
     body:anchoredBody.replace('- [x] SC-02 immutable',
       '- [ ] SC-02 immutable').replace('| SC-02 | Pass |','| SC-02 | Pending |')},'pr',{
