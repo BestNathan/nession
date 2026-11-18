@@ -729,7 +729,7 @@ function ImageBuildRow({
         </span>
         <span
           className="min-w-0 truncate text-muted-foreground"
-          data-testid="image-build-attempt"
+          data-testid="image-build-current-attempt"
         >
           Attempt {build.attempt} · {imageBuildStageLabel(build)}
         </span>
