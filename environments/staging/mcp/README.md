@@ -2,11 +2,14 @@
 
 This is a **separate Argo CD Application** (`nession-mcp-staging`) and a
 single stateless Deployment/ClusterIP Service (`nession-mcp-staging`) in the
-shared `nession` namespace. Its dedicated Higress HTTPS Ingress is enabled
-in this staging overlay (#3902); HTTP requests must redirect to HTTPS.
-The deployed certificate is currently self-signed (verified 2026-11-18):
-ordinary public clients will NOT trust it until it is replaced by a
-publicly trusted CA certificate or the caller explicitly trusts this CA.
+shared `nession` namespace. The Higress HTTPS Ingress manifest for
+`https://staging-mcp-nession.bestnathan.top/mcp` is **staged but temporarily excluded** from the
+Kustomization while the DNS hostname, TLS certificate, and private MCP config
+Secret are rotated (#3945). When enabled, HTTP must redirect to HTTPS.
+The previously deployed Kubernetes certificate was self-signed and issued for
+`staging.mcp.nession.bestnathan.top`, which does NOT cover the new hostname. Both the public
+Host allowlist and certificate must be replaced via protected Secrets before
+reactivating this Ingress. Ordinary clients must receive a trusted TLS chain.
 Never disable certificate verification to make a bearer-authenticated MCP
 client connect. This activation is not evidence that DNS, externally trusted
 TLS, HTTP redirect, or authenticated MCP requests have passed live tests.
@@ -57,42 +60,55 @@ either token or place it in a ConfigMap.
 
 ## Public HTTPS MCP entry point (operator prerequisites)
 
-The staging-only Ingress (enabled in Kustomize) is
+The staging-only Ingress (present as a manifest, **not currently enabled** in Kustomize) is
 `nession-mcp-staging`, with
 `ingressClassName: higress` and the single **Exact** path `/mcp` mapped to
 the MCP Service port 9090. The supported external endpoint is:
 
 ```text
-https://staging.mcp.nession.bestnathan.top/mcp
+https://staging-mcp-nession.bestnathan.top/mcp
 ```
 
 **Before claiming the public MCP endpoint is ready (GitOps activation alone is NOT sufficient):**
 
-1. Create/verify the public DNS A/AAAA/CNAME record
-   `staging.mcp.nession.bestnathan.top` pointing to the externally reachable
+1. In Cloudflare's `bestnathan.top` zone create/verify the **first-level**
+   proxied record (one DNS label `staging-mcp-nession`) and its matching
+   active Cloudflare **Edge certificate**; confirm Cloudflare → Higress
+   **Origin TLS** certificate trust under Full (strict) before forwarding
+   authenticated MCP traffic. Create/verify the public DNS A/AAAA/CNAME record
+   `staging-mcp-nession.bestnathan.top` pointing to the externally reachable
    **Higress gateway**. A GitOps Ingress manifest does not create public DNS.
-2. Provision a valid publicly trusted TLS certificate with SAN
-   `staging.mcp.nession.bestnathan.top` and its matching private key.
+2. Provision a **new** valid TLS certificate with SAN
+   `staging-mcp-nession.bestnathan.top` and its matching private key.
    **Use the reviewed SealedSecret workflow**, not plaintext `kubectl create
    secret`, when GitOps owns this Secret. First reconcile any existing
    cert-manager/Higress/nitops owner of that exact name to avoid two writers.
-   Once [#3936](https://github.com/BestNathan/nession/issues/3936)
-   has shipped on main, put the original PEM bundle (leaf, ordered
+   Once the #3945 registered-hostname change is merged to main, put the
+   renewed PEM bundle (leaf, ordered
    intermediates, then matching unencrypted private key) into GitHub
    Environment `staging` Secret `MCP_TLS_PEM_BUNDLE`, and manually run
    `Deploy / Seal GitOps Secret` selecting `staging/MCP_TLS_PEM_BUNDLE`.
+   Use a publicly trusted certificate, or a Cloudflare Origin CA certificate
+   if the origin is reached only through Cloudflare and Full (strict).
    That produces encrypted `sealed-tls.json` in this overlay and instructs
    the Sealed Secrets controller to create a `kubernetes.io/tls` Secret
    `nession/nession-mcp-staging-tls` with `tls.crt` + `tls.key`.
    See `docs/engineering/sealed-secret-generation.md` on main for validation,
    rotation and expiration requirements. The key never enters plaintext Git.
-3. Verify **both** Kubernetes Secrets exist after Argo CD/Sealed Secrets
-   reconcile: `nession-mcp-config-staging` and
-   `nession-mcp-staging-tls`. Also verify DNS and actual publicly trusted
+3. Update the existing **private GitHub Environment** `MCP_CONFIG_TOML`
+   so `[mcp].allowed_hosts` contains the new hostname but NOT the old name,
+   retaining internal Kubernetes Service hosts and distinct inbound/outbound
+   bearer tokens; re-run `Deploy / Seal GitOps Secret` selecting
+   `staging/MCP_CONFIG_TOML`. The repo's `mcp.example.toml` documents the
+   allowed hosts. Verify **both** Kubernetes Secrets exist after Argo CD/
+   Sealed Secrets reconcile: `nession-mcp-config-staging` and
+   `nession-mcp-staging-tls`. Verify actual TLS SAN and that the running
+   pod sees the new config; reload/restart the Deployment if necessary. Also verify DNS and actual publicly trusted
    TLS from an external client. Host allowlist must include the public
    hostname, and inbound/outbound bearer tokens must differ.
-4. The staging-only `ingress.yaml` resource is now enabled in this overlay.
-   Verify that the Higress Controller reconciles this Ingress and TLS
+4. **After all prior steps and Cloudflare Edge/Origin TLS trust pass**, add
+   `ingress.yaml` to `kustomization.yaml` by a separate reviewed activation
+   PR; then verify that Higress reconciles this Ingress and TLS
    Secret, DNS resolves publicly, and its gateway is actually reachable
    from the internet. The manifest explicitly requests TLS termination and
    HTTP→HTTPS redirection using Higress-compatible
@@ -106,10 +122,10 @@ After Argo CD sync, verify from a **machine outside** the cluster:
 
 ```sh
 # HTTP redirects to HTTPS, never serves MCP content directly.
-curl -sS -I http://staging.mcp.nession.bestnathan.top/mcp
+curl -sS -I http://staging-mcp-nession.bestnathan.top/mcp
 
 # Check real TLS trust chain and endpoint auth refusal (no -k).
-curl -si https://staging.mcp.nession.bestnathan.top/mcp
+curl -si https://staging-mcp-nession.bestnathan.top/mcp
 # Expect HTTP 401 without Authorization (not 200 or HTML).
 
 # With the private inbound token, use an MCP client to send
