@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "87cfa0ed06bb46899b7d0eb24bc1407fac337a4363efe6d4c2907cd36bdd7ba3",
+  "run_id": 44315111876,
+  "run_attempt": 1,
+  "issue": 3779,
+  "criterion": "SC-02",
+  "criterion_text": "`enter new` and `enter resume` select the exact requested Claude conversation on a named Session; idle/in-process and Shell paths are verified, busy/waiting/foreign/stale targets fail without spawning conflicting transcript writers.",
+  "stage": "staging",
+  "target_sha": "4154866259139b6b3e9c4c1ef32ef9635b41fa22",
+  "contract_sha256": "72f43c6842f09676bd559c020c6187ad69329f8c99d80bc452734ce04dcd63a8",
+  "case_revision": "4154866259139b6b3e9c4c1ef32ef9635b41fa22",
+  "case_tree_sha": "d27d9b8e0acdea9628d6dab9c3ebfae1ebeccb7b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T13:40:49.630Z",
+  "finished_at": "2026-11-18T13:41:56.313Z",
+  "duration_ms": 66683,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the enter Tool contracts are pinned in source; the live verifiers drive the in-process and Shell paths with a real CLI",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "enter requires an explicit agent_id/session_id, `new` chooses the conversation id itself, `resume` requires an explicit conversation_id and refuses omission/blank, and a foreign Agent target is refused before any input"
+        }
+      ],
+      "duration_ms": 200,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-live.cjs",
+      "result": "Pass",
+      "summary": "a real Claude CLI 2.1.312 (Claude Code) changed to a new exact conversation via /clear, restored the exact requested id via /resume, refused a foreign Agent target, and refused to redirect a waiting CLI",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 4154866259139b6b3e9c4c1ef32ef9635b41fa22: CLI 2.1.312 (resolved 2.1.312 (Claude Code)); enter new launched a verified idle conversation 748ab8db-ec90-4a97-9567-2b0f9ceed7d5 whose first turn (Reply with the single word READY and nothing else.) was readable by the exact id"
+        },
+        {
+          "type": "runtime",
+          "value": "enter new on the verified idle CLI sent /clear and reported entered; the exact verified id changed from 748ab8db-ec90-4a97-9567-2b0f9ceed7d5 to 91f25993-c378-4657-85d2-dbeb383215ca"
+        },
+        {
+          "type": "runtime",
+          "value": "enter resume 748ab8db-ec90-4a97-9567-2b0f9ceed7d5 on the verified idle CLI sent /resume and restored exactly that id (entered, verified idle)"
+        },
+        {
+          "type": "runtime",
+          "value": "enter addressed to a foreign Agent was refused before any input: nession_claude_enter refused: { \"error\": { \"kind\": \"invalid_argument\", \"message\": \"this Claude provider is Agent 'claude-live', not 'foreign-agent'\" } }"
+        },
+        {
+          "type": "runtime",
+          "value": "enter new while the live CLI waited at an AskUserQuestion prompt answered status=refused with the same verified conversation and no second writer: Claude is not verifiably idle; refusing to redirect it or create a concurrent transcript writer"
+        }
+      ],
+      "duration_ms": 34493,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-live-shell.cjs",
+      "result": "Pass",
+      "summary": "a real Claude CLI 2.1.312 (Claude Code) was resumed by exact id through the Session shell, a stale id spawned no writer, and a busy conversation refused a redirect",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 4154866259139b6b3e9c4c1ef32ef9635b41fa22: CLI 2.1.312 (resolved 2.1.312 (Claude Code)); after /exit the Session answered process=not_running with the original id still known to the verifier"
+        },
+        {
+          "type": "runtime",
+          "value": "enter resume with the stale id 50139098-2dce-4e3d-ac66-c9d9c669995a answered pending; no Claude process or invented conversation was left running"
+        },
+        {
+          "type": "runtime",
+          "value": "the Session shell launched `claude --resume 8f4cffd0-bf79-48df-8c56-d1ba7defecbe` and the typed status verified exactly that id, running and idle (entered)"
+        },
+        {
+          "type": "runtime",
+          "value": "enter new while the resumed shell-launched Claude was busy answered status=refused with no second transcript writer: Claude is not verifiably idle; refusing to redirect it or create a concurrent transcript writer"
+        }
+      ],
+      "duration_ms": 31968,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44315111876,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "4154866259139b6b3e9c4c1ef32ef9635b41fa22",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44315111876",
+    "record_path": "runs/2026-11-18/44315111876-1/3779/SC-02.json",
+    "source_result_sha256": "079700a48215342a961b990fe6e278829f0895ac61b0fee36b1e7ae9d15bd1b7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44315111876-1",
+    "sha256": "079700a48215342a961b990fe6e278829f0895ac61b0fee36b1e7ae9d15bd1b7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44315111876",
+    "durability": "time-limited; object archival not configured"
+  }
+}
