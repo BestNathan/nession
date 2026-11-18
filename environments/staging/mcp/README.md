@@ -14,30 +14,32 @@ and linux/arm64, then changes this overlay's `mcp-<short-sha>` and
 The independent Argo apps reconcile separately, so the same desired source
 revision does not guarantee simultaneous *runtime* readiness. Inspect both.
 
-## Mandatory Secret preflight (before merging/enabling the Argo app)
+## Encrypted MCP configuration via GitHub Environments (#3912 / PR #3913)
 
-An operator must provision `nession-mcp-config-staging` with one key,
-`mcp.toml`. Start from the checked-in `mcp.example.toml`, fill the inbound
-bearer token and the *different* staging Server backend token. The Server
-backend token must match the existing staging Server credential, which is
-managed separately. Never commit either credential, copy the token into a
-ConfigMap, bake it into an image, or reuse inbound and outbound tokens.
+The operator supplies the **private `mcp.toml`** as the single JSON
+`K8S_SECRET_DATA_JSON` Secret of the protected GitHub Environment
+`staging-mcp`. Separately, `SEALED_SECRETS_CERT_B64` is an Environment
+Variable containing the Sealed Secrets controller's **public sealing
+certificate** (not the controller private key). See
+`docs/engineering/sealed-secret-generation.md` on `main`.
 
-From a trusted workstation with configured `kubectl` access:
+First merge this GitOps overlay PR, then dispatch the main-owned
+`Deploy / Seal GitOps Secret` workflow with target `staging-mcp`. It seals
+the config **offline**, commits `sealed-secret.json` to this overlay and
+adds the matching `resources` entry automatically. The existing cluster
+Sealed Secrets Controller then generates the ordinary Kubernetes Secret
+`nession-mcp-config-staging` (key `mcp.toml`). The new MCP pod may be
+Pending until that first encrypted resource is reconciled. There is no need
+for the workflow to have `kubectl`, Kubernetes credentials, or the controller
+private key.
 
-```sh
-# Edit a PRIVATE file (not tracked by git) based on mcp.example.toml.
-kubectl -n nession create secret generic nession-mcp-config-staging \
-  --from-file=mcp.toml=/secure/path/mcp.toml \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-The config must bind `0.0.0.0:9090`, allow the actual HTTP Host and point
-`[backend.server].endpoint` to `ws://nession-server-staging:18080`. MCP
-clients authenticate separately from Server/Agent; Origin requests are denied
-by default. The operator MUST allow the exact public DNS Host in
-`mcp.toml`, not disable Host validation. A missing/invalid MCP config Secret
-fails closed before the listener starts.
+Start from the checked-in `mcp.example.toml`; set separate nonempty inbound
+and staging Server backend tokens. The Server credential must be **rotated**
+if it is the existing credential previously committed in plain text. The
+config must bind `0.0.0.0:9090`, explicitly allow the public Host, and use
+`ws://nession-server-staging:18080` as the backend URL. Browser Origins
+remain refused by default. Missing/invalid config fails closed; never commit
+either token or place it in a ConfigMap.
 
 ## Public HTTPS MCP entry point (operator prerequisites)
 
@@ -49,7 +51,7 @@ the MCP Service port 9090. The supported external endpoint is:
 https://staging.mcp.nession.bestnathan.top/mcp
 ```
 
-**Before merging the GitOps app PR / enabling ingress:**
+**Before claiming the public MCP endpoint is ready:**
 
 1. Create/verify the public DNS A/AAAA/CNAME record
    `staging.mcp.nession.bestnathan.top` pointing to the externally reachable
@@ -66,9 +68,10 @@ https://staging.mcp.nession.bestnathan.top/mcp
      --cert=/secure/path/fullchain.pem --key=/secure/path/privkey.pem \
      --dry-run=client -o yaml | kubectl apply -f -
    ```
-3. Provision the separate `nession-mcp-config-staging` Secret shown above.
-   Its `allowed_hosts` must include the public hostname, and its inbound
-   bearer token must be different from the outbound Server credential.
+3. Run the protected GitHub Environment SealedSecret workflow described
+   above and verify the controller reconciles the resulting
+   `nession-mcp-config-staging` Secret. The Host allowlist must include the
+   public hostname and inbound/outbound bearer tokens must differ.
 4. Verify the existing Higress Controller reconciles this Ingress and TLS
    Secret, DNS resolves publicly, and its gateway is actually reachable
    from the internet. The manifest explicitly requests TLS termination and
