@@ -32,9 +32,30 @@ function fixture(mode='fast',kind='agent'){
     process.exit(child.status??1);
   `);
   executable(dir,'docker',`
+    const fs=require('node:fs');
     const a=process.argv.slice(2);
     if(a.join(' ').includes('inspect --raw')){
-      const broken=process.env.MIRROR_TEST_MODE==='mismatch' && a[a.length-1].startsWith('crpi.');
+      const dest=a[a.length-1].startsWith('crpi.');
+      const mode=process.env.MIRROR_TEST_MODE;
+      const destAttempts=fs.readFileSync(process.env.MIRROR_TEST_EVENTS,'utf8')
+        .split(String.fromCharCode(10)).filter(x=>
+          x.includes('90s docker buildx imagetools inspect --raw crpi.')).length;
+      if(dest && (mode==='readback-reset-always' ||
+          (mode==='readback-reset-once' && destAttempts===1))){
+        console.error('failed to fetch oauth token: Post "https://auth.invalid/SECRET-TOKEN": read: connection reset by peer');
+        process.exit(4);
+      }
+      if(dest && mode==='readback-auth'){
+        console.error('unauthorized HTTP 403: Post "https://auth.invalid/SECRET-TOKEN"');
+        process.exit(4);
+      }
+      if(dest && mode==='readback-partial'){
+        console.log(JSON.stringify({manifests:[
+          {platform:{os:'linux',architecture:'amd64'},digest:'sha256:aaaa'}
+        ]}));
+        process.exit(0);
+      }
+      const broken=mode==='mismatch' && dest;
       console.log(JSON.stringify({manifests:[
         {platform:{os:'linux',architecture:'amd64'},digest:'sha256:aaaa'},
         {platform:{os:'linux',architecture:'arm64'},digest:broken?'sha256:ffff':'sha256:bbbb'}
@@ -143,10 +164,44 @@ test('standalone MCP host mirrors under the workspace runtime tag',()=>{
     /imagetools create --tag crpi\.example\.cn\/n_public\/nession:mcp-0123456 /);
   assert.match(run.stdout,/Verified both linux\/amd64 and linux\/arm64/);
 });
-test('post-copy manifest mismatch still fails closed',()=>{
-  const {run}=fixture('mismatch');
+test('post-copy readback retries transient OAuth resets without repeating upload',()=>{
+  const {run,log}=fixture('readback-reset-once','ui');
+  assert.equal(run.status,0,run.stderr);
+  assert.equal((log.match(/90s docker buildx imagetools create/g)||[]).length,1);
+  assert.equal((log.match(/90s docker buildx imagetools inspect --raw crpi\./g)||[]).length,2);
+  assert.match(run.stderr,/ACR_DESTINATION_READBACK_V1 attempt=1 outcome=connection_reset/);
+  assert.match(run.stderr,/ACR_DESTINATION_READBACK_V1 attempt=2 outcome=success/);
+  assert.match(run.stdout,/Verified both linux\/amd64 and linux\/arm64/);
+  assert.doesNotMatch(run.stdout+run.stderr,/SECRET-TOKEN|auth\.invalid/);
+});
+test('persistent destination readback reset exhausts bounded attempts fail-closed',()=>{
+  const {run,log}=fixture('readback-reset-always','ui');
+  assert.equal(run.status,1);
+  assert.equal((log.match(/90s docker buildx imagetools create/g)||[]).length,1);
+  assert.equal((log.match(/90s docker buildx imagetools inspect --raw crpi\./g)||[]).length,3);
+  assert.match(run.stderr,/ACR_DESTINATION_READBACK_V1 attempt=3 outcome=connection_reset/);
+  assert.doesNotMatch(run.stdout,/Verified both linux/);
+  assert.doesNotMatch(run.stdout+run.stderr,/SECRET-TOKEN|auth\.invalid/);
+});
+test('terminal destination OAuth denial never retries or leaks authorization URL',()=>{
+  const {run,log}=fixture('readback-auth','ui');
+  assert.equal(run.status,1);
+  assert.equal((log.match(/90s docker buildx imagetools inspect --raw crpi\./g)||[]).length,1);
+  assert.match(run.stderr,/outcome=credential_or_permission_rejected/);
+  assert.doesNotMatch(run.stdout+run.stderr,/SECRET-TOKEN|auth\.invalid/);
+});
+test('malformed or incomplete destination manifest is not a transient retry',()=>{
+  const {run,log}=fixture('readback-partial','ui');
+  assert.equal(run.status,1);
+  assert.equal((log.match(/90s docker buildx imagetools inspect --raw crpi\./g)||[]).length,1);
+  assert.match(run.stderr,/outcome=copy_error/);
+  assert.doesNotMatch(run.stdout,/Verified both linux/);
+});
+test('post-copy manifest mismatch still fails closed without retry',()=>{
+  const {run,log}=fixture('mismatch');
   assert.equal(run.status,1,run.stderr);
   assert.match(run.stderr,/platform digests do not match GHCR/);
+  assert.equal((log.match(/90s docker buildx imagetools inspect --raw crpi\./g)||[]).length,1);
 });
 test('the independently retried ACR mirror builder retains the HTTP/1.1 transport setting',()=>{
   // imagetools create copies inside buildkitd; the runner/script GODEBUG does
