@@ -105,9 +105,12 @@ function command(args, {stdin = '', timeoutMs = 90000, env = process.env} = {}) 
     const start = performance.now();
     const child = spawn('regctl', args, {env, stdio: ['pipe', 'pipe', 'pipe']});
     let stdout = '', diagnostic = '', timedOut = false, done = false;
-    const add = (current, chunk) => (current + String(chunk)).slice(0, 262144);
-    child.stdout.on('data', chunk => { stdout = add(stdout, chunk); });
-    child.stderr.on('data', chunk => { diagnostic = add(diagnostic, chunk); });
+    // Manifest stdout keeps its initial bounded JSON; error diagnostics keep
+    // their *tail* so the final regctl cause survives preceding progress text.
+    const addStdout = (current, chunk) => (current + String(chunk)).slice(0, 262144);
+    const addDiagnostic = (current, chunk) => (current + String(chunk)).slice(-262144);
+    child.stdout.on('data', chunk => { stdout = addStdout(stdout, chunk); });
+    child.stderr.on('data', chunk => { diagnostic = addDiagnostic(diagnostic, chunk); });
     child.stdin.on('error', () => {});
     child.stdin.end(stdin);
     const timer = setTimeout(() => {
