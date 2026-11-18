@@ -54,10 +54,11 @@ export function readPreflightChecks({issueNumber,finalProposal,env=process.env})
        ['version','issue','run','attempt','sequence','proposal_sha256','ok','code'].sort().join(',')||
        x.version!==1||x.issue!==issueNumber||
        x.run!==Number(env.GITHUB_RUN_ID)||x.attempt!==Number(env.GITHUB_RUN_ATTEMPT)||
-       !Number.isSafeInteger(x.sequence)||x.sequence!==++previous||
+       !Number.isSafeInteger(x.sequence)||x.sequence<=previous||x.sequence>MAX_CALLS||
        !DIGEST.test(x.proposal_sha256)||typeof x.ok!=='boolean'||!CODE.test(x.code)||
        (x.ok !== (x.code==='VALID_CANDIDATE')))
       throw Error('Unauthenticated or inconsistent Issue Audit preflight receipt');
+    previous=x.sequence;
   }
   const hash=finalProposal?proposalDigest(finalProposal):null;
   return {observed:true,calls:parsed.length,passed:parsed.filter(x=>x.ok).length,
