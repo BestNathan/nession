@@ -61,7 +61,10 @@ test('SC-01: managed Workspace detail separates ownership, lowers, usage and con
   const location = page
     .getByTestId('sandbox-workspace-row')
     .filter({ hasText: 'user-owned' });
-  await location.getByTestId('sandbox-workspace-row-select').click();
+  // Activate the final row by keyboard; the shell's floating tool bar overlaps
+  // the scroll viewport's bottom edge at this height.
+  await location.getByTestId('sandbox-workspace-row-select').focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByTestId('sandbox-workspace-detail-ownership')).toHaveText(
     'Project Location · user-owned',
   );
