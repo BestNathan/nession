@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   getTarget, validateRaw, createPlainSecret,
-  validatePublicCert, validateSealed, addResource
+  validatePublicCert, validateSealed, addResource, validateChangedPaths
 } from './seal-gitops-secret.mjs';
 
 const environment = 'staging', secret = 'MCP_CONFIG_TOML';
@@ -86,4 +86,14 @@ test('Kustomize resource enrollment is idempotent', () => {
   assert.match(once, /- sealed-secret\.json/);
   assert.equal(addResource(once, target.resource), once);
   assert.throws(() => addResource('images: []\n', target.resource));
+});
+
+
+test('GitOps publisher allows only the exact reviewed two-file output', () => {
+  const base = ['environments/staging/mcp/sealed-secret.json',
+    'environments/staging/mcp/kustomization.yaml'];
+  assert.deepEqual(validateChangedPaths(base, environment, secret), base);
+  assert.throws(() => validateChangedPaths([...base, 'environments/staging/nession/secret.yaml'], environment, secret));
+  assert.throws(() => validateChangedPaths(['environments/production/mcp/sealed-secret.json'], environment, secret));
+  assert.throws(() => validateChangedPaths(['.github/workflows/deploy.yml'], environment, secret));
 });
