@@ -17,6 +17,7 @@
 //! ```
 
 pub mod coordinator;
+pub mod shell;
 
 use std::collections::BTreeMap;
 
@@ -30,6 +31,7 @@ pub use nession_common::session_activity::{
     ForegroundFacts, PaneActivitySnapshot, ReportOutcome, SessionActivityContext,
     SessionActivityProvider, SessionActivitySnapshot, WorkloadClass,
 };
+pub use shell::ShellActivityProvider;
 
 use crate::tmux::manager::SessionInfo;
 

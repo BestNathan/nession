@@ -25,6 +25,7 @@ use nession_claude_code::session_context::{McpHostContext, McpHostEndpoint};
 use nession_claude_code::tools::ClaudeCodeToolProvider;
 use nession_common::extension::AgentExtension;
 use nession_common::readiness::Readiness;
+use nession_common::session_activity::SessionActivityProvider;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_github::{GithubAgentExtension, GithubClient};
@@ -44,7 +45,7 @@ use crate::netdetect::build_advertised_addresses;
 use crate::netwatch;
 use crate::protocol::served_descriptors;
 use crate::server::AgentServer;
-use crate::session::activity::SessionActivityCoordinator;
+use crate::session::activity::{SessionActivityCoordinator, ShellActivityProvider};
 use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
@@ -375,9 +376,11 @@ pub async fn run(
         // Activity providers come from the same composition that serves
         // the protocol routes (#3800), so a capability cannot contribute
         // observations without being part of this Agent's provider set.
-        let activity =
-            SessionActivityCoordinator::new(agent_id.clone(), ext_registry.activity_providers())
-                .context("cannot compose this agent's Session Activity providers")?;
+        let activity = SessionActivityCoordinator::new(
+            agent_id.clone(),
+            compose_activity_providers(&ext_registry),
+        )
+        .context("cannot compose this agent's Session Activity providers")?;
 
         // Serving: the socket is bound and the provider set composed. Announced
         // *before* the central-server connection on purpose — that one is
@@ -614,6 +617,21 @@ pub fn compose_providers(
     ))
 }
 
+/// The Session Activity providers this Agent composes (#3800/#3802).
+///
+/// Capability providers come from the same Extension set that serves the
+/// Protocol routes; the generic Shell provider belongs to the Agent itself
+/// because it interprets tmux Pane foreground work, not a capability workload.
+/// Extracted so the composition can be asserted without starting an Agent —
+/// a provider dropped here would disappear from every entrypoint at once.
+pub fn compose_activity_providers(
+    registry: &ExtensionRegistry,
+) -> Vec<Arc<dyn SessionActivityProvider>> {
+    let mut providers = registry.activity_providers();
+    providers.push(Arc::new(ShellActivityProvider::new()));
+    providers
+}
+
 /// Every MCP Tool contribution this Agent composes into its shared endpoint
 /// (`#3778`).
 ///
@@ -828,6 +846,34 @@ mod tests {
             !manifest.is_empty(),
             "the runtime must advertise at least the units it routes itself"
         );
+    }
+
+    /// The generic Shell Activity provider is part of the Agent product
+    /// (`#3802`), and one capability id cannot be composed twice.
+    #[test]
+    fn the_runtime_composes_the_shell_activity_provider() {
+        let registry = compose_providers(
+            "agent-test",
+            Arc::new(SessionManager::new()),
+            McpHostContext::default(),
+        )
+        .expect("the runtime's own providers must compose");
+        let providers = compose_activity_providers(&registry);
+        let ids: Vec<&'static str> = providers.iter().map(|provider| provider.id()).collect();
+
+        assert_eq!(
+            ids.iter().filter(|id| **id == "shell").count(),
+            1,
+            "the Shell provider is part of the Agent product: {ids:?}"
+        );
+        for id in &ids {
+            let id = *id;
+            assert_eq!(
+                ids.iter().filter(|other| **other == id).count(),
+                1,
+                "capability id `{id}` must be composed exactly once: {ids:?}"
+            );
+        }
     }
 
     /// The Claude control Tools reach the shared MCP catalog only through this
