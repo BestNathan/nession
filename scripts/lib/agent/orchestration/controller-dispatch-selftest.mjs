@@ -179,7 +179,7 @@ for(const mutation of [
   {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
 ]){
   assert.throws(()=>assertDispatchAuthority({...cliRecovery,...mutation}),
-    /authenticated owner\\/main/);
+    /authenticated owner\/main/);
 }
 
 const actualAction=await import('./outbox.mjs').then(m=>
