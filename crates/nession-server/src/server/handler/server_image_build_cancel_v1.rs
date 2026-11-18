@@ -24,7 +24,11 @@ impl ConnectionHandler {
             Ok(payload) => payload,
             Err(reply) => return Ok(reply),
         };
-        match self.image_manager.cancel_build(&payload.build_id).await {
+        match self
+            .image_manager
+            .cancel_build_at(&payload.build_id, payload.attempt)
+            .await
+        {
             Ok(build) => Ok(image_build_success_reply(&msg.id, WIRE, &build)),
             Err(error) => Ok(image_error_reply(
                 &msg.id,

@@ -108,7 +108,13 @@ function build(
   };
 }
 
-export type FixtureImagesScenario = 'canonical' | 'empty' | 'error' | 'buildfail' | 'lifecycle';
+export type FixtureImagesScenario =
+  | 'canonical'
+  | 'empty'
+  | 'error'
+  | 'buildfail'
+  | 'lifecycle'
+  | 'buildhistory';
 
 interface FixtureLibraryMeta {
   repository: string;
@@ -167,7 +173,11 @@ function libraryMeta(
 
 function scenario(search: string): FixtureImagesScenario {
   const value = new URLSearchParams(search).get('images');
-  return value === 'empty' || value === 'error' || value === 'buildfail' || value === 'lifecycle'
+  return value === 'empty'
+    || value === 'error'
+    || value === 'buildfail'
+    || value === 'lifecycle'
+    || value === 'buildhistory'
     ? value
     : 'canonical';
 }
@@ -177,6 +187,81 @@ const GITHUB = {
   repository_url: 'https://github.com/BestNathan/nession',
   ref: 'main',
 };
+
+/**
+ * A history large enough to cross the first page, with every adapter and
+ * lifecycle state plus one record whose earlier attempt diagnostics survived
+ * a retry (#3798).
+ */
+function historyBuilds(): ImageBuildDescriptor[] {
+  const attempts = build(
+    'build-fixture-attempts',
+    { ...GITHUB, ref: 'release' },
+    { status: 'failed' },
+    {
+      alias: 'history-attempts',
+      attempt: 2,
+      source_sha: 'a'.repeat(40),
+      attempts: [
+        {
+          attempt: 1,
+          status: 'failed',
+          stage: 'packaging',
+          diagnostic: 'mkfs.erofs failed: first attempt ran out of space',
+          error: 'mkfs.erofs failed: first attempt ran out of space',
+          started_at: CREATED_AT,
+          finished_at: CREATED_AT + 10,
+        },
+        {
+          attempt: 2,
+          status: 'failed',
+          stage: 'packaging',
+          diagnostic: 'mkfs.erofs failed: second attempt hit the same limit',
+          error: 'mkfs.erofs failed: second attempt hit the same limit',
+          started_at: CREATED_AT + 20,
+          finished_at: CREATED_AT + 30,
+        },
+      ],
+    },
+  );
+  const succeeded = Array.from({ length: 39 }, (_, index) =>
+    build(
+      `build-fixture-history-succeeded-${index}`,
+      GITHUB,
+      { status: 'succeeded' },
+      {
+        alias: index === 0 ? 'nightly' : null,
+        digest: digestFor(1200 + index),
+        progress: { files: 214, bytes: 2_400_000, elapsed_ms: 4200 },
+      },
+    ),
+  );
+  const failed = Array.from({ length: 10 }, (_, index) =>
+    build(
+      `build-fixture-history-failed-${index}`,
+      { kind: 'local_directory', path: `/srv/nession/history/${index}` },
+      { status: 'failed' },
+    ),
+  );
+  const canceled = Array.from({ length: 10 }, (_, index) =>
+    build(
+      `build-fixture-history-canceled-${index}`,
+      {
+        kind: 'compose',
+        representation: 'flattened',
+        sources: [
+          {
+            repository: 'nession/fixtures',
+            ref: 'fixture-build-latest',
+            destination: '',
+          },
+        ],
+      },
+      { status: 'canceled' },
+    ),
+  );
+  return [attempts, ...succeeded, ...failed, ...canceled];
+}
 
 function initialBuilds(): ImageBuildDescriptor[] {
   return [
@@ -226,7 +311,12 @@ function stateFor(selected: FixtureImagesScenario): FixtureState {
   const state: FixtureState = {
     scenario: selected,
     images,
-    builds: selected === 'lifecycle' ? initialBuilds() : [],
+    builds:
+      selected === 'lifecycle'
+        ? initialBuilds()
+        : selected === 'buildhistory'
+          ? historyBuilds()
+          : [],
     nextBuild: 1,
     library,
   };
@@ -572,7 +662,7 @@ function requestBuildInventory(
     );
   }
   if (type === 'server.image.build.cancel' || type === 'server.image.build.retry') {
-    return Promise.resolve(buildActionReply(state, type, String(payload.build_id ?? ''), emit));
+    return Promise.resolve(buildActionReply(state, type, payload, emit));
   }
   return null;
 }
@@ -584,14 +674,47 @@ function buildReadReply(state: FixtureState, buildId: string): unknown {
     : { success: false, error: 'build not found', error_kind: 'not_found' };
 }
 
+function buildSourceText(buildValue: ImageBuildDescriptor): string {
+  const source = buildValue.source;
+  switch (source.kind) {
+    case 'github':
+      return `${source.repository_url} ${source.ref}`;
+    case 'local_directory':
+      return source.path;
+    case 'compose':
+      return source.sources.map((entry) => `${entry.repository} ${entry.ref}`).join(' ');
+  }
+}
+
 function buildListReply(state: FixtureState, payload: Record<string, unknown>): unknown {
   const offset = Number(payload.offset ?? 0);
   const limit = Number(payload.limit ?? 50);
-  const page = state.builds.slice(offset, offset + limit);
+  const statuses = Array.isArray(payload.statuses) ? payload.statuses : [];
+  const sources = Array.isArray(payload.sources) ? payload.sources : [];
+  const query = String(payload.query ?? '').trim();
+  const filtered = state.builds.filter((buildValue) => {
+    if (statuses.length > 0 && !statuses.includes(buildValue.status)) {
+      return false;
+    }
+    if (sources.length > 0 && !sources.includes(buildValue.source.kind)) {
+      return false;
+    }
+    if (query.length === 0) {
+      return true;
+    }
+    return (
+      buildValue.build_id.includes(query)
+      || buildValue.image_id.includes(query)
+      || (buildValue.alias ?? '').includes(query)
+      || (buildValue.digest ?? '').includes(query)
+      || buildSourceText(buildValue).includes(query)
+    );
+  });
+  const page = filtered.slice(offset, offset + limit);
   return {
     builds: page,
-    total: state.builds.length,
-    ...(offset + page.length < state.builds.length
+    total: filtered.length,
+    ...(offset + page.length < filtered.length
       ? { next_offset: offset + page.length }
       : {}),
   };
@@ -600,20 +723,40 @@ function buildListReply(state: FixtureState, payload: Record<string, unknown>): 
 function buildActionReply(
   state: FixtureState,
   type: string,
-  buildId: string,
+  payload: Record<string, unknown>,
   emit: Emit,
 ): unknown {
+  const buildId = String(payload.build_id ?? '');
+  const expected = payload.attempt;
   const position = state.builds.findIndex((candidate) => candidate.build_id === buildId);
   if (position < 0) {
     return { success: false, error: 'build not found', error_kind: 'not_found' };
   }
   const previous = state.builds[position];
+  if (typeof expected === 'number' && expected !== previous.attempt) {
+    return {
+      success: false,
+      error: `build ${buildId} is at attempt ${previous.attempt}; the requested attempt ${expected} is stale`,
+      error_kind: 'conflict',
+    };
+  }
+  const finishedAttempt = {
+    attempt: previous.attempt,
+    status: previous.status,
+    stage: previous.stage ?? null,
+    diagnostic: previous.diagnostic ?? null,
+    error: previous.error ?? null,
+    started_at: previous.created_at,
+    finished_at: previous.updated_at,
+  };
+  const attempts = [...(previous.attempts ?? []), finishedAttempt];
   if (type === 'server.image.build.cancel') {
     const canceled: ImageBuildDescriptor = {
       ...previous,
       status: 'canceled',
       stage: null,
       error: null,
+      attempts,
       updated_at: previous.updated_at + 5,
     };
     state.builds[position] = canceled;
@@ -626,6 +769,8 @@ function buildActionReply(
     status: 'running',
     stage: 'packaging',
     error: null,
+    diagnostic: null,
+    attempts,
     digest: null,
     size_bytes: 0,
     updated_at: previous.updated_at + 5,

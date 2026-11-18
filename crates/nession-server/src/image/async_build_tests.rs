@@ -480,9 +480,21 @@ async fn retry_reuses_a_verified_snapshot_and_never_recopies_the_source() {
     assert!(failed.error.as_deref().unwrap().contains("simulated"));
     assert_eq!(failed.progress.files, Some(2));
 
+    // A stale attempt is a conflict: retrying does not silently open an
+    // attempt for a record the caller did not observe (#3798).
+    let conflict = manager
+        .retry_build_at(&submitted.build_id, Some(2))
+        .await
+        .unwrap_err();
+    assert_eq!(conflict.kind(), "conflict");
+    assert!(conflict.message().contains("attempt 1"));
+
     // Only the durable snapshot can produce the image after this point.
     std::fs::remove_dir_all(&source).unwrap();
-    let retried = manager.retry_build(&submitted.build_id).await.unwrap();
+    let retried = manager
+        .retry_build_at(&submitted.build_id, Some(1))
+        .await
+        .unwrap();
     assert_eq!(retried.attempt, 2);
     assert_eq!(retried.status, ImageBuildStatus::Queued);
     let done = manager.wait_terminal(&submitted.build_id).await.unwrap();
@@ -491,6 +503,11 @@ async fn retry_reuses_a_verified_snapshot_and_never_recopies_the_source() {
     assert_eq!(done.attempts.len(), 2);
     assert_eq!(done.attempts[0].attempt, 1);
     assert_eq!(done.attempts[0].status, "failed");
+    assert_eq!(
+        done.attempts[0].diagnostic.as_deref(),
+        done.attempts[0].error.as_deref(),
+        "the failed attempt keeps the diagnostic after a retry clears the current record"
+    );
     assert_eq!(done.attempts[1].attempt, 2);
     assert_eq!(done.attempts[1].status, "succeeded");
     assert!(manager.retry_build(&submitted.build_id).await.is_err());

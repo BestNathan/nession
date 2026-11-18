@@ -266,7 +266,10 @@ describe('Images Workspace capability', () => {
     const cancel = surface.requests.find(
       (request) => request.type === 'server.image.build.cancel',
     );
-    expect(cancel?.payload).toEqual({ build_id: runningBuild().build_id });
+    expect(cancel?.payload).toEqual({
+      build_id: runningBuild().build_id,
+      attempt: 1,
+    });
     surface.resolveNext('server.image.build.cancel', {
       success: true,
       build: { ...runningBuild(), status: 'canceled', stage: null },
@@ -275,6 +278,130 @@ describe('Images Workspace capability', () => {
       expect(screen.getByTestId('image-build-status')).toHaveTextContent('Canceled'),
     );
     expect(screen.getByTestId('image-build-retry')).toBeInTheDocument();
+  });
+
+  it('pages, filters and keeps the selected build outside the current page or filter', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
+    surface.resolveNext('server.image.build.list', {
+      builds: [runningBuild()],
+      total: 120,
+    });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-row');
+    expect(screen.getByTestId('image-builds-page-label')).toHaveTextContent('1–1 of 120');
+
+    await userEvent.click(screen.getByTestId('image-build-select'));
+    expect(screen.getByTestId('image-build-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('image-build-detail-attempt')).toHaveTextContent('1 · Building');
+
+    await userEvent.click(screen.getByTestId('image-builds-status-failed'));
+    const filteredRequests = surface.requests.filter(
+      (request) => request.type === 'server.image.build.list',
+    );
+    const filtered = filteredRequests[filteredRequests.length - 1];
+    expect(filtered?.payload).toMatchObject({
+      offset: 0,
+      limit: 50,
+      statuses: ['failed'],
+      sources: [],
+      query: '',
+    });
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await waitFor(() =>
+      expect(screen.getByTestId('image-build-selection-retained')).toBeInTheDocument(),
+    );
+    // The retained record is not presented as a fresh Server page; the empty
+    // filtered result is truthful.
+    expect(screen.getByTestId('images-builds-empty')).toHaveTextContent(
+      'No build matches this search or filter.',
+    );
+
+    await userEvent.click(screen.getByTestId('image-builds-source-github'));
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    fireEvent.change(screen.getByTestId('image-builds-search'), {
+      target: { value: 'nightly' },
+    });
+    await waitFor(() => {
+      const searchedRequests = surface.requests.filter(
+        (request) => request.type === 'server.image.build.list',
+      );
+      const searched = searchedRequests[searchedRequests.length - 1];
+      expect(searched?.payload).toMatchObject({ offset: 0, query: 'nightly' });
+    });
+    surface.resolveNext('server.image.build.list', { builds: [runningBuild()], total: 120 });
+    await waitFor(() =>
+      expect(screen.getByTestId('image-builds-page-label')).toHaveTextContent('1–1 of 120'),
+    );
+    await userEvent.click(screen.getByTestId('image-builds-next'));
+    const pagedRequests = surface.requests.filter(
+      (request) => request.type === 'server.image.build.list',
+    );
+    const paged = pagedRequests[pagedRequests.length - 1];
+    expect(paged?.payload).toMatchObject({ offset: 50, query: 'nightly' });
+  });
+
+  it('rejects a stale retry attempt and re-reads the durable record', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
+    const failed = {
+      ...runningBuild(),
+      status: 'failed' as const,
+      stage: null,
+      error: 'mkfs.erofs failed: earlier attempt',
+      attempts: [
+        {
+          attempt: 1,
+          status: 'failed',
+          stage: 'packaging',
+          diagnostic: 'mkfs.erofs failed: earlier attempt',
+          error: 'mkfs.erofs failed: earlier attempt',
+          started_at: 1,
+          finished_at: 2,
+        },
+      ],
+    };
+    surface.resolveNext('server.image.build.list', { builds: [failed], total: 1 });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-row');
+    await userEvent.click(screen.getByTestId('image-build-select'));
+    expect(screen.getByTestId('image-build-attempt-diagnostic')).toHaveTextContent(
+      'mkfs.erofs failed: earlier attempt',
+    );
+
+    await userEvent.click(screen.getByTestId('image-build-retry'));
+    const retry = surface.requests.find(
+      (request) => request.type === 'server.image.build.retry',
+    );
+    expect(retry?.payload).toEqual({ build_id: failed.build_id, attempt: 1 });
+    surface.resolveNext('server.image.build.retry', {
+      success: false,
+      error: 'build is at attempt 2; the requested attempt 1 is stale',
+      error_kind: 'conflict',
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('image-builds-action-error')).toHaveTextContent(
+        'the requested attempt 1 is stale',
+      ),
+    );
+    // A refused action re-reads the authoritative page instead of inventing a
+    // new attempt locally.
+    await waitFor(() =>
+      expect(
+        surface.requests.filter(
+          (request) => request.type === 'server.image.build.list',
+        ).length,
+      ).toBe(1),
+    );
+    surface.resolveNext('server.image.build.list', { builds: [failed], total: 1 });
   });
 
   it('refuses an invalid Build source without submitting a Server job', async () => {

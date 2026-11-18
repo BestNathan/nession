@@ -54,12 +54,17 @@ import {
   type ComposeSourceDraft,
 } from '../buildSource';
 import {
+  IMAGE_BUILD_SOURCES,
+  IMAGE_BUILD_STATUSES,
   IMAGE_PAGE_SIZE,
   composeRepresentationLabel,
   imageAliases,
+  imageBuildAttemptLabel,
   imageBuildProgressLabel,
+  imageBuildSourceKindLabel,
   imageBuildStageLabel,
   imageBuildStatusLabel,
+  imageBuildStatusText,
   imageServerStatusLabel,
   imageSourceLabel,
   impactSummary,
@@ -588,63 +593,177 @@ function BuildStatusBadge({ build }: { build: ImageBuildDescriptor }) {
   );
 }
 
+function ImageBuildDetail({ build }: { build: ImageBuildDescriptor }) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-surface)] border border-border bg-muted/40 px-3 py-2"
+      data-testid="image-build-detail"
+    >
+      <dl className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1">
+        <dt className={chromeSansRole('caption')}>Image id</dt>
+        <dd className={cn('min-w-0 break-all', chromeMonoRole('code'))}>{build.image_id}</dd>
+        <dt className={chromeSansRole('caption')}>Source adapter</dt>
+        <dd data-testid="image-build-detail-source-kind">
+          {imageBuildSourceKindLabel(build.source.kind)}
+        </dd>
+        <dt className={chromeSansRole('caption')}>Source</dt>
+        <dd className="min-w-0 break-all" data-testid="image-build-detail-source">
+          {imageSourceLabel(build.source)}
+        </dd>
+        {build.source_sha ? (
+          <>
+            <dt className={chromeSansRole('caption')}>Source commit</dt>
+            <dd className={cn('min-w-0 break-all', chromeMonoRole('code'))} data-testid="image-build-detail-source-sha">
+              {build.source_sha}
+            </dd>
+          </>
+        ) : null}
+        <dt className={chromeSansRole('caption')}>Attempt</dt>
+        <dd data-testid="image-build-detail-attempt">
+          {build.attempt} · {imageBuildStatusLabel(build)}
+        </dd>
+        <dt className={chromeSansRole('caption')}>Submitted</dt>
+        <dd>{new Date(build.created_at * 1000).toLocaleString()}</dd>
+        <dt className={chromeSansRole('caption')}>Updated</dt>
+        <dd>{new Date(build.updated_at * 1000).toLocaleString()}</dd>
+        {build.digest ? (
+          <>
+            <dt className={chromeSansRole('caption')}>Digest</dt>
+            <dd className={cn('min-w-0 break-all', chromeMonoRole('code'))}>{build.digest}</dd>
+            <dt className={chromeSansRole('caption')}>Size</dt>
+            <dd>{build.size_bytes.toLocaleString()} bytes</dd>
+            <dt className={chromeSansRole('caption')}>Deduplicated</dt>
+            <dd>{build.deduplicated ? 'Reused published bytes' : 'No'}</dd>
+          </>
+        ) : null}
+      </dl>
+      <div className="flex min-w-0 flex-col gap-1">
+        <h4 className={chromeSansRole('secondary')}>Attempt history</h4>
+        {(build.attempts ?? []).length === 0 ? (
+          <p className="text-muted-foreground" data-testid="image-build-attempts-empty">
+            No attempt has finished yet.
+          </p>
+        ) : (
+          <ul className="flex min-w-0 flex-col gap-1" data-testid="image-build-attempts">
+            {(build.attempts ?? []).map((attempt) => (
+              <li
+                key={attempt.attempt}
+                className="min-w-0 rounded-[var(--nession-radius-control)] border border-border px-2 py-1"
+                data-testid="image-build-attempt"
+                data-attempt={attempt.attempt}
+                data-attempt-status={attempt.status}
+              >
+                <p className={chromeSansRole('caption')}>{imageBuildAttemptLabel(attempt)}</p>
+                {attempt.diagnostic ? (
+                  <p
+                    className="min-w-0 break-all text-muted-foreground"
+                    data-testid="image-build-attempt-diagnostic"
+                  >
+                    {attempt.diagnostic}
+                  </p>
+                ) : null}
+                {attempt.error ? (
+                  <p
+                    className="min-w-0 break-all text-destructive"
+                    data-testid="image-build-attempt-error"
+                  >
+                    {attempt.error}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ImageBuildRow({
   build,
+  selected,
+  onSelect,
   onCancel,
   onRetry,
 }: {
   build: ImageBuildDescriptor;
-  onCancel: (buildId: string) => void;
-  onRetry: (buildId: string) => void;
+  selected: boolean;
+  onSelect: () => void;
+  onCancel: (buildId: string, attempt: number) => void;
+  onRetry: (buildId: string, attempt: number) => void;
 }) {
   const terminal = isTerminalBuild(build);
   return (
     <div
       data-testid="image-build-row"
       data-build-id={build.build_id}
-      className="flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-control)] border border-border px-3 py-2"
+      data-build-attempt={build.attempt}
+      data-build-status={build.status}
+      data-build-source={build.source.kind}
+      data-selected={selected ? 'true' : undefined}
+      className={cn(
+        'flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-control)] border border-border px-3 py-2',
+        selected && 'bg-muted/30',
+      )}
     >
-      <span className="flex min-w-0 items-center justify-between gap-2">
-        <span className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
-          {build.alias ?? build.build_id}
-        </span>
-        <span className="flex shrink-0 items-center gap-1">
-          <BuildStatusBadge build={build} />
-        </span>
-      </span>
-      <span
-        className="min-w-0 truncate text-muted-foreground"
-        data-testid="image-build-source"
+      <button
+        type="button"
+        data-testid="image-build-select"
+        aria-expanded={selected}
+        onClick={onSelect}
+        className="flex min-w-0 flex-col gap-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {imageSourceLabel(build.source)}
-      </span>
-      <span className="min-w-0 truncate text-muted-foreground" data-testid="image-build-stage">
-        {imageBuildStageLabel(build)}
-      </span>
-      <span
-        className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}
-        data-testid="image-build-progress"
-      >
-        {imageBuildProgressLabel(build)}
-      </span>
-      {build.diagnostic ? (
+        <span className="flex min-w-0 items-center justify-between gap-2">
+          <span className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
+            {build.alias ?? build.build_id}
+          </span>
+          <span className="flex shrink-0 items-center gap-1">
+            <BuildStatusBadge build={build} />
+          </span>
+        </span>
         <span
           className="min-w-0 truncate text-muted-foreground"
-          data-testid="image-build-diagnostic"
+          data-testid="image-build-source"
         >
-          {build.diagnostic}
+          {imageSourceLabel(build.source)}
         </span>
-      ) : null}
-      {build.error ? (
-        <span className="min-w-0 break-all text-destructive" data-testid="image-build-error">
-          {build.error}
+        <span
+          className="min-w-0 truncate text-muted-foreground"
+          data-testid="image-build-attempt"
+        >
+          Attempt {build.attempt} · {imageBuildStageLabel(build)}
         </span>
-      ) : null}
-      {build.digest ? (
-        <span className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}>
-          {shortDigest(build.digest)}
+        <span
+          className="min-w-0 truncate text-muted-foreground"
+          data-testid="image-build-stage"
+        >
+          {imageBuildStageLabel(build)}
         </span>
-      ) : null}
+        <span
+          className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}
+          data-testid="image-build-progress"
+        >
+          {imageBuildProgressLabel(build)}
+        </span>
+        {build.diagnostic ? (
+          <span
+            className="min-w-0 truncate text-muted-foreground"
+            data-testid="image-build-diagnostic"
+          >
+            {build.diagnostic}
+          </span>
+        ) : null}
+        {build.error ? (
+          <span className="min-w-0 break-all text-destructive" data-testid="image-build-error">
+            {build.error}
+          </span>
+        ) : null}
+        {build.digest ? (
+          <span className={cn('min-w-0 truncate text-muted-foreground', chromeMonoRole('code'))}>
+            {shortDigest(build.digest)}
+          </span>
+        ) : null}
+      </button>
       <span className="flex items-center gap-1">
         {!terminal ? (
           <Button
@@ -652,9 +771,9 @@ function ImageBuildRow({
             size="sm"
             variant="outline"
             data-testid="image-build-cancel"
-            onClick={() => onCancel(build.build_id)}
+            onClick={() => onCancel(build.build_id, build.attempt)}
           >
-            Cancel
+            Cancel attempt {build.attempt}
           </Button>
         ) : null}
         {build.status === 'failed' || build.status === 'canceled' ? (
@@ -663,12 +782,13 @@ function ImageBuildRow({
             size="sm"
             variant="outline"
             data-testid="image-build-retry"
-            onClick={() => onRetry(build.build_id)}
+            onClick={() => onRetry(build.build_id, build.attempt)}
           >
-            Retry
+            Retry attempt {build.attempt}
           </Button>
         ) : null}
       </span>
+      {selected ? <ImageBuildDetail build={build} /> : null}
     </div>
   );
 }
@@ -1133,7 +1253,202 @@ function BuildSubmitForm({ onSubmitted }: { onSubmitted: () => void }) {
   );
 }
 
+function BuildStatusFilter({
+  builds,
+}: {
+  builds: ImageBuildsState;
+}) {
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-1"
+      role="group"
+      aria-label="Filter build history by lifecycle"
+      data-testid="image-builds-status-filter"
+    >
+      {IMAGE_BUILD_STATUSES.map((status) => {
+        const active = builds.statuses.includes(status);
+        return (
+          <Button
+            key={status}
+            type="button"
+            size="sm"
+            variant={active ? 'secondary' : 'outline'}
+            aria-pressed={active}
+            data-testid={`image-builds-status-${status}`}
+            onClick={() => builds.toggleStatus(status)}
+          >
+            {imageBuildStatusText(status)}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BuildSourceFilter({ builds }: { builds: ImageBuildsState }) {
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-1"
+      role="group"
+      aria-label="Filter build history by source adapter"
+      data-testid="image-builds-source-filter"
+    >
+      {IMAGE_BUILD_SOURCES.map((source) => {
+        const active = builds.sources.includes(source);
+        return (
+          <Button
+            key={source}
+            type="button"
+            size="sm"
+            variant={active ? 'secondary' : 'outline'}
+            aria-pressed={active}
+            data-testid={`image-builds-source-${source}`}
+            onClick={() => builds.toggleSource(source)}
+          >
+            {imageBuildSourceKindLabel(source)}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BuildHistoryFilters({ builds }: { builds: ImageBuildsState }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <Input
+        type="search"
+        value={builds.query}
+        placeholder="Search build id, image, alias, digest or source"
+        aria-label="Search build history"
+        data-testid="image-builds-search"
+        onChange={(event) => builds.setQuery(event.target.value)}
+      />
+      <BuildStatusFilter builds={builds} />
+      <BuildSourceFilter builds={builds} />
+    </div>
+  );
+}
+
+function BuildHistoryResults({
+  builds,
+  selectedId,
+  retained,
+  retainedOnly,
+  onSelect,
+  onDeselect,
+}: {
+  builds: ImageBuildsState;
+  selectedId: string | null;
+  retained: ImageBuildDescriptor | null;
+  retainedOnly: boolean;
+  onSelect: (build: ImageBuildDescriptor) => void;
+  onDeselect: () => void;
+}) {
+  const filtered =
+    builds.query.trim().length > 0
+    || builds.statuses.length > 0
+    || builds.sources.length > 0;
+  const currentSelected =
+    builds.builds.find((build) => build.build_id === selectedId)
+    ?? (retained?.build_id === selectedId ? retained : null);
+  return (
+    <>
+      {builds.builds.length === 0 ? (
+        <p
+          className={cn('text-muted-foreground', chromeSansRole('secondary'))}
+          data-testid="images-builds-empty"
+        >
+          {builds.loading
+            ? 'Reading durable builds…'
+            : filtered
+              ? 'No build matches this search or filter.'
+              : 'No builds have been submitted.'}
+        </p>
+      ) : null}
+      {retainedOnly && currentSelected ? (
+        <div
+          className="flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-control)] border border-dashed border-border px-3 py-2"
+          data-testid="image-build-selection-retained"
+        >
+          <p className="text-muted-foreground">
+            The selected build is not on this page or filter. Its last observed record
+            is kept below; the Server history was not claimed empty.
+          </p>
+          <ImageBuildRow
+            build={currentSelected}
+            selected
+            onSelect={onDeselect}
+            onCancel={(buildId, attempt) => void builds.cancel(buildId, attempt)}
+            onRetry={(buildId, attempt) => void builds.retry(buildId, attempt)}
+          />
+        </div>
+      ) : null}
+      {builds.builds.length > 0 ? (
+        <div className="flex max-h-80 min-w-0 flex-col gap-1 overflow-auto">
+          {builds.builds.map((build) => (
+            <ImageBuildRow
+              key={build.build_id}
+              build={build}
+              selected={build.build_id === selectedId}
+              onSelect={() => onSelect(build)}
+              onCancel={(buildId, attempt) => void builds.cancel(buildId, attempt)}
+              onRetry={(buildId, attempt) => void builds.retry(buildId, attempt)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function BuildHistoryPager({ builds }: { builds: ImageBuildsState }) {
+  return (
+    <div className="flex items-center justify-between gap-2 border-t border-border pt-1">
+      <span
+        className={cn('text-muted-foreground', chromeSansRole('caption'))}
+        data-testid="image-builds-page-label"
+      >
+        {builds.total === 0
+          ? '0 builds'
+          : `${builds.offset + 1}–${builds.offset + builds.builds.length} of ${builds.total}`}
+      </span>
+      <span className="flex items-center gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!builds.hasPrevious || builds.loading}
+          data-testid="image-builds-previous"
+          onClick={builds.previous}
+        >
+          <ChevronLeft aria-hidden="true" /> Previous
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!builds.hasNext || builds.loading}
+          data-testid="image-builds-next"
+          onClick={builds.next}
+        >
+          Next <ChevronRight aria-hidden="true" />
+        </Button>
+      </span>
+    </div>
+  );
+}
+
 export function ImagesBuildsPanel({ builds }: { builds: ImageBuildsState }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [retained, setRetained] = useState<ImageBuildDescriptor | null>(null);
+  const retainedOnly =
+    selectedId !== null
+    && !builds.builds.some((build) => build.build_id === selectedId);
+  const select = (build: ImageBuildDescriptor) => {
+    setRetained(build);
+    setSelectedId((current) => (current === build.build_id ? null : build.build_id));
+  };
   return (
     <div
       className="flex min-w-0 flex-col gap-2 border-b border-border p-3"
@@ -1152,30 +1467,32 @@ export function ImagesBuildsPanel({ builds }: { builds: ImageBuildsState }) {
         </Button>
       </div>
       <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
-        Builds run in the Server&apos;s durable build directory. Stage and measured counts
-        survive navigation and reconnect; no percentage is invented while mkfs.erofs runs.
+        Builds run in the Server&apos;s durable build directory. History is read from the
+        Server one page at a time; stage, attempts and measured counts survive navigation
+        and reconnect, and no percentage is invented while mkfs.erofs runs.
       </p>
       <BuildSubmitForm onSubmitted={builds.refresh} />
+      <BuildHistoryFilters builds={builds} />
+      {builds.actionError ? (
+        <p className="text-destructive" data-testid="image-builds-action-error">
+          {builds.actionError}
+        </p>
+      ) : null}
       {builds.error ? (
         <p className="text-destructive" data-testid="images-builds-error">
           {builds.error}
         </p>
-      ) : builds.builds.length === 0 ? (
-        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))} data-testid="images-builds-empty">
-          {builds.loading ? 'Reading durable builds…' : 'No builds have been submitted.'}
-        </p>
       ) : (
-        <div className="flex max-h-64 min-w-0 flex-col gap-1 overflow-auto">
-          {builds.builds.map((build) => (
-            <ImageBuildRow
-              key={build.build_id}
-              build={build}
-              onCancel={(buildId) => void builds.cancel(buildId)}
-              onRetry={(buildId) => void builds.retry(buildId)}
-            />
-          ))}
-        </div>
+        <BuildHistoryResults
+          builds={builds}
+          selectedId={selectedId}
+          retained={retained}
+          retainedOnly={retainedOnly}
+          onSelect={select}
+          onDeselect={() => setSelectedId(null)}
+        />
       )}
+      <BuildHistoryPager builds={builds} />
     </div>
   );
 }

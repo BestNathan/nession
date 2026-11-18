@@ -1349,10 +1349,21 @@ impl ImageManager {
         offset: u32,
         limit: u32,
     ) -> std::result::Result<BuildListPage, ImageError> {
+        self.list_builds_filtered(offset, limit, &builds::BuildListFilter::default())
+            .await
+    }
+
+    /// Read one filtered page of the durable build inventory, newest first.
+    pub async fn list_builds_filtered(
+        &self,
+        offset: u32,
+        limit: u32,
+        filter: &builds::BuildListFilter,
+    ) -> std::result::Result<BuildListPage, ImageError> {
         let store = self.store()?;
         let limit = limit.clamp(1, IMAGE_BUILD_LIST_MAX_LIMIT);
         let (builds, total) = store
-            .list_page(offset, limit)
+            .list_page(offset, limit, filter)
             .map_err(|e| ImageError::Unavailable(format!("image build list failed: {e:#}")))?;
         let descriptors = builds
             .iter()
@@ -1380,6 +1391,19 @@ impl ImageManager {
         &self,
         build_id: &str,
     ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        self.cancel_build_at(build_id, None).await
+    }
+
+    /// Cancel the exact attempt the caller observed.
+    ///
+    /// A stale attempt is a conflict: the Server never cancels whatever
+    /// attempt happens to be current when the client was looking at an older
+    /// record (#3798).
+    pub async fn cancel_build_at(
+        &self,
+        build_id: &str,
+        expected_attempt: Option<u32>,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
         let build_id = normalize_image_build_id(build_id)?;
         let store = self.store()?.clone();
         let state = store.try_read_state(&build_id).map_err(|e| {
@@ -1388,6 +1412,14 @@ impl ImageManager {
         let Some(state) = state else {
             return Err(ImageError::NotFound("build not found".to_string()));
         };
+        if let Some(expected) = expected_attempt {
+            if expected != state.attempt {
+                return Err(ImageError::Conflict(format!(
+                    "build {} is at attempt {}; the requested attempt {} is stale",
+                    build_id, state.attempt, expected
+                )));
+            }
+        }
         if state.is_terminal() {
             return Ok(state.descriptor(now_secs()));
         }
@@ -1422,6 +1454,18 @@ impl ImageManager {
         self: &Arc<Self>,
         build_id: &str,
     ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
+        self.retry_build_at(build_id, None).await
+    }
+
+    /// Retry the exact attempt the caller observed.
+    ///
+    /// A stale attempt is a conflict: no new attempt is opened for a record
+    /// that changed after the client read it (#3798).
+    pub async fn retry_build_at(
+        self: &Arc<Self>,
+        build_id: &str,
+        expected_attempt: Option<u32>,
+    ) -> std::result::Result<ImageBuildDescriptor, ImageError> {
         let build_id = normalize_image_build_id(build_id)?;
         let store = self.store()?.clone();
         let state = store.try_read_state(&build_id).map_err(|e| {
@@ -1430,6 +1474,14 @@ impl ImageManager {
         let Some(mut state) = state else {
             return Err(ImageError::NotFound("build not found".to_string()));
         };
+        if let Some(expected) = expected_attempt {
+            if expected != state.attempt {
+                return Err(ImageError::Conflict(format!(
+                    "build {} is at attempt {}; the requested attempt {} is stale",
+                    build_id, state.attempt, expected
+                )));
+            }
+        }
         if !state.is_terminal() {
             return Err(ImageError::Invalid(
                 "build is still active; cancel it before retrying".to_string(),
@@ -3440,6 +3492,7 @@ fn push_attempt(state: &mut BuildState, status: ImageBuildStatus, error: Option<
         attempt: state.attempt,
         status: status.as_str().to_string(),
         stage: state.stage.map(|stage| stage.as_str().to_string()),
+        diagnostic: state.diagnostic.clone(),
         error,
         started_at: started,
         finished_at: finished,
