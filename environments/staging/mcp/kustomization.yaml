@@ -11,16 +11,16 @@ commonLabels:
   env: staging
 
 resources:
-  - sealed-tls.json
-  - sealed-secret.json
-  - deployment.yaml
-  - service.yaml
+- sealed-tls.json
+- sealed-secret.json
+- deployment.yaml
+- service.yaml
   # Staging MCP public Ingress intentionally staged but inactive during
   # the hostname/TLS/Host-allowlist rotation (#3945). Re-enable ingress.yaml
   # by separate reviewed PR only after both Secrets, DNS, Edge/Origin TLS
   # and HTTPS/auth preflight for staging-mcp-nession.bestnathan.top pass.
 
 images:
-  - name: ghcr.io/bestnathan/nession-mcp
-    newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-    newTag: mcp-73e9859
+- name: ghcr.io/bestnathan/nession-mcp
+  newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
+  newTag: mcp-0b8fbd4
