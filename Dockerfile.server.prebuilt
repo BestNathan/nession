@@ -14,7 +14,13 @@ RUN apt-get update && \
         ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 COPY deploy/build-erofs-utils.sh /usr/local/bin/build-erofs-utils.sh
+# Shared source identity for Server and Agent; overrides must supply BOTH
+# release version and checksum, which the build script verifies fail-closed.
+ARG EROFS_UTILS_VERSION=1.9.4
+ARG EROFS_UTILS_SHA256=7d135aa2550326a5acf20f53c518aea5a8900015ce50700044e40f818c31dd80
 RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
+    EROFS_UTILS_VERSION="${EROFS_UTILS_VERSION}" \
+    EROFS_UTILS_SHA256="${EROFS_UTILS_SHA256}" \
     /usr/local/bin/build-erofs-utils.sh
 
 # Final Server runtime base (#3178). `Dockerfile.server` extends the identical

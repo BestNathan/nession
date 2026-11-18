@@ -51,6 +51,7 @@ const ROLE_CONTRACT = {
 };
 
 const UNRELATED_IMAGE = 'Dockerfile.ui.prebuilt';
+const RELEASE_WORKFLOW = '.github/workflows/release-staging.yml';
 const UNRELATED_FORBIDDEN = ['mkfs.erofs', 'erofsfuse', 'fuse-overlayfs'];
 const BUILDER_PACKAGES = [
   'build-essential',
@@ -115,7 +116,7 @@ function aptPackages(stage) {
       if (!match) continue;
       for (const token of match[1].trim().split(/\s+/)) {
         if (!token || token.startsWith('-')) continue;
-        packages.add(token);
+        packages.add(token.replace(/^["']|["']$/g, '').split('=')[0]);
       }
     }
   }
@@ -188,6 +189,91 @@ function checkBuildScript(text) {
   return errors;
 }
 
+
+function checkAgentImageVersionAndCacheContracts(files) {
+  const errors = [];
+  const agent = files.get('Dockerfile.agent');
+  const prebuilt = files.get('Dockerfile.agent.prebuilt');
+  const yaml = files.get(RELEASE_WORKFLOW);
+  const arg = (text, key) => {
+    if (typeof text !== 'string') return null;
+    const matches = text.split(/\r?\n/).filter(line => line.startsWith('ARG ' + key + '='));
+    return matches.length === 1 ? matches[0].split('=').slice(1).join('=').trim() : null;
+  };
+  if (agent && prebuilt) {
+    const keys = [
+      'AGENT_DEBIAN_BASE_IMAGE','AGENT_NGINX_VERSION',
+      'AGENT_CA_CERTIFICATES_VERSION','AGENT_CURL_VERSION','AGENT_GETTEXT_BASE_VERSION',
+      'AGENT_GIT_VERSION','AGENT_BUBBLEWRAP_VERSION','AGENT_FUSE3_VERSION',
+      'AGENT_FUSE_OVERLAYFS_VERSION','AGENT_NODEJS_VERSION',
+      'AGENT_CLAUDE_CODE_VERSION','AGENT_TMUX_VERSION','EROFS_UTILS_VERSION','EROFS_UTILS_SHA256',
+    ];
+    for (const key of keys) {
+      const left = arg(agent, key), right = arg(prebuilt, key);
+      if (!left || !right || /^(?:latest|stable|main|\d+\.x)$/i.test(left)) {
+        errors.push('Dockerfile.agent: ' + key + ' requires a fixed version ARG default');
+      } else if (left !== right) {
+        errors.push('Dockerfile.agent: ' + key + ' diverges from prebuilt version ARG');
+      }
+    }
+    if (!/^debian:bookworm-\d{8}-slim(?:@sha256:[0-9a-f]{64})?$/.test(arg(agent,'AGENT_DEBIAN_BASE_IMAGE')||'')) {
+      errors.push('Dockerfile.agent: must pin a dated Debian Bookworm base');
+    }
+    const apt = {
+      nginx: 'AGENT_NGINX_VERSION', 'ca-certificates': 'AGENT_CA_CERTIFICATES_VERSION',
+      curl: 'AGENT_CURL_VERSION', 'gettext-base': 'AGENT_GETTEXT_BASE_VERSION',
+      git: 'AGENT_GIT_VERSION', bubblewrap: 'AGENT_BUBBLEWRAP_VERSION',
+      fuse3: 'AGENT_FUSE3_VERSION', 'fuse-overlayfs': 'AGENT_FUSE_OVERLAYFS_VERSION',
+    };
+    for (const file of ['Dockerfile.agent','Dockerfile.agent.prebuilt']) {
+      const source = files.get(file);
+      for (const [pkg,key] of Object.entries(apt)) {
+        if (!source.includes('"' + pkg + '=$' + '{' + key + '}"')) {
+          errors.push(file + ': must install pinned version for ' + pkg);
+        }
+      }
+      const clauses = [
+        'nodejs=$' + '{AGENT_NODEJS_VERSION}', 'AGENT_NODEJS_VERSION%%-*',
+        '@anthropic-ai/claude-code@$' + '{AGENT_CLAUDE_CODE_VERSION}',
+        'DISABLE_AUTOUPDATER=1', 'test "$(tmux -V)"',
+      ];
+      if (!clauses.every(line=>source.includes(line))) {
+        errors.push(file + ': must pin and verify Node/Claude/tmux and disable Claude autoupdate');
+      }
+    }
+  }
+  if (typeof yaml !== 'string') {
+    errors.push(RELEASE_WORKFLOW + ': release image Workflow must be readable');
+  } else {
+    for (const role of ['server','agent','mcp','ui']) {
+      for (const arch of ['amd64','arm64']) {
+        const name = 'docker-' + role + '-' + arch;
+        const block = yaml.split('\n  ' + name + ':')[1]?.split(/\n  [a-z][\w-]*:/)[0];
+        const scope = 'nession-build-' + role + '-' + arch;
+        if (!block || !block.includes('cache-from: type=gha,scope=' + scope) ||
+            !block.includes('cache-to: type=gha,scope=' + scope + ',mode=min')) {
+          errors.push(RELEASE_WORKFLOW + ': ' + name + ' cache scope must be isolated and mode=min');
+        }
+        if (role === 'agent') {
+          for (const key of ['AGENT_DEBIAN_BASE_IMAGE','AGENT_NODEJS_VERSION',
+            'AGENT_CLAUDE_CODE_VERSION','AGENT_TMUX_VERSION','EROFS_UTILS_VERSION','EROFS_UTILS_SHA256']) {
+            if (!block?.includes(key + '=$' + '{{ env.' + key + ' }}')) {
+              errors.push(RELEASE_WORKFLOW + ': ' + name + ' must supply ' + key + ' build ARG');
+            }
+          }
+        }
+      }
+    }
+    for (const key of ['AGENT_DEBIAN_BASE_IMAGE','AGENT_NODEJS_VERSION',
+      'AGENT_CLAUDE_CODE_VERSION','AGENT_TMUX_VERSION','EROFS_UTILS_VERSION','EROFS_UTILS_SHA256']) {
+      if (!yaml.includes('  ' + key + ': "' + arg(prebuilt,key) + '"')) {
+        errors.push(RELEASE_WORKFLOW + ': ' + key + ' Workflow version must match pinned Docker ARG');
+      }
+    }
+  }
+  return errors;
+}
+
 /**
  * Check an explicit file map. Exported for the deterministic self-test; the
  * CLI below is the only production caller.
@@ -217,8 +303,9 @@ export function checkFiles(files) {
     if (builder.from !== RUNTIME_BASE) {
       errors.push(`${file}: \`${BUILDER_STAGE}\` must use ${RUNTIME_BASE}, found ${builder.from}`);
     }
-    if (runtimeTools.from !== RUNTIME_BASE) {
-      errors.push(`${file}: \`${RUNTIME_STAGE}\` must use ${RUNTIME_BASE}, found ${runtimeTools.from}`);
+    const runtimeBase = role === 'agent' ? '$' + '{AGENT_DEBIAN_BASE_IMAGE}' : RUNTIME_BASE;
+    if (runtimeTools.from !== runtimeBase) {
+      errors.push(file + ': runtime-tools must use ' + runtimeBase + ', found ' + runtimeTools.from);
     }
     const builderPackages = aptPackages(builder);
     for (const pkg of BUILDER_PACKAGES) {
@@ -297,6 +384,8 @@ export function checkFiles(files) {
     }
   }
 
+  errors.push(...checkAgentImageVersionAndCacheContracts(files));
+
   const script = files.get(BUILD_SCRIPT);
   if (typeof script !== 'string') {
     errors.push(`${BUILD_SCRIPT}: missing pinned build script`);
@@ -317,7 +406,7 @@ export function checkFiles(files) {
   return errors;
 }
 
-const CLI_FILES = [...IMAGES.map((image) => image.file), BUILD_SCRIPT, UNRELATED_IMAGE];
+const CLI_FILES = [...IMAGES.map((image) => image.file), BUILD_SCRIPT, UNRELATED_IMAGE, RELEASE_WORKFLOW];
 
 function loadFiles() {
   const files = new Map();
@@ -457,7 +546,7 @@ function selfTest(files) {
     ['server loses runtime probe', 'Dockerfile.server', (text) => replaceOnce(text, 'RUN command -v git mkfs.erofs fsck.erofs', 'RUN true'), 'must probe `command -v git mkfs.erofs fsck.erofs`'],
     ['server runtime base drifts', 'Dockerfile.server', (text) => replaceOnce(text, 'FROM debian:bookworm-slim AS runtime-tools', 'FROM debian:trixie-slim AS runtime-tools'), 'must use debian:bookworm-slim'],
     ['prebuilt server stops extending runtime-tools', 'Dockerfile.server.prebuilt', (text) => replaceOnce(text, 'FROM runtime-tools AS runtime', 'FROM debian:bookworm-slim AS runtime'), 'final stage must extend `runtime-tools`'],
-    ['agent loses fuse3', 'Dockerfile.agent', (text) => replaceOnce(text, 'bubblewrap fuse3 fuse-overlayfs', 'bubblewrap fuse-overlayfs'), 'apt install must include `fuse3`'],
+    ['agent loses fuse3', 'Dockerfile.agent', (text) => replaceOnce(text, '"fuse3=$' + '{AGENT_FUSE3_VERSION}"', ''), 'apt install must include `fuse3`'],
     ['agent loses erofsfuse copy', 'Dockerfile.agent', (text) => text.replace(
       /COPY --from=erofs-utils-builder \/usr\/local\/bin\/erofsfuse \/usr\/local\/bin\/erofsfuse\n/,
       '',
@@ -471,6 +560,10 @@ function selfTest(files) {
     ['build script loses the integrity diagnostic', BUILD_SCRIPT, (text) => replaceOnce(text, 'source integrity check failed', 'check failed'), 'must report a source checksum failure distinctly'],
     ['build script loses the revision diagnostic', BUILD_SCRIPT, (text) => text.split('source revision check failed').join('check failed'), 'must report a source revision failure distinctly'],
     ['build script stops building erofsfuse', BUILD_SCRIPT, (text) => replaceOnce(text, '--enable-fuse', '--disable-fuse'), 'must build erofsfuse'],
+    ['agent version floats', 'Dockerfile.agent', (text) => replaceOnce(text, 'ARG AGENT_CLAUDE_CODE_VERSION=2.1.323', 'ARG AGENT_CLAUDE_CODE_VERSION=latest'), 'fixed version ARG'],
+    ['agent versions diverge', 'Dockerfile.agent', (text) => replaceOnce(text, 'ARG AGENT_NODEJS_VERSION=22.23.5-1nodesource1', 'ARG AGENT_NODEJS_VERSION=22.0.0'), 'diverges from prebuilt'],
+    ['GHA cross-role cache collision', RELEASE_WORKFLOW, (text) => replaceOnce(text, 'cache-from: type=gha,scope=nession-build-agent-amd64', 'cache-from: type=gha,scope=nession-build-server-amd64'), 'cache scope must be isolated'],
+    ['GHA cache mode regression', RELEASE_WORKFLOW, (text) => replaceOnce(text, 'cache-to: type=gha,scope=nession-build-agent-arm64,mode=min', 'cache-to: type=gha,scope=nession-build-agent-arm64,mode=max'), 'cache scope must be isolated'],
     ['UI image gains sandbox tooling', UNRELATED_IMAGE, (text) => `${text}\nRUN apt-get install -y fuse3 erofsfuse\n`, 'must not carry EROFS runtime tool'],
   ];
 
