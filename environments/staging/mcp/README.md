@@ -9,7 +9,8 @@ ordinary public clients will NOT trust it until it is replaced by a
 publicly trusted CA certificate or the caller explicitly trusts this CA.
 Never disable certificate verification to make a bearer-authenticated MCP
 client connect. This activation is not evidence that DNS, externally trusted
-TLS, HTTP redirect, or authenticated MCP requests have passed live tests. Production, preprod, and staging-01 are unchanged.
+TLS, HTTP redirect, or authenticated MCP requests have passed live tests.
+Production, preprod, and staging-01 are unchanged.
 This service is not the embedded `/mcp` route inside Server/Agent containers.
 
 ## Image and version contract
@@ -91,8 +92,7 @@ https://staging.mcp.nession.bestnathan.top/mcp
    TLS from an external client. Host allowlist must include the public
    hostname, and inbound/outbound bearer tokens must differ.
 4. The staging-only `ingress.yaml` resource is now enabled in this overlay.
-   Verify that the existing Higress Controller reconciles the Ingress and TLS
-   Verify the existing Higress Controller reconciles this Ingress and TLS
+   Verify that the Higress Controller reconciles this Ingress and TLS
    Secret, DNS resolves publicly, and its gateway is actually reachable
    from the internet. The manifest explicitly requests TLS termination and
    HTTP→HTTPS redirection using Higress-compatible
