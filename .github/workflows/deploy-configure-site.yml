@@ -1,0 +1,74 @@
+name: Deploy / Configure Site
+# Main-owned, human-approved Cloudflare DNS reconciliation for reviewed sites.
+# No arbitrary FQDN, Zone, IP or API endpoint is accepted as dispatch input.
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: Reviewed site registry entry (staging environment)
+        type: choice
+        options:
+          - staging-mcp
+        required: true
+      action:
+        description: Read-only plan or bounded DNS apply
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+        required: true
+
+concurrency:
+  group: cloudflare-site-staging-mcp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate bounded Cloudflare site provider and tests
+        run: |
+          set -euo pipefail
+          node --test scripts/ci/configure-cloudflare-site.test.mjs
+          node --input-type=module -e "import {getSite} from './scripts/ci/configure-cloudflare-site.mjs'; if(getSite('staging-mcp').environment !== 'staging') process.exit(1)"
+
+  configure:
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment:
+      name: staging
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Plan or reconcile one registered Cloudflare DNS record
+        env:
+          TARGET_ENVIRONMENT: staging
+          TARGET_SITE: ${{ inputs.site }}
+          TARGET_ACTION: ${{ inputs.action }}
+          # Bound to the protected GitHub Environment, not user inputs.
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_ORIGIN_IPV4: ${{ vars.CLOUDFLARE_ORIGIN_IPV4 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ci/configure-cloudflare-site.mjs "$TARGET_ACTION" "$TARGET_SITE"
