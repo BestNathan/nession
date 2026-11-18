@@ -16,7 +16,11 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const ENVIRONMENT = /^[a-z][a-z0-9-]{0,62}$/;
 const TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const REPOSITORY = /^[a-z0-9.-]+(\/[a-z0-9._-]+)+$/;
+// Workloads in the existing Nession deployment overlay are independent of
+// the complete image family published by the trusted GHCR/ACR release.
+// In particular, a published standalone MCP image is not an implicit Pod.
 export const ROLES = Object.freeze(['agent', 'server', 'ui']);
+export const PUBLISHED_ROLES = Object.freeze([...ROLES, 'mcp']);
 export const OVERLAY_PATH = /^environments\/([a-z][a-z0-9-]{0,62})\/nession\/kustomization\.yaml$/;
 
 function fail(message) {
@@ -154,13 +158,19 @@ export function validateProvenance(provenance) {
   if (!images || typeof images !== 'object' || Array.isArray(images)) {
     fail('build provenance images must be an object');
   }
-  const unknown = Object.keys(images).filter((key) => !ROLES.includes(key));
+  const unknown = Object.keys(images).filter((key) => !PUBLISHED_ROLES.includes(key));
   if (unknown.length) fail('build provenance contains an unknown image role');
   const result = {};
-  for (const roleName of ROLES) {
+  for (const roleName of PUBLISHED_ROLES) {
+    // All deployed Nession roles remain mandatory. The standalone MCP image
+    // is optional for older releases, but if published it is fully validated.
+    if (!Object.hasOwn(images, roleName)) {
+      if (ROLES.includes(roleName)) fail('build provenance is missing the ' + roleName + ' image');
+      continue;
+    }
     const entry = images[roleName];
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      fail('build provenance is missing the ' + roleName + ' image');
+      fail('build provenance has an invalid ' + roleName + ' image');
     }
     const tag = singleLine(entry.tag, roleName + ' provenance tag');
     if (!TAG.test(tag)) fail(roleName + ' provenance tag is invalid');
@@ -591,6 +601,19 @@ function selfTest() {
   assert.equal(receipt.images.find((image) => image.role === 'server').digest,
     provenance.images.server.digest);
 
+  // #3953: four published images may authenticate only the three actual
+  // workloads. The optional MCP record is verified, not silently discarded.
+  const publishedProvenance = structuredClone(provenance);
+  publishedProvenance.images.mcp = {
+    tag: 'mcp-abcdef1', digest: 'sha256:' + '4'.repeat(64),
+  };
+  assert.deepEqual(Object.keys(validateProvenance(publishedProvenance).images).sort(),
+    ['agent', 'mcp', 'server', 'ui']);
+  const publishedReceipt = attestDeployment({
+    overlay, provenance: publishedProvenance, gitopsRevision: 'b'.repeat(40), observation,
+  });
+  assert.deepEqual(publishedReceipt, receipt);
+
   // Durable-store validation must preserve the same binding without the
   // original overlay/provenance/cluster inputs.
   const validated = validateAttestation(receipt);
@@ -724,6 +747,17 @@ function selfTest() {
   reject(({ provenance: next }) => { next.images.ui.digest = 'sha256:short'; }, /immutable sha256 digest/);
   reject(({ provenance: next }) => { next.images.ui.tag = 'ui-deadbee'; }, /does not match the provenance source SHA/);
   reject(({ overlay: next }) => { next.images.ui.tag = 'ui-abcdef2'; }, /disagrees with build provenance/);
+  reject(({ provenance: next }) => {
+    next.images.mcp = { tag: 'mcp-abcdef1', digest: 'sha256:' + '4'.repeat(64) };
+    next.images.unapproved = { tag: 'unapproved-abcdef1', digest: 'sha256:' + '5'.repeat(64) };
+  }, /unknown image role/);
+  reject(({ provenance: next }) => { next.images.mcp = null; }, /invalid mcp image/);
+  reject(({ provenance: next }) => {
+    next.images.mcp = { tag: 'mcp-abcdef1', digest: 'sha256:short' };
+  }, /mcp provenance digest is not an immutable sha256 digest/);
+  reject(({ provenance: next }) => {
+    next.images.mcp = { tag: 'mcp-deadbee', digest: 'sha256:' + '4'.repeat(64) };
+  }, /mcp tag does not match the provenance source SHA/);
   reject(({ provenance: next }) => { next.kind = 'unknown'; }, /unsupported build provenance schema/);
 
   assert.throws(() => attestDeployment({
