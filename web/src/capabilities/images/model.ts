@@ -216,6 +216,70 @@ export function imageBuildProgressLabel(build: ImageBuildDescriptor): string {
   return `${measured} · ${seconds}s`;
 }
 
+/** The advisory image role a consumer picker expects (#3793). */
+export type ImageConsumerRole = 'base_runtime' | 'tool' | 'directory';
+
+/** The readable advisory role of one Library entry, or `null` when unknown. */
+export function libraryImageRole(entry: ImageLibraryEntry): string | null {
+  return entry.image_kind ?? null;
+}
+
+export function imageRoleLabel(role: string | null | undefined): string {
+  switch (role) {
+    case 'base_runtime':
+      return 'Base Runtime';
+    case 'tool':
+      return 'Toolchain';
+    case 'directory':
+      return 'Directory';
+    default:
+      return 'Role unknown';
+  }
+}
+
+/**
+ * Whether an entry can be offered to a role-specific picker.
+ *
+ * A known mismatched role is excluded. An unknown role (a legacy digest
+ * image without readable Manifest annotations) is offered with an explicit
+ * "Role unknown" marker rather than being silently misclassified.
+ */
+export function imageRoleCompatible(
+  entry: ImageLibraryEntry,
+  expected: ImageConsumerRole,
+): boolean {
+  const role = libraryImageRole(entry);
+  return role === null || role === expected;
+}
+
+/**
+ * The reason an entry cannot be executed by the Sandbox composition, or
+ * `null` when it has no known representation barrier.
+ *
+ * The current Sandbox backend mounts only a single-layer or flattened EROFS
+ * image. A referenced Composite has no executable closure selection yet, so it
+ * is never offered as executable (#3697, #3793).
+ */
+export function imageExecutionBarrier(entry: ImageLibraryEntry): string | null {
+  if (entry.representation === 'referenced') {
+    return 'Referenced composite images are not executable by the Sandbox backend yet';
+  }
+  return null;
+}
+
+/** Whether the entry's platform matches the consumer target, when both are known. */
+export function imagePlatformCompatible(
+  entry: ImageLibraryEntry,
+  targetPlatform: string | null | undefined,
+): boolean {
+  if (!targetPlatform || !entry.platform) {
+    return true;
+  }
+  const target = targetPlatform.split('/');
+  const image = entry.platform.split('/');
+  return target[0] === image[0] && target[1] === image[1];
+}
+
 /** Every selectable build-history lifecycle state (#3798). */
 export const IMAGE_BUILD_STATUSES: readonly ImageBuildStatus[] = [
   'queued',

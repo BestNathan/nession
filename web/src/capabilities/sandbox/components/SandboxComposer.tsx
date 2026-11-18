@@ -46,6 +46,7 @@ export interface SandboxComposerProps {
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
   sessionId: string | null;
+  targetPlatform: string | null;
   observations: Map<string, ImageCacheObservation>;
   onPreflight: () => void;
   onRequestEnter: () => void;
@@ -183,6 +184,7 @@ export function SandboxPolicyPanels(props: SandboxComposerProps) {
         <SandboxFilesystemFields
           context={context}
           sessionId={sessionId}
+          targetPlatform={props.targetPlatform}
           draft={draft}
           workingDir={workingDir}
           workingDirError={fieldErrors['working_dir']}

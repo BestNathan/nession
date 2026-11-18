@@ -264,10 +264,14 @@ Manifest for a Session.
 The Server Catalog is also a managed Library surface, not only a build
 publication target. `server.image.library.list` projects each revision with its
 Repository, mutable Tags, immutable Manifest/Index/Composite digest, media
-type, platform, representation, descriptor edges, reachable EROFS closure and
-known reference impact. Metadata the catalog cannot read is returned as
-explicit unknown; the legacy digest/alias descriptor is never used to
-synthesize it.
+type, platform, the advisory `io.nession.kind` role and
+`io.nession.mount.default` target, representation, descriptor edges, reachable
+EROFS closure and known reference impact. Metadata the catalog cannot read is
+returned as explicit unknown; the legacy digest/alias descriptor is never used
+to synthesize it. Consumers project these fields as hints (role-specific
+pickers, a proposed mount target) but never treat them as authorization: the
+Server grant, Agent resolver and Sandbox target validation remain the
+executable owners.
 
 `server.image.tag.set` creates only when the Tag is absent, or moves only when
 the exact expected digest still resolves. A stale expectation returns a

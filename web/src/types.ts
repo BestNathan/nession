@@ -19,6 +19,10 @@ export interface Agent {
     os_version: string;
     nession_version: string;
     image_tag?: string;
+    /** OCI architecture and OS the Agent executes on (#3499). */
+    architecture?: string;
+    os?: string;
+    variant?: string | null;
   };
   /** Candidate P2P endpoints with server probe status (issue #51). Empty for
    *  legacy servers that don't yet send them in agents.list. */

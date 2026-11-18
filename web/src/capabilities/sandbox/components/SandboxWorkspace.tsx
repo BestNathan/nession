@@ -70,6 +70,7 @@ interface SandboxContentProps {
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
   sessionId: string | null;
+  targetPlatform: string | null;
   observations: Map<string, ImageCacheObservation>;
   activeSection: SandboxSectionId;
   activePolicy: SandboxPolicyId;
@@ -124,6 +125,7 @@ function SandboxContent({
   workingDir,
   onWorkingDirChange,
   sessionId,
+  targetPlatform,
   observations,
   activeSection,
   activePolicy,
@@ -208,6 +210,7 @@ function SandboxContent({
     workingDir,
     onWorkingDirChange,
     sessionId,
+    targetPlatform,
     observations,
     onPreflight: () => preflightState.runPreflight(draft.draft),
     onRequestEnter: transitions.requestEnter,
@@ -239,6 +242,10 @@ export function SandboxWorkspace({
   depth?: WorkspaceDepthControl;
 }) {
   const sessionId = ctx.session?.session_id ?? null;
+  const targetPlatform =
+    ctx.agent?.metadata?.os && ctx.agent.metadata.architecture
+      ? `${ctx.agent.metadata.os}/${ctx.agent.metadata.architecture}`
+      : null;
   const [activeSection, setActiveSection] = useState<SandboxSectionId>('overview');
   const [activePolicy, setActivePolicy] = useState<SandboxPolicyId>('filesystem');
   const sandbox = useSandboxContext(sessionId);
@@ -328,6 +335,7 @@ export function SandboxWorkspace({
           workingDir={workingDir}
           onWorkingDirChange={setWorkingDir}
           sessionId={sessionId}
+          targetPlatform={targetPlatform}
           observations={observations.observations}
           activeSection={activeSection}
           activePolicy={activePolicy}

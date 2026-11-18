@@ -2479,6 +2479,8 @@ impl ImageManager {
             manifest_digest: None,
             media_type: None,
             kind: None,
+            image_kind: None,
+            mount_default: None,
             platform: None,
             representation: ImageLibraryRepresentation::Unknown,
             layers: Vec::new(),
@@ -2521,6 +2523,18 @@ impl ImageManager {
             .await
             .unwrap_or_default();
         entry.platform = self.manifest_platform(manifest).await.ok().flatten();
+        if manifest.kind == ObjectKind::Manifest {
+            // Advisory role and default target come from the Manifest's
+            // `io.nession.*` annotations. They are projections, never
+            // authorization: a missing or unreadable Manifest leaves both
+            // unknown and the picker fails closed on its own rules (#3793).
+            if let Ok(inspection) =
+                nession_erofs::image::inspect_manifest(&self.blobs, &manifest.digest)
+            {
+                entry.image_kind = inspection.usage.kind.map(|kind| kind.as_str().to_string());
+                entry.mount_default = inspection.usage.mount_default;
+            }
+        }
         entry.representation = library_representation(row, manifest);
         entry.impact = Some(match self.tag_impact_for_manifest(manifest, None).await {
             Ok(mut impact) => {
