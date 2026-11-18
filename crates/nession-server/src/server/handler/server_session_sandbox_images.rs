@@ -106,10 +106,11 @@ fn same_selections(left: &[SandboxImageSelection], right: &[SandboxImageSelectio
 /// Resolve the effective image transport for one preflight/Enter payload.
 ///
 /// - no declaration: the explicit `images` list is unchanged (older clients);
-/// - a declaration: Base Runtime and mount digests are derived into image
+/// - a declaration: a Base Runtime and mount digests are derived into image
 ///   selections, and an explicitly supplied list must agree with it;
-/// - an unmaterializable declaration (local root plus mounts, or mounts
-///   without an image root) is refused before routing.
+/// - a Local (or absent) RootFS with mounts is a Host-root composition: no
+///   Base selection is derived, and the toolchain digests remain the only
+///   added selection (#3792).
 pub(super) fn derive_sandbox_image_selections(
     policy: &SandboxPolicyDraft,
     explicit: Vec<SandboxImageSelection>,
@@ -125,38 +126,13 @@ pub(super) fn derive_sandbox_image_selections(
     }
 
     let mut derived = Vec::new();
-    match &filesystem.rootfs {
-        Some(SandboxFilesystemRoot::Local) => {
-            if !filesystem.mounts.is_empty() || filesystem.workspace.is_some() {
-                return Err(
-                    "filesystem.rootfs Local cannot carry mounts or a Workspace".to_string()
-                );
-            }
-            if !explicit.is_empty() {
-                return Err(
-                    "filesystem.rootfs Local conflicts with the explicit image selection"
-                        .to_string(),
-                );
-            }
-            return Ok(Vec::new());
-        }
-        Some(SandboxFilesystemRoot::Image {
-            digest,
-            writable: _,
-        }) => {
-            derived.push(SandboxImageSelection {
-                role: SandboxImageRole::Base,
-                digest: digest.clone(),
-                target: None,
-                mode: SandboxImageMode::ReadOnly,
-            });
-        }
-        None => {
-            if !filesystem.mounts.is_empty() || filesystem.workspace.is_some() {
-                return Err("filesystem mounts or Workspace require an image RootFS".to_string());
-            }
-            return Ok(explicit);
-        }
+    if let Some(SandboxFilesystemRoot::Image { digest, .. }) = &filesystem.rootfs {
+        derived.push(SandboxImageSelection {
+            role: SandboxImageRole::Base,
+            digest: digest.clone(),
+            target: None,
+            mode: SandboxImageMode::ReadOnly,
+        });
     }
 
     for mount in &filesystem.mounts {
@@ -241,24 +217,37 @@ mod tests {
     }
 
     #[test]
-    fn local_root_with_mounts_or_workspace_is_refused() {
-        for filesystem in [
-            serde_json::json!({
-                "access": { "read": [], "write": [] },
-                "rootfs": { "kind": "local" },
-                "mounts": [{
-                    "source": { "kind": "image", "digest": tool() },
-                    "target": "/opt/tool",
-                    "read_only": true,
-                }],
-            }),
-            serde_json::json!({
-                "access": { "read": [], "write": [] },
-                "rootfs": { "kind": "local" },
-                "workspace": { "kind": "auto" },
-            }),
-        ] {
-            assert!(derive_sandbox_image_selections(&draft(filesystem), Vec::new()).is_err());
-        }
+    fn a_local_root_derives_toolchains_without_a_base() {
+        let policy = draft(serde_json::json!({
+            "access": { "read": [], "write": [] },
+            "rootfs": { "kind": "local" },
+            "mounts": [{
+                "source": { "kind": "image", "digest": tool() },
+                "target": "/opt/tool",
+                "read_only": true,
+            }],
+        }));
+        let derived = derive_sandbox_image_selections(&policy, Vec::new()).unwrap();
+        assert_eq!(derived.len(), 1);
+        assert_eq!(derived[0].role, SandboxImageRole::Toolchain);
+        assert_eq!(derived[0].target.as_deref(), Some("/opt/tool"));
+        assert!(
+            derived
+                .iter()
+                .all(|selection| selection.role != SandboxImageRole::Base),
+            "a Local RootFS never derives a Base Runtime selection"
+        );
+
+        let workspace_only = draft(serde_json::json!({
+            "access": { "read": [], "write": [] },
+            "rootfs": { "kind": "local" },
+            "workspace": { "kind": "auto" },
+        }));
+        assert!(
+            derive_sandbox_image_selections(&workspace_only, Vec::new())
+                .unwrap()
+                .is_empty(),
+            "a Local Workspace preparation needs no image grant"
+        );
     }
 }

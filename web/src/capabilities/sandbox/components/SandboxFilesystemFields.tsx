@@ -81,7 +81,6 @@ export function SandboxFilesystemFields({
       <SandboxFilesystemWorkspaceSection
         sessionId={sessionId}
         workspace={filesystem?.workspace ?? undefined}
-        rootfsIsImage={rootfs?.kind === 'image'}
         workingDir={workingDir}
         workingDirError={workingDirError}
         onWorkingDirChange={onWorkingDirChange}
@@ -89,7 +88,7 @@ export function SandboxFilesystemFields({
       />
       <FormSection
         title="Access"
-        description="V1 identity-path mapping on this Agent. One absolute host path per line; overlapping read and write trees are refused. Access is replaced by an image RootFS and cannot be combined with one."
+        description="V1 identity-path mapping on this Agent. One absolute host path per line; overlapping read and write trees are refused. Access is replaced by a prepared composition (an image RootFS, or a Local RootFS carrying mounts/workspace) and cannot be combined with one."
         testId="sandbox-filesystem-access"
       >
         <SandboxImplementationStatus

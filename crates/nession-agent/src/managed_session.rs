@@ -241,7 +241,7 @@ pub async fn prepare(
             mounts: Vec::new(),
             workspace: None,
             composition: Some(SandboxFilesystemComposition {
-                base: base_ref,
+                base: Some(base_ref),
                 base_writable: false,
                 workspace: Some(SandboxWorkspace {
                     image: None,
@@ -370,9 +370,11 @@ mod tests {
         let filesystem = first.policy.filesystem.as_ref().unwrap();
         assert!(filesystem.access.read.is_empty() && filesystem.access.write.is_empty());
         let composition = filesystem.composition.as_ref().unwrap();
-        assert_eq!(composition.base.digest, base_digest);
+        assert_eq!(composition.base.as_ref().unwrap().digest, base_digest);
         assert!(composition
             .base
+            .as_ref()
+            .unwrap()
             .source
             .starts_with(cache.root().to_string_lossy().as_ref()));
         assert_eq!(
@@ -725,7 +727,8 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(
-            composition.base.digest, layer_digest,
+            composition.base.as_ref().unwrap().digest,
+            layer_digest,
             "the mount identity is the EROFS layer, not the Manifest"
         );
         assert_eq!(

@@ -4208,3 +4208,165 @@ fn concurrent_shared_acquisitions_keep_one_physical_mount() {
         "generation": generation,
     }));
 }
+
+// ---------------------------------------------------------------------------
+// #3792 Host-root composition with a verified Toolchain and persistent
+// Workspace
+// ---------------------------------------------------------------------------
+
+/// A Host-root composition keeps the ordinary host root as `/`, mounts one
+/// verified EROFS toolchain under a private `/opt`, and binds a persistent
+/// Agent-managed Workspace at `/workspace`. Writes survive into a second Pane;
+/// a missing authorized toolchain source is refused before any mount.
+#[test]
+fn a_host_root_composition_mounts_a_verified_toolchain_and_keeps_workspace_writes() {
+    if !Path::new("/workspace").is_dir() {
+        // A Host-root composition binds /workspace over the read-only host
+        // root; a runner without that mountpoint cannot prove the contract.
+        // The Acceptance Case checks the same prerequisite and reports
+        // Pending instead of running this test.
+        eprintln!("skipping: no /workspace mountpoint on this host");
+        return;
+    }
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    attach_mount_manager(&mut settings, dir.path());
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let write = settings.state_dir.join("host-root-workspace");
+    std::fs::create_dir_all(&write).expect("persistent workspace");
+
+    let policy = || -> SandboxPolicy {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "composition": {
+                    "workspace": {
+                        "write": write.to_string_lossy()
+                    },
+                    "toolchains": [{
+                        "digest": format!("sha256:{}", images.toolchain_digest),
+                        "source": images.toolchain.to_string_lossy(),
+                        "target": "/opt/go"
+                    }]
+                }
+            },
+            "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+            "enforcement": "required"
+        }))
+        .expect("host-root composition policy")
+    };
+    let request = |command: &str| LaunchRequest {
+        policy: policy(),
+        session_name: "host-root-toolchain".to_string(),
+        instance_id: "instance-host-root".to_string(),
+        working_dir: "/workspace".to_string(),
+        inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), command.to_string()],
+        tmux_socket: None,
+    };
+
+    let mut first = launch(
+        &settings,
+        request("[ -f /opt/go/marker ] && echo TOOL-OK; echo pane-one > /workspace/shared.txt"),
+    );
+    verify_or_report(
+        &mut first,
+        "the Host-root composition barrier must verify before the shell runs",
+    );
+    let (status, stdout, stderr) = wait_for_exit(&mut first);
+    assert!(
+        status.success(),
+        "the Host-root Pane must exit successfully: stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("TOOL-OK"),
+        "the verified EROFS toolchain must be visible at /opt/go: {stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(write.join("shared.txt")).expect("workspace write"),
+        "pane-one\n",
+        "the Workspace write must persist on the Agent-owned directory"
+    );
+    let record = first.prepared.record();
+    assert_eq!(record.backend, "linux-bwrap");
+    let first_execution = record.execution_id.clone();
+
+    // A second Pane enters the same persistent Workspace and reads the write.
+    let mut second = launch(&settings, request("cat /workspace/shared.txt"));
+    verify_or_report(
+        &mut second,
+        "the second Host-root Pane barrier must verify before the shell runs",
+    );
+    let (status, stdout, stderr) = wait_for_exit(&mut second);
+    assert!(
+        status.success(),
+        "the second Host-root Pane must exit successfully: stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("pane-one"),
+        "the second Pane must observe the persistent Workspace write: {stdout}"
+    );
+
+    // A toolchain source outside the Agent image root is refused before any
+    // host view is mounted; the persistent Workspace bytes remain untouched.
+    let outside = dir.path().join("outside-toolchain.erofs");
+    std::fs::copy(&images.toolchain, &outside).expect("copy outside image");
+    let outside_digest = sha256_file(&outside);
+    let refused: SandboxPolicy = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "enabled": true,
+        "filesystem": {
+            "access": { "read": [], "write": [] },
+            "rootfs": { "kind": "local" },
+            "composition": {
+                "workspace": { "write": write.to_string_lossy() },
+                "toolchains": [{
+                    "digest": format!("sha256:{outside_digest}"),
+                    "source": outside.to_string_lossy(),
+                    "target": "/opt/go"
+                }]
+            }
+        },
+        "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+        "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+        "enforcement": "required"
+    }))
+    .expect("out-of-root policy");
+    let error = match prepare(
+        &LaunchRequest {
+            policy: refused,
+            session_name: "host-root-refused".to_string(),
+            instance_id: "instance-host-root-refused".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
+            tmux_socket: None,
+        },
+        &settings,
+    ) {
+        Ok(_) => panic!("a toolchain outside the authorized image root must not mount"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:#}").contains("outside the Agent-authorized image root"),
+        "the refusal must name the authorization boundary: {error:#}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(write.join("shared.txt")).expect("workspace survives"),
+        "pane-one\n"
+    );
+
+    print_evidence(&serde_json::json!({
+        "backend": record.backend,
+        "first_execution": first_execution,
+        "tool_visible_at": "/opt/go",
+        "workspace_persisted": true,
+        "second_pane_read_back": true,
+        "unauthorized_source_refused_before_mount": true,
+    }));
+}

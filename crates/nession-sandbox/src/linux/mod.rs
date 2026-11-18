@@ -497,9 +497,14 @@ fn prepare_inner(
     visible_probes.sort();
     visible_probes.dedup();
 
+    let host_root_composition = compiled
+        .filesystem
+        .as_ref()
+        .and_then(|filesystem| filesystem.composition.as_ref())
+        .is_some_and(|composition| composition.base.is_none());
     let mut hidden_probes = Vec::new();
     let mut not_socket_probes = Vec::new();
-    if compiled.filesystem.is_some() {
+    if compiled.filesystem.is_some() && !host_root_composition {
         hidden_probes.extend(
             forbidden
                 .directories

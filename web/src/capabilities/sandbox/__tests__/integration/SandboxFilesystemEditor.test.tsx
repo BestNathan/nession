@@ -271,13 +271,14 @@ describe('Sandbox Filesystem editor', () => {
     );
   });
 
-  it('declares an auto or Project Location Workspace only under an image RootFS', async () => {
+  it('declares an auto or Project Location Workspace under a Local RootFS', async () => {
     render(<Harness />);
-    await screen.findByText(/requires an image RootFS/);
-    expect(screen.getByTestId('sandbox-workspace-auto')).toBeDisabled();
-    expect(screen.getByTestId('sandbox-workspace-project')).toBeDisabled();
+    // A Local RootFS is a Host-root composition; it no longer needs a Base
+    // Runtime image before a Workspace can be selected (#3792, #3793).
+    expect(screen.queryByText(/requires an image RootFS/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('sandbox-workspace-auto')).toBeEnabled();
+    expect(screen.getByTestId('sandbox-workspace-project')).toBeEnabled();
 
-    await chooseRootfs([image('base', DIGEST, 'base-runtime')]);
     await userEvent.click(screen.getByTestId('sandbox-workspace-auto'));
     expect(screen.getByTestId('sandbox-filesystem-preview-workspace')).toHaveTextContent(
       'Auto by Session name',

@@ -643,17 +643,32 @@ pub(crate) fn validate_working_dir(
             "the Session working directory must be absolute".to_string(),
         ));
     }
-    if filesystem.is_some_and(|filesystem| filesystem.composition.is_some()) {
-        // The composed root does not exist on the host; `/workspace` is the
-        // only writable working tree and Bubblewrap creates/chdirs into it.
+    if let Some(composition) = filesystem.and_then(|filesystem| filesystem.composition.as_ref()) {
         let workspace = Path::new("/workspace");
-        if path != workspace && !path.starts_with(workspace) {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "the composition working directory {} must be /workspace or below",
-                path.display()
-            )));
+        let inside_workspace = path == workspace || path.starts_with(workspace);
+        if composition.base.is_some() {
+            // The composed root does not exist on the host; `/workspace` is
+            // the only writable working tree and Bubblewrap creates/chdirs
+            // into it.
+            if !inside_workspace {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "the composition working directory {} must be /workspace or below",
+                    path.display()
+                )));
+            }
+            return Ok(path.to_path_buf());
         }
-        return Ok(path.to_path_buf());
+        // A Host-root composition keeps every host path visible. A
+        // `/workspace` working directory needs the prepared Workspace view;
+        // any other path is validated as a real host directory below.
+        if inside_workspace {
+            if composition.workspace.is_none() {
+                return Err(SandboxError::InvalidPolicy(
+                    "a /workspace working directory requires a prepared Workspace view".to_string(),
+                ));
+            }
+            return Ok(path.to_path_buf());
+        }
     }
     let metadata = std::fs::metadata(path).map_err(|error| {
         SandboxError::InvalidPolicy(format!(
@@ -674,7 +689,14 @@ pub(crate) fn validate_working_dir(
         ))
     })?;
     if let Some(filesystem) = filesystem {
-        if !filesystem.is_visible(&canonical) {
+        // A Host-root composition exposes the host root read-only; its
+        // declared access lists are empty by construction, so a canonical
+        // host directory remains visible.
+        let host_root_composition = filesystem
+            .composition
+            .as_ref()
+            .is_some_and(|composition| composition.base.is_none());
+        if !host_root_composition && !filesystem.is_visible(&canonical) {
             return Err(SandboxError::InvalidPolicy(format!(
                 "working directory {} is not visible under filesystem.access",
                 canonical.display()
@@ -741,7 +763,10 @@ fn validate_composition_paths(
         )));
     }
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let mut images = vec![&composition.base];
+    let mut images: Vec<&crate::policy::CompiledImage> = Vec::new();
+    if let Some(base) = &composition.base {
+        images.push(base);
+    }
     if let Some(workspace) = &composition.workspace {
         images.extend(workspace.lowers.iter());
     }

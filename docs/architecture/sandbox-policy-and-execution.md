@@ -99,8 +99,9 @@ Git source or raw mount command. The Agent verifies/stages those files from its
 authorized EROFS cache (#3023); `nession-sandbox` re-verifies the exact bytes
 before mounting anything.
 
-- **Input.** `base` (read-only at `/`), optional `workspace.image`
-  (read-only Project source) plus `workspace.write` (the writable directory)
+- **Input.** An optional `base` (read-only at `/`; absent means a Host-root
+  composition, #3792), optional `workspace.image` (read-only Project source)
+  plus `workspace.write` (the writable directory)
   and `workspace.ownership` (`agent` or `project_location`), and zero or more
   `toolchains` whose targets are exactly `/opt/<lowercase name>`. Every image
   carries its `sha256:<64 hex>` digest and an absolute source path. Sources
@@ -143,10 +144,20 @@ before mounting anything.
   Project source image (or an ordered lower set, #3698) is merged with the
   durable Workspace upper/work by the Sandbox-owned
   `nession_sandbox::mount::overlay::OverlayMountManager` (#3582, below); a
-  workspace without an image is a direct writable bind. Bubblewrap starts from
-  an empty tmpfs root, binds the Base Runtime over `/`, installs `/workspace`,
-  then the toolchains, and only then mounts `/dev`, `/proc`, `/tmp`, `/home`
-  and `/run/nession`.
+  workspace without an image is a direct writable bind. For an image-root
+  composition Bubblewrap starts from an empty tmpfs root, binds the Base
+  Runtime over `/`, installs `/workspace`, then the toolchains, and only then
+  mounts `/dev`, `/proc`, `/tmp`, `/home` and `/run/nession`.
+- **Host-root composition (#3792).** When `base` is absent the ordinary host
+  root is the read-only `/`. A selected Workspace is bound at `/workspace` and
+  every toolchain is mounted read-only under a private `/opt` tmpfs, so a
+  toolchain target is never created in the host tree. Because a read-only root
+  bind cannot grow a top-level mountpoint, preparation fails closed before any
+  mount when `/workspace` is required but absent on the Agent, or when an
+  `/opt` mountpoint is required but absent. The persistent Workspace keeps its
+  Agent-owned identity and bytes; a Project Location stays external and is
+  never created or deleted. No Base Runtime image, `base_env` or writable
+  RootFS is accepted without a Base.
 - **Base Runtime contract.** The image must already contain the mountpoint
   directories the backend installs: `/bin/sh` (or `/usr/bin/sh`),
   `/workspace`, every declared `/opt/<name>`, `/dev`, `/proc`, `/home`,
@@ -361,12 +372,14 @@ Server-owned images. The client never sends a native source path; it sends
 `target`, `mode`) on preflight and Enter. The rules split by owner:
 
 - **Policy shape.** `nession-sandbox`/`nession-protocol` validate the canonical
-  composition: at most one `base` (read-only at `/`), at most one `workspace`
-  (overlay at `/workspace`), any number of `toolchain` entries (read-only at
-  `/opt/<name>`). A nonempty composition requires exactly one base, base and
-  toolchain must be read-only, workspace must be overlay, and toolchain targets
-  must be one lowercase-level `/opt/<name>`. A composition and
-  `filesystem.access` remain mutually exclusive.
+  composition: at most one `base` (read-only at `/`; optional for a Host-root
+  composition), at most one `workspace` (overlay at `/workspace`), any number
+  of `toolchain` entries (read-only at `/opt/<name>`). An image-root
+  composition requires its Base and a Workspace; a Host-root composition may
+  carry only toolchains and/or a Workspace, and never `base_writable` or
+  `base_env`. Base and toolchain must be read-only, workspace must be overlay,
+  and toolchain targets must be one lowercase-level `/opt/<name>`. A
+  composition and `filesystem.access` remain mutually exclusive.
 - **Server authorization.** The Server validates the selection shape, requires
   every digest to be Ready in the Image Manager, and mints one
   `grant_sandbox_access(session_id, digest)` grant per image on the Enter
