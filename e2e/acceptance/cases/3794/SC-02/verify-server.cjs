@@ -1,8 +1,8 @@
 'use strict';
-// #3794 SC-02: a created Managed Session persists its immutable resolved image
-// and workspace snapshot. Later Project edits change only what a new Session
-// would receive; a refused prepare records failure and never falls back to
-// Native or disturbs another Session's managed context.
+// #3794 SC-02 (Server): a created Managed Session persists its immutable
+// resolved image and workspace snapshot. Later Project edits change only what
+// a new Session would receive; a refused prepare records failure and never
+// falls back to Native or disturbs another Session's managed context.
 const { run, targetSha, crateTests, assertRan } = require('../../../shared/control-mode-cases.cjs');
 
 run(({ evidence }) => {
@@ -16,10 +16,6 @@ run(({ evidence }) => {
     'server::handler::tests::server_session_managed_v1::a_refused_managed_create_records_a_truthful_failed_context',
     'server::handler::tests::server_session_managed_v1::deleting_one_managed_context_keeps_another_sessions',
     'server::handler::tests::server_session_managed_v1::a_changed_project_git_source_refuses_a_stale_pinned_image',
-  ]);
-  const agent = crateTests('nession-agent', ['--lib', 'managed_session::tests::']);
-  assertRan(agent, [
-    'managed_session::tests::managed_prepare_downloads_pins_and_builds_the_composition',
   ]);
   evidence.push(
     {
@@ -37,8 +33,7 @@ run(({ evidence }) => {
     {
       type: 'runtime',
       value:
-        'deleting one Session managed context left another Session context intact; the Agent ' +
-        'prepared the composition from the pinned grants and its durable cache',
+        'deleting one Session managed context left another Session context intact',
     },
   );
   return 'The created Session owns its pinned image/workspace snapshot; failures stay Managed and bounded';
