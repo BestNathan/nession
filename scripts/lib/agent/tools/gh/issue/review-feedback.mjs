@@ -62,6 +62,40 @@ export async function publishIssueAuditFeedback(record,api=defaultIssueAuditFeed
     throw Error('Audit review status comment missing authenticated ID');
   return {action:'created',id:created.id};
 }
+// Only a trusted post-readback success may resolve a previously posted
+// needs-review comment. Never create a success comment on an untouched Issue.
+export async function resolveIssueAuditFeedback(record,api=defaultIssueAuditFeedbackApi){
+  const issueNumber=record?.issue?.number;
+  if(!['repaired','contract-pass'].includes(record?.result)||
+     (record.errors??[]).length>0||
+     !Number.isSafeInteger(issueNumber)||issueNumber<1)
+    throw Error('Only authenticated, fully valid Audit results can resolve feedback');
+  const runId=Number(process.env.GITHUB_RUN_ID),attempt=Number(process.env.GITHUB_RUN_ATTEMPT);
+  if(!Number.isSafeInteger(runId)||runId<1||!Number.isSafeInteger(attempt)||attempt<1)
+    throw Error('Missing exact Issue Audit success run identity');
+  const items=await api.list(issueNumber);
+  if(!Array.isArray(items)||items.length>=100)
+    throw Error('Incomplete Issue comment history; refusing ambiguous status reconciliation');
+  const previous=items.filter(x=>x?.user?.login==='github-actions[bot]'&&
+    typeof x.body==='string'&&x.body.startsWith(MARK));
+  if(previous.length>1)throw Error('Multiple Audit review status comments; owner reconciliation required');
+  if(!previous.length)return {action:'absent',id:null};
+  const description=record.result==='repaired'
+    ? 'repaired and independently revalidated'
+    : 'canonical Issue Contract passed without modification';
+  const body=[MARK,'**Issue Audit: resolved — '+description+'**','',
+    '- Source: [Run '+runId+'/'+attempt+']('+ACTIONS+runId+')',
+    '- Outcome: \`'+record.result+'\`',
+    '- Validation: canonical Issue Contract and verification tier confirmed by trusted runner',
+    '- E2E: This status does not attest execution, changes to selected tests or any Pass receipt.',
+    '',
+    'This status supersedes the earlier needs-review diagnosis; original audit run and diagnostics remain available in its Actions log.',
+  ].join('\n');
+  if(previous[0].body===body)return {action:'unchanged',id:previous[0].id};
+  await api.edit(previous[0].id,body);
+  return {action:'resolved',id:previous[0].id};
+}
+
 export async function selfTestIssueAuditFeedback(){
   const oldId=process.env.GITHUB_RUN_ID,oldAttempt=process.env.GITHUB_RUN_ATTEMPT;
   process.env.GITHUB_RUN_ID='44242491392';
@@ -85,6 +119,16 @@ export async function selfTestIssueAuditFeedback(){
     assert.equal((await publishIssueAuditFeedback({...record,
       review:{...record.review,code:'ISSUE_AUDIT_CONTRACT_REJECTED'}},api)).action,'updated');
     assert.equal(edits,1);
+    const resolved={issue:{number:issueNumber},result:'repaired',errors:[]};
+    assert.equal((await resolveIssueAuditFeedback(resolved,api)).action,'resolved');
+    assert.equal((await resolveIssueAuditFeedback(resolved,api)).action,'unchanged');
+    assert.equal(edits,2);
+    assert.match(comments[0].body,/Issue Audit: resolved/);
+    assert.equal(writes,1,'success only edits the preexisting bot comment');
+    assert.equal((await publishIssueAuditFeedback(record,api)).action,'updated');
+    assert.equal(edits,3,'later rejection reopens the same bot comment');
+    await assert.rejects(resolveIssueAuditFeedback({...resolved,errors:['invalid E2E']},api),
+      /Only authenticated/);
     assert.throws(()=>formatIssueAuditFeedback({issueNumber,runId:0,attempt:1,
       code:record.review.code}),/Invalid trusted/);
     await assert.rejects(publishIssueAuditFeedback({...record,result:'repaired'},api),
