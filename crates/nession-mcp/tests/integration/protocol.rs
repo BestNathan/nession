@@ -30,9 +30,14 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
     ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::project::v1::{
+    ProjectGetPayload, ProjectGetResponsePayload, ProjectListResponsePayload,
+};
 use nession_protocol::contracts::session::v1::{
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
+    WebSessionsListResponse,
 };
 use rmcp::model::{CallToolRequestParams, ContentBlock, ProtocolVersion};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -92,6 +97,62 @@ impl ClusterBackend for Recorder {
                     "os": "linux"
                 }
             }]
+        }))
+    }
+
+    async fn list_sessions(
+        &self,
+        agent_id: Option<&str>,
+        force: bool,
+    ) -> Result<WebSessionsListResponse, ToolError> {
+        self.push(format!(
+            "cluster.list_sessions:{}:{force}",
+            agent_id.unwrap_or("*")
+        ));
+        typed(json!({ "sessions": [], "stale_agents": [] }))
+    }
+
+    async fn project_list(&self) -> Result<ProjectListResponsePayload, ToolError> {
+        self.push("cluster.project_list");
+        typed(json!({ "projects": [] }))
+    }
+
+    async fn project_get(
+        &self,
+        payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ToolError> {
+        self.push(format!("cluster.project_get:{}", payload.project_id));
+        typed(json!({
+            "success": true,
+            "project": {
+                "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+                "name": "Test Project",
+                "description": null,
+                "source": null,
+                "locations": [{ "agent_id": "agent-1", "path": "/srv/project" }],
+                "session_defaults": null,
+                "image_digest": null,
+                "created_at": 1,
+                "updated_at": 2
+            }
+        }))
+    }
+
+    async fn create_project_session(
+        &self,
+        payload: ClientSessionCreatePayload,
+    ) -> Result<ClientSessionCreateResponsePayload, ToolError> {
+        self.push(format!(
+            "cluster.create_project_session:{}:{}:{}",
+            payload.agent_id,
+            payload.name,
+            payload.project_id.as_deref().unwrap_or("none")
+        ));
+        typed(json!({
+            "success": true,
+            "session_id": format!("{}:{}", payload.agent_id, payload.name),
+            "project_id": payload.project_id,
+            "warnings": []
         }))
     }
 
@@ -528,6 +589,10 @@ async fn modern_stateless_requests_need_no_initialize_and_advertise_tools() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_project_list",
+            "nession_server_project_get",
+            "nession_server_project_session_list",
+            "nession_server_project_session_create",
             "nession_server_env_list",
             "nession_server_env_get",
             "nession_server_env_write",
@@ -694,9 +759,27 @@ async fn every_successful_tool_call_returns_declared_structured_content() {
         .as_array()
         .expect("tools")
         .clone();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 15);
     let calls = [
         ("nession_server_list_agents", json!({})),
+        ("nession_server_project_list", json!({})),
+        (
+            "nession_server_project_get",
+            json!({ "project_id": "project-123e4567-e89b-42d3-a456-426614174000" }),
+        ),
+        (
+            "nession_server_project_session_list",
+            json!({ "project_id": "project-123e4567-e89b-42d3-a456-426614174000" }),
+        ),
+        (
+            "nession_server_project_session_create",
+            json!({
+                "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+                "agent_id": "agent-1",
+                "name": "dev",
+                "target": { "kind": "existing", "working_dir": "/srv/project" }
+            }),
+        ),
         ("nession_server_env_list", json!({})),
         ("nession_server_env_get", json!({ "name": "prod.env" })),
         (
@@ -951,7 +1034,7 @@ async fn the_legacy_initialize_lifecycle_still_works() {
             .as_array()
             .expect("tools")
             .len(),
-        11
+        15
     );
 
     let call = request(
@@ -1317,7 +1400,7 @@ async fn the_official_client_negotiates_modern_protocol_without_initialize() {
     assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
 
     let tools = running.list_tools(None).await.expect("tools/list");
-    assert_eq!(tools.tools.len(), 11);
+    assert_eq!(tools.tools.len(), 15);
 
     let result = running
         .call_tool(CallToolRequestParams::new("nession_server_list_agents"))
@@ -1352,7 +1435,7 @@ async fn the_official_client_keeps_the_legacy_lifecycle() {
     );
 
     let tools = running.list_tools(None).await.expect("tools/list");
-    assert_eq!(tools.tools.len(), 11);
+    assert_eq!(tools.tools.len(), 15);
     let result = running
         .call_tool(
             CallToolRequestParams::new("nession_agent_create_session").with_arguments(
