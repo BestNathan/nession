@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // #2010. Real, tightly scoped Developer proof with encrypted SDK-native Session.
-// Run ONLY after trusted Store-backed admission. This sandbox receives a
+// Run ONLY after trusted Store-backed admission. This Node process receives a
 // Provider key, never Git Writer/Controller/Publisher credentials. Untrusted
 // model edits are evidence/proposals, NOT accepted commits or PRs.
 import fs from 'node:fs';
@@ -18,8 +18,8 @@ import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[a-f0-9]{40}$/;
-// Stable across Docker jobs for the same Issue/Agent, isolated per ephemeral
-// container. Cross-Runner durability still belongs to encrypted agent-store.
+// Stable local identity for the historical #1997 Cursor native Store.
+// Cross-Runner durability still belongs to encrypted agent-store.
 export const CURSOR_LOCAL_ROOT='/tmp/nession-cursor-issue-1997';
 export const CURSOR_WORKSPACE_PATH=path.join(CURSOR_LOCAL_ROOT,'workspace');
 export const CURSOR_JSONL_PATH=path.join(CURSOR_LOCAL_ROOT,'jsonl');
@@ -165,16 +165,13 @@ export function assertUnprivilegedDeveloperEnvironment(env){
 async function main(){
   if(process.argv.length!==4)fail('usage: verified-admission.json output-directory');
   assertUnprivilegedDeveloperEnvironment(process.env);
-  // The SDK's local.sandboxOptions is unsupported on GitHub runners.
-  // The sole production execution route is now an OS-isolated Docker process:
-  // separate disposable Git checkout, read-only program/SDK mounts, no host
-  // runner credentials, no capabilities, no writable root, bounded resources.
-  if(process.env.NESSION_DEVELOPER_ISOLATED!=='docker-v1'||
-     process.env.GITHUB_WORKSPACE!=='/workspace'||
-     process.env.CURSOR_SDK_ROOT!=='/sdk'||
-     process.env.RUNNER_TEMP!=='/tmp'||
-     !fs.existsSync('/.dockerenv'))
-    fail('OS-isolated Docker worker is mandatory, not local SDK sandbox');
+  // Cursor SDK sandbox is optional on GitHub Actions and unsupported there.
+  // Execute directly on the Runner using the signed Store admission and
+  // existing Provider tool allowlist, never a Docker/container precondition.
+  if(!path.isAbsolute(process.env.GITHUB_WORKSPACE??'')||
+     !path.isAbsolute(process.env.CURSOR_SDK_ROOT??'')||
+     !path.isAbsolute(process.env.RUNNER_TEMP??''))
+    fail('Node Developer requires absolute Runner workspace, SDK and temp paths');
   const a=readAdmission(process.argv[2]),resuming=Object.hasOwn(a,'resume_from');
   const repairing=a.task==='repair';
   if(repairing&&!resuming)fail('Repair requires original Provider-native Session');
@@ -188,8 +185,8 @@ async function main(){
     fail('Cursor SDK digest/version differs from pinned Environment version');
   const model=cursorModel(process.env);
   // Do not let the SDK index its native Agent under a new random cwd/store
-  // on each Slice. This root is private to one unprivileged Docker run and
-  // must be absent; never merge another action's local native state.
+  // on each Slice. The fixed local state root must be absent before use;
+  // never merge another action's local native state.
   if(fs.existsSync(CURSOR_LOCAL_ROOT))fail('fixed Cursor local state root is occupied');
   fs.mkdirSync(CURSOR_LOCAL_ROOT,{mode:0o700});
   let workspace=CURSOR_WORKSPACE_PATH;
@@ -206,15 +203,15 @@ async function main(){
     fs.mkdirSync(nativeStore,{mode:0o700});
     if(resuming){
       const names=['agents.ndjson','checkpoints.ndjson','runs.ndjson','run_events.ndjson'];
-      if(fs.readdirSync('/resume').sort().join(',')!==names.sort().join(','))
+      if(fs.readdirSync(path.join(process.env.RUNNER_TEMP,'development-native')).sort().join(',')!==names.sort().join(','))
         fail('exact trusted restored native store missing');
       for(const name of names){
-        const source=path.join('/resume',name),stat=fs.lstatSync(source);
+        const source=path.join(process.env.RUNNER_TEMP,'development-native',name),stat=fs.lstatSync(source);
         if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)fail('unsafe native file');
         fs.copyFileSync(source,path.join(nativeStore,name),fs.constants.COPYFILE_EXCL);
       }
       // Only a committed, authenticated native Agent document can select cwd.
-      // This exact path no longer exists in the fresh disposable container.
+      // This exact path no longer exists in the fresh disposable Runner task.
       workspace=originalCursorWorkspace(fs.readFileSync(path.join(nativeStore,'agents.ndjson'),'utf8'),
         'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6');
       if(fs.existsSync(workspace))fail('restored native workspace path is already occupied');
@@ -242,8 +239,8 @@ async function main(){
       if(fs.existsSync(target))fail('fixture unexpectedly exists in source checkout');
       fs.writeFileSync(target,initial,{flag:'wx'});
     }
-    const issue=JSON.parse(fs.readFileSync('/context/issue.json','utf8'));
-    const comments=JSON.parse(fs.readFileSync('/context/comments.json','utf8'));
+    const issue=JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP,'development-context','issue.json'),'utf8'));
+    const comments=JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP,'development-context','comments.json'),'utf8'));
     if(issue.number!==1997||issue.state!=='open'||issue.pull_request||
         typeof issue.body!=='string'||issue.body.length>64000||issue.comments>100||
         !Array.isArray(comments)||comments.length>100)fail('live Issue synchronization missing');
@@ -279,19 +276,18 @@ async function main(){
       JSON.stringify({number:1997,body:issue.body,recent_comments:recent});
     // SDK confines available native tools to read, grep and edit (no shell);
     // settingSources=[] forbids ambient project configuration injection.
-    // Cursor SDK file discovery requires ripgrep inside the *same* isolated
-    // container, not merely on the trusted Actions runner. A missing or
-    // unusable binary is a pre-model error, never a reason to drop evidence.
-    if(process.env.CURSOR_RIPGREP_PATH!=='/usr/bin/rg')
-      fail('Cursor SDK ripgrep absolute path not configured inside isolated Worker');
+    // The SDK requires a usable ripgrep binary on the same Node Runner.
+    // Its optional sandbox is skipped; missing Provider dependencies still fail.
+    if(!path.isAbsolute(process.env.CURSOR_RIPGREP_PATH??''))
+      fail('Cursor SDK ripgrep absolute path not configured on Runner');
     let ripgrep;
     try{
-      ripgrep=execFileSync('rg',['--version'],{
+      ripgrep=execFileSync(process.env.CURSOR_RIPGREP_PATH,['--version'],{
         encoding:'utf8',timeout:5000,stdio:['ignore','pipe','ignore'],
       }).split('\n')[0];
-    }catch{fail('isolated Cursor SDK ripgrep runtime unavailable before Provider call');}
+    }catch{fail('Cursor SDK ripgrep runtime unavailable before Provider call');}
     if(!/^ripgrep [0-9]+\.[0-9]+\.[0-9]+/.test(ripgrep))
-      fail('unrecognized isolated Cursor SDK ripgrep binary');
+      fail('unrecognized Cursor SDK ripgrep binary');
     console.log('Cursor SDK local file-search runtime verified: '+ripgrep);
     invokedAt=Date.now();
     const response=await runCursorSession({
