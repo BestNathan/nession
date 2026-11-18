@@ -11,7 +11,7 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery,
   recoverAttestedRepairRuntimeFailure,
   recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
-  recoverAttestedQwenPreflightV3}
+  recoverAttestedQwenPreflightV3,recoverAttestedQwenCliFailure}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_JSON_FAILURE} from './outbox.mjs';
@@ -39,6 +39,8 @@ import {SOURCE as QWEN_KEY_FAILURE,
   verifyQwenPreflightFailureV2Live,
   verifyQwenPreflightFailureV3Live}
   from './qwen-preflight-failure.mjs';
+import {SOURCE as QWEN_CLI_FAILURE,verifyQwenCliFailureLive}
+  from './qwen-cli-failure.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -50,6 +52,8 @@ export const REVIEWER_PREMODEL_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3433 run=43667393107';
 export const REVIEWER_JSON_RECOVERY_COMMENT=
   '/nession recover-review-json issue=3433 run=43681851455';
+export const QWEN_CLI_RECOVERY_COMMENT=
+  '/nession recover-qwen-cli issue=3784 run=44250586057';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
@@ -110,6 +114,14 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     event.comment.body===REVIEWER_JSON_RECOVERY_COMMENT&&
     issue===REVIEWER_JSON_FAILURE.issue&&
     actionId===REVIEWER_JSON_FAILURE.action_id;
+  const cliRecoveryComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===QWEN_CLI_FAILURE.issue&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&
+    event.comment.body===QWEN_CLI_RECOVERY_COMMENT&&
+    issue===QWEN_CLI_FAILURE.issue&&
+    actionId===QWEN_CLI_FAILURE.action_id;
   const recoveryComment=commanded&&event?.action==='created'&&
     event?.issue?.number===REVIEWER_PREMODEL_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
@@ -130,7 +142,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&reviewCommand?.[1]===String(issue)&&
     reviewCommand?.[2]===actionId;
-  const permitted=publisherWake||ownerReview||ownerRepair||recoveryComment||jsonRecovery||(commanded
+  const permitted=publisherWake||ownerReview||ownerRepair||
+    recoveryComment||jsonRecovery||cliRecoveryComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -323,7 +336,10 @@ async function main(){
     event?.comment?.body===REVIEWER_PREMODEL_RECOVERY_COMMENT;
   const reviewerJsonRecovery=commanded&&
     event?.comment?.body===REVIEWER_JSON_RECOVERY_COMMENT;
-  const issue=commanded?(qwenV2CommentAction?3001:
+  const recoveringQwenCli=commanded&&
+    event?.comment?.body===QWEN_CLI_RECOVERY_COMMENT;
+  const issue=commanded?(recoveringQwenCli?QWEN_CLI_FAILURE.issue:
+    qwenV2CommentAction?3001:
     ownerReviewCommand?Number(ownerReviewCommand[1]):
     ownerRepairCommand?Number(ownerRepairCommand[1]):
     reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.issue:
@@ -346,7 +362,8 @@ async function main(){
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=ownerReviewCommand?.[2]??null;
   const newRepairAction=ownerRepairCommand?.[2]??null;
-  const actionId=commanded?(qwenV2CommentAction??newReviewAction??newRepairAction??
+  const actionId=commanded?(recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
+    qwenV2CommentAction??newReviewAction??newRepairAction??
     (reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.action_id:null)??
     (reviewerJsonRecovery?REVIEWER_JSON_FAILURE.action_id:null)??
     (recoveringRepair||retryingRepair?
@@ -378,6 +395,25 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recoveringQwenCli){
+      // The Owner command only names the immutable failed Run. The Controller
+      // independently checks exact Run/Job/Artifact/log and Store CAS before
+      // generating a new signed Action. No retry of the failed GitHub attempt.
+      const proof=await verifyQwenCliFailureLive(token);
+      const recovered=recoverAttestedQwenCliFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
     if(reviewerJsonRecovery){
       // Source-attest the exact completed failed native Reviewer Run and
       // absence of any accepted verdict Artifact BEFORE the Store CAS.
