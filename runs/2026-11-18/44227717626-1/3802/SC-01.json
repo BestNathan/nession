@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9d92d856e0d04a56606696fa131844de0a5f1760123a5c8ad818dfbf5d110ef6",
+  "run_id": 44227717626,
+  "run_attempt": 1,
+  "issue": 3802,
+  "criterion": "SC-01",
+  "criterion_text": "In detached or attached real bash/zsh tmux Sessions, starting a foreground command (including one that emits no output) yields working and regaining prompt yields idle, without using terminal-output silence as a timer.",
+  "stage": "staging",
+  "target_sha": "ef8808b630069a1705fcb9483c66ac677c772b6f",
+  "contract_sha256": "0ac6352a093adb5b9e0119139d07073fe822ca2ee8f66f40036d04c618a50fc4",
+  "case_revision": "ef8808b630069a1705fcb9483c66ac677c772b6f",
+  "case_tree_sha": "dece3b8a13ccd8fc116101dd0b669ee8982f808f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T03:07:07.422Z",
+  "finished_at": "2026-11-18T03:08:22.297Z",
+  "duration_ms": 74875,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A real Shell Pane follows its foreground process group between prompt and work",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA ef8808b630069a1705fcb9483c66ac677c772b6f: detached real bash and zsh tmux Panes reported idle at the prompt and working for a silent foreground `sleep` and a blocking `cat`; regaining the prompt returned idle without an output timer"
+        }
+      ],
+      "duration_ms": 68929,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44227717626,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ef8808b630069a1705fcb9483c66ac677c772b6f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44227717626",
+    "record_path": "runs/2026-11-18/44227717626-1/3802/SC-01.json",
+    "source_result_sha256": "fbba6f3df99e943ad29a7b874b061d845d17be7afb92838e6652ef824819cdb9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44227717626-1",
+    "sha256": "fbba6f3df99e943ad29a7b874b061d845d17be7afb92838e6652ef824819cdb9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44227717626",
+    "durability": "time-limited; object archival not configured"
+  }
+}
