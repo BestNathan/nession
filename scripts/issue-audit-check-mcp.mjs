@@ -82,7 +82,7 @@ function fixture(){
     body:'## Requirements: Runner\n### Success Criteria\n- [ ] SC-01 works\n'+
       '## Acceptance Report\n| Criterion | Result | Evidence |\n'+
       '|---|---|---|\n| SC-01 | Pending | awaiting tests |\n'+
-      '## Product alignment\n- [x] aligned\n'+
+      '## Product alignment\n- [x] aligned\n\n**Status:** Approved\n'+
       '## E2E Verification\n### New\n- none: Node-only test\n'+
       '### Regression\n- none: same\n'+
       '## E2E Report\n| ID | Type | Result | Evidence |\n|---|---|---|---|'};
