@@ -26,8 +26,11 @@ through arbitrary workflow inputs.
    the Sealed Secrets controller PRIVATE key to GitHub.
 
 2. Create protected GitHub Environment "staging-mcp" with required reviewers
-   and main-branch restriction. Add Environment Variable
+   and main-branch restriction. Add public variable
    SEALED_SECRETS_CERT_B64 = base64-encoded public.pem (single line).
+   Put it at the repository level to reuse a single cluster sealing certificate
+   across environments, or override it at Environment level if targets use
+   different clusters. The private controller key never goes to GitHub.
    Example: base64 < public.pem | tr -d '\n'
 
 3. Add Environment Secret K8S_SECRET_DATA_JSON as a JSON map. It must contain
