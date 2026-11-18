@@ -13,7 +13,27 @@ const JOBS = [
 ];
 function deny(message) { throw Error('staging GHCR source: ' + message); }
 
+// Production Staging release validation stays strict across all four roles.
 export function verifyRelease(run, inventory, expectedSha) {
+  return verifyReleaseJobs(run, inventory, expectedSha, JOBS);
+}
+
+// A manual historical benchmark authenticates only the requested product(s).
+// This cannot be called by the deployment verifier's "wait" path.
+export function verifyMirrorRelease(run, inventory, expectedSha, selectedImage) {
+  const roles = ['server', 'agent', 'mcp', 'ui'];
+  if (selectedImage !== 'all' && !roles.includes(selectedImage)) {
+    deny('unsupported manual mirror image');
+  }
+  const selected = selectedImage === 'all' ? roles : [selectedImage];
+  const required = [
+    ...selected.flatMap(role => ['amd64', 'arm64'].map(arch => 'docker-' + role + '-' + arch)),
+    'merge', 'provenance',
+  ];
+  return verifyReleaseJobs(run, inventory, expectedSha, required);
+}
+
+function verifyReleaseJobs(run, inventory, expectedSha, requiredJobs) {
   if (!SHA.test(expectedSha) || run?.head_sha !== expectedSha ||
       run?.path?.split('@')[0] !== PATH ||
       run?.name !== 'Release / Staging Artifacts' ||
@@ -27,11 +47,11 @@ export function verifyRelease(run, inventory, expectedSha) {
     deny('invalid source workflow/branch/repo/SHA/attempt/result');
   }
   const jobs = inventory?.jobs;
-  if (!Array.isArray(jobs) || jobs.length < JOBS.length || jobs.length >= 100 ||
+  if (!Array.isArray(jobs) || jobs.length < requiredJobs.length || jobs.length >= 100 ||
       (inventory.total_count != null && inventory.total_count !== jobs.length)) {
     deny('missing or truncated source jobs');
   }
-  for (const name of JOBS) {
+  for (const name of requiredJobs) {
     const found = jobs.filter(job => job.name === name &&
       job.run_id === run.id &&
       (job.run_attempt == null || job.run_attempt === run.run_attempt));
@@ -91,6 +111,7 @@ async function main() {
   const command = process.argv[2];
   if (command === 'self-test') { selfTest(); return; }
   const sourceSha = process.argv[3];
+  const selectedImage = process.argv[4];
   // A manual main-owned diagnostic can inspect a historical, authenticated
   // Staging release but may not deploy it or claim a current Staging identity.
   const staged = command === 'wait';
@@ -102,8 +123,9 @@ async function main() {
       process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
   if ((!staged && !diagnostic) || !SHA.test(sourceSha) ||
       process.env.GITHUB_REPOSITORY !== REPO || !trustedContext ||
-      !process.env.GH_TOKEN || !process.env.GITHUB_OUTPUT) {
-    deny('invalid trusted execution or usage: self-test | wait <full-sha> | verify-mirror <full-sha>');
+      !process.env.GH_TOKEN || !process.env.GITHUB_OUTPUT ||
+      (staged && selectedImage !== undefined)) {
+    deny('invalid trusted execution or usage: self-test | wait <full-sha> | verify-mirror <full-sha> <image>');
   }
   const api = async route => {
     const response = await fetch('https://api.github.com/repos/' + REPO + route, {
@@ -144,7 +166,9 @@ async function main() {
         api('/actions/runs/' + selected.id +
           '/attempts/' + selected.run_attempt + '/jobs?per_page=100'),
       ]);
-      const verified = verifyRelease(run, jobs, sourceSha);
+      const verified = diagnostic
+        ? verifyMirrorRelease(run, jobs, sourceSha, selectedImage)
+        : verifyRelease(run, jobs, sourceSha);
       if (staged) {
         const branch = await api('/branches/staging');
         if (branch.commit?.sha !== sourceSha) {
@@ -156,7 +180,10 @@ async function main() {
         'short_sha=' + verified.short_sha + '\n' +
         'source_run_id=' + verified.source_run_id + '\n' +
         'source_run_attempt=' + verified.source_run_attempt + '\n');
-      console.log('TRUSTED_STAGING_GHCR_V1 ' + JSON.stringify(verified));
+      console.log((diagnostic ? 'TRUSTED_MAC_MIRROR_SOURCE_V1 ' :
+        'TRUSTED_STAGING_GHCR_V1 ') + JSON.stringify({
+          ...verified, ...(diagnostic ? {selected_image: selectedImage} : {}),
+        }));
       return;
     }
     if (diagnostic) {
