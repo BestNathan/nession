@@ -4,23 +4,20 @@
 // verified, while busy/waiting/foreign/stale targets fail without creating a
 // concurrent transcript writer.
 //
-// The deterministic Tool contracts prove mode/identity/foreign-target refusal.
-// SCN-03's live interactive Claude paths need a runner this Case does not have,
-// so the criterion stays Pending instead of claiming them.
+// This verifier pins the Tool's mode/identity/foreign-target contracts in
+// source; `verify-live.cjs` and `verify-live-shell.cjs` execute the live
+// in-process and Shell paths against a real CLI. The Case is selected only by
+// the `live-cli` lane (result_policy all-pass), so fixtures alone cannot Pass.
 const {
   run, crateTests, assertRan, isolatedTmuxEnv,
 } = require('../../../shared/mcp-cases.cjs');
-const { pendingRealCli } = require('../../../shared/claude-cases.cjs');
 
-const env = isolatedTmuxEnv('nession-3779-sc02');
-const evidence = [];
-
-try {
+run(({ evidence }) => {
   const tests = crateTests(
     'nession-claude-code',
     ['--lib', 'tools::nession_claude_enter::'],
     600000,
-    env,
+    isolatedTmuxEnv('nession-3779-sc02'),
   );
   assertRan(tests, [
     'tools::nession_claude_enter::tests::resume_returns_the_selected_conversation',
@@ -34,14 +31,5 @@ try {
     type: 'runtime',
     value: 'enter requires an explicit agent_id/session_id, `new` chooses the conversation id itself, `resume` requires an explicit conversation_id and refuses omission/blank, and a foreign Agent target is refused before any input',
   });
-} catch (error) {
-  run(() => {
-    throw error;
-  });
-  return;
-}
-
-pendingRealCli(
-  evidence,
-  'The live Shell-launch, in-process /clear && /resume, busy/waiting refusal and one-writer paths therefore remain unproven at this stage.',
-);
+  return 'the enter Tool contracts are pinned in source; the live verifiers drive the in-process and Shell paths with a real CLI';
+});
