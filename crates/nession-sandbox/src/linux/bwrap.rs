@@ -605,6 +605,66 @@ mod tests {
     }
 
     #[test]
+    fn a_host_root_composition_binds_the_workspace_and_a_private_opt() {
+        let toolchain = format!("sha256:{}", "c".repeat(64));
+        let policy = compiled(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "composition": {
+                    "workspace": { "write": "/tmp/ws" },
+                    "toolchains": [{
+                        "digest": toolchain,
+                        "source": "/tmp/mounts/tool.erofs",
+                        "target": "/opt/go",
+                    }],
+                },
+            },
+        }));
+        let resolved = crate::linux::erofs::ResolvedComposition {
+            base: None,
+            base_writable: false,
+            workspace: Some(crate::linux::erofs::WorkspaceMount::Bind(PathBuf::from(
+                "/tmp/ws",
+            ))),
+            toolchains: vec![(PathBuf::from("/opt/go"), PathBuf::from("/tmp/mounts/go"))],
+        };
+        let plan = build(
+            &policy,
+            Path::new("/workspace"),
+            &ForbiddenPaths::default(),
+            &bridge(),
+            &[],
+            &[],
+            &[],
+            Path::new("/tmp/seccomp"),
+            None,
+            &["/bin/sh".to_string(), "-l".to_string()],
+            Some(&resolved),
+            &settings(),
+        )
+        .expect("host-root plan");
+        let has = |parts: &[&str]| {
+            plan.argv
+                .windows(parts.len())
+                .any(|window| window.iter().map(String::as_str).eq(parts.iter().copied()))
+        };
+        assert!(
+            has(&["--ro-bind", "/", "/"]),
+            "the host root is the read-only root"
+        );
+        assert!(
+            !has(&["--tmpfs", "/"]),
+            "a Host-root composition is not an empty tmpfs"
+        );
+        assert!(has(&["--tmpfs", "/workspace"]));
+        assert!(has(&["--bind", "/tmp/ws", "/workspace"]));
+        assert!(has(&["--tmpfs", "/opt"]));
+        assert!(has(&["--ro-bind", "/tmp/mounts/go", "/opt/go"]));
+    }
+
+    #[test]
     fn exposing_the_tmux_socket_is_refused() {
         let filesystem = compiled(serde_json::json!({
             "enabled": true,
