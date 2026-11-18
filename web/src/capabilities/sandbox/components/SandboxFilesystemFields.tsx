@@ -25,6 +25,7 @@ import { SandboxStringListEditor } from './SandboxStringListEditor';
 export interface SandboxFilesystemFieldsProps {
   context: SandboxCurrentContext;
   sessionId: string | null;
+  targetPlatform: string | null;
   draft: SandboxDraftState;
   workingDir: string;
   workingDirError: string | undefined;
@@ -43,6 +44,7 @@ export interface SandboxFilesystemFieldsProps {
 export function SandboxFilesystemFields({
   context,
   sessionId,
+  targetPlatform,
   draft,
   workingDir,
   workingDirError,
@@ -59,6 +61,8 @@ export function SandboxFilesystemFields({
     <>
       <SandboxFilesystemRootfs
         context={context}
+        sessionId={sessionId}
+        targetPlatform={targetPlatform}
         rootfs={rootfs}
         observation={
           rootfs?.kind === 'image' ? observations.get(rootfs.digest) : undefined
@@ -66,6 +70,8 @@ export function SandboxFilesystemFields({
         onChange={(next) => draft.setFilesystemRootfs(next)}
       />
       <SandboxFilesystemMounts
+        sessionId={sessionId}
+        targetPlatform={targetPlatform}
         mounts={mounts}
         observations={observations}
         onAdd={(mount) => draft.addMount(mount)}

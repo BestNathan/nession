@@ -299,7 +299,7 @@ sweep over registry rows.
 |---|---|---|
 | `server.image.list` | Query | Complete legacy inventory, newest first, paginated and searchable |
 | `server.image.get` | Query | Exactly one of `digest` or `alias` |
-| `server.image.library.list` | Query | Server Catalog Library page: Repository/Tags, Manifest identity, platform, representation and closure |
+| `server.image.library.list` | Query | Server Catalog Library page: Repository/Tags, Manifest identity, advisory role/default target, platform, representation and closure |
 | `server.image.impact.get` | Query | Known Project/Session pins, other Tags, leases and Compose references for one Tag |
 | `server.image.tag.set` | Inline | CAS-guarded Tag create (expected absent) or move (exact expected digest) |
 | `server.image.tag.remove` | Inline | CAS-guarded logical Tag unlink with explicit reference-impact confirmation |

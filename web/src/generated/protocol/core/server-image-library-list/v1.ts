@@ -50,6 +50,16 @@ manifest_digest?: string | null, media_type?: string | null,
  */
 kind?: string | null, 
 /**
+ * The advisory `io.nession.kind` role, when the Manifest annotations are
+ * readable: `base_runtime`, `tool` or `directory` (#3793).
+ */
+image_kind?: string | null, 
+/**
+ * The advisory `io.nession.mount.default` target, when readable and
+ * valid. It is a default suggestion, never an authorization (#3793).
+ */
+mount_default?: string | null, 
+/**
  * `os/arch`, when the catalog records or verifies a platform.
  */
 platform?: string | null, representation: ImageLibraryRepresentation, 
