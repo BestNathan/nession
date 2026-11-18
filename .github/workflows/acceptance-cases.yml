@@ -473,6 +473,7 @@ jobs:
         run: node workspace/scripts/ci/web-preview-parity.mjs workspace
 
       - name: Build Rust runtime
+        id: runtime-build
         if: steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0'
         run: cd workspace && cargo build -p nession-server -p nession-agent -p nession-cli
 
@@ -569,7 +570,10 @@ jobs:
       # a real, authenticated external agent CLI and fail closed without the
       # gateway.
       - name: Execute live CLI Cases with the qwen gateway
-        if: steps.select-live.outcome == 'success' && steps.select-live.outputs.count != '0'
+        # Independent evidence: an unrelated standard-batch failure must not
+        # suppress the live Cases (which are still what proves their criteria).
+        # A cancelled job or a failed runtime build still stops the batch.
+        if: ${{ !cancelled() && steps.select-live.outcome == 'success' && steps.select-live.outputs.count != '0' && steps.runtime-build.outcome == 'success' }}
         env:
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
