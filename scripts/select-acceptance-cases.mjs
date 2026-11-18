@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { discoverCases, CASE_PLATFORMS } from '../e2e/acceptance/contract/cases.mjs';
+import { discoverCases, CASE_PLATFORMS, CASE_RUNNERS } from '../e2e/acceptance/contract/cases.mjs';
 import { buildAcceptanceContext } from './acceptance-executor.mjs';
 import { acceptancePlan, acceptancePlanSection, canonicalAcceptanceStage } from './acceptance-plan.mjs';
 import { validateCaseSelection } from './acceptance-case-selection-contract.mjs';
@@ -14,11 +14,12 @@ const SELF = fileURLToPath(import.meta.url);
 
 export function selectTrustedCases({
   issueNumbers, issues, stage, targetSha, runId, requested = '',
-  runtime = '', platform = '', sourceCaseRoot, deploymentBinding = null,
+  runtime = '', platform = '', runner = '', sourceCaseRoot, deploymentBinding = null,
 }) {
   if (!Array.isArray(issueNumbers) || !Array.isArray(issues)) throw new Error('Issue inputs must be arrays');
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) throw new Error('target must be an exact 40-byte hexadecimal SHA');
   if (platform && !CASE_PLATFORMS.has(platform)) throw new Error('unsupported Acceptance platform: ' + platform);
+  if (runner && !CASE_RUNNERS.has(runner)) throw new Error('unsupported Acceptance runner: ' + runner);
   const manifests = discoverCases(sourceCaseRoot).map(({ manifest }) => manifest);
   const manifestByKey = new Map(
     manifests.map((item) => [item.issue + '/' + item.criterion, item]),
@@ -29,8 +30,9 @@ export function selectTrustedCases({
     .filter((item) => !requested || item.criterion === requested)
     .filter((item) => !runtime || item.runtime === runtime)
     .filter((item) => !platform || item.platform === platform || item.platform === 'both')
-    .map(({ issue, criterion, platform: platformName, runtime: runtimeName, verifiers }) => ({
-      issue, criterion, platform: platformName, runtime: runtimeName,
+    .filter((item) => !runner || item.runner === runner)
+    .map(({ issue, criterion, platform: platformName, runner: runnerName, runtime: runtimeName, verifiers }) => ({
+      issue, criterion, platform: platformName, runner: runnerName, runtime: runtimeName,
       needs_browser: verifiers.some((item) => item.type === 'browser'),
     }));
   // A `when: deployed` criterion carries a `post-merge` compatibility Case,
@@ -61,6 +63,10 @@ export function selectTrustedCases({
       // expected on both platforms and fails closed there.
       const manifest = manifestByKey.get(key);
       if (platform && manifest && manifest.platform !== platform && manifest.platform !== 'both') continue;
+      // A Case declared for another runner lane belongs to that lane. The
+      // standard lane must not report a live-CLI Case missing (and vice
+      // versa); a genuinely absent Case is still expected in its own lane.
+      if (runner && manifest && manifest.runner !== runner) continue;
       // Explicit Case-method obligations must be present. Historical issues
       // without a declared Method retain only their existing source Cases:
       // forcing a Case for all legacy Agent-validated SCs would break them.
@@ -167,6 +173,26 @@ function selfTest() {
       assert.equal(selectedBoth.selected[0].platform, 'both');
     }
 
+    // A live-CLI Case belongs to the credentialed lane. The standard lane
+    // must not select it or report it missing, and the live lane must select
+    // exactly it; an unknown runner fails closed.
+    const liveDir = path.join(root, '46', 'SC-01');
+    fs.mkdirSync(liveDir, { recursive: true });
+    fs.writeFileSync(path.join(liveDir, 'case.yaml'),
+      'schema_version: 1\nissue: 46\ncriterion: SC-01\nstage: staging\nrunner: live-cli\nruntime: full-stack-local\nverifiers:\n  - type: runtime\n    entry: verify.js\nresult_policy: all-pass\n');
+    fs.writeFileSync(path.join(liveDir, 'verify.js'), '// live CLI fixture');
+    const liveIssue = { ...issue, number: 46, body: issueBody('staging', true) };
+    const liveBase = { ...base, issueNumbers: [46], issues: [liveIssue] };
+    const standardLane = selectTrustedCases({ ...liveBase, runner: 'standard' });
+    assert.equal(standardLane.selected.length, 0);
+    assert.equal(standardLane.coverage.status, 'not-applicable');
+    const liveLane = selectTrustedCases({ ...liveBase, runner: 'live-cli' });
+    assert.deepEqual(liveLane.coverage.expected, ['46/SC-01']);
+    assert.equal(liveLane.selected.length, 1);
+    assert.equal(liveLane.selected[0].runner, 'live-cli');
+    assert.throws(() => selectTrustedCases({ ...liveBase, runner: 'windows' }),
+      /unsupported Acceptance runner/);
+
     // A `when: deployed` criterion's post-merge compatibility Case exists in
     // the tree, but without an authenticated binding the executor makes the
     // criterion ineligible — the selector must not count the Case as
@@ -188,7 +214,7 @@ function selfTest() {
     assert.throws(() => selectTrustedCases({ ...postBase, issues: [deployedIssue],
       deploymentBinding: { environment_id: 'production', attested: true } }),
     /wrong-stage\/unknown|no source-aligned Cases/);
-    console.log('trusted Acceptance Case selection: method separation, platform routing, '
+    console.log('trusted Acceptance Case selection: method separation, platform/runner routing, '
       + 'missing coverage, and deployed-binding negatives passed');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -216,6 +242,7 @@ function main() {
     requested: process.env.MANUAL_CRITERION ?? '',
     runtime: process.env.RUNTIME_PROFILE ?? '',
     platform: process.env.ACCEPTANCE_PLATFORM ?? '',
+    runner: process.env.ACCEPTANCE_RUNNER ?? '',
     sourceCaseRoot: caseRoot,
     deploymentBinding,
   });
