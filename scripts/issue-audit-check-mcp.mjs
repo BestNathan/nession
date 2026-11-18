@@ -115,7 +115,8 @@ export async function selfTestAuditMcp(){
   assert.equal(forged.error.code,-32602);
   const sourceFail=makeAuditMcpHandler({issueNumber:3855,
     readIssue:()=>{throw Error('private 403 token string');}});
-  assert.equal(JSON.parse((await sourceFail(req(8,{})).result).content[0].text).code,
+  const untrustedRead=await sourceFail(req(8,{}));
+  assert.equal(JSON.parse(untrustedRead.result.content[0].text).code,
     'ISSUE_AUDIT_PREFLIGHT_SOURCE_UNAVAILABLE');
   assert.equal(await h({jsonrpc:'2.0',method:'notifications/initialized'}),null);
   console.log('issue-audit-check-mcp: fixed target, bounded calls, no shell/mutation, readback and protection fixtures passed');
