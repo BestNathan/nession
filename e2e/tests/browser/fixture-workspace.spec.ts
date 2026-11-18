@@ -203,3 +203,149 @@ test('Memory keeps readable wrapping and bounded scroll at a phone width', async
   );
   expect(pageOverflow).toBeLessThanOrEqual(1);
 });
+
+/**
+ * Shared MCP UI kit (#3772).
+ *
+ * These cases review the kit inside the real Workspace chrome against the
+ * deterministic `mcp-kit` fixture host. The kit is not a product capability:
+ * the capability capsule gains no entry, and the only navigation it renders is
+ * the capability-local server/tool columns.
+ */
+test('MCP kit keeps the Session context and never probes on view (#3772)', async ({ page }) => {
+  await page.goto('/#/fixture/workspace?capability=mcp-kit&mcp=ready');
+  await expect(page.getByTestId('mcp-kit')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'AI · MCP' })).toBeVisible();
+  await expect(page.getByTestId('mcp-kit-host')).toContainText('Current Session · devbox-01');
+
+  // The kit adds no capability-dock entry and no second global navigation.
+  await expect(
+    page.getByRole('navigation', { name: 'Workspace capabilities' }).getByText('MCP'),
+  ).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'MCP Servers' })).toHaveCount(1);
+
+  await expect(page.getByTestId('mcp-server-row')).toHaveCount(3);
+  await expect(page.getByTestId('mcp-server-row').filter({ hasText: 'read-only' })).toHaveCount(1);
+  // A view read is configuration only: no Tools exist before an explicit probe.
+  await expect(page.getByTestId('mcp-tool-row')).toHaveCount(0);
+
+  await page.getByTestId('mcp-server-row').filter({ hasText: 'nession' }).click();
+  await expect(page.getByTestId('mcp-tools-not-probed')).toContainText('never probes');
+  await expect(page.getByTestId('mcp-connection-reachability')).toContainText('Not probed');
+  await expect(page.getByTestId('mcp-connection-loaded')).toContainText('Unknown');
+
+  await page.getByTestId('mcp-connection-test').click();
+  await expect(page.getByTestId('mcp-connection-state')).toHaveText('Reachable');
+  await page.getByTestId('mcp-tool-row').filter({ hasText: 'session.list' }).click();
+
+  // The contract is readable and complete: both schemas and their raw JSON.
+  await expect(page.getByTestId('mcp-schema-input-fields')).toContainText('scope');
+  await expect(page.getByTestId('mcp-schema-input-raw')).toContainText('"required"');
+  await expect(page.getByTestId('mcp-schema-output-fields')).toContainText('sessions');
+
+  // Inspecting never invokes; the Run depth requires an explicit action.
+  await page.getByTestId('mcp-open-runner').click();
+  await expect(page.getByTestId('mcp-result-empty')).toContainText('never triggers a call');
+  await page.getByTestId('mcp-run').click();
+  await expect(page.getByTestId('mcp-argument-error')).toContainText('Required: scope');
+  await page.locator('[data-argument-name="scope"]').fill('current');
+  await page.getByTestId('mcp-run').click();
+  await expect(page.getByTestId('mcp-result-structured')).toContainText('fixture-session');
+  await expect(page.getByTestId('mcp-call-history-row')).toHaveCount(1);
+
+  // The raw envelope keeps unknown fields and redacts credential values.
+  await page.getByTestId('mcp-result-tab-raw').click();
+  await expect(page.getByTestId('mcp-result-raw')).toContainText('unknownField');
+  await expect(page.getByTestId('mcp-result-raw')).toContainText('[redacted]');
+  await expect(page.getByTestId('mcp-result-raw')).not.toContainText('fixture-secret-token');
+
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const desktopOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(desktopOverflow).toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const phoneOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(phoneOverflow).toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 375, height: 812 });
+  const compactOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(compactOverflow).toBeLessThanOrEqual(1);
+});
+
+test('MCP stdio probe needs consent and an external Tool has no output schema (#3772)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture/workspace?capability=mcp-kit&mcp=ready');
+  await expect(page.getByTestId('mcp-kit')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('mcp-server-row').filter({ hasText: 'github' }).click();
+
+  await page.getByTestId('mcp-connection-test').click();
+  await expect(page.getByTestId('mcp-connection-consent')).toContainText('launches');
+  await expect(page.getByTestId('mcp-tool-row')).toHaveCount(0);
+  await page.getByTestId('mcp-connection-consent-confirm').click();
+  await page.getByTestId('mcp-tool-row').filter({ hasText: 'search_repositories' }).click();
+  await expect(page.getByTestId('mcp-schema-output-missing')).toContainText('not advertised');
+  await expect(page.getByTestId('mcp-schema-output-fields')).toHaveCount(0);
+
+  await page.getByTestId('mcp-open-runner').click();
+  await page.locator('[data-argument-name="query"]').fill('nession');
+  await page.getByTestId('mcp-run').click();
+  await expect(page.getByTestId('mcp-result-structured')).toContainText('BestNathan/nession');
+});
+
+test('MCP isError is an answer, and offline inventory is unavailable rather than empty (#3772)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture/workspace?capability=mcp-kit&mcp=error');
+  await expect(page.getByTestId('mcp-kit')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('mcp-server-row').filter({ hasText: 'nession' }).click();
+  await page.getByTestId('mcp-connection-test').click();
+  await page.getByTestId('mcp-tool-row').filter({ hasText: 'session.list' }).click();
+  await page.getByTestId('mcp-open-runner').click();
+  await page.locator('[data-argument-name="scope"]').fill('current');
+  await page.getByTestId('mcp-run').click();
+  await expect(page.getByTestId('mcp-result-is-error')).toContainText('isError: true');
+  await expect(page.getByTestId('mcp-result-structured')).toContainText('PERMISSION_DENIED');
+
+  await page.goto('/#/fixture/workspace?capability=mcp-kit&mcp=offline');
+  await expect(page.getByTestId('mcp-inventory-unavailable')).toContainText(
+    'unavailable, not empty',
+  );
+  await expect(page.getByTestId('mcp-server-empty')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-server-row')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-server-add')).toBeDisabled();
+});
+
+test('MCP configuration is adapter-scoped, honors read-only entries, and confirms removal (#3772)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture/workspace?capability=mcp-kit&mcp=ready&mcpHost=claude');
+  await expect(page.getByTestId('mcp-kit')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'Claude Code · MCP' })).toBeVisible();
+
+  await page.getByTestId('mcp-server-row').filter({ hasText: 'managed-catalog' }).click();
+  await expect(page.getByTestId('mcp-server-read-only')).toContainText('cannot be edited');
+  await expect(page.getByTestId('mcp-server-edit')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-server-remove')).toHaveCount(0);
+
+  await page.getByTestId('mcp-server-add').click();
+  await expect(page.getByTestId('mcp-server-editor')).toBeVisible();
+  await expect(page.getByTestId('mcp-editor-scope')).toContainText('Local');
+  await page.getByTestId('mcp-editor-name').fill('docs');
+  await page.getByTestId('mcp-editor-endpoint').fill('not-a-url');
+  await page.getByTestId('mcp-editor-save').click();
+  await expect(page.getByTestId('mcp-server-editor')).toBeVisible();
+  await page.getByTestId('mcp-editor-endpoint').fill('https://docs.invalid/mcp');
+  await page.getByTestId('mcp-editor-save').click();
+  await expect(page.getByTestId('mcp-server-row').filter({ hasText: 'docs' })).toHaveCount(1);
+
+  await page.getByTestId('mcp-server-row').filter({ hasText: 'docs' }).click();
+  await page.getByTestId('mcp-server-remove').click();
+  await expect(page.getByTestId('mcp-server-remove-confirm')).toContainText('Other scopes');
+  await page.getByTestId('mcp-server-remove-confirm-button').click();
+  await expect(page.getByTestId('mcp-server-row').filter({ hasText: 'docs' })).toHaveCount(0);
+});

@@ -66,6 +66,17 @@ pub const SERVER_SESSION_KILL: &str = "server.session.kill";
 /// `server.info` — Server version, uptime and protocol manifest.
 pub const SERVER_INFO: &str = "server.info";
 
+/// `server.mcp.tools.list` — the Server's validated contribution manifest
+/// (`#3778`).
+pub const SERVER_MCP_TOOLS_LIST: &str = "server.mcp.tools.list";
+
+/// `server.mcp.tool.call` — one authorized Extension-contributed Tool call,
+/// routed by the Server to the explicitly named Agent (`#3778`).
+pub const SERVER_MCP_TOOL_CALL: &str = "server.mcp.tool.call";
+
+/// `agent.mcp.tool.call` — the same call on a direct Agent connection.
+pub const AGENT_MCP_TOOL_CALL: &str = "agent.mcp.tool.call";
+
 /// `server.session.capture-preview` — read-only scrollback capture.
 pub const SERVER_SESSION_CAPTURE_PREVIEW: &str = "server.session.capture-preview";
 

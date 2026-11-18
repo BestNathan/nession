@@ -1,11 +1,16 @@
 //! Session watcher that polls tmux for session changes and notifies the server.
 
 use crate::connection::ServerClientHandle;
+use crate::session::activity::{
+    contexts_from_tmux, ActivityState, AttentionState, SessionActivityCoordinator,
+    SessionActivitySnapshot,
+};
 use crate::tmux::manager::{SessionInfo, SessionManager};
 use anyhow::Result;
+use nession_protocol::contracts::session::v1::AgentSessionActivityPayload;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 /// Status string sent with [`ServerClientHandle::send_session_update`].
@@ -104,8 +109,49 @@ pub struct SessionWatcher {
     poll_interval: Duration,
     /// Previous session state, keyed by session name.
     prev_sessions: HashMap<String, SessionInfo>,
+    /// The Agent's Session Activity coordinator (#3800), when this runtime
+    /// composed one. The watcher refreshes it from verified tmux facts and
+    /// never derives activity itself.
+    activity: Option<Arc<SessionActivityCoordinator>>,
+    /// This Agent process's Activity epoch (#3804).
+    ///
+    /// The Server fences a level by `(epoch, Session, generation)`, so a
+    /// restarted Agent's generation counter may start over at 1 without being
+    /// rejected as stale while the Server still holds the previous process's
+    /// higher generation.
+    activity_epoch: String,
+    /// The last Activity level the Server was told about, per Session. Only a
+    /// successfully enqueued level is recorded, so a refused publish is retried
+    /// on the next poll instead of being remembered as sent.
+    published_activity: HashMap<String, PublishedActivity>,
+    /// Monotonic per-Session Activity generation, never reused in this process.
+    activity_generations: HashMap<String, u64>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
+}
+
+/// The comparable identity of one Activity level.
+///
+/// `observed_at` is deliberately excluded: every probe produces a fresh
+/// observation time, and treating that as a change would publish one frame per
+/// Session per poll — the debounce the issue forbids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublishedActivity {
+    instance_id: String,
+    state: ActivityState,
+    attention: Option<AttentionState>,
+    capability_id: Option<String>,
+}
+
+impl From<&SessionActivitySnapshot> for PublishedActivity {
+    fn from(snapshot: &SessionActivitySnapshot) -> Self {
+        Self {
+            instance_id: snapshot.session_instance_id.clone(),
+            state: snapshot.state,
+            attention: snapshot.attention,
+            capability_id: snapshot.capability_id.clone(),
+        }
+    }
 }
 
 impl SessionWatcher {
@@ -126,9 +172,119 @@ impl SessionWatcher {
             tmux,
             poll_interval: Duration::from_secs(poll_interval_secs),
             prev_sessions: HashMap::new(),
+            activity: None,
+            activity_epoch: uuid::Uuid::new_v4().to_string(),
+            published_activity: HashMap::new(),
+            activity_generations: HashMap::new(),
             shutdown_tx,
             shutdown_rx,
         }
+    }
+
+    /// Attach the Agent's Session Activity coordinator (#3800).
+    ///
+    /// Without one the watcher publishes Session inventory only; with one it
+    /// refreshes the Activity projection after every **successful** tmux
+    /// enumeration. A failed enumeration is never passed on as an empty
+    /// inventory — that would retire every Pane's activity.
+    pub fn with_activity(mut self, activity: Arc<SessionActivityCoordinator>) -> Self {
+        self.activity = Some(activity);
+        self
+    }
+
+    /// Refresh the coordinator from the Session list this poll already read.
+    ///
+    /// The Pane listing is a second query rather than derived from
+    /// `SessionInfo`: only the active Pane's command is in the Session row, and
+    /// aggregating "every actual Session Pane" needs all of them. Its failure
+    /// keeps the previous Activity snapshot instead of manufacturing an empty
+    /// one.
+    async fn reconcile_activity(
+        &self,
+        sessions: &[SessionInfo],
+    ) -> Option<Vec<SessionActivitySnapshot>> {
+        let activity = self.activity.as_ref()?;
+        let panes = match self.tmux.list_panes().await {
+            Ok(panes) => panes,
+            Err(error) => {
+                warn!(
+                    "Session Activity Pane enumeration failed; keeping the previous snapshot: {error:#}"
+                );
+                return None;
+            }
+        };
+        let contexts = contexts_from_tmux(sessions, &panes);
+        Some(activity.reconcile(&contexts).await)
+    }
+
+    /// Publish Activity levels that changed since the last successful enqueue.
+    ///
+    /// `force` is the full-resync path: every observed Session's current level
+    /// is restated even when it is unchanged, because the Server may have lost
+    /// its ephemeral projection. A refuseful enqueue leaves both the remembered
+    /// level and the generation untouched, so the next poll retries the same
+    /// value rather than claiming it was sent.
+    fn publish_activity(
+        &mut self,
+        snapshots: &[SessionActivitySnapshot],
+        force: bool,
+    ) -> Result<()> {
+        // A Session absent from this verified inventory has no level to keep.
+        // The Server removes its row through the inventory's own update/gone
+        // message, and a later appearance is a new observation.
+        self.published_activity.retain(|name, _| {
+            snapshots
+                .iter()
+                .any(|snapshot| &snapshot.session_name == name)
+        });
+
+        for snapshot in snapshots {
+            let level = PublishedActivity::from(snapshot);
+            if !force && self.published_activity.get(&snapshot.session_name) == Some(&level) {
+                continue;
+            }
+            let generation = self
+                .activity_generations
+                .get(&snapshot.session_name)
+                .copied()
+                .unwrap_or(0)
+                + 1;
+            let observed_at_ms = i64::try_from(
+                snapshot
+                    .observed_at
+                    .unwrap_or_else(SystemTime::now)
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis(),
+            )
+            .unwrap_or(i64::MAX);
+            let payload = AgentSessionActivityPayload {
+                agent_id: self.handle.agent_id().to_string(),
+                session_name: snapshot.session_name.clone(),
+                instance_id: snapshot.session_instance_id.clone(),
+                epoch: self.activity_epoch.clone(),
+                generation,
+                state: snapshot.state.as_str().to_string(),
+                attention: snapshot
+                    .attention
+                    .map(|attention| attention.as_str().to_string()),
+                capability_id: snapshot.capability_id.clone(),
+                observed_at_ms,
+            };
+            self.handle
+                .send_session_activity(&snapshot.session_name, payload)?;
+            debug!(
+                session = %snapshot.session_name,
+                state = snapshot.state.as_str(),
+                generation,
+                "published Session Activity level"
+            );
+            self.activity_generations
+                .insert(snapshot.session_name.clone(), generation);
+            self.published_activity
+                .insert(snapshot.session_name.clone(), level);
+        }
+        Ok(())
     }
 
     /// Get a handle that can be used to shut down this watcher.
@@ -190,6 +346,11 @@ impl SessionWatcher {
                 }
             };
 
+            // Activity is Agent-local and does not depend on the current
+            // reconnect intent; refresh it from this verified enumeration
+            // before publication, which may still fail and retry.
+            let activity = self.reconcile_activity(&current_sessions).await;
+
             // Successful enumeration is not a completed re-sync. Every frame
             // must be accepted by the outbound owner before the intent is
             // satisfied: a failed enqueue leaves `prev_sessions` untouched, and
@@ -227,6 +388,20 @@ impl SessionWatcher {
                     e
                 );
                 return Ok(());
+            }
+
+            // The Server's Activity projection is ephemeral, so a full re-sync
+            // restates every level even when it is unchanged. A refused publish
+            // keeps the reconnect intent owed just like the inventory above.
+            if let Some(activity) = activity {
+                if let Err(e) = self.publish_activity(&activity, true) {
+                    warn!(
+                        "Session Activity publication failed during full re-sync; keeping the \
+                         reconnect intent and retrying next poll: {:#}",
+                        e
+                    );
+                    return Ok(());
+                }
             }
 
             // Only the exact request observed before enumeration may be
@@ -269,6 +444,16 @@ impl SessionWatcher {
                 return Ok(());
             }
         };
+
+        if let Some(activity) = self.reconcile_activity(&current_sessions).await {
+            if let Err(e) = self.publish_activity(&activity, false) {
+                // Not recorded as sent, so the next poll retries this level.
+                warn!(
+                    "Session Activity publication failed; retrying next poll: {:#}",
+                    e
+                );
+            }
+        }
 
         // Build a map of current sessions for easy lookup.
         let mut current_map: HashMap<String, SessionInfo> = HashMap::new();
@@ -497,13 +682,20 @@ mod tests {
 /// tmux binary the test owns, and read the ordered frames back from the
 /// outbox the watcher publishes into — no mocked watcher and no mocked
 /// `gone` semantics.
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod enumeration_failure {
     use super::*;
     use crate::connection::outbox::OutboxFrames;
+    use crate::session::activity::{
+        ActivityLevel, ActivityState, SessionActivityContext, SessionActivityCoordinator,
+        SessionActivityProvider, WorkloadClass,
+    };
     use crate::test_support::{FakeTmux, FAKE_TIMEOUT};
     use crate::tmux::cmd::TmuxCmd;
     use std::path::Path;
+    use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
+    use std::time::SystemTime;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     /// Point a manager at a binary that does not exist yet.
@@ -606,6 +798,237 @@ mod enumeration_failure {
             updates.push((name.to_string(), status.to_string(), instance_id));
         }
         updates
+    }
+
+    /// A provider that records each probe and answers one static idle level.
+    struct CountingProvider {
+        probes: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionActivityProvider for CountingProvider {
+        fn id(&self) -> &'static str {
+            "fixture-shell"
+        }
+
+        fn class(&self) -> WorkloadClass {
+            WorkloadClass::GenericShell
+        }
+
+        async fn probe(
+            &self,
+            _context: &SessionActivityContext,
+        ) -> anyhow::Result<Option<ActivityLevel>> {
+            self.probes.fetch_add(1, Ordering::Relaxed);
+            Ok(Some(ActivityLevel {
+                state: ActivityState::Idle,
+                attention: None,
+                workload_ref: None,
+                source_generation: 1,
+                observed_at: SystemTime::now(),
+            }))
+        }
+    }
+
+    /// A fake tmux that answers both listings, so the activity refresh can be
+    /// driven without a real server.
+    const ACTIVITY_LISTING: &str = "\
+case \"$1\" in\n\
+list-sessions)\n\
+  case \"$3\" in\n\
+    '#{session_id}|#{session_name}') printf '%s\\n' '$0|dev' ;;\n\
+    *) printf '%s\\n' 'dev|inc-1|1000|1|0|80|24|/tmp|bash' ;;\n\
+  esac ;;\n\
+list-panes) printf '%s\\n' '$0|@1|1|%1|0|123|/dev/ttys001|0|1|1|bash|w' ;;\n\
+esac\n";
+
+    #[tokio::test]
+    async fn the_watcher_refreshes_activity_only_from_a_successful_pane_enumeration() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        FakeTmux::new(dir.path(), ACTIVITY_LISTING);
+        let (handle, _frames) = ServerClientHandle::test_handle(true);
+        let probes = Arc::new(AtomicUsize::new(0));
+        let activity = SessionActivityCoordinator::new(
+            "agent-a",
+            vec![Arc::new(CountingProvider {
+                probes: Arc::clone(&probes),
+            })],
+        )
+        .expect("one provider composes");
+        let mut watcher = SessionWatcher::new(handle, Arc::new(manager_at(dir.path())), 5)
+            .with_activity(Arc::clone(&activity));
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        let snapshot = activity.snapshot("dev").expect("the Session is observed");
+        assert_eq!(snapshot.session_instance_id, "inc-1");
+        assert_eq!(snapshot.state, ActivityState::Idle);
+        assert_eq!(probes.load(Ordering::Relaxed), 1);
+
+        // A failed Pane enumeration must keep the previous projection rather
+        // than reading as an observed empty inventory.
+        FakeTmux::new(
+            dir.path(),
+            "if [ \"$1\" = list-panes ]; then echo 'boom' >&2; exit 1; fi\n\
+             printf '%s\\n' 'dev|inc-1|1000|1|0|80|24|/tmp|bash'\n",
+        );
+        watcher
+            .poll_and_sync()
+            .await
+            .expect("poll with failed panes");
+        assert_eq!(
+            activity.snapshot("dev").map(|snapshot| snapshot.state),
+            Some(ActivityState::Idle),
+            "the previous activity survives a failed Pane enumeration"
+        );
+        assert_eq!(
+            probes.load(Ordering::Relaxed),
+            1,
+            "a failed enumeration does not probe providers with invented facts"
+        );
+
+        // An observed empty inventory retires the Session's activity.
+        FakeTmux::new(dir.path(), "exit 0\n");
+        watcher.poll_and_sync().await.expect("empty poll");
+        assert!(
+            activity.snapshot("dev").is_none(),
+            "a Session absent from the verified inventory has no activity"
+        );
+    }
+
+    /// A provider whose level a test can change between polls.
+    struct SwitchableProvider {
+        state: Arc<AtomicU8>,
+        sequence: AtomicU64,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionActivityProvider for SwitchableProvider {
+        fn id(&self) -> &'static str {
+            "fixture-shell"
+        }
+
+        fn class(&self) -> WorkloadClass {
+            WorkloadClass::GenericShell
+        }
+
+        async fn probe(
+            &self,
+            _context: &SessionActivityContext,
+        ) -> anyhow::Result<Option<ActivityLevel>> {
+            let state = if self.state.load(Ordering::Relaxed) == 0 {
+                ActivityState::Idle
+            } else {
+                ActivityState::Working
+            };
+            Ok(Some(ActivityLevel {
+                state,
+                attention: None,
+                workload_ref: Some("fixture".to_string()),
+                source_generation: self.sequence.fetch_add(1, Ordering::Relaxed) + 1,
+                observed_at: SystemTime::now(),
+            }))
+        }
+    }
+
+    /// Drain every pending frame as `(msg_type, payload)`.
+    fn drain_frames(frames: &mut OutboxFrames) -> Vec<(String, serde_json::Value)> {
+        let mut drained = Vec::new();
+        while let Some(frame) = frames.try_next() {
+            let WsMessage::Text(text) = frame else {
+                continue;
+            };
+            let parsed: serde_json::Value = serde_json::from_str(&text).expect("frame JSON");
+            let msg_type = parsed
+                .get("msg_type")
+                .and_then(serde_json::Value::as_str)
+                .expect("a frame states its message type")
+                .to_string();
+            let payload = parsed
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            drained.push((msg_type, payload));
+        }
+        drained
+    }
+
+    fn of_kind<'a>(
+        drained: &'a [(String, serde_json::Value)],
+        msg_type: &str,
+    ) -> Vec<&'a serde_json::Value> {
+        drained
+            .iter()
+            .filter(|(kind, _)| kind == msg_type)
+            .map(|(_, payload)| payload)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn activity_is_published_on_change_and_restated_by_a_full_resync() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        FakeTmux::new(dir.path(), ACTIVITY_LISTING);
+        let (handle, mut frames) = ServerClientHandle::test_handle(true);
+        let state = Arc::new(AtomicU8::new(1));
+        let activity = SessionActivityCoordinator::new(
+            "agent-a",
+            vec![Arc::new(SwitchableProvider {
+                state: Arc::clone(&state),
+                sequence: AtomicU64::new(0),
+            })],
+        )
+        .expect("one provider composes");
+        let mut watcher = SessionWatcher::new(handle.clone(), Arc::new(manager_at(dir.path())), 5)
+            .with_activity(activity);
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        let drained = drain_frames(&mut frames);
+        let published = of_kind(&drained, "server.agent.session-activity");
+        assert_eq!(
+            published.len(),
+            1,
+            "the first level is published: {published:?}"
+        );
+        assert_eq!(published[0]["state"], "working");
+        assert_eq!(published[0]["instance_id"], "inc-1");
+        assert_eq!(published[0]["capability_id"], "fixture-shell");
+        assert_eq!(published[0]["generation"], 1);
+        assert!(
+            published[0]["epoch"]
+                .as_str()
+                .is_some_and(|epoch| !epoch.is_empty()),
+            "the Agent epoch fences a restarted process: {published:?}"
+        );
+        assert_eq!(
+            of_kind(&drained, "server.agent.session-update").len(),
+            1,
+            "the inventory is published on its own key beside the level"
+        );
+
+        // The same level is a level, not a change: no second frame.
+        watcher.poll_and_sync().await.expect("unchanged poll");
+        assert!(
+            of_kind(&drain_frames(&mut frames), "server.agent.session-activity").is_empty(),
+            "an unchanged level is not republished"
+        );
+
+        // A real change is published with the next generation.
+        state.store(0, Ordering::Relaxed);
+        watcher.poll_and_sync().await.expect("changed poll");
+        let drained = drain_frames(&mut frames);
+        let published = of_kind(&drained, "server.agent.session-activity");
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0]["state"], "idle");
+        assert_eq!(published[0]["generation"], 2);
+
+        // A full re-sync restates the current level even though it did not
+        // change, because the Server's projection is ephemeral.
+        handle.mark_sync_needed();
+        watcher.poll_and_sync().await.expect("resync poll");
+        let drained = drain_frames(&mut frames);
+        let published = of_kind(&drained, "server.agent.session-activity");
+        assert_eq!(published.len(), 1, "the resync restates every level");
+        assert_eq!(published[0]["state"], "idle");
+        assert_eq!(published[0]["generation"], 3);
     }
 
     #[tokio::test]

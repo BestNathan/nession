@@ -6,6 +6,10 @@ import {
   imagesApi,
   type ImageBuildDescriptor,
   type ImageDescriptor,
+  type ImageLibraryEntry,
+  type ImageLibraryLayer,
+  type ImageLibraryRepresentation,
+  type ImageReferenceImpact,
 } from '@/capabilities/images';
 
 const CREATED_AT = 1_762_300_000;
@@ -106,11 +110,59 @@ function build(
 
 export type FixtureImagesScenario = 'canonical' | 'empty' | 'error' | 'buildfail' | 'lifecycle';
 
+interface FixtureLibraryMeta {
+  repository: string;
+  tags: string[];
+  manifest_digest: string;
+  media_type: string;
+  kind: string;
+  platform: string;
+  representation: ImageLibraryRepresentation;
+  layers: ImageLibraryLayer[];
+  closure: string[];
+  impact: ImageReferenceImpact;
+}
+
 interface FixtureState {
   scenario: FixtureImagesScenario;
   images: ImageDescriptor[];
   builds: ImageBuildDescriptor[];
   nextBuild: number;
+  library: Map<string, FixtureLibraryMeta>;
+}
+
+function libraryMeta(
+  image: ImageDescriptor,
+  overrides: Partial<FixtureLibraryMeta> = {},
+): FixtureLibraryMeta {
+  const manifest = overrides.manifest_digest ?? digestFor(990);
+  const layer = {
+    digest: image.digest ?? digestFor(991),
+    media_type: 'application/vnd.nession.erofs.layer.v1',
+    size_bytes: image.size_bytes,
+    role: 'layer',
+  };
+  return {
+    repository: 'nession/fixtures',
+    tags: [],
+    manifest_digest: manifest,
+    media_type: 'application/vnd.oci.image.manifest.v1+json',
+    kind: 'manifest',
+    platform: 'linux/amd64',
+    representation: 'single_layer',
+    layers: [layer],
+    closure: [layer.digest],
+    impact: {
+      manifest_digest: manifest,
+      project_pins: 0,
+      session_pins: 0,
+      other_tags: [],
+      leases: 0,
+      compose_references: 0,
+      unknown: false,
+    },
+    ...overrides,
+  };
 }
 
 function scenario(search: string): FixtureImagesScenario {
@@ -152,17 +204,41 @@ function stateFor(selected: FixtureImagesScenario): FixtureState {
   if (selected === 'lifecycle') {
     images.push(fixtureImage(1, 'fixture-build-latest', 'ready'));
   }
+  const library = new Map<string, FixtureLibraryMeta>();
+  if (selected === 'lifecycle') {
+    const managed = images[images.length - 1];
+    library.set(
+      managed.image_id,
+      libraryMeta(managed, {
+        tags: ['fixture-build-latest'],
+        impact: {
+          manifest_digest: digestFor(990),
+          project_pins: 1,
+          session_pins: 0,
+          other_tags: [],
+          leases: 1,
+          compose_references: 0,
+          unknown: false,
+        },
+      }),
+    );
+  }
   const state: FixtureState = {
     scenario: selected,
     images,
     builds: selected === 'lifecycle' ? initialBuilds() : [],
     nextBuild: 1,
+    library,
   };
   states.set(selected, state);
   return state;
 }
 
-function matches(image: ImageDescriptor, query: string): boolean {
+function matches(
+  image: ImageDescriptor,
+  query: string,
+  tags: readonly string[] = [],
+): boolean {
   if (!query) {
     return true;
   }
@@ -171,6 +247,7 @@ function matches(image: ImageDescriptor, query: string): boolean {
     image.image_id.toLowerCase().includes(target)
     || (image.alias ?? '').toLowerCase().includes(target)
     || image.aliases.some((alias) => alias.toLowerCase().includes(target))
+    || tags.some((tag) => tag.toLowerCase().includes(target))
     || (image.digest ?? '').toLowerCase().includes(target)
     || sourceText(image.source).toLowerCase().includes(target)
   );
@@ -235,11 +312,216 @@ function completeBuild(
   emit(done);
 }
 
+function libraryMetaForRepository(
+  state: FixtureState,
+  repository: string,
+): FixtureLibraryMeta | null {
+  for (const meta of state.library.values()) {
+    if (meta.repository === repository) {
+      return meta;
+    }
+  }
+  return null;
+}
+
+function libraryMetaForTag(
+  state: FixtureState,
+  repository: string,
+  tag: string,
+): FixtureLibraryMeta | null {
+  for (const meta of state.library.values()) {
+    if (meta.repository === repository && meta.tags.includes(tag)) {
+      return meta;
+    }
+  }
+  return null;
+}
+
+function libraryImpact(meta: FixtureLibraryMeta, tag: string | null): ImageReferenceImpact {
+  return {
+    ...meta.impact,
+    other_tags: meta.tags.filter((candidate) => candidate !== tag),
+  };
+}
+
+function libraryEntries(state: FixtureState, query: string, repository: string): ImageLibraryEntry[] {
+  return state.images
+    .filter((image) =>
+      matches(image, query, state.library.get(image.image_id)?.tags ?? []),
+    )
+    .map((image) => {
+      const meta = state.library.get(image.image_id);
+      if (!meta) {
+        return {
+          image,
+          repository: '',
+          tags: [],
+          manifest_digest: null,
+          media_type: null,
+          kind: null,
+          platform: null,
+          representation: 'unknown' as const,
+          layers: [],
+          closure: [],
+        };
+      }
+      return {
+        image,
+        repository: meta.repository,
+        tags: [...meta.tags],
+        manifest_digest: meta.manifest_digest,
+        media_type: meta.media_type,
+        kind: meta.kind,
+        platform: meta.platform,
+        representation: meta.representation,
+        layers: [...meta.layers],
+        closure: [...meta.closure],
+        impact: { ...libraryImpact(meta, null), other_tags: [] },
+      };
+    })
+    .filter((entry) => repository === '' || entry.repository === repository);
+}
+
+function requestLibrary(
+  state: FixtureState,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> | null {
+
+  if (type === 'server.image.library.list') {
+    const offset = Number(payload.offset ?? 0);
+    const limit = Number(payload.limit ?? 50);
+    const query = String(payload.query ?? '');
+    const repository = String(payload.repository ?? '');
+    const entries = libraryEntries(state, query, repository);
+    const page = entries.slice(offset, offset + limit);
+    return Promise.resolve({
+      success: true,
+      entries: page,
+      total: entries.length,
+      ...(offset + page.length < entries.length ? { next_offset: offset + page.length } : {}),
+    });
+  }
+  if (type === 'server.image.impact.get') {
+    const repository = String(payload.repository ?? '');
+    const tag = String(payload.tag ?? '');
+    const meta = libraryMetaForTag(state, repository, tag);
+    return Promise.resolve(
+      meta
+        ? { success: true, impact: libraryImpact(meta, tag) }
+        : { success: false, error: 'Tag not found', error_kind: 'not_found' },
+    );
+  }
+  return null;
+}
+
+function requestTagSet(
+  state: FixtureState,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const repository = String(payload.repository ?? '');
+  const tag = String(payload.tag ?? '');
+  const digest = String(payload.digest ?? '');
+  const expected = typeof payload.expected_digest === 'string' ? payload.expected_digest : null;
+  const meta = libraryMetaForRepository(state, repository);
+  if (!meta) {
+    return Promise.resolve({ success: false, error: 'repository not found', error_kind: 'not_found' });
+  }
+  if (expected === null) {
+    if (meta.tags.includes(tag)) {
+      return Promise.resolve({
+        success: false,
+        error: `tag ${repository}:${tag} already exists`,
+        error_kind: 'conflict',
+        current_digest: meta.manifest_digest,
+      });
+    }
+    meta.tags = [...meta.tags, tag].sort();
+    return Promise.resolve({
+      success: true,
+      update: { repository, tag, digest, previous: null },
+    });
+  }
+  if (!meta.tags.includes(tag)) {
+    return Promise.resolve({ success: false, error: 'Tag not found', error_kind: 'not_found' });
+  }
+  if (expected !== meta.manifest_digest || digest !== meta.manifest_digest) {
+    return Promise.resolve({
+      success: false,
+      error: `tag conflict for ${repository}:${tag}: expected ${expected}`,
+      error_kind: 'conflict',
+      current_digest: meta.manifest_digest,
+    });
+  }
+  return Promise.resolve({
+    success: true,
+    update: { repository, tag, digest, previous: expected },
+  });
+}
+
+function requestTagRemove(
+  state: FixtureState,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const repository = String(payload.repository ?? '');
+  const tag = String(payload.tag ?? '');
+  const expected = String(payload.expected_digest ?? '');
+  const accept = payload.accept_reference_impact === true;
+  const meta = libraryMetaForTag(state, repository, tag);
+  if (!meta) {
+    return Promise.resolve({ success: false, error: 'Tag not found', error_kind: 'not_found' });
+  }
+  if (meta.manifest_digest !== expected) {
+    return Promise.resolve({
+      success: false,
+      error: `tag conflict for ${repository}:${tag}: expected ${expected}`,
+      error_kind: 'conflict',
+      current_digest: meta.manifest_digest,
+    });
+  }
+  const impact = libraryImpact(meta, tag);
+  const referenced =
+    impact.project_pins > 0
+    || impact.session_pins > 0
+    || impact.leases > 0
+    || impact.compose_references > 0;
+  if (impact.unknown || (referenced && !accept)) {
+    return Promise.resolve({
+      success: false,
+      error: impact.unknown
+        ? 'Reference impact is unknown; refusing to unlink'
+        : 'Tag removal has references; review and confirm the reference impact',
+      error_kind: impact.unknown ? 'impact_unknown' : 'impact_required',
+      impact,
+    });
+  }
+  meta.tags = meta.tags.filter((candidate) => candidate !== tag);
+  return Promise.resolve({ success: true, removed: true, impact });
+}
+
+function requestTagMutation(
+  state: FixtureState,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> | null {
+  if (type === 'server.image.tag.set') {
+    return requestTagSet(state, payload);
+  }
+  if (type === 'server.image.tag.remove') {
+    return requestTagRemove(state, payload);
+  }
+  return null;
+}
+
 function requestRegistry(
   state: FixtureState,
   type: string,
   payload: Record<string, unknown>,
 ): Promise<unknown> | null {
+  const handled = requestLibrary(state, type, payload) ?? requestTagMutation(state, type, payload);
+  if (handled) {
+    return handled;
+  }
   if (type === 'server.image.list') {
     if (state.scenario === 'error') {
       return Promise.resolve({

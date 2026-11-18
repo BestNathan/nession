@@ -960,6 +960,8 @@ wires: &["server.agent.register"],
                 decl_of::<nession_protocol::contracts::agent::v1::AgentAddress>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::AgentMetadata>(cfg),
                 decl_of::<nession_protocol::ProtocolManifest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolManifest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolDescriptor>(cfg),
                 decl_of::<nession_protocol::contracts::agent::v1::NetworkType>(cfg),
                 decl_of::<nession_protocol::ContractSupport>(cfg),
                 decl_of::<nession_protocol::ProtocolId>(cfg),
@@ -1005,6 +1007,24 @@ wires: &["server.agent.register"],
                 "AgentSessionUpdateCall",
                 nession_protocol::contracts::session::v1::AgentSessionUpdatePayload::inline,
                 schema_of::<nession_protocol::contracts::session::v1::AgentSessionUpdatePayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.agent.session-activity",
+            version: 1,
+            wires: &["server.agent.session-activity"],
+            // One-way (#3804): an Agent publishes one Session's Activity level
+            // and nothing answers it. A separate unit from `session-update`
+            // because Activity is not interaction recency.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::AgentSessionActivityPayload>(cfg),
+            ],
+            request: Some((
+                "AgentSessionActivityCall",
+                nession_protocol::contracts::session::v1::AgentSessionActivityPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentSessionActivityPayload>,
             )),
             response: None,
         },
@@ -1280,6 +1300,7 @@ wires: &["client.auth"],
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionsListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionActivityView>(cfg),
             ],
             request: Some((
                 "ClientSessionsListCall",
@@ -1365,6 +1386,7 @@ wires: &["client.auth"],
                 decl_of::<nession_protocol::contracts::session::v1::ServerSessionListReply>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionActivityView>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
             ],
             request: Some((
@@ -2317,6 +2339,30 @@ wires: &["agent.env.delete"],
         },
         Unit {
             owner: "core",
+            id: "agent.mcp.tool.call",
+            version: 1,
+            wires: &["agent.mcp.tool.call"],
+            // The Server relays one authorized contributed-Tool call to the
+            // Agent that advertised it (#3778). The Agent validates the named
+            // target and executes through its own composed catalog.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallError>(cfg),
+            ],
+            request: Some((
+                "AgentMcpToolCall",
+                nession_protocol::contracts::mcp::v1::McpToolCallPayload::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>,
+            )),
+            response: Some((
+                "AgentMcpToolCallReply",
+                nession_protocol::contracts::mcp::v1::McpToolCallReply::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "server.info",
             version: 1,
 wires: &["server.info"],
@@ -2358,6 +2404,55 @@ wires: &["server.info"],
                 "ServerMcpEndpointReply",
                 nession_protocol::contracts::server::v1::ServerMcpEndpointResponse::inline,
                 schema_of::<nession_protocol::contracts::server::v1::ServerMcpEndpointResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.mcp.tools.list",
+            version: 1,
+            wires: &["server.mcp.tools.list"],
+            // The validated Extension contribution manifest (#3778). The
+            // standalone host reads it to advertise the same Tool definitions
+            // the Server would; a Tool stays listed while its owner is offline.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolsListRequest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolsListResponse>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolManifest>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolDescriptor>(cfg),
+            ],
+            request: Some((
+                "McpToolsListCall",
+                nession_protocol::contracts::mcp::v1::McpToolsListRequest::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolsListRequest>,
+            )),
+            response: Some((
+                "McpToolsListReply",
+                nession_protocol::contracts::mcp::v1::McpToolsListResponse::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolsListResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.mcp.tool.call",
+            version: 1,
+            wires: &["server.mcp.tool.call"],
+            // An authorized call of an Extension-contributed Tool. The Server
+            // owns routing: it checks the named Agent's validated manifest and
+            // brokers the call to that Agent, never to another one.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>(cfg),
+                decl_of::<nession_protocol::contracts::mcp::v1::McpToolCallError>(cfg),
+            ],
+            request: Some((
+                "ServerMcpToolCall",
+                nession_protocol::contracts::mcp::v1::McpToolCallPayload::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallPayload>,
+            )),
+            response: Some((
+                "ServerMcpToolCallReply",
+                nession_protocol::contracts::mcp::v1::McpToolCallReply::inline,
+                schema_of::<nession_protocol::contracts::mcp::v1::McpToolCallReply>,
             )),
         },
         Unit {
@@ -2650,6 +2745,105 @@ wires: &["server.commands.update"],
                 "ImageGetReply",
                 nession_protocol::contracts::image::v1::ImageGetResponsePayload::inline,
                 schema_of::<nession_protocol::contracts::image::v1::ImageGetResponsePayload>,
+            )),
+        },
+        // Server Catalog Library and mutable Tag lifecycle (#3799). The
+        // Library read projects Manifest/Index identity, representation,
+        // closure and known reference impact; Tag mutations are CAS-guarded
+        // logical references and never delete CAS bytes.
+        Unit {
+            owner: "core",
+            id: "server.image.library.list",
+            version: 1,
+            wires: &["server.image.library.list"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryListResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryEntry>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryRepresentation>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageLibraryLayer>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageReferenceImpact>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageDescriptor>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageComposeSource>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageComposeRepresentation>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImagePackaging>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageStatus>(cfg),
+            ],
+            request: Some((
+                "ImageLibraryListCall",
+                nession_protocol::contracts::image::v1::ImageLibraryListPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageLibraryListPayload>,
+            )),
+            response: Some((
+                "ImageLibraryListReply",
+                nession_protocol::contracts::image::v1::ImageLibraryListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageLibraryListResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.tag.set",
+            version: 1,
+            wires: &["server.image.tag.set"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagSetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagSetResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagUpdate>(cfg),
+            ],
+            request: Some((
+                "ImageTagSetCall",
+                nession_protocol::contracts::image::v1::ImageTagSetPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagSetPayload>,
+            )),
+            response: Some((
+                "ImageTagSetReply",
+                nession_protocol::contracts::image::v1::ImageTagSetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagSetResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.tag.remove",
+            version: 1,
+            wires: &["server.image.tag.remove"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagRemovePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageTagRemoveResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageReferenceImpact>(cfg),
+            ],
+            request: Some((
+                "ImageTagRemoveCall",
+                nession_protocol::contracts::image::v1::ImageTagRemovePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagRemovePayload>,
+            )),
+            response: Some((
+                "ImageTagRemoveReply",
+                nession_protocol::contracts::image::v1::ImageTagRemoveResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageTagRemoveResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.image.impact.get",
+            version: 1,
+            wires: &["server.image.impact.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::image::v1::ImageImpactPayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageImpactResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::image::v1::ImageReferenceImpact>(cfg),
+            ],
+            request: Some((
+                "ImageImpactGetCall",
+                nession_protocol::contracts::image::v1::ImageImpactPayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageImpactPayload>,
+            )),
+            response: Some((
+                "ImageImpactGetReply",
+                nession_protocol::contracts::image::v1::ImageImpactResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::image::v1::ImageImpactResponsePayload>,
             )),
         },
         // Asynchronous directory-backed build lifecycle (#3334). The legacy
@@ -3130,6 +3324,51 @@ wires: &["agent.file.cwd"],
                 "ServerSessionSandboxContextCall",
                 nession_protocol::contracts::session::v1::ServerSessionSandboxContextPayload::inline,
                 schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxContextPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.sandbox.image-prepare",
+            version: 1,
+            wires: &["server.session.sandbox.image-prepare"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxImagePreparePayload>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareIntent>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareResponse>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxImagePrepareCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxImagePreparePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxImagePreparePayload>,
+            )),
+            response: Some((
+                "SessionSandboxImagePrepareReply",
+                nession_protocol::contracts::session::v1::SandboxImagePrepareResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.image-prepare",
+            version: 1,
+            wires: &["agent.session.sandbox.image-prepare"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxImagePreparePayload>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxImagePrepareIntent>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxImagePrepareCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxImagePreparePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxImagePreparePayload>,
             )),
             response: None,
         },

@@ -488,11 +488,11 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-list')).toBeVisible();
-    // The row exists only after `listDir` has answered, so its presence is the
-    // settled signal. It carries no child count: the App list stopped
-    // enumerating every child directory for a subtitle in #3451, and this
-    // assertion used to wait for the removed "1 item" meta.
-    await expect(page.getByTestId('file-row-web')).toBeVisible();
+    // #3451 removed per-child directory counts from ordinary navigation, so
+    // a row's meta is no longer a load signal. The row itself is rendered only
+    // after the fixture's `listDir` resolves, so waiting for it keeps the
+    // screenshot from racing the list.
+    await expect(page.getByTestId('file-row-web')).toBeVisible({ timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,

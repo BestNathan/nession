@@ -6,6 +6,9 @@ edition.workspace = true
 [dependencies]
 nession-common = { path = "../nession-common" }
 nession-protocol = { path = "../nession-protocol" }
+# The Extension contribution contract (#3778). The shared layer never depends
+# back on this provider; only the Tool/provider side of this crate uses it.
+nession-mcp = { path = "../nession-mcp", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
@@ -27,10 +30,10 @@ url.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 # Codegen only — see nession-protocol/Cargo.toml.
 ts-rs = { workspace = true, optional = true }
-schemars = { workspace = true, optional = true, features = ["derive"] }
+schemars = { workspace = true, features = ["derive"] }
 
 [features]
-codegen = ["dep:ts-rs", "dep:schemars", "nession-protocol/codegen"]
+codegen = ["dep:ts-rs", "nession-protocol/codegen"]
 
 [dev-dependencies]
 tempfile = "3"

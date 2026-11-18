@@ -12,6 +12,7 @@
 //! fixture has no Server, which is exactly SC-07's local-tools-still-work case.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +23,9 @@ use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::McpConfig;
+use nession_mcp::provider::{McpToolProvider, ToolProviderError};
+use nession_mcp::tool::{parse_arguments, reply_value, schema_for, ToolContext, ToolHandler};
+use nession_mcp::ToolError;
 use nession_runtime::lane::KeyedLane;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -102,6 +106,32 @@ async fn start_agent_with_mcp_using(
     mutations: Arc<KeyedLane<ResourceKey>>,
     tool_timeout_secs: u64,
 ) -> (SocketAddr, nession_agent::server::ServerHandle) {
+    start_agent_with_providers(mutations, tool_timeout_secs, Vec::new()).await
+}
+
+/// Start the real Agent listener with an explicit MCP Tool composition.
+async fn start_agent_with_providers(
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    tool_timeout_secs: u64,
+    tool_providers: Vec<Arc<dyn McpToolProvider>>,
+) -> (SocketAddr, nession_agent::server::ServerHandle) {
+    start_agent_with_provider_factory(mutations, tool_timeout_secs, |_| tool_providers).await
+}
+
+/// Start the real Agent listener with a provider composition that receives the
+/// listener's own tmux Session manager.
+///
+/// A provider that executes a Session-scoped Protocol Unit must observe the
+/// same tmux truth the MCP endpoint serves; handing it a second manager would
+/// make the test pass against Sessions the endpoint never created.
+async fn start_agent_with_provider_factory<F>(
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    tool_timeout_secs: u64,
+    tool_providers: F,
+) -> (SocketAddr, nession_agent::server::ServerHandle)
+where
+    F: FnOnce(Arc<SessionManager>) -> Vec<Arc<dyn McpToolProvider>>,
+{
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
@@ -142,7 +172,9 @@ async fn start_agent_with_mcp_using(
         },
         ..Default::default()
     };
-    server.mount_mcp(&config, TOKEN).expect("mount MCP");
+    server
+        .mount_mcp(&config, TOKEN, tool_providers(Arc::clone(&tmux)))
+        .expect("mount MCP");
     let (handle, addr) = server.start().await.expect("start");
     tokio::time::sleep(Duration::from_millis(50)).await;
     (addr, handle)
@@ -243,9 +275,197 @@ async fn call_tool(addr: SocketAddr, session: &str, name: &str, arguments: Value
     response.json()["result"].clone()
 }
 
+async fn list_tools(addr: SocketAddr, session: &str) -> Vec<Value> {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/list",
+        "params": {}
+    })
+    .to_string();
+    let response = send(addr, "POST", Some(TOKEN), Some(session), &body)
+        .await
+        .expect("tools response");
+    assert_eq!(response.status, 200, "{}", response.body);
+    response.json()["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .clone()
+}
+
 fn text_of(result: &Value) -> Value {
     let text = result["content"][0]["text"].as_str().expect("text content");
     serde_json::from_str(text).expect("tool text is JSON")
+}
+
+/// A fixture Extension Tool contributed through the explicit provider seam
+/// (`#3778` SC-01). It owns its typed input/output contract and execution;
+/// the Agent only composes the provider and the shared MCP host advertises it.
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct ExtensionEchoOutput {
+    /// The message the Extension echoed.
+    message: String,
+    /// The provider that answered.
+    provider: String,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ExtensionEchoInput {
+    /// The Agent this call names.
+    agent_id: String,
+    /// The message to echo.
+    message: String,
+}
+
+struct ExtensionEchoTool;
+
+#[async_trait::async_trait]
+impl ToolHandler for ExtensionEchoTool {
+    fn name(&self) -> &'static str {
+        "fixture_extension_echo"
+    }
+
+    fn description(&self) -> &'static str {
+        "Echo one message through the shared MCP catalog"
+    }
+
+    fn input_schema(&self) -> serde_json::Map<String, Value> {
+        schema_for::<ExtensionEchoInput>()
+    }
+
+    fn output_schema(&self) -> serde_json::Map<String, Value> {
+        schema_for::<ExtensionEchoOutput>()
+    }
+
+    async fn call(
+        &self,
+        _context: &ToolContext,
+        arguments: serde_json::Map<String, Value>,
+    ) -> Result<Value, ToolError> {
+        let input = parse_arguments::<ExtensionEchoInput>(arguments)?;
+        nession_mcp::tool::non_empty(&input.agent_id, "agent_id")?;
+        reply_value(&ExtensionEchoOutput {
+            message: input.message,
+            provider: "fixture-extension".to_string(),
+        })
+    }
+}
+
+#[derive(Default)]
+struct FixtureExtensionProvider {
+    enumerations: AtomicUsize,
+}
+
+impl McpToolProvider for FixtureExtensionProvider {
+    fn provider_name(&self) -> &str {
+        "fixture-extension"
+    }
+
+    fn tools(&self) -> Result<Vec<Arc<dyn ToolHandler>>, ToolProviderError> {
+        self.enumerations.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![Arc::new(ExtensionEchoTool)])
+    }
+}
+
+/// Send one business frame on an authenticated direct P2P connection.
+async fn p2p_request(addr: SocketAddr, payload: Value) -> Value {
+    use futures_util::{SinkExt, StreamExt};
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("p2p socket");
+    let (mut sink, mut stream) = ws.split();
+    let auth = json!({
+        "msg_type": "client.auth",
+        "id": "auth-1",
+        "timestamp": 0,
+        "payload": { "auth_token": TOKEN, "client_id": null }
+    });
+    sink.send(tokio_tungstenite::tungstenite::Message::Text(
+        auth.to_string(),
+    ))
+    .await
+    .expect("client.auth");
+    loop {
+        let frame = stream.next().await.expect("auth frame").expect("frame");
+        let parsed: Value = serde_json::from_str(frame.to_text().expect("text")).expect("JSON");
+        if parsed["id"] == "auth-1" {
+            assert_eq!(parsed["msg_type"], "ok", "{parsed}");
+            break;
+        }
+    }
+    let request = json!({
+        "msg_type": "agent.mcp.tool.call",
+        "id": "call-1",
+        "timestamp": 0,
+        "payload": payload
+    });
+    sink.send(tokio_tungstenite::tungstenite::Message::Text(
+        request.to_string(),
+    ))
+    .await
+    .expect("tool call");
+    loop {
+        let frame = stream.next().await.expect("call frame").expect("frame");
+        let parsed: Value = serde_json::from_str(frame.to_text().expect("text")).expect("JSON");
+        if parsed["id"] == "call-1" {
+            return parsed["payload"].clone();
+        }
+    }
+}
+
+#[tokio::test]
+async fn agent_p2p_mcp_tool_call_executes_its_own_contribution() {
+    let (addr, handle) = start_agent_with_providers(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        vec![Arc::new(FixtureExtensionProvider::default())],
+    )
+    .await;
+
+    let reply = p2p_request(
+        addr,
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "tool": "fixture_extension_echo",
+            "arguments": { "agent_id": TEST_AGENT_ID, "message": "p2p" }
+        }),
+    )
+    .await;
+    assert_eq!(reply["success"], true, "{reply}");
+    assert_eq!(
+        reply["result"],
+        json!({ "message": "p2p", "provider": "fixture-extension" })
+    );
+
+    // A call naming a different Agent is refused, never executed locally.
+    let foreign = p2p_request(
+        addr,
+        json!({
+            "agent_id": "other-agent",
+            "tool": "fixture_extension_echo",
+            "arguments": { "agent_id": "other-agent", "message": "p2p" }
+        }),
+    )
+    .await;
+    assert_eq!(foreign["success"], false, "{foreign}");
+    assert_eq!(foreign["error"]["kind"], "invalid_argument", "{foreign}");
+
+    // A Tool this Agent does not advertise is refused, not looked up on a
+    // baseline or a neighbour.
+    let unknown = p2p_request(
+        addr,
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "tool": "missing_tool",
+            "arguments": { "agent_id": TEST_AGENT_ID }
+        }),
+    )
+    .await;
+    assert_eq!(unknown["success"], false, "{unknown}");
+    assert_eq!(unknown["error"]["kind"], "not_found", "{unknown}");
+
+    let _ = handle.shutdown().await;
 }
 
 #[tokio::test]
@@ -343,6 +563,270 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
     assert_eq!(text_of(&killed)["name"], name);
+
+    let _ = handle.shutdown().await;
+}
+
+/// `#3779` SC-04: the three Conversation/Transcript read Tools are contributed
+/// through the Agent's own catalog and execute the **existing** Protocol Units
+/// against the same tmux Session truth the endpoint serves.
+///
+/// The empty Session is the real reader's answer at this Session's strict cwd:
+/// `ready` with no conversations, then `not_found` for an id that names no
+/// conversation and no transcript. None of the three substitutes another
+/// conversation, and none carries a filesystem path.
+#[tokio::test]
+async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
+    let (addr, handle) = start_agent_with_provider_factory(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        |tmux| nession_agent::runtime::compose_mcp_tool_providers(TEST_AGENT_ID, tmux),
+    )
+    .await;
+    let session = initialize(addr).await;
+
+    let tools = list_tools(addr, &session).await;
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    for name in [
+        "nession_claude_status",
+        "nession_claude_enter",
+        "nession_claude_submit",
+        "nession_claude_list_conversations",
+        "nession_claude_get_conversation",
+        "nession_claude_get_transcript",
+    ] {
+        assert!(names.contains(&name), "{name} is missing from {names:?}");
+    }
+
+    let list_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "nession_claude_list_conversations")
+        .expect("list Tool");
+    assert_eq!(list_tool["inputSchema"]["additionalProperties"], false);
+    for field in ["state", "items", "binding", "next_cursor", "has_more"] {
+        assert!(
+            list_tool["outputSchema"]["properties"].get(field).is_some(),
+            "the list contract is missing {field}"
+        );
+    }
+    let conversation_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "nession_claude_get_conversation")
+        .expect("conversation Tool");
+    for field in ["items", "conversation", "partial_tail", "skipped"] {
+        assert!(
+            conversation_tool["outputSchema"]["properties"]
+                .get(field)
+                .is_some(),
+            "the conversation contract is missing {field}"
+        );
+    }
+    let transcript_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "nession_claude_get_transcript")
+        .expect("transcript Tool");
+    for field in ["page", "record"] {
+        assert!(
+            transcript_tool["outputSchema"]["properties"]
+                .get(field)
+                .is_some(),
+            "the transcript contract is missing {field}"
+        );
+    }
+    assert!(
+        !transcript_tool["outputSchema"]
+            .to_string()
+            .contains("\"path\""),
+        "the transcript contract must not expose a file path"
+    );
+
+    let name = unique_session_name("claude-read");
+    let created = call_tool(
+        addr,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let target = format!("{TEST_AGENT_ID}:{name}");
+
+    let listed = call_tool(
+        addr,
+        &session,
+        "nession_claude_list_conversations",
+        json!({ "agent_id": TEST_AGENT_ID, "session_id": target }),
+    )
+    .await;
+    assert_eq!(listed["isError"], false, "{listed}");
+    let listed = text_of(&listed);
+    assert_eq!(listed["state"], "ready", "{listed}");
+    assert!(
+        listed["items"]
+            .as_array()
+            .is_none_or(std::vec::Vec::is_empty),
+        "a cwd with no Claude conversations is an empty ready list: {listed}"
+    );
+
+    let unknown = call_tool(
+        addr,
+        &session,
+        "nession_claude_get_conversation",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "session_id": target,
+            "conversation_id": "550e8400-e29b-41d4-a716-446655440000"
+        }),
+    )
+    .await;
+    assert_eq!(unknown["isError"], false, "{unknown}");
+    let unknown = text_of(&unknown);
+    assert_eq!(unknown["state"], "not_found", "{unknown}");
+    assert!(
+        unknown.get("conversation").is_none(),
+        "an unknown id must not select another conversation: {unknown}"
+    );
+
+    let transcript = call_tool(
+        addr,
+        &session,
+        "nession_claude_get_transcript",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "session_id": target,
+            "conversation_id": "550e8400-e29b-41d4-a716-446655440000"
+        }),
+    )
+    .await;
+    assert_eq!(transcript["isError"], false, "{transcript}");
+    let transcript = text_of(&transcript);
+    assert_eq!(transcript["page"]["state"], "not_found", "{transcript}");
+    assert!(transcript.get("record").is_none(), "{transcript}");
+
+    let record = call_tool(
+        addr,
+        &session,
+        "nession_claude_get_transcript",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "session_id": target,
+            "record_ref": "not-a-real-reference"
+        }),
+    )
+    .await;
+    assert_eq!(record["isError"], false, "{record}");
+    assert_eq!(text_of(&record)["record"]["state"], "not_found", "{record}");
+
+    let foreign = call_tool(
+        addr,
+        &session,
+        "nession_claude_list_conversations",
+        json!({ "agent_id": "another-agent", "session_id": "another-agent:dev" }),
+    )
+    .await;
+    assert_eq!(foreign["isError"], true, "{foreign}");
+
+    let killed = call_tool(
+        addr,
+        &session,
+        "nession_agent_kill_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
+    let _ = handle.shutdown().await;
+}
+
+/// `#3778` SC-01: the Agent's explicit provider composition reaches the shared
+/// endpoint with its typed contract intact, while the eleven baseline Tools
+/// keep their exact advertised definitions.
+#[tokio::test]
+async fn agent_mcp_composes_an_extension_tool_into_the_shared_catalog() {
+    let provider = Arc::new(FixtureExtensionProvider::default());
+    let (addr, handle) = start_agent_with_providers(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        vec![provider.clone()],
+    )
+    .await;
+    let session = initialize(addr).await;
+
+    let tools = list_tools(addr, &session).await;
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    let baseline = nession_mcp::tools::TOOL_NAMES;
+    assert_eq!(
+        &names[..baseline.len()],
+        baseline,
+        "the baseline catalog and its order must not change"
+    );
+    assert_eq!(names.len(), baseline.len() + 1);
+
+    let fixture = tools
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .expect("the contributed Tool is advertised");
+    assert_eq!(
+        fixture["description"],
+        "Echo one message through the shared MCP catalog"
+    );
+    let input = &fixture["inputSchema"];
+    assert_eq!(input["type"], "object");
+    assert_eq!(input["additionalProperties"], false);
+    assert_eq!(input["properties"]["message"]["type"], "string");
+    assert_eq!(
+        input["properties"]["message"]["description"],
+        "The message to echo."
+    );
+    assert!(input["required"]
+        .as_array()
+        .expect("required")
+        .iter()
+        .any(|field| field == "message"));
+    let output = &fixture["outputSchema"];
+    assert_eq!(output["type"], "object");
+    assert_eq!(output["properties"]["message"]["type"], "string");
+    assert_eq!(output["properties"]["provider"]["type"], "string");
+    assert_eq!(
+        output["properties"]["provider"]["description"],
+        "The provider that answered."
+    );
+
+    let called = call_tool(
+        addr,
+        &session,
+        "fixture_extension_echo",
+        json!({ "agent_id": TEST_AGENT_ID, "message": "hello" }),
+    )
+    .await;
+    assert_eq!(called["isError"], false, "{called}");
+    let expected = json!({ "message": "hello", "provider": "fixture-extension" });
+    assert_eq!(text_of(&called), expected);
+    assert_eq!(called["structuredContent"], expected);
+
+    let refused = call_tool(
+        addr,
+        &session,
+        "fixture_extension_echo",
+        json!({ "agent_id": TEST_AGENT_ID, "wrong": "hello" }),
+    )
+    .await;
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(
+        refused.get("structuredContent").is_none(),
+        "a refused call must not carry success structuredContent"
+    );
+
+    assert_eq!(
+        provider.enumerations.load(Ordering::SeqCst),
+        1,
+        "tools/list and tools/call must not rebuild the catalog"
+    );
 
     let _ = handle.shutdown().await;
 }

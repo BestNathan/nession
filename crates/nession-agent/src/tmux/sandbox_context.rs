@@ -1521,6 +1521,7 @@ mod tests {
             window_linked: false,
             window_active: active,
             pane_active: active,
+            pane_current_command: Some("bash".to_string()),
         }
     }
 

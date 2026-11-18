@@ -88,7 +88,7 @@ pub const PAGE_PAYLOAD_BUDGET: usize = 128 * 1024;
 /// Who a message is from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRoleV1 {
     User,
@@ -100,7 +100,7 @@ pub enum MessageRoleV1 {
 /// A closed enum rather than a boolean, which cannot say "we do not know yet".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatusV1 {
     /// The call is the newest thing in the transcript and no result exists yet.
@@ -123,7 +123,7 @@ pub enum ToolStatusV1 {
 /// What a payload body is, so a client can choose a treatment without parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PayloadKindV1 {
     /// Serialized JSON — render preformatted, not as prose.
@@ -136,9 +136,9 @@ pub enum PayloadKindV1 {
 ///
 /// `text` is always present when the body is; `truncated` is what tells a reader
 /// the difference between a short result and a long one that was cut.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct PayloadV1 {
     pub text: String,
     pub kind: PayloadKindV1,
@@ -146,9 +146,9 @@ pub struct PayloadV1 {
 }
 
 /// A tool call, paired with its result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct ToolActivityV1 {
     /// The `tool_use.id` this call was made under.
     ///
@@ -175,9 +175,9 @@ pub struct ToolActivityV1 {
 /// A union rather than a bare `String` so a later version can add a content
 /// kind — a summarized reasoning block is the one actually expected — without
 /// making every existing client treat a new block as prose it cannot read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageContentV1 {
     /// Prose. Carried verbatim: whether it is Markdown is the client's reading,
@@ -195,9 +195,9 @@ pub enum MessageContentV1 {
 /// Tagged on `kind`, so the shape a client switches on is the shape it
 /// deserializes. `id` is stable within the conversation, derived from the
 /// transcript record, and is what a client keys identity reuse on across polls.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MessageItemV1 {
     /// A human or model turn, with its content blocks in order.
@@ -246,7 +246,7 @@ impl MessageItemV1 {
 /// not a state either — that is what the sibling unit's list is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MessagesStateV1 {
     /// The requested conversation was found and the page is the answer.
@@ -266,9 +266,9 @@ pub enum MessagesStateV1 {
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct MessagesRequestV1 {
     /// The Nession session the read is scoped to. Required: visibility is
     /// per-Session-cwd, so a request without one would be a machine-wide
@@ -294,9 +294,9 @@ pub struct MessagesRequestV1 {
 }
 
 /// The answer.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct MessagesResponseV1 {
     pub state: MessagesStateV1,
 

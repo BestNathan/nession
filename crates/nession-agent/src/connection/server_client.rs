@@ -39,6 +39,7 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::extension::ExtensionUnitPolicy;
 use nession_common::SecretString;
+use nession_mcp::{McpCatalog, ToolContext};
 use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
     AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
@@ -47,10 +48,12 @@ use nession_protocol::contracts::env::v1::{
     AgentSessionEnvBindingReportEntry, AgentSessionEnvBindingReportPayload,
     ServerSessionEnvBindingGetPayload, ServerSessionEnvBindingSetPayload,
 };
+use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply, McpToolManifest};
 use nession_protocol::contracts::session::v1::{
-    AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionProcessesPayload, ServerSessionSandboxContextPayload,
-    ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
+    AgentGitInvalidatedPayload, AgentSessionActivityPayload, AgentSessionUpdatePayload,
+    AgentTerminalResizePayload, ServerSessionCreatePayload, ServerSessionProcessesPayload,
+    ServerSessionSandboxContextPayload, ServerSessionSandboxEnterPayload,
+    ServerSessionSandboxFocusPayload, ServerSessionSandboxImagePreparePayload,
     ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
     SessionMetadataUpdatePayload,
 };
@@ -133,6 +136,9 @@ pub mod msg_types {
     pub const CONTROL_PING: &str = "control.ping";
     pub const CONTROL_PONG: &str = "control.pong";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
+    /// One-way Activity level for one Session (#3804). A separate unit from the
+    /// session update because it must not stamp the Server's recency.
+    pub const AGENT_SESSION_ACTIVITY: &str = "server.agent.session-activity";
     /// One-way: the Agent reports every live Session's observed Environment
     /// Binding after registration, so the Server's observed cache can be
     /// rebuilt from the runtime that owns it (#170).
@@ -190,6 +196,15 @@ pub struct ServerClient {
     default_working_dir: String,
     /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
+    /// The Extension-contributed MCP Tools this Agent advertises (`#3778`).
+    /// Sent on every registration; `None` when no Extension contributes one.
+    mcp_tool_manifest: Option<McpToolManifest>,
+    /// The composed catalog and the context its Tool handlers receive. The
+    /// Server relays `agent.mcp.tool.call` here; the Agent validates the named
+    /// target and executes through exactly the catalog its own MCP endpoint
+    /// serves.
+    mcp_catalog: Option<Arc<McpCatalog>>,
+    mcp_tool_context: Option<Arc<ToolContext>>,
     /// The Agent's durable inbound token (#3440). Sent to the Server on every
     /// registration so attach can hand it to an authenticated client; never
     /// put in a URL, log or public view.
@@ -244,6 +259,14 @@ pub struct ServerClientHandle {
 }
 
 impl ServerClientHandle {
+    /// The Agent id this connection reports under.
+    ///
+    /// Read-only: an outbound payload names its Agent from this value rather
+    /// than a second copy that could drift from the registered identity.
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
     /// Mark that a full session sync is needed (called by supervisor on reconnect).
     pub fn mark_sync_needed(&self) {
         self.sync_intent.mark();
@@ -347,6 +370,21 @@ impl ServerClientHandle {
             ));
         }
         self.outbox.send_session_update(session_name, frame(&msg)?)
+    }
+
+    /// Queue one Session's Activity level (#3804).
+    ///
+    /// A level, not a history: the Server keeps only the latest accepted value.
+    /// One frame per Session is pending at a time, under an Activity-specific
+    /// outbox key so it never supersedes the Session inventory frame.
+    pub fn send_session_activity(
+        &self,
+        session_name: &str,
+        payload: AgentSessionActivityPayload,
+    ) -> Result<()> {
+        let msg = new_message(msg_types::AGENT_SESSION_ACTIVITY, payload);
+        self.outbox
+            .send_session_activity(session_name, frame(&msg)?)
     }
 
     /// Queue an address-update message for delivery to the server.
@@ -551,6 +589,9 @@ impl ServerClient {
             display_name,
             default_working_dir,
             extension_registry,
+            mcp_tool_manifest: None,
+            mcp_catalog: None,
+            mcp_tool_context: None,
             metadata,
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::clone(&tmux))),
             tmux,
@@ -568,6 +609,21 @@ impl ServerClient {
     /// to both.
     pub fn with_session_metadata(mut self, store: Arc<SessionMetadataStore>) -> Self {
         self.session_metadata = store;
+        self
+    }
+
+    /// Advertise and serve the Extension-contributed MCP Tools this Agent
+    /// composed (`#3778`).
+    ///
+    /// The manifest is derived from the same catalog the embedded MCP endpoint
+    /// serves, so the Agent cannot advertise a Tool it cannot execute. The
+    /// catalog and context are also what the Server-relayed
+    /// `agent.mcp.tool.call` route executes through.
+    pub fn with_mcp_tools(mut self, catalog: Arc<McpCatalog>, context: Arc<ToolContext>) -> Self {
+        let manifest = catalog.manifest();
+        self.mcp_tool_manifest = (!manifest.tools.is_empty()).then_some(manifest);
+        self.mcp_catalog = Some(catalog);
+        self.mcp_tool_context = Some(context);
         self
     }
 
@@ -777,6 +833,7 @@ impl ServerClient {
                 .extension_registry
                 .as_ref()
                 .map(|registry| registry.manifest().clone()),
+            mcp_tool_manifest: self.mcp_tool_manifest.clone(),
         };
         let msg = new_message(msg_types::AGENT_REGISTER, payload);
         let json = serde_json::to_string(&msg)?;
@@ -4671,6 +4728,125 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
+    "agent.session.sandbox.image-prepare" => "agent.session.sandbox.image-prepare" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxImagePreparePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.image-prepare payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.image-prepare",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                        "error_kind": "invalid",
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, error, error_kind, observation, observations) = async {
+                        // The Server resolved the Session to this Agent. Prove
+                        // the named Session is still one this Agent owns before
+                        // touching the cache: a stale name is unavailable, not
+                        // an invitation to prepare bytes for a vanished owner.
+                        match agent.tmux.list_sessions().await {
+                            Ok(sessions)
+                                if sessions
+                                    .iter()
+                                    .any(|session| session.name == payload.session_name) => {}
+                            Ok(_) => {
+                                return (
+                                    false,
+                                    Some("the named Session is not on this Agent".to_string()),
+                                    Some("unavailable"),
+                                    None,
+                                    Vec::new(),
+                                );
+                            }
+                            Err(e) => {
+                                return (
+                                    false,
+                                    Some(format!("cannot list this Agent's Sessions: {e:#}")),
+                                    Some("unavailable"),
+                                    None,
+                                    Vec::new(),
+                                );
+                            }
+                        }
+                        if payload.grant.digest != payload.digest {
+                            return (
+                                false,
+                                Some(
+                                    "the authorized grant does not name the requested image identity"
+                                        .to_string(),
+                                ),
+                                Some("invalid"),
+                                None,
+                                Vec::new(),
+                            );
+                        }
+                        let Some(cache) = agent
+                            .tmux
+                            .sandbox_runtime()
+                            .and_then(|runtime| runtime.erofs_cache())
+                        else {
+                            return (
+                                false,
+                                Some("this Agent has no EROFS cache configured".to_string()),
+                                Some("unavailable"),
+                                None,
+                                Vec::new(),
+                            );
+                        };
+                        match crate::erofs_cache::prepare_grant_image(
+                            &cache,
+                            &payload.grant,
+                            payload.intent,
+                            &agent.server_url,
+                            &agent.auth_token,
+                        )
+                        .await
+                        {
+                            Ok(prepared) => (
+                                true,
+                                None,
+                                None,
+                                Some(prepared.observation),
+                                prepared.observations,
+                            ),
+                            Err(e) => (
+                                false,
+                                Some(format!("{e:#}")),
+                                Some("failed"),
+                                None,
+                                Vec::new(),
+                            ),
+                        }
+                    }
+                    .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.image-prepare",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "observation": observation,
+                            "observations": observations,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
     "agent.workspace.list" => "agent.workspace.list" => 1 => Query => {
                     let payload: ServerWorkspaceListPayload =
                         match serde_json::from_value(msg.payload.clone()) {
@@ -5052,6 +5228,94 @@ core_routes!(agent, msg, responses;
                             "error": list_error,
                             "sessions": sessions_json,
                         }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    // One authorized call of an Extension-contributed MCP Tool (#3778). The
+    // Server has already authenticated the caller and checked this Agent's
+    // advertised manifest; the Agent still proves the named target is itself
+    // and executes through exactly the catalog its own MCP endpoint serves.
+    //
+    // Read-only lane admission for P1: contributed Tools have no per-Tool
+    // policy declaration yet. #3779's control Tools add the owner-specific
+    // session routing key when they introduce mutation contributions.
+    "agent.mcp.tool.call" => "agent.mcp.tool.call" => 1 => Query => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let reply = match (agent.mcp_catalog.as_ref(), agent.mcp_tool_context.as_ref()) {
+                        (Some(catalog), Some(context)) => {
+                            match serde_json::from_value::<McpToolCallPayload>(msg.payload.clone()) {
+                                Ok(call) if call.agent_id == agent.agent_id => {
+                                    let snapshot = catalog.snapshot();
+                                    if !snapshot
+                                        .contributions()
+                                        .iter()
+                                        .any(|tool| tool.name == call.tool)
+                                    {
+                                        McpToolCallReply::failure(
+                                            "not_found",
+                                            format!(
+                                                "this Agent does not advertise contributed Tool `{}`",
+                                                call.tool
+                                            ),
+                                        )
+                                    } else {
+                                        match call.arguments.as_object().cloned() {
+                                            Some(arguments) => {
+                                                match snapshot
+                                                    .call(context, &call.tool, Some(arguments))
+                                                    .await
+                                                {
+                                                    Ok(value) => McpToolCallReply::success(value),
+                                                    Err(error) => McpToolCallReply::failure(
+                                                        error.kind.as_str(),
+                                                        error.message,
+                                                    ),
+                                                }
+                                            }
+                                            None => McpToolCallReply::failure(
+                                                "invalid_argument",
+                                                "`arguments` must be an object",
+                                            ),
+                                        }
+                                    }
+                                }
+                                Ok(call) => McpToolCallReply::failure(
+                                    "invalid_argument",
+                                    format!(
+                                        "this Agent is '{}', not '{}'",
+                                        agent.agent_id, call.agent_id
+                                    ),
+                                ),
+                                Err(error) => McpToolCallReply::failure(
+                                    "invalid_argument",
+                                    format!("the call does not match its contract: {error}"),
+                                ),
+                            }
+                        }
+                        _ => McpToolCallReply::failure(
+                            "unavailable",
+                            "this Agent has no composed contribution catalog",
+                        ),
+                    };
+                    let mut payload = match serde_json::to_value(&reply) {
+                        Ok(payload) => payload,
+                        Err(_) => serde_json::json!({
+                            "success": false,
+                            "error": {
+                                "kind": "backend",
+                                "message": "the Tool reply could not be serialized",
+                            },
+                        }),
+                    };
+                    if let Some(object) = payload.as_object_mut() {
+                        object.insert("request_id".to_string(), serde_json::json!(request_id));
+                        object.insert("command".to_string(), serde_json::json!("mcp.tool.call"));
+                    }
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": payload,
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }

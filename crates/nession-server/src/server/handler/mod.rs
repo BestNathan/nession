@@ -39,8 +39,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
     ClientSessionProcessesPayload, ClientSessionSandboxContextPayload,
     ClientSessionSandboxEnterPayload, ClientSessionSandboxFocusPayload,
-    ClientSessionSandboxPreflightPayload, ClientSessionSandboxReturnPayload, ProcessSnapshot,
-    SandboxContextResponse, ServerSessionListPayload, ServerSessionListReply,
+    ClientSessionSandboxImagePreparePayload, ClientSessionSandboxPreflightPayload,
+    ClientSessionSandboxReturnPayload, ProcessSnapshot, SandboxContextResponse,
+    SandboxImagePrepareResponse, ServerSessionListPayload, ServerSessionListReply,
     ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvBindingRefusalKind,
     SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
     SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
@@ -122,6 +123,8 @@ pub struct ConnectionHandler {
     image_manager: Arc<crate::image::ImageManager>,
     /// Database handle for quick-command CRUD (issue #95, part 3).
     db: Arc<crate::db::Database>,
+    /// The validated Extension-contribution catalog (`#3778`).
+    extension_tools: Option<Arc<crate::server::extension_tools::ExtensionToolCatalog>>,
     config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
@@ -176,6 +179,7 @@ impl Clone for ConnectionHandler {
             env_service: Arc::clone(&self.env_service),
             image_manager: Arc::clone(&self.image_manager),
             db: Arc::clone(&self.db),
+            extension_tools: self.extension_tools.clone(),
             config: ConnectionHandlerConfig {
                 server_auth_token: self.config.server_auth_token.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
@@ -220,6 +224,11 @@ pub struct ConnectionHandlerDeps {
     /// Server-owned global EROFS image manager (#3022).
     pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
+    /// The Server's validated Extension-contributed MCP Tool catalog
+    /// (`#3778`). Registration installs each Agent's advertised manifest here,
+    /// and the route handlers read the same catalog. `None` only in tests that
+    /// do not exercise contribution routing.
+    pub extension_tools: Option<Arc<crate::server::extension_tools::ExtensionToolCatalog>>,
 }
 
 /// Why the canonical Session binding mutation refused.
@@ -275,6 +284,7 @@ impl ConnectionHandler {
             env_service: deps.env_service,
             image_manager: deps.image_manager,
             db: deps.db,
+            extension_tools: deps.extension_tools,
             config,
             authenticated_client: false,
             registered_agent_id: None,
@@ -1369,6 +1379,9 @@ pub(crate) fn session_to_info(
         working_dir: s.working_dir.clone(),
         instance_id: s.instance_id.clone(),
         project_id: project_id.map(std::string::ToString::to_string),
+        // The same shared serializer feeds `server.session.list` and
+        // `server.sessions.changed`, so the two always agree on Activity too.
+        activity: s.activity.clone(),
         last_activity: s.last_activity.to_rfc3339(),
     }
 }
@@ -1446,6 +1459,11 @@ fn parse_agent_sessions(
                             .and_then(serde_json::Value::as_str)
                             .filter(|id| !id.is_empty())
                             .map(std::string::ToString::to_string),
+                        // The inventory reply carries no Activity; the
+                        // replacement preserves a same-incarnation level.
+                        activity: None,
+                        activity_epoch: None,
+                        activity_generation: 0,
                     })
                 })
                 .collect()
@@ -1469,6 +1487,7 @@ mod server_agent_git_invalidated_v1;
 mod server_agent_list_v1;
 mod server_agent_register_v1;
 mod server_agent_rename_v1;
+mod server_agent_session_activity_v1;
 mod server_agent_session_env_binding_v1;
 mod server_agent_session_update_v1;
 mod server_agent_terminal_resize_v1;
@@ -1488,9 +1507,15 @@ mod server_image_build_retry_v1;
 mod server_image_build_submit_v1;
 mod server_image_build_v1;
 mod server_image_get_v1;
+mod server_image_impact_get_v1;
+mod server_image_library_list_v1;
 mod server_image_list_v1;
+mod server_image_tag_remove_v1;
+mod server_image_tag_set_v1;
 mod server_info_v1;
 mod server_mcp_endpoint_v1;
+mod server_mcp_tool_call_v1;
+mod server_mcp_tools_list_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;
 mod server_project_get_v1;
@@ -1516,6 +1541,7 @@ mod server_session_relay_begin_v1;
 mod server_session_sandbox_context_v1;
 mod server_session_sandbox_enter_v1;
 mod server_session_sandbox_focus_v1;
+mod server_session_sandbox_image_prepare_v1;
 mod server_session_sandbox_images;
 mod server_session_sandbox_preflight_v1;
 mod server_session_sandbox_return_to_native_v1;

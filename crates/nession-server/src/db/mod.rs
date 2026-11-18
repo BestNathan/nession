@@ -2054,6 +2054,9 @@ mod tests {
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
             instance_id: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
         }
     }
 

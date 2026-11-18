@@ -11,11 +11,21 @@
 //! ## Flat Tools, one owner each
 //!
 //! Every Tool is one file under [`tools`], named exactly like the MCP Tool.
-//! [`tools::registry`] registers them explicitly with a single
-//! [`registry::ToolRegistry`]; there is no central `match name` dispatch.
-//! [`tool::ToolHandler`] owns the name, description, typed arguments, schema
-//! and execution; the [service](service) owns lifecycle, transport,
-//! authentication, concurrency and deadlines.
+//! The baseline list in [`tools::baseline_handlers`] registers them explicitly
+//! with a single [`registry::ToolRegistry`]; there is no central `match name`
+//! dispatch. [`tool::ToolHandler`] owns the name, description, typed
+//! arguments, schema and execution; the [service](service) owns lifecycle,
+//! transport, authentication, concurrency and deadlines.
+//!
+//! ## Extension contributions (`#3778`)
+//!
+//! An Extension may contribute Tools through an explicit
+//! [`provider::McpToolProvider`]. [`catalog::McpCatalog`] composes the
+//! baseline Tools and those contributions into one immutable generation and
+//! atomically swaps generations only on an explicit host reconfiguration.
+//! Providers are never enumerated by `tools/list` or `tools/call`, a rejected
+//! update keeps the previous generation, and this crate never depends on a
+//! host crate or a concrete provider.
 //!
 //! ## Three hosts, one contract
 //!
@@ -42,10 +52,12 @@
 //! [`http::sniff`] plus [`McpService::serve`] there.
 
 pub mod backend;
+pub mod catalog;
 pub mod error;
 pub mod http;
 pub mod pending_mutation;
 pub mod protocol;
+pub mod provider;
 pub mod registry;
 pub mod service;
 pub mod tool;
@@ -58,7 +70,9 @@ pub mod remote;
 pub mod standalone;
 
 pub use backend::{ClusterBackend, NodeBackend, UnavailableClusterBackend, UnavailableNodeBackend};
+pub use catalog::{CatalogError, CatalogSnapshot, McpCatalog};
 pub use error::{ToolError, ToolErrorKind};
+pub use provider::{McpToolContribution, McpToolProvider, RoutedTool, ToolProviderError};
 pub use registry::{RegistryError, ToolRegistry};
 pub use service::{McpService, ServiceConfig, ServiceConfigError};
 pub use tool::{ToolContext, ToolHandler};

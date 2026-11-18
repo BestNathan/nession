@@ -35,6 +35,10 @@ use crate::workspace_manager::WorkspaceLease;
 
 const REAPER_INTERVAL: Duration = Duration::from_millis(500);
 const REAPER_IDLE_INTERVAL: Duration = Duration::from_secs(2);
+/// A failed cleanup is retried on a bounded exponential backoff so a resource
+/// that cannot be released yet does not spin the reaper.
+const CLEANUP_RETRY_BASE: Duration = Duration::from_millis(500);
+const CLEANUP_RETRY_MAX: Duration = Duration::from_secs(30);
 /// The host catalog is a measured fact; probing it on every context refresh
 /// would spawn Bubblewrap fixtures repeatedly. The capability changes rarely,
 /// and Enter re-probes through `prepare` regardless.
@@ -49,6 +53,14 @@ enum TrackedExecution {
     /// A record recovered at startup whose Pane still exists. Its owned
     /// resources are released when the Pane disappears.
     Recovered(Box<ExecutionRecord>),
+    /// A record whose last cleanup attempt failed. The identity is retained so
+    /// the reaper retries exactly the resources the Agent still owns; the
+    /// bounded backoff keeps a persistently failing resource from spinning.
+    CleanupPending {
+        record: Box<ExecutionRecord>,
+        attempts: u32,
+        next_attempt: Instant,
+    },
 }
 
 impl TrackedExecution {
@@ -56,8 +68,24 @@ impl TrackedExecution {
         match self {
             Self::Live(handle) => handle.record(),
             Self::Recovered(record) => record,
+            Self::CleanupPending { record, .. } => record,
         }
     }
+
+    /// Whether the reaper may retry this entry now. Explicit caller-driven
+    /// cleanup ignores the backoff.
+    fn retry_due(&self, now: Instant) -> bool {
+        match self {
+            Self::CleanupPending { next_attempt, .. } => *next_attempt <= now,
+            Self::Live(_) | Self::Recovered(_) => true,
+        }
+    }
+}
+
+/// Bounded exponential retry delay for failed cleanups.
+fn cleanup_retry_delay(attempts: u32) -> Duration {
+    let exponent = attempts.saturating_sub(1).min(6);
+    (CLEANUP_RETRY_BASE * (1u32 << exponent)).min(CLEANUP_RETRY_MAX)
 }
 
 /// The Pane a prepared execution was launched into, as tmux reported it.
@@ -494,6 +522,10 @@ impl SandboxRuntime {
     }
 
     /// Release one tracked key. Returns `None` when it was not tracked.
+    ///
+    /// A failed attempt never drops the tracked identity: the same record is
+    /// kept as [`TrackedExecution::CleanupPending`] so the reaper retries the
+    /// resources the Agent still owns. Explicit calls retry immediately.
     pub fn cleanup_entry(&self, key: &str) -> Result<Option<CleanupReport>> {
         let Some(entry) = self
             .executions
@@ -503,38 +535,55 @@ impl SandboxRuntime {
         else {
             return Ok(None);
         };
-        match entry {
+        let (record, prior_attempts) = match entry {
             TrackedExecution::Live(handle) => {
                 let record = handle.record().clone();
                 match handle.cleanup() {
                     Ok(report) => {
                         self.release_workspace_lease(&record.execution_id);
-                        Ok(Some(report))
+                        return Ok(Some(report));
                     }
-                    Err(error) => {
-                        // Keep the record retryable: reconciliation and the
-                        // reaper must not forget resources they still own.
-                        if let Ok(mut executions) = self.executions.lock() {
-                            executions.insert(
-                                key.to_string(),
-                                TrackedExecution::Recovered(Box::new(record)),
-                            );
-                        }
-                        Err(error.into())
-                    }
+                    Err(error) => return Err(self.retain_for_retry(key, record, 0, error.into())),
                 }
             }
-            TrackedExecution::Recovered(record) => {
-                let mut report = CleanupReport {
-                    execution_id: record.execution_id.clone(),
-                    ..CleanupReport::default()
-                };
-                cleanup_record(&self.settings, &record, &mut report)
-                    .map_err(anyhow::Error::from)?;
+            TrackedExecution::Recovered(record) => (*record, 0),
+            TrackedExecution::CleanupPending {
+                record, attempts, ..
+            } => (*record, attempts),
+        };
+        let mut report = CleanupReport {
+            execution_id: record.execution_id.clone(),
+            ..CleanupReport::default()
+        };
+        match cleanup_record(&self.settings, &record, &mut report) {
+            Ok(()) => {
                 self.release_workspace_lease(&record.execution_id);
                 Ok(Some(report))
             }
+            Err(error) => Err(self.retain_for_retry(key, record, prior_attempts, error.into())),
         }
+    }
+
+    /// Keep a failed cleanup tracked with the next bounded retry time.
+    fn retain_for_retry(
+        &self,
+        key: &str,
+        record: ExecutionRecord,
+        prior_attempts: u32,
+        error: anyhow::Error,
+    ) -> anyhow::Error {
+        let attempts = prior_attempts.saturating_add(1);
+        if let Ok(mut executions) = self.executions.lock() {
+            executions.insert(
+                key.to_string(),
+                TrackedExecution::CleanupPending {
+                    record: Box::new(record),
+                    attempts,
+                    next_attempt: Instant::now() + cleanup_retry_delay(attempts),
+                },
+            );
+        }
+        error
     }
 
     /// Remember one completed Enter attempt for an idempotent retry.
@@ -576,6 +625,22 @@ impl SandboxRuntime {
                     }
                     ReconcileOutcome::Cleaned(execution_id) => {
                         tracing::info!(%execution_id, "removed leftover Sandbox resources");
+                    }
+                    ReconcileOutcome::CleanupFailed(record, error) => {
+                        tracing::warn!(
+                            execution = %record.execution_id,
+                            "could not clean a recovered Sandbox execution; tracking it for a \
+                             bounded retry: {error}"
+                        );
+                        let key = execution_key(&record);
+                        executions.insert(
+                            key,
+                            TrackedExecution::CleanupPending {
+                                record,
+                                attempts: 1,
+                                next_attempt: Instant::now() + cleanup_retry_delay(1),
+                            },
+                        );
                     }
                     ReconcileOutcome::Failed(execution_id, error) => {
                         tracing::warn!(
@@ -622,6 +687,7 @@ impl SandboxRuntime {
                             panes.iter().map(|pane| pane.pane_id.clone()).collect();
                         let live_sessions: HashSet<String> =
                             panes.iter().map(|pane| pane.session_name.clone()).collect();
+                        let now = Instant::now();
                         let vanished: Vec<String> = runtime
                             .executions
                             .lock()
@@ -629,6 +695,9 @@ impl SandboxRuntime {
                                 executions
                                     .iter()
                                     .filter(|(_, entry)| {
+                                        if !entry.retry_due(now) {
+                                            return false;
+                                        }
                                         let record = entry.record();
                                         match &record.pane_id {
                                             Some(pane_id) => !live_panes.contains(pane_id),
@@ -857,5 +926,250 @@ mod tests {
             format!("{error:#}").contains("filesystem.access"),
             "the refusal must name the mechanism: {error:#}"
         );
+    }
+
+    /// A recorded cleanup that fails must keep its tracked identity: dropping
+    /// it would make the reaper forget resources the Agent still owns. The
+    /// Linux transient-rootfs release is the deterministic failing boundary.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_failed_recovered_cleanup_keeps_the_record_tracked_for_retry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = SandboxRuntime::new(settings(dir.path()));
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state).expect("state dir");
+        let state = std::fs::canonicalize(&state).expect("canonical state");
+        let execution_dir = state.join("execution-failing");
+        let overlay = execution_dir.join("rootfs-overlay");
+        std::fs::create_dir_all(overlay.join("upper")).expect("upper");
+        std::fs::create_dir_all(overlay.join("work")).expect("work");
+        // A symlinked owned path fails closed. Point it at a path that is
+        // still inside the execution directory so the symlink rule, not the
+        // authorization rule, is the failing boundary.
+        std::fs::remove_dir(overlay.join("upper")).expect("remove upper");
+        std::os::unix::fs::symlink(overlay.join("work"), overlay.join("upper"))
+            .expect("symlink upper");
+        let record: ExecutionRecord = serde_json::from_value(serde_json::json!({
+            "execution_id": "execution-failing",
+            "session_name": "sandbox-test",
+            "instance_id": "instance-test",
+            "backend": "test",
+            "policy_digest": "digest",
+            "created_at": 0,
+            "transient_rootfs": {
+                "mountpoint": overlay.join("merged"),
+                "upper": overlay.join("upper"),
+                "work": overlay.join("work"),
+            },
+            "execution_dir": execution_dir,
+            "restricted_network": false,
+            "agent_pid": std::process::id(),
+        }))
+        .expect("record fixture");
+        runtime.executions.lock().expect("executions").insert(
+            "pane-failing".to_string(),
+            TrackedExecution::Recovered(Box::new(record)),
+        );
+
+        let error = match runtime.cleanup_entry("pane-failing") {
+            Ok(_) => panic!("a symlinked owned path must fail the cleanup"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("symlinked"), "{error:#}");
+        assert!(
+            runtime
+                .executions
+                .lock()
+                .expect("executions")
+                .contains_key("pane-failing"),
+            "a failed cleanup must keep the tracked identity for retry"
+        );
+
+        // A second explicit attempt fails again: every failure keeps the
+        // identity rather than dropping it after the first error.
+        let error = match runtime.cleanup_entry("pane-failing") {
+            Ok(_) => panic!("the second cleanup must fail"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("symlinked"), "{error:#}");
+        assert!(
+            runtime
+                .executions
+                .lock()
+                .expect("executions")
+                .contains_key("pane-failing"),
+            "the second failure must keep the tracked identity too"
+        );
+
+        // Explicit retries bypass the backoff; once the owned path is a real
+        // directory the cleanup succeeds and the identity is released.
+        std::fs::remove_file(overlay.join("upper")).expect("remove symlink");
+        std::fs::create_dir_all(overlay.join("upper")).expect("restore upper");
+        let report = match runtime.cleanup_entry("pane-failing") {
+            Ok(report) => report.expect("the record was still tracked"),
+            Err(error) => panic!("the retry must succeed: {error:#}"),
+        };
+        assert_eq!(report.execution_id, "execution-failing");
+        assert!(
+            !runtime
+                .executions
+                .lock()
+                .expect("executions")
+                .contains_key("pane-failing"),
+            "a successful cleanup releases the tracked identity"
+        );
+    }
+
+    /// A failed cleanup keeps a CleanupPending identity and schedules its next
+    /// reaper attempt on a bounded exponential backoff.
+    #[test]
+    fn a_failed_cleanup_keeps_a_pending_identity_with_bounded_backoff() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = SandboxRuntime::new(settings(dir.path()));
+        let fixture = || -> ExecutionRecord {
+            serde_json::from_value(serde_json::json!({
+                "execution_id": "execution-backoff",
+                "session_name": "sandbox-test",
+                "instance_id": "instance-test",
+                "backend": "test",
+                "policy_digest": "digest",
+                "created_at": 0,
+                "execution_dir": dir.path().join("state").join("execution-backoff"),
+                "restricted_network": false,
+                "agent_pid": std::process::id(),
+            }))
+            .expect("record fixture")
+        };
+
+        let first = runtime.retain_for_retry(
+            "pane-backoff",
+            fixture(),
+            0,
+            anyhow::anyhow!("first cleanup failure"),
+        );
+        assert!(format!("{first:#}").contains("first cleanup failure"));
+        let now = Instant::now();
+        {
+            let executions = runtime.executions.lock().expect("executions");
+            let entry = executions.get("pane-backoff").expect("still tracked");
+            assert!(
+                !entry.retry_due(now),
+                "the reaper must wait for the bounded backoff"
+            );
+            assert!(
+                entry.retry_due(now + CLEANUP_RETRY_MAX),
+                "the retry delay is bounded"
+            );
+            match entry {
+                TrackedExecution::CleanupPending { attempts, .. } => {
+                    assert_eq!(*attempts, 1, "the first failure records one attempt")
+                }
+                _ => panic!("a failed cleanup must keep a CleanupPending identity"),
+            }
+        }
+
+        let _ = runtime.retain_for_retry(
+            "pane-backoff",
+            fixture(),
+            1,
+            anyhow::anyhow!("second cleanup failure"),
+        );
+        match runtime
+            .executions
+            .lock()
+            .expect("executions")
+            .get("pane-backoff")
+        {
+            Some(TrackedExecution::CleanupPending { attempts, .. }) => {
+                assert_eq!(*attempts, 2, "each failed attempt increments the count")
+            }
+            other => panic!(
+                "the identity must stay tracked as CleanupPending: present={}",
+                other.is_some()
+            ),
+        }
+        assert_eq!(cleanup_retry_delay(1), CLEANUP_RETRY_BASE);
+        assert_eq!(
+            cleanup_retry_delay(2),
+            CLEANUP_RETRY_BASE * 2,
+            "the delay grows exponentially"
+        );
+        assert_eq!(
+            cleanup_retry_delay(100),
+            CLEANUP_RETRY_MAX,
+            "the delay is capped"
+        );
+    }
+
+    /// A startup cleanup failure hands the record to the reaper instead of
+    /// logging it without a retry owner.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_failed_startup_reconciliation_is_tracked_for_retry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = SandboxRuntime::new(settings(dir.path()));
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(&state).expect("state dir");
+        let state = std::fs::canonicalize(&state).expect("canonical state");
+        let execution_dir = state.join("execution-reconcile");
+        let overlay = execution_dir.join("rootfs-overlay");
+        std::fs::create_dir_all(overlay.join("work")).expect("work");
+        std::os::unix::fs::symlink(overlay.join("work"), overlay.join("upper"))
+            .expect("symlink upper");
+        let record: ExecutionRecord = serde_json::from_value(serde_json::json!({
+            "execution_id": "execution-reconcile",
+            "session_name": "sandbox-gone",
+            "instance_id": "instance-test",
+            "backend": "test",
+            "policy_digest": "digest",
+            "created_at": 0,
+            "transient_rootfs": {
+                "mountpoint": overlay.join("merged"),
+                "upper": overlay.join("upper"),
+                "work": overlay.join("work"),
+            },
+            "execution_dir": execution_dir,
+            "restricted_network": false,
+            "agent_pid": std::process::id(),
+        }))
+        .expect("record fixture");
+        std::fs::write(
+            state.join("execution-reconcile.json"),
+            serde_json::to_vec(&record).expect("record bytes"),
+        )
+        .expect("persist the record");
+
+        runtime.reconcile(&[]).expect("reconcile");
+
+        {
+            let executions = runtime.executions.lock().expect("executions");
+            match executions.values().next() {
+                Some(TrackedExecution::CleanupPending {
+                    record, attempts, ..
+                }) => {
+                    assert_eq!(record.execution_id, "execution-reconcile");
+                    assert_eq!(*attempts, 1, "the first startup failure is tracked");
+                }
+                _ => panic!("a failed startup cleanup must be tracked for retry"),
+            }
+        }
+
+        // The recorded failure is retried through the same tracked identity.
+        std::fs::remove_file(overlay.join("upper")).expect("remove symlink");
+        std::fs::create_dir_all(overlay.join("upper")).expect("restore upper");
+        let key = runtime
+            .executions
+            .lock()
+            .expect("executions")
+            .keys()
+            .next()
+            .cloned()
+            .expect("a tracked key");
+        let report = match runtime.cleanup_entry(&key) {
+            Ok(report) => report.expect("the record was tracked"),
+            Err(error) => panic!("the retry must succeed: {error:#}"),
+        };
+        assert_eq!(report.execution_id, "execution-reconcile");
+        assert!(runtime.executions.lock().expect("executions").is_empty());
     }
 }

@@ -106,6 +106,10 @@ server_routes!(handler, msg, payload;
     // unit the server offers. It is handled in `handle_protocol_message`, ahead
     // of the relay path — see the match there for why the position matters.
     "server.agent.session-update" => "server.agent.session-update" => 1 => Inline => handler.handle_agent_session_update(msg).await,
+    // Activity is its own unit, not an update field: it must not stamp
+    // `last_activity`, and a level has its own incarnation/epoch/generation
+    // fence (#3804).
+    "server.agent.session-activity" => "server.agent.session-activity" => 1 => Inline => handler.handle_agent_session_activity(msg).await,
     "server.agent.session-env-binding" => "server.agent.session-env-binding" => 1 => Inline => handler.handle_agent_session_env_binding(msg).await,
     "server.agent.command-response" => "server.agent.command-response" => 1 => Inline => handler.handle_agent_command_response(msg).await,
     "server.agent.git-invalidated" => "server.agent.git-invalidated" => 1 => Inline => handler.handle_agent_git_invalidated(msg).await,
@@ -123,6 +127,10 @@ server_routes!(handler, msg, payload;
     // Pane and execution identity.
     "server.session.sandbox.context" => "server.session.sandbox.context" => 1 => Query => handler.handle_client_session_sandbox_context(msg).await,
     "server.session.sandbox.preflight" => "server.session.sandbox.preflight" => 1 => Query => handler.handle_client_session_sandbox_preflight(msg).await,
+    // Explicit one-Agent cache preparation (#3796). It is a Session-scoped
+    // mutation: an observation read never downloads, and a second prepare
+    // queues behind the same Session rather than racing it.
+    "server.session.sandbox.image-prepare" => "server.session.sandbox.image-prepare" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_image_prepare(msg).await,
     "server.session.sandbox.enter" => "server.session.sandbox.enter" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_enter(msg).await,
     "server.session.sandbox.return-to-native" => "server.session.sandbox.return-to-native" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_return(msg).await,
     "server.session.sandbox.focus" => "server.session.sandbox.focus" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_focus(msg).await,
@@ -176,6 +184,12 @@ server_routes!(handler, msg, payload;
     // a Claude client must resolve "is `/mcp` really on, and at which path?"
     // from the host rather than invent a port or assume the default.
     "server.mcp.endpoint" => "server.mcp.endpoint" => 1 => Query => handler.handle_client_mcp_endpoint(msg).await,
+    // Extension-contributed MCP Tool discovery and routing (#3778). `list`
+    // answers the validated merged manifest; `call` authorizes the named Agent
+    // against its own manifest and brokers one call. Neither is a new
+    // management plane: the Agent remains the execution authority.
+    "server.mcp.tools.list" => "server.mcp.tools.list" => 1 => Query => handler.handle_client_mcp_tools_list(msg).await,
+    "server.mcp.tool.call" => "server.mcp.tool.call" => 1 => Query => handler.handle_client_mcp_tool_call(msg).await,
     "server.agent.rename" => "server.agent.rename" => 1 => Inline => handler.handle_client_agent_rename(msg).await,
     "server.agent.delete" => "server.agent.delete" => 1 => Inline => handler.handle_client_agent_delete(msg).await,
     "server.commands.list" => "server.commands.list" => 1 => Query => handler.handle_client_commands_list(msg).await,
@@ -196,6 +210,12 @@ server_routes!(handler, msg, payload;
     "server.image.build" => "server.image.build" => 1 => Inline => handler.handle_client_image_build(msg).await,
     "server.image.list" => "server.image.list" => 1 => Query => handler.handle_client_image_list(msg).await,
     "server.image.get" => "server.image.get" => 1 => Query => handler.handle_client_image_get(msg).await,
+    // Server Catalog Library and mutable Tag lifecycle (#3799). Reads are
+    // queries; Tag mutations are small CAS-guarded catalog writes.
+    "server.image.library.list" => "server.image.library.list" => 1 => Query => handler.handle_client_image_library_list(msg).await,
+    "server.image.impact.get" => "server.image.impact.get" => 1 => Query => handler.handle_client_image_impact_get(msg).await,
+    "server.image.tag.set" => "server.image.tag.set" => 1 => Inline => handler.handle_client_image_tag_set(msg).await,
+    "server.image.tag.remove" => "server.image.tag.remove" => 1 => Inline => handler.handle_client_image_tag_remove(msg).await,
     // Asynchronous durable build lifecycle (#3334). Submit/cancel/retry are
     // small writes to the durable build directory; get/list read it.
     "server.image.build.submit" => "server.image.build.submit" => 1 => Inline => handler.handle_client_image_build_submit(msg).await,

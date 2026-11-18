@@ -12,11 +12,17 @@ import {
   type SandboxUnsupportedReason,
   type SandboxPolicyDraft,
   type SandboxPreflightResult,
+  type ImageCacheObservation,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { WIRE as ENTER_WIRE } from '@/generated/protocol/core/server-session-sandbox-enter/v1';
 import { WIRE as FOCUS_WIRE } from '@/generated/protocol/core/server-session-sandbox-focus/v1';
 import { WIRE as PREFLIGHT_WIRE } from '@/generated/protocol/core/server-session-sandbox-preflight/v1';
 import { WIRE as RETURN_WIRE } from '@/generated/protocol/core/server-session-sandbox-return-to-native/v1';
+import {
+  WIRE as IMAGE_PREPARE_WIRE,
+  type SandboxImagePrepareIntent,
+  type SandboxImagePrepareResponse,
+} from '@/generated/protocol/core/server-session-sandbox-image-prepare/v1';
 import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
 
 /**
@@ -35,6 +41,7 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   …&sandbox=offline     → the context read fails (Agent unreachable)
  *   …&sandbox=preflight-fail → validation blocked by host capability
  *   …&sandbox=enter-fail  → validated, then the launch barrier refuses
+ *   …&sandbox=agent-cache-absent → an image has no verified bytes or partial
  *   …&sandbox=agent-cache-failed → a selected image's Agent cache failed
  *   …&sandbox=agent-cache-downloading → one digest is actively downloading
  *   …&sandbox=agent-cache-resumable → a verified partial download survives
@@ -58,6 +65,7 @@ type Scenario =
   | 'offline'
   | 'preflight-fail'
   | 'enter-fail'
+  | 'agent-cache-absent'
   | 'agent-cache-failed'
   | 'agent-cache-downloading'
   | 'agent-cache-resumable';
@@ -74,6 +82,7 @@ function scenarioOf(search: string): Scenario {
     case 'offline':
     case 'preflight-fail':
     case 'enter-fail':
+    case 'agent-cache-absent':
     case 'agent-cache-failed':
     case 'agent-cache-downloading':
     case 'agent-cache-resumable':
@@ -650,62 +659,176 @@ function fixtureCacheStatuses(
   }));
 }
 
-function fixtureCacheObservations(
-  cacheDigests: string[],
-  scenario: Scenario,
-): SandboxContextResponse['cache_observations'] {
-  return cacheDigests.map((digest, index) => {
-    if (scenario === 'agent-cache-failed') {
+function observationOf(
+  digest: string,
+  phase: ImageCacheObservation['phase'],
+): ImageCacheObservation {
+  switch (phase) {
+    case 'absent':
       return {
         contract_version: 1,
         digest,
-        phase: 'failed' as const,
-        downloaded_bytes: 262_144,
-        total_bytes: 4_194_304,
+        phase,
         active: false,
         updated_at: 1_760_000_000,
-        detail: 'fixture cache verification failed',
       };
-    }
-    if (scenario === 'agent-cache-downloading' && index === 0) {
+    case 'resumable':
       return {
         contract_version: 1,
         digest,
-        phase: 'downloading' as const,
-        downloaded_bytes: 1_048_576,
-        total_bytes: 4_194_304,
-        active: true,
-        updated_at: 1_760_000_100,
-      };
-    }
-    if (scenario === 'agent-cache-resumable' && index === 0) {
-      return {
-        contract_version: 1,
-        digest,
-        phase: 'resumable' as const,
+        phase,
         downloaded_bytes: 524_288,
         total_bytes: 4_194_304,
         active: false,
         updated_at: 1_760_000_200,
         detail: 'a verified partial download survives; resume on next Prepare',
       };
+    case 'downloading':
+      return {
+        contract_version: 1,
+        digest,
+        phase,
+        downloaded_bytes: 1_048_576,
+        total_bytes: 4_194_304,
+        active: true,
+        updated_at: 1_760_000_100,
+      };
+    case 'verifying':
+      return {
+        contract_version: 1,
+        digest,
+        phase,
+        downloaded_bytes: 4_194_304,
+        total_bytes: 4_194_304,
+        active: true,
+        updated_at: 1_760_000_150,
+        detail: 'verifying the downloaded closure is not mount-ready',
+      };
+    case 'failed':
+      return {
+        contract_version: 1,
+        digest,
+        phase,
+        downloaded_bytes: 262_144,
+        total_bytes: 4_194_304,
+        active: false,
+        updated_at: 1_760_000_000,
+        detail: 'fixture cache verification failed',
+      };
+    case 'unavailable':
+      return {
+        contract_version: 1,
+        digest,
+        phase,
+        active: false,
+        updated_at: 1_760_000_000,
+        detail: 'this Agent has no EROFS cache configured',
+      };
+    case 'verified':
+      return {
+        contract_version: 1,
+        digest,
+        phase,
+        downloaded_bytes: 4_194_304,
+        total_bytes: 4_194_304,
+        active: false,
+        updated_at: 1_760_000_000,
+      };
+  }
+}
+
+/** The scenario's starting phase for a digest, before any explicit action. */
+function scenarioPhase(
+  scenario: Scenario,
+  index: number,
+): ImageCacheObservation['phase'] {
+  if (scenario === 'agent-cache-absent') {
+    return 'absent';
+  }
+  if (scenario === 'agent-cache-failed') {
+    return 'failed';
+  }
+  if ((scenario === 'agent-cache-downloading' || scenario === 'agent-cache-resumable') && index === 0) {
+    return scenario === 'agent-cache-downloading' ? 'downloading' : 'resumable';
+  }
+  return 'verified';
+}
+
+function currentPhase(
+  state: FixtureSandboxState,
+  digest: string,
+  index: number,
+): ImageCacheObservation['phase'] {
+  return state.cache.get(digest) ?? scenarioPhase(state.scenario, index);
+}
+
+function fixtureCacheObservations(
+  state: FixtureSandboxState,
+  cacheDigests: string[],
+): SandboxContextResponse['cache_observations'] {
+  const observations = cacheDigests.map((digest, index) =>
+    observationOf(digest, currentPhase(state, digest, index)),
+  );
+  // A simulated transfer advances one step per observation read, so a browser
+  // Case sees Downloading -> Verifying -> Verified through the same polling
+  // path a real Agent uses. The returned observation is what was true at the
+  // read; the next read reports the transition.
+  for (const observation of observations) {
+    if (observation.phase === 'downloading') {
+      state.cache.set(observation.digest, 'verifying');
+    } else if (observation.phase === 'verifying') {
+      state.cache.set(observation.digest, 'verified');
     }
-    return {
-      contract_version: 1,
-      digest,
-      phase: 'verified' as const,
-      downloaded_bytes: 4_194_304,
-      total_bytes: 4_194_304,
-      active: false,
-      updated_at: 1_760_000_000,
-    };
-  });
+  }
+  return observations;
 }
 
 interface FixtureSandboxState {
   scenario: Scenario;
   revision: number;
   entered: boolean;
+  /** The fixture Agent's simulated cache phase overrides, by digest. */
+  cache: Map<string, ImageCacheObservation['phase']>;
+}
+
+/** One explicit fixture cache action; mirrors the Agent's eligibility rules. */
+function answerImagePrepare(
+  state: FixtureSandboxState,
+  payload: Record<string, unknown>,
+): Promise<SandboxImagePrepareResponse> {
+  const digest = typeof payload.digest === 'string' ? payload.digest : '';
+  const intent = payload.intent as SandboxImagePrepareIntent;
+  const current = currentPhase(state, digest, 0);
+  const intentFits =
+    intent === 'prepare'
+      ? current !== 'unavailable'
+      : intent === 'resume'
+        ? current === 'resumable'
+        : current === 'failed';
+  if (!intentFits) {
+    return Promise.resolve({
+      success: false,
+      error_kind: 'invalid',
+      error:
+        intent === 'resume'
+          ? `resume requires a durable partial; the image is currently ${current}`
+          : `retry requires a failed cache state; the image is currently ${current}`,
+      observations: [],
+    } satisfies SandboxImagePrepareResponse);
+  }
+  if (intent === 'prepare' && current === 'verified') {
+    return Promise.resolve({
+      success: true,
+      observation: observationOf(digest, 'verified'),
+      observations: [observationOf(digest, 'verified')],
+    } satisfies SandboxImagePrepareResponse);
+  }
+  state.cache.set(digest, 'downloading');
+  return Promise.resolve({
+    success: true,
+    observation: observationOf(digest, 'downloading'),
+    observations: [observationOf(digest, 'downloading')],
+  } satisfies SandboxImagePrepareResponse);
 }
 
 /** The one request switch; `state` is the Agent's mutable observed state. */
@@ -732,7 +855,7 @@ function answerSandbox(
         cacheDigests,
         state.scenario === 'agent-cache-failed',
       ),
-      cache_observations: fixtureCacheObservations(cacheDigests, state.scenario),
+      cache_observations: fixtureCacheObservations(state, cacheDigests),
     };
     return Promise.resolve(response);
   }
@@ -821,6 +944,9 @@ function answerSandbox(
       context: insideContext(state.scenario, state.revision),
     } satisfies SandboxActionResult);
   }
+  if (type === IMAGE_PREPARE_WIRE) {
+    return answerImagePrepare(state, payload);
+  }
   return Promise.reject(new Error(`fixture sandbox surface does not answer ${type}`));
 }
 
@@ -830,6 +956,7 @@ export function fixtureSandboxSurface(search: string): PluginSurface {
     revision: 0,
     entered:
       scenarioOf(search) === 'inside' || scenarioOf(search) === 'inside-erofs',
+    cache: new Map(),
   };
   const protocols = new ProtocolDirectory();
   protocols.publish(manifestsOf(FIXTURE_AGENTS));
