@@ -4,6 +4,7 @@ import { advanceWorkflow } from './transition.mjs';
 import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2,
   SOURCE_V3 as QWEN_PREFLIGHT_FAILURE_V3 } from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
+import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ROLE_TASK = { developer: ['implement','repair'], reviewer: ['review'], acceptor: ['accept'] };
@@ -241,6 +242,7 @@ export function validateDevelopmentState(state) {
             QWEN_PREFLIGHT_FAILURE_V2.failure_code,
             QWEN_PREFLIGHT_FAILURE_V3.failure_code,
             QWEN_CLI_FAILURE.failure_code,
+            QWEN_TOOL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_JSON_FAILURE.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
@@ -272,6 +274,15 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===QWEN_TOOL_FAILURE.failure_code&&(
+            state.issue!==QWEN_TOOL_FAILURE.issue||
+            item.id!==QWEN_TOOL_FAILURE.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.role!=='developer'||
+            item.task.task!=='implement'||
+            item.task.sha!==QWEN_TOOL_FAILURE.source_sha||
+            r.source_run_id!==QWEN_TOOL_FAILURE.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_CLI_FAILURE.failure_code&&(
             state.issue!==QWEN_CLI_FAILURE.issue||
@@ -1227,6 +1238,55 @@ export function recordAttestedQwenCliFailure(state,version,proof){
     attempts:0,receipt:null};
   return validateDevelopmentState({...state,version:version+1,
     outbox:[failed,successor]});
+}
+
+// #3885: the second real Node Qwen Developer completed tool activity but
+// invoked the read-only Grep discovery tool, which the old policy denied.
+export function qwenToolSuccessorId(issue,actionId,runId){
+  if(issue!==QWEN_TOOL_FAILURE.issue||
+     actionId!==QWEN_TOOL_FAILURE.action_id||
+     runId!==QWEN_TOOL_FAILURE.run_id)
+    reject('unrecognized real Qwen readonly-tool failure source');
+  return hash([issue,actionId,runId,'qwen-readonly-discovery-recovery-v1']);
+}
+export function recordAttestedQwenToolFailure(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','run_head_sha','failure_code'],
+    'independently attested Qwen readonly-tool failure');
+  const f=QWEN_TOOL_FAILURE;
+  const original=state.outbox.find(x=>x.id===QWEN_CLI_FAILURE.action_id);
+  const old=state.outbox.find(x=>x.id===f.action_id);
+  if(state.version!==version||version!==6||state.issue!==f.issue||
+     state.phase!=='ready'||state.target_sha!==null||
+     state.transitions.length!==0||state.outbox.length!==2||
+     state.assignments.developer!=='dev-qwen-01'||
+     state.assignments.reviewer!=='review-qwen-01'||
+     original?.status!=='failed'||
+     original.receipt?.source_run_id!==QWEN_CLI_FAILURE.run_id||
+     original.receipt?.failure_code!==QWEN_CLI_FAILURE.failure_code||
+     proof.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.run_head_sha!==f.run_head_sha||
+     proof.failure_code!==f.failure_code||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='developer'||
+     old.task.task!=='implement'||old.task.agent_id!=='dev-qwen-01'||
+     old.task.sha!==f.source_sha||old.task.resume!=null||
+     old.receipt?.status!=='verified'||old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id)
+    reject('Qwen readonly-tool failure lacks exact Store lineage');
+  const nextId=qwenToolSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===nextId))
+    reject('Qwen readonly-tool successor already scheduled');
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
+    source_attempt:1,failure_code:f.failure_code}};
+  const successor={id:nextId,task:{...old.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===old.id?failed:x),successor]});
 }
 
 // The second exact pre-model Qwen failure: current main had no dedicated
