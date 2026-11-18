@@ -51,7 +51,7 @@ test('SC-01: Project New Session previews the resolved Managed snapshot before C
   await expect(review).toBeVisible();
   await expect(review.getByTestId('managed-review-runtime')).toHaveText('Managed (EROFS)');
   await expect(review.getByTestId('managed-review-agent')).toContainText('macbook');
-  await expect(review.getByTestId('managed-review-base')).toContainText('fixture-image');
+  await expect(review.getByTestId('managed-review-base')).toContainText('image-fixture');
   await expect(review.getByTestId('managed-review-source')).toContainText('sha256:');
   await expect(review.getByTestId('managed-review-toolchains')).toContainText('1.');
   await expect(review.getByTestId('managed-review-workspace')).toContainText(
