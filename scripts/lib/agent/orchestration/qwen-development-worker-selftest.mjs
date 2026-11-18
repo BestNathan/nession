@@ -14,8 +14,7 @@ const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
   GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',
   GITHUB_WORKFLOW:'Agent / Development',GITHUB_ACTOR:'github-actions[bot]',
   GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'55501',GITHUB_SHA:'c'.repeat(40),
-  NESSION_DEVELOPER_ISOLATED:'docker-v1',GITHUB_WORKSPACE:'/workspace',
-  RUNNER_TEMP:'/tmp'};
+  GITHUB_WORKSPACE:'/runner/nession',RUNNER_TEMP:'/tmp'};
 assert.equal(qwenWorkerAuthority(admission,env).agent_id,'dev-qwen-01');
 assert.equal(qwenWorkerAuthority({...admission,issue:1998},env).issue,1998);
 const issue={number:2274,state:'open',title:'Fix tracked application source',
@@ -29,13 +28,13 @@ for(const extra of [
   {STORE_WRITER_PRIVATE_KEY:'private'}, {GH_TOKEN:'forbidden'},
   {CURSOR_RESUME_PRIVATE_KEY_B64:'forbidden'},
   {QWEN_RESUME_PRIVATE_KEY_B64:'forbidden'},
-  {GITHUB_WORKSPACE:'/repo'}, {GITHUB_ACTOR:'untrusted'},
+  {GITHUB_WORKSPACE:'relative'}, {RUNNER_TEMP:'relative'},
+  {GITHUB_ACTOR:'untrusted'},
   {GITHUB_RUN_ATTEMPT:'2'}, {GITHUB_REF:'refs/heads/staging'},
   {GITHUB_WORKFLOW:'Another workflow'},
-  {NSESSION_DEVELOPER_ISOLATED:'invalid',NESSION_DEVELOPER_ISOLATED:'host'},
-]){
+ ]){
   assert.throws(()=>qwenWorkerAuthority(admission,{...env,...extra}),
-    /isolated Qwen Developer|Qwen Developer evidence/);
+    /Qwen Developer|Qwen Developer evidence/);
 }
 for(const change of [
   {authorized:false},{issue:0},{run_id:55502},
@@ -43,7 +42,7 @@ for(const change of [
   {environment:'deepseek'},{task:'review'},{input_sha:'invalid'},
 ])
   assert.throws(()=>qwenWorkerAuthority({...admission,...change},env),
-    /isolated Qwen Developer/);
+    /Qwen Developer/);
 for(const invalid of [
   {...issue,number:1997},{...issue,state:'closed'},
   {...issue,title:'x'.repeat(400)},
