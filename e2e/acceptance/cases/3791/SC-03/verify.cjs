@@ -11,7 +11,7 @@ const { run, targetSha } = require('../../../shared/mcp-cases.cjs');
 
 const REPO = 'BestNathan/nession';
 const API = 'https://api.github.com/repos/' + REPO;
-const GHCR = 'ghcr.io/bestnathan/nession';
+const GHCR = 'https://ghcr.io/bestnathan/nession';
 const HEX40 = /^[a-f0-9]{40}$/;
 const HEX64 = /^sha256:[a-f0-9]{64}$/;
 
@@ -92,7 +92,7 @@ async function registryToken() {
 }
 
 async function manifest(token, reference, accept) {
-  const response = await fetch(GHCR + '/manifests/' + encodeURIComponent(reference), {
+  const response = await fetch(GHCR + '/manifests/' + reference, {
     headers: { Authorization: 'Bearer ' + token, Accept: accept },
     signal: AbortSignal.timeout(20000),
   });
