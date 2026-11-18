@@ -276,7 +276,7 @@ export function readCommittedQwenPublisherIntent({
 }){
   if(!positive(issue)||!HEX.test(action_id??'')||
       !positive(worker_run_id)||!positive(publisher_run_id)||
-      typeof remote!=='string'||!remote||/\\s/.test(remote)||remote.length>2000)
+      typeof remote!=='string'||!remote||/\s/.test(remote)||remote.length>2000)
     reject('invalid read-only Qwen Publisher recovery identity');
   const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-publisher-recovery-'));
   const root=path.join(tmp,'agent-store');
