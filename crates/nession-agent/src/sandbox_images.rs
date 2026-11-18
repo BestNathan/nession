@@ -257,6 +257,11 @@ pub async fn prepare(
     let (base_ref, base_env) =
         match resolve_grant_image(cache, base, &origin, server_auth_token).await {
             Ok(resolved) => {
+                if let Err(error) = reject_referenced_composite(&resolved) {
+                    guard.disarm();
+                    remove_owned_workspace(&guard.root, &guard.path);
+                    return Err(error);
+                }
                 let base_env = image_env_defaults(&resolved);
                 let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
                 manifests.extend(binding);
