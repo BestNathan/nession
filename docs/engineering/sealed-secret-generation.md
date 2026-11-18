@@ -106,3 +106,19 @@ gateway certificate remains a separate prerequisite.
 - GitOps Sync / CI success is NOT evidence of a live usable Kubernetes Secret,
   public HTTPS TLS, or an authenticated remote MCP handshake.
 \n## Main-merge one-time bootstrap (#3912)\n\nA restricted `push` trigger runs when `.github/workflows/deploy-seal-gitops-secret.yml` itself is merged to `main`. This trigger selects only the registered `staging/MCP_CONFIG_TOML` resource. GitHub Environment protection/approval still applies, and the validated GitOps MCP overlay must exist before the run. Unrelated pushes to `main` do NOT regenerate the ciphertext. On later credential changes use the existing manual `workflow_dispatch` and select the specific registered resource. The producer has no access to the SealedSecrets controller private key or to Kubernetes credentials.\n
+## Strict GitOps publication (Bug #3921)
+
+A successful offline seal does not imply the encrypted manifest has reached
+GitOps. The source-owned publisher treats `gitops` as a data checkout and
+commits only the registered `sealed-secret.json` and the matching
+`kustomization.yaml`. Its `git status --porcelain=v1` parser preserves both
+status columns (including the leading space of an unstaged ` M` record) so
+the exact target-path allowlist cannot falsely reject valid Kustomize changes.
+Unexpected paths still fail closed and do not get staged or committed.
+
+Initial protected bootstrap run #44280180970 reached and passed the offline
+`kubeseal` step but failed publication due to a trimmed status prefix.
+The corrective publish workflow runs after the reviewed source fix is merged
+to `main`; confirm both the successful Action and the actual encrypted
+resource on `gitops` before relying on Argo CD reconciliation. Cluster
+readiness itself requires an independent Kubernetes observation.
