@@ -142,7 +142,7 @@ export function classifyQwenCliFailure(proc) {
     detail.push('spawn=' + (['ETIMEDOUT','ENOENT','EACCES'].includes(proc.error.code)
       ? proc.error.code : 'other'));
   let last = null;
-  for (const line of String(proc?.stdout ?? '').split(/\\r?\\n/)) {
+  for (const line of String(proc?.stdout ?? '').split(/\r?\n/)) {
     if (line.length > 65536 || !line.trim().startsWith('{')) continue;
     try {
       const record = JSON.parse(line);
@@ -169,15 +169,15 @@ export function classifyQwenCliFailure(proc) {
   const stderr = String(proc?.stderr ?? '').slice(-32768);
   let category = 'other';
   for (const [pattern, label] of [
-    [/\\b(401|unauthori[sz]ed|invalid api key|authentication failed)\\b/i,'authentication'],
-    [/\\b(403|forbidden|not permitted)\\b/i,'authorization'],
-    [/\\b(429|rate.limit|too many requests)\\b/i,'rate_limit'],
-    [/\\b(unknown model|unrecognized.model|invalid model)\\b/i,'model'],
-    [/\\b(session not found|invalid session|session.*missing)\\b/i,'session'],
-    [/\\b(ENOSPC|no space left)\\b/i,'disk'],
-    [/\\b(EACCES|permission denied)\\b/i,'filesystem_permission'],
-    [/\\b(ETIMEDOUT|request timeout|timed out)\\b/i,'timeout'],
-    [/\\b(ECONNRESET|ECONNREFUSED|ENOTFOUND)\\b/i,'network'],
+    [/\b(401|unauthori[sz]ed|invalid api key|authentication failed)\b/i,'authentication'],
+    [/\b(403|forbidden|not permitted)\b/i,'authorization'],
+    [/\b(429|rate.limit|too many requests)\b/i,'rate_limit'],
+    [/\b(unknown model|unrecognized.model|invalid model)\b/i,'model'],
+    [/\b(session not found|invalid session|session.*missing)\b/i,'session'],
+    [/\b(ENOSPC|no space left)\b/i,'disk'],
+    [/\b(EACCES|permission denied)\b/i,'filesystem_permission'],
+    [/\b(ETIMEDOUT|request timeout|timed out)\b/i,'timeout'],
+    [/\b(ECONNRESET|ECONNREFUSED|ENOTFOUND)\b/i,'network'],
   ]) {
     if (pattern.test(stderr)) {category = label; break;}
   }
