@@ -16,15 +16,18 @@ revision does not guarantee simultaneous *runtime* readiness. Inspect both.
 
 ## Encrypted MCP configuration via GitHub Environments (#3912 / PR #3913)
 
-The operator supplies the **private `mcp.toml`** as the single JSON
-`K8S_SECRET_DATA_JSON` Secret of the protected GitHub Environment
-`staging-mcp`. Separately, `SEALED_SECRETS_CERT_B64` is an Environment
-Variable containing the Sealed Secrets controller's **public sealing
-certificate** (not the controller private key). See
-`docs/engineering/sealed-secret-generation.md` on `main`.
+The GitHub Environment is **`staging`**, matching
+`gitops/environments/staging` exactly. It holds independent GitHub Secrets
+for this environment. The operator provides **`MCP_CONFIG_TOML`** as one
+Environment Secret whose value is the complete **raw `mcp.toml` text**,
+not JSON/base64 or a bundle. The repository variable
+`SEALED_SECRETS_CERT_PEM` contains the controller's **public X.509 RSA
+certificate PEM** (not the SSH public key used by Argo CD, and never the
+controller private key). See `docs/engineering/sealed-secret-generation.md`
+on `main`.
 
 First merge this GitOps overlay PR, then dispatch the main-owned
-`Deploy / Seal GitOps Secret` workflow with target `staging-mcp`. It seals
+`Deploy / Seal GitOps Secret` workflow with environment `staging` and secret `MCP_CONFIG_TOML`. It seals
 the config **offline**, commits `sealed-secret.json` to this overlay and
 adds the matching `resources` entry automatically. The existing cluster
 Sealed Secrets Controller then generates the ordinary Kubernetes Secret
