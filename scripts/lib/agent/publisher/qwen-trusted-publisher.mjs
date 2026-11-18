@@ -233,6 +233,9 @@ export async function runTrustedQwenPublication({
       receipt,worker,claim,originalResult,
       resultJsonBytes:readWorkerZipMember(resultZip,'result.json'),
       readback,publisherRunId:Number(env.GITHUB_RUN_ID),
+      // The Intent was committed before any PR POST and independently
+      // checked against the original signed Store Outbox and Worker ZIP.
+      signedSourceSha:intent.record.worker_source_sha,
     });
     const handoff=applyQwenPublicationToRemote({
       remote,readback,intent,registry,developerResult});
