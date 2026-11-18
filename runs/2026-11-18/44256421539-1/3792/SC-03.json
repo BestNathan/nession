@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8dbfb5fdf752b4c133d88fb95d835fb6d0dd2d7beb34d3f7b6e95b8b2938cff1",
+  "run_id": 44256421539,
+  "run_attempt": 1,
+  "issue": 3792,
+  "criterion": "SC-03",
+  "criterion_text": "The Filesystem editor can choose Local RootFS and a compatible Workspace/Toolchain without displaying the obsolete mandatory-Base error; it explains unavailable backend or missing verified cache before Enter.",
+  "stage": "staging",
+  "target_sha": "5fac35d88e0c28b0be2363399d8772c552ae6e05",
+  "contract_sha256": "74b1833a8c2b4005f61ecae4ef443ae57078b8da964f8e539ed22ed78faa220f",
+  "case_revision": "5fac35d88e0c28b0be2363399d8772c552ae6e05",
+  "case_tree_sha": "9ec66d2e639725d376987998681888d471b1b681",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T07:11:28.775Z",
+  "finished_at": "2026-11-18T07:11:44.455Z",
+  "duration_ms": 15680,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-web.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=30"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 30
+      },
+      "duration_ms": 5840,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-app.spec.ts",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=15"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 15
+      },
+      "duration_ms": 3935,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44256421539,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5fac35d88e0c28b0be2363399d8772c552ae6e05",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44256421539",
+    "record_path": "runs/2026-11-18/44256421539-1/3792/SC-03.json",
+    "source_result_sha256": "e6a542c5cb876814ddc82584dabdb5e242078b964c80d0a0b21bf1e0fd3bbd67"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44256421539-1",
+    "sha256": "e6a542c5cb876814ddc82584dabdb5e242078b964c80d0a0b21bf1e0fd3bbd67",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44256421539",
+    "durability": "time-limited; object archival not configured"
+  }
+}
