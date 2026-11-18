@@ -66,7 +66,7 @@ import {collectPublicPagesLineage,selfTestPublicPagesLineage,shouldCollectPublic
 import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shouldCollectPublicWorkflowPublication} from './acceptance-pages-workflow-receipt.mjs';
 import {collectStagingAcrEvidence,shouldCollectStagingAcr,selfTestStagingAcrEvidence} from './acceptance-staging-acr-readback.mjs';
 import {collectDevelopmentReadback} from './acceptance-development-readback.mjs';
-import {collectIssueAuditReadback,selfTestIssueAuditReadback,SIDEBAR_AUDIT_REPAIR_PROOF} from './acceptance-issue-audit-readback.mjs';
+import {collectIssueAuditReadback,selfTestIssueAuditReadback,SIDEBAR_AUDIT_REPAIR_PROOF,ISSUE_AUDIT_3843_PROOF} from './acceptance-issue-audit-readback.mjs';
 import {collectRunStoreFixtureEvidence,selfTestRunStoreFixtureEvidence} from './acceptance-run-store-fixture-evidence.mjs';
 import {collectAuthenticatedAgentFixture,selfTestAuthenticatedAgentFixture} from './acceptance-run-store-agent-fixture-evidence.mjs';
 import {collectCasMatrixEvidence,selfTestCasMatrixEvidence} from './acceptance-run-store-cas-evidence.mjs';
@@ -215,7 +215,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -251,6 +251,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs_dropped: directRunsAtSha.dropped,
     ...(authenticatedIssueAuditReadback ? {authenticated_issue_audit_readback:authenticatedIssueAuditReadback} : {}),
     ...(authenticatedIssueAuditRepairReadback ? {authenticated_issue_audit_repair_readback:authenticatedIssueAuditRepairReadback} : {}),
+    ...(authenticatedIssueAudit3843Readback ? {authenticated_issue_audit_3843_readback:authenticatedIssueAudit3843Readback} : {}),
     ...(verifiedAgentTelemetryRecords.length
       ? { verified_agent_telemetry_records: verifiedAgentTelemetryRecords } : {}),
     verified_development_checkpoint_readbacks: developmentReadback,
@@ -1672,6 +1673,19 @@ async function collectCommand(workspace, outFile) {
         isAncestor:(source,target)=>spawnSync('git',
           ['-C',workspace,'merge-base','--is-ancestor',source,target]).status===0,
       }) : null;
+  // #3843 SC-03: a real owner comment dispatched #3837 on the repaired
+  // exact main SHA. Re-read only the fixed source Run, owner comment,
+  // acknowledged repair, GitHub label events and final canonical target.
+  // A successful sibling Audit of the implementing #3843 is NOT this proof.
+  const authenticatedIssueAudit3843Readback =
+    process.env.ACCEPTANCE_STAGE==='post-merge' &&
+    Number(process.env.ISSUE_NUMBER)===ISSUE_AUDIT_3843_PROOF.acceptanceIssue &&
+    sha===ISSUE_AUDIT_3843_PROOF.sourceSha
+    ? await collectIssueAuditReadback({
+      repo,targetSha:sha,sourceRunId:ISSUE_AUDIT_3843_PROOF.sourceRunId,
+      targetIssueNumber:ISSUE_AUDIT_3843_PROOF.targetIssueNumber,
+      proof:ISSUE_AUDIT_3843_PROOF,request:githubGet,readLog:githubJobLog,
+    }):null;
   const verifiedRunStoreFixtureEvidence = process.env.ACCEPTANCE_STAGE === 'post-merge' && String(process.env.ISSUE_NUMBER ?? '') === '1690'
     ? await collectRunStoreFixtureEvidence(repo, sha, directRuns, githubGet) : [];
   // SC-10: the real disposable agent-store fixture has its OWN executed CAS
@@ -2078,7 +2092,7 @@ async function collectCommand(workspace, outFile) {
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
-    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, verifiedLiveFullFailurePublication, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, deferredAcceptanceReplays,
+    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, verifiedLiveFullFailurePublication, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, authenticatedIssueAudit3843Readback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
     authenticatedQwenChainFixture,authenticatedQwen3433Recovery,
     authenticatedRunStoreCasMatrix,
@@ -3006,6 +3020,15 @@ async function selfTest() {
     ]]]),
   });
 
+  // #3843: the exact source-attested cross-Issue proof reaches the immutable
+  // Acceptance context but is never invented for unrelated Issues.
+  const source3843=normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedIssueAudit3843Readback:{status:'authenticated-repair-readback',
+      source_run_id:ISSUE_AUDIT_3843_PROOF.sourceRunId}});
+  assert.equal(source3843.authenticated_issue_audit_3843_readback.source_run_id,
+    ISSUE_AUDIT_3843_PROOF.sourceRunId);
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40)})
+    .authenticated_issue_audit_3843_readback,undefined);
   assert.equal(evidence.kind, 'acceptance_ci_evidence');
   assert.equal(evidence.provider_wake_evidence,null);
   assert.deepEqual(normalizeCiEvidence({targetSha:'a'.repeat(40),

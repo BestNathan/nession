@@ -155,6 +155,17 @@ Three rules make that safe:
   same row with a different status — never a replacement — so finishing a
   response does not remount it.
 
+## App presentation
+
+On App the conversation is the Workspace capability's **root**, not a tab beside
+its resources (#3829). The reader fills the content area under the App's single
+page header; resources are reached through one contextual Browse entry and
+pushed depth, and the reading surface keeps its scroll while those depths are on
+screen. The reader is read-only: submitting new CLI input belongs to the
+Terminal, and the App transcript never renders a composer. Provider activity is
+shown in the provider's own words; it is never inferred from a foreground
+process name.
+
 ## Scroll
 
 The transcript owns its own scroll.

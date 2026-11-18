@@ -78,6 +78,7 @@ export const CATALOG = [
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['deploy-identity', 'deploy-identity.yml', 'Deploy / Identity', 'deploy-identity.yml', 'Deploy / Identity', 'delivery'],
   ['deploy-staging-acr', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'delivery'],
+  ['deploy-acr-macos-mirror', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'delivery'],
   ['deploy-oci-pull-readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'delivery'],
   ['deploy-staging-rollout-readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'delivery'],
   ['deploy-identity-ingest', 'deploy-identity-ingest.yml', 'Deploy / Identity Ingest', 'deploy-identity-ingest.yml', 'Deploy / Identity Ingest', 'delivery'],

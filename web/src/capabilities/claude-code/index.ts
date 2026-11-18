@@ -11,6 +11,8 @@ export {
   CLAUDE_CODE_ID,
   CLAUDE_CODE_TITLE,
   CLAUDE_CODE_SHORT_TITLE,
+} from './identity';
+export {
   claudeCodeConversation,
   claudeCodeProjection,
   claudeCodeView,
