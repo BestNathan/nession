@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "33d96ee090bf15a1287042a56d0fa70fb80ce8465e6943b9f611680aa94550e8",
+  "run_id": 44239838091,
+  "run_attempt": 1,
+  "issue": 3779,
+  "criterion": "SC-02",
+  "criterion_text": "`enter new` and `enter resume` select the exact requested Claude conversation on a named Session; idle/in-process and Shell paths are verified, busy/waiting/foreign/stale targets fail without spawning conflicting transcript writers.",
+  "stage": "staging",
+  "target_sha": "73e9859ac08e5ca3901dc8a7f347bc92e3acc353",
+  "contract_sha256": "72f43c6842f09676bd559c020c6187ad69329f8c99d80bc452734ce04dcd63a8",
+  "case_revision": "73e9859ac08e5ca3901dc8a7f347bc92e3acc353",
+  "case_tree_sha": "cdf9924856357b1a52277782a97c5b4975df85eb",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T04:51:46.839Z",
+  "finished_at": "2026-11-18T04:51:47.075Z",
+  "duration_ms": 236,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "The real-CLI positive path stays Pending on this runner (claude absent); deterministic negative-path fixtures passed. The live Shell-launch, in-process /clear && /resume, busy/waiting refusal and one-writer paths therefore remain unproven at this stage.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "enter requires an explicit agent_id/session_id, `new` chooses the conversation id itself, `resume` requires an explicit conversation_id and refuses omission/blank, and a foreign Agent target is refused before any input"
+        },
+        {
+          "type": "blocked",
+          "value": "The Acceptance / Cases runner provides no authenticated interactive Claude runtime: measured no runnable `claude` executable; the verified matrix is 2.1.326. The live Shell-launch, in-process /clear && /resume, busy/waiting refusal and one-writer paths therefore remain unproven at this stage."
+        }
+      ],
+      "duration_ms": 215,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44239838091,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "73e9859ac08e5ca3901dc8a7f347bc92e3acc353",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44239838091",
+    "record_path": "runs/2026-11-18/44239838091-1/3779/SC-02.json",
+    "source_result_sha256": "80106c330e528e830aa0f1df8ade179c083a9df272b5b28a45efb1738988f588"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44239838091-1",
+    "sha256": "80106c330e528e830aa0f1df8ade179c083a9df272b5b28a45efb1738988f588",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44239838091",
+    "durability": "time-limited; object archival not configured"
+  }
+}

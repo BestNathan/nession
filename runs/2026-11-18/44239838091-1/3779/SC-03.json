@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7bba3fb85e0e6e5dfa351d19da8d743e4540c95f17a36a94017803793bd271ad",
+  "run_id": 44239838091,
+  "run_attempt": 1,
+  "issue": 3779,
+  "criterion": "SC-03",
+  "criterion_text": "`submit` inputs one prompt only into the verified idle Claude Session and returns its actual `conversation_id` and truthful delivery status; mismatch/unknown/concurrent/timeout replay does not cause an unchecked second submission.",
+  "stage": "staging",
+  "target_sha": "73e9859ac08e5ca3901dc8a7f347bc92e3acc353",
+  "contract_sha256": "72f43c6842f09676bd559c020c6187ad69329f8c99d80bc452734ce04dcd63a8",
+  "case_revision": "73e9859ac08e5ca3901dc8a7f347bc92e3acc353",
+  "case_tree_sha": "e88d1d867c9c0ca74ef6e02a80229584f5b9e5e0",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T04:51:47.075Z",
+  "finished_at": "2026-11-18T04:51:47.300Z",
+  "duration_ms": 225,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "The real-CLI positive path stays Pending on this runner (claude absent); deterministic negative-path fixtures passed. The live one-prompt delivery, verified actual-id, busy/stale refusal and timeout read-back paths therefore remain unproven at this stage.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "submit requires the verified conversation_id, refuses an empty/blank guard and empty/multi-line prompts before any input, refuses a foreign Agent target, and reports the delivery phase (`input_sent`) with the actual conversation id rather than an execution result"
+        },
+        {
+          "type": "blocked",
+          "value": "The Acceptance / Cases runner provides no authenticated interactive Claude runtime: measured no runnable `claude` executable; the verified matrix is 2.1.326. The live one-prompt delivery, verified actual-id, busy/stale refusal and timeout read-back paths therefore remain unproven at this stage."
+        }
+      ],
+      "duration_ms": 204,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44239838091,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "73e9859ac08e5ca3901dc8a7f347bc92e3acc353",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44239838091",
+    "record_path": "runs/2026-11-18/44239838091-1/3779/SC-03.json",
+    "source_result_sha256": "f89accb6674595fde8bc90574d1d6bd921a7fe87f8821a6674fd8b6914b5a73d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44239838091-1",
+    "sha256": "f89accb6674595fde8bc90574d1d6bd921a7fe87f8821a6674fd8b6914b5a73d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44239838091",
+    "durability": "time-limited; object archival not configured"
+  }
+}
