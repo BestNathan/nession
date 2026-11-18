@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { CONTROLLED_1997_POLICY as POLICY } from '../publisher/controlled-proposal.mjs';
 import { reviewModelResult } from '../tasks/review.mjs';
 import { runReviewSlice } from './review-slice.mjs';
-import { assertIsolatedReviewerProcess, createClaudeReviewRunner, createCursorReviewRunner,
+import { assertReviewerWorkerEnvironment, createClaudeReviewRunner, createCursorReviewRunner,
   readReviewAdmission, writeReviewTelemetry } from './review-worker.mjs';
 
 const admission=Object.freeze({
@@ -54,25 +54,23 @@ try{
   assert.throws(()=>readReviewAdmission(path.join(temp,'missing.json')),/ENOENT|no such file/i);
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
 
-const goodEnv={NESSION_REVIEWER_ISOLATED:'docker-v1',GITHUB_WORKSPACE:'/workspace',
-  CURSOR_SDK_ROOT:'/sdk',RUNNER_TEMP:'/tmp',CURSOR_API_KEY:'provider-only-key'};
-assert.doesNotThrow(()=>assertIsolatedReviewerProcess(goodEnv,{dockerenv:true}));
-assert.throws(()=>assertIsolatedReviewerProcess(goodEnv,{dockerenv:false}),/OS-isolated Docker worker/);
-assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,NESSION_REVIEWER_ISOLATED:'local'},{dockerenv:true}),
-  /OS-isolated Docker worker/);
-assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,GITHUB_WORKSPACE:'/tmp'},{dockerenv:true}),
-  /OS-isolated Docker worker/);
-assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,RUNNER_TEMP:'/var/tmp'},{dockerenv:true}),
-  /OS-isolated Docker worker/);
-// The Cursor SDK mount is required only for the cursor provider.
-assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,CURSOR_SDK_ROOT:'/tmp'},
-  {dockerenv:true,provider:'cursor'}),/missing mounted Cursor SDK/);
+const goodEnv={GITHUB_WORKSPACE:'/runner/nession',RUNNER_TEMP:'/tmp',
+  CURSOR_SDK_ROOT:'/tmp/review-sdk',CURSOR_API_KEY:'provider-only-key'};
+assert.doesNotThrow(()=>assertReviewerWorkerEnvironment(goodEnv));
+assert.doesNotThrow(()=>assertReviewerWorkerEnvironment(goodEnv,{provider:'cursor'}));
+assert.throws(()=>assertReviewerWorkerEnvironment({...goodEnv,GITHUB_WORKSPACE:'relative'}),
+  /absolute Runner workspace/);
+assert.throws(()=>assertReviewerWorkerEnvironment({...goodEnv,RUNNER_TEMP:'relative'}),
+  /absolute Runner workspace/);
+// Only Cursor needs the installed SDK; Qwen uses the Claude CLI.
 const {CURSOR_SDK_ROOT,...noSdk}=goodEnv;
-assert.doesNotThrow(()=>assertIsolatedReviewerProcess(noSdk,{dockerenv:true,provider:'claude-code'}));
-assert.throws(()=>assertIsolatedReviewerProcess(noSdk,{dockerenv:true,provider:'cursor'}),
-  /missing mounted Cursor SDK/);
+assert.doesNotThrow(()=>assertReviewerWorkerEnvironment(noSdk,{provider:'claude-code'}));
+assert.throws(()=>assertReviewerWorkerEnvironment(noSdk,{provider:'cursor'}),
+  /missing installed Cursor SDK root/);
+assert.throws(()=>assertReviewerWorkerEnvironment({...goodEnv,CURSOR_SDK_ROOT:'relative'},{provider:'cursor'}),
+  /missing installed Cursor SDK root/);
 for(const key of ['GITHUB_TOKEN','GH_TOKEN','STORE_WRITER_PRIVATE_KEY','PUBLISHER_APP_PRIVATE_KEY'])
-  assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,[key]:'leak'},{dockerenv:true}),
+  assert.throws(()=>assertReviewerWorkerEnvironment({...goodEnv,[key]:'leak'}),
     /privileged credential leaked/);
 
 const catalog=[{id:'composer-2.5',parameters:[{id:'fast',values:[{value:'true'}]}]}];
@@ -195,9 +193,9 @@ await assert.rejects(()=>runReviewSlice({admission:qwenAdmission,
   runner:createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
     spawn:claudeSpawn(0,editLines),env:{}}),
   taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),/write\/shell tool/);
-// The CLI path must fail closed on a non-container host before reading input.
+// The CLI still rejects missing trusted Runner paths before reading input.
 const cli=spawnSync(process.execPath,['scripts/lib/agent/reviewer/review-worker.mjs',
   'missing.json','/tmp/nession-review-out'],{encoding:'utf8',env:{PATH:process.env.PATH}});
 assert.equal(cli.status,1);
-assert.match(cli.stderr,/OS-isolated Docker worker is mandatory/);
-console.log('Reviewer Worker: bounded admission read, isolated-process preconditions and exactly-read/grep mock SDK slice passed; no network, GitHub or Store effect');
+assert.match(cli.stderr,/Node Reviewer requires absolute Runner workspace/);
+console.log('Reviewer Worker: bounded admission, Node Runner preconditions and exactly-read/grep mock SDK slice passed');
