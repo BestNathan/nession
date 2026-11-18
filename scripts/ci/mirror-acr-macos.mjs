@@ -36,17 +36,62 @@ export function samePlatforms(a, b) {
     Object.keys(b).length === 2;
 }
 
+// Only fixed enums and numeric fields can escape this function. Raw stderr may
+// include signed Blob URLs, Authorization headers or credentials; never log it.
+export function classifyCopyFailure(code, timedOut, diagnostic = '') {
+  const message = String(diagnostic);
+  const statuses = [...message.matchAll(
+    /(?:\bHTTP(?:\/[0-9.]+)?\s+|\b(?:unexpected|response)\s+status(?:\s+code)?\s*[:=]?\s*|\bstatus\s*:\s*|\bstatus\s+code\s*[:=]?\s*)([1-5]\d{2})\b/gi,
+  )];
+  const http_status = statuses.length ? Number(statuses.at(-1)[1]) : null;
+  const exit_code = Number.isInteger(code) && code >= 0 && code <= 255 ? code : null;
+  const result = (error_type, retryable) =>
+    ({error_type, http_status, exit_code, retryable});
+
+  // HTTP status is context-bound: a bare "401" in a signed URL is not auth.
+  if ([401, 403].includes(http_status) ||
+      /\b(?:unauthorized|authentication required|incorrect password|access denied|permission denied|forbidden|insufficient_scope)\b/i.test(message)) {
+    return result('credential_or_permission_rejected', false);
+  }
+  if (/\b(?:manifest invalid|manifest unknown|blob unknown|digest mismatch|unsupported media type|invalid manifest|unsupported manifest|invalid reference)\b/i.test(message)) {
+    return result('invalid_registry_content', false);
+  }
+  if (http_status === 408 || http_status === 429 || (http_status >= 500 && http_status <= 599)) {
+    return result('registry_transient_http', true);
+  }
+  if (http_status !== null) return result('registry_http_rejection', false);
+  if (timedOut || code === 124) return result('transfer_deadline', true);
+  if (/TLS.{0,12}handshake timeout/i.test(message)) return result('tls_handshake_timeout', true);
+  if (/connection reset|connection refused|unexpected EOF|broken pipe|connection aborted|connection closed by peer/i.test(message)) {
+    return result('connection_reset', true);
+  }
+  if (/context deadline|i\/o timeout|network is unreachable|dial tcp|connection timed out|timeout awaiting response headers|no such host|temporary failure in name resolution|context canceled/i.test(message)) {
+    return result('network_transport', true);
+  }
+  if (code === 127) return result('tool_unavailable', false);
+  if (code === 137 || code === null) return result('process_interrupted', false);
+  return result('copy_error', false);
+}
+
+// Preserve the earlier stable category-only interface for login/preflight.
 export function failureClass(code, timedOut, diagnostic = '') {
-  if (/401|403|unauthorized|authentication required|denied|incorrect.password/i.test(diagnostic)) {
-    return 'credential_or_permission_rejected';
-  }
-  if (timedOut || code === 124 || code === 137) return 'transfer_deadline';
-  if (/TLS.handshake.timeout/i.test(diagnostic)) return 'tls_handshake_timeout';
-  if (/connection reset|connection refused|unexpected EOF|broken pipe/i.test(diagnostic)) return 'connection_reset';
-  if (/context.deadline|i.o timeout|network.unreachable|dial tcp|context canceled/i.test(diagnostic)) {
-    return 'network_transport';
-  }
-  return 'copy_error';
+  return classifyCopyFailure(code, timedOut, diagnostic).error_type;
+}
+
+// A heartbeat proves that the external command is still pending; it cannot
+// claim Blob bytes, upload percentage, throughput, or destination progress.
+export async function withHeartbeat({image, attempt, run, intervalMs = 30000,
+  log = console.log} = {}) {
+  const started = performance.now();
+  const interval = setInterval(() => {
+    log('ACR_MAC_MIRROR_PROGRESS_V1 ' + JSON.stringify({
+      image, attempt, phase: 'oci_transfer_and_index',
+      elapsed_seconds: seconds(started), status: 'running',
+    }));
+  }, intervalMs);
+  interval.unref();
+  try { return await run(); }
+  finally { clearInterval(interval); }
 }
 
 function seconds(start) { return Number(((performance.now() - start) / 1000).toFixed(3)); }
@@ -60,9 +105,12 @@ function command(args, {stdin = '', timeoutMs = 90000, env = process.env} = {}) 
     const start = performance.now();
     const child = spawn('regctl', args, {env, stdio: ['pipe', 'pipe', 'pipe']});
     let stdout = '', diagnostic = '', timedOut = false, done = false;
-    const add = (current, chunk) => (current + String(chunk)).slice(0, 262144);
-    child.stdout.on('data', chunk => { stdout = add(stdout, chunk); });
-    child.stderr.on('data', chunk => { diagnostic = add(diagnostic, chunk); });
+    // Manifest stdout keeps its initial bounded JSON; error diagnostics keep
+    // their *tail* so the final regctl cause survives preceding progress text.
+    const addStdout = (current, chunk) => (current + String(chunk)).slice(0, 262144);
+    const addDiagnostic = (current, chunk) => (current + String(chunk)).slice(-262144);
+    child.stdout.on('data', chunk => { stdout = addStdout(stdout, chunk); });
+    child.stderr.on('data', chunk => { diagnostic = addDiagnostic(diagnostic, chunk); });
     child.stdin.on('error', () => {});
     child.stdin.end(stdin);
     const timer = setTimeout(() => {
@@ -163,6 +211,9 @@ function appendSummary(result) {
     for (const attempt of role.attempts) {
       lines.push('- ' + role.name + ' native OCI attempt ' + attempt.attempt +
         ': ' + attempt.elapsed_seconds + ' s, ' + attempt.outcome +
+        ', exit ' + (attempt.exit_code ?? 'signal') +
+        ', HTTP ' + (attempt.http_status ?? 'none') +
+        ', retryable ' + attempt.retryable + ', decision ' + attempt.decision +
         ', chunk ' + attempt.chunk_bytes + ' bytes');
     }
   }
@@ -194,6 +245,12 @@ export async function execute({sourceSha, image, sourceRunId, sourceRunAttempt,
   const concurrency = Number(env.MIRROR_MAX_CONCURRENT_IMAGES || '2');
   check(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4,
     'invalid_mirror_role_concurrency');
+  // Short fixture-only heartbeat intervals make timing observable in CI,
+  // while trusted production runs always use one 30-second interval.
+  const heartbeatMs = env.MIRROR_ACR_TEST_ALLOW_PLATFORM === '1'
+    ? Number(env.MIRROR_ACR_TEST_HEARTBEAT_MS || '30000') : 30000;
+  check(Number.isInteger(heartbeatMs) && heartbeatMs >= 10 && heartbeatMs <= 30000,
+    'invalid_mirror_heartbeat_interval');
 
   const jobStart = performance.now();
   const selected = image === 'all' ? ROLES : [image];
@@ -262,21 +319,32 @@ export async function execute({sourceSha, image, sourceRunId, sourceRunAttempt,
           must(['registry', 'set', REGISTRY,
             '--blob-max', '1048576', '--blob-chunk', String(chunk)], 90000, '', roleEnv));
         const start = performance.now();
-        const copy = await invoke([
-          'index', 'create', target, '--ref', pinnedSource,
-          '--platform', 'linux/amd64', '--platform', 'linux/arm64',
-        ], {timeoutMs: 720000, env: roleEnv});
-        const outcome = copy.ok ? 'success' :
-          failureClass(copy.code, copy.timedOut, copy.diagnostic);
+        const copy = await withHeartbeat({
+          image: role, attempt: attempt + 1, intervalMs: heartbeatMs,
+          run: () => invoke([
+            'index', 'create', target, '--ref', pinnedSource,
+            '--platform', 'linux/amd64', '--platform', 'linux/arm64',
+          ], {timeoutMs: 720000, env: roleEnv}),
+        });
+        const diagnostic = copy.ok
+          ? {error_type: 'success', exit_code: 0, http_status: null, retryable: false}
+          : classifyCopyFailure(copy.code, copy.timedOut, copy.diagnostic);
+        const outcome = diagnostic.error_type;
+        const decision = copy.ok ? 'success' :
+          diagnostic.retryable && attempt < CHUNKS.length - 1 ? 'retry' : 'stop';
         const phase = markPhase(report, 'oci_transfer_and_index', start, outcome,
           {attempt: attempt + 1, chunk_bytes: chunk});
         const record = {attempt: attempt + 1, chunk_bytes: chunk,
-          elapsed_seconds: phase.elapsed_seconds, outcome};
+          elapsed_seconds: phase.elapsed_seconds, outcome,
+          exit_code: diagnostic.exit_code, http_status: diagnostic.http_status,
+          retryable: diagnostic.retryable, decision};
         report.attempts.push(record);
         console.log('ACR_MAC_MIRROR_ATTEMPT_V2 ' +
           JSON.stringify({image: role, ...record}));
         if (copy.ok) { copied = true; break; }
-        if (outcome === 'credential_or_permission_rejected' || outcome === 'copy_error') break;
+        // Only positively identified transient failures may retry. An
+        // unknown error remains terminal rather than consuming 3×12 minutes.
+        if (decision === 'stop') break;
       }
       check(copied, 'native_oci_copy_failed');
       const observed = await measure(report, 'destination_verify', () => readPlatforms(target));
