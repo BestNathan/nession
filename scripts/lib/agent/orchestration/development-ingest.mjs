@@ -278,7 +278,9 @@ export function resolveTrustedIngestSource({environment,event}){
       fail('owner Repair Ingest must bind exact completed Worker Run');
     // #3885: one source-pinned retry of the ALREADY successful real Worker.
     // Never let this Owner command select another historical Run or model.
-    if(event.issue.number===3784&&event.comment.body!==QWEN_3784_INGEST_COMMENT)
+    if(event.issue.number===3784&&
+        (event.issue.state!=='open'||
+         event.comment.body!==QWEN_3784_INGEST_COMMENT))
       fail('Owner Qwen Ingest must bind exact completed #3784 Worker Run');
     return {run_id:Number(command[2]),source:null,qwen_recovery:true,
       issue:event.issue.number,attempt:1};
@@ -314,10 +316,10 @@ export function resolveTrustedIngestSource({environment,event}){
 // dispatch an older exact-source task after main has advanced. Check actual
 // Git ancestry rather than accepting any differently named SHA. The trusted
 // Store candidate admission separately binds issue/action/source/Run/ticket.
-function isWorkerMainAncestor(sourceSha,workerSha){
+export function isWorkerMainAncestor(sourceSha,workerSha,{cwd=process.cwd()}={}){
   try{
     execFileSync('git',['merge-base','--is-ancestor',sourceSha,workerSha],{
-      cwd:process.cwd(),stdio:'ignore',timeout:5000,
+      cwd,stdio:'ignore',timeout:5000,
       env:{...process.env,GIT_NO_REPLACE_OBJECTS:'1',GIT_OPTIONAL_LOCKS:'0'},
     });
     return true;
@@ -414,7 +416,7 @@ async function main(){
   if(authority.qwen_recovery&&authority.issue===3433&&
      (run.id!==43677482758||claim.inputs?.task!=='repair'))
     fail('owner Repair Ingest differs from authenticated signed Worker action');
-  if(authority.bot_qwen_wake)
+  if(authority.bot_qwen_wake||authority.qwen_recovery)
     assertQwenBotWakeSource({run,claim});
   const resultZip=fs.readFileSync(process.argv[4]);
   if(matching[0].digest!=='sha256:'+hash(resultZip))
