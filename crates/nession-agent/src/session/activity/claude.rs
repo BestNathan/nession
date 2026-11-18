@@ -289,8 +289,7 @@ fn is_claude_foreground(context: &SessionActivityContext) -> bool {
 fn is_claude_process(
     process: &nession_protocol::contracts::session::v1::DiscoveredProcess,
 ) -> bool {
-    process.executable.to_ascii_lowercase().contains("claude")
-        || process.command.to_ascii_lowercase().contains("claude")
+    nession_claude_code::process::is_claude_cli_process(&process.executable, &process.command)
 }
 
 #[cfg(test)]
@@ -617,9 +616,7 @@ esac
                 .expect("process discovery answers");
                 for pane in &snapshot.panes {
                     for process in &pane.processes {
-                        if process.command.contains("claude")
-                            || process.executable.contains("claude")
-                        {
+                        if is_claude_process(process) {
                             return (pane.pane_id.clone(), process.pid);
                         }
                     }
@@ -663,11 +660,10 @@ esac
                 )
                 .await
                 .expect("process discovery answers");
-                let has_claude = snapshot.panes.iter().any(|pane| {
-                    pane.processes.iter().any(|process| {
-                        process.command.contains("claude") || process.executable.contains("claude")
-                    })
-                });
+                let has_claude = snapshot
+                    .panes
+                    .iter()
+                    .any(|pane| pane.processes.iter().any(is_claude_process));
                 if !has_claude {
                     return;
                 }
