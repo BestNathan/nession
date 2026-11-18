@@ -7,12 +7,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {claudeCliToolPolicy} from './harness/native.mjs';
 import {qwenDeveloperModel,qwenGatewayEndpoint} from './orchestration/qwen-developer-policy.mjs';
 import {runClaudeCli,normalizeClaudeUsage} from './providers/claude-code.mjs';
 import {parseNativeEvents} from './providers/claude-stream.mjs';
+import {classifyQwenCliFailure} from './orchestration/qwen-development-worker.mjs';
 import {providerScopedRunName} from './telemetry/run-name.mjs';
 import {normalizeNativeTrace,writeExecutionTrace} from './telemetry/execution-trace.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../agent-workflow-telemetry.mjs';
@@ -64,10 +65,36 @@ export function checkSyntheticEdit(root,events){
   if(fs.readFileSync(target,'utf8')!==EXPECTED)fail('exact synthetic code repair not observed');
   return {edit_verified:true,native_read:true,native_edit:true};
 }
-function canaryArgs(model){
+// The original stateless canary missed #3885's production-only failure.
+// Trusted main smoke now uses a real persistent native --session-id profile;
+// the historical staging fixture retains its original no-persistence mode.
+function canaryArgs(model,{sessionId=null}={}){
+  if(sessionId!==null&&!UUID.test(sessionId))
+    fail('invalid canary native Session UUID');
   return ['-p',PROMPT,'--output-format','stream-json','--verbose',
-    '--no-session-persistence','--max-turns','8','--model',model,
-    '--strict-mcp-config',...claudeCliToolPolicy(['Read','Edit','Write'],{restricted:true})];
+    ...(sessionId===null?['--no-session-persistence']:['--session-id',sessionId]),
+    '--max-turns','8','--model',model,'--strict-mcp-config',
+    ...claudeCliToolPolicy(['Read','Edit','Write'],{restricted:true})];
+}
+export function assertNativeSessionSaved(configDir,sessionId){
+  if(!UUID.test(sessionId)||typeof configDir!=='string'||!path.isAbsolute(configDir))
+    fail('invalid persistent native Session identity');
+  const root=path.join(configDir,'projects');
+  if(!fs.existsSync(root)||!fs.lstatSync(root).isDirectory())
+    fail('persistent native Session project directory missing');
+  const stack=[root];let count=0;
+  while(stack.length){
+    const dir=stack.pop();
+    for(const entry of fs.readdirSync(dir)){
+      if(++count>256)fail('unbounded native Session directory');
+      const file=path.join(dir,entry),stat=fs.lstatSync(file);
+      if(stat.isSymbolicLink())fail('native Session directory contains symlink');
+      if(stat.isDirectory()){stack.push(file);continue;}
+      if(stat.isFile()&&entry===sessionId+'.jsonl'&&stat.size>0)
+        return true;
+    }
+  }
+  fail('persistent native Session transcript not created');
 }
 function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=false}={}){
   const {GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SHA,GITHUB_REPOSITORY}=env;
@@ -130,19 +157,31 @@ async function run(dir,{stage=false}={}){
   if(!dir||!path.isAbsolute(dir))fail('metrics directory must be absolute');
   const root=fs.mkdtempSync(path.join(env.RUNNER_TEMP||os.tmpdir(),'qwen-developer-canary-'));
   let events=[],envelope=null,sourceResult={edit_verified:false},error=null;
+  // Isolate native metadata away from the editable fixture and never
+  // accidentally accept the no-persistence CLI mode as a production proof.
+  const nativeParent=stage?null:fs.mkdtempSync(path.join(
+    env.RUNNER_TEMP||os.tmpdir(),'qwen-persistent-canary-'));
+  const configDir=nativeParent===null?null:path.join(nativeParent,'native');
+  const sessionId=nativeParent===null?null:randomUUID();
   const startedAt=new Date().toISOString();
   try {
     fs.writeFileSync(path.join(root,'calc.js'),SOURCE,{flag:'wx',mode:0o600});
-    const argv=canaryArgs(model);
+    const argv=canaryArgs(model,{sessionId});
     const proc=spawnSync('claude',argv,{
       cwd:root,encoding:'utf8',timeout:180000,maxBuffer:8*1024*1024,
       env:{...env,DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:model,
-        ANTHROPIC_DEFAULT_SONNET_MODEL:model},
+        ANTHROPIC_DEFAULT_SONNET_MODEL:model,
+        ...(configDir===null?{}:{CLAUDE_CONFIG_DIR:configDir})},
     });
-    if(proc.error||proc.status!==0)fail('restricted Claude Code CLI failed (no raw output logged)');
+    if(proc.error||proc.status!==0)fail(classifyQwenCliFailure(proc));
     const parsed=parseNativeEvents(proc.stdout);
     events=parsed.events;envelope=parsed.envelope;
     if(envelope.is_error===true)fail('Provider returned error');
+    if(sessionId!==null){
+      if(envelope.session_id!==sessionId)
+        fail('persistent native Session ID differs from requested UUID');
+      assertNativeSessionSaved(configDir,sessionId);
+    }
     sourceResult=checkSyntheticEdit(root,events);
     console.log('Qwen Developer Canary: authenticated CLI edit and exact synthetic repair verified');
   }catch(e){error=e;console.error(e.message);}
@@ -158,6 +197,7 @@ async function run(dir,{stage=false}={}){
     });
     writeExecutionTrace(path.join(dir,'agent-execution-trace.json'),trace);
     fs.rmSync(root,{recursive:true,force:true});
+    if(nativeParent!==null)fs.rmSync(nativeParent,{recursive:true,force:true});
   }
   if(error)throw error;
 }
@@ -257,6 +297,28 @@ function selfTest(){
     '--disallowedTools mcp__*','--no-session-persistence']){
     assert.ok(a.includes(flag),'required Claude flag absent: '+flag);
   }
+  const persistent=canaryArgs('qwen3.7-plus',{
+    sessionId:'11111111-1111-4111-8111-111111111111'});
+  assert.ok(persistent.includes('--session-id'));
+  assert.equal(persistent[persistent.indexOf('--session-id')+1],
+    '11111111-1111-4111-8111-111111111111');
+  assert.ok(!persistent.includes('--no-session-persistence'));
+  assert.throws(()=>canaryArgs('qwen3.7-plus',{sessionId:'unsafe'}),
+    /invalid canary native Session/);
+  const transcriptRoot=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-canary-native-'));
+  try{
+    const transcript=path.join(transcriptRoot,'projects','fixture');
+    fs.mkdirSync(transcript,{recursive:true});
+    fs.writeFileSync(path.join(transcript,'11111111-1111-4111-8111-111111111111.jsonl'),
+      '{"type":"user"}\n');
+    assert.equal(assertNativeSessionSaved(transcriptRoot,
+      '11111111-1111-4111-8111-111111111111'),true);
+    assert.throws(()=>assertNativeSessionSaved(transcriptRoot,
+      '22222222-2222-4222-8222-222222222222'),/transcript not created/);
+    fs.symlinkSync('target',path.join(transcript,'unsafe-link'));
+    assert.throws(()=>assertNativeSessionSaved(transcriptRoot,
+      '22222222-2222-4222-8222-222222222222'),/contains symlink/);
+  } finally{fs.rmSync(transcriptRoot,{recursive:true,force:true});}
   const stageEnv={
     GITHUB_REPOSITORY:'BestNathan/nession',GITHUB_REF:'refs/heads/main',
     GITHUB_WORKFLOW:'Agent / Staging Developer Canary',
