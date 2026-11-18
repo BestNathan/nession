@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "df7d1df8fc52c6f52771c2e7954a9a21a00cf2e55338ecb4e72b77d943640a4b",
+  "run_id": 44303804955,
+  "run_attempt": 1,
+  "issue": 3910,
+  "criterion": "SC-04",
+  "criterion_text": ": Project-scoped MCP Session listing returns only currently associated Sessions across relevant Agents with optional agent filter and truthful live/stale behavior; Web reassociation changes both projections without touching Agent Session runtime.",
+  "stage": "staging",
+  "target_sha": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+  "contract_sha256": "0b0ce78e47ce9ab6c57c205d5651fe2a63502d420a3a92bb7bb668b856e1615e",
+  "case_revision": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+  "case_tree_sha": "705dd6da5e93c3ee57b05cc4da7687d08116d2de",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T12:30:15.668Z",
+  "finished_at": "2026-11-18T12:30:18.126Z",
+  "duration_ms": 2458,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Project-scoped Session listing is a truthful Server view across Agents and follows Web reassociation without an Agent runtime change",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0b0b29d72d3a321e94b68adff51d0f94f0b69323: Project-scoped listing returned only associated Sessions; a Web server.session.project.set correlated, changed the Project view and the Agent Session projection, and the Agent tmux Session kept the same instance identity and live runtime"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 0b0b29d72d3a321e94b68adff51d0f94f0b69323: the Tool forwards agent_id and force to the Server query and preserves stale_agents, so an incomplete forced view is not presented as complete-but-empty"
+        }
+      ],
+      "duration_ms": 2416,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44303804955,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44303804955",
+    "record_path": "runs/2026-11-18/44303804955-1/3910/SC-04.json",
+    "source_result_sha256": "086f79a9c0ca9bcde676db3dd1b4c681fe9bfe967f7e9b2567a2b3858c3bde6a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44303804955-1",
+    "sha256": "086f79a9c0ca9bcde676db3dd1b4c681fe9bfe967f7e9b2567a2b3858c3bde6a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44303804955",
+    "durability": "time-limited; object archival not configured"
+  }
+}

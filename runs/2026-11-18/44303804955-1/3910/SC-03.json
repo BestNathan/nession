@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "fd618c52864c76f1da018cc542fd6ca7283c71a3feec21f4980cba6ab1242fc4",
+  "run_id": 44303804955,
+  "run_attempt": 1,
+  "issue": 3910,
+  "criterion": "SC-03",
+  "criterion_text": ": `nession_agent_list_sessions` returns current authoritative `project_id` for both Project-created and subsequently Web-associated Sessions; confirmed unassociated is `null`, unresolved due to missing Server is **omitted**; other Agent Session fields remain; no `session_type`, Project object or creation-history inference.",
+  "stage": "staging",
+  "target_sha": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+  "contract_sha256": "0b0ce78e47ce9ab6c57c205d5651fe2a63502d420a3a92bb7bb668b856e1615e",
+  "case_revision": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+  "case_tree_sha": "2d0107ca14e28d446c0019f44c64bf03bdc411a0",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T12:30:13.205Z",
+  "finished_at": "2026-11-18T12:30:15.668Z",
+  "duration_ms": 2463,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Agent Session listing projects the Server current association with truthful null vs omitted semantics and no second Session type",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0b0b29d72d3a321e94b68adff51d0f94f0b69323: the real Server+Agent+tmux Case listed a Project-created Session with project_id set, a never-associated Session as explicit null, and after Web reassociation reported the current association; the Agent Session identity and runtime fields remained"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 0b0b29d72d3a321e94b68adff51d0f94f0b69323: direct-Agent output omits unresolved project metadata, an unreachable Server omits it instead of null, and the output contract carries session_id plus only optional project_id"
+        }
+      ],
+      "duration_ms": 2418,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44303804955,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44303804955",
+    "record_path": "runs/2026-11-18/44303804955-1/3910/SC-03.json",
+    "source_result_sha256": "855ca1d81fd4ccdf6331128a5de3a5ad26d95d0c2230bcc53b249cd840c61a94"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44303804955-1",
+    "sha256": "855ca1d81fd4ccdf6331128a5de3a5ad26d95d0c2230bcc53b249cd840c61a94",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44303804955",
+    "durability": "time-limited; object archival not configured"
+  }
+}

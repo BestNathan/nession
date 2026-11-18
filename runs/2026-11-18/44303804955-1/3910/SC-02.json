@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a2d480dc710d3fc44bb6d2d239a5f17db26f56c6f60f9ae7df465c6cfb9b554f",
+  "run_id": 44303804955,
+  "run_attempt": 1,
+  "issue": 3910,
+  "criterion": "SC-02",
+  "criterion_text": ": Project-context create supports declared Existing `agent_id/path` with correct Server validation, Project default ENV inherit/explicit replace and confirmed persisted `project_id`; invalid project/location/env and ambiguous binding failure do not report an unqualified successful Project create. Managed targets, when supported by existing canonical workflow, reuse its grants/validation without fallback.",
+  "stage": "staging",
+  "target_sha": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+  "contract_sha256": "0b0ce78e47ce9ab6c57c205d5651fe2a63502d420a3a92bb7bb668b856e1615e",
+  "case_revision": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+  "case_tree_sha": "9ab34a87570671b1cc3773e87b4d9bfff4b4fada",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T12:29:08.232Z",
+  "finished_at": "2026-11-18T12:30:13.205Z",
+  "duration_ms": 64972,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Project-context create validates through the Server, inherits or explicitly replaces Project ENV, and reports only a confirmed association",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0b0b29d72d3a321e94b68adff51d0f94f0b69323: an isolated real Server + registered real tmux Agent created a Session through a declared Existing Location; the reply carried the confirmed persisted project_id; absent environment inherited the Project ENV profile and replace used the explicit list; an undeclared directory, unknown Project and Managed target without a Project image were refusals"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 0b0b29d72d3a321e94b68adff51d0f94f0b69323: the Tool unit contract requires a confirmed project_id for success and reports a created-but-unassociated Session as a readback-before-retry error, not as a successful Project create"
+        }
+      ],
+      "duration_ms": 64889,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44303804955,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0b0b29d72d3a321e94b68adff51d0f94f0b69323",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44303804955",
+    "record_path": "runs/2026-11-18/44303804955-1/3910/SC-02.json",
+    "source_result_sha256": "66e4b4d4333349543bc7c530bc59cbf7ede25b42067003388b36933ba60a3f89"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44303804955-1",
+    "sha256": "66e4b4d4333349543bc7c530bc59cbf7ede25b42067003388b36933ba60a3f89",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44303804955",
+    "durability": "time-limited; object archival not configured"
+  }
+}
