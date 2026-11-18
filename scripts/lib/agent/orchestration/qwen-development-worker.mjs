@@ -64,7 +64,8 @@ export function qwenDeveloperPrompt(issue,admission,review=null){
       Buffer.byteLength(issue.body)>MAX_CONTEXT)
     fail('Issue context not in bounded authenticated source');
   const guide='You are editing a disposable exact-SHA checkout. '+
-    'Use ONLY native Read/Edit/Write tools; no Bash, shell, MCP, skills, network or Git actions. '+
+    'Use ONLY native Read/Grep/Glob/Edit/Write tools; Grep/Glob are read-only discovery. '+
+    'No Bash, shell, MCP, skills, network or Git actions. '+
     'Read relevant tracked source files; modify no more than eight existing regular app/source/doc files. '+
     'Do not create/remove/rename files, modify .github, gates, automation, dotfiles, AGENTS.md, VISION.md or PRINCIPLE.md. '+
     'Do not run tests or execute source code. Provide a concise outcome; no PR or publication.';

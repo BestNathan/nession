@@ -263,10 +263,15 @@ export function collectQwenDevelopmentPatch(snapshot,{events}={}){
   // Reuse the canonical Claude Code native stream parser's tool-use owner;
   // the caller must supply the real parsed stream, never claimed names.
   const observed=Array.isArray(events)?toolUseNames(events):null;
+  // Grep/Glob are read-only discovery tools. The native CLI may invoke
+  // them while locating a tracked file; their use is not a source mutation.
+  // Still require real Read and Edit/Write tool events, and reject Bash/MCP.
+  const allowed=new Set(['Read','Grep','Glob','Edit','Write']);
   if(!observed||!observed.includes('Read')||
-      !observed.some(x=>x==='Edit'||x==='Write')||
-      observed.some(x=>!['Read','Edit','Write'].includes(x)))
+      !observed.some(x=>x==='Edit'||x==='Write'))
     fail('required actual restricted native Read/Edit evidence missing');
+  if(observed.some(x=>!allowed.has(x)))
+    fail('unapproved native Developer tool was invoked');
   return checkedGitPatch(snapshot);
 }
 export function verifyQwenPatchStillMatches(snapshot,previous){
