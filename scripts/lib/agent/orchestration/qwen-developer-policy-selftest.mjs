@@ -29,7 +29,18 @@ assert.notEqual(plan.harness_digest,createHash('sha256').update(JSON.stringify({
 assert.equal(plan.model,env.ANTHROPIC_MODEL);
 assert.equal(plan.provider,'claude-code');
 assert.equal(plan.environment,'dev-claude-qwen');
-assert.equal(plan.tools.join(','),'Read,Edit,Write');
+assert.equal(plan.tools.join(','),'Read,Grep,Glob,Edit,Write');
+assert.ok(!plan.tools.includes('Bash')&&!plan.tools.includes('mcp__*'));
+const oldNodePolicy=JSON.parse(JSON.stringify({
+  schema_version:1,role:'developer',provider:'claude-code',
+  agent_id:'dev-qwen-01',environment:'dev-claude-qwen',
+  model:env.ANTHROPIC_MODEL,endpoint:'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+  cli_version:'2.1.34',tools:['Read','Edit','Write'],
+  native_format:'claude-jsonl-v1',execution:'node-24',
+}));
+assert.notEqual(plan.harness_digest,createHash('sha256').update(
+  JSON.stringify(oldNodePolicy)).digest('hex'),
+  'Old reduced-tool Node native checkpoint must not resume under new tool policy');
 assert.match(plan.harness_digest,/^[a-f0-9]{64}$/);
 assert.ok(!JSON.stringify(plan).includes(env.ANTHROPIC_AUTH_TOKEN));
 assert.equal(plan.harness_digest,bindQwenDeveloper(admission,registry,env,

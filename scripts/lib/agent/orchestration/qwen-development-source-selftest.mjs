@@ -129,9 +129,16 @@ try{
       assert.throws(()=>assertQwenModelHasNoStoreAuthority({
         ...env,[k]:'forbidden'}),/privileged credential/);
   }finally{fs.rmSync(tempNative,{recursive:true,force:true});}
-  for(const tools of [[],['Edit'],['Read'],['Read','Bash','Edit']])
+  // Actual real #3784 Worker performed Read×7, Edit×1, Grep×1 and was
+  // incorrectly rejected. Accept discovery while preserving real edit proof.
+  assert.equal(collectQwenDevelopmentPatch(snapshot,{
+    events:native(['Read','Grep','Glob','Edit'])}).patch,proposed.patch);
+  for(const tools of [[],['Edit'],['Read']])
     assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{events:native(tools)}),
       /restricted native Read\/Edit/);
+  for(const tools of [['Read','Bash','Edit'],['Read','mcp__exec','Edit']])
+    assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{events:native(tools)}),
+      /unapproved native Developer tool/);
   assert.throws(()=>prepareQwenDevelopmentSource(request),
     /not the clean signed/);
   git('reset','--hard','HEAD');
