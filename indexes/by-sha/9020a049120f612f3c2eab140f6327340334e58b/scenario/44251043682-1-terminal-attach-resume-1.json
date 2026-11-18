@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44251043682,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3793-context-image-picker",
+    "target_sha": "9020a049120f612f3c2eab140f6327340334e58b",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44251043682",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "efc4f385be775fe04f065a2d3b28cb51d9aa780a11d1139f2b42fb1143156c87"
+  },
+  "record": "runs/2026-11-18/44251043682-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "6f841e028e497d52c22e0c80b934b77c0766d2d4c4c10e28559e16732eb8df80"
+}
