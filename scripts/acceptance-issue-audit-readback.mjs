@@ -469,5 +469,84 @@ export async function selfTestIssueAuditReadback(){
     isAncestor:()=>true,
   });
   assert.equal(fetched.source_run_id,recipe.sourceRunId);
+  // #3843: the original #3837 owner command becomes a bot-dispatched
+  // workflow_dispatch. Another Issue Audit is not equivalent source evidence.
+  const scoped=ISSUE_AUDIT_3843_PROOF,scopedSha=target;
+  const commentRun={...sourceRun,id:scoped.sourceRunId,run_attempt:1,
+    name:'Comment Audit #3837 comment:'+scoped.sourceCommentId,
+    event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
+    head_sha:scopedSha,created_at:'2026-11-06T06:42:30Z'};
+  const scopedJob={...agent,id:930,run_id:scoped.sourceRunId,
+    run_attempt:1,head_sha:scopedSha};
+  const scopedIssue={...issue,number:scoped.targetIssueNumber,
+    labels:scoped.requiredLabels.map(name=>({name})),
+    body:issue.body
+      .replace('- none: Native CLI','- none: '+scoped.expectedNone.new)
+      .replace('- none: No browser','- none: '+scoped.expectedNone.regression)};
+  const scopedLog=log.replace('ISSUE_NUMBER: 2811','ISSUE_NUMBER: 3837');
+  const scopedEvents=scoped.requiredWriteLabels.map((name,i)=>({
+    id:300+i,event:'labeled',label:{name},
+    actor:{login:'github-actions[bot]'},created_at:'2026-11-06T06:44:20Z',
+  }));
+  const commentRoot='https://api.github.com/repos/'+REPO+'/issues/3837';
+  const sourceComment={id:scoped.sourceCommentId,body:'/audit',
+    user:{login:'BestNathan',type:'User'},author_association:'OWNER',
+    issue_url:commentRoot,created_at:'2026-11-06T06:42:00Z',
+    updated_at:'2026-11-06T06:42:00Z'};
+  const repairComment={id:scoped.repairCommentId,
+    body:'Issue Audit repair: canonical structure; source E2E none-only preserved',
+    user:{login:'github-actions[bot]'},issue_url:commentRoot,
+    created_at:'2026-11-06T06:44:10Z',updated_at:'2026-11-06T06:44:10Z'};
+  const scopedArgs={repo,targetSha:scopedSha,sourceRun:commentRun,
+    jobs:[scopedJob],log:scopedLog,issue:scopedIssue,
+    events:scopedEvents,targetIssueNumber:scoped.targetIssueNumber,
+    ancestorConfirmed:true,sourceCodeUnchanged:true,
+    proof:scoped,sourceComment,repairComment};
+  const scopedReceipt=attestIssueAuditReadback(scopedArgs);
+  assert.equal(scopedReceipt.status,'authenticated-repair-readback');
+  assert.equal(scopedReceipt.owner_trigger_verified,true);
+  assert.equal(scopedReceipt.repair_ack_verified,true);
+  assert.equal(scopedReceipt.protected_e2e_none_verified,true);
+  assert.equal(scopedReceipt.source_comment_id,scoped.sourceCommentId);
+  assert.equal(scopedReceipt.protected_e2e_rows,0);
+  assert.deepEqual(scopedReceipt.protected_e2e_selected_ids,[]);
+  assert.deepEqual(scopedReceipt.label_event_ids,[300,301,302,303]);
+  for(const [patch,reason] of [
+    [{sourceRun:{...commentRun,name:'Issue Audit #3843'}},/identity/],
+    [{sourceRun:{...commentRun,actor:{login:'BestNathan'}}},/identity/],
+    [{sourceRun:{...commentRun,run_attempt:2}},/identity/],
+    [{sourceRun:{...commentRun,head_sha:sha}},/identity/],
+    [{sourceComment:{...sourceComment,body:'/audit tree'}},/owner comment/],
+    [{sourceComment:{...sourceComment,user:{login:'attacker',type:'User'}}},/owner comment/],
+    [{sourceComment:{...sourceComment,updated_at:'2026-11-06T06:43:00Z'}},/owner comment/],
+    [{repairComment:{...repairComment,user:{login:'BestNathan'}}},/repair acknowledgement/],
+    [{repairComment:{...repairComment,created_at:'2026-11-06T06:50:00Z',
+      updated_at:'2026-11-06T06:50:00Z'}},/outside exact Agent/],
+    [{events:scopedEvents.filter(e=>e.label.name!=='test')},/label write/],
+    [{issue:{...scopedIssue,body:scopedIssue.body.replace(scoped.expectedNone.new,
+      'fabricated E2E none reason')}},/none-only E2E/],
+    [{issue:{...scopedIssue,body:scopedIssue.body.replace(
+      '|---|---|---|---|','|---|---|---|---|\n| fabricated | New | Pass | url |')}},/E2E|source-bound/],
+    [{jobs:[{...scopedJob,conclusion:'skipped'}]},/job identity/],
+  ])assert.throws(()=>attestIssueAuditReadback({...scopedArgs,...patch}),reason);
+  const scopedRequest=async path=>{
+    if(path.endsWith('/actions/runs/'+scoped.sourceRunId))return commentRun;
+    if(path.includes('/attempts/1/jobs'))return {jobs:[scopedJob]};
+    if(path.endsWith('/issues/'+scoped.targetIssueNumber))return scopedIssue;
+    if(path.includes('/issues/'+scoped.targetIssueNumber+'/events'))return scopedEvents;
+    if(path.endsWith('/issues/comments/'+scoped.sourceCommentId))return sourceComment;
+    if(path.endsWith('/issues/comments/'+scoped.repairCommentId))return repairComment;
+    throw Error('unexpected scoped source '+path);
+  };
+  const collected=await collectIssueAuditReadback({repo,targetSha:scopedSha,
+    sourceRunId:scoped.sourceRunId,targetIssueNumber:scoped.targetIssueNumber,
+    proof:scoped,request:scopedRequest,readLog:async()=>scopedLog});
+  assert.deepEqual(collected,scopedReceipt);
+  await assert.rejects(collectIssueAuditReadback({repo,targetSha:scopedSha,
+    sourceRunId:scoped.sourceRunId,targetIssueNumber:scoped.targetIssueNumber,
+    proof:scoped,request:async path=>path.endsWith('/issues/3837')
+      ? {...scopedIssue,number:3843}:scopedRequest(path),
+    readLog:async()=>scopedLog}),/target readback/);
+
   console.log('Issue Audit authenticated readback: exact run, target, model, GitHub writes, E2E contract and negative fixtures passed');
 }
