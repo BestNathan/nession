@@ -29,6 +29,64 @@ export const SIDEBAR_AUDIT_REPAIR_PROOF=Object.freeze({
   expectedE2EIds:['sidebar-session-first','ui-contract-web','fixture-visual','fixture-visual-app'],
 });
 
+// #3843 SC-03: the implementing Issue is NOT the repaired source Issue.
+// This is a fixed source locator, not authority delegated to Issue Markdown.
+export const ISSUE_AUDIT_3843_PROOF=Object.freeze({
+  acceptanceIssue:3843,criterion:'SC-03',
+  sourceRunId:44230199871,sourceAttempt:1,targetIssueNumber:3837,
+  event:'workflow_dispatch',sourceCommentId:6968059863,
+  repairCommentId:6968107101,
+  requiredLabels:['bug','agent','test','verification:integration'],
+  requiredWriteLabels:['bug','agent','test','verification:integration'],
+  expectedNone:Object.freeze({
+    new:'Rust protocol admission/concurrency invariant, not a browser interaction',
+    regression:'same Rust-specific invariant, verified by integration test and Rust Gate',
+  }),
+});
+
+export function verifiedIssueAudit3843Criterion(context, normalized) {
+  if(Number(context?.issue?.number)!==ISSUE_AUDIT_3843_PROOF.acceptanceIssue||
+      context?.stage!=='post-merge')return normalized;
+  const selected=normalized.criteria?.find(x=>x.criterion===ISSUE_AUDIT_3843_PROOF.criterion);
+  if(!selected||selected.result==='Fail'||selected.result==='N/A')return normalized;
+  const proof=context?.ci_evidence?.authenticated_issue_audit_3843_readback;
+  const valid=proof?.status==='authenticated-repair-readback'&&
+    proof.source_run_id===ISSUE_AUDIT_3843_PROOF.sourceRunId&&
+    proof.source_attempt===ISSUE_AUDIT_3843_PROOF.sourceAttempt&&
+    proof.target_issue===ISSUE_AUDIT_3843_PROOF.targetIssueNumber&&
+    proof.source_event==='workflow_dispatch'&&
+    proof.source_sha===context.target_ref&&
+    proof.target_sha===context.target_ref&&
+    proof.source_comment_id===ISSUE_AUDIT_3843_PROOF.sourceCommentId&&
+    proof.repair_comment_id===ISSUE_AUDIT_3843_PROOF.repairCommentId&&
+    proof.owner_trigger_verified===true&&proof.repair_ack_verified===true&&
+    proof.provider==='qwen'&&proof.issue_contract_pass===true&&
+    proof.verified_risk_tier==='verification:integration'&&
+    proof.protected_e2e_rows===0&&
+    Array.isArray(proof.protected_e2e_selected_ids)&&
+    proof.protected_e2e_selected_ids.length===0&&
+    proof.protected_e2e_none_verified===true&&
+    Array.isArray(proof.label_event_ids)&&proof.label_event_ids.length===4;
+  if(!valid){
+    if(selected.result==='Pass')
+      throw Error('#3843 SC-03 Pass lacks authenticated #3837 source-bound Audit readback');
+    return normalized;
+  }
+  // Trusted proof may close a model's uncertainty about the source run:
+  // fail-closed for absence/conflict; never override an observed Fail.
+  return {...normalized,criteria:normalized.criteria.map(item=>
+    item.criterion!==ISSUE_AUDIT_3843_PROOF.criterion ? item : {
+      ...item,result:'Pass',
+      evidence:[{type:'authenticated-issue-audit',
+        value:'run '+proof.source_run_id+'/'+proof.source_attempt+
+        ', agent job '+proof.source_job_id+', owner comment '+proof.source_comment_id+
+        ', repair comment '+proof.repair_comment_id+
+        ', target #'+proof.target_issue+', main '+proof.source_sha+
+        ', canonical Bug and preserved none-only E2E readback'}],
+      summary:'Owner-authorized Qwen Audit repaired #3837; independently verified exact run, bot writes, Bug Contract and original none-only E2E declarations',
+    })};
+}
+
 export function verifiedIssueAuditCriterion(context, normalized) {
   if(Number(context?.issue?.number)!==SIDEBAR_AUDIT_REPAIR_PROOF.acceptanceIssue||
      context?.stage!=='post-merge') return normalized;
@@ -95,7 +153,7 @@ export function parseAuditEnvironmentLog(log) {
 export function attestIssueAuditReadback({
   repo, targetSha, sourceRun, jobs, log, issue, events,
   targetIssueNumber, ancestorConfirmed, sourceCodeUnchanged,
-  proof = null,
+  proof = null, sourceComment = null, repairComment = null,
 }) {
   if(repo!==REPO||!SHA.test(String(targetSha))||
      !Number.isSafeInteger(targetIssueNumber)||targetIssueNumber<1)
@@ -105,7 +163,8 @@ export function attestIssueAuditReadback({
   const historical=proof?.historical===true;
   const requiredLabels=proof?.requiredLabels??['bug','cli','terminal'];
   const requiredWriteLabels=proof?.requiredWriteLabels??['bug','cli','terminal'];
-  if(!['issues','issue_comment'].includes(expectedEvent) ||
+  const commandDispatch=expectedEvent==='workflow_dispatch';
+  if(!['issues','issue_comment','workflow_dispatch'].includes(expectedEvent) ||
      !Array.isArray(requiredLabels)||!requiredLabels.length||
      !Array.isArray(requiredWriteLabels)||!requiredWriteLabels.length||
      requiredLabels.some(x=>typeof x!=='string'||!x)||
@@ -115,12 +174,35 @@ export function attestIssueAuditReadback({
      !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1||
      !SHA.test(String(run.head_sha))||
      run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
-     run.name!=='Agent / Issue Audit'||run.path!==WORKFLOW||
+     run.name!==(commandDispatch
+       ? 'Comment Audit #'+targetIssueNumber+' comment:'+proof?.sourceCommentId
+       : 'Agent / Issue Audit')||run.path!==WORKFLOW||
      run.event!==expectedEvent||run.head_branch!=='main'||
      run.status!=='completed'||run.conclusion!=='success'||
      (historical && run.actor?.login!=='BestNathan')||
+     (commandDispatch && (run.actor?.login!=='github-actions[bot]'||
+        run.run_attempt!==proof?.sourceAttempt||run.head_sha!==targetSha))||
      (run.head_sha!==targetSha&&(!ancestorConfirmed||(!historical&&!sourceCodeUnchanged))))
     throw Error('unverified Issue Audit source run identity or ancestry');
+  if(commandDispatch){
+    const origin=sourceComment,ack=repairComment;
+    const sourceTime=Date.parse(origin?.created_at);
+    const runTime=Date.parse(run.created_at);
+    if(!Number.isSafeInteger(proof?.sourceCommentId)||
+       !Number.isSafeInteger(proof?.repairCommentId)||
+       origin?.id!==proof.sourceCommentId||origin?.body!=='/audit'||
+       origin?.user?.login!=='BestNathan'||origin?.user?.type!=='User'||
+       origin?.author_association!=='OWNER'||
+       origin?.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+targetIssueNumber||
+       origin?.updated_at!==origin.created_at||
+       !Number.isFinite(sourceTime)||!Number.isFinite(runTime)||sourceTime>runTime||
+       ack?.id!==proof.repairCommentId||
+       ack?.user?.login!=='github-actions[bot]'||
+       ack?.issue_url!==origin.issue_url||
+       ack?.updated_at!==ack?.created_at||
+       !String(ack?.body??'').startsWith('Issue Audit repair:'))
+      throw Error('unverified owner comment / trusted repair acknowledgement');
+  }
   if(!Array.isArray(jobs)||jobs.length>100)
     throw Error('invalid Issue Audit exact-attempt jobs');
   const agents=jobs.filter(j=>j?.name==='agent');
@@ -155,6 +237,12 @@ export function attestIssueAuditReadback({
   if(kinds.length!==1||areas.length===0||
      requiredLabels.some(label=>!labels.includes(label)))
     throw Error('Issue Audit target missing repaired canonical labels');
+  if(proof?.expectedNone){
+    if(e2e.selectedIds.length!==0||e2e.rows.size!==0||
+       e2e.newNone!==proof.expectedNone.new||
+       e2e.regressionNone!==proof.expectedNone.regression)
+      throw Error('Issue Audit #3837 changed source-bound none-only E2E declarations');
+  }
   if (proof?.expectedE2EIds != null) {
     if(!Array.isArray(proof.expectedE2EIds)||!proof.expectedE2EIds.length||
        JSON.stringify([...e2e.selectedIds].sort()) !==
@@ -168,6 +256,11 @@ export function attestIssueAuditReadback({
   const start=Date.parse(job.started_at),end=Date.parse(job.completed_at);
   if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)
     throw Error('invalid Issue Audit execution time bounds');
+  if(commandDispatch){
+    const ackTime=Date.parse(repairComment?.created_at);
+    if(!Number.isFinite(ackTime)||ackTime<start||ackTime>end)
+      throw Error('Issue Audit acknowledgement is outside exact Agent execution');
+  }
   const changes=events.filter(e=>e?.event==='labeled'&&
     e.actor?.login==='github-actions[bot]'&&
     Date.parse(e.created_at)>=start&&Date.parse(e.created_at)<=end);
@@ -186,7 +279,10 @@ export function attestIssueAuditReadback({
     source_event:run.event,
     // These are identity checks that already passed above, not additional
     // claims by the model or a generic source_ancestry discovery list.
-    owner_trigger_verified:historical && run.actor?.login==='BestNathan',
+    owner_trigger_verified:commandDispatch||historical && run.actor?.login==='BestNathan',
+    ...(commandDispatch?{source_comment_id:proof.sourceCommentId,
+      repair_comment_id:proof.repairCommentId,repair_ack_verified:true,
+      protected_e2e_none_verified:!!proof.expectedNone}:{}),
     source_main_ancestry_confirmed:run.head_sha===targetSha||ancestorConfirmed,
     verified_risk_tier:labels.find(label=>label.startsWith('verification:'))??null,
     kinds,areas, labels,
@@ -213,16 +309,18 @@ export async function collectIssueAuditReadback({
   const sourceRun=await request(root+'/actions/runs/'+sourceRunId);
   if(!sourceRun||sourceRun.id!==sourceRunId)
     throw Error('mismatched Issue Audit run locator');
-  const [jobs,issue,events]=await Promise.all([
+  const [jobs,issue,events,sourceComment,repairComment]=await Promise.all([
     request(root+'/actions/runs/'+sourceRunId+'/attempts/'+sourceRun.run_attempt+'/jobs?per_page=100'),
     request(root+'/issues/'+targetIssueNumber),
     request(root+'/issues/'+targetIssueNumber+'/events?per_page=100'),
+    proof?.sourceCommentId?request(root+'/issues/comments/'+proof.sourceCommentId):null,
+    proof?.repairCommentId?request(root+'/issues/comments/'+proof.repairCommentId):null,
   ]);
   const exactJobs=jobs?.jobs;
   const agent=Array.isArray(exactJobs)?exactJobs.filter(x=>x.name==='agent'):[];
   const log=agent.length===1?await readLog(root+'/actions/jobs/'+agent[0].id+'/logs',MAX_LOG_BYTES):null;
   return attestIssueAuditReadback({repo,targetSha,sourceRun,jobs:exactJobs,log,
-    issue,events,targetIssueNumber,
+    issue,events,targetIssueNumber,sourceComment,repairComment,
     ancestorConfirmed:sourceRun.head_sha===targetSha||isAncestor(sourceRun.head_sha,targetSha),
     sourceCodeUnchanged:sourceRun.head_sha===targetSha||
       (proof?.historical===true ? false : sourceUnchanged(sourceRun.head_sha,targetSha)),
