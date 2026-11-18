@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "20dd16db12a62143f3a91fc820d7b1693abc99bb",
+  "run_id": 44319649673,
+  "run_attempt": 1,
+  "plan_digest": "5abf9ff6df3c33e98b751715e810ccba758206fb300d64b435d1f66b87583ae4",
+  "artifact_digest": "sha256:569e39e5c5d4da4cad6bfe0402fca46934ebc239b46a7bf59d63b1003eac4cee",
+  "results": [
+    {
+      "id": "conversation-list-state",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 14
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 23,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 156
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 110
+    },
+    {
+      "id": "project-sidebar-detail",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 50
+    },
+    {
+      "id": "transcript-geometry",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 78
+    }
+  ]
+}
