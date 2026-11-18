@@ -239,14 +239,19 @@ function runFormatRepair(raw) {
 
 function runAgent(issue) {
   ensureProviderConfig();
-  const allowed = 'Read,Glob,Grep';
-  const disallowed = 'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__playwright__*';
+  const allowed = 'Read,Glob,Grep,mcp__nession_audit__validate_issue_proposal';
+  const disallowed = 'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch';
+  const mcpConfig = {mcpServers:{nession_audit:{
+    command:'node',args:['scripts/issue-audit-check-mcp.mjs'],
+    env:{ISSUE_AUDIT_FIXED_ISSUE_ID:String(issue.number)},
+  }}};
   const audit = auditIssue(issue);
   const requestModel = claudeRequestModel();
   const { proc: result, parsed: envelope } = runClaudeCli({
     prompt: promptFor(issue, audit), model: requestModel,
     maxTurns: process.env.ISSUE_AUDIT_MAX_TURNS || '20',
     allowedTools: allowed, disallowedTools: disallowed,
+    mcpConfig, tools:allowed,
     jsonSchema: issueAuditProposalSchemaForIssue(issue),
   });
   if (result.error) throw result.error;
@@ -280,6 +285,28 @@ async function selfTest() {
   assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
   assert.match(args[1], /By turn 8, stop investigating/);
   assert.equal(args[args.indexOf('--disallowedTools') + 1], 'Bash');
+  const checkConfig={mcpServers:{nession_audit:{command:'node',
+    args:['scripts/issue-audit-check-mcp.mjs'],
+    env:{ISSUE_AUDIT_FIXED_ISSUE_ID:'3855'}}}};
+  const checkArgs=buildClaudeCliArgs({
+    prompt:'audit',model:claudeRequestModel(),maxTurns:20,
+    allowedTools:'Read,Glob,Grep,mcp__nession_audit__validate_issue_proposal',
+    disallowedTools:'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch',
+    mcpConfig:checkConfig,
+    tools:'Read,Glob,Grep,mcp__nession_audit__validate_issue_proposal',
+    jsonSchema:ISSUE_AUDIT_PROPOSAL_SCHEMA,
+  });
+  assert.equal(checkArgs[checkArgs.indexOf('--permission-mode')+1],'dontAsk');
+  assert.ok(checkArgs.includes('--strict-mcp-config'));
+  assert.equal(checkArgs[checkArgs.indexOf('--tools')+1],
+    'Read,Glob,Grep,mcp__nession_audit__validate_issue_proposal');
+  assert.deepEqual(JSON.parse(checkArgs[checkArgs.indexOf('--mcp-config')+1]),checkConfig);
+  assert.throws(()=>buildClaudeCliArgs({...{
+    prompt:'audit',model:claudeRequestModel(),maxTurns:1,
+    allowedTools:'',disallowedTools:'',tools:'Read,Glob,Grep,mcp__nession_audit__validate_issue_proposal',
+    mcpConfig:checkConfig,
+  },mcpConfig:{mcpServers:{evil:{command:'sh',args:['-c','rm -rf /']}}}}),
+    /Unapproved Issue Audit MCP/);
   assert.equal(args.includes('--json-schema'),false,'schema must be explicit');
   const schemaArgs=buildClaudeCliArgs({
     prompt:'audit', model:claudeRequestModel(), maxTurns:20,
