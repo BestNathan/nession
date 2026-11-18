@@ -88,6 +88,50 @@ export function selfTest() {
     ]}));
   const inventory = {jobs, total_count: jobs.length};
   assert.equal(verifyRelease(run, inventory, sha).short_sha, 'aaaaaaa');
+  // The original 3-role Staging release predates standalone MCP. The
+  // diagnostic must accept a requested real role but never infer an absent one.
+  const historical = jobs.filter(job => !job.name.startsWith('docker-mcp-'));
+  const historicalInventory = {jobs: historical, total_count: historical.length};
+  assert.equal(verifyMirrorRelease(run, historicalInventory, sha, 'server').source_run_id, 79);
+  assert.equal(verifyMirrorRelease(run, historicalInventory, sha, 'agent').short_sha, 'aaaaaaa');
+  assert.equal(verifyMirrorRelease(run, historicalInventory, sha, 'ui').short_sha, 'aaaaaaa');
+  assert.equal(verifyMirrorRelease(run, inventory, sha, 'all').source_run_id, 79);
+  assert.throws(() => verifyMirrorRelease(run, historicalInventory, sha, 'mcp'),
+    /missing successful original job docker-mcp-amd64/);
+  assert.throws(() => verifyMirrorRelease(run, historicalInventory, sha, 'all'),
+    /missing successful original job docker-mcp-amd64/);
+  assert.throws(() => verifyRelease(run, historicalInventory, sha),
+    /missing successful original job docker-mcp-amd64/);
+  for (const badRole of ['unknown', '', undefined, '../server']) {
+    assert.throws(() => verifyMirrorRelease(run, inventory, sha, badRole),
+      /unsupported manual mirror image/);
+  }
+  for (const corrupted of [
+    {jobs: historical.filter(j => j.name !== 'docker-server-amd64')},
+    {jobs: historical.map(j => j.name === 'docker-server-arm64'
+      ? {...j, conclusion: 'failure'} : j)},
+    {jobs: historical.map(j => j.name === 'docker-server-amd64'
+      ? {...j, run_id: 80} : j)},
+    {jobs: historical.map(j => j.name === 'docker-server-amd64'
+      ? {...j, run_attempt: 2} : j)},
+    {jobs: historical.map(j => j.name === 'merge'
+      ? {...j, steps: []} : j)},
+    {jobs: historical.map(j => j.name === 'provenance'
+      ? {...j, steps: []} : j)},
+  ]) {
+    assert.throws(() => verifyMirrorRelease(run,
+      {...corrupted, total_count: corrupted.jobs.length}, sha, 'server'));
+  }
+  for (const bad of [
+    {head_sha: 'b'.repeat(40)}, {head_branch: 'main'},
+    {path: '.github/workflows/foreign.yml'}, {name: 'Forged Release'},
+    {event: 'pull_request'}, {status: 'in_progress'}, {conclusion: 'failure'},
+    {run_attempt: 2}, {repository: {full_name: 'other/nession'}},
+    {head_repository: {full_name: 'other/nession'}},
+  ]) {
+    assert.throws(() => verifyMirrorRelease({...run, ...bad},
+      historicalInventory, sha, 'server'));
+  }
   for (const bad of [
     {head_sha: 'b'.repeat(40)}, {head_branch: 'main'},
     {path: '.github/workflows/foreign.yml'}, {name: 'Forgery'},
