@@ -45,7 +45,9 @@ use crate::netdetect::build_advertised_addresses;
 use crate::netwatch;
 use crate::protocol::served_descriptors;
 use crate::server::AgentServer;
-use crate::session::activity::{SessionActivityCoordinator, ShellActivityProvider};
+use crate::session::activity::{
+    ClaudeActivityProvider, SessionActivityCoordinator, ShellActivityProvider,
+};
 use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
@@ -378,7 +380,7 @@ pub async fn run(
         // observations without being part of this Agent's provider set.
         let activity = SessionActivityCoordinator::new(
             agent_id.clone(),
-            compose_activity_providers(&ext_registry),
+            compose_activity_providers(&agent_id, Arc::clone(&tmux_for_client), &ext_registry),
         )
         .context("cannot compose this agent's Session Activity providers")?;
 
@@ -625,9 +627,17 @@ pub fn compose_providers(
 /// Extracted so the composition can be asserted without starting an Agent —
 /// a provider dropped here would disappear from every entrypoint at once.
 pub fn compose_activity_providers(
+    agent_id: &str,
+    tmux: Arc<SessionManager>,
     registry: &ExtensionRegistry,
 ) -> Vec<Arc<dyn SessionActivityProvider>> {
     let mut providers = registry.activity_providers();
+    // The Claude adapter consumes #3779's source-owned status reader and owns
+    // a Pane only when it can bind a verified Claude process to it.
+    providers.push(Arc::new(ClaudeActivityProvider::new(
+        agent_id,
+        Arc::clone(&tmux),
+    )));
     providers.push(Arc::new(ShellActivityProvider::new()));
     providers
 }
@@ -848,24 +858,27 @@ mod tests {
         );
     }
 
-    /// The generic Shell Activity provider is part of the Agent product
-    /// (`#3802`), and one capability id cannot be composed twice.
+    /// The Claude and Shell Activity providers are part of the Agent product
+    /// (#3801/#3802), and one capability id cannot be composed twice.
     #[test]
-    fn the_runtime_composes_the_shell_activity_provider() {
+    fn the_runtime_composes_the_session_activity_providers() {
         let registry = compose_providers(
             "agent-test",
             Arc::new(SessionManager::new()),
             McpHostContext::default(),
         )
         .expect("the runtime's own providers must compose");
-        let providers = compose_activity_providers(&registry);
+        let providers =
+            compose_activity_providers("agent-test", Arc::new(SessionManager::new()), &registry);
         let ids: Vec<&'static str> = providers.iter().map(|provider| provider.id()).collect();
 
-        assert_eq!(
-            ids.iter().filter(|id| **id == "shell").count(),
-            1,
-            "the Shell provider is part of the Agent product: {ids:?}"
-        );
+        for expected in ["claude-code", "shell"] {
+            assert_eq!(
+                ids.iter().filter(|id| **id == expected).count(),
+                1,
+                "the {expected} provider is part of the Agent product: {ids:?}"
+            );
+        }
         for id in &ids {
             let id = *id;
             assert_eq!(

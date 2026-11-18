@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 3801
+criterion: SC-03
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify-adapter.cjs
+  - type: runtime
+    entry: verify-status-tool.cjs
+result_policy: all-pass

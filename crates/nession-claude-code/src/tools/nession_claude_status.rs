@@ -155,6 +155,7 @@ mod tests {
         async fn status(&self, _target: &ClaudeSessionTarget) -> ClaudeStatusObservation {
             ClaudeStatusObservation {
                 process: ClaudeProcessState::Running,
+                process_id: Some(4242),
                 activity: ClaudeActivityState::Waiting,
                 waiting_for: Some("input needed".to_string()),
                 conversation_id: Some("a460cce1-35c0-4b8f-9d5f-5ae899e72229".to_string()),
