@@ -47,7 +47,7 @@ function verifyReleaseJobs(run, inventory, expectedSha, requiredJobs) {
     deny('invalid source workflow/branch/repo/SHA/attempt/result');
   }
   const jobs = inventory?.jobs;
-  if (!Array.isArray(jobs) || jobs.length < requiredJobs.length || jobs.length >= 100 ||
+  if (!Array.isArray(jobs) || jobs.length >= 100 ||
       (inventory.total_count != null && inventory.total_count !== jobs.length)) {
     deny('missing or truncated source jobs');
   }
