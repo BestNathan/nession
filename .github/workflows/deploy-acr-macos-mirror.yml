@@ -19,6 +19,15 @@ on:
           - agent
           - mcp
           - ui
+      max_concurrent_images:
+        description: 'Maximum simultaneous image roles (architecture/Blob copy is owned by regctl)'
+        required: true
+        type: choice
+        default: '2'
+        options:
+          - '1'
+          - '2'
+          - '4'
 
 permissions:
   contents: read
@@ -88,7 +97,7 @@ jobs:
           command -v regctl
           regctl version
           command -v node
-      - name: Copy selected OCI images and measure real elapsed time
+      - name: Mirror roles with native platform selection and phase timing
         shell: bash
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -97,6 +106,7 @@ jobs:
           ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
           MIRROR_RESULT_DIR: ${{ runner.temp }}/acr-mac-mirror
           SELECTED_IMAGE: ${{ inputs.image }}
+          MIRROR_MAX_CONCURRENT_IMAGES: ${{ inputs.max_concurrent_images }}
           SOURCE_SHA: ${{ needs.verify-source.outputs.source_sha }}
           SOURCE_RUN_ID: ${{ needs.verify-source.outputs.source_run_id }}
           SOURCE_RUN_ATTEMPT: ${{ needs.verify-source.outputs.source_run_attempt }}
