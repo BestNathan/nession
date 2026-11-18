@@ -5,8 +5,15 @@
 //! authoritative state or action, independent of where the endpoint runs:
 //!
 //! * `nession_server_list_agents` answers from the Server's Agent registry.
+//! * `nession_server_project_*` tools read the Server's Project declarations
+//!   and use its Project-context Session create/list views; the Agent remains
+//!   the owner of the Session runtime.
 //! * `nession_agent_*` tools act on one **explicitly named** Agent node and
 //!   never fall back to the host MCP happens to run on.
+//!
+//! A Project adds only an optional durable `project_id` to Session
+//! projection; there is no second Session type, registry or creation-source
+//! flag.
 //!
 //! ## Flat Tools, one owner each
 //!
@@ -37,7 +44,7 @@
 //! |---|---|---|
 //! | Standalone | [`remote::RemoteClusterBackend`] | Server-routed (or an explicit direct Agent) |
 //! | `nession-agent` | Server client (or unavailable) | the Agent's local services |
-//! | `nession-server` | the Server's registry | the Server's canonical Agent routing |
+//! | `nession-server` | the Server's registry and Project store | the Server's canonical Agent routing |
 //!
 //! ## Protocol
 //!

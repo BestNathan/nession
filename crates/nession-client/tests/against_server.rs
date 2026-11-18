@@ -19,8 +19,9 @@ use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRenameReply};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
 };
+use nession_protocol::contracts::project::v1::ProjectGetPayload;
 use nession_protocol::contracts::session::v1::{
-    ClientSessionAttachReply, ClientSessionEnvBindingGetPayload,
+    ClientSessionAttachReply, ClientSessionCreatePayload, ClientSessionEnvBindingGetPayload,
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingSetPayload,
     ServerSessionListReply, SessionEnvBindingRefusalKind,
 };
@@ -111,6 +112,81 @@ async fn a_real_server_answers_the_session_list() {
             )
         }
     }
+}
+
+#[tokio::test]
+async fn a_real_server_answers_the_project_list() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let reply = client.project_list().await.unwrap();
+    assert!(
+        reply.projects.is_empty(),
+        "this server has no Project declarations"
+    );
+    assert_eq!(reply.error, None, "an empty list is a successful read");
+}
+
+#[tokio::test]
+async fn a_real_server_reports_an_unknown_project() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let reply = client
+        .project_get(ProjectGetPayload {
+            project_id: "project-123e4567-e89b-42d3-a456-426614174000".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!reply.success);
+    assert_eq!(reply.error_kind.as_deref(), Some("not_found"));
+    assert_eq!(reply.error.as_deref(), Some("Project not found"));
+}
+
+/// A Project-context create travels as the whole typed request, not as a
+/// hand-built JSON object that could silently drop a field.
+#[tokio::test]
+async fn a_real_server_receives_the_typed_project_session_create() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let reply = client
+        .create_session_payload(ClientSessionCreatePayload {
+            agent_id: "missing-agent".to_string(),
+            name: "dev".to_string(),
+            working_dir: Some("/srv/project".to_string()),
+            env_files: Vec::new(),
+            env_selection_mode: None,
+            sandbox: None,
+            project_id: Some("project-123e4567-e89b-42d3-a456-426614174000".to_string()),
+            managed: None,
+        })
+        .await
+        .unwrap();
+    assert!(!reply.success);
+    assert!(
+        reply
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("not found")),
+        "{reply:?}"
+    );
+}
+
+/// The Extension-tool units travel through the same typed client boundary.
+#[tokio::test]
+async fn a_real_server_answers_the_extension_tool_units() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let listed = client.list_mcp_tools().await.unwrap();
+    assert!(
+        listed.manifest.tools.is_empty(),
+        "no Agent has contributed a manifest to this Server"
+    );
+
+    let reply = client
+        .call_mcp_tool("missing-agent", "fixture_echo", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(!reply.success);
+    assert!(reply.error.is_some(), "an unroutable call is a refusal");
 }
 
 /// A wrong token is refused, and the **Server's own sentence** is what travels.

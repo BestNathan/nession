@@ -3,24 +3,21 @@
 // bound to the Session's actual process, with unsupported/unobservable/
 // absent/ambiguous answers never presented as a guessed state.
 //
-// The deterministic fixtures pin the captured CLI shape and every negative
-// answer. SCN-03's positive path needs a live, authenticated interactive
-// Claude in a Nession Session, which this Case runner does not provide, so the
-// criterion stays Pending rather than substituting a fixture for that claim.
+// This verifier pins the captured CLI shape and every negative answer in
+// source; `verify-live.cjs` executes the positive path with a real,
+// authenticated interactive CLI. The Case is selected only by the
+// `live-cli` lane, and the live verifier must pass too (result_policy
+// all-pass), so a run cannot Pass on fixtures alone.
 const {
   run, crateTests, assertRan, isolatedTmuxEnv,
 } = require('../../../shared/mcp-cases.cjs');
-const { pendingRealCli } = require('../../../shared/claude-cases.cjs');
 
-const env = isolatedTmuxEnv('nession-3779-sc01');
-const evidence = [];
-
-try {
+run(({ evidence }) => {
   const tests = crateTests(
     'nession-claude-code',
     ['--lib', 'agent_view::'],
     600000,
-    env,
+    isolatedTmuxEnv('nession-3779-sc01'),
   );
   assertRan(tests, [
     'agent_view::tests::the_supported_path_reports_the_captured_records',
@@ -36,18 +33,21 @@ try {
     'agent_view::tests::a_missing_binary_is_absent',
     'agent_view::tests::malformed_or_non_array_output_is_cannot_observe',
   ]);
+  const identity = crateTests(
+    'nession-claude-code',
+    ['--lib', 'process::'],
+    600000,
+    isolatedTmuxEnv('nession-3779-sc01-identity'),
+  );
+  assertRan(identity, [
+    'process::tests::the_native_npm_binary_is_the_cli',
+    'process::tests::a_shell_script_wrapper_named_claude_is_the_cli',
+    'process::tests::a_session_shell_adapter_path_that_mentions_claude_is_not_the_cli',
+    'process::tests::an_argument_that_mentions_claude_is_not_the_cli',
+  ]);
   evidence.push({
     type: 'runtime',
-    value: 'the captured `agents --json` shape parsed into typed busy/waiting/idle and background states; unknown values survived verbatim, a missing sessionId stayed null, an unlisted version was interpreted by its answer, an older CLI without the command was unsupported, and absent/unsupported/cannot-observe were each distinct and never reported as idle',
+    value: 'the captured `agents --json` shape (2.1.326 fixture, not an admission gate) parsed into typed busy/waiting/idle and background states; unknown values survived verbatim, a missing sessionId stayed null, an unlisted version was interpreted by its answer, an older CLI without the command was unsupported, and absent/unsupported/cannot-observe were each distinct and never reported as idle; the executable/argv0/script identity rule accepts the real CLI shapes and rejects a Session adapter path or an argument that merely contains "claude"',
   });
-} catch (error) {
-  run(() => {
-    throw error;
-  });
-  return;
-}
-
-pendingRealCli(
-  evidence,
-  'The on-demand status probe against a live PID-matched Session therefore remains unproven at this stage.',
-);
+  return 'the CLI answer parser, its non-verified observations and the Claude process identity rule are pinned in source; the live verifier drives the real CLI path';
+});

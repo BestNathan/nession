@@ -189,7 +189,10 @@ impl NodeBackend for AgentNodeBackend {
             sessions,
             stale_agents: Vec::new(),
         };
-        Ok(SessionListOutput::from_agent_sessions(&reply.sessions))
+        Ok(SessionListOutput::from_agent_sessions(
+            agent_id,
+            &reply.sessions,
+        ))
     }
 
     async fn create_session(

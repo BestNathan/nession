@@ -24,6 +24,9 @@ use nession_protocol::contracts::env::v1::{
 use nession_protocol::contracts::mcp::v1::{
     McpToolCallPayload, McpToolCallReply, McpToolsListRequest, McpToolsListResponse,
 };
+use nession_protocol::contracts::project::v1::{
+    ProjectGetPayload, ProjectGetResponsePayload, ProjectListPayload, ProjectListResponsePayload,
+};
 use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoResponse};
 use nession_protocol::contracts::session::v1::{
@@ -57,6 +60,14 @@ impl UnitRequest for AgentListPayload {
 
 impl UnitRequest for ServerSessionListPayload {
     type Reply = ServerSessionListReply;
+}
+
+impl UnitRequest for ProjectListPayload {
+    type Reply = ProjectListResponsePayload;
+}
+
+impl UnitRequest for ProjectGetPayload {
+    type Reply = ProjectGetResponsePayload;
 }
 
 impl UnitRequest for ClientEnvListPayload {
@@ -307,6 +318,28 @@ impl ClientConnection {
         .await
     }
 
+    /// `server.project.list` — every Project declaration the Server owns.
+    ///
+    /// The reply carries `error` separately from an empty `projects` list, so a
+    /// failed read is never presented to a caller as "there are no Projects".
+    pub async fn project_list(&mut self) -> Result<ProjectListResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_PROJECT_LIST, ProjectListPayload {}))
+            .await
+    }
+
+    /// `server.project.get` — one Project declaration by identity.
+    ///
+    /// The reply is returned whole: `error_kind` distinguishes an unknown
+    /// Project from an unavailable read, and the Server's own sentence is the
+    /// useful thing to hand on.
+    pub async fn project_get(
+        &mut self,
+        payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_PROJECT_GET, payload))
+            .await
+    }
+
     /// `server.session.attach` — ask the Server how to reach a session.
     ///
     /// Returns the **contract's** reply, not a narrowed copy, and that is
@@ -513,20 +546,31 @@ impl ClientConnection {
         working_dir: Option<&str>,
         sandbox: Option<SandboxPolicy>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
+        self.create_session_payload(ClientSessionCreatePayload {
+            agent_id: agent_id.to_string(),
+            name: name.to_string(),
+            working_dir: working_dir.map(str::to_owned),
+            env_files: Vec::new(),
+            env_selection_mode: None,
+            sandbox,
+            project_id: None,
+            managed: None,
+        })
+        .await
+    }
+
+    /// `server.session.create` with the whole typed request.
+    ///
+    /// A Project-context create needs the request's Project, Environment
+    /// selection and Managed target, so the caller owns the payload. Keeping
+    /// this single method means every field the Server reads is the contract's
+    /// field, not a hand-built JSON object that can silently omit one.
+    pub async fn create_session_payload(
+        &mut self,
+        payload: ClientSessionCreatePayload,
+    ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
         self.request_within(
-            proto_msg(
-                wire::SERVER_SESSION_CREATE,
-                ClientSessionCreatePayload {
-                    agent_id: agent_id.to_string(),
-                    name: name.to_string(),
-                    working_dir: working_dir.map(str::to_owned),
-                    env_files: Vec::new(),
-                    env_selection_mode: None,
-                    sandbox,
-                    project_id: None,
-                    managed: None,
-                },
-            ),
+            proto_msg(wire::SERVER_SESSION_CREATE, payload),
             SESSION_CREATE_TIMEOUT,
         )
         .await

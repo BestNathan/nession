@@ -23,23 +23,79 @@ export const VERSION = 1;
 
 export type ProjectListPayload = Record<symbol, never>;
 export type ProjectListResponsePayload = { projects: Array<Project>, error?: string | null, };
-export type Project = { project_id: string, name: string, description?: string | null, source?: ProjectSource | null, locations: Array<ProjectLocation>, session_defaults?: ProjectSessionDefaults | null, 
+export type Project = { 
+/**
+ * Stable Server-minted identity (`project-<uuid>`).
+ */
+project_id: string, 
+/**
+ * Human-readable Project name.
+ */
+name: string, 
+/**
+ * Optional free-text description.
+ */
+description?: string | null, 
+/**
+ * Optional Git source declaration.
+ */
+source?: ProjectSource | null, 
+/**
+ * Existing Locations the Project declares; may be empty.
+ */
+locations: Array<ProjectLocation>, 
+/**
+ * Optional Session presets applied at create time.
+ */
+session_defaults?: ProjectSessionDefaults | null, 
 /**
  * Immutable digest reference to an EROFS image artifact.
  *
  * The artifact belongs to the global Image Manager. A Project never owns
  * the blob bytes, and deleting the Project never deletes shared content.
  */
-image_digest?: string | null, created_at: number, updated_at: number, };
-export type ProjectSource = { repository_url: string, ref: string, };
-export type ProjectLocation = { agent_id: string, path: string, };
-export type ProjectSessionDefaults = { shell?: string | null, 
+image_digest?: string | null, 
+/**
+ * Unix timestamp (seconds) when the Server created the declaration.
+ */
+created_at: number, 
+/**
+ * Unix timestamp (seconds) of the last declaration update.
+ */
+updated_at: number, };
+export type ProjectSource = { 
+/**
+ * Repository the Project declares; checked out by a separate capability.
+ */
+repository_url: string, 
+/**
+ * Branch name or full commit SHA the Project declares.
+ */
+ref: string, };
+export type ProjectLocation = { 
+/**
+ * The Agent node that owns the referenced directory.
+ */
+agent_id: string, 
+/**
+ * Absolute, user-owned directory path on that Agent.
+ */
+path: string, };
+export type ProjectSessionDefaults = { 
+/**
+ * Preferred shell reference for new Sessions, when the Project declares one.
+ */
+shell?: string | null, 
 /**
  * Server env file names applied at create time when the request selects
  * no env files. An explicit request selection takes precedence, and the
  * resulting binding belongs to the Session, not the Project.
  */
-env_profile_ids: Array<string>, sandbox_policy_ref?: string | null, };
+env_profile_ids: Array<string>, 
+/**
+ * Preferred Sandbox policy reference for new Sessions, when declared.
+ */
+sandbox_policy_ref?: string | null, };
 
 // ── Operations ──
 

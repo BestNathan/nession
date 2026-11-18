@@ -67,6 +67,11 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # The live CLI lane's test gateway lives in this GitHub Environment. The
+    # binding lets the live step below resolve `vars`/`secrets`; an environment
+    # secret reaches a process only where a step maps it, so the standard Case
+    # batch (which maps none) still executes without any provider credential.
+    environment: dev-claude-qwen
     outputs:
       macos_count: ${{ steps.macos-select.outputs.count }}
     env:
@@ -558,9 +563,11 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           exit "${status}"
-      # The only step that receives the provider gateway credential. The
-      # standard batch above never sees it; these Cases run against a real,
-      # authenticated external agent CLI and fail closed without the gateway.
+      # The only step that maps the provider gateway credential into a process
+      # environment; the job's environment binding supplies the context. The
+      # standard batch maps nothing and never sees it. These Cases run against
+      # a real, authenticated external agent CLI and fail closed without the
+      # gateway.
       - name: Execute live CLI Cases with the qwen gateway
         if: steps.select-live.outcome == 'success' && steps.select-live.outputs.count != '0'
         env:

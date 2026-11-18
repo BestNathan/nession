@@ -4,23 +4,20 @@
 // mismatch/unknown/concurrent/timeout replay never causes an unchecked second
 // submission.
 //
-// The deterministic Tool contracts prove prompt/identity/stale-guard refusal.
-// SCN-03's live delivery proof needs an interactive authenticated Claude runtime
-// this Case runner does not provide, so the criterion stays Pending.
+// This verifier pins the Tool's prompt/identity/stale-guard contracts in
+// source; `verify-live.cjs` delivers a real prompt and reads the same
+// conversation back. The Case is selected only by the `live-cli` lane
+// (result_policy all-pass), so fixtures alone cannot Pass.
 const {
   run, crateTests, assertRan, isolatedTmuxEnv,
 } = require('../../../shared/mcp-cases.cjs');
-const { pendingRealCli } = require('../../../shared/claude-cases.cjs');
 
-const env = isolatedTmuxEnv('nession-3779-sc03');
-const evidence = [];
-
-try {
+run(({ evidence }) => {
   const tests = crateTests(
     'nession-claude-code',
     ['--lib', 'tools::nession_claude_submit::'],
     600000,
-    env,
+    isolatedTmuxEnv('nession-3779-sc03'),
   );
   assertRan(tests, [
     'tools::nession_claude_submit::tests::a_verified_submit_reports_input_sent_with_the_actual_id',
@@ -33,14 +30,5 @@ try {
     type: 'runtime',
     value: 'submit requires the verified conversation_id, refuses an empty/blank guard and empty/multi-line prompts before any input, refuses a foreign Agent target, and reports the delivery phase (`input_sent`) with the actual conversation id rather than an execution result',
   });
-} catch (error) {
-  run(() => {
-    throw error;
-  });
-  return;
-}
-
-pendingRealCli(
-  evidence,
-  'The live one-prompt delivery, verified actual-id, busy/stale refusal and timeout read-back paths therefore remain unproven at this stage.',
-);
+  return 'the submit delivery/identity contracts are pinned in source; the live verifier delivers one real prompt and reads it back from the same conversation';
+});
