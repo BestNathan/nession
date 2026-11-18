@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "5dae9290a9044dc277273cd3762e468fc21a345d",
+  "run_id": 44234897913,
+  "run_attempt": 1,
+  "plan_digest": "18629233ef71a43e9dce36a5060687414bbe8daa5e429ac153904054ca8ad8d0",
+  "artifact_digest": "sha256:1d7101ab4431a34433359cad8622cdb3e95be85e8b447e7e12004fc37a73aa3b",
+  "results": [
+    {
+      "id": "app-session-operations",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 151
+    },
+    {
+      "id": "sidebar-session-first",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 217
+    }
+  ]
+}
