@@ -34,6 +34,7 @@ export const SIDEBAR_AUDIT_REPAIR_PROOF=Object.freeze({
 export const ISSUE_AUDIT_3843_PROOF=Object.freeze({
   acceptanceIssue:3843,criterion:'SC-03',
   sourceRunId:44230199871,sourceAttempt:1,targetIssueNumber:3837,
+  sourceSha:'e50fa7672740164222c1168416c1e5784927847a',
   event:'workflow_dispatch',sourceCommentId:6968059863,
   repairCommentId:6968107101,
   requiredLabels:['bug','agent','test','verification:integration'],
