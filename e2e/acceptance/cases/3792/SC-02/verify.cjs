@@ -45,7 +45,10 @@ if (!capabilities.backend) {
     assert.equal(facts.workspace_persisted, true);
     assert.equal(facts.second_pane_read_back, true);
     assert.equal(facts.unauthorized_source_refused_before_mount, true);
-    assert.match(String(facts.first_execution), /^sandbox-/);
+    assert.match(
+      String(facts.first_execution),
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
     evidence.push(
       { type: 'runtime', value: 'Host-root Pane ' + facts.first_execution + ' on linux-bwrap mounted the verified EROFS toolchain at ' + facts.tool_visible_at },
       { type: 'runtime', value: 'the Agent-managed Workspace retained a write that a second Pane read back' },
