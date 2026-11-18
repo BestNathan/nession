@@ -112,6 +112,13 @@ test('SC-02: a refreshed first page drops an orphaned commit and file selection'
   await expect(detailSubject(page)).toHaveText('A first page 2 commit 2');
 
   await page.getByTestId('git-history-load-more').click();
+  // The history-overlap fixture holds the first older page so #3751's Case can
+  // release it after a replacement; this Case releases it too, and the answer
+  // is the page the refreshed cursor names.
+  await expect
+    .poll(() => page.evaluate(() => window.fixtureGitHistoryOverlap.olderRequests()))
+    .toBe(1);
+  await page.evaluate(() => window.fixtureGitHistoryOverlap.releaseOlder());
   await expect(
     page.getByTestId('git-commit-row').filter({ hasText: /^A older page 2 / }),
   ).toHaveCount(50);
