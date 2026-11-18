@@ -1,0 +1,13 @@
+schema_version: 1
+issue: 3804
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify-registry.cjs
+  - type: runtime
+    entry: verify-watcher.cjs
+  - type: browser
+    entry: verify-offline.spec.ts
+result_policy: all-pass

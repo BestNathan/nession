@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react';
-import { FolderKanban, Info, MoreHorizontal, Pencil, Settings, Trash2 } from 'lucide-react';
+import {
+  Circle,
+  CircleAlert,
+  CircleHelp,
+  FolderKanban,
+  Info,
+  LoaderCircle,
+  MoreHorizontal,
+  Pencil,
+  Settings,
+  Trash2,
+} from 'lucide-react';
 import { formatRelativeTime } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -185,6 +196,89 @@ function workloadHint(session: Session): string {
   return session.foreground_command ?? 'unknown';
 }
 
+/**
+ * The Session Activity reading this row may state as current (#3804).
+ *
+ * Activity is an independent dimension, but it is only *verified* while the
+ * Agent that reported it is online and answering. An offline or stale Agent
+ * therefore reads `unknown` whatever the last level was — the row must not
+ * claim a working Session that nobody is currently observing.
+ */
+interface EffectiveActivity {
+  state: 'working' | 'idle' | 'unknown';
+  attention: 'input_required' | null;
+  /** The Agent is offline/stale, so the level is not currently verified. */
+  stale: boolean;
+}
+
+function effectiveActivity(session: Session, domain: DomainState): EffectiveActivity {
+  if (domain.agent.channel !== 'online') {
+    return { state: 'unknown', attention: null, stale: true };
+  }
+  const reported = session.activity;
+  if (!reported) {
+    return { state: 'unknown', attention: null, stale: false };
+  }
+  const state = reported.state === 'working' || reported.state === 'idle'
+    ? reported.state
+    : 'unknown';
+  return {
+    state,
+    attention: reported.attention === 'input_required' ? 'input_required' : null,
+    stale: false,
+  };
+}
+
+function spokenActivity(activity: EffectiveActivity): string {
+  if (activity.stale) {
+    return 'Unknown — Agent unreachable, last observation unverified';
+  }
+  if (activity.attention === 'input_required') {
+    return 'Working — needs user input';
+  }
+  if (activity.state === 'working') {
+    return 'Working';
+  }
+  if (activity.state === 'idle') {
+    return 'Idle';
+  }
+  return 'Unknown';
+}
+
+/**
+ * The row's fixed-size Activity glyph (#3804).
+ *
+ * One 12px slot for every state keeps the title and row geometry stable as the
+ * level changes. The working arc is recognisable without motion; the spin is
+ * `motion-safe` only, so reduced-motion users still see the same shape.
+ * Monochrome by design: this is not a second colored status dot, and it never
+ * encodes connectivity, lifecycle or attachment.
+ */
+function SessionActivityGlyph({ activity }: { activity: EffectiveActivity }) {
+  const spoken = spokenActivity(activity);
+  const glyph = activity.attention === 'input_required' ? (
+    <CircleAlert className="size-3 text-warning" />
+  ) : activity.state === 'working' ? (
+    <LoaderCircle className="size-3 text-foreground motion-safe:animate-spin" />
+  ) : activity.state === 'idle' ? (
+    <Circle className="size-3 opacity-60" />
+  ) : (
+    <CircleHelp className="size-3 opacity-80" />
+  );
+  return (
+    <span
+      data-testid="session-item-activity"
+      data-activity={activity.state}
+      data-attention={activity.attention ?? 'none'}
+      aria-hidden="true"
+      title={spoken}
+      className="inline-flex size-3 shrink-0 items-center justify-center text-muted-foreground"
+    >
+      {glyph}
+    </span>
+  );
+}
+
 export interface SessionItemProps {
   session: Session;
   domain: DomainState;
@@ -252,7 +346,8 @@ function SessionMetaLine({
   return (
     <span
       data-testid="session-item-meta"
-      className={cn('truncate text-muted-foreground', chromeSansRole('metadata'))}
+      /* Aligns under the title, past the fixed Activity glyph slot. */
+      className={cn('truncate pl-5 text-muted-foreground', chromeSansRole('metadata'))}
     >
       <span data-testid="session-item-workload" className={chromeMonoRole('metadata')}>
         {workloadHint(session)}
@@ -297,11 +392,18 @@ export function SessionItem({
   displayTitle,
 }: SessionItemProps) {
   const title = displayTitle ?? session.session_name;
+  const activity = effectiveActivity(session, domain);
+  const activityLabel = spokenActivity(activity);
   return (
     <div
       data-testid="session-item-row"
       data-session-row={session.session_id}
       data-selected={selected}
+      /* The row's activity reading, for tests and styling. It is a fourth
+         dimension: the existing lifecycle/connectivity attributes are not
+         derived from it and vice versa. */
+      data-activity={activity.state}
+      data-attention={activity.attention ?? 'none'}
       /* Selection is the surface and nothing else. The mockup fills the row
          with `--n-raised` and draws no other cue, and visual-language.md
          forbids stacking background + border + shadow + accent for one
@@ -315,6 +417,8 @@ export function SessionItem({
         type="button"
         data-testid={`session-item-${session.session_id}`}
         aria-current={selected ? 'true' : undefined}
+        /* Activity joins the row's spoken summary; it is not only a glyph. */
+        aria-label={`${title}. Activity: ${activityLabel}. ${workloadHint(session)}, ${agentLabel}`}
         /* The row's primary control is this button, not the row: the row's box
            is 60px because of the `…` trigger beside it, and the 7px padding
            around either is dead space. So the row measuring 374×60 said nothing
@@ -332,26 +436,43 @@ export function SessionItem({
             line is wider than the column, and a wrapped "ago" reads as a layout
             bug rather than a second line of information; the mockup sets
             `white-space: nowrap` on both for the same reason. */}
-        <span
-          data-testid="session-item-title"
-          className={cn(
-            'truncate',
-            chromeSansRole('primary'),
-            selected ? 'text-foreground' : 'text-[color:var(--nession-text-secondary)]',
-          )}
-        >
-          {title}
+        <span className="flex min-w-0 items-center gap-[var(--nession-shell-space-2)]">
+          <SessionActivityGlyph activity={activity} />
+          <span
+            data-testid="session-item-title"
+            className={cn(
+              'truncate',
+              chromeSansRole('primary'),
+              selected ? 'text-foreground' : 'text-[color:var(--nession-text-secondary)]',
+            )}
+          >
+            {title}
+          </span>
         </span>
         <SessionMetaLine
           session={session}
           agentLabel={agentLabel}
           showRecency={showRecency}
         />
+        {activity.attention === 'input_required' && (
+          /* Orthogonal to the activity state: the row still says Working, and
+             this line is the one place the user's attention is requested. */
+          <span
+            data-testid="session-item-attention"
+            className={cn('truncate pl-5 text-warning', chromeSansRole('metadata'))}
+          >
+            Needs input
+          </span>
+        )}
         {domain.agent.copy !== null && (
           /* Product text too: continuity state about infrastructure, and the
              degraded reading of the agent slot two lines up. */
           <span
-            className={cn('truncate', chromeSansRole('metadata'), agentCopyClass(domain.agent.channel))}
+            className={cn(
+              'truncate pl-5',
+              chromeSansRole('metadata'),
+              agentCopyClass(domain.agent.channel),
+            )}
           >
             {domain.agent.copy}
           </span>

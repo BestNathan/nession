@@ -1843,6 +1843,9 @@ pub(super) async fn bind_for_test(
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
             created_at: now,
             last_activity: now,
         })
@@ -1867,6 +1870,7 @@ mod server_agent_address_update_v1;
 mod server_agent_command_response_v1;
 mod server_agent_list_v1;
 mod server_agent_register_v1;
+mod server_agent_session_activity_v1;
 mod server_agent_session_update_v1;
 mod server_agent_terminal_resize_v1;
 mod server_auth_v1;

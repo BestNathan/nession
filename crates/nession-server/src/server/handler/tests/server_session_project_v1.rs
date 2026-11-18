@@ -43,6 +43,9 @@ async fn seed_session(h: &mut ConnectionHandler, name: &str) -> SessionInfo {
         created_at: chrono::Utc::now(),
         last_activity: chrono::Utc::now(),
         instance_id: Some("instance-1".to_string()),
+        activity: None,
+        activity_epoch: None,
+        activity_generation: 0,
     };
     h.session_registry.update_session(session.clone()).await;
     session

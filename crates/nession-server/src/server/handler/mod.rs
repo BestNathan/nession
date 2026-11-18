@@ -1379,6 +1379,9 @@ pub(crate) fn session_to_info(
         working_dir: s.working_dir.clone(),
         instance_id: s.instance_id.clone(),
         project_id: project_id.map(std::string::ToString::to_string),
+        // The same shared serializer feeds `server.session.list` and
+        // `server.sessions.changed`, so the two always agree on Activity too.
+        activity: s.activity.clone(),
         last_activity: s.last_activity.to_rfc3339(),
     }
 }
@@ -1456,6 +1459,11 @@ fn parse_agent_sessions(
                             .and_then(serde_json::Value::as_str)
                             .filter(|id| !id.is_empty())
                             .map(std::string::ToString::to_string),
+                        // The inventory reply carries no Activity; the
+                        // replacement preserves a same-incarnation level.
+                        activity: None,
+                        activity_epoch: None,
+                        activity_generation: 0,
                     })
                 })
                 .collect()
@@ -1479,6 +1487,7 @@ mod server_agent_git_invalidated_v1;
 mod server_agent_list_v1;
 mod server_agent_register_v1;
 mod server_agent_rename_v1;
+mod server_agent_session_activity_v1;
 mod server_agent_session_env_binding_v1;
 mod server_agent_session_update_v1;
 mod server_agent_terminal_resize_v1;
