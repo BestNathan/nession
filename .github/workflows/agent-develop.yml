@@ -248,18 +248,12 @@ jobs:
           git update-ref refs/nession/repair-source "$REPAIR_INPUT_SHA"
           # Only inert Git objects are brought into the disposable clone.
           # Never checkout or execute any PR-head code in this trusted job.
-      - name: Build trusted isolated Cursor runtime with ripgrep
-        shell: bash
+      - name: Verify Cursor file-search dependency on Runner
         run: |
           set -euo pipefail
-          # Build from main-owned Dockerfile only. No repository or PR sources
-          # are in the build context; no secrets are accessible to this step.
-          docker build --pull=false --tag nession-cursor-worker-rg:local - \
-            < scripts/lib/agent/orchestration/cursor-worker.Dockerfile
-          docker run --rm --network=none --read-only --cap-drop=ALL \
-            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
-            nession-cursor-worker-rg:local rg --version
-      - name: Execute real Developer in isolated Docker with no host credentials
+          command -v rg >/dev/null || { echo "::error::Cursor SDK requires ripgrep on Runner"; exit 1; }
+          rg --version
+      - name: Execute real Cursor Developer directly with Node.js
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
@@ -267,46 +261,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Clone the exact trusted checkout into an unprivileged disposable Git
-          # repository. Docker never mounts the runner's .git or credential dir.
-          git clone --no-hardlinks --local "$GITHUB_WORKSPACE" \
-            "$RUNNER_TEMP/development-checkout"
-          if [[ "${{ inputs.task }}" == repair ]]; then
-            git -C "$RUNNER_TEMP/development-checkout" fetch --quiet --no-tags \
-              "$GITHUB_WORKSPACE" \
-              refs/nession/repair-source:refs/nession/repair-source
-            test "$(git -C "$RUNNER_TEMP/development-checkout" rev-parse refs/nession/repair-source)" = \
-              '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
-          fi
-          git -C "$RUNNER_TEMP/development-checkout" remote remove origin
+          # Worker creates its own source-pinned disposable Git worktree.
+          # Do not pass Store, Controller or Publisher writer credentials.
           mkdir -p "$RUNNER_TEMP/development-output"
           chmod 0700 "$RUNNER_TEMP/development-output"
-          docker run --rm --read-only \
-            --cap-drop=ALL --security-opt=no-new-privileges \
-            --pids-limit=256 --memory=4g --cpus=2 \
-            --network=bridge --tmpfs /tmp:rw,nosuid,nodev,size=2g \
-            --user "$(id -u):$(id -g)" --workdir /trusted-code \
-            -v "$GITHUB_WORKSPACE:/trusted-code:ro" \
-            -v "$RUNNER_TEMP/development-checkout:/workspace:rw" \
-            -v "$RUNNER_TEMP/development-sdk:/sdk:ro" \
-            -v "$RUNNER_TEMP/development-admission.json:/admission.json:ro" \
-            -v "$RUNNER_TEMP/development-output:/output:rw" \
-            -v "$RUNNER_TEMP/development-native:/resume:ro" \
-            -v "$RUNNER_TEMP/development-context:/context:ro" \
-            -e NESSION_DEVELOPER_ISOLATED=docker-v1 \
-            -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_RUN_ID \
-            -e GITHUB_RUN_ATTEMPT -e GITHUB_EVENT_NAME -e GITHUB_WORKFLOW \
-            -e GITHUB_REF -e CURSOR_API_KEY -e CURSOR_MODEL \
-            -e CURSOR_MODEL_FAST -e CURSOR_RESUME_PUBLIC_KEY_B64 \
-            -e CURSOR_SDK_VERSION \
-            -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
-            -e CURSOR_SDK_ROOT=/sdk -e CURSOR_RIPGREP_PATH=/usr/bin/rg -e HOME=/tmp \
-            nession-cursor-worker-rg:local \
-            node scripts/lib/agent/orchestration/development-worker.mjs \
-              /admission.json /output
+          export CURSOR_RIPGREP_PATH="$(command -v rg)"
+          node scripts/lib/agent/orchestration/development-worker.mjs \
+            "$RUNNER_TEMP/development-admission.json" "$RUNNER_TEMP/development-output"
       - name: Upload canonical immutable Agent telemetry
         # A real Cursor Provider failure is still a model execution. Preserve
-        # the sanitized canonical outcome even when the Docker step exits 1.
+        # the sanitized canonical outcome even when the Node Worker step exits 1.
         # A failure before model invocation has no telemetry; do not invent it.
         if: always()
         uses: actions/upload-artifact@v4
@@ -434,7 +398,7 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # The trusted host derives the public sealing key from the
-          # already-existing private Restore key; Docker never receives it.
+          # already-existing private Restore key; the model receives only the public key.
           QWEN_RESUME_PRIVATE_KEY_B64: ${{ secrets.QWEN_RESUME_PRIVATE_KEY_B64 }}
           CONFIGURED_QWEN_PUBLIC_KEY_B64: ${{ vars.QWEN_RESUME_PUBLIC_KEY_B64 }}
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
@@ -495,7 +459,7 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/qwen-source" rev-parse HEAD)" = "$SOURCE_SHA"
           git -C "$RUNNER_TEMP/qwen-source" remote remove origin
           mkdir -m 700 "$RUNNER_TEMP/qwen-context"
-      - name: Fetch only bounded read-only Issue context outside model container
+      - name: Fetch only bounded read-only Issue context before Node model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -506,7 +470,7 @@ jobs:
             "$RUNNER_TEMP/qwen-context/issue.json" > /dev/null
       # #1664 SC-05: the trusted host alone reads GitHub comments and the
       # public orphan Store. Only one canonical Reviewer projection is passed
-      # to Docker as task context; API tokens and other comments never enter it.
+      # to the model as task context; API tokens and other comments never enter it.
       - name: Attest latest committed Qwen Reviewer Issue comment before Repair
         if: inputs.task == 'repair'
         env:
@@ -543,21 +507,25 @@ jobs:
           node scripts/lib/agent/orchestration/qwen-review-context.mjs verify \
             "$RUNNER_TEMP/qwen-admission.json" "$temp/matched.json" \
             "$RUNNER_TEMP/qwen-context/review.json"
-      - name: Build pinned, source-free isolated Qwen runtime
+      - name: Install pinned Qwen Claude CLI on Node Runner
         env:
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
         run: |
           set -euo pipefail
-          docker build --pull=false --build-arg "CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION" \
-            --tag nession-qwen-developer:local - \
-            < scripts/lib/agent/orchestration/qwen-worker.Dockerfile
+          [[ "$CLAUDE_CODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::Qwen Developer requires numeric pinned CLAUDE_CODE_VERSION"; exit 1;
+          }
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          "$RUNNER_TEMP/claude-cli/node_modules/.bin/claude" --help | grep -q -- '--restricted'
+          echo "$RUNNER_TEMP/claude-cli/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Download only same-Run encrypted Qwen Resume transfer
         if: inputs.resume_from != ''
         uses: actions/download-artifact@v4
         with:
           name: development-qwen-transfer-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/qwen-transfer
-      - name: Open Qwen native Session on trusted host before model Docker
+      - name: Restore Qwen native Session before Node model execution
         if: inputs.resume_from != ''
         env:
           QWEN_RESUME_PRIVATE_KEY_B64: ${{ secrets.QWEN_RESUME_PRIVATE_KEY_B64 }}
@@ -574,41 +542,21 @@ jobs:
           mkdir -m 700 "$RUNNER_TEMP/qwen-resume"
           mv "$RUNNER_TEMP/qwen-native" "$RUNNER_TEMP/qwen-resume/native"
           cp "$RUNNER_TEMP/qwen-transfer/manifest.json" "$RUNNER_TEMP/qwen-resume/manifest.json"
-      - name: Execute Store-admitted Qwen CLI in unprivileged Docker
+      - name: Execute Store-admitted Qwen Developer directly with Node.js
         env:
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
-          # QWEN_RESUME_PUBLIC_KEY_B64 is populated by the earlier trusted
-          # host preflight through GITHUB_ENV, not a separate unverified var.
+          # QWEN_RESUME_PUBLIC_KEY_B64 was derived by trusted pre-model verification.
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/qwen-resume" "$RUNNER_TEMP/qwen-output"
           chmod 0700 "$RUNNER_TEMP/qwen-resume" "$RUNNER_TEMP/qwen-output"
-          docker run --rm --read-only \
-            --cap-drop=ALL --security-opt=no-new-privileges \
-            --pids-limit=256 --memory=4g --cpus=2 \
-            --network=bridge --tmpfs /tmp:rw,nosuid,nodev,size=2g \
-            --user "$(id -u):$(id -g)" --workdir /trusted-code \
-            -v "$GITHUB_WORKSPACE:/trusted-code:ro" \
-            -v "$RUNNER_TEMP/qwen-source:/workspace:rw" \
-            -v "$RUNNER_TEMP/qwen-admission.json:/admission.json:ro" \
-            -v "$RUNNER_TEMP/qwen-context:/context:ro" \
-            -v "$RUNNER_TEMP/qwen-resume:/resume:ro" \
-            -v "$RUNNER_TEMP/qwen-output:/output:rw" \
-            -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_REF \
-            -e GITHUB_EVENT_NAME -e GITHUB_WORKFLOW -e GITHUB_ACTOR \
-            -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e GITHUB_SHA \
-            -e ANTHROPIC_MODEL -e ANTHROPIC_BASE_URL \
-            -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_API_KEY \
-            -e CLAUDE_CODE_VERSION -e QWEN_RESUME_PUBLIC_KEY_B64 \
-            -e NESSION_DEVELOPER_ISOLATED=docker-v1 \
-            -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
-            -e HOME=/tmp nession-qwen-developer:local \
-            node scripts/lib/agent/orchestration/qwen-development-worker.mjs \
-              /admission.json /output
+          # No Docker runtime, Sandbox setup, or privileged Store token.
+          node scripts/lib/agent/orchestration/qwen-development-worker.mjs \
+            "$RUNNER_TEMP/qwen-admission.json" "$RUNNER_TEMP/qwen-output"
       - name: Upload canonical real Qwen Developer telemetry
         # A failed model attempt is still an Agent invocation and must retain
         # its native-observable failure telemetry; no Store/PR publication.
@@ -632,12 +580,12 @@ jobs:
       - name: Remove private transient restored Session and Issue data
         if: always()
         run: |
-          rm -rf "$RUNNER_TEMP/qwen-native" "$RUNNER_TEMP/qwen-resume" \
-            "$RUNNER_TEMP/qwen-transfer" "$RUNNER_TEMP/qwen-context"
+          rm -rf "$RUNNER_TEMP/qwen-native" "$RUNNER_TEMP/qwen-native-session" \
+            "$RUNNER_TEMP/qwen-resume" "$RUNNER_TEMP/qwen-transfer" "$RUNNER_TEMP/qwen-context"
 
   # #3491: separate no-model job. A GITHUB_TOKEN-started Worker does not
   # emit a downstream workflow_run, but explicit workflow_dispatch is allowed.
-  # Qwen and every model/container step retain read-only permissions. The
+  # Qwen and every model Worker step retain read-only permissions. The
   # Store owner independently waits for completed success and attests the
   # original immutable Artifacts and Outbox before any Store App token.
   wake-qwen-result:
