@@ -341,7 +341,7 @@ try {
       '## Knowledge Impact',
       '- Decision: Read',
       '- Related knowledge: #961',
-    ].join('\\n'),
+    ].join('\n'),
   };
   const sourceNoneParsed=parseIssueE2E(sourceNoneBug.body);
   assert.deepEqual(sourceNoneParsed.errors,['missing ## E2E Report']);
@@ -356,13 +356,13 @@ try {
     '## Fix Direction', 'Measure admitted and released workers before changing the owner.',
     '## Location', '- crates/nession-agent/tests/integration/server.rs',
     '## Knowledge Impact', '- Decision: Read', '- Related knowledge: #961',
-  ].join('\\n');
+  ].join('\n');
   writeFileSync(filename,JSON.stringify(sourceNoneBug));
   const noneBugSnapshot=readFileSync(filename,'utf8');
   for(const rejected of [
-    {body:semanticBug+'\\n\\n'+sourceNoneBug.body,labels:['bug','agent']},
-    {body_without_e2e:semanticBug+'\\n## E2E Report\\n| fake |',labels:['bug','agent']},
-    {body_without_e2e:semanticBug+'\\n## E2E Verification\\n### New\\n- none: invented',labels:['bug','agent']},
+    {body:semanticBug+'\n\n'+sourceNoneBug.body,labels:['bug','agent']},
+    {body_without_e2e:semanticBug+'\n## E2E Report\n| fake |',labels:['bug','agent']},
+    {body_without_e2e:semanticBug+'\n## E2E Verification\n### New\n- none: invented',labels:['bug','agent']},
   ]) {
     await assert.rejects(applyIssueAuditProposal(issue,{
       result:JSON.stringify(rejected),
@@ -374,7 +374,7 @@ try {
       'an unauthorized E2E proposal cannot partially write an Issue');
   }
   await assert.rejects(applyIssueAuditProposal(issue,{
-    result:JSON.stringify({body_without_e2e:'## Description\\nStill invalid',
+    result:JSON.stringify({body_without_e2e:'## Description\nStill invalid',
       labels:['bug','agent']}),
   },'example/repo'),/Issue Contract validation failed before write/);
   assert.equal(readFileSync(filename,'utf8'),noneBugSnapshot);
@@ -393,7 +393,7 @@ try {
   assert.equal(completedNoneE2E.regressionNone,sourceNoneParsed.regressionNone);
   assert.equal(completedNoneE2E.digest,sourceNoneParsed.digest);
   assert.ok(completedNoneBug.body.endsWith(
-    '## E2E Report\\n| ID | Type | Result | Evidence |\\n|---|---|---|---|'));
+    '## E2E Report\n| ID | Type | Result | Evidence |\n|---|---|---|---|'));
   assert.deepEqual(completedNoneBug.labels.map(x=>x.name).sort(),
     ['agent','bug','protocol']);
   const completedSnapshot=readFileSync(filename,'utf8');
