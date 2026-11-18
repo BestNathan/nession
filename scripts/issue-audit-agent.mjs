@@ -15,6 +15,16 @@ import { publishIssueAuditFeedback, resolveIssueAuditFeedback, selfTestIssueAudi
 import { readPreflightChecks } from './lib/agent/tools/gh/issue/preflight-receipt.mjs';
 import { selfTestAuditMcp } from './issue-audit-check-mcp.mjs';
 
+// A tool-less format/contract continuation can replace the model proposal.
+ // Its final candidate was NOT checked by the preceding MCP invocation.
+function finalPreflightEvidence(preflight,formatRepairAttempted=false,contractRepairAttempted=false){
+  return {...(preflight??{observed:false,calls:0,passed:0,
+    final_candidate_checked:false,codes:[],
+    evidence_kind:'local-readonly-mcp-proposal-checks'}),
+    final_candidate_checked:!!preflight?.final_candidate_checked&&
+      !formatRepairAttempted&&!contractRepairAttempted};
+}
+
 function envNumber(name) {
   const raw = process.env[name];
   if (raw == null || raw === '') return null;
@@ -277,6 +287,15 @@ function runAgent(issue) {
 }
 
 async function selfTest() {
+  const witnessed={observed:true,calls:2,passed:1,final_candidate_checked:true,
+    codes:['ISSUE_AUDIT_CONTRACT_REJECTED','VALID_CANDIDATE'],
+    evidence_kind:'local-readonly-mcp-proposal-checks'};
+  assert.equal(finalPreflightEvidence(witnessed).final_candidate_checked,true);
+  assert.equal(finalPreflightEvidence(witnessed,true,false).final_candidate_checked,false,
+    'format-only second pass was never independently MCP checked');
+  assert.equal(finalPreflightEvidence(witnessed,false,true).final_candidate_checked,false,
+    'contract correction cannot borrow a prior selfcheck receipt');
+  assert.equal(finalPreflightEvidence(null).observed,false);
   const sample = {
     usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 20, cache_creation_input_tokens: 3 },
     total_cost_usd: 0.01, session_id: 's1', num_turns: 2, duration_ms: 100,
@@ -450,7 +469,7 @@ async function main() {
         terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
         error: rejection ? null : message,
         rejection_code: rejection?.code ?? null,
-        preflight,
+        preflight:finalPreflightEvidence(preflight,repairAttempted,contractRepairAttempted),
       },
       errors: after.errors,
     });
@@ -486,7 +505,7 @@ async function main() {
       model_requests: 1 + Number(repairAttempted) + Number(contractRepairAttempted),
         contract_repair_attempted: contractRepairAttempted,
       format_repair_attempted: repairAttempted,
-      preflight:claude.preflight,
+      preflight:finalPreflightEvidence(claude.preflight,repairAttempted,contractRepairAttempted),
       started_at: agentStartedAt.toISOString(),
       finished_at: new Date().toISOString(),
       duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime())),
