@@ -2,9 +2,14 @@
 
 This is a **separate Argo CD Application** (`nession-mcp-staging`) and a
 single stateless Deployment/ClusterIP Service (`nession-mcp-staging`) in the
-shared `nession` namespace. Its public Higress Ingress manifest is **staged but
-excluded from Kustomize** until DNS, CA-trusted TLS, and redirect preflight
-succeeds; plaintext HTTP must never expose a bearer token. Production, preprod, and staging-01 are unchanged.
+shared `nession` namespace. Its dedicated Higress HTTPS Ingress is enabled
+in this staging overlay (#3902); HTTP requests must redirect to HTTPS.
+The deployed certificate is currently self-signed (verified 2026-11-18):
+ordinary public clients will NOT trust it until it is replaced by a
+publicly trusted CA certificate or the caller explicitly trusts this CA.
+Never disable certificate verification to make a bearer-authenticated MCP
+client connect. This activation is not evidence that DNS, externally trusted
+TLS, HTTP redirect, or authenticated MCP requests have passed live tests. Production, preprod, and staging-01 are unchanged.
 This service is not the embedded `/mcp` route inside Server/Agent containers.
 
 ## Image and version contract
@@ -51,7 +56,7 @@ either token or place it in a ConfigMap.
 
 ## Public HTTPS MCP entry point (operator prerequisites)
 
-The staging-only Ingress definition (currently **not enabled in Kustomize**) is
+The staging-only Ingress (enabled in Kustomize) is
 `nession-mcp-staging`, with
 `ingressClassName: higress` and the single **Exact** path `/mcp` mapped to
 the MCP Service port 9090. The supported external endpoint is:
@@ -60,7 +65,7 @@ the MCP Service port 9090. The supported external endpoint is:
 https://staging.mcp.nession.bestnathan.top/mcp
 ```
 
-**Before claiming the public MCP endpoint is ready:**
+**Before claiming the public MCP endpoint is ready (GitOps activation alone is NOT sufficient):**
 
 1. Create/verify the public DNS A/AAAA/CNAME record
    `staging.mcp.nession.bestnathan.top` pointing to the externally reachable
@@ -85,8 +90,8 @@ https://staging.mcp.nession.bestnathan.top/mcp
    `nession-mcp-staging-tls`. Also verify DNS and actual publicly trusted
    TLS from an external client. Host allowlist must include the public
    hostname, and inbound/outbound bearer tokens must differ.
-4. **Only after steps 1-3 pass**, add `ingress.yaml` to this overlay's
-   `kustomization.yaml` resources in a separate reviewed GitOps activation.
+4. The staging-only `ingress.yaml` resource is now enabled in this overlay.
+   Verify that the existing Higress Controller reconciles the Ingress and TLS
    Verify the existing Higress Controller reconciles this Ingress and TLS
    Secret, DNS resolves publicly, and its gateway is actually reachable
    from the internet. The manifest explicitly requests TLS termination and
