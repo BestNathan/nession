@@ -6,8 +6,6 @@ import { execFileSync } from 'node:child_process';
 const REPO='BestNathan/nession',MARK='<!-- nession-issue-audit-needs-review:v1 -->';
 const SAFE_CODE=/^ISSUE_AUDIT_[A-Z0-9_]{3,70}$/;
 const ACTIONS='https://github.com/'+REPO+'/actions/runs/';
-const owner=()=>process.env.GITHUB_REPOSITORY===REPO &&
-  process.env.GITHUB_ACTOR==='BestNathan' || process.env.GITHUB_ACTOR==='github-actions[bot]';
 
 function gh(path,{method=null,body=null}={}){
   const args=['api',path];
