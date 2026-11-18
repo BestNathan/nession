@@ -44,6 +44,7 @@ const mock = '#!/bin/sh\n' +
   '  image:digest) printf "%s\\n" "sha256:' + 'a'.repeat(64) + '"; exit 0 ;;\n' +
   '  manifest:get) printf "%s\\n" ' + "'" + JSON.stringify(indexed()) + "'" + '; exit 0 ;;\n' +
   '  index:create)\n' +
+  '    if [ "$4" != "--ref" ] || [ "$6" != "--platform" ] || [ "$7" != "linux/amd64" ] || [ "$8" != "--platform" ] || [ "$9" != "linux/arm64" ]; then exit 9; fi\n' +
   '    if [ -n "$REGCTL_FIXTURE_TRACE" ]; then printf "start:%s\\n" "$3" >> "$REGCTL_FIXTURE_TRACE"; fi\n' +
   '    sleep 0.10\n' +
   '    if [ -n "$REGCTL_FIXTURE_TRACE" ]; then printf "end:%s\\n" "$3" >> "$REGCTL_FIXTURE_TRACE"; fi\n' +
@@ -76,6 +77,7 @@ function fixture(fail, image = 'server', concurrency = '2') {
         GITHUB_RUN_ATTEMPT: '1', RUNNER_NAME: 'hs-mac-fixture',
         REGCTL_FIXTURE_FAIL: fail ? '1' : '0'},
     });
+    if (concurrency === '5') return {result};
     const report = JSON.parse(fs.readFileSync(path.join(resultDir, 'result.json'), 'utf8'));
     assert.equal(report.source_sha, sha);
     assert.equal(report.roles.length, image === 'all' ? 4 : 1);
