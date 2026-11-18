@@ -108,6 +108,18 @@ export function addResource(yaml, resource) {
 }
 
 
+// Git porcelain is two status columns + one space + path. Do not call
+// trim() on its output; a leading blank status column is semantically useful.
+export function parseGitStatusPaths(raw) {
+  if (typeof raw !== 'string') throw new Error('Git status output must be text');
+  return raw.split(/\r?\n/).filter(Boolean).map(line => {
+    if (!/^[ MADRCU?!]{2} /.test(line)) {
+      throw new Error('Invalid git status --porcelain=v1 record');
+    }
+    return line.slice(3);
+  });
+}
+
 export function validateChangedPaths(changedPaths, environment, secretName) {
   const target = getTarget(environment, secretName);
   const expected = new Set([target.resource, target.kustomization]);
@@ -131,8 +143,13 @@ function publish(root, environment, secretName) {
   if (git('branch', '--show-current') !== 'gitops') {
     throw new Error('Publication must target the checked-out gitops branch');
   }
-  const paths = git('status', '--porcelain=v1', '--untracked-files=all')
-    .split('\n').filter(Boolean).map(line => line.slice(3));
+  // Keep leading porcelain status columns: git() trims whitespace and would
+  // corrupt the first path when Git starts with an unstaged " M ..." line.
+  const porcelain = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+    cwd: root, encoding: 'utf8', timeout: 30000,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const paths = parseGitStatusPaths(porcelain);
   validateChangedPaths(paths, environment, secretName);
   if (!paths.includes(target.resource)) {
     throw new Error('Expected encrypted SealedSecret resource was not generated');
