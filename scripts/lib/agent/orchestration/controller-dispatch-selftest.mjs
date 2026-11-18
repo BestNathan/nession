@@ -6,7 +6,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
-  assertOwnerReviewDispatchRole}
+  QWEN_CLI_RECOVERY_COMMENT,assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -148,6 +148,39 @@ for(const change of [
 ])
   assert.throws(()=>assertDispatchAuthority({...canaryValid,...change}),
     /authenticated owner\/main/);
+
+// #3885: an authenticated original Owner Issue comment is the ONLY trigger
+// for the immutable failed Qwen CLI Run; never authorize a bot, different
+// Issue, altered command, wrong Outbox identity, PR or attempt-2.
+const cliFailure=(await import('./qwen-cli-failure.mjs')).SOURCE;
+const cliCommentEvent={
+  action:'created',repository:{full_name:'BestNathan/nession'},
+  issue:{number:3784,state:'open'},
+  comment:{id:6971000001,body:QWEN_CLI_RECOVERY_COMMENT,
+    user:{login:'BestNathan'}},
+};
+const cliRecovery={...valid,environment:{...commentEnvironment},
+  event:cliCommentEvent,run:{...run,event:'issue_comment'},
+  issue:3784,actionId:cliFailure.action_id};
+assert.equal(assertDispatchAuthority(cliRecovery).issue,3784);
+for(const mutation of [
+  {issue:3785},
+  {actionId:'a'.repeat(64)},
+  {event:{...cliCommentEvent,issue:{number:3784,state:'closed'}}},
+  {event:{...cliCommentEvent,issue:{number:3784,state:'open',pull_request:{}}}},
+  {event:{...cliCommentEvent,action:'edited'}},
+  {event:{...cliCommentEvent,comment:{...cliCommentEvent.comment,
+    body:QWEN_CLI_RECOVERY_COMMENT+' '}}},
+  {event:{...cliCommentEvent,comment:{...cliCommentEvent.comment,
+    user:{login:'other'}}}},
+  {event:{...cliCommentEvent,comment:{...cliCommentEvent.comment,id:0}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'github-actions[bot]'}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+  {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
+]){
+  assert.throws(()=>assertDispatchAuthority({...cliRecovery,...mutation}),
+    /authenticated owner\/main/);
+}
 
 const actualAction=await import('./outbox.mjs').then(m=>
   m.failedDeveloperRetryActionId(1997,
@@ -411,3 +444,4 @@ console.log('Controller dispatch: trusted run binding, fork/retry/role denial, H
 // New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
 await import('./qwen-reviewer-source-selftest.mjs');
 await import('./qwen-preflight-recovery-selftest.mjs');
+await import('./qwen-cli-failure-selftest.mjs');
