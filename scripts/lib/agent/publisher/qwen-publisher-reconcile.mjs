@@ -104,7 +104,7 @@ export function assertOwnerQwenPublisherRecovery({env,event,run,jobs,receipt,ing
   return Object.freeze({issue:s.issue,run_id:s.publisher_run_id,pr:s.pr});
 }
 export function getOnlyQwenPrApi(token){
-  if(typeof token!=='string'||token.length<8||/\\s/.test(token))
+  if(typeof token!=='string'||token.length<8||/\s/.test(token))
     fail('missing read-only GitHub token');
   const s=ORIGINAL,branch='agent/'+s.issue+'/qwen-'+s.action_id.slice(0,16);
   const paths=new Set([
