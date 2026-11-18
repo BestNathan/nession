@@ -204,7 +204,7 @@ for(const mutation of [
   {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
 ])
   assert.throws(()=>assertDispatchAuthority({...toolsRecovery,...mutation}),
-    /authenticated owner\\/main/);
+    /authenticated owner\/main/);
 
 const actualAction=await import('./outbox.mjs').then(m=>
   m.failedDeveloperRetryActionId(1997,
