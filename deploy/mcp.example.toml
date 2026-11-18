@@ -6,6 +6,15 @@
 # configuration, credential or default bearer token.
 #
 # With any REQUIRED value left empty this document fails closed at startup.
+# Standalone MCP can alternatively receive credentials from three fixed
+# environment variables, typically Kubernetes secretKeyRef:
+#   NESSION_MCP_INBOUND_TOKEN         -> [mcp].auth_token
+#   NESSION_MCP_BACKEND_SERVER_TOKEN  -> [backend.server].auth_token
+#   NESSION_MCP_BACKEND_AGENT_TOKEN   -> [backend.agent].auth_token (optional)
+# When using environment credentials, omit auth_token keys entirely from
+# this TOML so it can be stored in a nonsecret ConfigMap. Never embed
+# ${PLACEHOLDER} strings: MCP does not interpolate TOML. Simultaneously
+# configuring a literal token and its environment variable is an error.
 # The inbound token and the outbound credentials are separate secrets; never
 # reuse the MCP inbound token as a Server/Agent credential.
 
