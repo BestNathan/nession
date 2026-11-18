@@ -1,44 +1,89 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getTarget, parsePayload, makeSecret, publicCert, checkSealed, addResource } from './seal-gitops-secret.mjs';
-const t = getTarget('staging-mcp');
-const plain = '[mcp]\nauth_token = "inbound"\nallowed_hosts = ["staging.mcp.nession.bestnathan.top"]\n[backend.server]\nauth_token = "backend"\n';
-const payload = JSON.stringify({ 'mcp.toml': plain });
-const doc = { apiVersion: 'bitnami.com/v1alpha1', kind: 'SealedSecret',
-  metadata: { name: t.name, namespace: t.namespace },
-  spec: { encryptedData: { 'mcp.toml': 'encrypted-opaque-value' },
-    template: { metadata: { name: t.name, namespace: t.namespace }, type: 'Opaque' } } };
-test('target only allows configured namespace and name', () => {
-  assert.equal(t.namespace, 'nession'); assert.equal(t.name, 'nession-mcp-config-staging');
-  assert.throws(() => getTarget('production')); assert.throws(() => getTarget('../prod'));
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import {
+  getTarget, validateRaw, createPlainSecret,
+  validatePublicCert, validateSealed, addResource
+} from './seal-gitops-secret.mjs';
+
+const environment = 'staging', secret = 'MCP_CONFIG_TOML';
+const target = getTarget(environment, secret);
+const raw = '[mcp]\nauth_token = "inbound"\n[backend.server]\nauth_token = "backend"\n';
+const sealed = {
+  apiVersion: 'bitnami.com/v1alpha1',
+  kind: 'SealedSecret',
+  metadata: { name: target.name, namespace: target.namespace },
+  spec: {
+    encryptedData: { [target.key]: 'AgEncryptedText' },
+    template: { metadata: { name: target.name, namespace: target.namespace }, type: 'Opaque' }
+  }
+};
+
+test('GitHub Environment must match GitOps environment directory exactly', () => {
+  assert.equal(target.resource, 'environments/staging/mcp/sealed-secret.json');
+  assert.equal(target.namespace, 'nession');
+  assert.throws(() => getTarget('staging-mcp', secret));
+  assert.throws(() => getTarget('production', secret));
+  assert.throws(() => getTarget('staging', 'UNREGISTERED'));
+  assert.throws(() => getTarget('../staging', secret));
 });
-test('payload must match target keys and contain authentication', () => {
-  assert.equal(parsePayload(payload, 'staging-mcp')['mcp.toml'], plain);
-  for (const s of ['{}', '[]', '{', '{"mcp.toml":""}', JSON.stringify({ 'mcp.toml': plain, other: 'secret' })])
-    assert.throws(() => parsePayload(s, 'staging-mcp'));
+
+test('one GitHub Secret raw text is copied byte-for-byte into one Kubernetes Secret key', () => {
+  const doc = createPlainSecret(environment, secret, raw);
+  assert.equal(doc.kind, 'Secret');
+  assert.deepEqual(Object.keys(doc.data), ['mcp.toml']);
+  assert.equal(Buffer.from(doc.data['mcp.toml'], 'base64').toString(), raw);
+  assert.equal(validateRaw('{"this":"is literal data, not a JSON wrapper"}'),
+    '{"this":"is literal data, not a JSON wrapper"}');
+  assert.throws(() => validateRaw(''));
+  assert.throws(() => validateRaw('abc\0def'));
 });
-test('plaintext is only materialized as a temporary Secret', () => {
-  const manifest = makeSecret('staging-mcp', parsePayload(payload, 'staging-mcp'));
-  assert.equal(Buffer.from(manifest.data['mcp.toml'], 'base64').toString(), plain);
-  assert.ok(!JSON.stringify(manifest).includes(plain));
+
+test('Argo CD SSH public keys are not Sealed Secrets public certificates', () => {
+  assert.throws(() => validatePublicCert('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOipQ6S8G8lfxK89iKF7O2UVGnHU5XyVOaSuGiP1vdDr argocd-nitops'));
+  assert.throws(() => validatePublicCert('-----BEGIN PRIVATE KEY-----\nZmFrZQ==\n-----END PRIVATE KEY-----'));
 });
-test('public certificate rejects controller private key', () => {
-  const cert = '-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----';
-  assert.equal(publicCert(Buffer.from(cert).toString('base64')), cert);
-  assert.throws(() => publicCert(Buffer.from('-----BEGIN PRIVATE KEY-----').toString('base64')));
+
+test('public sealing key must be valid RSA X.509 certificate', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'nession-seal-test-'));
+  try {
+    const rsa = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048',
+      '-nodes', '-days', '10', '-keyout', path.join(tmp, 'rsa.key'),
+      '-out', path.join(tmp, 'rsa.crt'), '-subj', '/CN=test-rsa'], { encoding: 'utf8' });
+    assert.equal(rsa.status, 0, rsa.stderr);
+    assert.match(validatePublicCert(readFileSync(path.join(tmp, 'rsa.crt'), 'utf8')), /BEGIN CERTIFICATE/);
+    const key = spawnSync('openssl', ['genpkey', '-algorithm', 'ED25519',
+      '-out', path.join(tmp, 'ed.key')], { encoding: 'utf8' });
+    assert.equal(key.status, 0, key.stderr);
+    const cert = spawnSync('openssl', ['req', '-x509', '-new',
+      '-key', path.join(tmp, 'ed.key'), '-days', '10',
+      '-out', path.join(tmp, 'ed.crt'), '-subj', '/CN=wrong-type'], { encoding: 'utf8' });
+    assert.equal(cert.status, 0, cert.stderr);
+    assert.throws(() => validatePublicCert(readFileSync(path.join(tmp, 'ed.crt'), 'utf8')));
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
-test('sealed output refuses broad scopes, plaintext and altered identity', () => {
-  assert.equal(checkSealed(structuredClone(doc), 'staging-mcp').kind, 'SealedSecret');
-  const broad = structuredClone(doc); broad.metadata.annotations = { 'sealedsecrets.bitnami.com/cluster-wide': 'true' };
-  assert.throws(() => checkSealed(broad, 'staging-mcp'));
-  const wrong = structuredClone(doc); wrong.metadata.name = 'another';
-  assert.throws(() => checkSealed(wrong, 'staging-mcp'));
-  const unsealed = structuredClone(doc); unsealed.spec.template.data = { a: 'plaintext' };
-  assert.throws(() => checkSealed(unsealed, 'staging-mcp'));
+
+test('encrypted output rejects broad scopes, wrong names and plaintext', () => {
+  assert.equal(validateSealed(structuredClone(sealed), environment, secret).kind, 'SealedSecret');
+  const wrong = structuredClone(sealed); wrong.metadata.name = 'wrong';
+  assert.throws(() => validateSealed(wrong, environment, secret));
+  const broad = structuredClone(sealed);
+  broad.metadata.annotations = { 'sealedsecrets.bitnami.com/cluster-wide': 'true' };
+  assert.throws(() => validateSealed(broad, environment, secret));
+  const plaintext = structuredClone(sealed);
+  plaintext.spec.template.stringData = { 'mcp.toml': raw };
+  assert.throws(() => validateSealed(plaintext, environment, secret));
+  const extra = structuredClone(sealed); extra.spec.encryptedData.foo = 'secret';
+  assert.throws(() => validateSealed(extra, environment, secret));
 });
+
 test('Kustomize resource enrollment is idempotent', () => {
   const yaml = 'resources:\n  - deployment.yaml\n\nimages:\n  - name: mcp\n';
-  assert.equal(addResource(addResource(yaml)), addResource(yaml));
-  assert.match(addResource(yaml), /- sealed-secret\.json/);
-  assert.throws(() => addResource('images: []\n'));
+  const once = addResource(yaml, target.resource);
+  assert.match(once, /- sealed-secret\.json/);
+  assert.equal(addResource(once, target.resource), once);
+  assert.throws(() => addResource('images: []\n', target.resource));
 });
