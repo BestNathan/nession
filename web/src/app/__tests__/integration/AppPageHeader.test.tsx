@@ -65,4 +65,25 @@ describe('AppPageHeader', () => {
     await user.click(screen.getByTestId('app-page-back'));
     expect(onBack).toHaveBeenCalled();
   });
+
+  it('renders a capability-supplied action beside the title, never as a second bar', async () => {
+    // #3829: the capability owns the semantic action; the host owns the
+    // geometry and the touch target. One header per depth still.
+    const onActivate = vi.fn();
+    render(
+      <AppPageHeader
+        backLabel="Back to terminal"
+        onBack={vi.fn()}
+        title="Claude Code"
+        action={{ label: 'Browse', ariaLabel: 'Browse Claude', onActivate }}
+      />,
+    );
+    expect(screen.getAllByTestId('app-page-header')).toHaveLength(1);
+    const action = screen.getByTestId('app-page-action');
+    expect(action).toHaveAccessibleName('Browse Claude');
+    expect(action).toHaveTextContent('Browse');
+    const user = userEvent.setup();
+    await user.click(action);
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
 });
