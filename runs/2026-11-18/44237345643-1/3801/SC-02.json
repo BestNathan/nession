@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8fb4c6ab31a0c4229a2225db44e687a005a72c7c84d55d0b9d0dceb8b18544f7",
+  "run_id": 44237345643,
+  "run_attempt": 1,
+  "issue": 3801,
+  "criterion": "SC-02",
+  "criterion_text": "A verified waiting-for-input Claude maps to working with `attention: input_required`; unsupported/ambiguous/unreadable or stale Claude status maps to unknown, and cannot be masked by Shell's foreground-process heuristic.",
+  "stage": "staging",
+  "target_sha": "7e82d7d21e0ab368e816d7633bd495a3cf78fa5b",
+  "contract_sha256": "a95e8c686ec84f193a8cf1dfad103b53aa6556f98e9966d4d0ed3daa8f8a9f7e",
+  "case_revision": "7e82d7d21e0ab368e816d7633bd495a3cf78fa5b",
+  "case_tree_sha": "853ecc3ab56a23888c780f31e99436618cbb65c3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T04:30:46.206Z",
+  "finished_at": "2026-11-18T04:31:12.752Z",
+  "duration_ms": 26546,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Claude attention is orthogonal, and unverifiable Claude state stays unknown instead of Shell working",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 7e82d7d21e0ab368e816d7633bd495a3cf78fa5b: a verified waiting Claude mapped to working with attention input_required; an unbound PID and an unverified CLI version both mapped to unknown; the coordinator kept a specialized unknown owner ahead of the generic Shell working claim; the command name alone never produced working"
+        }
+      ],
+      "duration_ms": 20672,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44237345643,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "7e82d7d21e0ab368e816d7633bd495a3cf78fa5b",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44237345643",
+    "record_path": "runs/2026-11-18/44237345643-1/3801/SC-02.json",
+    "source_result_sha256": "c5927bd7be11dcd7136a02aaf977fc95bed1ebc5054d7f974f3102366225c5ab"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44237345643-1",
+    "sha256": "c5927bd7be11dcd7136a02aaf977fc95bed1ebc5054d7f974f3102366225c5ab",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44237345643",
+    "durability": "time-limited; object archival not configured"
+  }
+}
