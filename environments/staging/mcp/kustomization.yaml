@@ -13,6 +13,7 @@ commonLabels:
 resources:
   - deployment.yaml
   - service.yaml
+  - ingress.yaml
 
 images:
   - name: ghcr.io/bestnathan/nession-mcp

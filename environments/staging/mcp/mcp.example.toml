@@ -6,9 +6,11 @@
 listen_address = "0.0.0.0:9090"
 auth_token = ""
 path = "/mcp"
-# Only internal Kubernetes names + local port-forward. Add public hosts only
-# if a separate approved HTTPS ingress is established later.
+# Staging HTTPS Ingress retains the original Host header; the exact public
+# hostname MUST be included here or valid external MCP clients will be blocked.
+# Keep a narrow list rather than turning off Host validation.
 allowed_hosts = [
+  "staging.mcp.nession.bestnathan.top",
   "nession-mcp-staging",
   "nession-mcp-staging.nession.svc",
   "nession-mcp-staging.nession.svc.cluster.local",
