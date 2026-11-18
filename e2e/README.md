@@ -105,6 +105,28 @@ The regression profile in `e2e/runtime.ts` uses loopback ports
 Other Case profiles can allocate their own home, ports and socket;
 fixtures are rendered as runtime-specific config.
 
+### Agent CLI version under test
+
+The full-stack harness is product-neutral: it does not assume a host `claude`
+installation. A caller may pass `agentCliVersions` to
+`startFullStackRuntime` (or set `NESSION_AGENT_CLI_VERSIONS` to a JSON object)
+to install an exact CLI version into the isolated runtime home and prepend it
+to the Agent's `PATH`:
+
+```text
+{"claude":"2.1.326"}
+```
+
+Only exact versions are accepted; `latest`/tags are refused because the
+evidence must name the version that ran. The requested and resolved versions
+are recorded in the runtime's `runtime.json` under `agent_cli`. Adding another
+agent CLI provider is one installer entry plus its adapter tests. The product
+itself never gates on a version: it attempts the CLI's observation command and
+reports `Unsupported`/`CannotObserve` rather than refusing an unlisted version.
+The interactive CLI launched in a Session still resolves through that shell's
+own startup files; the version selection governs the Agent's probe/plugin
+operations.
+
 Each run carries its own `NESSION_TMUX_SOCKET` and executes tmux with
 `-S <socket>`, never the user's default server. The regression socket is
 `/tmp/nession-e2e-tmux-<hex>/tmux.sock`. **Do not use `TMUX_TMPDIR` as a

@@ -20,30 +20,37 @@ observes now.
   the specific Nession Session is the Agent's existing process-discovery query,
   which the host performs before presenting a state as verified.
 
-## Five distinct answers
+## Four distinct answers
 
 | Result | Meaning |
 |---|---|
-| `Supported { sessions }` | The exact CLI version is verified and the records parsed. |
-| `Unsupported { reason }` | The CLI exists but rejects `agents --json`. |
-| `CannotObserve { reason }` | The CLI runs but this build cannot truthfully read the answer (unverified version, failed/timed-out run, malformed output). |
+| `Supported { sessions }` | The CLI answered `agents --json` with records this build can read. The reported version is recorded for diagnostics, not used as an admission gate. |
+| `Unsupported { reason }` | The CLI exists but rejects `agents --json` (for example, an older CLI without the command). |
+| `CannotObserve { reason }` | The CLI runs but this build cannot truthfully read the answer (failed/timed-out run, malformed output). |
 | `Absent` | No `claude` executable was found. |
 
 None of the non-`Supported` answers is ever presented as `idle`, and
 `CannotObserve` is not `Absent`: "I could not ask" and "there is no Claude" are
 different claims.
 
-## Version matrix
+## CLI compatibility is observed, not pre-gated
 
-The matrix is exact, not a wildcard:
+The probe **attempts** `claude agents --json` on every installed CLI and lets
+the answer decide:
 
-| CLI version | Evidence | Status |
-|---|---|---|
-| `2.1.326` | Captured `agents --json` output on 2026-11-18 (interactive `waiting`/`busy`/`idle`, background `blocked`), pinned by the module fixtures | Verified |
+* any version that prints the shaped records is interpreted normally — a newer
+  or older version is not refused merely because it is absent from a list;
+* an older CLI that does not offer the command is `Unsupported`, carrying the
+  CLI's own refusal;
+* a failed, timed-out or unparseable answer is `CannotObserve`.
 
-Any other version is `Unverified` and yields `CannotObserve` until a capture
-and its fixtures are added. Older or vendor-fork CLIs therefore cannot be
-silently interpreted with the verified shape.
+The captured `2.1.326` output remains the fixture that documents the shape
+(interactive `waiting`/`busy`/`idle`, background `blocked`); it is evidence, not
+a runtime allowlist. Additive CLI changes are tolerated because unknown fields
+are ignored; an incompatible shape fails closed as `CannotObserve` rather than
+being guessed. The e2e runtime can install and select the CLI version under
+test (`agentCliVersions` / `NESSION_AGENT_CLI_VERSIONS`), and records the
+requested/resolved version in `runtime.json`.
 
 ## Control: enter and submit
 

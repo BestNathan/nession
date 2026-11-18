@@ -554,20 +554,19 @@ mod tests {
 /// The fixture is a CLI-compatible `claude` script in the Session's PATH: the
 /// real `AgentClaudeControl` runs it, the real process discovery binds its PID
 /// to the Pane, and the adapter maps busy/waiting/idle, refuses a stale PID,
-/// reports an unverified CLI version as unknown and releases the Pane when the
-/// process exits. A second Pane proves per-Pane ownership.
+/// reports a CLI without `agents --json` as unknown and releases the Pane when
+/// the process exits. A second Pane proves per-Pane ownership.
 #[cfg(test)]
 #[cfg(unix)]
 mod runtime_tests {
     use super::*;
     use crate::session::activity::contexts_from_tmux;
     use crate::test_support::{install_via_a_child, TestSession};
-    use nession_claude_code::agent_view::OBSERVED_AGENT_VIEW_VERSIONS;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
     use tokio::time::{sleep, timeout};
 
-    fn write_script(dir: &Path, version: &str) -> String {
+    fn write_script(dir: &Path, version: &str, supports_agents: bool) -> String {
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).expect("fake bin");
         let state = dir.join("state");
@@ -578,6 +577,10 @@ STATE="{state}"
 case "$1" in
   --version) echo "{version} (Claude Code)"; exit 0 ;;
   agents)
+    if [ "{supports_agents}" != "true" ]; then
+      echo "error: unknown command 'agents'" >&2
+      exit 1
+    fi
     pid=$(cat "$STATE/pid" 2>/dev/null || echo 0)
     status=$(cat "$STATE/status" 2>/dev/null || echo unknown)
     if [ "$status" = "waiting" ]; then
@@ -678,7 +681,7 @@ esac
     #[tokio::test]
     async fn a_bound_claude_pane_maps_busy_waiting_idle_and_releases_on_exit() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let script = write_script(dir.path(), OBSERVED_AGENT_VIEW_VERSIONS[0]);
+        let script = write_script(dir.path(), "2.1.326", true);
         let manager = Arc::new(SessionManager::new());
         let session = TestSession::new("claude-activity");
         let path = format!(
@@ -782,9 +785,11 @@ esac
             .expect("a Claude foreground with an unbound PID is still Claude's");
         assert_eq!(level.state, ActivityState::Unknown);
 
-        // An unverified CLI version is unknown, not idle and not Shell working.
+        // A CLI without the command is unknown, not idle and not Shell
+        // working. Its version is not pre-gated: the refusal itself is the
+        // answer the adapter must not turn into a state guess.
         std::fs::write(state.join("pid"), pid.to_string()).expect("restore pid");
-        write_script(dir.path(), "9.9.9");
+        write_script(dir.path(), "2.0.0", false);
         sleep(CACHE_TTL + Duration::from_millis(250)).await;
         let level = probe(&provider, &manager, session.name(), &pane_id)
             .await
