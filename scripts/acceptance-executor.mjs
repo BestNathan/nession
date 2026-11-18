@@ -108,12 +108,12 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     .filter((criterion) => canonicalAcceptanceStage(contract.rows.get(criterion.id).stage) === normalizedStage)
     .filter((criterion) => eligible(contract.plan?.get(criterion.id)))
     // An independently accepted PR-stage SC is pinned to its original
-    // implementing PR head. A later related PR must not re-evaluate or
+    // implementing PR head. A later linked PR must not re-evaluate or
     // overwrite that receipt unless an explicit trusted supersession exists.
     // Keep Pending/Fail and inconsistent checkbox/report states selectable.
-    .filter((criterion) => normalizedStage!=='pr' ||
-      !criterion.checked || !['pass','n/a'].includes(
-        String(contract.rows.get(criterion.id).result).toLowerCase()))
+    .filter((criterion) => options.skipAcceptedPrCriteria!==true ||
+      normalizedStage!=='pr' ||
+      !acceptedPrSourceRef(criterion,contract.rows.get(criterion.id)))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
@@ -617,6 +617,9 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     deployment,
     ciEvidence,
     method: 'agent',
+    // Only a LIVE PR Agent evaluation skips previously source-accepted SCs.
+    // Historical Case/CI readback must still see those original criteria.
+    skipAcceptedPrCriteria: true,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   // The trusted prepare step has read-only Actions credentials. Read the
@@ -765,7 +768,7 @@ function selfTest() {
   assert.match(passedBody, /Keep this paragraph exactly\./);
   assert.equal(validateRequirementBody(passedBody, { mode: 'merge' }).ok, true);
 
-  // #3843: a later PR addressing only a pending post-merge criterion
+  // #3857: a later PR addressing only a pending post-merge criterion
   // must not redispatch already accepted PR-head SCs on a foreign SHA.
   const exactA='a'.repeat(40),exactB='b'.repeat(40);
   const anchoredBody=[
@@ -792,23 +795,34 @@ function selfTest() {
   ].join('\n');
   const anchoredIssue={number:3843,title:'Bug: audit readback',body:anchoredBody};
   const foreignPr=buildAcceptanceContext(anchoredIssue,'pr',{
-    targetRef:exactB,runId:2,
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   });
   assert.deepEqual(foreignPr.criteria,[],'accepted PR receipts are not re-evaluated');
+  assert.deepEqual(buildAcceptanceContext(anchoredIssue,'pr',{
+    targetRef:exactA,runId:1,method:'agent',
+  }).criteria.map(x=>x.criterion),['SC-01','SC-02','SC-04'],
+  'historical readers must retain accepted source criteria; Case-mode contract is exercised separately');
   const pendingPr=buildAcceptanceContext({...anchoredIssue,
     body:anchoredBody.replace('- [x] SC-02 immutable',
       '- [ ] SC-02 immutable').replace('| SC-02 | Pass |','| SC-02 | Pending |')},'pr',{
-    targetRef:exactB,runId:2,
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   });
   assert.deepEqual(pendingPr.criteria.map(x=>x.criterion),['SC-02']);
   assert.deepEqual(buildAcceptanceContext(anchoredIssue,'post-merge',{
     targetRef:exactB,runId:3,
   }).criteria.map(x=>x.criterion),['SC-03']);
+  // A user-edited Pass without a canonical projected exact-source receipt
+  // is NOT an accepted result and must not disappear from audit visibility.
+  const inventedPass=anchoredBody.replace(
+    'run 1; ref '+exactA+'; source agent-qwen; evidence',
+    'human-provided text without source Run');
+  assert.deepEqual(buildAcceptanceContext({...anchoredIssue,body:inventedPass},
+    'pr',{targetRef:exactB,runId:2,skipAcceptedPrCriteria:true}).criteria.map(x=>x.criterion),['SC-01']);
   // Only checkbox+accepted outcome freezes a prior source; an inconsistent
   // checkbox/report pair does not silently disappear from repair visibility.
   assert.deepEqual(buildAcceptanceContext({...anchoredIssue,
     body:anchoredBody.replace('- [x] SC-04','- [ ] SC-04')},'pr',{
-    targetRef:exactB,runId:2,
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   }).criteria.map(x=>x.criterion),['SC-04']);
 
   const post = buildAcceptanceContext({ ...issue, body: passedBody }, 'post-merge', {
