@@ -494,6 +494,7 @@ fn verified(session: &ObservedAgentSession, observed_at: String) -> ClaudeStatus
     };
     ClaudeStatusObservation {
         process: ClaudeProcessState::Running,
+        process_id: session.pid,
         activity,
         waiting_for,
         conversation_id: session.session_id.clone(),

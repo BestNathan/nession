@@ -1,8 +1,8 @@
 # Session Activity ownership
 
-Status: **delivered on `staging` for #3800 (P0), #3802 (Shell) and #3804
-(Server/Web/App projection)**. Claude (#3801) is the remaining downstream
-provider; this document owns the domain contract it consumes.
+Status: **delivered on `staging` for #3800 (P0), #3801 (Claude adapter),
+#3802 (Shell) and #3804 (Server/Web/App projection)**. This document owns the
+domain contract all of them consume.
 
 Session Activity answers one question — **is this Session's work happening
 right now?** — and deliberately not any other:
@@ -127,6 +127,35 @@ reports `unknown`; macOS runtime accuracy is not claimed from Linux tests.
 The provider is composed by `runtime::compose_activity_providers` beside the
 Extension providers, so the composition is one explicit list.
 
+## Claude provider (#3801)
+
+`session::activity::claude::ClaudeActivityProvider` is the specialized Claude
+claimant. It consumes **#3779's** source-owned reader
+(`ClaudeControl::status` / `AgentClaudeControl`) and maps the verified answer:
+
+| Verified Claude fact | Session Activity |
+|---|---|
+| `busy` | `working` |
+| `waiting` (permission/input) | `working` + `input_required` |
+| `idle` | `idle` |
+| unsupported / unreadable / ambiguous PID or conversation | `unknown` |
+| no Claude process in the Session | no claim (`None`) |
+
+It owns a Pane only when the verified `process_id` is in that Pane's process
+tree. If a Claude process exists but the status cannot bind a PID, or the
+status is unreadable while the Pane's process tree still contains a Claude
+process, the Pane is owned as `unknown` — never released to a Shell `working`
+claim. A `claude` foreground name alone is not ownership and never produces
+`working`.
+
+`ClaudeControl` answers are reused for two seconds per `(Session incarnation,
+foreground)` and a changed foreground retires the answer immediately. This is
+a transient query cache, not a persistent hook mirror or a second status
+engine; conversation id and `waiting_for` stay capability-local, and only the
+activity/attention plus an opaque workload reference reach the generic model.
+Real CLI compatibility and credentials remain #3779's acceptance scope; the
+runtime Case uses a CLI-compatible fixture.
+
 ## Server projection (#3804)
 
 The Agent publishes one level per Session for `server.agent.session-activity` —
@@ -171,9 +200,9 @@ or adds a resting Capsule spinner. `session-item.md` owns the pattern contract;
 `e2e/acceptance/cases/3804` proves it in Chromium at Web 1180/1024 and App
 390/375 with touch.
 
-## Explicit non-goals (P0/#3802/#3804)
+## Explicit non-goals (P0/#3801/#3802/#3804)
 
-- No real Claude/Codex status reader (#3801, reusing #3779).
+- No second Claude/Codex status engine; #3801 consumes #3779.
 - No shell prompt hook or OSC 133 integration; the process-group fallback is
   the current detector.
 - No background-job, CPU, output-volume or attachment-based inference.

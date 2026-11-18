@@ -70,6 +70,13 @@ pub enum ClaudeObservation {
 pub struct ClaudeStatusObservation {
     /// Running / not running / unknown.
     pub process: ClaudeProcessState,
+    /// The verified interactive Claude PID, when this observation bound one.
+    ///
+    /// A capability-local identity detail (the Agent proved the PID belongs to
+    /// the named Session). It is deliberately not projected into the generic
+    /// Session Activity model; #3801 uses it to decide which Pane the
+    /// capability owns.
+    pub process_id: Option<u32>,
     /// Interactive activity, or `unknown`.
     pub activity: ClaudeActivityState,
     /// What Claude reported it is waiting for, when it did.
@@ -89,6 +96,7 @@ impl ClaudeStatusObservation {
     pub fn not_running(observed_at: impl Into<String>) -> Self {
         Self {
             process: ClaudeProcessState::NotRunning,
+            process_id: None,
             activity: ClaudeActivityState::Unknown,
             waiting_for: None,
             conversation_id: None,
@@ -106,6 +114,7 @@ impl ClaudeStatusObservation {
     ) -> Self {
         Self {
             process: ClaudeProcessState::Unknown,
+            process_id: None,
             activity: ClaudeActivityState::Unknown,
             waiting_for: None,
             conversation_id: None,

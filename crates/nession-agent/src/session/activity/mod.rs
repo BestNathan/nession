@@ -16,6 +16,7 @@
 //!                                  ownership + aggregation      Server/Web (#3804)
 //! ```
 
+pub mod claude;
 pub mod coordinator;
 pub mod shell;
 
@@ -23,6 +24,7 @@ use std::collections::BTreeMap;
 
 use nession_tmux::ops::PaneSummary;
 
+pub use claude::ClaudeActivityProvider;
 pub use coordinator::{
     ActivityCompositionError, ActivityReporterHandle, SessionActivityCoordinator,
 };
