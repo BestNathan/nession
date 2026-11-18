@@ -11,6 +11,8 @@ import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
+import { publishIssueAuditFeedback, selfTestIssueAuditFeedback } from './lib/agent/tools/gh/issue/review-feedback.mjs';
+import { selfTestAuditMcp } from './issue-audit-check-mcp.mjs';
 
 function envNumber(name) {
   const raw = process.env[name];
@@ -347,6 +349,8 @@ async function selfTest() {
   else process.env.ISSUE_AUDIT_CLAUDE_MODEL = previous;
   if (oldRepo == null) delete process.env.GITHUB_REPOSITORY;
   else process.env.GITHUB_REPOSITORY = oldRepo;
+  await selfTestAuditMcp();
+  await selfTestIssueAuditFeedback();
   await import('./lib/agent/selftest.mjs');
   console.log('issue-audit-agent self-test: 4 cases passed');
 }
@@ -436,6 +440,11 @@ async function main() {
       errors: after.errors,
     });
     if (rejection) {
+      // The final trusted validator rejected the candidate; publish only its
+      // typed verdict and original source Run identity. This is not a write
+      // on behalf of the model and cannot mark Acceptance/E2E Pass.
+      await publishIssueAuditFeedback({issue:{number:afterIssue.number},
+        result:'needs-review',review:rejection});
       console.warn(`::warning::Issue Audit needs review (${rejection.code}); no Issue mutation was applied`);
       return;
     }
