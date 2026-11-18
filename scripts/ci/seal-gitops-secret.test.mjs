@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   getTarget, validateRaw, createPlainSecret,
-  validatePublicCert, validateSealed, addResource, validateChangedPaths
+  validatePublicCert, validateSealed, addResource, validateChangedPaths, parseGitStatusPaths
 } from './seal-gitops-secret.mjs';
 
 const environment = 'staging', secret = 'MCP_CONFIG_TOML';
@@ -96,4 +96,16 @@ test('GitOps publisher allows only the exact reviewed two-file output', () => {
   assert.throws(() => validateChangedPaths([...base, 'environments/staging/nession/secret.yaml'], environment, secret));
   assert.throws(() => validateChangedPaths(['environments/production/mcp/sealed-secret.json'], environment, secret));
   assert.throws(() => validateChangedPaths(['.github/workflows/deploy.yml'], environment, secret));
+});
+
+test('Git porcelain parser preserves leading tracked-status columns', () => {
+  const base = 'environments/staging/mcp/';
+  const raw = ' M ' + base + 'kustomization.yaml\\n' +
+    '?? ' + base + 'sealed-secret.json\\n';
+  const paths = parseGitStatusPaths(raw.replaceAll('\\n', '\n'));
+  assert.deepEqual(paths, [base + 'kustomization.yaml', base + 'sealed-secret.json']);
+  assert.deepEqual(validateChangedPaths(paths, environment, secret), paths);
+  assert.throws(() => parseGitStatusPaths('bogus porcelain record\n'));
+  assert.throws(() => validateChangedPaths(
+    parseGitStatusPaths(' M environments/staging/nession/secret.yaml\n'), environment, secret));
 });
