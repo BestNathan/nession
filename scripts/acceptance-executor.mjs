@@ -111,7 +111,8 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     // implementing PR head. A later linked PR must not re-evaluate or
     // overwrite that receipt unless an explicit trusted supersession exists.
     // Keep Pending/Fail and inconsistent checkbox/report states selectable.
-    .filter((criterion) => normalizedStage!=='pr' ||
+    .filter((criterion) => options.skipAcceptedPrCriteria!==true ||
+      normalizedStage!=='pr' ||
       !acceptedPrSourceRef(criterion,contract.rows.get(criterion.id)))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
@@ -616,6 +617,9 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     deployment,
     ciEvidence,
     method: 'agent',
+    // Only a LIVE PR Agent evaluation skips previously source-accepted SCs.
+    // Historical Case/CI readback must still see those original criteria.
+    skipAcceptedPrCriteria: true,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   // The trusted prepare step has read-only Actions credentials. Read the
@@ -791,13 +795,17 @@ function selfTest() {
   ].join('\n');
   const anchoredIssue={number:3843,title:'Bug: audit readback',body:anchoredBody};
   const foreignPr=buildAcceptanceContext(anchoredIssue,'pr',{
-    targetRef:exactB,runId:2,
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   });
   assert.deepEqual(foreignPr.criteria,[],'accepted PR receipts are not re-evaluated');
+  assert.deepEqual(buildAcceptanceContext(anchoredIssue,'pr',{
+    targetRef:exactA,runId:1,method:'case',
+  }).criteria.map(x=>x.criterion),['SC-01','SC-02','SC-04'],
+  'historical and Case proof readers must retain accepted source criteria');
   const pendingPr=buildAcceptanceContext({...anchoredIssue,
     body:anchoredBody.replace('- [x] SC-02 immutable',
       '- [ ] SC-02 immutable').replace('| SC-02 | Pass |','| SC-02 | Pending |')},'pr',{
-    targetRef:exactB,runId:2,
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   });
   assert.deepEqual(pendingPr.criteria.map(x=>x.criterion),['SC-02']);
   assert.deepEqual(buildAcceptanceContext(anchoredIssue,'post-merge',{
@@ -809,12 +817,12 @@ function selfTest() {
     'run 1; ref '+exactA+'; source agent-qwen; evidence',
     'human-provided text without source Run');
   assert.deepEqual(buildAcceptanceContext({...anchoredIssue,body:inventedPass},
-    'pr',{targetRef:exactB,runId:2}).criteria.map(x=>x.criterion),['SC-01']);
+    'pr',{targetRef:exactB,runId:2,skipAcceptedPrCriteria:true}).criteria.map(x=>x.criterion),['SC-01']);
   // Only checkbox+accepted outcome freezes a prior source; an inconsistent
   // checkbox/report pair does not silently disappear from repair visibility.
   assert.deepEqual(buildAcceptanceContext({...anchoredIssue,
     body:anchoredBody.replace('- [x] SC-04','- [ ] SC-04')},'pr',{
-    targetRef:exactB,runId:2,
+    targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   }).criteria.map(x=>x.criterion),['SC-04']);
 
   const post = buildAcceptanceContext({ ...issue, body: passedBody }, 'post-merge', {
