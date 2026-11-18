@@ -31,6 +31,7 @@ mcp-image-default
 mcp-standalone-image
 compose-storage-contract
 gitops-storage-contract
+cloudflare-site-dns-selftest
 protocol-json-contract
 issue-contract-selftest
 e2e-tests-catalog
