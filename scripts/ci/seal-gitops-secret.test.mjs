@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
-  getTarget, validateRaw, createPlainSecret,
+  getTarget, validateRaw, createPlainSecret, parseTlsPemBundle,
   validatePublicCert, validateSealed, addResource, validateChangedPaths, parseGitStatusPaths
 } from './seal-gitops-secret.mjs';
 
@@ -117,4 +117,115 @@ test('Git porcelain staged status and mixed status preserve exact file identitie
   const parsed = parseGitStatusPaths(rows.join('\n'));
   assert.deepEqual(parsed, [root + 'kustomization.yaml', root + 'sealed-secret.json']);
   assert.deepEqual(validateChangedPaths(parsed, environment, secret), parsed);
+});
+
+
+const tlsSecret = 'MCP_TLS_PEM_BUNDLE';
+const tlsTarget = getTarget(environment, tlsSecret);
+const tlsHostname = 'staging.mcp.nession.bestnathan.top';
+
+function generateTlsFixture(directory, label, host = tlsHostname, days = 30) {
+  const crt = path.join(directory, label + '.crt');
+  const key = path.join(directory, label + '.key');
+  const r = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048',
+    '-nodes', '-days', String(days), '-keyout', key, '-out', crt,
+    '-subj', '/CN=' + host, '-addext', 'subjectAltName=DNS:' + host],
+  { encoding: 'utf8' });
+  assert.equal(r.status, 0, 'OpenSSL fixture generation failed');
+  return {
+    crt: readFileSync(crt, 'utf8'),
+    key: readFileSync(key, 'utf8')
+  };
+}
+
+test('TLS target is one exact-name, two-key Kubernetes TLS Secret', () => {
+  assert.deepEqual(tlsTarget.keys, ['tls.crt', 'tls.key']);
+  assert.equal(tlsTarget.type, 'kubernetes.io/tls');
+  assert.equal(tlsTarget.namespace, 'nession');
+  assert.equal(tlsTarget.name, 'nession-mcp-staging-tls');
+  assert.equal(tlsTarget.resource, 'environments/staging/mcp/sealed-tls.json');
+  assert.throws(() => getTarget('production', tlsSecret));
+  assert.throws(() => getTarget('staging', 'MCP_TLS_PRIVATE_KEY'));
+});
+
+test('TLS PEM fullchain + key validates and produces a single TLS Secret without plaintext', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'nession-tls-valid-'));
+  try {
+    const {crt, key} = generateTlsFixture(tmp, 'leaf');
+    const raw = crt + key;
+    const decoded = parseTlsPemBundle(raw, tlsHostname);
+    assert.equal(decoded.certificateChain.trim(), crt.trim());
+    assert.equal(decoded.privateKey.trim(), key.trim());
+    const plain = createPlainSecret(environment, tlsSecret, raw);
+    assert.equal(plain.type, 'kubernetes.io/tls');
+    assert.equal(plain.metadata.name, tlsTarget.name);
+    assert.deepEqual(Object.keys(plain.data).sort(), ['tls.crt', 'tls.key']);
+    assert.equal(Buffer.from(plain.data['tls.crt'], 'base64').toString(), crt);
+    assert.equal(Buffer.from(plain.data['tls.key'], 'base64').toString(), key);
+    assert.doesNotMatch(JSON.stringify(plain), /BEGIN PRIVATE KEY/);
+  } finally { rmSync(tmp, {recursive: true, force: true}); }
+});
+
+test('TLS PEM rejects unrelated identity, mismatch, extra material and expiring certs', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'nession-tls-negative-'));
+  try {
+    const a = generateTlsFixture(tmp, 'a');
+    const b = generateTlsFixture(tmp, 'b', 'other.example.com');
+    const soon = generateTlsFixture(tmp, 'soon', tlsHostname, 1);
+    const raw = a.crt + a.key;
+    assert.throws(() => parseTlsPemBundle(raw, 'other.example.com'));
+    assert.throws(() => parseTlsPemBundle(a.crt + b.key, tlsHostname));
+    assert.throws(() => parseTlsPemBundle(a.crt + a.key + b.key, tlsHostname));
+    assert.throws(() => parseTlsPemBundle(a.crt, tlsHostname));
+    assert.throws(() => parseTlsPemBundle(a.key + a.crt, tlsHostname));
+    assert.throws(() => parseTlsPemBundle('unexpected\n' + raw, tlsHostname));
+    assert.throws(() => parseTlsPemBundle(raw + 'unexpected\n', tlsHostname));
+    assert.throws(() => parseTlsPemBundle(b.crt + b.key, tlsHostname));
+    assert.throws(() => parseTlsPemBundle(soon.crt + soon.key, tlsHostname));
+    assert.throws(() => parseTlsPemBundle(raw.replace('BEGIN PRIVATE KEY', 'BEGIN ENCRYPTED PRIVATE KEY'), tlsHostname));
+  } finally { rmSync(tmp, {recursive: true, force: true}); }
+});
+
+test('TLS SealedSecret output must contain exactly encrypted tls.crt and tls.key', () => {
+  const doc = {
+    apiVersion: 'bitnami.com/v1alpha1',
+    kind: 'SealedSecret',
+    metadata: { name: tlsTarget.name, namespace: tlsTarget.namespace },
+    spec: {
+      encryptedData: {'tls.crt':'AgEncryptedCert','tls.key':'AgEncryptedKey'},
+      template: {
+        metadata: { name: tlsTarget.name, namespace: tlsTarget.namespace },
+        type: 'kubernetes.io/tls'
+      }
+    }
+  };
+  assert.equal(validateSealed(structuredClone(doc), environment, tlsSecret).kind, 'SealedSecret');
+  const badType = structuredClone(doc); badType.spec.template.type = 'Opaque';
+  assert.throws(() => validateSealed(badType, environment, tlsSecret));
+  const omittedType = structuredClone(doc); delete omittedType.spec.template.type;
+  assert.throws(() => validateSealed(omittedType, environment, tlsSecret));
+  const missingKey = structuredClone(doc); delete missingKey.spec.encryptedData['tls.key'];
+  assert.throws(() => validateSealed(missingKey, environment, tlsSecret));
+  const extraKey = structuredClone(doc); extraKey.spec.encryptedData.other = 'AgX';
+  assert.throws(() => validateSealed(extraKey, environment, tlsSecret));
+  const wrongName = structuredClone(doc); wrongName.metadata.name = 'foreign';
+  assert.throws(() => validateSealed(wrongName, environment, tlsSecret));
+  const plaintext = structuredClone(doc); plaintext.spec.template.data = {'tls.key':'plain'};
+  assert.throws(() => validateSealed(plaintext, environment, tlsSecret));
+  const broadScope = structuredClone(doc);
+  broadScope.metadata.annotations = {'sealedsecrets.bitnami.com/cluster-wide':'true'};
+  assert.throws(() => validateSealed(broadScope, environment, tlsSecret));
+});
+
+test('TLS Kustomize registration is repeatable, with no collision with MCP config seal', () => {
+  const old = 'resources:\n  - sealed-secret.json\n  - deployment.yaml\n';
+  const newYaml = addResource(old, tlsTarget.resource);
+  assert.match(newYaml, /- sealed-tls\.json/);
+  assert.match(newYaml, /- sealed-secret\.json/);
+  assert.equal(addResource(newYaml, tlsTarget.resource), newYaml);
+  assert.deepEqual(validateChangedPaths(
+    [tlsTarget.resource, tlsTarget.kustomization], environment, tlsSecret),
+    [tlsTarget.resource, tlsTarget.kustomization]);
+  assert.throws(() => validateChangedPaths(
+    ['environments/staging/mcp/sealed-secret.json'], environment, tlsSecret));
 });
