@@ -122,7 +122,7 @@ test('Git porcelain staged status and mixed status preserve exact file identitie
 
 const tlsSecret = 'MCP_TLS_PEM_BUNDLE';
 const tlsTarget = getTarget(environment, tlsSecret);
-const tlsHostname = 'staging.mcp.nession.bestnathan.top';
+const tlsHostname = 'staging-mcp-nession.bestnathan.top';
 
 function generateTlsFixture(directory, label, host = tlsHostname, days = 30) {
   const crt = path.join(directory, label + '.crt');
@@ -174,6 +174,9 @@ test('TLS PEM rejects unrelated identity, mismatch, extra material and expiring 
     const soon = generateTlsFixture(tmp, 'soon', tlsHostname, 1);
     const raw = a.crt + a.key;
     assert.throws(() => parseTlsPemBundle(raw, 'other.example.com'));
+    assert.throws(() => parseTlsPemBundle(raw, 'staging.mcp.nession.bestnathan.top'));
+    const oldHostCert = generateTlsFixture(tmp, 'old-host', 'staging.mcp.nession.bestnathan.top');
+    assert.throws(() => parseTlsPemBundle(oldHostCert.crt + oldHostCert.key, tlsHostname));
     assert.throws(() => parseTlsPemBundle(a.crt + b.key, tlsHostname));
     assert.throws(() => parseTlsPemBundle(a.crt + a.key + b.key, tlsHostname));
     assert.throws(() => parseTlsPemBundle(a.crt, tlsHostname));
