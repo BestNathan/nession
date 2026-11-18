@@ -3044,6 +3044,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // Project membership is Server-owned (#3082);
                                 // a direct Agent view has no authority for it.
                                 project_id: None,
+                                // Activity is projected by the Server from the
+                                // Agent's dedicated level wire (#3804); this
+                                // direct view has no coordinator snapshot.
+                                activity: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                             }
                         })

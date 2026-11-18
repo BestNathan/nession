@@ -1012,6 +1012,24 @@ wires: &["server.agent.register"],
         },
         Unit {
             owner: "core",
+            id: "server.agent.session-activity",
+            version: 1,
+            wires: &["server.agent.session-activity"],
+            // One-way (#3804): an Agent publishes one Session's Activity level
+            // and nothing answers it. A separate unit from `session-update`
+            // because Activity is not interaction recency.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::AgentSessionActivityPayload>(cfg),
+            ],
+            request: Some((
+                "AgentSessionActivityCall",
+                nession_protocol::contracts::session::v1::AgentSessionActivityPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::AgentSessionActivityPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
             id: "server.agent.git-invalidated",
             version: 1,
             wires: &["server.agent.git-invalidated"],
@@ -1282,6 +1300,7 @@ wires: &["client.auth"],
                 decl_of::<nession_protocol::contracts::session::v1::ClientSessionsListPayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionActivityView>(cfg),
             ],
             request: Some((
                 "ClientSessionsListCall",
@@ -1367,6 +1386,7 @@ wires: &["client.auth"],
                 decl_of::<nession_protocol::contracts::session::v1::ServerSessionListReply>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionsListResponse>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::WebSessionInfo>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionActivityView>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
             ],
             request: Some((

@@ -1,8 +1,8 @@
 # Session Activity ownership
 
-Status: **delivered on `staging` for #3800 (P0) and #3802 (Shell)**. Claude
-(#3801) and the Server/Web/App projection (#3804) are downstream issues; this
-document owns the domain contract they consume.
+Status: **delivered on `staging` for #3800 (P0), #3802 (Shell) and #3804
+(Server/Web/App projection)**. Claude (#3801) is the remaining downstream
+provider; this document owns the domain contract it consumes.
 
 Session Activity answers one question — **is this Session's work happening
 right now?** — and deliberately not any other:
@@ -127,11 +127,55 @@ reports `unknown`; macOS runtime accuracy is not claimed from Linux tests.
 The provider is composed by `runtime::compose_activity_providers` beside the
 Extension providers, so the composition is one explicit list.
 
-## Explicit non-goals (P0/#3802)
+## Server projection (#3804)
 
-- No wire type, Server projection or Web/App indicator (#3804).
+The Agent publishes one level per Session for `server.agent.session-activity` —
+a **notification**, deliberately separate from `server.agent.session-update`
+because an Activity change is not Session interaction recency. The payload
+carries `instance_id`, the Agent process `epoch`, a monotonic per-Session
+`generation`, `state`, optional `attention`/`capability_id` and
+`observed_at_ms` (`AgentSessionActivityPayload` in
+`crates/nession-protocol`).
+
+The Server keeps the level **in memory**, like `foreground_command`:
+
+- a level for another Session incarnation, or a non-newer `(epoch,
+  generation)`, is refused — a retried frame or a superseded socket cannot
+  resurrect Activity;
+- a new Agent epoch is accepted even at generation 1, so an Agent restart does
+  not have to defeat the previous process's counter;
+- the level never writes `last_activity`, `created_at` or `status`;
+- an inventory update and an `agent.session.report`/force refresh preserve the
+  level for the same incarnation, so a resync cannot clear a newer observation;
+- the projection is ephemeral: a restart, a removed Session or a legacy Agent
+  has no level, which consumers render as `unknown`.
+
+`session_to_info` is shared by `server.session.list` and the
+`server.sessions.changed` push, so both carry an identical `activity` object.
+The Agent restates its levels after a reconnect as part of the same full
+resync that restates the Session inventory; no browser need be attached.
+
+## Web/App presentation (#3804)
+
+`SessionItem` renders the level in a fixed one-size glyph slot before the
+title: a monochrome arc for `working` (motion-safe spin; the shape reads
+without motion), a quiet outline for `idle`, an explicit `?` for `unknown`,
+and a warning glyph for `needs input`. The attention signal stays orthogonal:
+a working row gains a `Needs input` line; it does not become a fourth state.
+The row's accessible name states the reading.
+
+The row projects `unknown` whenever its Agent is offline or stale, even if the
+last reported level was `working`; Agent reachability keeps its own existing
+copy. Activity never rewrites recency, selects a row, opens a Capability Peek,
+or adds a resting Capsule spinner. `session-item.md` owns the pattern contract;
+`e2e/acceptance/cases/3804` proves it in Chromium at Web 1180/1024 and App
+390/375 with touch.
+
+## Explicit non-goals (P0/#3802/#3804)
+
 - No real Claude/Codex status reader (#3801, reusing #3779).
 - No shell prompt hook or OSC 133 integration; the process-group fallback is
   the current detector.
 - No background-job, CPU, output-volume or attachment-based inference.
 - No durable activity history and no new persistent store.
+- No sorting/filtering by Activity; the list proves the basic reading first.
