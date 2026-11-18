@@ -47,7 +47,7 @@
     "__snapshots__/fixture-visual.spec.ts/app-sessions-filtered-375-linux.png": "c1c0375ee933ee7bb9f6137bf076ed5631199c3b",
     "__snapshots__/fixture-visual.spec.ts/app-sessions-filtered-linux.png": "5714d2936528f28970021332e50b1a5352efd210",
     "__snapshots__/fixture-visual.spec.ts/app-sessions-linux.png": "110f96dab1b8914ebf51d29ecd432cf45c310a6a",
-    "__snapshots__/fixture-visual.spec.ts/app-sessions-status-filtered-linux.png": "edd6325e9eaecf18a0adb911192f0e35abfac95d",
+    "__snapshots__/fixture-visual.spec.ts/app-sessions-status-filtered-linux.png": "d739418278f90862f4e6d6b969098d8bb9f51d0b",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png": "617bae3214c0952c1d47b1b0bb93655a6a8efa70",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-linux.png": "be41d555dcb75b3ce1f9c6c59e5dc7a792766187",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-multiline-linux.png": "2f158e83a3cf8d7c15aa0143bdb72a661e023408",
@@ -64,22 +64,22 @@
     "__snapshots__/fixture-visual.spec.ts/web-compact-workspace-linux.png": "d6cdc88abeed05de3bab1aa595565f65705a35da",
     "__snapshots__/fixture-visual.spec.ts/web-env-edit-dirty-linux.png": "f6103d894cb8b4fd22efbe1652d8ddb33fddd714",
     "__snapshots__/fixture-visual.spec.ts/web-env-profile-linux.png": "7162aee689e410de30216275dfd43a9435140bce",
-    "__snapshots__/fixture-visual.spec.ts/web-env-save-impact-linux.png": "af549af1d7cb9f96f2aa458ca2d58d2cf1929784",
+    "__snapshots__/fixture-visual.spec.ts/web-env-save-impact-linux.png": "20367d68b401537da5b870974927c915cab554d0",
     "__snapshots__/fixture-visual.spec.ts/web-git-peek-linux.png": "c1a92d134ab250927f39d7e9077a10ed58e0eb6f",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-linux.png": "31e9b920243a2a57f42013e7b48c2b54276a916c",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-unopened-linux.png": "d3da4db5b5b50603ad9a5680db139e48654b4ab4",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-ctrl-linux.png": "6a47c7f03431e9867c864d764a6a91e7e5b07df8",
     "__snapshots__/fixture-visual.spec.ts/app-quick-commands-linux.png": "7da7ce6ab15976a2f3db0ac90ff4c6430cd63be3",
     "__snapshots__/fixture-visual.spec.ts/web-sidebar-collapsed-linux.png": "f4f61f5702d231d2022baee7c3c246712891665f",
-    "__snapshots__/fixture-visual.spec.ts/web-project-detail-linux.png": "ce97d3c9cc55842836b474578e113918449da928",
-    "__snapshots__/fixture-visual.spec.ts/web-sandbox-outside-linux.png": "fde4d88d4f6cc9b27f4dc46e6aac6ecf3e57687e",
-    "__snapshots__/fixture-visual.spec.ts/web-sandbox-inside-linux.png": "25371f6c39f9f88c16c462dcb5ce21d99afd9a7a",
-    "__snapshots__/fixture-visual-app.spec.ts/app-project-detail-linux.png": "0ac2c7c3a4543fd1561ae4071ae671aafbdd8c1e",
+    "__snapshots__/fixture-visual.spec.ts/web-project-detail-linux.png": "9653cda6abf4fe7fcd7b0c928c070aee33425599",
+    "__snapshots__/fixture-visual.spec.ts/web-sandbox-outside-linux.png": "c32a2d1d6dd8c728e74dde713c153e500c58c925",
+    "__snapshots__/fixture-visual.spec.ts/web-sandbox-inside-linux.png": "e8a0a0b9a7fb89eabbe31d6de16a60585fa1ca7e",
+    "__snapshots__/fixture-visual-app.spec.ts/app-project-detail-linux.png": "944949cd7268466ac9a4842de8b1d5677cf6b0a2",
     "__snapshots__/fixture-visual-app.spec.ts/app-sandbox-inside-linux.png": "15d0484658e707000924ed3343bf0b7f873d6e6d"
   },
   "baseline_set_updated": {
-    "requirement": 3804,
-    "reason": "Session Activity adds a fixed glyph slot and aligned meta to Session rows; the canonical update-snapshots dispatch produced the approved bytes",
+    "requirement": 3794,
+    "reason": "Project detail retires the unconditional Managed stub in favor of one runtime-aware New Session; the canonical update-snapshots dispatch produced the approved bytes",
     "date": "2026-11-18"
   }
 }
