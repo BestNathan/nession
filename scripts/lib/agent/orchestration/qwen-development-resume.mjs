@@ -72,7 +72,7 @@ export function validateQwenStoredNativeBundle(admission,plan,bundle){
       bundle.rsa_envelope?.kind!=='claude-native-encrypted-snapshot'||
       JSON.stringify(bundle.rsa_envelope.metadata)!==JSON.stringify(m)||
       m?.run_id!==bundle.run_id||m.attempt!==bundle.attempt||
-      m.cwd_sha256!==hash('/workspace'))
+      m.cwd_sha256!==hash(expectedWorkspace()))
     fail('invalid original encrypted native Store bundle');
   return verifyQwenNativeContinuation(admission,plan,m);
 }
