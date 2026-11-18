@@ -7,6 +7,7 @@ import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueA
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
+import { auditIssue } from '../../../../../issue-contract.mjs';
 
 const tmp = mkdtempSync(path.join(tmpdir(), 'nession-agent-gh-'));
 const filename = path.join(tmp, 'issue.json');
@@ -317,6 +318,89 @@ try {
   const repairedE2e=JSON.parse(readFileSync(filename,'utf8'));
   assert.ok(repairedE2e.body.endsWith(e2eContract));
   assert.deepEqual(parseIssueE2E(repairedE2e.body).errors,[]);
+  writeFileSync(filename,JSON.stringify(preE2eIssue));
+
+  // #3843 / live #3837: a Bug with missing headings/labels and two
+  // legitimate none-only E2E declarations lacks only the Report table.
+  // The model must not reproduce or rewrite those protected declarations.
+  const sourceNoneBug={...preE2eIssue,
+    title:'Bug: per-connection peer naming exceeds bounded admission',
+    labels:[],
+    body:[
+      '## Background / observed failure',
+      'A peer naming flood admitted 17 sessions past a bound of 16.',
+      '## Impact and classification',
+      'Connection worker bound may be violated.',
+      '## Suggested investigation and decision',
+      'Reproduce the race and preserve the original safety limit.',
+      '## E2E Verification',
+      '### New',
+      '- none: Rust concurrency invariant, not a browser interaction',
+      '### Regression',
+      '- none: bounded behavior is verified by Rust integration tests',
+      '## Knowledge Impact',
+      '- Decision: Read',
+      '- Related knowledge: #961',
+    ].join('\n'),
+  };
+  const sourceNoneParsed=parseIssueE2E(sourceNoneBug.body);
+  assert.deepEqual(sourceNoneParsed.errors,['missing ## E2E Report']);
+  const specialSchema=issueAuditProposalSchemaForIssue(sourceNoneBug);
+  assert.ok(Object.hasOwn(specialSchema.properties,'body_without_e2e'));
+  assert.ok(!Object.hasOwn(specialSchema.properties,'body'));
+  const semanticBug=[
+    '## Description', 'Observed 17 admissions when the bound is 16.',
+    '## Reproduction', '1. Flood a single peer connection with session names.',
+    '## Investigation Status', 'Root cause is not yet confirmed; reproduce under load.',
+    '## Impact', 'A single connection may exceed its worker admission bound.',
+    '## Fix Direction', 'Measure admitted and released workers before changing the owner.',
+    '## Location', '- crates/nession-agent/tests/integration/server.rs',
+    '## Knowledge Impact', '- Decision: Read', '- Related knowledge: #961',
+  ].join('\n');
+  writeFileSync(filename,JSON.stringify(sourceNoneBug));
+  const noneBugSnapshot=readFileSync(filename,'utf8');
+  for(const rejected of [
+    {body:semanticBug+'\n\n'+sourceNoneBug.body,labels:['bug','agent']},
+    {body_without_e2e:semanticBug+'\n## E2E Report\n| fake |',labels:['bug','agent']},
+    {body_without_e2e:semanticBug+'\n## E2E Verification\n### New\n- none: invented',labels:['bug','agent']},
+  ]) {
+    await assert.rejects(applyIssueAuditProposal(issue,{
+      result:JSON.stringify(rejected),
+    },'example/repo'),error=>{
+      assert.equal(error.code,'ISSUE_AUDIT_E2E_PROTECTED');
+      return true;
+    });
+    assert.equal(readFileSync(filename,'utf8'),noneBugSnapshot,
+      'an unauthorized E2E proposal cannot partially write an Issue');
+  }
+  await assert.rejects(applyIssueAuditProposal(issue,{
+    result:JSON.stringify({body_without_e2e:'## Description\nStill invalid',
+      labels:['bug','agent']}),
+  },'example/repo'),/Issue Contract validation failed before write/);
+  assert.equal(readFileSync(filename,'utf8'),noneBugSnapshot);
+  await applyIssueAuditProposal(issue,{result:JSON.stringify({
+    body_without_e2e:semanticBug,
+    labels:['bug','agent','protocol'],
+  })},'example/repo');
+  const completedNoneBug=JSON.parse(readFileSync(filename,'utf8'));
+  assert.equal(auditIssue(completedNoneBug).ok,true,
+    auditIssue(completedNoneBug).errors.join('; '));
+  const completedNoneE2E=parseIssueE2E(completedNoneBug.body);
+  assert.deepEqual(completedNoneE2E.errors,[]);
+  assert.deepEqual(completedNoneE2E.selectedIds,[]);
+  assert.equal(completedNoneE2E.rows.size,0);
+  assert.equal(completedNoneE2E.newNone,sourceNoneParsed.newNone);
+  assert.equal(completedNoneE2E.regressionNone,sourceNoneParsed.regressionNone);
+  assert.equal(completedNoneE2E.digest,sourceNoneParsed.digest);
+  assert.ok(completedNoneBug.body.endsWith(
+    '## E2E Report\n| ID | Type | Result | Evidence |\n|---|---|---|---|'));
+  assert.deepEqual(completedNoneBug.labels.map(x=>x.name).sort(),
+    ['agent','bug','protocol']);
+  const completedSnapshot=readFileSync(filename,'utf8');
+  await assert.rejects(applyIssueAuditProposal(issue,{result:JSON.stringify({
+    body_without_e2e:semanticBug,
+  })},'example/repo'),/only permitted for a none-only E2E source/);
+  assert.equal(readFileSync(filename,'utf8'),completedSnapshot);
   writeFileSync(filename,JSON.stringify(preE2eIssue));
 
   // #2921 / live #2878: - none: is a DECLARATION, never a Report row ID.

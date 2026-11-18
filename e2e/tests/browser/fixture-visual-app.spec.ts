@@ -577,9 +577,29 @@ test.describe('App 390×844', () => {
       ...FIXTURE_SCREENSHOT,
     });
 
-    // The App draws this view with its own layout, so its strip gets its own
-    // region rather than borrowing Web's (#1332).
-    await expectChromeRegion(page, 'claude-code-view-tabs', 'app-claude-code-view-tabs.png');
+    // #3829: the App's Claude surface is conversation-first. There is no
+    // permanent five-tab strip competing with the work; the one contextual
+    // resource entry is the header's Browse action, and it opens the App-owned
+    // resource sheet. The host keeps exactly one header at every depth.
+    await expect(page.getByTestId('claude-code-view-tabs')).toHaveCount(0);
+    await expect(page.getByTestId('app-page-header')).toHaveCount(1);
+    await expect(page.getByTestId('app-page-action')).toHaveAccessibleName('Browse Claude');
+
+    await page.getByTestId('app-page-action').click();
+    const browseSheet = page.getByTestId('claude-browse-sheet');
+    await expect(browseSheet).toBeVisible();
+    for (const id of [
+      'claude-browse-conversations',
+      'claude-browse-transcripts',
+      'claude-browse-memory',
+      'claude-browse-mcp',
+      'claude-browse-configuration',
+    ]) {
+      await expect(page.getByTestId(id)).toBeVisible();
+    }
+    // The resource index gets its own chrome region rather than borrowing a
+    // capability strip's (#1332).
+    await expectChromeRegion(page, 'claude-browse-sheet', 'app-claude-code-browse.png');
   });
 
   // #1184 SC-16 names the Peek overlay — the conversation read from the

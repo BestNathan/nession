@@ -221,9 +221,19 @@ export function TranscriptRawInspector({
       {parsed?.validJson ? (
         <div className="shrink-0 border-b px-3 py-1">
           <Tabs value={tab} onValueChange={(value) => setTab(value as 'tree' | 'text')}>
-            <TabsList>
-              <TabsTrigger value="tree">Tree</TabsTrigger>
-              <TabsTrigger value="text">Original text</TabsTrigger>
+            <TabsList className={variant === 'pushed' ? 'h-auto' : undefined}>
+              <TabsTrigger
+                value="tree"
+                className={variant === 'pushed' ? 'min-h-11' : undefined}
+              >
+                Tree
+              </TabsTrigger>
+              <TabsTrigger
+                value="text"
+                className={variant === 'pushed' ? 'min-h-11' : undefined}
+              >
+                Original text
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>

@@ -69,6 +69,11 @@ This is where richer information and management belongs:
 
 Workspace is not a feature lobby. It is the high-density contextual layer for the current work.
 
+On App, a capability's Workspace is a push hierarchy rather than a tab strip:
+its root shows the current work, and resource collections, details and
+inspectors are pushed under the one host header. The capability owns the stack
+and what Back means at each depth; the shell owns the bar.
+
 ## TerminalCapsule relationship
 
 The resting TerminalCapsule remains minimal.

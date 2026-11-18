@@ -22,11 +22,9 @@ import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
 import type { CapabilityConversationBinding } from '@/app/conversationIdentities';
 import { ClaudeCodeWorkspace } from './components/ClaudeCodeWorkspace';
+import { ClaudeCodeAppWorkspace } from './components/ClaudeCodeAppWorkspace';
 import { ClaudeCodeProjection } from './components/ClaudeCodeProjection';
-
-export const CLAUDE_CODE_ID = 'claude-code';
-export const CLAUDE_CODE_TITLE = 'Claude Code';
-export const CLAUDE_CODE_SHORT_TITLE = 'Claude';
+import { CLAUDE_CODE_ID } from './identity';
 
 /**
  * Commands that mean "Claude Code is running here".
@@ -75,16 +73,18 @@ export function resolveClaudeCodeState(
 /**
  * How the capability draws itself in the Workspace.
  *
- * Both experiences render the same view: Claude Code is a read-only config
- * browser, and its Web/App difference is the chrome around it, which the
- * experience compositions own — not something this binding branches on.
+ * Web keeps the five-section browser (`#1120`, `#1234`, `#2689`, `#3600`).
+ * App draws the conversation-first stack (#3829) — the current work is the
+ * root, and the resources live behind one Browse entry and the shell's push
+ * depth. The two presentations share `useClaudeCodeWorkspace`, so they cannot
+ * disagree about what the provider answered.
  */
 export const claudeCodeView: WorkspaceViewBinding = {
   id: CLAUDE_CODE_ID,
   icon: Bot,
   layout: {
     web: ({ ctx }) => <ClaudeCodeWorkspace ctx={ctx} />,
-    app: ({ ctx }) => <ClaudeCodeWorkspace ctx={ctx} />,
+    app: ({ ctx, depth }) => <ClaudeCodeAppWorkspace ctx={ctx} depth={depth} />,
   },
 };
 

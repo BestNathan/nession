@@ -354,6 +354,30 @@ terminal `path:line` deep-link (#1175), and long-press selection mode (#1174).
 Richer viewer/sheet actions may still extend this model without reintroducing an
 expandable tree on App.
 
+### App Claude Code workspace (#3829)
+
+Claude Code's App surface follows the same rule from the other side: the
+**current conversation is the work**, not one tab among five. The capability
+root is the exact bound conversation, read-only; new CLI input stays in the
+Terminal. One contextual **Browse** action in the App page header opens the
+capability's resource sheet — Conversations and Transcripts under *Work*;
+Memory, MCP and Configuration under *Resources & setup*. Choosing an entry
+replaces the pushed stack with that resource's root, so Back always returns to
+the conversation.
+
+Resource depth is a single push stack under the same host header: collection →
+resource → detail (a transcript record, Raw, a memory file, a configuration
+file, an MCP tool). Each depth has exactly one Back; covered layers stay mounted
+under the one above, so returning restores the list's scroll position and the
+reader's place. This is not Web's master/detail scaled down: Configuration is a
+single-column list → file, and Memory is a list → file.
+
+The conversation reader is read-only and never renders a composer. Activity is
+only the provider's own word (`Running now` / `Finished`); a foreground `claude`
+process is not evidence that a turn is working (#2663, #3801). An unbound
+Session says so and offers strict-cwd candidates without promoting one to
+"current"; an offline Agent says that instead of showing stale history.
+
 ### One navigation bar per depth
 
 Workspace is a stack of depths, and **at any moment exactly one navigation bar owns the
