@@ -13,7 +13,7 @@ const output=classifyQwenCliFailure({
   status:1,signal:null,error:null,
   stdout:JSON.stringify({type:'result',subtype:'error_during_execution',
     terminal_reason:'api_error',api_error_status:401,is_error:true,
-    result:'API Error: credential '+sentinel})+'\\n',
+    result:'API Error: credential '+sentinel})+'\n',
   stderr:'Invalid API Key '+sentinel,
 });
 for(const field of ['status=1','terminal=api_error',
