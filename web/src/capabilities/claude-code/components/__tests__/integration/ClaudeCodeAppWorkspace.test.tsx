@@ -247,6 +247,14 @@ function lastAction(setAction: ReturnType<typeof vi.fn>): WorkspaceHeaderAction 
   return calls.length === 0 ? null : (calls[calls.length - 1][0] as WorkspaceHeaderAction | null);
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function layer(testId: string): HTMLElement {
   return screen.getByTestId(testId);
 }
@@ -405,6 +413,19 @@ describe('Claude App workspace (#3829)', () => {
     expect(await screen.findByText('hello from c2')).toBeInTheDocument();
     expect(screen.getByText(/not bound to this Session/)).toBeInTheDocument();
     expect(lastPush(setPush)?.title).toBe('Conversation');
+  });
+
+  it('shows the directory loading state instead of claiming no binding', async () => {
+    const pending = deferred<ClaudeCodeConversationsResponse>();
+    vi.mocked(claudeCodeApi.claudeCodeConversations).mockReturnValueOnce(pending.promise);
+    renderApp();
+
+    expect(await screen.findByTestId('conversation-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('claude-app-unbound')).toBeNull();
+
+    pending.resolve(conversations);
+    expect(await screen.findByText('Current work')).toBeInTheDocument();
+    expect(screen.queryByTestId('claude-app-unbound')).toBeNull();
   });
 
   it('pushes every transcript record, and Raw from a malformed record stays readable', async () => {
