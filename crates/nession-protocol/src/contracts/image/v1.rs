@@ -1499,6 +1499,62 @@ pub struct ImageBuildProgress {
     pub elapsed_ms: u64,
 }
 
+/// The source adapter a durable build record was submitted from (#3798).
+///
+/// This is the bounded filter vocabulary for build history, not a second
+/// `ImageSource` owner: it names exactly the three source variants the
+/// protocol can carry.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageBuildSourceKind {
+    Github,
+    LocalDirectory,
+    Compose,
+}
+
+impl ImageBuildSourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::LocalDirectory => "local_directory",
+            Self::Compose => "compose",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "github" => Some(Self::Github),
+            "local_directory" => Some(Self::LocalDirectory),
+            "compose" => Some(Self::Compose),
+            _ => None,
+        }
+    }
+}
+
+/// One terminal attempt of a durable build record (#3798).
+///
+/// The record's current fields describe the latest/active attempt. This
+/// history keeps earlier diagnostics so a retry never erases why the previous
+/// attempt failed. It is bounded by the Server; older entries are dropped.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBuildAttempt {
+    pub attempt: u32,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// The last bounded diagnostic observed for this attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub started_at: u64,
+    pub finished_at: u64,
+}
+
 /// One durable build record as the asynchronous units return it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1532,6 +1588,9 @@ pub struct ImageBuildDescriptor {
     /// Whether this build reused bytes that were already published.
     #[serde(default)]
     pub deduplicated: bool,
+    /// Bounded terminal attempt history, oldest first (#3798).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<ImageBuildAttempt>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -1595,6 +1654,16 @@ pub struct ImageBuildListPayload {
     pub offset: u32,
     #[serde(default = "default_build_list_limit")]
     pub limit: u32,
+    /// Exact lifecycle states to include; empty means every state.
+    #[serde(default)]
+    pub statuses: Vec<ImageBuildStatus>,
+    /// Exact source adapters to include; empty means every adapter.
+    #[serde(default)]
+    pub sources: Vec<ImageBuildSourceKind>,
+    /// Case-sensitive substring filter over build id, image id, alias, digest
+    /// and persisted source. Empty returns the unfiltered page.
+    #[serde(default)]
+    pub query: String,
 }
 
 fn default_build_list_limit() -> u32 {
@@ -1620,6 +1689,11 @@ pub struct ImageBuildListResponsePayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildCancelPayload {
     pub build_id: String,
+    /// The attempt the caller observed. A mismatch is a conflict and the
+    /// Server returns the current record rather than canceling a different
+    /// attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
 }
 
 /// `server.image.build.cancel`'s reply.
@@ -1642,6 +1716,10 @@ pub struct ImageBuildCancelResponsePayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageBuildRetryPayload {
     pub build_id: String,
+    /// The attempt the caller observed. A mismatch is a conflict and the
+    /// Server opens no new attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
 }
 
 /// `server.image.build.retry`'s reply.

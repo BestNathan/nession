@@ -209,9 +209,9 @@ packaging stage reports stage and elapsed time and **no invented percentage**.
 |---|---|---|
 | `server.image.build.submit` | Inline | Validate input, create the durable directory and `building` row, return the queued record promptly |
 | `server.image.build.get` | Query | Read the authoritative durable record (valid after reconnect/restart) |
-| `server.image.build.list` | Query | Durable build inventory, newest first |
-| `server.image.build.cancel` | Inline | Terminate owned subprocesses, record truthful `canceled`; idempotent on a terminal record |
-| `server.image.build.retry` | Inline | New attempt in the same record, reusing a verified snapshot |
+| `server.image.build.list` | Query | Durable build inventory, newest first; status/source filters and bounded substring search apply before pagination |
+| `server.image.build.cancel` | Inline | Terminate owned subprocesses, record truthful `canceled`; idempotent on a terminal record; an observed `attempt` mismatch is a conflict |
+| `server.image.build.retry` | Inline | New attempt in the same record, reusing a verified snapshot; an observed `attempt` mismatch is a conflict |
 | `server.image.build` | Inline | **Legacy synchronous compatibility path**: submits the same durable build and waits for the terminal record, then returns the ready/failed `ImageDescriptor` |
 
 The legacy unit is explicit and versioned, not reinterpreted: a client that
@@ -221,9 +221,11 @@ contract types and validation live in
 `nession-protocol::contracts::image::v1`.
 
 The Server pushes `server.image.build.updated` with the descriptor read from the
-durable state at each transition. A client that misses a push (navigation or
-reconnect) re-reads `server.image.build.get|list`; there is no client-side
-fabrication of progress.
+durable state at each transition. Every descriptor also carries the record's
+bounded terminal attempt history with each attempt's last diagnostic, so a
+retry never erases why the previous attempt failed. A client that misses a push
+(navigation or reconnect) re-reads `server.image.build.get|list`; there is no
+client-side fabrication of progress.
 
 ### Stage-level restart recovery
 
@@ -260,10 +262,13 @@ bytes, fails only its own registry row and never changes a Project reference or
 alias.
 
 Retry creates the next attempt in the same record and preserves the terminal
-attempt's stage/error history. A verified snapshot is reused without the source;
-packaging is rerun; a Git source with no snapshot is refetched (pinned commit
-when one exists); a local source without a snapshot is refused with "submit a
-new build". A succeeded build cannot be retried.
+attempt's stage/diagnostic/error history. A verified snapshot is reused without
+the source; packaging is rerun; a Git source with no snapshot is refetched
+(pinned commit when one exists); a local source without a snapshot is refused
+with "submit a new build". A succeeded build cannot be retried. A cancel or
+retry names the attempt the caller observed; if the record moved to another
+attempt in the meantime, the Server returns `conflict` and mutates nothing, so
+an action can never terminate or retry an attempt the user did not see.
 
 `image_max_concurrent_builds` still bounds simultaneous workers with an
 in-process semaphore. Each build ID has at most one active execution; a

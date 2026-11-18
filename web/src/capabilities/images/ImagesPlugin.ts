@@ -14,6 +14,7 @@ import {
 } from '@/generated/protocol/core/server-image-get/v1';
 import {
   WIRE as BUILD_SUBMIT_WIRE,
+  type ImageBuildAttempt,
   type ImageBuildDescriptor,
   type ImageBuildSubmitResponsePayload,
 } from '@/generated/protocol/core/server-image-build-submit/v1';
@@ -24,6 +25,8 @@ import {
 import {
   WIRE as BUILD_LIST_WIRE,
   type ImageBuildListResponsePayload,
+  type ImageBuildSourceKind,
+  type ImageBuildStatus,
 } from '@/generated/protocol/core/server-image-build-list/v1';
 import {
   WIRE as BUILD_CANCEL_WIRE,
@@ -57,7 +60,10 @@ import {
 import type { ConnectionState, PluginSurface, TransportPlugin } from '@/platform/socket/types';
 
 export type {
+  ImageBuildAttempt,
   ImageBuildDescriptor,
+  ImageBuildSourceKind,
+  ImageBuildStatus,
   ImageDescriptor,
   ImageLibraryEntry,
   ImageLibraryLayer,
@@ -202,11 +208,23 @@ export class ImagesPlugin implements TransportPlugin {
 
   /** One page of the durable build inventory, newest first. */
   async listBuilds(
-    options: { offset?: number; limit?: number } = {},
+    options: {
+      offset?: number;
+      limit?: number;
+      statuses?: readonly ImageBuildStatus[];
+      sources?: readonly ImageBuildSourceKind[];
+      query?: string;
+    } = {},
   ): Promise<ImageBuildPage> {
     const response = await this.requireConnection().request<ImageBuildListResponsePayload>(
       BUILD_LIST_WIRE,
-      { offset: options.offset ?? 0, limit: options.limit ?? 50 },
+      {
+        offset: options.offset ?? 0,
+        limit: options.limit ?? 50,
+        statuses: [...(options.statuses ?? [])],
+        sources: [...(options.sources ?? [])],
+        query: options.query ?? '',
+      },
     );
     if (response.error) {
       throw new Error(response.error);
@@ -218,11 +236,15 @@ export class ImagesPlugin implements TransportPlugin {
     };
   }
 
-  /** Cancel one build and return its truthful (possibly still running) record. */
-  async cancelBuild(buildId: string): Promise<ImageBuildDescriptor> {
+  /** Cancel one build at the observed attempt. */
+  async cancelBuild(buildId: string, attempt?: number): Promise<ImageBuildDescriptor> {
+    const payload: Record<string, unknown> = { build_id: buildId };
+    if (attempt !== undefined) {
+      payload.attempt = attempt;
+    }
     const response = await this.requireConnection().request<ImageBuildCancelResponsePayload>(
       BUILD_CANCEL_WIRE,
-      { build_id: buildId },
+      payload,
     );
     if (!response.success || !response.build) {
       throw new Error(response.error ?? 'Image build cancellation was refused');
@@ -230,11 +252,15 @@ export class ImagesPlugin implements TransportPlugin {
     return response.build;
   }
 
-  /** Retry one failed/canceled build as a new attempt in the same record. */
-  async retryBuild(buildId: string): Promise<ImageBuildDescriptor> {
+  /** Retry one failed/canceled build at the observed attempt. */
+  async retryBuild(buildId: string, attempt?: number): Promise<ImageBuildDescriptor> {
+    const payload: Record<string, unknown> = { build_id: buildId };
+    if (attempt !== undefined) {
+      payload.attempt = attempt;
+    }
     const response = await this.requireConnection().request<ImageBuildRetryResponsePayload>(
       BUILD_RETRY_WIRE,
-      { build_id: buildId },
+      payload,
     );
     if (!response.success || !response.build) {
       throw new Error(response.error ?? 'Image build retry was refused');

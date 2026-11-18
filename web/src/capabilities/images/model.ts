@@ -1,5 +1,8 @@
 import type {
+  ImageBuildAttempt,
   ImageBuildDescriptor,
+  ImageBuildSourceKind,
+  ImageBuildStatus,
   ImageDescriptor,
   ImageLibraryEntry,
   ImageLibraryRepresentation,
@@ -156,9 +159,9 @@ export function isTerminalBuild(build: ImageBuildDescriptor): boolean {
   );
 }
 
-/** The lifecycle word for one durable build. */
-export function imageBuildStatusLabel(build: ImageBuildDescriptor): string {
-  switch (build.status) {
+/** The lifecycle word for one durable build status. */
+export function imageBuildStatusText(status: ImageBuildStatus): string {
+  switch (status) {
     case 'queued':
       return 'Queued';
     case 'running':
@@ -170,6 +173,11 @@ export function imageBuildStatusLabel(build: ImageBuildDescriptor): string {
     case 'canceled':
       return 'Canceled';
   }
+}
+
+/** The lifecycle word for one durable build. */
+export function imageBuildStatusLabel(build: ImageBuildDescriptor): string {
+  return imageBuildStatusText(build.status);
 }
 
 /** The current stage word, or the truthful "waiting" state before a worker. */
@@ -206,4 +214,38 @@ export function imageBuildProgressLabel(build: ImageBuildDescriptor): string {
       ? `${build.progress.files.toLocaleString()} files · ${build.progress.bytes.toLocaleString()} bytes`
       : 'No measured counts yet';
   return `${measured} · ${seconds}s`;
+}
+
+/** Every selectable build-history lifecycle state (#3798). */
+export const IMAGE_BUILD_STATUSES: readonly ImageBuildStatus[] = [
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'canceled',
+];
+
+/** Every selectable build-history source adapter (#3798). */
+export const IMAGE_BUILD_SOURCES: readonly ImageBuildSourceKind[] = [
+  'github',
+  'local_directory',
+  'compose',
+];
+
+export function imageBuildSourceKindLabel(kind: ImageBuildSourceKind): string {
+  switch (kind) {
+    case 'github':
+      return 'GitHub';
+    case 'local_directory':
+      return 'Directory';
+    case 'compose':
+      return 'Compose';
+  }
+}
+
+/** One terminal attempt line, preserving its diagnostic. */
+export function imageBuildAttemptLabel(attempt: ImageBuildAttempt): string {
+  const stage = attempt.stage ? ` · ${attempt.stage}` : '';
+  const seconds = Math.max(0, attempt.finished_at - attempt.started_at);
+  return `#${attempt.attempt} ${attempt.status}${stage} · ${seconds}s`;
 }
