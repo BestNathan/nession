@@ -820,15 +820,24 @@ export function classifyCaseBranchAncestry(target, current, comparison) {
   return 'verified-ancestor';
 }
 
-/** Historical merge-SHA proof must not overwrite an existing SC conclusion. */
-export function historicalCaseMayProject(issueBody, criterion) {
+/**
+ * Historical merge-SHA proof must not overwrite an existing SC conclusion.
+ *
+ * A `Pending` row is not a conclusion. The first automatic run records a
+ * `run <id>;` prefix, which used to make the row permanently unsupersedable;
+ * a release-dependent Case therefore could never pass after an earlier
+ * Pending observation. A strictly newer authenticated run may supersede a
+ * Pending row; `Pass`/`Fail` rows and older or equal runs never may.
+ */
+export function historicalCaseMayProject(issueBody, criterion, newRunId) {
   const { rows, errors } = parseAcceptanceReport(extractSection(issueBody, 'Acceptance Report'));
   if (errors.length) return false;
   const previous = rows.get(criterion);
-  // A previous authenticated result (including a Fail or a Pending result
-  // from another run) is never superseded by an older target SHA.
-  return !!previous && previous.result.toLowerCase() === 'pending' &&
-    !/^run\s+[1-9]\d*\s*;/i.test(previous.evidence);
+  if (!previous || previous.result.toLowerCase() !== 'pending') return false;
+  const previousRun = /^run\s+([1-9]\d*)\s*;/i.exec(previous.evidence)?.[1];
+  if (!previousRun) return true;
+  const next = Number(newRunId);
+  return Number.isSafeInteger(next) && next > Number(previousRun);
 }
 
 // A deployed Case may project only against the exact attestation it was
@@ -904,7 +913,7 @@ export async function applyCaseRecord(record, { repository, token, request = git
     if (String(issue.state).toLowerCase() !== 'open') {
       return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
     }
-    if (!historicalCaseMayProject(issue.body, item.criterion)) {
+    if (!historicalCaseMayProject(issue.body, item.criterion, item.run_id)) {
       return { projected: false, reason: 'PR Case cannot replay or overwrite an existing SC verdict' };
     }
     const context = buildAcceptanceContext(issue, 'pr', {
@@ -969,7 +978,7 @@ export async function applyCaseRecord(record, { repository, token, request = git
   if (String(issue.state).toLowerCase() !== 'open') {
     return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
   }
-  if (ancestry === 'verified-ancestor' && !historicalCaseMayProject(issue.body, item.criterion)) {
+  if (ancestry === 'verified-ancestor' && !historicalCaseMayProject(issue.body, item.criterion, item.run_id)) {
     return { projected: false, reason: 'historical merged-SHA Case cannot supersede an existing SC verdict or run' };
   }
 
@@ -1054,7 +1063,14 @@ async function selfTest() {
   assert.equal(historicalCaseMayProject(report('Pending', 'Post-merge proof not yet run'), 'SC-07'), true);
   assert.equal(historicalCaseMayProject(report('Pass', 'proof'), 'SC-07'), false);
   assert.equal(historicalCaseMayProject(report('Fail', 'failure'), 'SC-07'), false);
-  assert.equal(historicalCaseMayProject(report('Pending', 'run 900; ref ' + latest), 'SC-07'), false);
+  const pendingWithRun = report('Pending', 'run 900; ref ' + latest);
+  // A strictly newer authenticated run may supersede an earlier Pending
+  // observation; equal/older runs and Pass/Fail rows never may.
+  assert.equal(historicalCaseMayProject(pendingWithRun, 'SC-07', 901), true);
+  assert.equal(historicalCaseMayProject(pendingWithRun, 'SC-07', 900), false);
+  assert.equal(historicalCaseMayProject(pendingWithRun, 'SC-07', 899), false);
+  assert.equal(historicalCaseMayProject(pendingWithRun, 'SC-07'), false,
+    'a missing new run identity cannot supersede a recorded run');
   assert.equal(historicalCaseMayProject(report('Pending', '-'), 'SC-08'), false);
 
   // End-to-end mock of the actual authenticated projector: a newer unrelated
