@@ -62,7 +62,7 @@ test('SC-01: Project New Session previews the resolved Managed snapshot before C
   // The reviewed snapshot is the separate explicit Create step.
   const create = dialog.getByTestId('create-session-submit');
   await expect(create).toBeEnabled();
-  await expect(create).toHaveText('Create Session');
+  await expect(create).toHaveText('Create');
 
   test.info().annotations.push({
     type: 'evidence',
@@ -70,7 +70,7 @@ test('SC-01: Project New Session previews the resolved Managed snapshot before C
       'exact SHA ' + sha + ': Project New Session offered Host and Managed runtimes; the Managed ' +
       'form showed the pinned Server Ready Project Source, an explicit Base and ordered ' +
       'Toolchain selection, Agent-managed Workspace and effective ENV; Review resolved every ' +
-      'identity and only Review exposed the explicit Create Session; no unconditional Managed ' +
+      'identity and only Review exposed the explicit Create; no unconditional Managed ' +
       'stub remained',
   });
 });
