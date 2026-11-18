@@ -19,6 +19,12 @@ assert.match(reviewerWorkflow,/actions\/setup-node@v4/);
 assert.match(developerWorkflow,/CURSOR_RIPGREP_PATH/);
 assert.match(developerWorkflow,/@anthropic-ai\/claude-code@\$CLAUDE_CODE_VERSION/);
 assert.match(reviewerWorkflow,/CURSOR_SDK_ROOT=\$RUNNER_TEMP\/review-sdk/);
+// Direct Node Review invokes only one Provider; do not hand its competitor's key
+// to the selected model process by exporting all Environment secrets.
+assert.ok(reviewerWorkflow.includes("CURSOR_API_KEY: ${{ needs.prepare.outputs.reviewer == 'review-cursor-01' && secrets.CURSOR_API_KEY || '' }}"));
+assert.ok(reviewerWorkflow.includes("ANTHROPIC_AUTH_TOKEN: ${{ needs.prepare.outputs.reviewer == 'review-qwen-01' && secrets.ANTHROPIC_AUTH_TOKEN || '' }}"));
+assert.ok(reviewerWorkflow.includes("ANTHROPIC_API_KEY: ${{ needs.prepare.outputs.reviewer == 'review-qwen-01' && secrets.ANTHROPIC_API_KEY || '' }}"));
+
 assert.throws(()=>assertNativeWorkflow(developerWorkflow+' docker run forbidden',
   'scripts/lib/agent/orchestration/development-worker.mjs'),/Docker execution/);
 assert.throws(()=>assertNativeWorkflow(developerWorkflow.replace(
