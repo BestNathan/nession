@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "500a771fac57647b0c1932eae3640030cb3e86c5",
+  "source_tree_sha": "86ffb70403dc4a4a874a6963716cd21573496cef",
+  "run_id": 44321488737,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 44321488737,
+    "run_attempt": 1,
+    "head_sha": "500a771fac57647b0c1932eae3640030cb3e86c5",
+    "head_branch": "staging",
+    "event": "push"
+  },
+  "started_at": "2026-11-18T14:11:11Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "selected",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_selected_run",
+    "run_id": 44321488737,
+    "run_attempt": 1,
+    "sha": "500a771fac57647b0c1932eae3640030cb3e86c5",
+    "event": "push",
+    "branch": "staging",
+    "selected_ids": [
+      "sandbox-workspace-capability"
+    ],
+    "selected_count": 1,
+    "provisioned_runtimes": 1,
+    "reused_full": null,
+    "one_runtime_for_selected_run": true,
+    "evidence": "GitHub API Run/Attempt/job/step outcomes + exact original selected E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "selected",
+    "target_sha": "500a771fac57647b0c1932eae3640030cb3e86c5",
+    "run_id": 44321488737,
+    "run_attempt": 1,
+    "verified_ids": [
+      "sandbox-workspace-capability"
+    ],
+    "plan_digest": "a0ab85b83f74a6d82cf5e55012a2108b841af41204c692c66430177d79894dc5",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": {
+    "artifact_id": 14435616685,
+    "name": "issue-e2e-verification",
+    "size_bytes": 34184,
+    "sha256": "4e3399e197deb86f0afc0b58876e56b501746816454a4c1b9cad17f380abd3fa",
+    "expires_at": "2026-12-02T14:17:42Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "test_job": {
+    "job_id": 134861309216,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 14435616685,
+    "name": "issue-e2e-verification",
+    "size_bytes": 34184,
+    "sha256": "4e3399e197deb86f0afc0b58876e56b501746816454a4c1b9cad17f380abd3fa",
+    "expires_at": "2026-12-02T14:17:42Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "a4dbcede9dcf2725399afb946a3613d19c078fa9f8cd9bc6737995b781dcb293"
+}
