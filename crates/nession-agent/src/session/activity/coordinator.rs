@@ -500,11 +500,21 @@ fn project_session(name: &str, session: &SessionState) -> SessionActivitySnapsho
         None
     };
 
+    // The capability that produced the aggregate level: the first Pane whose
+    // state matches it. A multi-Pane Session can have several owners, so this
+    // is attribution for the level, not a claim that one capability owns the
+    // Session.
+    let capability_id = panes
+        .iter()
+        .find(|pane| pane.state == state)
+        .and_then(|pane| pane.owner.clone());
+
     SessionActivitySnapshot {
         session_name: name.to_string(),
         session_instance_id: session.instance_id.clone(),
         state,
         attention,
+        capability_id,
         panes,
         observed_at: session
             .panes

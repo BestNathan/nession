@@ -258,6 +258,10 @@ pub struct SessionActivitySnapshot {
     pub session_instance_id: String,
     pub state: ActivityState,
     pub attention: Option<AttentionState>,
+    /// The owner of the Pane that produced the aggregate level, when one is
+    /// known. A Session aggregate can combine several Panes; this names the
+    /// contributing capability rather than claiming a single Session owner.
+    pub capability_id: Option<String>,
     pub panes: Vec<PaneActivitySnapshot>,
     /// The newest accepted observation across the Session's Panes.
     pub observed_at: Option<SystemTime>,

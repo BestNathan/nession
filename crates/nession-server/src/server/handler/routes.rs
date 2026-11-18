@@ -106,6 +106,10 @@ server_routes!(handler, msg, payload;
     // unit the server offers. It is handled in `handle_protocol_message`, ahead
     // of the relay path — see the match there for why the position matters.
     "server.agent.session-update" => "server.agent.session-update" => 1 => Inline => handler.handle_agent_session_update(msg).await,
+    // Activity is its own unit, not an update field: it must not stamp
+    // `last_activity`, and a level has its own incarnation/epoch/generation
+    // fence (#3804).
+    "server.agent.session-activity" => "server.agent.session-activity" => 1 => Inline => handler.handle_agent_session_activity(msg).await,
     "server.agent.session-env-binding" => "server.agent.session-env-binding" => 1 => Inline => handler.handle_agent_session_env_binding(msg).await,
     "server.agent.command-response" => "server.agent.command-response" => 1 => Inline => handler.handle_agent_command_response(msg).await,
     "server.agent.git-invalidated" => "server.agent.git-invalidated" => 1 => Inline => handler.handle_agent_git_invalidated(msg).await,
