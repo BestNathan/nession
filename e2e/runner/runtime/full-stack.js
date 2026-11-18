@@ -239,6 +239,75 @@ function binaryCommand(repoRoot, packageName, binaryName, configPath) {
   };
 }
 
+/// Agent CLIs an e2e/Case runtime can install at an exact version.
+///
+/// The runtime is product-neutral: a Case declares the CLI version it wants to
+/// exercise, and only the named provider is installed into the isolated
+/// runtime home. Adding another provider is one entry here plus its adapter
+/// tests; it is never a version allowlist in product code.
+const AGENT_CLI_PACKAGES = {
+  claude: '@anthropic-ai/claude-code',
+};
+
+function agentCliVersionsFrom(value) {
+  const raw = value ?? process.env.NESSION_AGENT_CLI_VERSIONS;
+  if (raw == null || raw === '') return {};
+  let parsed;
+  try {
+    parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (error) {
+    throw new Error('agent CLI versions must be a JSON object: ' + error.message);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('agent CLI versions must be an object of provider -> exact version');
+  }
+  const versions = {};
+  for (const [provider, version] of Object.entries(parsed)) {
+    if (!Object.hasOwn(AGENT_CLI_PACKAGES, provider)) {
+      throw new Error('unsupported e2e agent CLI provider: ' + provider);
+    }
+    const exact = String(version ?? '').trim();
+    // Exact semver only: a tag such as `latest` would make the run's evidence
+    // non-reproducible, and an option-looking value must never reach npm.
+    if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(exact)) {
+      throw new Error('e2e agent CLI ' + provider + ' needs an exact version, got: ' + exact);
+    }
+    versions[provider] = exact;
+  }
+  return versions;
+}
+
+function installAgentClis(home, versions) {
+  const installed = {};
+  for (const [provider, version] of Object.entries(versions)) {
+    const prefix = path.join(home, 'agent-clis', provider + '-' + version);
+    mkdirSync(prefix, { recursive: true });
+    execFileSync(
+      'npm',
+      [
+        'install',
+        '--prefix', prefix,
+        '--no-save',
+        '--no-audit',
+        '--no-fund',
+        AGENT_CLI_PACKAGES[provider] + '@' + version,
+      ],
+      { stdio: 'inherit', env: process.env },
+    );
+    const bin = path.join(prefix, 'node_modules', '.bin', provider);
+    if (!existsSync(bin)) {
+      throw new Error('e2e agent CLI ' + provider + '@' + version + ' installed no `' + provider + '` binary');
+    }
+    const resolved = String(execFileSync(bin, ['--version'], { encoding: 'utf8' })).trim();
+    installed[provider] = {
+      requested_version: version,
+      resolved_version: resolved,
+      bin_dir: path.dirname(bin),
+    };
+  }
+  return installed;
+}
+
 function verifyAndKillTmux(tmuxSocket) {
   if (!existsSync(tmuxSocket)) return;
   try {
@@ -296,6 +365,15 @@ async function startFullStackRuntime(options) {
   mkdirSync(tmuxDir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(tmuxDir, 'owner.pid'), String(process.pid));
 
+  // Exact agent CLI versions under test. Installed into the isolated runtime
+  // home and prepended to the Agent's PATH; the product code is never told a
+  // version, so every version is exercised through the same probe.
+  const agentClis = webOnly
+    ? {}
+    : installAgentClis(home, agentCliVersionsFrom(options?.agentCliVersions));
+  const agentCliBinDirs = Object.values(agentClis).map((cli) => cli.bin_dir);
+  const agentEnvPath = [...agentCliBinDirs, process.env.PATH || ''].join(path.delimiter);
+
   const configDir = path.join(home, 'runtime-config');
   mkdirSync(configDir, { recursive: true });
   const serverConfig = path.join(configDir, 'server.toml');
@@ -343,6 +421,7 @@ async function startFullStackRuntime(options) {
       cwd: repoRoot,
       env: {
         ...isolationEnv,
+        PATH: agentEnvPath,
         LANG: 'C.UTF-8',
         RUST_LOG: 'info',
         RUST_BACKTRACE: '1',
@@ -412,6 +491,14 @@ async function startFullStackRuntime(options) {
       ...(webOnly ? {} : { server_port: serverPort, agent_port: agentPort }),
       web_port: webPort,
       base_url: baseURL,
+      // The CLI version under test, as requested and as installed. Product
+      // evidence can cite the exact version without re-reading the host PATH.
+      ...(Object.keys(agentClis).length === 0 ? {} : {
+        agent_cli: Object.fromEntries(Object.entries(agentClis).map(([provider, cli]) => [
+          provider,
+          { requested_version: cli.requested_version, resolved_version: cli.resolved_version },
+        ])),
+      }),
     };
     writeFileSync(path.join(home, 'runtime.json'), JSON.stringify(metadata, null, 2) + '\n');
     // #1866: a bounded, non-sensitive provision counter. The Full E2E Gate used
@@ -473,6 +560,11 @@ function selfTest() {
     /listen_address/,
   );
   assert.throws(() => positivePort(0, 'port'), /TCP port/);
+  assert.deepEqual(agentCliVersionsFrom({ claude: '2.1.326' }), { claude: '2.1.326' });
+  assert.throws(() => agentCliVersionsFrom({ claude: 'latest' }), /exact version/);
+  assert.throws(() => agentCliVersionsFrom({ claude: '--include=dev' }), /exact version/);
+  assert.throws(() => agentCliVersionsFrom({ codex: '1.0.0' }), /unsupported e2e agent CLI/);
+  assert.throws(() => agentCliVersionsFrom('not json'), /JSON object/);
 
   const previousSandboxRoot = process.env.SANDBOX_CGROUP_ROOT;
   try {
@@ -506,6 +598,8 @@ function selfTest() {
 module.exports = {
   allocateLoopbackPort,
   assertTargetSha,
+  agentCliVersionsFrom,
+  installAgentClis,
   renderAgentConfig,
   renderServerConfig,
   startFullStackRuntime,

@@ -3,31 +3,32 @@
 //! The control Tools answer "what is Claude doing now" from the official
 //! `claude agents --json` command, never from a lifecycle-hook-maintained store
 //! and never from the undocumented `jobs/state.json`. This module owns the
-//! **observation contract**: the exact JSON shape is parsed into typed states,
-//! every unobservable case is a distinct answer, and a CLI version that has not
-//! been verified in the compatibility matrix is reported as unverified rather
-//! than assumed to behave like the verified one.
+//! **observation contract**: the reported JSON shape is parsed into typed
+//! states, and every unobservable case is a distinct answer.
 //!
 //! Process identity is deliberately *not* decided here. A status record names a
 //! `pid`; whether that PID belongs to the specific Nession Session is the
 //! Agent's existing process-discovery query (the host owns Session membership).
 //! This module only says what Claude reported and whether it could observe.
 //!
-//! ## Version gating
+//! ## Compatibility is observed, not pre-gated
 //!
-//! `OBSERVED_AGENT_VIEW_VERSIONS` is the recorded matrix: exact CLI versions
-//! whose output shape was captured and whose fixtures this module pins. Any
-//! other version — older, newer, or a vendor fork — is `Unverified` and yields
-//! an honest `CannotObserve`. Extending the matrix is a deliberate,
-//! evidence-backed change, not a wildcard.
+//! The CLI is asked for `agents --json` and the answer decides the outcome:
+//!
+//! - a CLI that prints the shaped records is `Supported`, whatever version it
+//!   reports — a newer (or older) CLI is never refused merely because its
+//!   version is not in a list;
+//! - an older CLI without the command is `Unsupported`, carrying the CLI's own
+//!   refusal;
+//! - a failed, timed-out or unparseable answer is `CannotObserve`;
+//! - a missing executable is `Absent`.
+//!
+//! The captured `2.1.326` output remains the fixture that documents the shape
+//! and its version is recorded for diagnostics, but it is not an admission
+//! gate. No non-`Supported` answer is ever presented as `idle`.
 
 use async_trait::async_trait;
 use serde::Deserialize;
-
-/// CLI versions whose `agents --json` shape was observed and pinned by the
-/// fixtures in this module. Keep exact versions: a minor/major wildcard would
-/// claim compatibility nobody measured.
-pub const OBSERVED_AGENT_VIEW_VERSIONS: &[&str] = &["2.1.326"];
 
 /// The command the probe runs. A Session's own environment and cwd are the
 /// runner's responsibility; this module never reads the daemon's environment.
@@ -80,7 +81,8 @@ impl ClaudeCliVersion {
     ///
     /// The observed output is `2.1.326 (Claude Code)`; only the first token is
     /// the version. Anything that does not start with a dotted numeric triple
-    /// is not a version this probe can gate on.
+    /// is not a version this probe can record; it never decides whether the
+    /// command's answer is interpreted.
     pub fn parse(output: &str) -> Option<Self> {
         let token = output.split_whitespace().next()?;
         let mut parts = token.split('.');
@@ -98,25 +100,6 @@ impl ClaudeCliVersion {
             minor,
             patch,
         })
-    }
-}
-
-/// Whether this build has evidence for a version's `agents --json` shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentViewSupport {
-    /// The exact version is in [`OBSERVED_AGENT_VIEW_VERSIONS`].
-    Verified,
-    /// The version is not in the matrix; its output must not be interpreted as
-    /// if it were.
-    Unverified,
-}
-
-/// Classify one CLI version against the recorded matrix.
-pub fn agent_view_support(version: &ClaudeCliVersion) -> AgentViewSupport {
-    if OBSERVED_AGENT_VIEW_VERSIONS.contains(&version.raw.as_str()) {
-        AgentViewSupport::Verified
-    } else {
-        AgentViewSupport::Unverified
     }
 }
 
@@ -192,8 +175,12 @@ pub struct ObservedAgentSession {
 pub enum AgentViewObservation {
     /// The command is supported and the records parsed.
     Supported {
-        /// The verified CLI version.
-        version: ClaudeCliVersion,
+        /// The CLI version that answered, when `--version` was readable.
+        ///
+        /// Informational only: the version never decides whether the records
+        /// are interpreted. `None` means the answer parsed but the version
+        /// could not be read, not that the answer is suspect.
+        version: Option<ClaudeCliVersion>,
         /// Live records in the order the CLI reported them.
         sessions: Vec<ObservedAgentSession>,
     },
@@ -228,7 +215,10 @@ struct RawRecord {
 }
 
 /// Parse `claude agents --json` output.
-pub fn parse_agents_json(version: ClaudeCliVersion, stdout: &str) -> AgentViewObservation {
+///
+/// `version` is carried into the answer for diagnostics only; the shape is
+/// decided by the records, not by which version printed them.
+pub fn parse_agents_json(version: Option<ClaudeCliVersion>, stdout: &str) -> AgentViewObservation {
     let raw: Vec<RawRecord> = match serde_json::from_str(stdout) {
         Ok(raw) => raw,
         Err(error) => {
@@ -281,38 +271,11 @@ pub fn parse_agents_json(version: ClaudeCliVersion, stdout: &str) -> AgentViewOb
 
 /// Probe the CLI on demand.
 ///
-/// The runner supplies the Session's environment. A missing binary, a rejected
-/// command, an unverified version, a failed run and malformed output are five
-/// distinct answers; none of them is `idle`.
+/// The runner supplies the Session's environment. The command is attempted
+/// regardless of the CLI version: a missing binary, a rejected command, a
+/// failed run and malformed output are distinct answers, and none of them is
+/// `idle`. The version is read afterwards for diagnostics only.
 pub async fn probe_agent_view(runner: &dyn ClaudeCliRunner) -> AgentViewObservation {
-    let version_output = match runner.run(&["--version"]).await {
-        Ok(output) => output,
-        Err(CliFailure::NotFound) => return AgentViewObservation::Absent,
-        Err(CliFailure::Failed(reason)) => {
-            return AgentViewObservation::CannotObserve {
-                reason: format!("`claude --version` failed: {reason}"),
-            }
-        }
-    };
-    if !version_output.success {
-        return AgentViewObservation::CannotObserve {
-            reason: "`claude --version` exited unsuccessfully".to_string(),
-        };
-    }
-    let Some(version) = ClaudeCliVersion::parse(&version_output.stdout) else {
-        return AgentViewObservation::CannotObserve {
-            reason: "`claude --version` did not print a version token".to_string(),
-        };
-    };
-    if agent_view_support(&version) == AgentViewSupport::Unverified {
-        return AgentViewObservation::CannotObserve {
-            reason: format!(
-                "Claude CLI {} is not in the verified Agent-view matrix; refusing to interpret \
-                 its output as live state",
-                version.raw
-            ),
-        };
-    }
     let output = match runner.run(&[AGENTS_JSON_COMMAND, "--json"]).await {
         Ok(output) => output,
         Err(CliFailure::NotFound) => return AgentViewObservation::Absent,
@@ -339,6 +302,14 @@ pub async fn probe_agent_view(runner: &dyn ClaudeCliRunner) -> AgentViewObservat
         };
         return AgentViewObservation::CannotObserve { reason };
     }
+    // Best-effort version for diagnostics. A CLI that answers `agents --json`
+    // but cannot report a version is still interpreted by its answer.
+    let version = match runner.run(&["--version"]).await {
+        Ok(version_output) if version_output.success => {
+            ClaudeCliVersion::parse(&version_output.stdout)
+        }
+        _ => None,
+    };
     parse_agents_json(version, &output.stdout)
 }
 
@@ -383,11 +354,11 @@ mod tests {
     #[test]
     fn the_observed_shape_parses_into_typed_states() {
         let AgentViewObservation::Supported { version, sessions } =
-            parse_agents_json(version(), OBSERVED)
+            parse_agents_json(Some(version()), OBSERVED)
         else {
             panic!("the captured shape must parse");
         };
-        assert_eq!(version.raw, "2.1.326");
+        assert_eq!(version.expect("version").raw, "2.1.326");
         assert_eq!(sessions.len(), 2);
         assert_eq!(sessions[0].kind, AgentSessionKind::Background);
         assert_eq!(sessions[0].background_state, Some(BackgroundState::Blocked));
@@ -412,7 +383,8 @@ mod tests {
           {"kind":"interactive","pid":1,"status":"pondering"},
           {"kind":"background","state":"queued"}
         ]"#;
-        let AgentViewObservation::Supported { sessions, .. } = parse_agents_json(version(), output)
+        let AgentViewObservation::Supported { sessions, .. } =
+            parse_agents_json(Some(version()), output)
         else {
             panic!("unknown values are still parseable");
         };
@@ -429,7 +401,8 @@ mod tests {
     #[test]
     fn a_missing_conversation_id_is_none_not_a_guess() {
         let output = r#"[{"kind":"interactive","pid":7,"status":"idle"}]"#;
-        let AgentViewObservation::Supported { sessions, .. } = parse_agents_json(version(), output)
+        let AgentViewObservation::Supported { sessions, .. } =
+            parse_agents_json(Some(version()), output)
         else {
             panic!("parse");
         };
@@ -442,7 +415,7 @@ mod tests {
         for output in ["", "not json", "{\"sessions\":[]}", "[{\"pid\":1}]"] {
             assert!(
                 matches!(
-                    parse_agents_json(version(), output),
+                    parse_agents_json(Some(version()), output),
                     AgentViewObservation::CannotObserve { .. }
                 ),
                 "{output}"
@@ -451,18 +424,27 @@ mod tests {
     }
 
     #[test]
-    fn only_exact_matrix_versions_are_verified() {
-        assert_eq!(agent_view_support(&version()), AgentViewSupport::Verified);
+    fn the_same_answer_parses_whatever_version_reports_it() {
         for raw in [
             "2.1.325 (Claude Code)",
-            "2.0.0 (Claude Code)",
+            "2.1.326 (Claude Code)",
+            "2.1.327 (Claude Code)",
             "3.0.0 (Claude Code)",
+            "9.9.9-vendor-fork (vendor)",
         ] {
             let version = ClaudeCliVersion::parse(raw).expect("version");
+            let AgentViewObservation::Supported {
+                version: observed,
+                sessions,
+            } = parse_agents_json(Some(version), OBSERVED)
+            else {
+                panic!("{raw}: a shaped answer must parse");
+            };
+            assert_eq!(sessions.len(), 2, "{raw}");
             assert_eq!(
-                agent_view_support(&version),
-                AgentViewSupport::Unverified,
-                "{raw} must not be assumed compatible"
+                observed.expect("version").raw,
+                raw.split_whitespace().next().expect("token"),
+                "{raw}"
             );
         }
     }
@@ -504,14 +486,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unverified_version_is_never_interpreted() {
+    async fn an_unlisted_version_is_interpreted_by_its_answer() {
         let runner = FixtureRunner {
             version: ok("2.0.0 (Claude Code)\n"),
             agents: ok(OBSERVED),
         };
+        let AgentViewObservation::Supported {
+            version: observed,
+            sessions,
+        } = probe_agent_view(&runner).await
+        else {
+            panic!("a version outside the recorded matrix must not be pre-gated");
+        };
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(observed.expect("version").raw, "2.0.0");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_version_does_not_hide_a_valid_answer() {
+        let runner = FixtureRunner {
+            version: ok("built from source\n"),
+            agents: ok(OBSERVED),
+        };
+        let AgentViewObservation::Supported {
+            version: observed,
+            sessions,
+        } = probe_agent_view(&runner).await
+        else {
+            panic!("the records are the answer, not the version string");
+        };
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(observed, None);
+    }
+
+    #[tokio::test]
+    async fn an_older_cli_without_the_command_is_unsupported() {
+        let runner = FixtureRunner {
+            version: ok("2.0.0 (Claude Code)\n"),
+            agents: Ok(CliOutput {
+                success: false,
+                stdout: String::new(),
+                stderr: "error: unknown command 'agents'\n".to_string(),
+            }),
+        };
         assert!(matches!(
             probe_agent_view(&runner).await,
-            AgentViewObservation::CannotObserve { reason } if reason.contains("not in the verified")
+            AgentViewObservation::Unsupported { .. }
         ));
     }
 
@@ -544,7 +564,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_verified_path_reports_the_captured_records() {
+    async fn the_supported_path_reports_the_captured_records() {
         let runner = FixtureRunner {
             version: ok("2.1.326 (Claude Code)\n"),
             agents: ok(OBSERVED),

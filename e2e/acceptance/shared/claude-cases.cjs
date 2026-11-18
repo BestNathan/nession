@@ -10,8 +10,11 @@
 const { spawnSync } = require('node:child_process');
 const { pending } = require('./sandbox-cases.cjs');
 
-/// Exact CLI versions whose `agents --json` shape is verified (#3779 P0).
-const VERIFIED_CLI_VERSIONS = ['2.1.326'];
+/// CLI versions whose `agents --json` shape has a captured fixture (#3779 P0).
+/// This is evidence for the parser fixtures, not an admission gate: the product
+/// attempts the command on every version and reports Unsupported/CannotObserve
+/// from the answer.
+const CAPTURED_CLI_VERSIONS = ['2.1.326'];
 
 /// The `claude` version this runner exposes, or `null` when it cannot be run.
 function probeClaudeVersion(env = {}) {
@@ -33,8 +36,8 @@ function pendingRealCli(evidence, detail) {
     type: 'blocked',
     value: 'The Acceptance / Cases runner provides no authenticated interactive Claude runtime: ' +
       'measured ' + (version ? '`' + version + '`' : 'no runnable `claude` executable') +
-      '; the verified matrix is ' + VERIFIED_CLI_VERSIONS.join(', ') +
-      '. ' + detail,
+      '; the captured shape fixture is ' + CAPTURED_CLI_VERSIONS.join(', ') +
+      ' (not an admission gate). ' + detail,
   });
   pending(
     'The real-CLI positive path stays Pending on this runner (' +
@@ -44,4 +47,4 @@ function pendingRealCli(evidence, detail) {
   );
 }
 
-module.exports = { VERIFIED_CLI_VERSIONS, probeClaudeVersion, pendingRealCli };
+module.exports = { CAPTURED_CLI_VERSIONS, probeClaudeVersion, pendingRealCli };
