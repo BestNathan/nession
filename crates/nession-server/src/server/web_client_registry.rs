@@ -279,6 +279,9 @@ mod tests {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         }

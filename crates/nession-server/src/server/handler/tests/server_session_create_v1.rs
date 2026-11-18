@@ -92,6 +92,9 @@ async fn session_create_success_preserves_agent_report_that_arrived_first() {
                 foreground_command: Some("bash".to_string()),
                 working_dir: Some("/srv".to_string()),
                 instance_id: None,
+                activity: None,
+                activity_epoch: None,
+                activity_generation: 0,
                 created_at: now,
                 last_activity: now,
             })
@@ -799,6 +802,9 @@ async fn authoritative_refusal_preserves_the_ambiguous_new_create_binding() {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
             created_at: now,
             last_activity: now,
         })

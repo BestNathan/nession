@@ -50,11 +50,12 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply, McpToolManifest};
 use nession_protocol::contracts::session::v1::{
-    AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionProcessesPayload, ServerSessionSandboxContextPayload,
-    ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
-    ServerSessionSandboxImagePreparePayload, ServerSessionSandboxPreflightPayload,
-    ServerSessionSandboxReturnPayload, SessionMetadataUpdatePayload,
+    AgentGitInvalidatedPayload, AgentSessionActivityPayload, AgentSessionUpdatePayload,
+    AgentTerminalResizePayload, ServerSessionCreatePayload, ServerSessionProcessesPayload,
+    ServerSessionSandboxContextPayload, ServerSessionSandboxEnterPayload,
+    ServerSessionSandboxFocusPayload, ServerSessionSandboxImagePreparePayload,
+    ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
+    SessionMetadataUpdatePayload,
 };
 use nession_protocol::contracts::workspace::v1::{
     AgentWorkspaceDescriptor, AgentWorkspaceKind, AgentWorkspaceStatus,
@@ -135,6 +136,9 @@ pub mod msg_types {
     pub const CONTROL_PING: &str = "control.ping";
     pub const CONTROL_PONG: &str = "control.pong";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
+    /// One-way Activity level for one Session (#3804). A separate unit from the
+    /// session update because it must not stamp the Server's recency.
+    pub const AGENT_SESSION_ACTIVITY: &str = "server.agent.session-activity";
     /// One-way: the Agent reports every live Session's observed Environment
     /// Binding after registration, so the Server's observed cache can be
     /// rebuilt from the runtime that owns it (#170).
@@ -255,6 +259,14 @@ pub struct ServerClientHandle {
 }
 
 impl ServerClientHandle {
+    /// The Agent id this connection reports under.
+    ///
+    /// Read-only: an outbound payload names its Agent from this value rather
+    /// than a second copy that could drift from the registered identity.
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
     /// Mark that a full session sync is needed (called by supervisor on reconnect).
     pub fn mark_sync_needed(&self) {
         self.sync_intent.mark();
@@ -358,6 +370,21 @@ impl ServerClientHandle {
             ));
         }
         self.outbox.send_session_update(session_name, frame(&msg)?)
+    }
+
+    /// Queue one Session's Activity level (#3804).
+    ///
+    /// A level, not a history: the Server keeps only the latest accepted value.
+    /// One frame per Session is pending at a time, under an Activity-specific
+    /// outbox key so it never supersedes the Session inventory frame.
+    pub fn send_session_activity(
+        &self,
+        session_name: &str,
+        payload: AgentSessionActivityPayload,
+    ) -> Result<()> {
+        let msg = new_message(msg_types::AGENT_SESSION_ACTIVITY, payload);
+        self.outbox
+            .send_session_activity(session_name, frame(&msg)?)
     }
 
     /// Queue an address-update message for delivery to the server.

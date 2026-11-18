@@ -88,6 +88,9 @@ fn session_info(agent_id: &str, session_name: &str) -> SessionInfo {
         foreground_command: None,
         working_dir: None,
         instance_id: None,
+        activity: None,
+        activity_epoch: None,
+        activity_generation: 0,
         created_at: Utc::now(),
         last_activity: Utc::now(),
     }

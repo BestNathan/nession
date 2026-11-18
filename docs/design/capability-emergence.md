@@ -106,6 +106,11 @@ The stable rule is now:
 
 > **No permanent capability chrome on the resting capsule. Contextual capability projections may emerge around it, then deepen into Workspace.**
 
+Session **Activity** (#3804) is ambient Session state, not capability chrome:
+its one presentation is the fixed glyph slot on the Session row. It never adds
+a chip or spinner to the resting capsule, never auto-materializes a Peek, and
+never becomes a second status dot for connectivity, lifecycle or attachment.
+
 ## Capability entry
 
 The `+` expansion is a Nession capability entry, not an operating-system action menu.

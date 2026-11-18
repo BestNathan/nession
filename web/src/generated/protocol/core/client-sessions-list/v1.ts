@@ -56,7 +56,40 @@ instance_id?: string | null,
  * inference from cwd, Git or the Agent; a newer Session incarnation that
  * reuses the same `agent_id:session_name` does not inherit it.
  */
-project_id?: string | null, last_activity: string, };
+project_id?: string | null, 
+/**
+ * The Agent's current Session Activity level (#3804).
+ *
+ * A fourth, independent dimension; it never rewrites `status`,
+ * connectivity, attachment or `last_activity`. Absent means this Agent has
+ * not reported Activity (a legacy Agent, or one that has not reconciled
+ * yet), which consumers must render as `unknown`, never `idle`. A present
+ * `working` states the Agent's current observation; a Web client still
+ * treats it as unknown when that Agent is offline or stale.
+ */
+activity?: SessionActivityView | null, last_activity: string, };
+export type SessionActivityView = { 
+/**
+ * `working`, `idle` or `unknown`.
+ *
+ * A `String` rather than an enum, matching `status`'s treatment on the
+ * adjacent payload: the Server validates the value and refuses anything
+ * else, so a closed enum here would describe validation that lives
+ * elsewhere.
+ */
+state: string, 
+/**
+ * `input_required` when the owning capability needs the user, else absent.
+ */
+attention?: string | null, 
+/**
+ * The capability that owns the Pane whose level produced this aggregate.
+ */
+capability_id?: string | null, 
+/**
+ * When the Agent observed this level (Unix milliseconds).
+ */
+observed_at_ms: number, };
 
 // ── Operations ──
 
