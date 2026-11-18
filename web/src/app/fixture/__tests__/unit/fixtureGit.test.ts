@@ -345,4 +345,91 @@ describe('fixture git surface', () => {
       }
     }
   });
+
+  /**
+   * #3767: the selection Case must prove which target and OID a detail or
+   * commit-sourced diff read was addressed to. The surface records each read,
+   * answers a commit only when one of its served pages listed it, and refuses
+   * an object name it never offered.
+   */
+  it('records detail and diff targets, and refuses a commit it never served (#3767)', async () => {
+    const globalRecord = globalThis as unknown as { window?: unknown };
+    const hadWindow = 'window' in globalRecord;
+    const previousWindow = globalRecord.window;
+    const fakeWindow: Record<string, unknown> = {};
+    globalRecord.window = fakeWindow;
+    try {
+      const surface = fixtureGitSurface('?capability=git&git=history-overlap');
+      const session = 'devbox-01:fix-terminal-reconnect';
+      const unknownOid = 'f'.repeat(40);
+
+      const first = await surface.request<GitLogResponse>('git.log', { session });
+      expect(first.state).toBe('ok');
+      if (first.state !== 'ok') {
+        return;
+      }
+      const row = first.history.commits[0];
+      expect(row).toBeDefined();
+      if (!row) {
+        return;
+      }
+
+      const detail = await surface.request<GitCommitResponse>('git.commit', {
+        agent_id: 'devbox-01',
+        session,
+        oid: row.hash,
+      });
+      expect(detail.state).toBe('ok');
+      if (detail.state === 'ok') {
+        expect(detail.commit.subject).toBe(row.subject);
+        expect(detail.commit.files[0]?.path).toBe('src/a-history-overlap.ts');
+      }
+
+      const diff = await surface.request<GitDiffResponse>('git.diff', {
+        agent_id: 'devbox-01',
+        session,
+        path: 'src/a-history-overlap.ts',
+        source: { kind: 'commit', oid: row.hash },
+      });
+      expect(diff.state).toBe('ok');
+
+      const unknown = await surface.request<GitCommitResponse>('git.commit', {
+        agent_id: 'devbox-01',
+        session: 'devbox-01:design-system',
+        oid: unknownOid,
+      });
+      expect(unknown).toEqual({
+        state: 'error',
+        message: `unknown revision: ${unknownOid}`,
+      });
+
+      const control = fakeWindow.fixtureGitHistoryOverlap as {
+        commitRequests: () => readonly { agent_id: string; session: string; oid: string }[];
+        diffRequests: () => readonly {
+          agent_id: string;
+          session: string;
+          oid: string;
+          path: string;
+        }[];
+      };
+      expect(control.commitRequests()).toEqual([
+        { agent_id: 'devbox-01', session, oid: row.hash },
+        { agent_id: 'devbox-01', session: 'devbox-01:design-system', oid: unknownOid },
+      ]);
+      expect(control.diffRequests()).toEqual([
+        {
+          agent_id: 'devbox-01',
+          session,
+          oid: row.hash,
+          path: 'src/a-history-overlap.ts',
+        },
+      ]);
+    } finally {
+      if (hadWindow) {
+        globalRecord.window = previousWindow;
+      } else {
+        delete globalRecord.window;
+      }
+    }
+  });
 });
