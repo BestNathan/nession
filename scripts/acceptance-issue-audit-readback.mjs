@@ -526,7 +526,7 @@ export async function selfTestIssueAuditReadback(){
     [{issue:{...scopedIssue,body:scopedIssue.body.replace(scoped.expectedNone.new,
       'fabricated E2E none reason')}},/none-only E2E/],
     [{issue:{...scopedIssue,body:scopedIssue.body.replace(
-      '|---|---|---|---|','|---|---|---|---|\n| fabricated | New | Pass | url |')}},/E2E|source-bound/],
+      '|---|---|---|---|','|---|---|---|---|\n| fabricated | New | Pass | url |')}},/E2E|source-bound|Issue Contract/],
     [{jobs:[{...scopedJob,conclusion:'skipped'}]},/job identity/],
   ])assert.throws(()=>attestIssueAuditReadback({...scopedArgs,...patch}),reason);
   const scopedRequest=async path=>{
