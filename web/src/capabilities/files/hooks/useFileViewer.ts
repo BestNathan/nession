@@ -85,6 +85,14 @@ function replaceMediaBlob(
   return url;
 }
 
+/**
+ * What one load flight settled as (#3743). `loaded` is the only outcome that
+ * replaced the viewer's buffer with the read content; `failed` left the prior
+ * buffer and its revision in place; `superseded` belongs to a flight another
+ * load (or unmount) already owns, so it may not touch the successor's state.
+ */
+export type FileLoadOutcome = 'loaded' | 'failed' | 'superseded';
+
 interface FileLoaderResult {
   viewerType: ViewerType | null;
   content: string;
@@ -100,9 +108,11 @@ interface FileLoaderResult {
   /** Revision of the content currently loaded, for guarded saves. */
   revision: string | undefined;
   setRevision: (revision: string | undefined) => void;
-  loadFile: () => Promise<void>;
+  loadFile: () => Promise<FileLoadOutcome>;
   setContent: (content: string) => void;
   setOriginalContent: (content: string) => void;
+  /** Dismiss a read error without touching the retained draft or baseline. */
+  clearError: () => void;
   handleCancelLoad: () => void;
 }
 
@@ -134,12 +144,16 @@ async function readWholeFile(
   path: string,
   flight: LoadFlight,
   publish: (data: FileData) => void,
-): Promise<void> {
+): Promise<FileLoadOutcome> {
   try {
     const data = await fileOps.readFile(path);
-    if (flight.isCurrent()) { publish(data); }
+    if (!flight.isCurrent()) { return 'superseded'; }
+    publish(data);
+    return 'loaded';
   } catch (err) {
-    if (flight.isCurrent()) { flight.setError(errorMessage(err)); }
+    if (!flight.isCurrent()) { return 'superseded'; }
+    flight.setError(errorMessage(err));
+    return 'failed';
   } finally {
     if (flight.isCurrent()) { flight.settle(); }
   }
@@ -154,23 +168,26 @@ async function readChunkedFile(
   fileOps: FileOps,
   path: string,
   flight: ChunkedFlight,
-): Promise<void> {
+): Promise<FileLoadOutcome> {
   flight.begin();
   const result = readFileChunked(fileOps, path, (loaded, total) => {
     if (flight.isCurrent()) { flight.setProgress(loaded, total); }
   });
   if (!flight.isCurrent()) {
     result.cancel();
-    return;
+    return 'superseded';
   }
   flight.attachCancel(result.cancel);
   try {
     const fullText = await result.promise;
-    if (flight.isCurrent()) { flight.complete(fullText); }
+    if (!flight.isCurrent()) { return 'superseded'; }
+    flight.complete(fullText);
+    return 'loaded';
   } catch (err) {
-    if (!flight.isCurrent()) { return; }
-    if (err instanceof DOMException && err.name === 'AbortError') { return; }
+    if (!flight.isCurrent()) { return 'superseded'; }
+    if (err instanceof DOMException && err.name === 'AbortError') { return 'superseded'; }
     flight.setError(errorMessage(err));
+    return 'failed';
   } finally {
     if (flight.isCurrent()) { flight.settle(); }
   }
@@ -239,8 +256,11 @@ function useFileLoader(
   }, []);
 
   // Large text files: chunked read, forced read-only — too big to round-trip.
-  const runChunkedLoad = useCallback(async (size: number, generation: number) => {
-    await readChunkedFile(fileOps, path, {
+  const runChunkedLoad = useCallback(async (
+    size: number,
+    generation: number,
+  ): Promise<FileLoadOutcome> => {
+    return readChunkedFile(fileOps, path, {
       isCurrent: () => loadGenerationRef.current === generation,
       begin: () => {
         setForceReadOnly(true);
@@ -262,7 +282,7 @@ function useFileLoader(
     });
   }, [fileOps, path]);
 
-  const loadFile = useCallback(async () => {
+  const loadFile = useCallback(async (): Promise<FileLoadOutcome> => {
     // Take ownership before cancelling the previous flight: the old reader's
     // late chunk or finally block must not be able to touch this generation.
     const generation = loadGenerationRef.current + 1;
@@ -278,12 +298,11 @@ function useFileLoader(
     setMediaMimeType(null);
 
     if (fileSize && fileSize > CHUNKED_READ_THRESHOLD) {
-      await runChunkedLoad(fileSize, generation);
-      return;
+      return runChunkedLoad(fileSize, generation);
     }
 
     setForceReadOnly(false);
-    await readWholeFile(fileOps, path, {
+    return readWholeFile(fileOps, path, {
       isCurrent: () => loadGenerationRef.current === generation,
       setError,
       settle: () => setLoading(false),
@@ -306,8 +325,10 @@ function useFileLoader(
   }, [path, fileOps, viewerType, fileSize, runChunkedLoad]);
 
   useEffect(() => {
-    loadFile();
+    void loadFile();
   }, [loadFile]);
+
+  const clearError = useCallback(() => { setError(null); }, []);
 
   return {
     viewerType,
@@ -326,6 +347,7 @@ function useFileLoader(
     loadFile,
     setContent,
     setOriginalContent,
+    clearError,
     handleCancelLoad,
   };
 }
@@ -346,7 +368,6 @@ function useFileSave({
   setRevision,
   setOriginalContent,
   onDirtyChange,
-  loadFile,
 }: {
   fileOps: FileOps;
   path: string;
@@ -356,7 +377,6 @@ function useFileSave({
   setRevision: (revision: string | undefined) => void;
   setOriginalContent: (content: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
-  loadFile: () => Promise<void>;
 }) {
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -410,14 +430,6 @@ function useFileSave({
     void save(true);
   }, [save]);
 
-  /** Discard the local edit and read the file again after a conflict. */
-  const handleReloadAfterConflict = useCallback(() => {
-    setConflict(false);
-    setIsDirty(false);
-    onDirtyChange?.(false);
-    void loadFile();
-  }, [loadFile, onDirtyChange]);
-
   return {
     isDirty,
     setIsDirty,
@@ -427,8 +439,48 @@ function useFileSave({
     setConflict,
     handleSave,
     handleSaveOverwrite,
-    handleReloadAfterConflict,
   };
+}
+
+interface FileReloadControls {
+  loadFile: () => Promise<FileLoadOutcome>;
+  setIsDirty: (dirty: boolean) => void;
+  setConflict: (open: boolean) => void;
+  clearError: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+/**
+ * The conflict reload transaction (#3743): read the file again and adopt only
+ * a committed, current-generation replacement. The draft's dirty flag and the
+ * caller's navigation guard survive until that commit; a failed or superseded
+ * read leaves them untouched, so leaving still guards the draft.
+ */
+function useFileReload({
+  loadFile, setIsDirty, setConflict, clearError, onDirtyChange,
+}: FileReloadControls) {
+  const reloadFile = useCallback(() => {
+    void loadFile().then((outcome) => {
+      if (outcome !== 'loaded') { return; }
+      setIsDirty(false);
+      onDirtyChange?.(false);
+    });
+  }, [loadFile, onDirtyChange, setIsDirty]);
+
+  /** Close the conflict decision and start the read → commit transaction. */
+  const handleReloadAfterConflict = useCallback(() => {
+    setConflict(false);
+    reloadFile();
+  }, [reloadFile, setConflict]);
+
+  /**
+   * Return to the draft retained behind a failed reload. The error belonged to
+   * that read; content, baseline and revision are still the ones the draft was
+   * built on, so the dirty guard stays armed.
+   */
+  const handleKeepEditing = useCallback(() => { clearError(); }, [clearError]);
+
+  return { reloadFile, handleReloadAfterConflict, handleKeepEditing };
 }
 
 /**
@@ -545,19 +597,16 @@ export function useFileViewer({
   const {
     viewerType, content, originalContent, mediaBlobUrl, mediaMimeType, loading, error,
     loadedBytes, totalBytes, isChunkedLoading, forceReadOnly, revision,
-    setRevision, loadFile, setContent, setOriginalContent, handleCancelLoad,
+    setRevision, loadFile, setContent, setOriginalContent, clearError, handleCancelLoad,
   } = useFileLoader(fileOps, path, fileSize, handleDecoded);
 
   const saveState = useFileSave({
-    fileOps,
-    path,
-    filename,
-    content,
-    revision,
-    setRevision,
-    setOriginalContent,
-    onDirtyChange,
-    loadFile,
+    fileOps, path, filename, content, revision, setRevision, setOriginalContent, onDirtyChange,
+  });
+
+  const { reloadFile, handleReloadAfterConflict, handleKeepEditing } = useFileReload({
+    loadFile, setIsDirty: saveState.setIsDirty, setConflict: saveState.setConflict,
+    clearError, onDirtyChange,
   });
 
   useFileSaveReporting(saveState.saving, saveState.save, onSavingChange, onSaveHandlerChange);
@@ -630,12 +679,14 @@ export function useFileViewer({
     forceReadOnly,
     setShowUnsavedDialog,
     loadFile,
+    reloadFile,
     handleEditToggle,
     handleSetViewMode,
     handleContentChange,
     handleSave: saveState.handleSave,
     handleSaveOverwrite: saveState.handleSaveOverwrite,
-    handleReloadAfterConflict: saveState.handleReloadAfterConflict,
+    handleReloadAfterConflict,
+    handleKeepEditing,
     handleCloseClick,
     handleConfirmClose,
     handleSuggestionPreview,
