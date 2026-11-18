@@ -1,10 +1,36 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {qwenWorkerAuthority,qwenDeveloperPrompt}
+import {qwenWorkerAuthority,qwenDeveloperPrompt,classifyQwenCliFailure}
   from './qwen-development-worker.mjs';
 import {attestQwenRepairIssueReview} from './qwen-review-context.mjs';
 import {formatReviewerIssueReceipt}
   from './reviewer-result-ingest.mjs';
+
+// A real Provider failure must be classifiable without exposing raw model
+// output, prompts, stderr or Gateway credentials to public Actions logs.
+const sentinel = 'SECRET_PRIVATE_PROMPT_TOKEN';
+const output=classifyQwenCliFailure({
+  status:1,signal:null,error:null,
+  stdout:JSON.stringify({type:'result',subtype:'error_during_execution',
+    terminal_reason:'api_error',api_error_status:401,is_error:true,
+    result:'API Error: credential '+sentinel})+'\n',
+  stderr:'Invalid API Key '+sentinel,
+});
+for(const field of ['status=1','terminal=api_error',
+  'subtype=error_during_execution','api_status=401',
+  'provider_result_error=true','stderr_category=authentication'])
+  assert.ok(output.includes(field), 'missing safe Qwen failure field '+field);
+assert.ok(!output.includes(sentinel),'raw Provider text escaped');
+const untrusted=classifyQwenCliFailure({status:2,
+  stdout:JSON.stringify({type:'result',subtype:'sensitive-'+sentinel,
+    terminal_reason:'sensitive-'+sentinel,result:sentinel}),
+  stderr:sentinel});
+assert.ok(untrusted.includes('terminal=other'));
+assert.ok(untrusted.includes('subtype=other'));
+assert.ok(!untrusted.includes(sentinel));
+assert.match(classifyQwenCliFailure({status:null,signal:'SIGTERM',
+  error:{code:'ETIMEDOUT'},stdout:'not-json',stderr:'request timeout'}),
+  /signal=SIGTERM, spawn=ETIMEDOUT, result=missing, stderr_category=timeout/);
 
 const admission={authorized:true,issue:2274,role:'developer',
   agent_id:'dev-qwen-01',provider:'claude-code',
