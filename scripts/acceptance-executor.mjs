@@ -11,7 +11,7 @@ import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import {enforceLiveFullFailure,requiresLiveFullFailureProof} from './acceptance-main-full-failure-bug-evidence.mjs';
 import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
-import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
+import { verifiedIssueAuditCriterion, verifiedIssueAudit3843Criterion, SIDEBAR_AUDIT_REPAIR_PROOF, ISSUE_AUDIT_3843_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
   collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
   enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
@@ -636,8 +636,8 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
 function normalizeCommand(contextFile, rawFile, outFile, source) {
   const context = JSON.parse(fs.readFileSync(contextFile, 'utf8'));
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
-  const normalized = verifiedIssueAuditCriterion(
-    context, normalizeAcceptanceResult(context, raw, source));
+  const normalized = verifiedIssueAudit3843Criterion(context, verifiedIssueAuditCriterion(
+    context, normalizeAcceptanceResult(context, raw, source)));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
   const gated = enforceLiveFullFailure(context,
@@ -885,6 +885,47 @@ function selfTest() {
   ])assert.equal(verifiedIssueAuditCriterion({...auditContext,
     ci_evidence:{authenticated_issue_audit_repair_readback:tampered}},
     uncertain).criteria[0].result,'Pending');
+
+  // #3843: An exact owner-command, Agent job and repaired target readback
+  // can decide SC-03 independently; a model's unsupported Pass is rejected.
+  const repair3843=ISSUE_AUDIT_3843_PROOF,repairSha='e50fa7672740164222c1168416c1e5784927847a';
+  const completeProof={
+    status:'authenticated-repair-readback',
+    source_run_id:repair3843.sourceRunId,source_attempt:repair3843.sourceAttempt,
+    target_issue:repair3843.targetIssueNumber,source_event:'workflow_dispatch',
+    source_sha:repairSha,target_sha:repairSha,provider:'qwen',
+    source_comment_id:repair3843.sourceCommentId,
+    repair_comment_id:repair3843.repairCommentId,
+    owner_trigger_verified:true,repair_ack_verified:true,
+    issue_contract_pass:true,verified_risk_tier:'verification:integration',
+    protected_e2e_rows:0,protected_e2e_selected_ids:[],
+    protected_e2e_none_verified:true,label_event_ids:[1,2,3,4],
+    source_job_id:42,
+  };
+  const repairedContext={issue:{number:repair3843.acceptanceIssue},
+    target_ref:repairSha,stage:'post-merge',
+    ci_evidence:{authenticated_issue_audit_3843_readback:completeProof}};
+  const pendingRepair={criteria:[{criterion:'SC-03',result:'Pending',evidence:[],
+    summary:'model cannot see the cross-Issue source Run'}]};
+  assert.equal(verifiedIssueAudit3843Criterion(repairedContext,pendingRepair)
+    .criteria[0].result,'Pass');
+  assert.equal(verifiedIssueAudit3843Criterion({...repairedContext,ci_evidence:null},
+    pendingRepair).criteria[0].result,'Pending');
+  assert.throws(()=>verifiedIssueAudit3843Criterion(
+    {...repairedContext,ci_evidence:null},{criteria:[{
+      criterion:'SC-03',result:'Pass',evidence:[],summary:'untrusted claim'}]}),
+    /lacks authenticated #3837/);
+  for(const tampered of [
+    {source_run_id:0},{target_issue:3843},{source_sha:'f'.repeat(40)},
+    {source_comment_id:1},{repair_ack_verified:false},
+    {protected_e2e_rows:1},{protected_e2e_none_verified:false},
+    {label_event_ids:[]},
+  ])assert.equal(verifiedIssueAudit3843Criterion({...repairedContext,
+    ci_evidence:{authenticated_issue_audit_3843_readback:{...completeProof,...tampered}}},
+    pendingRepair).criteria[0].result,'Pending');
+  assert.equal(verifiedIssueAudit3843Criterion(repairedContext,{criteria:[{
+    criterion:'SC-03',result:'Fail',evidence:[],summary:'trusted conflicting failure'}]})
+    .criteria[0].result,'Fail');
 
   // #3545: a later read-only Agent on tooling PR #3540 cannot downgrade the
   // already accepted implementation PR #3529, even with a larger run ID.
