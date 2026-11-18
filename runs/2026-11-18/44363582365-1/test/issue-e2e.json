@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "b8ba6456136046fafa8b4d6da0da9ee8d8957020",
+  "run_id": 44363582365,
+  "run_attempt": 1,
+  "plan_digest": "e282c43da912c7a791c1a0322e89b48aa9f8df49743895251224d032462c4af7",
+  "artifact_digest": "sha256:a114324c43a52df14e6a62e7647422b8d4ab1bd0273da4b07793546c4166e0f3",
+  "results": [
+    {
+      "id": "conversation-list-state",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 14
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 23,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 155
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 110
+    },
+    {
+      "id": "project-sidebar-detail",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 50
+    },
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 268
+    },
+    {
+      "id": "transcript-geometry",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 78
+    }
+  ]
+}
