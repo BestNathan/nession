@@ -1,0 +1,28 @@
+# Staging-only standalone MCP host (#3902).
+# Separate Argo CD lifecycle from Server/Agent/UI; the staging GitOps writer
+# advances this image and the existing nession-staging app in one source-SHA commit.
+# No production, preprod or staging-01 MCP deployment is implied.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nession-mcp-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BestNathan/nession.git
+    targetRevision: gitops
+    path: environments/staging/mcp
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nession
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Replace=true
