@@ -2,7 +2,12 @@
 // #2010 exact owner-only independent Ingest replay. Worker code, Issue
 // comments, untrusted Action inputs and forked runs cannot mint receipts.
 import assert from 'node:assert/strict';
-import {assertQwenBotWakeSource,resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {assertQwenBotWakeSource,isWorkerMainAncestor,
+  resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
   NATIVE_RECOVERY_RUN,NATIVE_RECOVERY_SHA,NATIVE_RECOVERY_INGEST_COMMAND,
   QWEN_3784_INGEST_COMMENT}
   from './development-ingest.mjs';
@@ -211,6 +216,7 @@ assert.deepEqual(resolveTrustedIngestSource({
     issue:3784,attempt:1});
 for(const bad of [
   {event:{...recovered3784,issue:{number:3785,state:'open'}}},
+  {event:{...recovered3784,issue:{number:3784,state:'closed'}}},
   {event:{...recovered3784,comment:{...recovered3784.comment,
     body:QWEN_3784_INGEST_COMMENT+' '}}},
   {event:{...recovered3784,comment:{...recovered3784.comment,
@@ -222,5 +228,44 @@ for(const bad of [
 ])assert.throws(()=>resolveTrustedIngestSource({
   environment:qwenEnv,event:recovered3784,...bad}),
   /owner|exact|trusted|Ingest/);
+
+// Execute the actual git ancestry gate on real, isolated Git commit objects,
+// not merely a mocked Boolean: same branch and older-main pass, an unrelated
+// branch, a newer source and a nonexistent SHA fail closed.
+const history=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-main-ancestry-'));
+try{
+  const git=(...args)=>execFileSync('git',['-C',history,...args],{
+    encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000,
+    env:{...process.env,GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'},
+  }).trim();
+  git('init','-b','main');
+  git('config','user.name','Nession CI Gate');
+  git('config','user.email','nession-gate@example.invalid');
+  fs.writeFileSync(path.join(history,'source.txt'),'trusted main v1\\n');
+  git('add','source.txt');git('commit','-m','trusted source');
+  const origin=git('rev-parse','HEAD');
+  fs.writeFileSync(path.join(history,'source.txt'),'trusted main v2\\n');
+  git('add','source.txt');git('commit','-m','worker workflow version');
+  const worker=git('rev-parse','HEAD');
+  git('checkout','-b','foreign',origin);
+  fs.writeFileSync(path.join(history,'source.txt'),'unrelated branch\\n');
+  git('add','source.txt');git('commit','-m','unrelated branch');
+  const foreign=git('rev-parse','HEAD');
+  assert.equal(isWorkerMainAncestor(origin,worker,{cwd:history}),true);
+  assert.equal(isWorkerMainAncestor(worker,worker,{cwd:history}),true);
+  assert.equal(isWorkerMainAncestor(worker,origin,{cwd:history}),false);
+  assert.equal(isWorkerMainAncestor(foreign,worker,{cwd:history}),false);
+  assert.equal(isWorkerMainAncestor('f'.repeat(40),worker,{cwd:history}),false);
+  const signed={inputs:{agent_id:'dev-qwen-01',task:'implement',
+    input_sha:origin}};
+  assert.deepEqual(assertQwenBotWakeSource({
+    run:{head_sha:worker},claim:signed,
+    isMainAncestor:(src,head)=>isWorkerMainAncestor(src,head,{cwd:history})}),
+    {task:'implement',source_sha:origin});
+  assert.throws(()=>assertQwenBotWakeSource({
+    run:{head_sha:worker},claim:{inputs:{...signed.inputs,input_sha:foreign}},
+    isMainAncestor:(src,head)=>isWorkerMainAncestor(src,head,{cwd:history})}),
+    /signed trusted-main Qwen/);
+}finally{fs.rmSync(history,{recursive:true,force:true});}
 
 console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment, manual Qwen Worker Run and event denial passed');
