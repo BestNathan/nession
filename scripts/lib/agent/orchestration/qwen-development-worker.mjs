@@ -130,6 +130,60 @@ function nativeMode(admission,plan){
     errorOnExist:true,dereference:false});
   return {configDir:directory,sessionId:compatible.session_id,resuming:true};
 }
+// The CLI may print gateway errors, prompt text or credentials on stdout/stderr.
+// Return ONLY a bounded, closed-vocabulary diagnosis. Never log raw streams.
+export function classifyQwenCliFailure(proc) {
+  const detail = [];
+  if (Number.isInteger(proc?.status) && proc.status >= 0 && proc.status <= 255)
+    detail.push('status=' + proc.status);
+  if (proc?.signal && ['SIGTERM','SIGKILL','SIGINT'].includes(proc.signal))
+    detail.push('signal=' + proc.signal);
+  if (proc?.error?.code)
+    detail.push('spawn=' + (['ETIMEDOUT','ENOENT','EACCES'].includes(proc.error.code)
+      ? proc.error.code : 'other'));
+  let last = null;
+  for (const line of String(proc?.stdout ?? '').split(/\\r?\\n/)) {
+    if (line.length > 65536 || !line.trim().startsWith('{')) continue;
+    try {
+      const record = JSON.parse(line);
+      if (record?.type === 'result' && !Array.isArray(record)) last = record;
+    } catch {}
+  }
+  if (last) {
+    const terminal = ['api_error','provider_error','model_error',
+      'timeout','rate_limit','error_during_execution'];
+    const subtype = ['success','error','error_during_execution',
+      'error_max_turns','error_max_budget_usd','api_error'];
+    if (typeof last.terminal_reason === 'string')
+      detail.push('terminal=' + (terminal.includes(last.terminal_reason)
+        ? last.terminal_reason : 'other'));
+    if (typeof last.subtype === 'string')
+      detail.push('subtype=' + (subtype.includes(last.subtype) ? last.subtype : 'other'));
+    if (Number.isInteger(last.api_error_status) &&
+        last.api_error_status >= 400 && last.api_error_status <= 599)
+      detail.push('api_status=' + last.api_error_status);
+    if (last.is_error === true) detail.push('provider_result_error=true');
+  } else {
+    detail.push('result=missing');
+  }
+  const stderr = String(proc?.stderr ?? '').slice(-32768);
+  let category = 'other';
+  for (const [pattern, label] of [
+    [/\\b(401|unauthori[sz]ed|invalid api key|authentication failed)\\b/i,'authentication'],
+    [/\\b(403|forbidden|not permitted)\\b/i,'authorization'],
+    [/\\b(429|rate.limit|too many requests)\\b/i,'rate_limit'],
+    [/\\b(unknown model|unrecognized.model|invalid model)\\b/i,'model'],
+    [/\\b(session not found|invalid session|session.*missing)\\b/i,'session'],
+    [/\\b(ENOSPC|no space left)\\b/i,'disk'],
+    [/\\b(EACCES|permission denied)\\b/i,'filesystem_permission'],
+    [/\\b(ETIMEDOUT|request timeout|timed out)\\b/i,'timeout'],
+    [/\\b(ECONNRESET|ECONNREFUSED|ENOTFOUND)\\b/i,'network'],
+  ]) {
+    if (pattern.test(stderr)) {category = label; break;}
+  }
+  detail.push('stderr_category=' + category);
+  return 'Qwen CLI failed (' + detail.join(', ') + '); raw model output withheld';
+}
 function cliCall({prompt,sessionId,resuming,plan,configDir,workspace}){
   const argv=['-p',prompt,'--output-format','stream-json','--verbose',
     '--max-turns','10','--model',plan.model,'--strict-mcp-config',
@@ -144,7 +198,7 @@ function cliCall({prompt,sessionId,resuming,plan,configDir,workspace}){
   const proc=spawnSync('claude',argv,{cwd:workspace,env:cliEnv,
     encoding:'utf8',timeout:8*60*1000,maxBuffer:8*1024*1024,
     stdio:['ignore','pipe','pipe']});
-  if(proc.error||proc.status!==0)fail('Qwen CLI failed; raw model output withheld');
+  if(proc.error||proc.status!==0)fail(classifyQwenCliFailure(proc));
   const {events,envelope}=parseNativeEvents(proc.stdout);
   if(envelope.is_error===true||envelope.session_id!==sessionId)
     fail('Qwen failed to preserve exact native Session ID');
