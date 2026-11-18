@@ -1,6 +1,7 @@
 # ---- Build stages (shared with server via Docker build context) ----
 
 # Stage 1: Prepare cargo-chef recipe
+ARG AGENT_DEBIAN_BASE_IMAGE=debian:bookworm-20261104-slim
 FROM rust:1.96-bullseye AS planner
 WORKDIR /build
 RUN cargo install cargo-chef --locked
@@ -56,7 +57,6 @@ RUN cargo build --release --bin nession-agent
 # mount helper is built from one pinned upstream release in
 # `deploy/build-erofs-utils.sh`. It is linked against this bookworm base, which
 # the runtime stages below also use.
-ARG AGENT_DEBIAN_BASE_IMAGE=debian:bookworm-20261104-slim
 FROM debian:bookworm-slim AS erofs-utils-builder
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
