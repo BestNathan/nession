@@ -100,9 +100,9 @@ test('GitOps publisher allows only the exact reviewed two-file output', () => {
 
 test('Git porcelain parser preserves leading tracked-status columns', () => {
   const base = 'environments/staging/mcp/';
-  const raw = ' M ' + base + 'kustomization.yaml\\n' +
-    '?? ' + base + 'sealed-secret.json\\n';
-  const paths = parseGitStatusPaths(raw.replaceAll('\\n', '\n'));
+  const raw = [' M ' + base + 'kustomization.yaml',
+    '?? ' + base + 'sealed-secret.json', ''].join('\n');
+  const paths = parseGitStatusPaths(raw);
   assert.deepEqual(paths, [base + 'kustomization.yaml', base + 'sealed-secret.json']);
   assert.deepEqual(validateChangedPaths(paths, environment, secret), paths);
   assert.throws(() => parseGitStatusPaths('bogus porcelain record\n'));
