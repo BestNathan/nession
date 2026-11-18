@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e97d02e442f569821e472ed230d5a257aa29a50944606ee6b6a6a1d1d973ed33",
+  "run_id": 44266166179,
+  "run_attempt": 1,
+  "issue": 3779,
+  "criterion": "SC-01",
+  "criterion_text": "For supported Claude CLI versions, querying a concrete Nession Session returns accurate on-demand PID-matched `busy|waiting|idle`, `waiting_for` and conversation ID when supplied; unsupported CLI, ambiguous process or missing identity answers unknown/unavailable instead of a guessed state, without requiring a new state-tracking Hook.",
+  "stage": "staging",
+  "target_sha": "9bdf5aceda18cb85f946c11f8c0958d341667545",
+  "contract_sha256": "72f43c6842f09676bd559c020c6187ad69329f8c99d80bc452734ce04dcd63a8",
+  "case_revision": "9bdf5aceda18cb85f946c11f8c0958d341667545",
+  "case_tree_sha": "351cb9c1af4c4563ab8e8c7bcdfa9184b38589c4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T08:24:20.838Z",
+  "finished_at": "2026-11-18T08:24:49.968Z",
+  "duration_ms": 29130,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "The real-CLI positive path stays Pending on this runner (claude absent); deterministic negative-path fixtures passed. The on-demand status probe against a live PID-matched Session therefore remains unproven at this stage.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the captured `agents --json` shape parsed into typed busy/waiting/idle and background states; unknown values survived verbatim, a missing sessionId stayed null, an unlisted version was interpreted by its answer, an older CLI without the command was unsupported, and absent/unsupported/cannot-observe were each distinct and never reported as idle"
+        },
+        {
+          "type": "blocked",
+          "value": "The Acceptance / Cases runner provides no authenticated interactive Claude runtime: measured no runnable `claude` executable; the captured shape fixture is 2.1.326 (not an admission gate). The on-demand status probe against a live PID-matched Session therefore remains unproven at this stage."
+        }
+      ],
+      "duration_ms": 29058,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44266166179,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "9bdf5aceda18cb85f946c11f8c0958d341667545",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44266166179",
+    "record_path": "runs/2026-11-18/44266166179-1/3779/SC-01.json",
+    "source_result_sha256": "35b43bdd852bdab6d0af849ea69a9a679d0beab9eb4a8c7e5a2c7087ccf5eeca"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44266166179-1",
+    "sha256": "35b43bdd852bdab6d0af849ea69a9a679d0beab9eb4a8c7e5a2c7087ccf5eeca",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44266166179",
+    "durability": "time-limited; object archival not configured"
+  }
+}
