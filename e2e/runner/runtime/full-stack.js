@@ -368,7 +368,9 @@ async function startFullStackRuntime(options) {
   // Exact agent CLI versions under test. Installed into the isolated runtime
   // home and prepended to the Agent's PATH; the product code is never told a
   // version, so every version is exercised through the same probe.
-  const agentClis = installAgentClis(home, agentCliVersionsFrom(options?.agentCliVersions));
+  const agentClis = webOnly
+    ? {}
+    : installAgentClis(home, agentCliVersionsFrom(options?.agentCliVersions));
   const agentCliBinDirs = Object.values(agentClis).map((cli) => cli.bin_dir);
   const agentEnvPath = [...agentCliBinDirs, process.env.PATH || ''].join(path.delimiter);
 
