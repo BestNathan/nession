@@ -314,17 +314,23 @@ impl SessionManager {
             _ => None,
         };
         let cache = runtime.erofs_cache();
-        let composition = if images.is_empty() {
+        let workspace_requested = selected_workspace.is_some();
+        let composition = if images.is_empty() && !workspace_requested {
             None
         } else {
-            let Some(cache) = cache.as_ref() else {
+            if !images.is_empty() && cache.is_none() {
                 return refuse(
                     "this Agent has no EROFS cache configured; it cannot prepare a Sandbox image composition"
                         .to_string(),
                     "not-enterable",
                 );
-            };
-            match crate::sandbox_images::preflight_composition(cache, images, project_location) {
+            }
+            match crate::sandbox_images::preflight_composition(
+                cache.as_deref(),
+                images,
+                project_location,
+                workspace_requested,
+            ) {
                 Ok(mut composition) => {
                     composition.base_writable = draft_writable_rootfs(draft);
                     Some(composition)
@@ -683,31 +689,21 @@ impl SessionManager {
                 }
             }
         };
-        if images.is_empty() && workspace_override.is_some() {
-            return refusal(
-                SandboxActionErrorKind::Invalid,
-                "a Workspace selection requires an image RootFS".to_string(),
-                Some(vec![SandboxFieldError {
-                    field: "filesystem.workspace".to_string(),
-                    code: "unsupported".to_string(),
-                    message: "select a Base Runtime image for a Workspace-backed Sandbox"
-                        .to_string(),
-                }]),
-            );
-        }
-        let mut prepared_images = if images.is_empty() {
+        let host_root_workspace = images.is_empty() && workspace_override.is_some();
+        let mut prepared_images = if images.is_empty() && !host_root_workspace {
             None
         } else {
-            let Some(cache) = runtime.erofs_cache() else {
+            let cache = runtime.erofs_cache();
+            if !images.is_empty() && cache.is_none() {
                 return refusal(
                     SandboxActionErrorKind::Unavailable,
                     "this Agent has no EROFS cache configured; it cannot prepare a Sandbox image composition"
                         .to_string(),
                     None,
                 );
-            };
+            }
             match crate::sandbox_images::prepare(
-                &cache,
+                cache.as_deref(),
                 images,
                 server_url,
                 server_auth_token,

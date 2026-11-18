@@ -72,7 +72,7 @@ export function SandboxFilesystemMounts({
   return (
     <FormSection
       title="Mounts"
-      description="Optional read-only image mounts at /opt/<lowercase-name>. The Base Runtime root owns each target directory; mounts are never writable in this version."
+      description="Optional read-only image mounts at /opt/<lowercase-name>. An image-root composition needs the Base Runtime image to own each target directory; a Host-root composition provides a private /opt. Mounts are never writable in this version."
       testId="sandbox-mounts"
     >
       {mounts.length === 0 ? (

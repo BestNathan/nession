@@ -66,31 +66,50 @@ pub fn mount_composition(
     settings: &SandboxSettings,
 ) -> Result<MountedComposition> {
     let plan = MountPlan::compile(composition, settings)?;
+    if composition.base.is_none() {
+        // A Host-root composition binds the ordinary read-only host root, so
+        // Bubblewrap cannot create a missing top-level mountpoint. Fail closed
+        // before any host resource exists with an actionable prerequisite
+        // (#3792).
+        if composition.workspace.is_some() && !Path::new("/workspace").is_dir() {
+            return Err(SandboxError::UnsupportedPolicy(
+                "the Host-root composition requires a /workspace mountpoint on this Agent;                  create it (or choose an image RootFS)"
+                    .to_string(),
+            ));
+        }
+        if !composition.toolchains.is_empty() && !Path::new("/opt").is_dir() {
+            return Err(SandboxError::UnsupportedPolicy(
+                "the Host-root composition requires an /opt mountpoint on this Agent for                  toolchains"
+                    .to_string(),
+            ));
+        }
+    }
     let consumer = MountConsumer::new(execution_id)?;
     let mounted = plan.execute(&consumer, settings, execution_dir)?;
     let resolved = mounted.resolved();
 
-    let base = &resolved.base;
-    if !base.join("bin/sh").exists() && !base.join("usr/bin/sh").exists() {
-        return Err(SandboxError::Prepare(format!(
-            "the Base Runtime image has no /bin/sh at {}",
-            base.display()
-        )));
-    }
-    // The composed root is read-only, so Bubblewrap can mount only over
-    // directories the image already contains. These are the runtime paths the
-    // sandbox always installs.
-    for required in ["dev", "proc", "home", "tmp", "run/nession", "workspace"] {
-        require_dir(base, Path::new(required))?;
-    }
-    for toolchain in &composition.toolchains {
-        require_dir(
-            base,
-            toolchain
-                .target
-                .strip_prefix("/")
-                .unwrap_or(toolchain.target.as_path()),
-        )?;
+    // An image-root composition mounts only over directories the Base image
+    // already contains. A Host-root composition needs no Base checks: its
+    // toolchain targets live under a private /opt mountpoint (#3792).
+    if let Some(base) = &resolved.base {
+        if !base.join("bin/sh").exists() && !base.join("usr/bin/sh").exists() {
+            return Err(SandboxError::Prepare(format!(
+                "the Base Runtime image has no /bin/sh at {}",
+                base.display()
+            )));
+        }
+        for required in ["dev", "proc", "home", "tmp", "run/nession", "workspace"] {
+            require_dir(base, Path::new(required))?;
+        }
+        for toolchain in &composition.toolchains {
+            require_dir(
+                base,
+                toolchain
+                    .target
+                    .strip_prefix("/")
+                    .unwrap_or(toolchain.target.as_path()),
+            )?;
+        }
     }
     for (toolchain, (target, path)) in composition.toolchains.iter().zip(&resolved.toolchains) {
         if target != &toolchain.target {

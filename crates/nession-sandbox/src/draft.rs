@@ -363,10 +363,10 @@ mod tests {
     fn a_composition_replaces_access_and_refuses_both_owners() {
         let digest = format!("sha256:{}", "a".repeat(64));
         let composition = SandboxFilesystemComposition {
-            base: nession_protocol::contracts::sandbox::v1::SandboxImageRef {
+            base: Some(nession_protocol::contracts::sandbox::v1::SandboxImageRef {
                 digest: digest.clone(),
                 source: "/cache/base.erofs".to_string(),
-            },
+            }),
             base_writable: false,
             workspace: Some(nession_protocol::contracts::sandbox::v1::SandboxWorkspace {
                 image: None,
@@ -388,7 +388,8 @@ mod tests {
                 .filesystem
                 .as_ref()
                 .and_then(|filesystem| filesystem.composition.as_ref())
-                .map(|value| value.base.digest.as_str()),
+                .and_then(|value| value.base.as_ref())
+                .map(|base| base.digest.as_str()),
             Some(digest.as_str())
         );
         assert!(policy
