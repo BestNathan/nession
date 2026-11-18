@@ -6,11 +6,12 @@
 listen_address = "0.0.0.0:9090"
 auth_token = ""
 path = "/mcp"
-# Staging HTTPS Ingress retains the original Host header; the exact public
-# hostname MUST be included here or valid external MCP clients will be blocked.
+# The NEW public Host must be allowed explicitly; remove the old multi-label
+# hostname from the GitHub Environment MCP_CONFIG_TOML, then reseal the config.
+# Edge TLS, Origin TLS and internal Service hosts are separate identities.
 # Keep a narrow list rather than turning off Host validation.
 allowed_hosts = [
-  "staging.mcp.nession.bestnathan.top",
+  "staging-mcp-nession.bestnathan.top",
   "nession-mcp-staging",
   "nession-mcp-staging.nession.svc",
   "nession-mcp-staging.nession.svc.cluster.local",
