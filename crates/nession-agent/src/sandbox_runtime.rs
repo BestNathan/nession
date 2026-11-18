@@ -296,56 +296,98 @@ impl SandboxRuntime {
         &self.settings
     }
 
-    /// Observed use of one managed Workspace (#3582).
+    /// Observed use of one managed Workspace (#3582, #3797).
     ///
-    /// This is the Agent Workspace Manager's deletion probe: it reports an
-    /// in-memory attachment, a mounted/leased physical Overlay, a live durable
-    /// owner lock, or a failed/orphaned state. Only a complete, unmounted and
-    /// unowned durable state returns `None`.
-    pub fn workspace_in_use(
+    /// This is the Agent Workspace Manager's deletion and detail probe: it
+    /// reports an in-memory attachment, a mounted/leased physical Overlay, a
+    /// live durable owner lock, or a failed/orphaned state. Only a complete,
+    /// unmounted and unowned durable state reports no reason.
+    ///
+    /// Consumers are Session names only. The observation never exposes a host
+    /// path, grant, execution directory or another consumer's runtime identity.
+    pub fn observe_workspace(
         &self,
         workspace_id: &str,
         workspace_directory: &std::path::Path,
-    ) -> Option<String> {
+    ) -> crate::workspace_manager::WorkspaceObservation {
+        let mut consumers = std::collections::BTreeSet::new();
+        let mut in_use = None;
+        let mut leased_executions = Vec::new();
         if let Ok(leases) = self.workspace_leases.lock() {
-            if leases
-                .values()
-                .any(|lease| lease.workspace_id() == workspace_id)
-            {
-                return Some("an execution holds an attachment lease".to_string());
+            for (execution_id, lease) in leases.iter() {
+                if lease.workspace_id() == workspace_id {
+                    in_use.get_or_insert_with(|| {
+                        "an execution holds an attachment lease".to_string()
+                    });
+                    leased_executions.push(execution_id.clone());
+                }
             }
         }
         // A surviving execution record is authoritative attachment evidence:
         // even when its physical Overlay could not be adopted, the Workspace
         // it was bound to must not be deleted underneath it.
         if let Ok(executions) = self.executions.lock() {
-            if executions
-                .values()
-                .any(|entry| record_uses_workspace(entry.record(), workspace_directory))
-            {
-                return Some("a live Sandbox execution is bound to this Workspace".to_string());
-            }
-        }
-        #[cfg(target_os = "linux")]
-        if let Some(manager) = &self.settings.overlay_manager {
-            if let Ok(workspace) = manager.resolve_workspace(workspace_directory) {
-                if let Some(status) = manager.lookup(&workspace) {
-                    if status.mounted
-                        || status.consumers > 0
-                        || status.state != nession_sandbox::mount::overlay::OverlayState::Idle
-                    {
-                        return Some(format!(
-                            "the Workspace has observed Overlay state ({:?})",
-                            status.state
-                        ));
+            for entry in executions.values() {
+                let record = entry.record();
+                let bound = record_uses_workspace(record, workspace_directory);
+                if bound
+                    || leased_executions
+                        .iter()
+                        .any(|execution_id| execution_id == &record.execution_id)
+                {
+                    if bound {
+                        in_use.get_or_insert_with(|| {
+                            "a live Sandbox execution is bound to this Workspace".to_string()
+                        });
                     }
-                }
-                if manager.probe_owner_held(&workspace) {
-                    return Some("a live process owns the durable Overlay".to_string());
+                    consumers.insert(record.session_name.clone());
                 }
             }
         }
-        None
+        let (mounted, overlay_in_use) = self.observe_overlay(workspace_directory);
+        if let Some(reason) = overlay_in_use {
+            in_use.get_or_insert(reason);
+        }
+        crate::workspace_manager::WorkspaceObservation {
+            in_use,
+            consumers: consumers.into_iter().collect(),
+            mounted,
+        }
+    }
+
+    /// The Overlay manager's observed mount/owner state, when this Agent has
+    /// a Sandbox runtime. A host without one observes nothing.
+    #[cfg(target_os = "linux")]
+    fn observe_overlay(&self, workspace_directory: &std::path::Path) -> (bool, Option<String>) {
+        let Some(manager) = &self.settings.overlay_manager else {
+            return (false, None);
+        };
+        let Ok(workspace) = manager.resolve_workspace(workspace_directory) else {
+            return (false, None);
+        };
+        let mut mounted = false;
+        let mut in_use = None;
+        if let Some(status) = manager.lookup(&workspace) {
+            mounted = status.mounted;
+            if status.mounted
+                || status.consumers > 0
+                || status.state != nession_sandbox::mount::overlay::OverlayState::Idle
+            {
+                in_use = Some(format!(
+                    "the Workspace has observed Overlay state ({:?})",
+                    status.state
+                ));
+            }
+        }
+        if manager.probe_owner_held(&workspace) {
+            in_use = Some("a live process owns the durable Overlay".to_string());
+        }
+        (mounted, in_use)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn observe_overlay(&self, _workspace_directory: &std::path::Path) -> (bool, Option<String>) {
+        (false, None)
     }
 
     /// Probe the host without creating an execution.
@@ -781,8 +823,12 @@ impl SandboxWorkspaceUse {
 }
 
 impl crate::workspace_manager::WorkspaceUseGuard for SandboxWorkspaceUse {
-    fn workspace_in_use(&self, workspace_id: &str, directory: &std::path::Path) -> Option<String> {
-        self.runtime.workspace_in_use(workspace_id, directory)
+    fn observe_workspace(
+        &self,
+        workspace_id: &str,
+        directory: &std::path::Path,
+    ) -> crate::workspace_manager::WorkspaceObservation {
+        self.runtime.observe_workspace(workspace_id, directory)
     }
 }
 
