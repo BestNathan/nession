@@ -13,7 +13,27 @@ const JOBS = [
 ];
 function deny(message) { throw Error('staging GHCR source: ' + message); }
 
+// Production Staging release validation stays strict across all four roles.
 export function verifyRelease(run, inventory, expectedSha) {
+  return verifyReleaseJobs(run, inventory, expectedSha, JOBS);
+}
+
+// A manual historical benchmark authenticates only the requested product(s).
+// This cannot be called by the deployment verifier's "wait" path.
+export function verifyMirrorRelease(run, inventory, expectedSha, selectedImage) {
+  const roles = ['server', 'agent', 'mcp', 'ui'];
+  if (selectedImage !== 'all' && !roles.includes(selectedImage)) {
+    deny('unsupported manual mirror image');
+  }
+  const selected = selectedImage === 'all' ? roles : [selectedImage];
+  const required = [
+    ...selected.flatMap(role => ['amd64', 'arm64'].map(arch => 'docker-' + role + '-' + arch)),
+    'merge', 'provenance',
+  ];
+  return verifyReleaseJobs(run, inventory, expectedSha, required);
+}
+
+function verifyReleaseJobs(run, inventory, expectedSha, requiredJobs) {
   if (!SHA.test(expectedSha) || run?.head_sha !== expectedSha ||
       run?.path?.split('@')[0] !== PATH ||
       run?.name !== 'Release / Staging Artifacts' ||
@@ -27,11 +47,11 @@ export function verifyRelease(run, inventory, expectedSha) {
     deny('invalid source workflow/branch/repo/SHA/attempt/result');
   }
   const jobs = inventory?.jobs;
-  if (!Array.isArray(jobs) || jobs.length < JOBS.length || jobs.length >= 100 ||
+  if (!Array.isArray(jobs) || jobs.length >= 100 ||
       (inventory.total_count != null && inventory.total_count !== jobs.length)) {
     deny('missing or truncated source jobs');
   }
-  for (const name of JOBS) {
+  for (const name of requiredJobs) {
     const found = jobs.filter(job => job.name === name &&
       job.run_id === run.id &&
       (job.run_attempt == null || job.run_attempt === run.run_attempt));
@@ -68,6 +88,50 @@ export function selfTest() {
     ]}));
   const inventory = {jobs, total_count: jobs.length};
   assert.equal(verifyRelease(run, inventory, sha).short_sha, 'aaaaaaa');
+  // The original 3-role Staging release predates standalone MCP. The
+  // diagnostic must accept a requested real role but never infer an absent one.
+  const historical = jobs.filter(job => !job.name.startsWith('docker-mcp-'));
+  const historicalInventory = {jobs: historical, total_count: historical.length};
+  assert.equal(verifyMirrorRelease(run, historicalInventory, sha, 'server').source_run_id, 79);
+  assert.equal(verifyMirrorRelease(run, historicalInventory, sha, 'agent').short_sha, 'aaaaaaa');
+  assert.equal(verifyMirrorRelease(run, historicalInventory, sha, 'ui').short_sha, 'aaaaaaa');
+  assert.equal(verifyMirrorRelease(run, inventory, sha, 'all').source_run_id, 79);
+  assert.throws(() => verifyMirrorRelease(run, historicalInventory, sha, 'mcp'),
+    /missing successful original job docker-mcp-amd64/);
+  assert.throws(() => verifyMirrorRelease(run, historicalInventory, sha, 'all'),
+    /missing successful original job docker-mcp-amd64/);
+  assert.throws(() => verifyRelease(run, historicalInventory, sha),
+    /missing successful original job docker-mcp-amd64/);
+  for (const badRole of ['unknown', '', undefined, '../server']) {
+    assert.throws(() => verifyMirrorRelease(run, inventory, sha, badRole),
+      /unsupported manual mirror image/);
+  }
+  for (const corrupted of [
+    {jobs: historical.filter(j => j.name !== 'docker-server-amd64')},
+    {jobs: historical.map(j => j.name === 'docker-server-arm64'
+      ? {...j, conclusion: 'failure'} : j)},
+    {jobs: historical.map(j => j.name === 'docker-server-amd64'
+      ? {...j, run_id: 80} : j)},
+    {jobs: historical.map(j => j.name === 'docker-server-amd64'
+      ? {...j, run_attempt: 2} : j)},
+    {jobs: historical.map(j => j.name === 'merge'
+      ? {...j, steps: []} : j)},
+    {jobs: historical.map(j => j.name === 'provenance'
+      ? {...j, steps: []} : j)},
+  ]) {
+    assert.throws(() => verifyMirrorRelease(run,
+      {...corrupted, total_count: corrupted.jobs.length}, sha, 'server'));
+  }
+  for (const bad of [
+    {head_sha: 'b'.repeat(40)}, {head_branch: 'main'},
+    {path: '.github/workflows/foreign.yml'}, {name: 'Forged Release'},
+    {event: 'pull_request'}, {status: 'in_progress'}, {conclusion: 'failure'},
+    {run_attempt: 2}, {repository: {full_name: 'other/nession'}},
+    {head_repository: {full_name: 'other/nession'}},
+  ]) {
+    assert.throws(() => verifyMirrorRelease({...run, ...bad},
+      historicalInventory, sha, 'server'));
+  }
   for (const bad of [
     {head_sha: 'b'.repeat(40)}, {head_branch: 'main'},
     {path: '.github/workflows/foreign.yml'}, {name: 'Forgery'},
@@ -91,12 +155,21 @@ async function main() {
   const command = process.argv[2];
   if (command === 'self-test') { selfTest(); return; }
   const sourceSha = process.argv[3];
-  if (command !== 'wait' || !SHA.test(sourceSha) ||
-      process.env.GITHUB_REPOSITORY !== REPO ||
-      process.env.GITHUB_REF !== 'refs/heads/staging' ||
-      process.env.GITHUB_SHA !== sourceSha ||
-      !process.env.GH_TOKEN) {
-    deny('invalid trusted execution or usage: self-test | wait <full-sha>');
+  const selectedImage = process.argv[4];
+  // A manual main-owned diagnostic can inspect a historical, authenticated
+  // Staging release but may not deploy it or claim a current Staging identity.
+  const staged = command === 'wait';
+  const diagnostic = command === 'verify-mirror';
+  const trustedContext = staged
+    ? process.env.GITHUB_REF === 'refs/heads/staging' &&
+      process.env.GITHUB_SHA === sourceSha
+    : diagnostic && process.env.GITHUB_REF === 'refs/heads/main' &&
+      process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+  if ((!staged && !diagnostic) || !SHA.test(sourceSha) ||
+      process.env.GITHUB_REPOSITORY !== REPO || !trustedContext ||
+      !process.env.GH_TOKEN || !process.env.GITHUB_OUTPUT ||
+      (staged && selectedImage !== undefined)) {
+    deny('invalid trusted execution or usage: self-test | wait <full-sha> | verify-mirror <full-sha> <image>');
   }
   const api = async route => {
     const response = await fetch('https://api.github.com/repos/' + REPO + route, {
@@ -111,7 +184,7 @@ async function main() {
   };
   // This independent job can wait while the GHCR-only build proceeds. A failed
   // or absent source cannot be laundered into a successful ACR/GitOps receipt.
-  for (let attempt = 1; attempt <= 240; attempt++) {
+  for (let attempt = 1; attempt <= (diagnostic ? 1 : 240); attempt++) {
     const body = await api('/actions/workflows/release-staging.yml/runs?head_sha=' +
       sourceSha + '&per_page=100');
     if (!Array.isArray(body.workflow_runs) || body.total_count > 100) {
@@ -137,16 +210,28 @@ async function main() {
         api('/actions/runs/' + selected.id +
           '/attempts/' + selected.run_attempt + '/jobs?per_page=100'),
       ]);
-      const verified = verifyRelease(run, jobs, sourceSha);
-      const branch = await api('/branches/staging');
-      if (branch.commit?.sha !== sourceSha) {
-        deny('Staging moved to another SHA; refuse a stale rollout');
+      const verified = diagnostic
+        ? verifyMirrorRelease(run, jobs, sourceSha, selectedImage)
+        : verifyRelease(run, jobs, sourceSha);
+      if (staged) {
+        const branch = await api('/branches/staging');
+        if (branch.commit?.sha !== sourceSha) {
+          deny('Staging moved to another SHA; refuse a stale rollout');
+        }
       }
       fs.appendFileSync(process.env.GITHUB_OUTPUT,
+        'source_sha=' + verified.source_sha + '\n' +
         'short_sha=' + verified.short_sha + '\n' +
-        'source_run_id=' + verified.source_run_id + '\n');
-      console.log('TRUSTED_STAGING_GHCR_V1 ' + JSON.stringify(verified));
+        'source_run_id=' + verified.source_run_id + '\n' +
+        'source_run_attempt=' + verified.source_run_attempt + '\n');
+      console.log((diagnostic ? 'TRUSTED_MAC_MIRROR_SOURCE_V1 ' :
+        'TRUSTED_STAGING_GHCR_V1 ') + JSON.stringify({
+          ...verified, ...(diagnostic ? {selected_image: selectedImage} : {}),
+        }));
       return;
+    }
+    if (diagnostic) {
+      deny('no completed authenticated Staging GHCR release for source SHA');
     }
     if (attempt % 8 === 1) {
       console.log('Waiting for GHCR release ' + sourceSha.slice(0, 7));
