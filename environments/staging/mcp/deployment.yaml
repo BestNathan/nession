@@ -41,8 +41,7 @@ spec:
               value: /etc/nession/mcp.toml
           volumeMounts:
             - name: mcp-config
-              mountPath: /etc/nession/mcp.toml
-              subPath: mcp.toml
+              mountPath: /etc/nession
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
