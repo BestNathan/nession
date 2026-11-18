@@ -6,6 +6,9 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openWebBuildHistory(page: Page): Promise<void> {
   await page.goto('/#/fixture/workspace?capability=sandbox&images=buildhistory');
+  // A hash-only goto to the same URL does not reload; force a fresh fixture
+  // state so each viewport starts with the unfiltered history.
+  await page.reload();
   await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
   await page.getByTestId('sandbox-section-images').click();
   await expect(page.getByTestId('images-panel')).toBeVisible();
