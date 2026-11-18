@@ -50,7 +50,9 @@ pub const PROJECT_ID_PREFIX: &str = "project-";
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSource {
+    /// Repository the Project declares; checked out by a separate capability.
     pub repository_url: String,
+    /// Branch name or full commit SHA the Project declares.
     #[serde(rename = "ref")]
     pub reference: String,
 }
@@ -63,7 +65,9 @@ pub struct ProjectSource {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectLocation {
+    /// The Agent node that owns the referenced directory.
     pub agent_id: String,
+    /// Absolute, user-owned directory path on that Agent.
     pub path: String,
 }
 
@@ -72,6 +76,7 @@ pub struct ProjectLocation {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSessionDefaults {
+    /// Preferred shell reference for new Sessions, when the Project declares one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
     /// Server env file names applied at create time when the request selects
@@ -79,6 +84,7 @@ pub struct ProjectSessionDefaults {
     /// resulting binding belongs to the Session, not the Project.
     #[serde(default)]
     pub env_profile_ids: Vec<String>,
+    /// Preferred Sandbox policy reference for new Sessions, when declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_policy_ref: Option<String>,
 }
@@ -88,14 +94,20 @@ pub struct ProjectSessionDefaults {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
+    /// Stable Server-minted identity (`project-<uuid>`).
     pub project_id: String,
+    /// Human-readable Project name.
     pub name: String,
+    /// Optional free-text description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Optional Git source declaration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ProjectSource>,
+    /// Existing Locations the Project declares; may be empty.
     #[serde(default)]
     pub locations: Vec<ProjectLocation>,
+    /// Optional Session presets applied at create time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_defaults: Option<ProjectSessionDefaults>,
     /// Immutable digest reference to an EROFS image artifact.
@@ -104,7 +116,9 @@ pub struct Project {
     /// the blob bytes, and deleting the Project never deletes shared content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_digest: Option<String>,
+    /// Unix timestamp (seconds) when the Server created the declaration.
     pub created_at: u64,
+    /// Unix timestamp (seconds) of the last declaration update.
     pub updated_at: u64,
 }
 

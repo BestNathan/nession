@@ -554,6 +554,15 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
         .expect("text content");
     assert!(text.contains("standalone"), "{text}");
 
+    // Project Tools are Server-owned too: a standalone Agent lists them and
+    // fails truthfully rather than projecting Project metadata from local tmux.
+    let projects = call_tool(addr, &session, "nession_server_project_list", json!({})).await;
+    assert_eq!(projects["isError"], true, "{projects}");
+    let text = projects["content"][0]["text"]
+        .as_str()
+        .expect("text content");
+    assert!(text.contains("standalone"), "{text}");
+
     let killed = call_tool(
         addr,
         &session,
@@ -741,7 +750,7 @@ async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
 }
 
 /// `#3778` SC-01: the Agent's explicit provider composition reaches the shared
-/// endpoint with its typed contract intact, while the eleven baseline Tools
+/// endpoint with its typed contract intact, while the fifteen baseline Tools
 /// keep their exact advertised definitions.
 #[tokio::test]
 async fn agent_mcp_composes_an_extension_tool_into_the_shared_catalog() {

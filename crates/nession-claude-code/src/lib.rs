@@ -10,6 +10,7 @@ pub mod memory;
 pub mod messages;
 pub(crate) mod payload;
 pub mod plugin;
+pub mod process;
 pub mod protocol;
 pub mod records;
 pub mod scanner;
