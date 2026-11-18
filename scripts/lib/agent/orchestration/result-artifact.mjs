@@ -359,6 +359,7 @@ export function validateAuthenticatedAgentReceipt(evidence){
 // RESULT; consumers still independently verify the Run, Artifact and writer.
 export function composeQwenDeveloperResult({
   receipt,worker,claim,originalResult,resultJsonBytes,readback,publisherRunId,
+  signedSourceSha,
 }){
   const validSha=x=>typeof x==='string'&&HEX40.test(x);
   const validDigest=x=>typeof x==='string'&&/^sha256:[a-f0-9]{64}$/.test(x);
@@ -369,8 +370,12 @@ export function composeQwenDeveloperResult({
      claim.inputs.agent_id!=='dev-qwen-01'||
      claim.inputs.action_id!==receipt.action_id||
      Number(claim.inputs.issue_number)!==receipt.issue||
+     // A Store-signed Implement may target a trusted ancestor of the
+     // Worker workflow main SHA. Do not conflate the two identities.
+     // The Publisher's immutable preflight Intent binds the exact source.
      !validSha(claim.inputs.input_sha)||
-     claim.inputs.input_sha!==worker?.head_sha||
+     !validSha(signedSourceSha)||
+     claim.inputs.input_sha!==signedSourceSha||
      !validSha(receipt.worker_sha)||
      !positive(receipt.issue)||!HEX64.test(receipt.action_id??'')||
      !positive(worker?.id)||worker.id!==receipt.run_id||
