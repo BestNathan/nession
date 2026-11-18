@@ -11,7 +11,7 @@ The previously deployed Kubernetes certificate was self-signed and issued for
 Host allowlist and certificate must be replaced via protected Secrets before
 reactivating this Ingress. Ordinary clients must receive a trusted TLS chain.
 Never disable certificate verification to make a bearer-authenticated MCP
-client connect. This activation is not evidence that DNS, externally trusted
+client connect. A staged manifest is not evidence that DNS, externally trusted
 TLS, HTTP redirect, or authenticated MCP requests have passed live tests.
 Production, preprod, and staging-01 are unchanged.
 This service is not the embedded `/mcp` route inside Server/Agent containers.
@@ -37,18 +37,18 @@ certificate PEM** (not the SSH public key used by Argo CD, and never the
 controller private key). See `docs/engineering/sealed-secret-generation.md`
 on `main`.
 
-First merge this GitOps overlay PR, then merge the main-owned
-`Deploy / Seal GitOps Secret` workflow PR. Its restricted main-merge bootstrap
-seals `staging/MCP_CONFIG_TOML` automatically after GitHub Environment approval;
-manual dispatch with environment `staging` and secret `MCP_CONFIG_TOML` is also
-available for subsequent rotations. It seals
-the config **offline**, commits `sealed-secret.json` to this overlay and
-adds the matching `resources` entry automatically. The existing cluster
-Sealed Secrets Controller then generates the ordinary Kubernetes Secret
-`nession-mcp-config-staging` (key `mcp.toml`). The new MCP pod may be
-Pending until that first encrypted resource is reconciled. There is no need
-for the workflow to have `kubectl`, Kubernetes credentials, or the controller
-private key.
+The main-owned `Deploy / Seal GitOps Secret` workflow already exists and
+has successfully published both encrypted resources to this overlay. For the
+new hostname, after the source registry update is merged to `main`, edit
+the existing private `staging/MCP_CONFIG_TOML` and
+`staging/MCP_TLS_PEM_BUNDLE` GitHub Environment Secrets independently, and
+run the workflow manually once per selected target to reseal their content.
+The existing Sealed Secrets Controller generates the ordinary Kubernetes
+Secrets `nession-mcp-config-staging` (key `mcp.toml`) and
+`nession-mcp-staging-tls` (keys `tls.crt`/`tls.key`). No workflow
+Kubernetes credentials or controller private key are required. The main-push
+bootstrap of the producer **only** seals `MCP_CONFIG_TOML` and cannot replace
+the required manual PEM/TLS rotation.
 
 Start from the checked-in `mcp.example.toml`; set separate nonempty inbound
 and staging Server backend tokens. The Server credential must be **rotated**
@@ -69,7 +69,7 @@ the MCP Service port 9090. The supported external endpoint is:
 https://staging-mcp-nession.bestnathan.top/mcp
 ```
 
-**Before claiming the public MCP endpoint is ready (GitOps activation alone is NOT sufficient):**
+**Before reactivating the public MCP endpoint (GitOps config alone is NOT sufficient):**
 
 1. In Cloudflare's `bestnathan.top` zone create/verify the **first-level**
    proxied record (one DNS label `staging-mcp-nession`) and its matching
@@ -84,8 +84,7 @@ https://staging-mcp-nession.bestnathan.top/mcp
    secret`, when GitOps owns this Secret. First reconcile any existing
    cert-manager/Higress/nitops owner of that exact name to avoid two writers.
    Once the #3945 registered-hostname change is merged to main, put the
-   renewed PEM bundle (leaf, ordered
-   intermediates, then matching unencrypted private key) into GitHub
+   renewed PEM bundle (leaf, ordered intermediates, then matching unencrypted private key) into GitHub
    Environment `staging` Secret `MCP_TLS_PEM_BUNDLE`, and manually run
    `Deploy / Seal GitOps Secret` selecting `staging/MCP_TLS_PEM_BUNDLE`.
    Use a publicly trusted certificate, or a Cloudflare Origin CA certificate
@@ -103,8 +102,9 @@ https://staging-mcp-nession.bestnathan.top/mcp
    allowed hosts. Verify **both** Kubernetes Secrets exist after Argo CD/
    Sealed Secrets reconcile: `nession-mcp-config-staging` and
    `nession-mcp-staging-tls`. Verify actual TLS SAN and that the running
-   pod sees the new config; reload/restart the Deployment if necessary. Also verify DNS and actual publicly trusted
-   TLS from an external client. Host allowlist must include the public
+   pod sees the new config; reload/restart the Deployment if necessary.
+   Verify DNS, external Edge HTTPS trust, and origin TLS independently.
+   Host allowlist must include the public
    hostname, and inbound/outbound bearer tokens must differ.
 4. **After all prior steps and Cloudflare Edge/Origin TLS trust pass**, add
    `ingress.yaml` to `kustomization.yaml` by a separate reviewed activation
