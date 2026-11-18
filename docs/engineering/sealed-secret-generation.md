@@ -72,7 +72,7 @@ any pre-existing cert-manager/ACME/Higress certificate owner.
    multiline TOML config text directly, using the template in
    gitops/environments/staging/mcp/mcp.example.toml. It must use distinct
    nonempty MCP inbound and Server backend tokens; include the exact
-   staging.mcp.nession.bestnathan.top Host; set 0.0.0.0:9090 and the actual
+   staging-mcp-nession.bestnathan.top Host; set 0.0.0.0:9090 and the actual
    staging Server endpoint. No JSON quotes, escaping, or base64.
 4. Merge MCP GitOps overlay PR #3905, then merge the workflow PR #3913.
    A new MCP Pod may remain pending until its missing Secret is reconciled.
@@ -157,7 +157,7 @@ PKCS#1 RSA/EC keys are also supported. The original bundle must contain only
 certificate blocks followed by exactly one matching unencrypted private key.
 Do not put private keys in Git, Issues, comments or workflow input text.
 
-The loader checks hostname SAN staging.mcp.nession.bestnathan.top, cert validity
+The loader checks hostname SAN staging-mcp-nession.bestnathan.top, cert validity
 (now and more than seven days remaining), key match, and ordered intermediate
 chain signatures. It rejects unexpected PEM blocks, duplicate or encrypted
 keys, wrong hostname, bad chain, expired/soon-expiring certificates and
@@ -199,3 +199,12 @@ kubectl -n nession get ingress nession-mcp-staging
 
 Avoid dumping the Kubernetes TLS Secret with -o yaml, which exposes
 base64-decodable private-key material.
+
+## One-level Cloudflare hostname migration (#3945)
+
+The staging MCP endpoint is now `https://staging-mcp-nession.bestnathan.top/mcp`.
+The old multi-label `staging.mcp.nession.bestnathan.top` DNS name is no longer allowed. Cloudflare Universal SSL on the `bestnathan.top` zone ordinarily covers first-level hosts such as `staging-mcp-nession.bestnathan.top`, not the old multi-level hostname. A Cloudflare DNS record and its active Edge certificate must still be verified independently.
+
+Migration order: (1) stage the updated GitOps Ingress and temporarily exclude `ingress.yaml`; (2) after the registered hostname check above reaches `main`, replace Environment Secret `staging/MCP_TLS_PEM_BUNDLE` with a new trusted fullchain PEM and matching private key for the **new** SAN, then manually run `Deploy / Seal GitOps Secret` selecting that target; (3) update `staging/MCP_CONFIG_TOML` with `allowed_hosts` including the new public hostname and no old hostname, keeping the private Service host entries and separate inbound/backend tokens, then seal it with the same workflow's `MCP_CONFIG_TOML` selection; (4) verify the **actual Kubernetes TLS certificate SAN and MCP config** (and pod config reload/restart), Cloudflare DNS, Edge TLS and origin trust; (5) enable the staged Ingress via a separate GitOps PR only after preflight. Never include TLS private keys or bearer tokens in an issue/PR/log, and never use insecure TLS verification with auth tokens.
+
+A `kubernetes.io/tls` Secret existing is not proof its SAN changed. The current old self-signed certificate cannot satisfy Cloudflare Full (strict) origin verification. Use a publicly trusted certificate (or an explicitly Cloudflare-trusted Origin CA certificate for proxied-only traffic) and verify the presented Edge certificate and origin TLS separately. Manual Certbot DNS challenge does not auto-renew without automation.
