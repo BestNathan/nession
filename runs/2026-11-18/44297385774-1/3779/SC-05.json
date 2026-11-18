@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "82bc4a457228659e6bc7d720a6ea91183c875161f77a649dab5fe57e59a56891",
+  "run_id": 44297385774,
+  "run_attempt": 1,
+  "issue": 3779,
+  "criterion": "SC-05",
+  "criterion_text": "The six Tools enforce target/Tool permissions and typed input/output schemas across Agent, Server and Standalone hosting; current Claude Hook binding remains a safe fallback until verified replacement and the existing UI/Protocol behavior does not regress.",
+  "stage": "staging",
+  "target_sha": "0aeae3538720239f271ad71e2bb1b7b1450f69c6",
+  "contract_sha256": "72f43c6842f09676bd559c020c6187ad69329f8c99d80bc452734ce04dcd63a8",
+  "case_revision": "0aeae3538720239f271ad71e2bb1b7b1450f69c6",
+  "case_tree_sha": "1574e09b728d3a15799724356007c85d8baf3d4a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-18T11:47:14.147Z",
+  "finished_at": "2026-11-18T11:49:03.747Z",
+  "duration_ms": 109600,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The six Claude Tools enforce explicit targets and typed schemas; their contributed-Tool routing is proven across Agent, Server and Standalone hosts; the reused conversation/transcript contracts and Hook binding fallback show no regression.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0aeae3538720239f271ad71e2bb1b7b1450f69c6: each of the six Claude Tools refused a foreign Agent/Session target and advertised a closed typed input contract with its Unit-owned output schema"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 0aeae3538720239f271ad71e2bb1b7b1450f69c6: the Agent catalog advertised all six Tools and the three read Tools executed the existing conversation/transcript Units against a real Session (empty ready list, exact-id not_found, no substituted conversation, no transcript path)"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 0aeae3538720239f271ad71e2bb1b7b1450f69c6: the contributed-Tool routing contract carried the Tools to the named owner on Server-embedded and Standalone hosts, wrong Agent/offline owner/unknown owner-specific Session failed closed with no fallback, and the direct P2P surface refused a foreign Agent and an unadvertised Tool"
+        },
+        {
+          "type": "runtime",
+          "value": "exact SHA 0aeae3538720239f271ad71e2bb1b7b1450f69c6: existing conversation/transcript Protocol contracts (identity, pagination, unknown-record placeholders, no path) and the SessionStart/SessionEnd Hook binding fallback remained green"
+        }
+      ],
+      "duration_ms": 103700,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44297385774,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0aeae3538720239f271ad71e2bb1b7b1450f69c6",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44297385774",
+    "record_path": "runs/2026-11-18/44297385774-1/3779/SC-05.json",
+    "source_result_sha256": "169e5b3fd540db2e3ef51c1f985b88bbf2a6f77ac96eba674af35c47c3fd8ddb"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44297385774-1",
+    "sha256": "169e5b3fd540db2e3ef51c1f985b88bbf2a6f77ac96eba674af35c47c3fd8ddb",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44297385774",
+    "durability": "time-limited; object archival not configured"
+  }
+}
