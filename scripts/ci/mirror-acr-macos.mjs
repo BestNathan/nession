@@ -233,8 +233,13 @@ export async function execute({sourceSha, image, sourceRunId, sourceRunAttempt,
     try {
       // Each regctl process reads an isolated configuration: retrying a
       // smaller chunk in one role cannot race another role's registry setting.
-      fs.copyFileSync(process.env.REGCTL_CONFIG, roleConfig);
-      fs.chmodSync(roleConfig, 0o600);
+      // regctl may persist login credentials in REGCTL_CONFIG or in
+      // DOCKER_CONFIG; both stores are job-private. A missing regctl file is
+      // valid, and registry set can initialize the per-role config.
+      if (fs.existsSync(process.env.REGCTL_CONFIG)) {
+        fs.copyFileSync(process.env.REGCTL_CONFIG, roleConfig);
+        fs.chmodSync(roleConfig, 0o600);
+      }
       const roleEnv = {...process.env, REGCTL_CONFIG: roleConfig};
       const sourceDigestResult = await measure(report, 'source_digest', () =>
         must(['image', 'digest', sourceTag]));
