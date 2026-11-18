@@ -2,10 +2,12 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import {bindQwenDeveloper} from './qwen-developer-policy.mjs';
 import {validateQwenNativeTransfer,validateQwenStoredNativeBundle}
   from './qwen-development-resume.mjs';
 
+process.env.RUNNER_TEMP=fs.realpathSync(process.env.RUNNER_TEMP || '/tmp');
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const admission={authorized:true,issue:2274,role:'developer',
   agent_id:'dev-qwen-01',provider:'claude-code',
@@ -21,7 +23,7 @@ const plan=bindQwenDeveloper(admission,registry,env,{cliVersion:'2.1.34'});
 const metadata={session_id:'550e8400-e29b-41d4-a716-446655440000',
   source_sha:admission.input_sha,harness_digest:plan.harness_digest,
   project_key:'-workspace',
-  cwd_sha256:createHash('sha256').update('/workspace').digest('hex'),
+  cwd_sha256:createHash('sha256').update(path.join(process.env.RUNNER_TEMP,'qwen-source')).digest('hex'),
   run_id:88001,attempt:1,cli_version:'2.1.34'};
 const record={schema_version:1,kind:'claude-native-encrypted-snapshot',
   metadata,ciphertext_sha256:'f'.repeat(64)};
