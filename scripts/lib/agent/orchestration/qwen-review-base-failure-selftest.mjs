@@ -28,8 +28,8 @@ const jobs={total_count:3,jobs:[
   job('review','skipped'),job('notify-metrics','skipped'),
 ]};
 const artifacts={total_count:0,artifacts:[]};
-const log='2026-11-19T00:46:22Z ##[error]Reviewer admission prep: unsafe PR base file\\n'+
-  '2026-11-19T00:46:22Z ##[error]Process completed with exit code 1.\\n';
+const log='2026-11-19T00:46:22Z ##[error]Reviewer admission prep: unsafe PR base file\n'+
+  '2026-11-19T00:46:22Z ##[error]Process completed with exit code 1.\n';
 const proof=attestQwenReviewerBaseFailure(run,jobs,artifacts,log);
 assert.deepEqual(proof,{verified:true,...f});
 for(const [r,j,a,l] of [
@@ -137,13 +137,13 @@ try{
   // readIssueWorkflowState validates its persisted version and SHA.
   const dir=path.join(work,'workflows/issues/'+f.issue+'/states');
   fs.mkdirSync(dir,{recursive:true});
-  const data=JSON.stringify(state,null,2)+'\\n';
+  const data=JSON.stringify(state,null,2)+'\n';
   const {createHash}=await import('node:crypto');
   const sum=createHash('sha256').update(data).digest('hex');
   fs.writeFileSync(path.join(dir,'00000012.json'),data);
   fs.writeFileSync(path.join(work,'workflows/issues/'+f.issue+'/head.json'),
     JSON.stringify({version:12,path:'workflows/issues/'+f.issue+
-      '/states/00000012.json',sha256:sum},null,2)+'\\n');
+      '/states/00000012.json',sha256:sum},null,2)+'\n');
   git('add','-A');git('commit','-m','authenticated existing Store v12');
   git('push','origin','agent-store');
   const recovered=recoverAttestedQwenBaseReviewFailure({
