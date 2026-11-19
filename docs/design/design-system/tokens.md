@@ -8,6 +8,11 @@ Executable tokens, codegen, and lint live in [#467](https://github.com/BestNatha
 
 Tokens encode reusable visual/state values. They do **not** define information architecture or decide capability presence.
 
+Spacing **numbers** live in this token architecture; the meaning of a spacing
+**relationship** (which parent owns the gap or inset, and when zero gap is
+intentional) lives in [Spatial Relationships / Content Rhythm](spatial-relationships.md).
+Do not introduce a second token family just to encode every neighboring pair.
+
 `Sessions ← Terminal → Workspace`, contextual capability emergence, or whether a control is visible are product/interaction rules. They belong in product model, IA, interaction, pattern, and contract layers — not in color/spacing token names.
 
 ## Layer stack
