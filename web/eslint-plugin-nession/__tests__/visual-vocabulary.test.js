@@ -29,6 +29,9 @@ const TERMINAL_VIEWPORT = '/proj/web/src/product/terminal/components/TerminalVie
 
 test('generated metadata makes the --nession-* namespace machine-readable', () => {
   assert.ok(lintMetadata.cssVariables.includes('--nession-background'));
+  // Keep the Staging-only rhythm token's generated-vocabulary coverage (#4050).
+  assert.ok(lintMetadata.cssVariables.includes('--nession-rhythm-inline'));
+  assert.ok(lintMetadata.cssVariables.includes('--nession-panel-padding'));
   assert.ok(lintMetadata.cssVariables.includes('--nession-radius-control'));
   assert.ok(lintMetadata.legacyCssVariables.includes('--background'));
   assert.equal(
@@ -41,7 +44,7 @@ test('generated metadata makes the --nession-* namespace machine-readable', () =
   );
 });
 
-test('Nession-owned recipes are not exempted as if they were upstream shadcn (#4050)', () => {
+test('Nession-owned recipes are not exempted as if they were upstream shadcn (#4050, #4098)', () => {
   assert.equal(isForeignAdapter(NESSION_RECIPE), false);
   assert.equal(isForeignAdapter('/proj/web/src/components/ui/configuration-form.tsx'), false);
   assert.equal(isForeignAdapter('/proj/web/src/components/ui/operation-surface.tsx'), false);
@@ -207,7 +210,7 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         filename: MARKDOWN_ADAPTER,
       },
       {
-        code: 'export const cls = "flex gap-[var(--nession-rhythm-inline)] text-muted-foreground";',
+        code: 'export const cls = "flex gap-[var(--nession-panel-padding)] text-muted-foreground";',
         filename: NESSION_RECIPE,
       },
       {
