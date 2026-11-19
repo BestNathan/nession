@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "3264971352f9741a1f4c3a403bdfc6c82678fca809436392d11a87dce8c0deeb",
+  "run_id": 44573072959,
+  "run_attempt": 1,
+  "issue": 4081,
+  "criterion": "SC-04",
+  "criterion_text": "— MCP host equivalence. The same valid Create input through Agent-embedded, Server-embedded, and standalone routing results in equivalent initial persisted Session metadata on the explicitly targeted Agent; unavailable/unauthorized targets fail without falling back to the MCP host Agent.",
+  "stage": "staging",
+  "target_sha": "5cd4477378b8360cce2b9724dd989516b1e24ed2",
+  "contract_sha256": "8917eb35541123ab0ca8a83b0ae3496ea55e421c9a3fb84f970a72840e78286d",
+  "case_revision": "5cd4477378b8360cce2b9724dd989516b1e24ed2",
+  "case_tree_sha": "d2efeee75f702d9f74c8e97db9ddfe52c0a236fe",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T17:08:40.343Z",
+  "finished_at": "2026-11-19T17:08:42.529Z",
+  "duration_ms": 2186,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "hosts.cjs",
+      "result": "Pass",
+      "summary": "Every hosting mode commits the same initial Session metadata on the explicit target",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-mcp at exact SHA 5cd4477378b8360cce2b9724dd989516b1e24ed2: one real Agent backed all four MCP hosting modes; each create with the same initial metadata persisted the same normalized revision-1 record on the targeted Agent, and a create naming a different Agent was refused with no Session created on the host Agent"
+        }
+      ],
+      "duration_ms": 2165,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44573072959,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5cd4477378b8360cce2b9724dd989516b1e24ed2",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44573072959",
+    "record_path": "runs/2026-11-19/44573072959-1/4081/SC-04.json",
+    "source_result_sha256": "fe5e80b20361aaeb74d5730720655c2e70823c49fdc6f76345886033b822d823"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44573072959-1",
+    "sha256": "fe5e80b20361aaeb74d5730720655c2e70823c49fdc6f76345886033b822d823",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44573072959",
+    "durability": "time-limited; object archival not configured"
+  }
+}

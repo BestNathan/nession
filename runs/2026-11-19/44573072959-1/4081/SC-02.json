@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "dbbb1ae85c06129f6c9e949b15ae04f8198107f0d46bf06efc2e310ce84aad54",
+  "run_id": 44573072959,
+  "run_attempt": 1,
+  "issue": 4081,
+  "criterion": "SC-02",
+  "criterion_text": "— Creation-time persistence and visibility. In an isolated Agent+tmux fixture, a single create request with title/description/tags succeeds; immediate Get and list-summary readback on the returned incarnation report the same normalized initial context, persisting across a metadata-store/Agent restart. Creating without metadata still produces the expected empty revision-0 metadata.",
+  "stage": "staging",
+  "target_sha": "5cd4477378b8360cce2b9724dd989516b1e24ed2",
+  "contract_sha256": "8917eb35541123ab0ca8a83b0ae3496ea55e421c9a3fb84f970a72840e78286d",
+  "case_revision": "5cd4477378b8360cce2b9724dd989516b1e24ed2",
+  "case_tree_sha": "81be8510e1f780d0b511d5fd852e07d1e59dd126",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T17:07:10.306Z",
+  "finished_at": "2026-11-19T17:08:20.635Z",
+  "duration_ms": 70329,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "owner.cjs",
+      "result": "Pass",
+      "summary": "Create-time initial metadata is committed, durable across restart and defaults to revision 0",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-agent at exact SHA 5cd4477378b8360cce2b9724dd989516b1e24ed2: a create with title/description/tags committed normalized revision 1 for its own tmux incarnation; a fresh metadata store over the same Session read the same record; a create without metadata produced the confirmed revision-0 record"
+        }
+      ],
+      "duration_ms": 40990,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "hosts.cjs",
+      "result": "Pass",
+      "summary": "Immediate Get and list-summary readback observe the committed initial context",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-mcp at exact SHA 5cd4477378b8360cce2b9724dd989516b1e24ed2: immediately after one create with initial title/description/tags, Get and the list summary reported the same normalized revision-1 context and durable instance identity on every host"
+        }
+      ],
+      "duration_ms": 29297,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44573072959,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5cd4477378b8360cce2b9724dd989516b1e24ed2",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44573072959",
+    "record_path": "runs/2026-11-19/44573072959-1/4081/SC-02.json",
+    "source_result_sha256": "5aec854c8dd6b6aa77edc881b85c2019a960ad68f38f7079f73391ffcb9e380d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44573072959-1",
+    "sha256": "5aec854c8dd6b6aa77edc881b85c2019a960ad68f38f7079f73391ffcb9e380d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44573072959",
+    "durability": "time-limited; object archival not configured"
+  }
+}
