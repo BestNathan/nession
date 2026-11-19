@@ -50,6 +50,24 @@ test('immutable original source is grandfathered, edited file with old values is
   assert.ok(rejectNewMetricDebt(FILE, edited, collectNonTokenSourceMetrics(edited, FILE), baseline).length > 0);
 });
 
+test('unowned local variables and dynamic Tailwind metrics cannot circumvent the Gate', () => {
+  const baseline = {schema_version: 1, files: {}};
+  const local = "export const cls = 'gap-[var(--nession-local-spacing)]';";
+  assert.deepEqual(
+    scanNonTokenStyleSource(local, FILE, baseline).map(x => x.kind),
+    ['untokenized-unowned-local-variable'],
+  );
+  const dynamic = 'export const cls = `gap-${density}`;';
+  assert.deepEqual(
+    scanNonTokenStyleSource(dynamic, FILE, baseline).map(x => x.kind),
+    ['untokenized-dynamic-visual-class'],
+  );
+  assert.deepEqual(
+    scanNonTokenStyleSource('export const cls = "gap-[var(--nession-rhythm-inline)]";', FILE, baseline),
+    [],
+  );
+});
+
 test('new files never inherit a legacy blob exemption', () => {
   assert.deepEqual(
     scanNonTokenStyleSource("export const c = 'gap-3';", FILE, {schema_version: 1, files: {}})
