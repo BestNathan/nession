@@ -757,11 +757,11 @@ function selfTest() {
   // #3247: prove the actual workflow job-if accepts the authenticated
   // post-deployment completion, not merely a copied JS approximation.
   assert.match(workflow,
-    /workflows: \[[^\n]*'Deploy \/ Staging ACR'[^\n]*\]/);
+    /workflows: \[[^\n]*'Deploy \/ Staging GHCR'[^\n]*\]/);
   const releaseWake = {
     event: 'push',
-    name: 'Deploy / Staging ACR',
-    path: '.github/workflows/deploy-staging-acr.yml',
+    name: 'Deploy / Staging GHCR',
+    path: '.github/workflows/deploy-staging-ghcr.yml',
     head_branch: 'staging',
     conclusion: 'success',
     repository: {full_name: 'BestNathan/nession'},
@@ -781,12 +781,12 @@ function selfTest() {
       needs: {'classify_pr': {result: 'success'}},
     }, {timeout: 1000});
   assert.equal(acceptsWake(releaseWake), true,
-    'successful verified ACR push must re-wake convergence');
+    'successful verified GHCR GitOps push must re-wake convergence');
   assert.equal(acceptsWake({...releaseWake, event: 'workflow_dispatch'}), true,
-    'independently retried verified ACR deployment must also wake convergence');
+    'independently retried verified GHCR GitOps deployment must also wake convergence');
   const refusedWake = [
     {event: 'schedule'},
-    {name: 'Deploy / Staging ACR (forged)'},
+    {name: 'Deploy / Staging GHCR (forged)'},
     {path: '.github/workflows/foreign.yml'},
     {head_branch: 'main'},
     {head_branch: 'integration/staging'},
@@ -811,7 +811,7 @@ function selfTest() {
   assert.equal(acceptsWake(releaseWake, {repository:'attacker/fork'}), false,
     'the wake must not execute in an unrelated repository');
   const deploy = [
-    'name: Deploy / Staging ACR', 'on:', '  push:',
+    'name: Deploy / Staging GHCR', 'on:', '  push:',
     "    branches: ['staging']", '  workflow_dispatch:',
     'jobs:', '  deploy-staging-gitops:', '    steps:',
     '      - run: ./scripts/gitops-commit.sh staging abc1234',
@@ -820,12 +820,12 @@ function selfTest() {
   assert.deepEqual(pushBranches(deploy.replace("['staging']", "\n      - staging\n      - integration/staging")),
     ['staging', 'integration/staging']);
   assert.deepEqual(discoverDeployBranches([
-    { file: 'deploy-staging-acr.yml', content: deploy },
+    { file: 'deploy-staging-ghcr.yml', content: deploy },
     { file: 'deploy-manual.yml', content: 'on:\n  workflow_dispatch:\njobs:\n  deploy-staging-gitops:\n    steps:\n      - run: ./scripts/gitops-commit.sh staging deadbeef' },
     { file: 'test.yml', content: deploy.replace('gitops-commit.sh staging', 'gitops-commit.sh production') },
-  ]), [{ branch: 'staging', deployment_workflows: ['deploy-staging-acr.yml'] }]);
+  ]), [{ branch: 'staging', deployment_workflows: ['deploy-staging-ghcr.yml'] }]);
   assert.deepEqual(discoverDeployBranches([
-    { file: 'deploy-staging-acr.yml', content: deploy },
+    { file: 'deploy-staging-ghcr.yml', content: deploy },
     { file: 'deploy-staging-01.yml', content: deploy
       .replace("['staging']", "['staging-01']")
       .replace('deploy-staging-gitops:', 'deploy-staging-01:')

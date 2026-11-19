@@ -38,13 +38,13 @@ on:
   # #3211/#3689: PR-native staging -> main promotion has exact-head PR
   # checks; wake on completion including failures to revoke stale status.
   # Only the independent canonical policy may publish qualified success.
-  # #3674: wake on successful post-mirror Staging deploy push only after
+  # #3674: wake on successful GHCR-driven Staging GitOps deploy push only after
   # release proof exists. This is NEVER approval; reconcile independently
   # re-attests exact HEAD checks, deployment and all source acceptance.
   # Wake only on completed checks for repository-owned immutable sync heads;
   # the trusted controller still revalidates every source and receipt.
   workflow_run:
-    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'Deploy / Staging ACR']
+    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'Deploy / Staging GHCR']
     types: [completed]
 
 permissions:
@@ -163,8 +163,8 @@ jobs:
             (
               (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
               github.event.workflow_run.head_branch == 'staging' &&
-              github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml' &&
-              github.event.workflow_run.name == 'Deploy / Staging ACR' &&
+              github.event.workflow_run.path == '.github/workflows/deploy-staging-ghcr.yml' &&
+              github.event.workflow_run.name == 'Deploy / Staging GHCR' &&
               github.event.workflow_run.repository.full_name == github.repository
             )
           )

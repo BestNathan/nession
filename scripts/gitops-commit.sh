@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gitops-commit.sh <env> <ref>
 #
-# Points staging at ACR and other environments at GHCR images {server,agent,ui}-<ref>.
+# All environments deploy GHCR images {server,agent,ui}-<ref> (#4032).
 # The staging-only standalone MCP overlay follows the same exact SHA as all
 # other staging roles; non-staging environments remain three-role deployments.
 # Pushes a deploy commit ("deploy(<env>): <ref>") to the gitops branch.
@@ -19,9 +19,6 @@ OWNER="${GITHUB_REPOSITORY_OWNER,,}"
 TOKEN="${GITHUB_TOKEN:?gitops-commit.sh needs GITHUB_TOKEN}"
 SOURCE_IMAGE="ghcr.io/${OWNER}/nession"
 TARGET_IMAGE="${SOURCE_IMAGE}"
-if [[ "${env}" == "staging" ]]; then
-  TARGET_IMAGE="crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession"
-fi
 
 # Production only ever ships released versions — the gitops-guard CI enforces
 # this post-push; refuse pre-push so a bad commit never lands at all.
@@ -30,24 +27,24 @@ if [ "$env" = "production" ]; then
     || { echo "refusing to write non-semver tag to production: $ref"; exit 1; }
 fi
 
-# Staging must not move desired state to an ACR tag until both platforms are
+# Staging must not move desired state to a GHCR tag until both platforms are
 # remotely readable. This also guards manual staging deploys, whose workflow
 # doesn't depend on the ACR mirror job.
 if [[ "${env}" == "staging" ]]; then
   for img in server agent ui mcp; do
     tag="${img}-${ref}"
-    # ACR can return HTTP 401 to raw curl manifest requests while the Docker
+    # GHCR can return HTTP 401 to raw curl manifest requests while the Docker
     # Registry challenge/token flow still permits anonymous image pulls.
     # Buildx performs that negotiation, just as Kubernetes containerd does.
     if ! manifest="$(docker buildx imagetools inspect --raw "${TARGET_IMAGE}:${tag}")"; then
-      echo "ACR image ${tag} unavailable; refusing to advance staging GitOps" >&2
+      echo "GHCR image ${tag} unavailable; refusing to advance staging GitOps" >&2
       exit 1
     fi
     if ! jq -e '
       [.manifests[]? | select(.platform.os == "linux") | .platform.architecture]
       | index("amd64") != null and index("arm64") != null
     ' <<< "${manifest}" >/dev/null; then
-      echo "ACR image ${tag} missing amd64 or arm64; refusing staging GitOps update" >&2
+      echo "GHCR image ${tag} missing amd64 or arm64; refusing staging GitOps update" >&2
       exit 1
     fi
   done
@@ -92,6 +89,15 @@ git -c user.name="github-actions[bot]" \
     commit -m "$msg"
 
 for i in $(seq 1 10); do
+  # Auto-deploy remains bound to the current protected staging SHA even
+  # if staging advances after the release verification but before pushing.
+  if [[ "${env}" == "staging" && -n "${DEPLOY_SOURCE_SHA:-}" ]]; then
+    [[ "${DEPLOY_SOURCE_SHA}" =~ ^[a-f0-9]{40}$ && "${DEPLOY_SOURCE_SHA:0:7}" == "${ref}" ]] ||
+      { echo "invalid source-bound Staging deployment identity" >&2; exit 1; }
+    current_staging="$(git ls-remote origin refs/heads/staging | cut -f1)"
+    [[ "${current_staging}" == "${DEPLOY_SOURCE_SHA}" ]] ||
+      { echo "staging advanced; refusing stale source-bound GHCR deployment" >&2; exit 1; }
+  fi
   if git pull --rebase origin gitops && git push origin gitops; then
     echo "pushed: $msg"
     exit 0

@@ -6,10 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const REPO = 'BestNathan/nession';
-const NAME = 'Release / Staging Artifacts';
-const PATH = '.github/workflows/release-staging.yml';
-const DEPLOY_NAME = 'Deploy / Staging ACR';
-const DEPLOY_PATH = '.github/workflows/deploy-staging-acr.yml';
+const DEPLOY_NAME = 'Deploy / Staging GHCR';
+const DEPLOY_PATH = '.github/workflows/deploy-staging-ghcr.yml';
 const SHA = /^[a-f0-9]{40}$/;
 
 function reject(reason) { throw Error('deployment-identity-trigger: ' + reason); }
@@ -19,8 +17,8 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
   const run = event?.workflow_run;
   if (!run || event?.action !== 'completed' ||
       event.repository?.full_name !== REPO ||
-      !((run.name === NAME && String(run.path ?? '').split('@')[0] === PATH) ||
-         (run.name === DEPLOY_NAME && String(run.path ?? '').split('@')[0] === DEPLOY_PATH)) ||
+      (run.name !== DEPLOY_NAME ||
+       String(run.path ?? '').split('@')[0] !== DEPLOY_PATH) ||
       !['push', 'workflow_dispatch'].includes(run.event) ||
       run.head_branch !== 'staging' || !SHA.test(String(run.head_sha ?? '')) ||
       run.status !== 'completed' || run.conclusion !== 'success' ||
@@ -45,16 +43,9 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
     reject('missing, truncated or ambiguous original release jobs');
   }
   const required = [
-    ['deploy-staging-gitops', run.name === DEPLOY_NAME ? /^Commit verified Staging GitOps$/ : /^Run \.\/scripts\/gitops-commit\.sh staging/],
-    ['provenance', /^Emit per-registry build provenance$/],
+    ['verify-source', /^Authenticate successful exact-SHA GHCR publishing run$/],
+    ['deploy-staging-gitops', /^Verify exact-source GHCR digests and update Staging GitOps$/],
   ];
-  if (run.name === DEPLOY_NAME) {
-    required.push(['verify-source', /^Authenticate successful exact-SHA GHCR publishing run$/]);
-    for (const role of ['server', 'agent', 'ui']) {
-      required.push(['mirror-acr (' + role + ')',
-        new RegExp('^Mirror and verify multi-arch ' + role + ' image$')]);
-    }
-  }
   for (const [name, step] of required) {
     const selected = jobs.filter(j => j.name === name &&
       j.run_id === run.id && (j.run_attempt == null || j.run_attempt === run.run_attempt));
@@ -74,88 +65,37 @@ export function verifyReleaseSource(event, nativeJobs, originalRun = null) {
 
 export function selfTest() {
   const sha = 'a'.repeat(40);
-  const run = {
-    id: 4200, run_attempt: 1, workflow_id: 33,
-    name: NAME, path: PATH, event: 'push', head_branch: 'staging',
-    head_sha: sha, status: 'completed', conclusion: 'success',
-    repository: { full_name: REPO }, head_repository: { full_name: REPO },
-  };
-  const event = { action: 'completed', repository: { full_name: REPO }, workflow_run: run };
-  const ok = name => ({
-    name, run_id: run.id, run_attempt: 1, status: 'completed',
-    conclusion: 'success', steps: [
-      { name: name === 'provenance' ? 'Emit per-registry build provenance' :
-        'Run ./scripts/gitops-commit.sh staging "abc"', status: 'completed',
-        conclusion: 'success' },
-    ],
-  });
-  const jobs = { total_count: 2, jobs: [
-    ok('deploy-staging-gitops'), ok('provenance'),
-  ] };
-  assert.equal(verifyReleaseSource(event, jobs, run).source_sha, sha);
-  assert.equal(verifyReleaseSource({
-    ...event, workflow_run: { ...run, event: 'workflow_dispatch' },
-  }, jobs).source_sha, sha);
-  for (const bad of [
-    { name: 'Unrelated' }, { path: '.github/workflows/foreign.yml' },
-    { event: 'pull_request' }, { head_branch: 'main' },
-    { head_sha: 'b'.repeat(40) }, { conclusion: 'failure' },
-    { status: 'in_progress' }, { run_attempt: 2 },
-    { repository: { full_name: 'attacker/nession' } },
-    { head_repository: { full_name: 'attacker/nession' } },
-  ]) assert.throws(() => verifyReleaseSource({
-    ...event, workflow_run: { ...run, ...bad },
-  }, jobs, run), /invalid native Staging|native original Run disagree/);
-  assert.throws(() => verifyReleaseSource({
-    ...event, repository: { full_name: 'attacker/nession' },
-  }, jobs), /invalid native/);
-  assert.throws(() => verifyReleaseSource({ ...event, action: 'requested' }, jobs),
-    /invalid native/);
-  assert.throws(() => verifyReleaseSource(event, {
-    total_count: 1, jobs: [jobs.jobs[0]],
-  }), /missing successful original release job/);
-  assert.throws(() => verifyReleaseSource(event, {
-    total_count: 2, jobs: [{ ...jobs.jobs[0], conclusion: 'skipped' }, jobs.jobs[1]],
-  }), /missing successful original release job/);
-  assert.throws(() => verifyReleaseSource(event, {
-    total_count: 2, jobs: [
-      { ...jobs.jobs[0], steps: [{ ...jobs.jobs[0].steps[0], conclusion: 'skipped' }] },
-      jobs.jobs[1],
-    ],
-  }), /missing successful release step/);
-  assert.throws(() => verifyReleaseSource(event, {
-    total_count: 3, jobs: jobs.jobs,
-  }), /missing, truncated or ambiguous/);
-  assert.throws(() => verifyReleaseSource(event, jobs, {
-    ...run, head_sha: 'b'.repeat(40),
-  }), /source event and native original Run disagree/);
-  // Pre-cutover Release runs require the original GitOps+provenance successes.
-  // A GHCR-only release can never pass either source's deployment check.
-  const newRun = {...run, name: DEPLOY_NAME, path: DEPLOY_PATH};
-  const newEvent = {...event, workflow_run: newRun};
-  const newJobs = [{...jobs.jobs[0], steps: [{...jobs.jobs[0].steps[0], name: 'Commit verified Staging GitOps'}]}, jobs.jobs[1], {
-    name: 'verify-source', run_id: run.id, run_attempt: 1,
-    status: 'completed', conclusion: 'success',
-    steps: [{name: 'Authenticate successful exact-SHA GHCR publishing run',
-      status: 'completed', conclusion: 'success'}],
-  }, ...['server', 'agent', 'ui'].map(role => ({
-    name: 'mirror-acr (' + role + ')', run_id: run.id, run_attempt: 1,
-    status: 'completed', conclusion: 'success',
-    steps: [{name: 'Mirror and verify multi-arch ' + role + ' image',
-      status: 'completed', conclusion: 'success'}],
-  }))];
-  const newInventory = {total_count: newJobs.length, jobs: newJobs};
-  assert.equal(verifyReleaseSource(newEvent, newInventory, newRun).source_sha, sha);
-  assert.throws(() => verifyReleaseSource(newEvent, jobs), /missing successful original release job/);
-  assert.throws(() => verifyReleaseSource(newEvent, {
-    ...newInventory, jobs: newJobs.map(job =>
-      job.name === 'mirror-acr (server)' ? {...job, conclusion: 'failure'} : job),
-  }), /missing successful original release job/);
-  assert.throws(() => verifyReleaseSource(newEvent, {
-    ...newInventory, jobs: newJobs.map(job =>
-      job.name === 'verify-source' ? {...job, steps: []} : job),
-  }), /missing successful release step/);
-  console.log('deployment identity: legacy and new ACR source, branch/SHA, all mirrors and step negatives passed');
+  const run = {id:4200,run_attempt:1,workflow_id:33,name:DEPLOY_NAME,path:DEPLOY_PATH,
+    event:'push',head_branch:'staging',head_sha:sha,status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO}};
+  const event = {action:'completed',repository:{full_name:REPO},workflow_run:run};
+  const job=(name,step)=>({name,run_id:run.id,run_attempt:1,status:'completed',
+    conclusion:'success',steps:[{name:step,status:'completed',conclusion:'success'}]});
+  const verify=job('verify-source','Authenticate successful exact-SHA GHCR publishing run');
+  const deploy=job('deploy-staging-gitops','Verify exact-source GHCR digests and update Staging GitOps');
+  const inventory={total_count:2,jobs:[verify,deploy]};
+  assert.equal(verifyReleaseSource(event,inventory,run).source_sha,sha);
+  for (const patch of [
+    {name:'Deploy / Staging ACR'},{path:'.github/workflows/deploy-staging-acr.yml'},
+    {event:'pull_request'},{head_branch:'main'},{head_sha:'b'.repeat(40)},
+    {status:'in_progress'},{conclusion:'failure'},{run_attempt:2},
+    {repository:{full_name:'attacker/nession'}},
+    {head_repository:{full_name:'attacker/nession'}},
+  ]) assert.throws(()=>verifyReleaseSource({...event,workflow_run:{...run,...patch}},
+    inventory,run),/invalid native Staging|native original Run disagree/);
+  assert.throws(()=>verifyReleaseSource({...event,action:'requested'},inventory),/invalid native/);
+  assert.throws(()=>verifyReleaseSource({...event,repository:{full_name:'attacker/nession'}},inventory),/invalid native/);
+  assert.throws(()=>verifyReleaseSource(event,{total_count:1,jobs:[verify]}),/missing successful original/);
+  for (const name of ['verify-source','deploy-staging-gitops']) {
+    assert.throws(()=>verifyReleaseSource(event,{total_count:2,jobs:inventory.jobs.map(j=>
+      j.name===name?{...j,conclusion:'failure'}:j)}),/missing successful original/);
+    assert.throws(()=>verifyReleaseSource(event,{total_count:2,jobs:inventory.jobs.map(j=>
+      j.name===name?{...j,steps:[]}:j)}),/missing successful release step/);
+  }
+  assert.throws(()=>verifyReleaseSource(event,{total_count:3,jobs:inventory.jobs}),/missing, truncated/);
+  assert.throws(()=>verifyReleaseSource(event,inventory,{...run,head_sha:'b'.repeat(40)}),
+    /source event and native original Run disagree/);
+  console.log('deployment identity: GHCR-only release writer Run/Job/Step negative cases passed');
 }
 
 async function main() {
