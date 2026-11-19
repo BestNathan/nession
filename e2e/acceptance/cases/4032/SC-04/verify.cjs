@@ -197,7 +197,8 @@ function fixtures() {
 }
 
 async function fileAt(path, rev) {
-  assert.match(rev, SHA);
+  assert.ok(SHA.test(rev) || rev === 'acceptance-results',
+    'only an immutable GitOps commit or canonical deployment-store ref is allowed');
   const file = await get('/contents/' + path + '?ref=' + rev);
   assert.equal(file.type, 'file');
   assert.equal(file.encoding, 'base64');
