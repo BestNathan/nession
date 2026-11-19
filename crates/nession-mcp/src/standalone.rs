@@ -282,11 +282,7 @@ impl StandaloneConfig {
     }
 }
 
-fn resolve_credential(
-    token: &mut String,
-    env_name: &str,
-    field_name: &str,
-) -> anyhow::Result<()> {
+fn resolve_credential(token: &mut String, env_name: &str, field_name: &str) -> anyhow::Result<()> {
     let value = match std::env::var(env_name) {
         Ok(value) => Some(value),
         Err(VarError::NotPresent) => None,
@@ -350,52 +346,44 @@ mod credential_tests {
     #[test]
     fn duplicate_sources_and_empty_environment_fail_closed() {
         let mut configured = "literal".to_string();
-        assert!(
-            resolve_credential_value(
+        assert!(resolve_credential_value(
                 &mut configured,
                 Some("env"),
                 "NESSION_MCP_INBOUND_TOKEN",
                 "[mcp].auth_token"
-            )
-            .is_err()
-        );
+        )
+        .is_err());
         assert_eq!(configured, "literal");
 
         let mut missing = String::new();
-        assert!(
-            resolve_credential_value(
+        assert!(resolve_credential_value(
                 &mut missing,
                 Some("   "),
                 "NESSION_MCP_INBOUND_TOKEN",
                 "[mcp].auth_token"
-            )
-            .is_err()
-        );
+        )
+        .is_err());
     }
 
     #[test]
     fn unresolved_placeholder_is_not_a_valid_bearer_token() {
         let mut token = concat!("$", "{NESSION_MCP_INBOUND_TOKEN}").to_string();
-        assert!(
-            resolve_credential_value(
+        assert!(resolve_credential_value(
                 &mut token,
                 None,
                 "NESSION_MCP_INBOUND_TOKEN",
                 "[mcp].auth_token"
-            )
-            .is_err()
-        );
+        )
+        .is_err());
 
         let mut another = String::new();
-        assert!(
-            resolve_credential_value(
+        assert!(resolve_credential_value(
                 &mut another,
                 Some(concat!("$", "{MISSING}")),
                 "NESSION_MCP_INBOUND_TOKEN",
                 "[mcp].auth_token"
-            )
-            .is_err()
-        );
+        )
+        .is_err());
     }
 
     #[test]
