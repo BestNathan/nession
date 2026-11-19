@@ -93,9 +93,11 @@ test('SC-03: semantic surfaces and region hierarchy carry each App resource mode
     await form.waitFor({ timeout: 30_000 });
     await expect(page.locator('[data-workspace-section]').first()).toBeVisible();
     await expect(page.locator('[data-recipe-part="form-section"]').first()).toBeVisible();
+    const secondary = page.locator('[data-workspace-surface="secondary"]').first();
+    await expect(secondary).toBeVisible();
     const paints = await page.evaluate(() => {
       const primary = document.querySelector('[data-testid="sandbox-workspace"]');
-      const secondary = document.querySelector('[data-recipe-part="form-row"]');
+      const secondary = document.querySelector('[data-workspace-surface="secondary"]');
       if (!(primary instanceof HTMLElement) || !(secondary instanceof HTMLElement)) return null;
       return {
         primary: getComputedStyle(primary).backgroundColor,

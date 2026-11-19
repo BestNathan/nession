@@ -287,6 +287,9 @@ export function SandboxWorkspace({
     setActivePolicy(policy);
     setActiveSection('policies');
   };
+  // The editable policy form is the App page's secondary region (#3971): a
+  // single named surface inside the primary Sandbox page, not a card per field.
+  const appSecondary = ctx.experience === 'app' && activeSection === 'policies';
 
   return (
     <div
@@ -340,9 +343,11 @@ export function SandboxWorkspace({
       ) : null}
       <div
         data-workspace-section={ctx.experience === 'app' ? '' : undefined}
+        data-workspace-surface={appSecondary ? 'secondary' : undefined}
         className={cn(
           'flex min-w-0 flex-col',
           ctx.experience === 'web' && 'min-h-0 flex-1',
+          appSecondary && 'rounded-[var(--nession-radius-surface)] bg-muted/40 p-[var(--nession-shell-space-3)]',
         )}
       >
         <SandboxContent
