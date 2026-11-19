@@ -19,6 +19,11 @@ const pairs = [
   ['server-handler-locality', ['server-handler-locality-selftest', 'server-handler-concurrency-selftest'], 'tooling'],
   ['release-version-consistency', ['release-version-consistency-selftest'], 'rust'],
   ['rust-coverage', ['coverage-classification-selftest'], 'rust'],
+  // #4064: the required Rust route must keep its two execution Gates and the
+  // contract that proves neither can silently narrow again.
+  ['rust-test-unit', ['rust-test-unit', 'rust-test-route-contract'], 'rust'],
+  ['rust-test-integration', ['rust-test-integration', 'rust-test-route-contract'], 'rust'],
+  ['rust-test-route-contract', ['rust-test-route-contract'], 'rust'],
   ['design-system-fast', ['design-token-boundary-selftest'], 'web'],
   ['design-system-full', ['design-token-boundary-selftest'], 'web'],
   ['acceptance-runtime-contract', ['e2e-cli-selftest'], 'tooling'],

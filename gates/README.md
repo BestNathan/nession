@@ -51,6 +51,14 @@ Suite files contain Gate IDs only: no commands, repair prose, changed-file rules
 
 Hooks delegate to `gates/route`, which filters their stage suite against changed files and invokes `gates/run`. For pre-commit, the hook pins the post-screenshot-maintenance Git index tree and the runner validates content Gates against a private export of that exact tree. Only `dev-workspace-commit` runs against the live linked worktree, because it checks Git metadata rather than source contents. The runner rechecks index identity before and after the Gates, fails closed on an unreadable/changing index, and reuses local ignored `node_modules` tooling without copying unstaged source. Direct Gates and pre-push retain their normal worktree semantics. `pre-commit` is limited to fast static checks; `pre-push` runs Rust/Web unit tests, Clippy/TypeScript and rule-owner regression contracts. Full integration, coverage, and browser checks remain available via their Gates and CI. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
 
+The `quality-rust` suite executes the canonical workspace Rust test route:
+`rust-test-unit` selects every lib/bin target and `rust-test-integration`
+selects every integration test target through `scripts/rust-test-route.mjs`;
+`rust-test-route-contract` rejects a suite or selector that omits a
+test-capable crate/target and records the inventory in the CI step log.
+`scripts/check-coverage.sh` thresholds are coverage policy, not execution
+selection (#4064).
+
 The Server Handler locality Gate (`server-handler-locality`) is included in the
 `quality-rust` and aggregate `quality` suites. Its isolated self-test and
 concurrency stress test are exposed by `just check-protocol` after the

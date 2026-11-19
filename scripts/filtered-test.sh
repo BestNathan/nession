@@ -15,7 +15,49 @@ NC='\033[0m'
 tmp=$(mktemp)
 trap 'rm -f "$tmp"; nession_tmux_run_cleanup' EXIT INT TERM
 
-cargo test --workspace --color=always "$@" >"$tmp" 2>&1
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+
+if [ "${1:-}" = "--route" ]; then
+    # Canonical workspace-wide selection (#4064). `scripts/rust-test-route.mjs`
+    # owns which targets run; this script executes exactly that selection and
+    # keeps the existing failure-reporting contract.
+    if [ "$#" -lt 2 ]; then
+        echo "usage: $0 --route <unit|integration> [--manifest-path <path>]" >&2
+        exit 2
+    fi
+    route_mode="$2"
+    shift 2
+    case "$route_mode" in
+        unit|integration) ;;
+        *) echo "usage: $0 --route <unit|integration> [--manifest-path <path>]" >&2; exit 2 ;;
+    esac
+    if ! command -v node >/dev/null 2>&1; then
+        echo "[ERROR] node is required to select the Rust test route" >&2
+        exit 2
+    fi
+    args_file=$(mktemp)
+    if ! node "$SCRIPT_DIR/rust-test-route.mjs" --cargo-args "$route_mode" "$@" >"$args_file"; then
+        rm -f "$args_file"
+        exit 2
+    fi
+    route_args=()
+    while IFS= read -r route_arg; do
+        [ -n "$route_arg" ] && route_args[${#route_args[@]}]="$route_arg"
+    done <"$args_file"
+    rm -f "$args_file"
+    if ! inventory=$(node "$SCRIPT_DIR/rust-test-route.mjs" --inventory "$route_mode" "$@"); then
+        exit 2
+    fi
+    # Machine-readable selection: the CI step log carries the exact target set.
+    printf '%s\n' "$inventory"
+    if [ -n "${NSESSION_RUST_TEST_INVENTORY:-}" ]; then
+        mkdir -p "$(dirname "$NSESSION_RUST_TEST_INVENTORY")"
+        printf '%s\n' "$inventory" >"$NSESSION_RUST_TEST_INVENTORY"
+    fi
+    cargo test --workspace --color=always "$@" "${route_args[@]}" >"$tmp" 2>&1
+else
+    cargo test --workspace --color=always "$@" >"$tmp" 2>&1
+fi
 rc=$?
 
 # Show test output lines: test results, panics, errors.
