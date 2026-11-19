@@ -348,7 +348,7 @@ test('all environment credentials are required and checked BEFORE any seal', () 
     NESSION_MCP_BACKEND_SERVER_TOKEN: good.NESSION_MCP_BACKEND_SERVER_TOKEN
   }), /NESSION_MCP_INBOUND_TOKEN/);
   for (const name of getRequiredSecrets('staging')) {
-    for (const bad of ['', ' ', 'newline\\nvalue', 'prefix ']) {
+    for (const bad of ['', ' ', 'newline\nvalue', 'prefix ']) {
       assert.throws(() => prepareRequiredSecrets('staging', {...good, [name]: bad}),
         new RegExp(name));
     }
@@ -377,9 +377,9 @@ test('required encrypted GitOps resources are one bounded atomic file set', () =
     [...full, 'environments/staging/mcp/sealed-tls.json'], 'staging'));
   assert.throws(() => validateChangedPathsForRequired(
     [...full, 'environments/staging/mcp/sealed-secret.json'], 'staging'));
-  const initial = 'resources:\\n  - deployment.yaml\\n';
+  const initial = 'resources:\n  - deployment.yaml\n';
   const next = addRequiredResources(initial, 'staging');
-  for (const t of targets) assert.match(next, new RegExp(t.resource.split('/').at(-1).replaceAll('.', '\\\\.')));
+  for (const t of targets) assert.match(next, new RegExp(t.resource.split('/').at(-1).replaceAll('.', '\\.')));
   assert.equal(addRequiredResources(next, 'staging'), next);
 });
 
@@ -405,7 +405,7 @@ test('staging batch aborts before touching GitOps if ANY sealed output is absent
     mkdirSync(path.join(root, '.git'));
     mkdirSync(overlay, {recursive: true});
     mkdirSync(work);
-    const before = 'resources:\\n  - deployment.yaml\\n';
+    const before = 'resources:\n  - deployment.yaml\n';
     writeFileSync(kustomization, before);
     const location = name => path.join(work, name + '.sealed.json');
     writeFileSync(location(names[0]), JSON.stringify(document(names[0])));
@@ -427,7 +427,7 @@ test('staging batch aborts before touching GitOps if ANY sealed output is absent
     const enrolled = readFileSync(kustomization, 'utf8');
     for (const name of names) {
       const t = getTarget('staging', name);
-      assert.match(enrolled, new RegExp(t.resource.split('/').at(-1).replaceAll('.', '\\\\.')));
+      assert.match(enrolled, new RegExp(t.resource.split('/').at(-1).replaceAll('.', '\\.')));
       assert.equal(JSON.parse(readFileSync(path.join(root, t.resource), 'utf8')).metadata.name, t.name);
     }
     stageRequired(root, 'staging', work);
