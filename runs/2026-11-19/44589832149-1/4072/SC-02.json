@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "688eec2bfb489f786d8249b6e7d7487bd93b37498ea63248d89834182d2d67bc",
+  "run_id": 44589832149,
+  "run_attempt": 1,
+  "issue": 4072,
+  "criterion": "SC-02",
+  "criterion_text": "A shutdown requested during any pending dial/registration phase stops that attempt and settles supervisor/initial caller promptly without leaking sockets/tasks or waiting for a remote close.",
+  "stage": "staging",
+  "target_sha": "89bf9a220bb70cc9233605100bb5797e0fbf7f06",
+  "contract_sha256": "6ee8dcdf48db600e2ae9e0a5c0f4e92df197de74d4a90de393437bdafdc3cf26",
+  "case_revision": "89bf9a220bb70cc9233605100bb5797e0fbf7f06",
+  "case_tree_sha": "c6c258d984f1bb937e447f9d4f4070a1a63302aa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T18:42:39.171Z",
+  "finished_at": "2026-11-19T18:42:39.670Z",
+  "duration_ms": 499,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Shutdown cancels a pending registration attempt without waiting for the peer",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact staging 89bf9a220bb70cc9233605100bb5797e0fbf7f06: a real Agent registered once, then reconnected to a mock Server that accepted the WS upgrade and never answered registration; shutdown() during that pending attempt closed the socket promptly (well under the 30s deadline) and the supervisor opened no further connection"
+        }
+      ],
+      "duration_ms": 476,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44589832149,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "89bf9a220bb70cc9233605100bb5797e0fbf7f06",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44589832149",
+    "record_path": "runs/2026-11-19/44589832149-1/4072/SC-02.json",
+    "source_result_sha256": "c388a9a31a529b09350f9237ae7289653e6bf8762ebba95090ad48fd841b20ca"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44589832149-1",
+    "sha256": "c388a9a31a529b09350f9237ae7289653e6bf8762ebba95090ad48fd841b20ca",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44589832149",
+    "durability": "time-limited; object archival not configured"
+  }
+}

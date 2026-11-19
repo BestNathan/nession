@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c08a0081d7b142e01a1a4b635adeb5645aa391a9f53f26c91bc6847a6df14eef",
+  "run_id": 44589832149,
+  "run_attempt": 1,
+  "issue": 4072,
+  "criterion": "SC-01",
+  "criterion_text": "When WS dial, Upgrade or Server registration acknowledgment stalls, Agent's attempt and first-start result settle within explicit finite bounds; the supervisor enters its existing bounded backoff and retries a transient failure rather than waiting forever.",
+  "stage": "staging",
+  "target_sha": "89bf9a220bb70cc9233605100bb5797e0fbf7f06",
+  "contract_sha256": "6ee8dcdf48db600e2ae9e0a5c0f4e92df197de74d4a90de393437bdafdc3cf26",
+  "case_revision": "89bf9a220bb70cc9233605100bb5797e0fbf7f06",
+  "case_tree_sha": "44925f0f2f4b2d8c71e6503aa9dd0d1c7929ebca",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T18:41:58.096Z",
+  "finished_at": "2026-11-19T18:42:39.170Z",
+  "duration_ms": 41073,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "WS Upgrade and registration stalls settle within the total attempt deadline",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact staging 89bf9a220bb70cc9233605100bb5797e0fbf7f06: a real Agent ServerClient dialled a mock Server whose WS upgrade completed but registration was never acknowledged, and a peer that never answered the HTTP Upgrade; both attempts and the first-start outcome settled within the explicit attempt deadline, and the supervisor then entered bounded backoff"
+        }
+      ],
+      "duration_ms": 41034,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44589832149,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "89bf9a220bb70cc9233605100bb5797e0fbf7f06",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44589832149",
+    "record_path": "runs/2026-11-19/44589832149-1/4072/SC-01.json",
+    "source_result_sha256": "b4301ac66d9cc490791b407a496a01b87b5cc9eaa6da22ae00b682751c2a5304"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44589832149-1",
+    "sha256": "b4301ac66d9cc490791b407a496a01b87b5cc9eaa6da22ae00b682751c2a5304",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44589832149",
+    "durability": "time-limited; object archival not configured"
+  }
+}
