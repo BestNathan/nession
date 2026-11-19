@@ -29,6 +29,13 @@ function git(root,args,{input,home=root}={}){
 function plan(preflight,intent,{write=false}={}){
   const x=validateQwenRepairPublisherIntent(intent?.record);
   const e=preflight?.evidence;
+  const heads=preflight?.origin?.published_head_shas;
+  if(!Array.isArray(heads)||
+      heads.length!==x.checkpoint_version-1||
+      heads.length>32||heads.at(-1)!==x.source_sha||
+      heads.some(sha=>!SHA.test(sha))||
+      new Set(heads).size!==heads.length)
+    fail('missing exact Store-authenticated published PR HEAD sequence');
   if(!SHA.test(intent?.store_commit_sha??'')||
       (write?(intent.status!=='committed'||intent.may_publish!==true):
         !['committed','reconcile'].includes(intent.status))||
@@ -102,6 +109,30 @@ async function get(api,endpoint){
   const v=await api('GET',endpoint);
   if(v==null)fail('incomplete independently retrieved GitHub source');
   return v;
+}
+// #4046: attest every historical PR commit against ordered Store-signed
+// Publisher transitions. The first commit A must descend directly from the
+// original main. After a prior Repair, current B must descend from A, etc.
+// The immutable WAL need not (and MUST NOT) be rewritten after a failed
+// pre-write attempt. These historical SHAs come from the independently
+// authenticated Store-backed preflight; the model cannot choose them.
+export async function attestQwenRepairPriorGitHistory({preflight,intent,api}){
+  if(typeof api!=='function')fail('GET-only history source required');
+  const record=plan(preflight,intent);
+  const heads=preflight.origin.published_head_shas;
+  let latest=null;
+  for(let i=heads.length-1;i>=0;i--){
+    const current=await get(api,'git/commits/'+heads[i]);
+    const expectedParent=i===0?record.original_main_sha:heads[i-1];
+    if(!Array.isArray(current.parents)||current.parents.length!==1||
+       current.parents[0]?.sha!==expectedParent||
+       !SHA.test(current.tree?.sha??''))
+      fail('signed Qwen PR chain has rewritten, missing or foreign parent/tree');
+    if(i===heads.length-1)latest=current;
+  }
+  return Object.freeze({latest_tree_sha:latest.tree.sha,
+    predecessor_sha:record.source_sha,
+    first_sha:heads[0],length:heads.length});
 }
 function matchPR(pr,record,expectedSha){
   if(pr?.state!=='open'||!Number.isSafeInteger(pr.number)||pr.number<1||
@@ -182,6 +213,7 @@ export async function readBackQwenRepairPR({
   const branch=await get(api,'git/ref/heads/'+short);
   if(branch.ref!==record.branch||branch.object?.sha!==pr.head.sha)
     fail('PR/ref SHA mismatch after Qwen Repair');
+  await attestQwenRepairPriorGitHistory({preflight,intent,api});
   const commit=await get(api,'git/commits/'+pr.head.sha);
   if(!Array.isArray(commit.parents)||commit.parents.length!==1||
       commit.parents[0].sha!==record.source_sha||
@@ -204,14 +236,11 @@ export async function publishQwenRepairToSamePR({
   const oldFiles=await prFiles(api,pr.number);
   if(blobs.some(b=>!oldFiles.some(f=>f.filename===b.path)))
     fail('Repair cannot add a new PR file outside original published scope');
-  const current=await get(api,'git/commits/'+record.source_sha);
-  // The current Slice proves its ORIGINAL PR-A parent, not a random
-  // branch or a model-selected base. Additional rounds require independently
-  // authenticated chained PR snapshots, not relaxing this check.
-  if(!Array.isArray(current.parents)||current.parents.length!==1||
-      current.parents[0].sha!==record.original_main_sha||
-      !SHA.test(current.tree?.sha??''))
-    fail('original Qwen PR-A commit parent or tree was rewritten');
+  // A reviewed B is the original A's child, not original main's child.
+  // Verify *every* historical ancestor against Store publisher transitions
+  // before the first GitHub POST; the same check runs in GET-only readback.
+  const history=await attestQwenRepairPriorGitHistory({
+    preflight,intent,api});
   const tree=[];
   for(const blob of blobs){
     const created=await api('POST','git/blobs',{
@@ -221,7 +250,7 @@ export async function publishQwenRepairToSamePR({
     tree.push({path:blob.path,mode:'100644',type:'blob',sha:created.sha});
   }
   const newTree=await api('POST','git/trees',{
-    base_tree:current.tree.sha,tree});
+    base_tree:history.latest_tree_sha,tree});
   if(newTree?.sha!==expected_tree_sha)
     fail('GitHub Repair tree differs from exact local source patch');
   const commit=await api('POST','git/commits',{
