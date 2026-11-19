@@ -10,6 +10,7 @@ import {
   findInlineStyleVisualViolations,
   findVisualUtilityViolations,
   findVisualVariableViolations,
+  isForeignAdapter,
 } from '../rules/visual-vocabulary.js';
 
 const metadataPath = join(
@@ -22,6 +23,8 @@ const PRODUCT = '/proj/web/src/product/session/components/Probe.tsx';
 const EDITOR_ADAPTER = '/proj/web/src/platform/editor/model/editorTheme.ts';
 const MARKDOWN_ADAPTER = '/proj/web/src/shared/markdown/markdownVisualGrammar.ts';
 const CAPABILITY = '/proj/web/src/capabilities/probe/components/Probe.tsx';
+const NESSION_RECIPE = '/proj/web/src/components/ui/resource-detail.tsx';
+const SHADCN_LABEL = '/proj/web/src/components/ui/label.tsx';
 const TERMINAL_VIEWPORT = '/proj/web/src/product/terminal/components/TerminalViewport.tsx';
 
 test('generated metadata makes the --nession-* namespace machine-readable', () => {
@@ -36,6 +39,14 @@ test('generated metadata makes the --nession-* namespace machine-readable', () =
     lintMetadata.cssVariableOwners['--nession-terminal-capsule-shell-pad-x'],
     'pattern.terminal-capsule',
   );
+});
+
+test('Nession-owned recipes are not exempted as if they were upstream shadcn (#4050, #4098)', () => {
+  assert.equal(isForeignAdapter(NESSION_RECIPE), false);
+  assert.equal(isForeignAdapter('/proj/web/src/components/ui/configuration-form.tsx'), false);
+  assert.equal(isForeignAdapter('/proj/web/src/components/ui/operation-surface.tsx'), false);
+  assert.equal(isForeignAdapter(SHADCN_LABEL), true);
+  assert.equal(isForeignAdapter(EDITOR_ADAPTER), true);
 });
 
 test('visual utility classifier separates local composition from visual vocabulary', () => {
@@ -195,8 +206,21 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         code: 'export const x = "prose prose-sm text-xs leading-relaxed rounded shadow-sm";',
         filename: MARKDOWN_ADAPTER,
       },
+      {
+        code: 'export const cls = "flex gap-[var(--nession-panel-padding)] text-muted-foreground";',
+        filename: NESSION_RECIPE,
+      },
+      {
+        code: 'export const cls = "text-sm leading-none font-medium";',
+        filename: SHADCN_LABEL,
+      },
     ],
     invalid: [
+      {
+        code: 'export const cls = "text-sm bg-white";',
+        filename: NESSION_RECIPE,
+        errors: [{ messageId: 'utilityViolation' }, { messageId: 'utilityViolation' }],
+      },
       {
         code: 'export const x = "var(--terminal-content-bottom-inset, 0px)";',
         filename: TERMINAL_VIEWPORT,
