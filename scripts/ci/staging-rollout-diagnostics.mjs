@@ -17,6 +17,13 @@ const SAFE_REASONS = new Set([
   'InvalidImageName', 'Killing', 'OOMKilled', 'OOMKilling',
   'PodInitializing', 'Pulled', 'Pulling', 'RunContainerError',
   'Started', 'Unhealthy', 'Unschedulable',
+  // Kubernetes Deployment conditions (not arbitrary controller or provider text).
+  'MinimumReplicasAvailable', 'MinimumReplicasUnavailable',
+  'NewReplicaSetAvailable', 'ProgressDeadlineExceeded',
+  'ReplicaSetUpdated', 'ReplicaSetCreateError', 'FailedDelete',
+  // Standard Pod / kubelet reasons. Preserve unknown reasons as "other".
+  'PodReadyToStartContainers', 'ContainerCreating', 'Completed',
+  'Error', 'Scheduled', 'SuccessfulCreate',
 ]);
 function boundedInt(value) {
   return Number.isSafeInteger(value) && value >= 0 && value <= 1000000 ? value : null;
@@ -156,6 +163,7 @@ function selfTest() {
       type:'Warning',reason:'Failed',message:token}]};
   const actual = readback({deployments:d,pods:p,events:e,short:'abcdef0'});
   assert.equal(actual.deployments[0].available,0);
+  assert.equal(actual.deployments[0].conditions[0].reason,'MinimumReplicasUnavailable');
   assert.equal(actual.pod_status.length,1);
   assert.equal(actual.pod_status[0].containers[0].previous_exit_code,137);
   assert.equal(actual.pod_status[0].containers[0].waiting_reason,'CrashLoopBackOff');
@@ -163,6 +171,17 @@ function selfTest() {
   assert.equal(actual.pod_events[0].reason,'FailedMount');
   assert.ok(!JSON.stringify(actual).includes(token));
   assert.ok(!JSON.stringify(actual).includes('acr.example'));
+  const healthy = structuredClone(d);
+  healthy.items[0].status.conditions[0].status = 'True';
+  healthy.items[0].status.conditions[0].reason = 'MinimumReplicasAvailable';
+  assert.equal(readback({deployments:healthy,pods:p,short:'abcdef0'})
+    .deployments[0].conditions[0].reason,'MinimumReplicasAvailable');
+  healthy.items[0].status.conditions[0].reason = 'ProgressDeadlineExceeded';
+  assert.equal(readback({deployments:healthy,pods:p,short:'abcdef0'})
+    .deployments[0].conditions[0].reason,'ProgressDeadlineExceeded');
+  healthy.items[0].status.conditions[0].reason = token;
+  assert.equal(readback({deployments:healthy,pods:p,short:'abcdef0'})
+    .deployments[0].conditions[0].reason,'other');
   const absent = readback({deployments:d,pods:p,short:'abcdef0'});
   assert.equal(absent.event_access,'not-authorized');
   assert.equal(absent.pod_events.length,0);
