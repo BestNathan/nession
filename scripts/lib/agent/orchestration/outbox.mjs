@@ -709,11 +709,19 @@ export function acceptAttestedQwenRepairPublication(
   const latest=state.transitions.at(-1);
   const original=state.transitions.filter(t=>t.kind==='publisher'&&
     t.outcome==='published'&&t.target_sha===state.target_sha);
+  const first=state.transitions.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published'&&
+    t.run_id===trusted.original_publisher_run_id);
+  // #4030/#3885: current PR-B may be authored by a prior Repair Publisher.
+  // Separately enforce the first immutable PR owner and the current SHA.
   if(latest?.kind!=='reviewer'||latest.outcome!=='changes_requested'||
       latest.target_sha!==state.target_sha||
-      original.length!==1||
-      original[0].run_id!==trusted.original_publisher_run_id||
-      original[0].attempt!==1)
+      original.length!==1||original[0].attempt!==1||
+      first.length!==1||first[0].attempt!==1||
+      state.transitions.indexOf(first[0])>
+        state.transitions.indexOf(original[0])||
+      state.transitions.indexOf(original[0])>=
+        state.transitions.indexOf(latest))
     reject('Qwen Repair missing latest authenticated Reviewer dispute');
   const tasks=state.outbox.filter(x=>x.task.type==='dispatch'&&
     x.task.role==='developer'&&x.status==='dispatched');
