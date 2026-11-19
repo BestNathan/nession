@@ -86,45 +86,32 @@ jobs:
           done
           kubectl --request-timeout=20s -n "$NAMESPACE" get deployments -o json > "$RUNNER_TEMP/deployments.json"
           kubectl --request-timeout=20s -n "$NAMESPACE" get pods -o json > "$RUNNER_TEMP/pods.json"
-          # Only allowlisted deployment and pod status fields reach the logs;
-          # never dump raw JSON, environment, events, kubeconfig or secrets.
-          jq -c --arg short "$DEPLOYED_SHORT" '
-            {
-              schema: "nession-staging-rollout-readback-v1",
-              desired_sha: $short,
-              deployments: [.items[] |
-                select(.metadata.name | test("^nession-(agent|server|ui)-staging$")) |
-                {name: .metadata.name,
-                 generation: .metadata.generation,
-                 observed_generation: (.status.observedGeneration // 0),
-                 desired: (.spec.replicas // 1),
-                 updated: (.status.updatedReplicas // 0),
-                 ready: (.status.readyReplicas // 0),
-                 available: (.status.availableReplicas // 0),
-                 image_tag: (.spec.template.spec.containers[0].image // "" | split(":") | last),
-                 conditions: [(.status.conditions // [])[] |
-                   {type, status, reason}]}]
-            }' "$RUNNER_TEMP/deployments.json" | tee "$RUNNER_TEMP/deploy-status.txt"
-          jq -c '
-            {
-              pod_status: [.items[] |
-                select(.metadata.labels.env == "staging") |
-                {phase: (.status.phase // "Unknown"),
-                 containers: [(.status.containerStatuses // [])[] |
-                   {ready: .ready, restart_count: .restartCount,
-                    image_tag: (.image // "" | split(":") | last),
-                    image_id: (.imageID // "" | split("@") | last),
-                    waiting_reason: (.state.waiting.reason // null),
-                    terminated_reason: (.state.terminated.reason // null)}]}]
-            }' "$RUNNER_TEMP/pods.json" | tee "$RUNNER_TEMP/pod-status.txt"
+          # #3994: Events may be inaccessible to this read-only identity.
+          # Do not request privilege elevation or turn missing RBAC into a fake
+          # absence of startup failures. Never emit raw Event JSON/messages.
+          events_file=none
+          if kubectl --request-timeout=20s auth can-i list events -n "$NAMESPACE" --quiet; then
+            kubectl --request-timeout=20s -n "$NAMESPACE" get events -o json > "$RUNNER_TEMP/events.json"
+            events_file="$RUNNER_TEMP/events.json"
+          fi
+          # The canonical script projects only allowlisted reason categories,
+          # role-scoped Pod/ReplicaSet ownership and bounded counts/digests.
+          # No raw env, Kubeconfig, Pod/Event message or startup log is printed.
+          node scripts/ci/staging-rollout-diagnostics.mjs self-test
+          node scripts/ci/staging-rollout-diagnostics.mjs run \
+            "$RUNNER_TEMP/deployments.json" \
+            "$RUNNER_TEMP/pods.json" \
+            "$events_file" "$DEPLOYED_SHORT" \
+            | tee "$RUNNER_TEMP/staging-rollout-status.txt"
           {
             echo "### Read-only Staging rollout (NOT an acceptance pass)"
             echo "GitOps revision: \`$GITOPS_REVISION\`, desired image tag suffix: \`$DEPLOYED_SHORT\`."
+            echo 'Pod Events are reason-only; absent Event permission is explicitly reported.'
             echo "\`\`\`json"
-            cat "$RUNNER_TEMP/deploy-status.txt" "$RUNNER_TEMP/pod-status.txt"
+            cat "$RUNNER_TEMP/staging-rollout-status.txt"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "STAGING_ROLLOUT_READBACK_V1 completed (no cluster writes)"
+          echo "STAGING_ROLLOUT_READBACK_V2 completed (no cluster writes)"
 
       - name: Clean up only job-owned VPN and credentials
         if: always()
