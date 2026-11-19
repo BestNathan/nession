@@ -5,7 +5,8 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
-  REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
   QWEN_TOOL_RECOVERY_COMMENT,
@@ -336,6 +337,28 @@ for(const bad of [
     user:{login:'external'}}}},
   {event:{...premodelRecovery.event,issue:{number:3434,state:'open'}}},
 ])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
+  /authenticated owner\/main/);
+
+// #4097: only the exact newer pre-model #3784 source can request CAS.
+const cRecoveryAction='ad5899ead831233a22dcac8856c7029bfebb47d23bb3eb47f0c9e68afaf2c504';
+const cRecovery={...premodelRecovery,issue:3784,actionId:cRecoveryAction,
+  event:{...premodelRecovery.event,issue:{number:3784,state:'open'},
+    comment:{...premodelRecovery.event.comment,
+      body:REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(cRecovery).action_id,cRecoveryAction);
+for(const wrong of [
+  {actionId:'f'.repeat(64)},{issue:3433},
+  {event:{...cRecovery.event,action:'edited'}},
+  {event:{...cRecovery.event,issue:{number:3784,state:'closed'}}},
+  {event:{...cRecovery.event,issue:{number:3784,state:'open',pull_request:{}}}},
+  {event:{...cRecovery.event,comment:{...cRecovery.event.comment,
+    body:REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT+' '}}},
+  {event:{...cRecovery.event,comment:{...cRecovery.event.comment,
+    body:'/nession recover-review-preflight issue=3784 run=44500591866'}}},
+  {event:{...cRecovery.event,comment:{...cRecovery.event.comment,
+    user:{login:'external'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'external'}},
+])assert.throws(()=>assertDispatchAuthority({...cRecovery,...wrong}),
   /authenticated owner\/main/);
 
 const jsonAction='8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7';
