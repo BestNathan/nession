@@ -639,6 +639,66 @@ async function selfTest() {
   assert.deepEqual(selectManualAgentRuns(unknownSource,[actual,ambiguous],
     {diagnostics:ambiguousReasons}),[]);
   assert.match(ambiguousReasons.join(' '),/conflicting/);
+  // #4076: prior Pass source is an authenticated ancestor of this very
+  // merged implementing PR; select the newest head for Pending criteria only.
+  const updatedHead = 'd'.repeat(40);
+  const mergedSamePr = {...nativeActual, merged_at:'2026-11-19T10:00:00Z',
+    state:'closed', head:{...nativeActual.head,sha:updatedHead}};
+  const sourceAnchor = nativeActual.head.sha;
+  const verifiedCompare = {base_commit:{sha:sourceAnchor},
+    merge_base_commit:{sha:sourceAnchor},behind_by:0,ahead_by:5,status:'ahead'};
+  const samePrWitness = [{number:mergedSamePr.number, merged_at:mergedSamePr.merged_at,
+    head:mergedSamePr.head,base:mergedSamePr.base}];
+  const ancestryRead = async path => {
+    if (path.includes('/compare/')) return verifiedCompare;
+    if (path.endsWith('/pulls?per_page=100')) return samePrWitness;
+    throw Error('unexpected PR ancestry fetch: '+path);
+  };
+  assert.deepEqual(await verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',ancestryRead),
+    [sourceAnchor]);
+  assert.deepEqual(selectManualAgentRuns(anchored,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor]}),
+    [{stage:'pr',target_ref:updatedHead}]);
+  assert.deepEqual(selectManualAgentRuns(anchored,[mergedSamePr],
+    {verifiedPrSha:updatedHead}),[],
+    'a newer head without authenticated original ancestry must fail closed');
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/')
+      ? {...verifiedCompare,behind_by:1,status:'diverged'} : samePrWitness),
+  /lacks authenticated same-PR ancestry/);
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/') ? verifiedCompare
+      : [{...samePrWitness[0],number:9999}]),
+  /lacks authenticated same-PR ancestry/);
+  const secondAnchor = 'c'.repeat(40);
+  const multiAnchorBody = twoScBody
+    .replace('- [ ] SC-02 exact-head Quality receipt',
+      '- [x] SC-02 earlier accepted + third Pending\n- [ ] SC-03 exact-head Quality receipt')
+    .replace('  SC-02:\n    when: pr\n    method: agent\n',
+      '  SC-02:\n    when: pr\n    method: agent\n'+
+      '  SC-03:\n    when: pr\n    method: agent\n')
+    .replace('| SC-02 | Pending | awaiting independently authenticated Web Quality |',
+      '| SC-02 | Pass | run 101; ref '+secondAnchor+
+      '; source agent-qwen; test: second source |\n'+
+      '| SC-03 | Pending | awaiting independently authenticated Web Quality |');
+  const multiAnchorIssue = {...anchored,body:multiAnchorBody};
+  const multiAnchorRead = async path => path.includes('/compare/')
+    ? {base_commit:{sha:path.split('/compare/')[1].split('...')[0]},
+      merge_base_commit:{sha:path.split('/compare/')[1].split('...')[0]},
+      behind_by:0,ahead_by:5,status:'ahead'}
+    : samePrWitness;
+  assert.deepEqual(await verifyManualAcceptedPrAnchors('BestNathan/nession',
+    multiAnchorIssue,[mergedSamePr],updatedHead,'fixture-token',multiAnchorRead),
+    [sourceAnchor,secondAnchor]);
+  assert.deepEqual(selectManualAgentRuns(multiAnchorIssue,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor,secondAnchor]}),
+    [{stage:'pr',target_ref:updatedHead}]);
+  assert.deepEqual(selectManualAgentRuns(multiAnchorIssue,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor]}),[],
+    'partial ancestor proof must not authorize a mixed-source acceptance');
   const stagedBody = body.replace('when: pr\n',
     'when: merged\n    branch: staging\n').replace('| Pass |', '| Pending |');
   const mainPr = { ...pr, base: { ref: 'main' } };
