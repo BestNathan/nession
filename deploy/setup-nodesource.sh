@@ -23,16 +23,20 @@ esac
 apt-get update
 apt-get install -y --no-install-recommends gpg
 key_file="$(mktemp)"
-trap 'rm -f "$key_file"' EXIT HUP INT TERM
+fingerprint_file="$(mktemp)"
+trap 'rm -f "$key_file" "$fingerprint_file"' EXIT HUP INT TERM
 curl --fail --silent --show-error --location \
   https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key_file"
 
 # Match exactly one primary public key, not a keyring with extra trusted keys.
 # GPG's machine-readable fpr field is the primary identity; no quoted
 # arbitrary output is accepted as a trust input to APT.
-actual="$(gpg --batch --with-colons --show-keys "$key_file" |
-  awk -F: '$1 == "pub" { primary = 1; next }
-    $1 == "fpr" && primary { print $10; primary = 0 }')"
+# A malformed key must fail even if GPG printed a partial fingerprint:
+# POSIX sh does not propagate the exit status of the first pipeline member.
+gpg --batch --with-colons --show-keys "$key_file" \
+  > "$fingerprint_file" || fail 'NodeSource key inspection failed'
+actual="$(awk -F: '$1 == "pub" { primary = 1; next }
+  $1 == "fpr" && primary { print $10; primary = 0 }' "$fingerprint_file")"
 [ "$actual" = "$expected" ] || fail 'NodeSource signing-key fingerprint mismatch'
 
 mkdir -p /usr/share/keyrings
