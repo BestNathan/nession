@@ -8,6 +8,8 @@
  * aliases once the production-source migration reached zero consumers.
  */
 
+import { isTokenOwnedRecipe } from '../../../design/scripts/recipe-style-owners.mjs';
+
 const RAW_COLOR_RE = /\[(?:#[0-9a-fA-F]{3,8}|(?:rgb|hsl|oklch|oklab)\([^\]]+)\]/i;
 const PALETTES = new Set([
   'red','green','blue','yellow','amber','orange','emerald','teal','cyan','sky',
@@ -159,7 +161,7 @@ function normalizedPath(filename) {
 export function isForeignAdapter(filename) {
   const path = normalizedPath(filename);
   return (
-    path.includes('/src/components/ui/') ||
+    (path.includes('/src/components/ui/') && !isTokenOwnedRecipe(path)) ||
     path.includes('/src/platform/editor/') ||
     path.includes('/src/platform/terminal-runtime/') ||
     path.endsWith('/src/shared/markdown/markdownVisualGrammar.ts')

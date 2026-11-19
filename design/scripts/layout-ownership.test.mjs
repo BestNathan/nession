@@ -112,6 +112,45 @@ test('the shared recipes do not encode raw numeric spacing', () => {
   );
 });
 
+test('Nession-owned shared recipes require token-backed visual metrics (#4050)', () => {
+  const recipe = 'web/src/components/ui/resource-detail.tsx';
+  const form = 'web/src/components/ui/configuration-formStyles.ts';
+
+  const bad = 'className="flex gap-3 p-2.5 -mt-4 w-6 gap-[12px] gap-[calc(1rem+var(--nession-rhythm-inline))]"';
+  const violations = scanLayoutSource(bad, recipe);
+  assert.equal(violations.length, 6);
+  assert.ok(violations.every(v => v.kind === 'no-recipe-raw-spacing' && v.owner && v.repair));
+  assert.ok(violations.some(v => v.actual.includes('gap-[calc(1rem')));
+
+  assert.deepEqual(
+    rules(scanLayoutSource("export const formRowClass = 'gap-2 p-3';", form)),
+    ['no-recipe-raw-spacing', 'no-recipe-raw-spacing'],
+    'a shared style-string owner is still a Recipe',
+  );
+  assert.deepEqual(
+    rules(scanLayoutSource('<div style={{ padding: 12 }} />', recipe)),
+    ['no-recipe-raw-spacing'],
+    'inline non-token visual lengths cannot bypass the class check',
+  );
+});
+
+test('Nession recipe tokens and structural layout remain legal (#4050)', () => {
+  const source =
+    '<div className="flex min-w-0 grid-cols-1 gap-0 p-0 gap-[var(--nession-rhythm-inline)] p-[var(--nession-shell-space-3)]" />';
+  for (const recipe of [
+    'web/src/components/ui/resource-detail.tsx',
+    'web/src/components/ui/configuration-form.tsx',
+    'web/src/components/ui/operation-surface.tsx',
+  ]) {
+    assert.deepEqual(scanLayoutSource(source, recipe), [], recipe);
+  }
+  assert.deepEqual(
+    scanLayoutSource('<div className="flex gap-3 p-3" />', 'web/src/components/ui/label.tsx'),
+    [],
+    'upstream Label interior geometry is not blanket-ported to Nession recipe ownership',
+  );
+});
+
 test('only the App Experience owns the keyboard-avoidance scroll ancestor', () => {
   const marker = `data-keyboard-avoidance-scrollport=""`;
   assert.deepEqual(
