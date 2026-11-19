@@ -18,6 +18,7 @@
 //! [mcp]
 //! listen_address = "127.0.0.1:9090"
 //! auth_token = "<mcp-inbound-token>"
+//! # allow_query_token = true  # Optional, default false; query credentials need HTTPS.
 //!
 //! [backend.server]
 //! endpoint = "wss://nession.example.com/ws"
