@@ -119,11 +119,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Prepare Rust toolchain for canonical Protocol codegen
+      - name: Prepare Rust toolchain and restore trusted Pages Cargo cache
         if: steps.detect.outputs.active == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: false
+          # The historical schema JSON cache below is NOT a Cargo dependency
+          # cache. Without this, even prototype-only publishes re-download
+          # locked dependencies for the current-main Protocol/MCP exporters.
+          # rust-cache keys include OS/arch, rustc version, Cargo.lock,
+          # workspace manifests and Rust flags; reuse survives unrelated
+          # prototype/Knowledge signals without trusting their executable code.
+          cache: true
+          cache-key: pages-main-codegen-v1
+          cache-workspaces: '. -> target'
+          cache-targets: true
+          cache-workspace-crates: false
+          cache-bin: false
+          cache-on-failure: false
+          # Historical tagged codegen uses a separate CARGO_HOME/TARGET_DIR in
+          # an unprivileged step; no historical binary can enter this target.
       - name: Restore SHA-keyed historical Protocol schemas
         if: steps.detect.outputs.active == 'true'
         uses: actions/cache@v4
