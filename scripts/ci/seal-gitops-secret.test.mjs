@@ -246,15 +246,15 @@ test('staging MCP inbound token is a dedicated strict SealedSecret target', () =
   const doc = createPlainSecret(environment, inboundSecret, 'opaque-query-safe_token');
   assert.deepEqual(Object.keys(doc.data), ['token']);
   assert.equal(Buffer.from(doc.data.token, 'base64').toString('utf8'), 'opaque-query-safe_token');
-  for (const invalid of ['', ' ', ' trailing', 'line\\nbreak', '\\tbad', 'bad\\0null']) {
+  for (const invalid of ['', ' ', ' trailing', 'line\nbreak', '\tbad', 'bad\0null']) {
     assert.throws(() => createPlainSecret(environment, inboundSecret, invalid));
   }
 });
 
 test('staging inbound sealing rejects foreign resources and remains idempotent', () => {
-  const yaml = 'resources:\\n- deployment.yaml\\n';
+  const yaml = 'resources:\n- deployment.yaml\n';
   const next = addResource(yaml, inboundTarget.resource);
-  assert.match(next, /sealed-inbound\\.json/);
+  assert.match(next, /sealed-inbound\.json/);
   assert.equal(addResource(next, inboundTarget.resource), next);
   const changed = [inboundTarget.resource, inboundTarget.kustomization];
   assert.deepEqual(validateChangedPaths(changed, environment, inboundSecret), changed);
