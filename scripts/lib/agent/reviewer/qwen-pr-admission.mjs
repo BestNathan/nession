@@ -38,6 +38,46 @@ export function authenticatedQwenPublisherTrigger(run){
     (run?.event==='workflow_dispatch'&&
       run.actor?.login==='github-actions[bot]');
 }
+// #4097: the second Repair wrote immutable PR-C through an Owner/main
+// recovery of the exact failed write-ahead writer. This is NOT a generic
+// issue_comment permission: both the signed A→B→C Store transition and the
+// successful reconciler Run must match their frozen identities.
+export function attestedQwenRepairPublisherRecovery({
+  state,intent,transition,publisherRun,
+}){
+  const published=state?.transitions?.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published')??[];
+  return state?.issue===3784&&state.phase==='review'&&
+    state.target_sha==='d80e0827ad2d9f2dd548d20fc92b9462681c3094'&&
+    state.repair_attempts===2&&
+    intent?.issue===3784&&intent.checkpoint_version===3&&
+    intent.source_sha==='51f82d64ec159397ea501e6cbb99e7039ee141bd'&&
+    intent.original_main_sha==='ec2984381bda57491d764a9ba3e1123a63b89861'&&
+    intent.original_publisher_run_id===44281178406&&
+    intent.publisher_run_id===44476308903&&
+    intent.branch==='refs/heads/agent/3784/qwen-39c01222a8d00fa3'&&
+    published.length===3&&
+    published[0]?.run_id===44281178406&&
+    published[0].target_sha==='5d7e9118b7e954e760cc680fff7d43b4f9e17612'&&
+    published[1]?.run_id===44457994853&&
+    published[1].target_sha===intent.source_sha&&
+    published[2]===transition&&
+    transition?.run_id===44497822207&&
+    transition.attempt===1&&transition.outcome==='published'&&
+    transition.target_sha===state.target_sha&&
+    transition.write_ahead_publisher_run_id===intent.publisher_run_id&&
+    publisherRun?.id===44497822207&&
+    publisherRun.run_attempt===1&&
+    publisherRun.name==='Store / Qwen Publisher'&&
+    publisherRun.path==='.github/workflows/store-qwen-publisher.yml'&&
+    publisherRun.event==='issue_comment'&&
+    publisherRun.actor?.login==='BestNathan'&&
+    publisherRun.head_branch==='main'&&
+    publisherRun.head_sha==='01bbda0509faa05ec0b3e8e025e2600cd48cc447'&&
+    publisherRun.status==='completed'&&publisherRun.conclusion==='success'&&
+    publisherRun.repository?.full_name===REPO&&
+    publisherRun.head_repository?.full_name===REPO;
+}
 // #3885: original Qwen Publisher wrote PR #3919 and failed *after* its
 // GitHub POST. A distinct Owner-authenticated GET-only Publisher recovery
 // verified the same PR/Store Intent and advanced the signed Issue Store.
@@ -256,7 +296,10 @@ export function admitQwenRepairPublishedReview({
       publisherRun.run_attempt!==1||
       publisherRun.name!=='Store / Qwen Publisher'||
       publisherRun.path!=='.github/workflows/store-qwen-publisher.yml'||
-      !authenticatedQwenPublisherTrigger(publisherRun)||publisherRun.head_branch!=='main'||
+      !(authenticatedQwenPublisherTrigger(publisherRun)||
+         attestedQwenRepairPublisherRecovery({
+           state,intent:record,transition:sourcePublisher,publisherRun}))||
+       publisherRun.head_branch!=='main'||
       !SHA.test(publisherRun.head_sha??'')||
       publisherRun.status!=='completed'||publisherRun.conclusion!=='success'||
       publisherRun.repository?.full_name!==REPO||
