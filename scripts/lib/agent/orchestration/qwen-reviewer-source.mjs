@@ -94,7 +94,7 @@ export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
           '-'+valid.action_id+'.json')
         fail('Repair Reviewer Intent path differs from signed Worker');
       if(priorWriter!==null&&
-          (state?.phase!=='review'||
+          (!['review','repair'].includes(state?.phase)||
            state.target_sha===valid.source_sha||
            !state.transitions.some(t=>t.kind==='publisher'&&
              t.run_id===valid.original_publisher_run_id&&

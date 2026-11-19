@@ -7,7 +7,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState} from '../orchestration/state-store.mjs';
-import {qwenCommittedPublisherIntent}
+import {qwenCommittedPublisherIntent,qwenCommittedReviewIntent}
   from '../orchestration/qwen-reviewer-source.mjs';
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
@@ -157,20 +157,34 @@ function confirmStore(root,record){
   const published=state.transitions.filter(t=>t.kind==='publisher'&&
     t.outcome==='published'&&t.target_sha===state.target_sha);
   if(latest?.kind!=='reviewer'||latest.outcome!=='changes_requested'||
-      latest.target_sha!==record.source_sha||
-      published.length!==1||
-      published[0].run_id!==record.original_publisher_run_id)
+      latest.target_sha!==record.source_sha||published.length!==1)
     fail('Repair Store lacks latest Reviewer changes_requested for PR SHA A');
+  // The current published SHA can belong to a later Repair Publisher.
+  // Its predecessor native checkpoint is the exact signed vN origin; the
+  // initial Publisher remains the sole PR branch/main identity owner.
+  const current=qwenCommittedReviewIntent({storeRoot:root,
+    issue:record.issue,publisherRunId:published[0].run_id});
+  const precursor=current.record;
   const first=qwenCommittedPublisherIntent({storeRoot:root,issue:record.issue,
     publisherRunId:record.original_publisher_run_id});
+  const origin=action[0].task.repair_checkpoint;
+  const sourceSha=current.repair?precursor.source_sha:precursor.worker_source_sha;
   if(first.branch!=='agent/'+record.issue+'/qwen-'+
       first.action_id.slice(0,16)||
       'refs/heads/'+first.branch!==record.branch||
       first.target_main_sha!==record.original_main_sha||
-      first.worker_run_id!==action[0].task.repair_checkpoint?.source_run_id||
-      first.checkpoint_commit_sha!==
-        action[0].task.repair_checkpoint?.checkpoint_commit_sha)
-    fail('Repair is not the same immutable original Publisher lineage');
+      first.publisher_run_id!==record.original_publisher_run_id||
+      current.branch!==first.branch||
+      precursor.worker_run_id!==origin.source_run_id||
+      precursor.checkpoint_version!==origin.checkpoint_version||
+      precursor.checkpoint_commit_sha!==origin.checkpoint_commit_sha||
+      precursor.checkpoint_ciphertext_sha256!==origin.ciphertext_sha256||
+      sourceSha!==origin.source_sha||
+      (current.repair&&(
+        precursor.original_publisher_run_id!==first.publisher_run_id||
+        precursor.original_main_sha!==first.target_main_sha||
+        precursor.source_sha===record.source_sha)))
+    fail('Repair is not the latest signed checkpoint on original PR lineage');
   const prefix='roles/developer/dev-qwen-01/issues/'+record.issue;
   const run=read(root,prefix+'/runs/'+record.worker_run_id+'-1.json');
   if(run?.version!==record.checkpoint_version||
