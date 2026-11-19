@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "2ede4dbfe6f3717776f91974f3414120eb20cd37",
+  "scenario_revision": "2ede4dbfe6f3717776f91974f3414120eb20cd37",
+  "run_id": 44588203093,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-19T18:32:14.519Z",
+  "finished_at": "2026-11-19T18:32:24.852Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-19T18:32:24.004Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "8605ff2bd01e46af21f93339a83fc05e9d577c66729810729b0ee2250cd3e12f",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-19T18:32:24.277Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "8605ff2bd01e46af21f93339a83fc05e9d577c66729810729b0ee2250cd3e12f",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-19T18:32:24.787Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "8605ff2bd01e46af21f93339a83fc05e9d577c66729810729b0ee2250cd3e12f",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44588203093,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4072-agent-registration-deadline",
+    "target_sha": "2ede4dbfe6f3717776f91974f3414120eb20cd37",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44588203093",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "8bf289779a8342aabdd4a7de26c06214b15f2331c5054f001435e3080dadb929"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-44588203093-1",
+    "sha256": "8bf289779a8342aabdd4a7de26c06214b15f2331c5054f001435e3080dadb929",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44588203093",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "18ecab7aa24f17535b7e467dc307d68373d3e978c7597ddc6abf8a349b75b763"
+}

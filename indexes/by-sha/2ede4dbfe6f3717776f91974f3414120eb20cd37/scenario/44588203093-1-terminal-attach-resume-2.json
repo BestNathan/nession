@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44588203093,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4072-agent-registration-deadline",
+    "target_sha": "2ede4dbfe6f3717776f91974f3414120eb20cd37",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44588203093",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e054c2d33a5e4317fa5f688047e9a888d49ec948bce27aa85502ccde250bbd3c"
+  },
+  "record": "runs/2026-11-19/44588203093-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ff1bc24e4e8d793c7de3492b8db786874bdf7454dee325a7898d91a71085ab4d"
+}
