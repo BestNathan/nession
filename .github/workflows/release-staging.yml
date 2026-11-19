@@ -6,7 +6,8 @@ name: Release / Staging Artifacts
 # for the Actions cache quota.
 env:
   RUSTC_WRAPPER: ""
-  AGENT_DEBIAN_BASE_IMAGE: "debian:bookworm-20261104-slim"
+  AGENT_DEBIAN_BASE_IMAGE: "debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc"
+  AGENT_NODESOURCE_GPG_FINGERPRINT: "6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
   AGENT_NODEJS_VERSION: "22.23.5-1nodesource1"
   AGENT_CLAUDE_CODE_VERSION: "2.1.323"
   AGENT_TMUX_VERSION: "3.6b"
@@ -345,6 +346,7 @@ jobs:
           build-args: |
             NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
             AGENT_DEBIAN_BASE_IMAGE=${{ env.AGENT_DEBIAN_BASE_IMAGE }}
+            AGENT_NODESOURCE_GPG_FINGERPRINT=${{ env.AGENT_NODESOURCE_GPG_FINGERPRINT }}
             AGENT_NODEJS_VERSION=${{ env.AGENT_NODEJS_VERSION }}
             AGENT_CLAUDE_CODE_VERSION=${{ env.AGENT_CLAUDE_CODE_VERSION }}
             AGENT_TMUX_VERSION=${{ env.AGENT_TMUX_VERSION }}
@@ -491,6 +493,7 @@ jobs:
           build-args: |
             NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
             AGENT_DEBIAN_BASE_IMAGE=${{ env.AGENT_DEBIAN_BASE_IMAGE }}
+            AGENT_NODESOURCE_GPG_FINGERPRINT=${{ env.AGENT_NODESOURCE_GPG_FINGERPRINT }}
             AGENT_NODEJS_VERSION=${{ env.AGENT_NODEJS_VERSION }}
             AGENT_CLAUDE_CODE_VERSION=${{ env.AGENT_CLAUDE_CODE_VERSION }}
             AGENT_TMUX_VERSION=${{ env.AGENT_TMUX_VERSION }}

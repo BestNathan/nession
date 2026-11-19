@@ -74,7 +74,7 @@ export function checkSources(files) {
 
   // Dedicated artifact: exactly the prebuilt host binary.
   includes(DOCKERFILE, [
-    'FROM debian:bookworm-slim',
+    'FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc',
     'ca-certificates',
     'COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp',
     'chmod +x /usr/local/bin/nession-mcp',
@@ -216,6 +216,9 @@ export function checkSources(files) {
 function selfTest(files) {
   const failures = checkSources(files).map((error) => 'baseline must pass: ' + error);
   const mutations = [
+    ['MCP Dockerfile unpins audited Debian index', DOCKERFILE,
+      (t) => replaceOnce(t, 'FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc', 'FROM debian:bookworm-slim'),
+      'missing FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc'],
     ['Dockerfile loses the prebuilt binary', DOCKERFILE,
       (t) => replaceOnce(t, 'COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp\n', ''),
       'missing COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp'],

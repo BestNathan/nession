@@ -28,7 +28,14 @@ const BUILD_SCRIPT = 'deploy/build-erofs-utils.sh';
 const BUILDER_STAGE = 'erofs-utils-builder';
 const RUNTIME_STAGE = 'runtime-tools';
 const FINAL_STAGE = 'runtime';
-const RUNTIME_BASE = 'debian:bookworm-slim';
+// Official multiarch OCI index identities audited from Docker Hub (2026-11-19).
+const RUNTIME_BASE = 'debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc';
+const RUST_BUILDER_BASE = 'rust:1.96-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f';
+const NODE_WEB_BASE = 'node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293';
+const NGINX_UI_BASE = 'nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10';
+const NODESOURCE_SETUP = 'deploy/setup-nodesource.sh';
+const NODESOURCE_FINGERPRINT = '6F71F525282841EEDAF851B42F59B5F99B1BE0B4';
+const MCP_IMAGE = 'Dockerfile.mcp.prebuilt';
 
 export const IMAGES = [
   { file: 'Dockerfile.server', role: 'server', variant: 'from-source' },
@@ -202,7 +209,7 @@ function checkAgentImageVersionAndCacheContracts(files) {
   };
   if (agent && prebuilt) {
     const keys = [
-      'AGENT_DEBIAN_BASE_IMAGE','AGENT_NGINX_VERSION',
+      'AGENT_DEBIAN_BASE_IMAGE','AGENT_NODESOURCE_GPG_FINGERPRINT','AGENT_NGINX_VERSION',
       'AGENT_CA_CERTIFICATES_VERSION','AGENT_CURL_VERSION','AGENT_GETTEXT_BASE_VERSION',
       'AGENT_GIT_VERSION','AGENT_BUBBLEWRAP_VERSION','AGENT_FUSE3_VERSION',
       'AGENT_FUSE_OVERLAYFS_VERSION','AGENT_NODEJS_VERSION',
@@ -216,8 +223,11 @@ function checkAgentImageVersionAndCacheContracts(files) {
         errors.push('Dockerfile.agent: ' + key + ' diverges from prebuilt version ARG');
       }
     }
-    if (!/^debian:bookworm-\d{8}-slim(?:@sha256:[0-9a-f]{64})?$/.test(arg(agent,'AGENT_DEBIAN_BASE_IMAGE')||'')) {
-      errors.push('Dockerfile.agent: must pin a dated Debian Bookworm base');
+    if (arg(agent, 'AGENT_DEBIAN_BASE_IMAGE') !== RUNTIME_BASE) {
+      errors.push('Dockerfile.agent: must pin audited Debian Bookworm multi-platform digest');
+    }
+    if (arg(agent, 'AGENT_NODESOURCE_GPG_FINGERPRINT') !== NODESOURCE_FINGERPRINT) {
+      errors.push('Dockerfile.agent: must pin verified NodeSource signing-key fingerprint');
     }
     const apt = {
       nginx: 'AGENT_NGINX_VERSION', 'ca-certificates': 'AGENT_CA_CERTIFICATES_VERSION',
@@ -233,12 +243,17 @@ function checkAgentImageVersionAndCacheContracts(files) {
         }
       }
       const clauses = [
+        'COPY deploy/setup-nodesource.sh /usr/local/bin/setup-nodesource.sh',
+        '/bin/sh /usr/local/bin/setup-nodesource.sh',
         'nodejs=$' + '{AGENT_NODEJS_VERSION}', 'AGENT_NODEJS_VERSION%%-*',
         '@anthropic-ai/claude-code@$' + '{AGENT_CLAUDE_CODE_VERSION}',
         'DISABLE_AUTOUPDATER=1', 'test "$(tmux -V)"',
       ];
-      if (!clauses.every(line=>source.includes(line))) {
-        errors.push(file + ': must pin and verify Node/Claude/tmux and disable Claude autoupdate');
+      if (!clauses.every(line => source.includes(line))) {
+        errors.push(file + ': must pin and verify Node/Claude/tmux and secure NodeSource bootstrap');
+      }
+      if (/setup_22\.x\s*\|\s*bash|curl[^\n]*\|\s*bash/.test(source)) {
+        errors.push(file + ': downloaded NodeSource shell must never execute');
       }
     }
   }
@@ -255,7 +270,7 @@ function checkAgentImageVersionAndCacheContracts(files) {
           errors.push(RELEASE_WORKFLOW + ': ' + name + ' cache scope must be isolated and mode=min');
         }
         if (role === 'agent') {
-          for (const key of ['AGENT_DEBIAN_BASE_IMAGE','AGENT_NODEJS_VERSION',
+          for (const key of ['AGENT_DEBIAN_BASE_IMAGE','AGENT_NODESOURCE_GPG_FINGERPRINT','AGENT_NODEJS_VERSION',
             'AGENT_CLAUDE_CODE_VERSION','AGENT_TMUX_VERSION','EROFS_UTILS_VERSION','EROFS_UTILS_SHA256']) {
             if (!block?.includes(key + '=$' + '{{ env.' + key + ' }}')) {
               errors.push(RELEASE_WORKFLOW + ': ' + name + ' must supply ' + key + ' build ARG');
@@ -264,7 +279,7 @@ function checkAgentImageVersionAndCacheContracts(files) {
         }
       }
     }
-    for (const key of ['AGENT_DEBIAN_BASE_IMAGE','AGENT_NODEJS_VERSION',
+    for (const key of ['AGENT_DEBIAN_BASE_IMAGE','AGENT_NODESOURCE_GPG_FINGERPRINT','AGENT_NODEJS_VERSION',
       'AGENT_CLAUDE_CODE_VERSION','AGENT_TMUX_VERSION','EROFS_UTILS_VERSION','EROFS_UTILS_SHA256']) {
       if (!yaml.includes('  ' + key + ': "' + arg(prebuilt,key) + '"')) {
         errors.push(RELEASE_WORKFLOW + ': ' + key + ' Workflow version must match pinned Docker ARG');
@@ -295,6 +310,18 @@ export function checkFiles(files) {
     const stages = parsed.get(file);
     if (!stages) continue;
     const contract = ROLE_CONTRACT[role];
+    if (!file.endsWith('.prebuilt')) {
+      for (const name of ['planner', 'cacher', 'rust-builder']) {
+        const stage = stageNamed(stages, name, file, errors);
+        if (stage?.from !== RUST_BUILDER_BASE) {
+          errors.push(file + ': ' + name + ' must use audited Rust multi-platform digest');
+        }
+      }
+      const webStage = stageNamed(stages, 'web-builder', file, errors);
+      if (webStage?.from !== NODE_WEB_BASE) {
+        errors.push(file + ': web-builder must use audited Node multi-platform digest');
+      }
+    }
 
     const builder = stageNamed(stages, BUILDER_STAGE, file, errors);
     const runtimeTools = stageNamed(stages, RUNTIME_STAGE, file, errors);
@@ -386,6 +413,36 @@ export function checkFiles(files) {
 
   errors.push(...checkAgentImageVersionAndCacheContracts(files));
 
+  // A fixed key identity and scoped signed APT are the only NodeSource trust path.
+  const nodeSource = files.get(NODESOURCE_SETUP);
+  if (typeof nodeSource !== 'string') {
+    errors.push(NODESOURCE_SETUP + ': missing authenticated NodeSource setup');
+  } else {
+    const required = [
+      ['set -eu', 'must fail closed'],
+      [NODESOURCE_FINGERPRINT, 'must pin approved NodeSource key'],
+      ['amd64|arm64', 'must allow only supported architectures'],
+      ['https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key', 'must fetch official signing key'],
+      ['gpg --batch --with-colons --show-keys', 'must inspect primary-key fingerprint'],
+      ['> "$fingerprint_file" || fail', 'must reject failed GPG inspection'],
+      ['[ "$actual" = "$expected" ]', 'must refuse mismatched signing key'],
+      ['gpg --batch --yes --dearmor -o /usr/share/keyrings/nodesource.gpg', 'must install verified key'],
+      ['Signed-By: /usr/share/keyrings/nodesource.gpg', 'must scope APT trust to verified key'],
+      ['https://deb.nodesource.com/node_22.x', 'must restrict APT to NodeSource 22'],
+      ['apt-get update', 'must verify APT repository signature'],
+    ];
+    for (const [fragment, message] of required) {
+      if (!nodeSource.includes(fragment)) errors.push(NODESOURCE_SETUP + ': ' + message);
+    }
+    if (/\|\s*(?:ba)?sh\b|trusted\.gpg|AllowInsecureRepositories|--allow-unauthenticated/.test(nodeSource)) {
+      errors.push(NODESOURCE_SETUP + ': must not bypass signed APT or execute remote shell');
+    }
+  }
+  const mcp = files.get(MCP_IMAGE);
+  if (typeof mcp !== 'string' || !mcp.includes('FROM ' + RUNTIME_BASE + ' AS runtime')) {
+    errors.push(MCP_IMAGE + ': must use audited Debian Bookworm multi-platform digest');
+  }
+
   const script = files.get(BUILD_SCRIPT);
   if (typeof script !== 'string') {
     errors.push(`${BUILD_SCRIPT}: missing pinned build script`);
@@ -396,6 +453,9 @@ export function checkFiles(files) {
   // The UI image serves static files; runtime test/build tooling must stay out.
   const unrelated = files.get(UNRELATED_IMAGE);
   if (typeof unrelated === 'string') {
+    if (!unrelated.includes('FROM ' + NGINX_UI_BASE + '\n')) {
+      errors.push(UNRELATED_IMAGE + ': must use audited nginx multi-platform digest');
+    }
     for (const forbidden of UNRELATED_FORBIDDEN) {
       if (unrelated.includes(forbidden)) {
         errors.push(`${UNRELATED_IMAGE}: must not carry EROFS runtime tool \`${forbidden}\``);
@@ -406,7 +466,7 @@ export function checkFiles(files) {
   return errors;
 }
 
-const CLI_FILES = [...IMAGES.map((image) => image.file), BUILD_SCRIPT, UNRELATED_IMAGE, RELEASE_WORKFLOW];
+const CLI_FILES = [...IMAGES.map((image) => image.file), BUILD_SCRIPT, NODESOURCE_SETUP, MCP_IMAGE, UNRELATED_IMAGE, RELEASE_WORKFLOW];
 
 function loadFiles() {
   const files = new Map();
@@ -544,7 +604,7 @@ function selfTest(files) {
       '',
     ), 'must COPY fsck.erofs'],
     ['server loses runtime probe', 'Dockerfile.server', (text) => replaceOnce(text, 'RUN command -v git mkfs.erofs fsck.erofs', 'RUN true'), 'must probe `command -v git mkfs.erofs fsck.erofs`'],
-    ['server runtime base drifts', 'Dockerfile.server', (text) => replaceOnce(text, 'FROM debian:bookworm-slim AS runtime-tools', 'FROM debian:trixie-slim AS runtime-tools'), 'must use debian:bookworm-slim'],
+    ['server runtime base drifts', 'Dockerfile.server', (text) => replaceOnce(text, 'FROM ' + RUNTIME_BASE + ' AS runtime-tools', 'FROM debian:trixie-slim AS runtime-tools'), 'must use ' + RUNTIME_BASE],
     ['prebuilt server stops extending runtime-tools', 'Dockerfile.server.prebuilt', (text) => replaceOnce(text, 'FROM runtime-tools AS runtime', 'FROM debian:bookworm-slim AS runtime'), 'final stage must extend `runtime-tools`'],
     ['agent loses fuse3', 'Dockerfile.agent', (text) => replaceOnce(text, '"fuse3=$' + '{AGENT_FUSE3_VERSION}"', ''), 'apt install must include `fuse3`'],
     ['agent loses erofsfuse copy', 'Dockerfile.agent', (text) => text.replace(
@@ -562,6 +622,18 @@ function selfTest(files) {
     ['build script stops building erofsfuse', BUILD_SCRIPT, (text) => replaceOnce(text, '--enable-fuse', '--disable-fuse'), 'must build erofsfuse'],
     ['agent version floats', 'Dockerfile.agent', (text) => replaceOnce(text, 'ARG AGENT_CLAUDE_CODE_VERSION=2.1.323', 'ARG AGENT_CLAUDE_CODE_VERSION=latest'), 'fixed version ARG'],
     ['agent versions diverge', 'Dockerfile.agent', (text) => replaceOnce(text, 'ARG AGENT_NODEJS_VERSION=22.23.5-1nodesource1', 'ARG AGENT_NODEJS_VERSION=22.0.0'), 'diverges from prebuilt'],
+    ['agent unpins Debian index', 'Dockerfile.agent', (text) => replaceOnce(text, 'ARG AGENT_DEBIAN_BASE_IMAGE=' + RUNTIME_BASE, 'ARG AGENT_DEBIAN_BASE_IMAGE=debian:bookworm-20261104-slim'), 'must pin audited Debian Bookworm multi-platform digest'],
+    ['agent changes Debian digest', 'Dockerfile.agent', (text) => replaceOnce(text, RUNTIME_BASE, RUNTIME_BASE.replace(/.$/, '0')), 'must pin audited Debian Bookworm multi-platform digest'],
+    ['agent changes NodeSource key fingerprint', 'Dockerfile.agent', (text) => replaceOnce(text, NODESOURCE_FINGERPRINT, '0'.repeat(40)), 'verified NodeSource signing-key fingerprint'],
+    ['agent skips NodeSource setup', 'Dockerfile.agent', (text) => replaceOnce(text, '/bin/sh /usr/local/bin/setup-nodesource.sh', '/bin/true'), 'secure NodeSource bootstrap'],
+    ['prebuilt agent restores curl pipe', 'Dockerfile.agent.prebuilt', (text) => text + '\nRUN curl https://deb.nodesource.com/setup_22.x | bash\n', 'downloaded NodeSource shell must never execute'],
+    ['NodeSource key inspection fail-open', NODESOURCE_SETUP, (text) => replaceOnce(text, '> "$fingerprint_file" || fail', '> "$fingerprint_file"; true #'), 'must reject failed GPG inspection'],
+    ['NodeSource registration skips fingerprint', NODESOURCE_SETUP, (text) => replaceOnce(text, '[ "$actual" = "$expected" ]', 'true'), 'must refuse mismatched signing key'],
+    ['NodeSource registration drops signed-by', NODESOURCE_SETUP, (text) => replaceOnce(text, 'Signed-By: /usr/share/keyrings/nodesource.gpg', 'Trusted: yes'), 'must scope APT trust to verified key'],
+    ['MCP reverts to mutable Debian base', MCP_IMAGE, (text) => replaceOnce(text, 'FROM ' + RUNTIME_BASE + ' AS runtime', 'FROM debian:bookworm-slim AS runtime'), 'must use audited Debian Bookworm multi-platform digest'],
+    ['Rust builder reverts to floating tag', 'Dockerfile.agent', (text) => replaceOnce(text, 'FROM ' + RUST_BUILDER_BASE + ' AS planner', 'FROM rust:1.96-bullseye AS planner'), 'planner must use audited Rust multi-platform digest'],
+    ['Web builder reverts to floating tag', 'Dockerfile.server', (text) => replaceOnce(text, 'FROM ' + NODE_WEB_BASE + ' AS web-builder', 'FROM node:20-alpine AS web-builder'), 'web-builder must use audited Node multi-platform digest'],
+    ['UI reverts to floating nginx base', UNRELATED_IMAGE, (text) => replaceOnce(text, 'FROM ' + NGINX_UI_BASE, 'FROM nginx:1.27-alpine'), 'must use audited nginx multi-platform digest'],
     ['GHA cross-role cache collision', RELEASE_WORKFLOW, (text) => replaceOnce(text, 'cache-from: type=gha,scope=nession-build-agent-amd64', 'cache-from: type=gha,scope=nession-build-server-amd64'), 'cache scope must be isolated'],
     ['GHA cache mode regression', RELEASE_WORKFLOW, (text) => replaceOnce(text, 'cache-to: type=gha,scope=nession-build-agent-arm64,mode=min', 'cache-to: type=gha,scope=nession-build-agent-arm64,mode=max'), 'cache scope must be isolated'],
     ['UI image gains sandbox tooling', UNRELATED_IMAGE, (text) => `${text}\nRUN apt-get install -y fuse3 erofsfuse\n`, 'must not carry EROFS runtime tool'],
