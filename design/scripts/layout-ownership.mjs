@@ -63,8 +63,30 @@ const HOST_CHROME_MARKERS = [
   'workspace-tool-content',
   'workspace-surface-navigation',
 ];
-const RAW_SPACING_RE =
-  /(?<![\w-])(?:gap|gap-x|gap-y|space-x|space-y|p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml)-\d+(?:\.\d+)?(?![\w-])/g;
+/** Token-only spacing applies to Nession-owned shared recipes, not the upstream
+ * internals of every shadcn primitive or the glyphs of a third-party renderer.
+ * This is the same owner as the existing no-recipe-raw-spacing check (#3194).
+ * A broader legacy product/capability migration must be explicitly audited.
+ */
+export const TOKEN_OWNED_RECIPE_FILES = new Set([
+  LAYOUT_RECIPE_OWNER,
+  'web/src/components/ui/resource-detail.tsx',
+  'web/src/components/ui/configuration-form.tsx',
+  'web/src/components/ui/configuration-formStyles.ts',
+  'web/src/components/ui/operation-surface.tsx',
+]);
+
+const SPACING_PREFIX = '(?:gap(?:-[xy])?|space-[xy]|p[trblxy]?|m[trblxy]?|w|h|size)';
+const RAW_SPACING_RE = new RegExp(
+  `(?<![\\w-])-?${SPACING_PREFIX}-(?:(?:-?\\d+(?:\\.\\d+)?|px)(?![\\w.-])|\\[-?\\d+(?:\\.\\d+)?(?:px|rem|em|vh|vw|%|ch|dvh)?\\])`,
+  'g',
+);
+const RAW_CALC_LENGTH_RE = new RegExp(
+  `(?<![\\w-])${SPACING_PREFIX}-\\[[^\\]\\n]*?(?:\\d+(?:\\.\\d+)?)(?:px|rem|em|vh|vw|dvh|%)\\b[^\\]\\n]*?\\]`,
+  'g',
+);
+const RAW_INLINE_VISUAL_RE =
+  /(?<![\w-])(?:padding(?:Top|Bottom|Left|Right|Inline|Block)?|margin(?:Top|Bottom|Left|Right|Inline|Block)?|gap|rowGap|columnGap|width|height|fontSize|borderRadius)\s*:\s*['"]?-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?/g;
 
 const RULES = {
   'no-capability-frame-geometry': {
@@ -101,9 +123,9 @@ const RULES = {
   'no-recipe-raw-spacing': {
     expected:
       'the shared layout recipes use token-backed spacing or no spacing at all; stable spacing belongs to a semantic token',
-    owner: LAYOUT_RECIPE_OWNER,
+    owner: 'design/tokens/experience/{web,app}.json + the shared recipe owner',
     repair:
-      'replace the numeric spacing with a token-backed arbitrary value (var(--nession-*)) or leave spacing to the local consumer',
+      'replace the raw visual metric with an existing --nession-* token; if no semantic metric exists, add it to the canonical Experience token graph and regenerate projections',
   },
   'no-foreign-keyboard-scroll-owner': {
     expected:
@@ -208,11 +230,15 @@ export function scanLayoutSource(source, file = '<fixture>') {
         ...RULES['no-duplicated-scroll-owner'],
       });
     }
-  } else {
-    pushOccurrences(violations, masked, RAW_SPACING_RE, {
-      file,
-      rule: 'no-recipe-raw-spacing',
-    });
+  }
+
+  if (TOKEN_OWNED_RECIPE_FILES.has(file)) {
+    for (const regex of [RAW_SPACING_RE, RAW_CALC_LENGTH_RE, RAW_INLINE_VISUAL_RE]) {
+      pushOccurrences(violations, masked, regex, {
+        file,
+        rule: 'no-recipe-raw-spacing',
+      });
+    }
   }
 
   // Keyboard avoidance has one Experience owner and one viewport reader
