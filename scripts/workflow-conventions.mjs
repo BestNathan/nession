@@ -82,6 +82,7 @@ export const CATALOG = [
   ['deploy-staging-acr', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'delivery'],
   ['deploy-staging-ghcr', 'deploy-staging-ghcr.yml', 'Deploy / Staging GHCR', 'deploy-staging-ghcr.yml', 'Deploy / Staging GHCR', 'delivery'],
   ['deploy-acr-macos-mirror', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'delivery'],
+  ['deploy-erofs-ghcr-smoke', 'deploy-erofs-ghcr-smoke.yml', 'Deploy / EROFS GHCR Smoke', 'deploy-erofs-ghcr-smoke.yml', 'Deploy / EROFS GHCR Smoke', 'delivery'],
   ['deploy-oci-pull-readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'delivery'],
   ['deploy-staging-rollout-readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'delivery'],
   ['deploy-mcp-secret-preflight', 'deploy-mcp-secret-preflight.yml', 'Deploy / MCP Secret Preflight', 'deploy-mcp-secret-preflight.yml', 'Deploy / MCP Secret Preflight', 'delivery'],
