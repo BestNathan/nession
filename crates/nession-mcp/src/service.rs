@@ -596,6 +596,61 @@ mod tests {
     }
 
     #[test]
+    fn query_credentials_require_opt_in_and_do_not_override_bearer() {
+        fn allowed(uri: &str, headers: &[&str], allow_query: bool) -> bool {
+            let mut request = Request::builder().uri(uri);
+            for header in headers {
+                request = request.header(http::header::AUTHORIZATION, *header);
+            }
+            let request = request.body(()).expect("test request");
+            authorized_by(&request, &TokenVerifier::new("value+with/slash"), allow_query)
+        }
+
+        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &[], false));
+        assert!(allowed("/mcp", &["Bearer value+with/slash"], false));
+        assert!(allowed("/mcp?token=value%2Bwith%2Fslash", &[], true));
+        assert!(allowed("/mcp?irrelevant=a&token=value%2Bwith%2Fslash", &[], true));
+        assert!(allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer value+with/slash"],
+            true
+        ));
+        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &["Bearer wrong"], true));
+        assert!(!allowed("/mcp?token=wrong", &["Bearer value+with/slash"], true));
+        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &["Basic wrong"], true));
+        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &["Bearer"], true));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer value+with/slash", "Bearer value+with/slash"],
+            true
+        ));
+        for target in [
+            "/mcp",
+            "/mcp?token=",
+            "/mcp?token=wrong",
+            "/mcp?token=value+with%2Fslash",
+            "/mcp?token=value%2Bwith%2Fslash&token=value%2Bwith%2Fslash",
+            "/mcp?token=value%",
+            "/mcp?token=value%2",
+            "/mcp?token=value%ZZ",
+            "/mcp?%74oken=wrong",
+        ] {
+            assert!(!allowed(target, &[], true), "unexpected authorization: {target}");
+        }
+    }
+
+    #[test]
+    fn query_token_decoding_rejects_invalid_encoding_and_duplicate_keys() {
+        assert_eq!(query_token(None), Ok(None));
+        assert_eq!(query_token(Some("token=a%2Bb%26c")), Ok(Some("a+b&c".into())));
+        assert_eq!(query_token(Some("%74oken=value")), Ok(Some("value".into())));
+        assert_eq!(query_token(Some("foo=bar")), Ok(None));
+        assert_eq!(query_token(Some("token=%")), Err(()));
+        assert_eq!(query_token(Some("token=%FF")), Err(()));
+        assert_eq!(query_token(Some("token=x&%74oken=x")), Err(()));
+    }
+
+    #[test]
     fn a_successful_reply_is_structured_but_a_refusal_is_not() {
         let success = tool_result(&json!({ "agents": [] }));
         assert_eq!(success.is_error, Some(false));
