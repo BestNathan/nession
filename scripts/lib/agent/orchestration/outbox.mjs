@@ -642,7 +642,6 @@ export function hasOnlyRetiredReviewerForQwenRepair(state){
       old.receipt?.failure_code===f.failure_code;
   });
 }
-}
 
 // #2137: The separately authenticated Qwen Repair Publisher has already
 // verified the original PR and a non-force A->B update by exact GET readback.
