@@ -56,6 +56,13 @@ export const icon = {
 export const panel = {
   padding: 16,
 } as const;
+export const rhythm = {
+  sectionStack: 20,
+  sectionContent: 8,
+  textStack: 4,
+  inline: 8,
+  fieldStack: 6,
+} as const;
 export const touchTarget = {
   min: 44,
 } as const;
