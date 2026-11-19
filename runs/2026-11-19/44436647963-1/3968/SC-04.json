@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a992491e86a52f9b993049372ea8aa08ca298a2fbc4ab98f06ab1c45db4457fd",
+  "run_id": 44436647963,
+  "run_attempt": 1,
+  "issue": 3968,
+  "criterion": "SC-04",
+  "criterion_text": ": A subsequent authenticated Staging ACR Run demonstrates real exact-SHA GHCR→ACR four-role source/digest proof, or explicitly retains Pending with the observed operational blocker; a source-only fixture is not runtime proof.",
+  "stage": "staging",
+  "target_sha": "4aa667c5777801e2384d8be3ffa7f87cec8c4677",
+  "contract_sha256": "a48a2f832f9d768780447df7d221619835f580c9d54afa1b895d3b8a4da123eb",
+  "case_revision": "4aa667c5777801e2384d8be3ffa7f87cec8c4677",
+  "case_tree_sha": "1b496901bad56b32a7b297854a2e98280fc5981b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T01:28:01.025Z",
+  "finished_at": "2026-11-19T01:28:18.398Z",
+  "duration_ms": 17372,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "trusted Staging release and ACR four-role Digest-verified GitOps lane succeeded for exactly the same post-fix source SHA af5dbe1b7acf37110394985cf98a3787ec8f595c",
+      "evidence": [
+        {
+          "type": "registry",
+          "value": "ghcr.io/bestnathan/nession:agent-af5dbe1 amd64=sha256:b7cb0a1c4883579dc76529a2f0ecefa1a15b683e7834d82ae51b95778f246467 arm64=sha256:ff57d065d4a9da9a06437fae4e64ae108191e8ffe844fab06e2c9dd71bd38148 source-bound by trusted Release Run and GHCR provenance"
+        },
+        {
+          "type": "registry",
+          "value": "ghcr.io/bestnathan/nession:server-af5dbe1 amd64=sha256:d0af0487762fd091f02d19cdaf2698dedf431bf36826fa196258ed127b645b88 arm64=sha256:d8585a7140e8b7fc17907d70d2a865c6f58f620512b82b0dd2f4056f4906d4d1 source-bound by trusted Release Run and GHCR provenance"
+        },
+        {
+          "type": "registry",
+          "value": "ghcr.io/bestnathan/nession:mcp-af5dbe1 amd64=sha256:f8a62f370701c3f7b856b9547883dd6ff9628bd57ac41612058152274908bcb6 arm64=sha256:939f5cb39766078d82335736ddd87e5d80cdc76ed52e053985a218da9bf77572 config revision=af5dbe1b7acf37110394985cf98a3787ec8f595c"
+        },
+        {
+          "type": "registry",
+          "value": "ghcr.io/bestnathan/nession:ui-af5dbe1 amd64=sha256:8765e996d894265725c4f1666b7471fbcc8cbbed8965787976226ea46a42bc74 arm64=sha256:351c2d394948411b3f3fad87f24e91450aa7078e31f487149fdb318f6382509b source-bound by trusted Release Run and GHCR provenance"
+        },
+        {
+          "type": "ci",
+          "value": "Release / Staging Artifacts run 44368130119 attempt 1, exact source=af5dbe1b7acf37110394985cf98a3787ec8f595c: 8 platform Docker jobs, merge and authenticated GHCR provenance passed"
+        },
+        {
+          "type": "ci",
+          "value": "Deploy / Staging ACR run 44368130140 attempt 1, exact same source=af5dbe1b7acf37110394985cf98a3787ec8f595c: verify-source, 4 source/destination Digest-checked mirror jobs, provenance and GitOps writer passed"
+        },
+        {
+          "type": "provenance",
+          "value": "source af5dbe1b7acf37110394985cf98a3787ec8f595c is an authenticated staging ancestor of target 4aa667c5777801e2384d8be3ffa7f87cec8c4677 and descendant of readback fix db6295494dcc316464d1f280ebf7685c38b4525c"
+        }
+      ],
+      "duration_ms": 11419,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44436647963,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "4aa667c5777801e2384d8be3ffa7f87cec8c4677",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44436647963",
+    "record_path": "runs/2026-11-19/44436647963-1/3968/SC-04.json",
+    "source_result_sha256": "b1b052bdce882cf84eb3ac0cf989685542d2904e44125fc3d30945860ddae786"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44436647963-1",
+    "sha256": "b1b052bdce882cf84eb3ac0cf989685542d2904e44125fc3d30945860ddae786",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44436647963",
+    "durability": "time-limited; object archival not configured"
+  }
+}
