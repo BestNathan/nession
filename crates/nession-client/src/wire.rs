@@ -69,6 +69,13 @@ pub const SERVER_SESSION_CREATE: &str = "server.session.create";
 /// `server.session.kill` — kill one session.
 pub const SERVER_SESSION_KILL: &str = "server.session.kill";
 
+/// `server.session.metadata.get` — one Session's Agent-owned work context.
+pub const SERVER_SESSION_METADATA_GET: &str = "server.session.metadata.get";
+
+/// `server.session.metadata.patch` — partial update with the required
+/// incarnation and revision preconditions.
+pub const SERVER_SESSION_METADATA_PATCH: &str = "server.session.metadata.patch";
+
 /// `server.info` — Server version, uptime and protocol manifest.
 pub const SERVER_INFO: &str = "server.info";
 
@@ -149,3 +156,10 @@ pub const AGENT_SESSION_CREATE: &str = "agent.session.create";
 
 /// `agent.session.kill` — kill a tmux Session on the Agent.
 pub const AGENT_SESSION_KILL: &str = "agent.session.kill";
+
+/// `agent.session.metadata.get` — one Agent Session's work context.
+pub const AGENT_SESSION_METADATA_GET: &str = "agent.session.metadata.get";
+
+/// `agent.session.metadata.patch` — partial update with the Agent's required
+/// incarnation and revision preconditions.
+pub const AGENT_SESSION_METADATA_PATCH: &str = "agent.session.metadata.patch";

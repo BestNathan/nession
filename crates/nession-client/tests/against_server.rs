@@ -23,7 +23,8 @@ use nession_protocol::contracts::project::v1::ProjectGetPayload;
 use nession_protocol::contracts::session::v1::{
     ClientSessionAttachReply, ClientSessionCreatePayload, ClientSessionEnvBindingGetPayload,
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionEnvBindingRefusalKind,
+    ServerSessionListReply, SessionEnvBindingRefusalKind, SessionMetadataPatch,
+    WebSessionMetadataPatchPayload,
 };
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
@@ -112,6 +113,33 @@ async fn a_real_server_answers_the_session_list() {
             )
         }
     }
+}
+
+#[tokio::test]
+async fn a_real_server_answers_the_typed_metadata_units() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    // This Server has no registered Agent, so it refuses by target before
+    // routing. The typed call and the typed refusal both survive the boundary.
+    let read = client.get_session_metadata("agent-1:work").await.unwrap();
+    assert!(!read.success);
+    assert_eq!(read.error_kind.as_deref(), Some("not_found"));
+    assert!(read.instance_id.is_none());
+
+    let patched = client
+        .patch_session_metadata(WebSessionMetadataPatchPayload {
+            session_id: "agent-1:work".to_string(),
+            expected_instance_id: "instance-a".to_string(),
+            expected_revision: 0,
+            patch: SessionMetadataPatch {
+                description: Some(Some("Next step".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        })
+        .await
+        .unwrap();
+    assert!(!patched.success);
+    assert_eq!(patched.error_kind.as_deref(), Some("not_found"));
 }
 
 #[tokio::test]

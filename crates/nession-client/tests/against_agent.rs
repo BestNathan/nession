@@ -17,6 +17,7 @@ use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_client::AgentConnection;
+use nession_protocol::contracts::session::v1::{SessionMetadataPatch, SessionMetadataPatchPayload};
 
 const AGENT_ID: &str = "client-test-agent";
 const AGENT_TOKEN: &str = "client-test-agent-token";
@@ -91,6 +92,48 @@ async fn the_agent_connection_lists_creates_and_kills_over_the_agent_token() {
         listed.sessions.iter().any(|session| session.name == name),
         "the created Session is missing from Agent truth"
     );
+
+    // Metadata is the same owner's state, reached through this connection.
+    let read = connection
+        .get_session_metadata(&name)
+        .await
+        .expect("metadata get");
+    assert!(read.success, "{:?}", read.error);
+    assert_eq!(read.metadata.as_ref().expect("metadata").revision, 0);
+    let instance = read.instance_id.expect("the authoritative identity");
+
+    let patched = connection
+        .patch_session_metadata(SessionMetadataPatchPayload {
+            name: name.clone(),
+            expected_instance_id: instance,
+            expected_revision: 0,
+            patch: SessionMetadataPatch {
+                description: Some(Some("Next step".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        })
+        .await
+        .expect("metadata patch");
+    assert!(patched.success, "{:?}", patched.error);
+    let committed = patched.metadata.expect("committed metadata");
+    assert_eq!(committed.revision, 1);
+    assert_eq!(committed.description.as_deref(), Some("Next step"));
+
+    // A stale incarnation is a delivered conflict, not a transport failure.
+    let stale = connection
+        .patch_session_metadata(SessionMetadataPatchPayload {
+            name: name.clone(),
+            expected_instance_id: "00000000-0000-4000-8000-000000000000".to_string(),
+            expected_revision: 1,
+            patch: SessionMetadataPatch {
+                title: Some(Some("Stale".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        })
+        .await
+        .expect("refusal reply");
+    assert!(!stale.success);
+    assert_eq!(stale.error_kind.as_deref(), Some("conflict"));
 
     let killed = connection.kill_session(&name).await.expect("kill");
     assert_eq!(killed.name, name);

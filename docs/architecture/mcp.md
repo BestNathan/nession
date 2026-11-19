@@ -28,7 +28,7 @@ MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
 
 ## Tools
 
-The baseline catalog has fifteen Tools:
+The baseline catalog has seventeen Tools:
 
 | Semantic owner | Tool | Operation |
 |---|---|---|
@@ -47,6 +47,8 @@ The baseline catalog has fifteen Tools:
 | Agent | `nession_agent_list_sessions` | the named Agent's live Session state |
 | Agent | `nession_agent_create_session` | `agent.session.create` on the named Agent |
 | Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent |
+| Agent | `nession_agent_get_session_metadata` | Agent-owned Session work context (title/description/tags/revision + instance identity) |
+| Agent | `nession_agent_update_session_metadata` | Agent-owned partial metadata update with incarnation + revision preconditions |
 
 A host that composes Extension contributions (`#3778`) advertises them after
 these under the same typed contract.
@@ -104,6 +106,7 @@ its semantic backend use:
 | Agent Session kill | `SessionKillResponse` | Protocol contract |
 | Agent Session list | `SessionListOutput` + `SessionSummary` | Tool module |
 | Agent Session create | `SessionCreatedOutput` | Tool module |
+| Agent Session metadata get/update | `SessionMetadataOutput` + `SessionMetadata` | Tool module + Protocol contract |
 
 The Agent Session list/create replies have one MCP projection because the three
 hosting modes reach the same Agent truth through different Protocol wires (the
@@ -198,6 +201,43 @@ MCP never exposes Project association set/unset/move/convert operations. The
 Web's `server.session.project.set` remains their only owner; the MCP list
 projections simply observe its current result.
 
+## Session Metadata access (#4007)
+
+Session Metadata is Agent-owned work context (`#2789`). MCP adds an access
+surface, not a second store: the Agent remains the only writer and the Server
+only authorizes and routes, as it already does for the Web.
+
+| Tool | Owner operation | Contract |
+|---|---|---|
+| `nession_agent_get_session_metadata` | the Agent's metadata read | canonical `session_id`, authoritative `instance_id`, full metadata |
+| `nession_agent_update_session_metadata` | the Agent's partial update | required `expected_instance_id` + `expected_revision`, typed `patch` |
+
+Both Tools require an explicit non-empty `agent_id` and `name`; neither infers
+the target. A missing/offline Agent or missing Session is an error
+(`not_found`/`unavailable`), never an apparently empty record. A legacy Session
+the Agent actually read answers revision 0 with empty fields.
+
+The update is a **patch resolved at the Agent**, under the same per-instance
+writer lock and revision compare-and-swap as the Web's full replacement. Per
+field: omitted preserves, explicit `null` clears title/description, a value
+replaces it, `tags: []` clears tags, and an empty patch is refused. The Agent
+applies the patch to the current record and commits the next revision in one
+guarded operation, so two writers with the same revision cannot both commit and
+a concurrent write is a `conflict`, never a field-dropping read-merge-write.
+The caller supplies the durable `instance_id` it read: a same-name replacement
+is a `conflict` even when its fresh revision is also 0. `nession-client` and
+the Server route the same typed contracts; there is no MCP-local metadata
+snapshot.
+
+`nession_agent_list_sessions` carries a bounded summary: `revision`, `title`
+and `tags`, never `description`. The summary is `{state: available, summary}`
+or `{state: unavailable}`; a failed metadata lookup is never rendered as an
+empty task, and an omitted summary from a legacy Agent is treated as
+unavailable. The Agent joins the summary from its own store by the list's
+already-reported instance identity; the Server projects it into
+`server.session.list` and refreshes it when the MCP list forces live Agent
+state. Listing never creates or writes metadata.
+
 ## Flat Tool structure
 
 ```text
@@ -221,7 +261,9 @@ crates/nession-mcp/src/
     ├── nession_server_project_session_create.rs
     ├── nession_agent_list_sessions.rs
     ├── nession_agent_create_session.rs
-    └── nession_agent_kill_session.rs
+    ├── nession_agent_kill_session.rs
+    ├── nession_agent_get_session_metadata.rs
+    ├── nession_agent_update_session_metadata.rs
     ├── env_target.rs           # shared source/agent target and Session identity validation
     ├── nession_server_env_list.rs
     ├── nession_server_env_get.rs
@@ -410,7 +452,7 @@ still drives the shared service through hyper.
 
 ### Abandoned MCP mutation requests
 
-The MCP service bounds request execution, but a timeout is **not** proof that a remote Session mutation was rolled back. Agent- and Server-embedded Session create/kill share their owner's keyed mutation lane. The request/worker pair uses a one-way admission guard: dropping an MCP request while its operation is queued atomically marks it abandoned, so the queued work skips the side effect when it reaches its turn. Once the worker has claimed execution, a later MCP timeout cannot retract the already-started business operation. The caller receives a timeout with explicit readback-before-retry guidance; it must inspect current Agent Session state rather than assume a failed write or automatically repeat it. The guard does not add a Session state owner, retry daemon or new Tool. Remote backend timeouts are likewise not evidence of rollback.
+The MCP service bounds request execution, but a timeout is **not** proof that a remote Session mutation was rolled back. Agent- and Server-embedded Session create/kill share their owner's keyed mutation lane. The same rule applies to `nession_agent_update_session_metadata`: a timed-out partial update may already have committed at the Agent, so the caller re-reads before retrying rather than automatically repeating it. The request/worker pair uses a one-way admission guard: dropping an MCP request while its operation is queued atomically marks it abandoned, so the queued work skips the side effect when it reaches its turn. Once the worker has claimed execution, a later MCP timeout cannot retract the already-started business operation. The caller receives a timeout with explicit readback-before-retry guidance; it must inspect current Agent Session state rather than assume a failed write or automatically repeat it. The guard does not add a Session state owner, retry daemon or new Tool. Remote backend timeouts are likewise not evidence of rollback.
 
 ## Hosting modes
 

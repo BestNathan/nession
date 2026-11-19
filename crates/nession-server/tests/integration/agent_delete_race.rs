@@ -223,6 +223,7 @@ async fn add_session_with_binding(
         foreground_command: None,
         working_dir: None,
         instance_id: None,
+        metadata: None,
         activity: None,
         activity_epoch: None,
         activity_generation: 0,

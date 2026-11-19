@@ -1843,6 +1843,7 @@ pub(super) async fn bind_for_test(
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            metadata: None,
             activity: None,
             activity_epoch: None,
             activity_generation: 0,

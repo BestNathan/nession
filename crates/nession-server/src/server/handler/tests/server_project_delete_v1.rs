@@ -156,6 +156,7 @@ async fn project_delete_does_not_cascade_to_sessions() {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            metadata: None,
             activity: None,
             activity_epoch: None,
             activity_generation: 0,

@@ -16,6 +16,9 @@ pub enum ToolErrorKind {
     Unavailable,
     /// The backend accepted the call but did not answer in time.
     Timeout,
+    /// A precondition the caller supplied no longer matches the owner's
+    /// current state (a stale revision or a replaced Session incarnation).
+    Conflict,
     /// The backend answered with a refusal.
     Backend,
 }
@@ -28,6 +31,7 @@ impl ToolErrorKind {
             Self::NotFound => "not_found",
             Self::Unavailable => "unavailable",
             Self::Timeout => "timeout",
+            Self::Conflict => "conflict",
             Self::Backend => "backend",
         }
     }
@@ -38,10 +42,11 @@ impl ToolErrorKind {
     /// a silently dropped classification.
     pub fn from_wire(kind: &str) -> Self {
         match kind {
-            "invalid_argument" => Self::InvalidArgument,
+            "invalid_argument" | "invalid" => Self::InvalidArgument,
             "not_found" => Self::NotFound,
             "unavailable" => Self::Unavailable,
             "timeout" => Self::Timeout,
+            "conflict" => Self::Conflict,
             _ => Self::Backend,
         }
     }
@@ -86,8 +91,44 @@ impl ToolError {
         Self::new(ToolErrorKind::Timeout, message)
     }
 
+    /// A caller-supplied precondition is stale.
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(ToolErrorKind::Conflict, message)
+    }
+
     /// The backend answered with a refusal.
     pub fn backend(message: impl Into<String>) -> Self {
         Self::new(ToolErrorKind::Backend, message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kinds_round_trip_through_their_stable_spellings() {
+        for kind in [
+            ToolErrorKind::InvalidArgument,
+            ToolErrorKind::NotFound,
+            ToolErrorKind::Unavailable,
+            ToolErrorKind::Timeout,
+            ToolErrorKind::Conflict,
+            ToolErrorKind::Backend,
+        ] {
+            assert_eq!(ToolErrorKind::from_wire(kind.as_str()), kind);
+        }
+        // The metadata owner's `invalid` spelling maps to an argument error;
+        // an unknown spelling never becomes a success.
+        assert_eq!(
+            ToolErrorKind::from_wire("invalid"),
+            ToolErrorKind::InvalidArgument
+        );
+        assert_eq!(ToolErrorKind::from_wire("unknown"), ToolErrorKind::Backend);
+        assert_eq!(ToolErrorKind::Conflict.as_str(), "conflict");
+        assert_eq!(
+            ToolError::conflict("stale precondition").kind,
+            ToolErrorKind::Conflict
+        );
     }
 }

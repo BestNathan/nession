@@ -101,6 +101,7 @@ mod tests {
             foreground_command: Some("bash".to_string()),
             working_dir: Some("/tmp".to_string()),
             instance_id: instance_id.map(str::to_string),
+            metadata: None,
         }
     }
 

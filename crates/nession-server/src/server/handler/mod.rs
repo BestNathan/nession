@@ -45,7 +45,7 @@ use nession_protocol::contracts::session::v1::{
     ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvBindingRefusalKind,
     SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
     SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
-    WebSessionMetadataUpdatePayload, WebSessionsListResponse,
+    WebSessionMetadataPatchPayload, WebSessionMetadataUpdatePayload, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -1378,6 +1378,9 @@ pub(crate) fn session_to_info(
         foreground_command: s.foreground_command.clone(),
         working_dir: s.working_dir.clone(),
         instance_id: s.instance_id.clone(),
+        // The Agent's last reported work-context summary (#4007); omitted when
+        // no current Agent has reported one.
+        metadata: s.metadata.clone(),
         project_id: project_id.map(std::string::ToString::to_string),
         // The same shared serializer feeds `server.session.list` and
         // `server.sessions.changed`, so the two always agree on Activity too.
@@ -1459,6 +1462,15 @@ fn parse_agent_sessions(
                             .and_then(serde_json::Value::as_str)
                             .filter(|id| !id.is_empty())
                             .map(std::string::ToString::to_string),
+                        metadata: s
+                            .get("metadata")
+                            .cloned()
+                            .and_then(|raw| {
+                                serde_json::from_value::<
+                                    nession_protocol::contracts::session::v1::SessionMetadataAvailability,
+                                >(raw)
+                                .ok()
+                            }),
                         // The inventory reply carries no Activity; the
                         // replacement preserves a same-incarnation level.
                         activity: None,
@@ -1534,6 +1546,7 @@ mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
 mod server_session_metadata_get_v1;
+mod server_session_metadata_patch_v1;
 mod server_session_metadata_update_v1;
 mod server_session_processes_v1;
 mod server_session_project_set_v1;
@@ -1674,6 +1687,12 @@ pub(super) fn metadata_response(
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
         metadata,
+        // The Agent is the identity's authority; the Server relays it with the
+        // value so a caller can use it as its next write precondition (#4007).
+        instance_id: value
+            .get("instance_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
     }
 }
 
@@ -1683,5 +1702,6 @@ pub(super) fn metadata_refusal(kind: &str, message: &str) -> SessionMetadataResp
         error: Some(message.to_string()),
         error_kind: Some(kind.to_string()),
         metadata: None,
+        instance_id: None,
     }
 }

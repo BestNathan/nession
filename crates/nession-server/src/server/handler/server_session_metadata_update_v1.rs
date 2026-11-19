@@ -49,6 +49,7 @@ impl ConnectionHandler {
                     "description": payload.description,
                     "tags": payload.tags,
                     "expected_revision": payload.expected_revision,
+                    "expected_instance_id": payload.expected_instance_id,
                 }),
             )
             .await;

@@ -452,6 +452,8 @@ async fn embedded_mcp_authenticates_and_lists_the_shared_catalog() {
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",
+            "nession_agent_get_session_metadata",
+            "nession_agent_update_session_metadata",
         ]
     );
     for removed in [

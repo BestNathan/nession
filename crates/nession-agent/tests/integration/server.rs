@@ -21,6 +21,7 @@ use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::ops::TmuxDep;
 use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource, SessionEnvProfile};
+use nession_protocol::contracts::session::v1::{SessionMetadataPatch, SessionMetadataPatchPayload};
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -343,6 +344,7 @@ async fn integration_session_metadata_round_trips_through_the_routed_socket() {
             description: Some("Fix the staging run".to_string()),
             tags: vec!["release".to_string()],
             expected_revision: 0,
+            expected_instance_id: None,
         },
     );
     let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
@@ -362,6 +364,7 @@ async fn integration_session_metadata_round_trips_through_the_routed_socket() {
             description: None,
             tags: vec![],
             expected_revision: 0,
+            expected_instance_id: None,
         },
     );
     let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
@@ -391,12 +394,173 @@ async fn integration_session_metadata_round_trips_through_the_routed_socket() {
             description: None,
             tags: vec!["Same".to_string(), "same".to_string()],
             expected_revision: 1,
+            expected_instance_id: None,
         },
     );
     let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
     assert!(!resp.payload.success);
     assert_eq!(resp.payload.error_kind.as_deref(), Some("invalid"));
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+#[tokio::test]
+async fn integration_session_metadata_patch_fences_revision_and_incarnation() {
+    let (addr, handle, auth) = start_server(0).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("metadata-patch");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+    let (mut sink, mut stream) = connect(&auth, addr).await.unwrap();
+
+    let get = |name: &str| SessionMetadataGetPayload {
+        name: name.to_string(),
+    };
+    let req = new_message(msg_types::SESSION_METADATA_GET, get(&session_name));
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(resp.payload.success);
+    let instance_a = resp.payload.instance_id.clone().expect("instance identity");
+    assert_eq!(resp.payload.metadata.as_ref().unwrap().revision, 0);
+
+    // A description-only patch preserves the other fields and commits at the
+    // owner under the read revision.
+    let req = new_message(
+        msg_types::SESSION_METADATA_PATCH,
+        SessionMetadataPatchPayload {
+            name: session_name.clone(),
+            expected_instance_id: instance_a.clone(),
+            expected_revision: 0,
+            patch: SessionMetadataPatch {
+                description: Some(Some("Next step".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(resp.payload.success, "{:?}", resp.payload.error);
+    assert_eq!(resp.payload.metadata.as_ref().unwrap().revision, 1);
+    assert!(resp.payload.metadata.as_ref().unwrap().title.is_none());
+
+    // Title and tags replace at revision 1 without clearing description.
+    let req = new_message(
+        msg_types::SESSION_METADATA_PATCH,
+        SessionMetadataPatchPayload {
+            name: session_name.clone(),
+            expected_instance_id: instance_a.clone(),
+            expected_revision: 1,
+            patch: SessionMetadataPatch {
+                title: Some(Some("Release triage".to_string())),
+                tags: Some(vec!["release".to_string()]),
+                ..SessionMetadataPatch::default()
+            },
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(resp.payload.success);
+    let committed = resp.payload.metadata.as_ref().unwrap();
+    assert_eq!(committed.revision, 2);
+    assert_eq!(committed.title.as_deref(), Some("Release triage"));
+    assert_eq!(committed.description.as_deref(), Some("Next step"));
+    assert_eq!(committed.tags, vec!["release".to_string()]);
+
+    // The stale revision is refused and leaves revision 2 intact.
+    let req = new_message(
+        msg_types::SESSION_METADATA_PATCH,
+        SessionMetadataPatchPayload {
+            name: session_name.clone(),
+            expected_instance_id: instance_a.clone(),
+            expected_revision: 1,
+            patch: SessionMetadataPatch {
+                description: Some(None),
+                ..SessionMetadataPatch::default()
+            },
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(!resp.payload.success);
+    assert_eq!(resp.payload.error_kind.as_deref(), Some("conflict"));
+
+    // An empty patch is invalid, not a silent no-op with a new revision.
+    let req = new_message(
+        msg_types::SESSION_METADATA_PATCH,
+        SessionMetadataPatchPayload {
+            name: session_name.clone(),
+            expected_instance_id: instance_a.clone(),
+            expected_revision: 2,
+            patch: SessionMetadataPatch::default(),
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(!resp.payload.success);
+    assert_eq!(resp.payload.error_kind.as_deref(), Some("invalid"));
+
+    // Kill/recreate under the same name: the successor starts at revision 0
+    // with its own identity, and the previous incarnation's token is stale.
+    tmux.kill_session(&session_name).await.expect("kill");
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("recreate");
+    let req = new_message(msg_types::SESSION_METADATA_GET, get(&session_name));
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(resp.payload.success);
+    let instance_b = resp.payload.instance_id.clone().expect("new identity");
+    assert_ne!(instance_a, instance_b);
+    assert_eq!(resp.payload.metadata.as_ref().unwrap().revision, 0);
+
+    let req = new_message(
+        msg_types::SESSION_METADATA_PATCH,
+        SessionMetadataPatchPayload {
+            name: session_name.clone(),
+            expected_instance_id: instance_a,
+            expected_revision: 0,
+            patch: SessionMetadataPatch {
+                description: Some(Some("Stale writer".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(!resp.payload.success);
+    assert_eq!(resp.payload.error_kind.as_deref(), Some("conflict"));
+
+    // The successor's own identity still commits.
+    let req = new_message(
+        msg_types::SESSION_METADATA_PATCH,
+        SessionMetadataPatchPayload {
+            name: session_name.clone(),
+            expected_instance_id: instance_b,
+            expected_revision: 0,
+            patch: SessionMetadataPatch {
+                description: Some(Some("Replacement context".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        },
+    );
+    let resp: nession_agent::server::websocket::Message<SessionMetadataResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert!(resp.payload.success, "{:?}", resp.payload.error);
+    assert_eq!(resp.payload.metadata.as_ref().unwrap().revision, 1);
+    assert_eq!(
+        resp.payload
+            .metadata
+            .as_ref()
+            .unwrap()
+            .description
+            .as_deref(),
+        Some("Replacement context")
+    );
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();

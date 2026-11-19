@@ -33,7 +33,7 @@ use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
-use crate::session::metadata::SessionMetadataStore;
+use crate::session::metadata::{attach_session_summaries, SessionMetadataStore};
 use crate::session::registry::{
     ControlAcquireRejected, InputRejected, InvalidStreamIdentity, NotAttached, ResizeRejected,
     SessionRegistry, SubscribeRejected,
@@ -217,6 +217,7 @@ pub mod msg_types {
     pub const SESSION_CAPTURE_PREVIEW: &str = "agent.session.capture-preview";
     pub const SESSION_METADATA_GET: &str = "agent.session.metadata.get";
     pub const SESSION_METADATA_UPDATE: &str = "agent.session.metadata.update";
+    pub const SESSION_METADATA_PATCH: &str = "agent.session.metadata.patch";
     /// One Extension-contributed MCP Tool call on the direct P2P surface
     /// (`#3778`).
     pub const MCP_TOOL_CALL: &str = "agent.mcp.tool.call";
@@ -332,10 +333,10 @@ pub use nession_protocol::contracts::session::v1::{
     ClientAttachPayload, ClientAttachResponse, ClientDetachPayload, ClientDetachResponse,
     SessionCapturePreviewPayload, SessionCapturePreviewResponse, SessionCreatePayload,
     SessionCreateResponse, SessionInfo, SessionKillPayload, SessionKillResponse,
-    SessionListResponse, SessionMetadata, SessionMetadataGetPayload, SessionMetadataResponse,
-    SessionMetadataUpdatePayload, WebAttachInfo, WebSessionAttachPayload, WebSessionCreatePayload,
-    WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload, WebSessionKillResponse,
-    WebSessionsListResponse,
+    SessionListResponse, SessionMetadata, SessionMetadataGetPayload, SessionMetadataPatchPayload,
+    SessionMetadataResponse, SessionMetadataUpdatePayload, WebAttachInfo, WebSessionAttachPayload,
+    WebSessionCreatePayload, WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload,
+    WebSessionKillResponse, WebSessionsListResponse,
 };
 
 // --- Wire shapes, re-exported from the Protocol Kernel (#678) ---
@@ -1951,16 +1952,11 @@ fn session_named(payload_value: &serde_json::Value) -> ResourceKey {
 ///
 /// The scope column's counterpart to [`session_named`], and deliberately not
 /// One successful metadata answer, on either operation.
-fn metadata_ok_reply(id: &str, metadata: SessionMetadata) -> String {
+fn metadata_ok_reply(id: &str, instance_id: String, metadata: SessionMetadata) -> String {
     serde_json::to_string(&make_response(
         id,
         msg_types::OK,
-        SessionMetadataResponse {
-            success: true,
-            error: None,
-            error_kind: None,
-            metadata: Some(metadata),
-        },
+        SessionMetadataResponse::success_for(instance_id, metadata),
     ))
     .unwrap_or_default()
 }
@@ -1977,6 +1973,7 @@ fn metadata_error_reply(id: &str, error: &anyhow::Error) -> String {
             error: Some(detail),
             error_kind: Some(kind.to_string()),
             metadata: None,
+            instance_id: None,
         },
     ))
     .unwrap_or_default()
@@ -2023,7 +2020,8 @@ fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
 // the `Key` policies are written in terms of.
 p2p_routes! { ctx, msg_type, payload_value;
             "agent.session.list" => "agent.session.list" => 1 => P2pAccess::Authenticated => Query => { match ctx.tmux.list_sessions().await {
-                Ok(sessions_list) => {
+                Ok(mut sessions_list) => {
+                    attach_session_summaries(ctx.session_metadata, &mut sessions_list).await;
                     let payload = SessionListResponse {
                         sessions: sessions_list,
                         // The agent answers from its own tmux, so nothing is
@@ -2191,8 +2189,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Ok(p) => p,
                         Err(e) => return ctx.err("parse_error", &e.to_string()),
                     };
-                match ctx.session_metadata.get(&payload.name).await {
-                    Ok(metadata) => metadata_ok_reply(ctx.id, metadata),
+                match ctx.session_metadata.read_current(&payload.name).await {
+                    Ok(snapshot) => metadata_ok_reply(ctx.id, snapshot.instance_id, snapshot.metadata),
                     Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
@@ -2204,8 +2202,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                     };
                 match ctx
                     .session_metadata
-                    .update(
+                    .update_guarded(
                         &payload.name,
+                        payload.expected_instance_id.as_deref(),
                         payload.title.as_deref(),
                         payload.description.as_deref(),
                         &payload.tags,
@@ -2213,7 +2212,27 @@ p2p_routes! { ctx, msg_type, payload_value;
                     )
                     .await
                 {
-                    Ok(metadata) => metadata_ok_reply(ctx.id, metadata),
+                    Ok(snapshot) => metadata_ok_reply(ctx.id, snapshot.instance_id, snapshot.metadata),
+                    Err(error) => metadata_error_reply(ctx.id, &error),
+                }
+            }
+            "agent.session.metadata.patch" => "agent.session.metadata.patch" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
+                let payload: SessionMetadataPatchPayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return ctx.err("parse_error", &e.to_string()),
+                    };
+                match ctx
+                    .session_metadata
+                    .patch(
+                        &payload.name,
+                        &payload.expected_instance_id,
+                        payload.expected_revision,
+                        &payload.patch,
+                    )
+                    .await
+                {
+                    Ok(snapshot) => metadata_ok_reply(ctx.id, snapshot.instance_id, snapshot.metadata),
                     Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
@@ -3019,7 +3038,8 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             "client.sessions.list" => "client.sessions.list" => 1 => P2pAccess::Authenticated => Query => { match ctx.tmux.list_sessions().await {
-                Ok(sessions_list) => {
+                Ok(mut sessions_list) => {
+                    attach_session_summaries(ctx.session_metadata, &mut sessions_list).await;
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
                         .map(|s| {
@@ -3041,6 +3061,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 foreground_command: None,
                                 working_dir: None,
                                 instance_id: s.instance_id,
+                                // The Agent owns the metadata summary (#4007);
+                                // a direct Agent list answer is the truth here.
+                                metadata: s.metadata,
                                 // Project membership is Server-owned (#3082);
                                 // a direct Agent view has no authority for it.
                                 project_id: None,
@@ -3523,6 +3546,7 @@ impl AgentServer {
             Arc::clone(&self.tmux_manager),
             Arc::clone(&self.sessions),
             Arc::clone(&self.mutations),
+            Arc::clone(&self.session_metadata),
             tool_providers,
         )?;
         Ok(())
@@ -7658,6 +7682,7 @@ mod tests {
         msg_types::SESSION_CAPTURE_PREVIEW,
         msg_types::SESSION_METADATA_GET,
         msg_types::SESSION_METADATA_UPDATE,
+        msg_types::SESSION_METADATA_PATCH,
         msg_types::CLIENT_ATTACH,
         msg_types::CLIENT_DETACH,
         msg_types::TERMINAL_INPUT,

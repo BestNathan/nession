@@ -750,7 +750,7 @@ async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
 }
 
 /// `#3778` SC-01: the Agent's explicit provider composition reaches the shared
-/// endpoint with its typed contract intact, while the fifteen baseline Tools
+/// endpoint with its typed contract intact, while the seventeen baseline Tools
 /// keep their exact advertised definitions.
 #[tokio::test]
 async fn agent_mcp_composes_an_extension_tool_into_the_shared_catalog() {
@@ -909,7 +909,12 @@ async fn abandoned_queued_call(
 #[tokio::test]
 async fn agent_mcp_abandoned_queued_create_and_kill_preserve_tmux_state() {
     let mutations = nession_agent::execution::mutation_scheduler();
-    let (addr, handle) = start_agent_with_mcp_using(Arc::clone(&mutations), 1).await;
+    // The fixture deadline is not the subject of this test: the abandoned call
+    // times out deterministically because its blocker is held for the whole
+    // call. The deliberate readback-then-retry create runs real tmux work, and
+    // a one-second deadline races it when the integration binary runs its
+    // other real-runtime tests in parallel.
+    let (addr, handle) = start_agent_with_mcp_using(Arc::clone(&mutations), 5).await;
     let mcp_session = initialize(addr).await;
     let name = unique_session_name("mcp-timeout");
 

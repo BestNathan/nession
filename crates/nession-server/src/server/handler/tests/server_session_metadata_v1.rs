@@ -186,6 +186,187 @@ async fn an_update_forwards_the_revision_guard_and_the_full_replacement() {
 }
 
 #[tokio::test]
+async fn an_update_forwards_the_instance_precondition_and_the_reply_identity() {
+    let mut h = handler_with_online_agent().await;
+    let (sender, mut rx) = crate::server::outbound::WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+
+    let broker = Arc::clone(&h.command_broker);
+    let request = h.handle_message(proto_msg(
+        "server.session.metadata.update",
+        json!({
+            "session_id": "a1:s1",
+            "title": "New title",
+            "description": null,
+            "tags": ["release"],
+            "expected_revision": 4,
+            "expected_instance_id": "instance-a"
+        }),
+    ));
+    let agent = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("the agent receives the metadata write")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["msg_type"], "agent.session.metadata.update");
+        assert_eq!(parsed["payload"]["expected_instance_id"], "instance-a");
+        let request_id = parsed["payload"]["request_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        broker
+            .resolve_command(
+                "a1",
+                &request_id,
+                json!({
+                    "success": true,
+                    "metadata": {
+                        "revision": 5,
+                        "title": "New title",
+                        "description": null,
+                        "tags": ["release"],
+                        "created_at": 1_762_300_000_u64,
+                        "updated_at": 1_762_303_600_u64,
+                    },
+                    "instance_id": "instance-a"
+                }),
+            )
+            .await;
+    };
+
+    let (action, ()) = tokio::join!(request, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], true);
+    assert_eq!(reply["payload"]["instance_id"], "instance-a");
+    assert_eq!(reply["payload"]["metadata"]["revision"], 5);
+}
+
+#[tokio::test]
+async fn a_patch_forwards_the_patch_and_both_preconditions() {
+    let mut h = handler_with_online_agent().await;
+    let (sender, mut rx) = crate::server::outbound::WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+
+    let broker = Arc::clone(&h.command_broker);
+    let request = h.handle_message(proto_msg(
+        "server.session.metadata.patch",
+        json!({
+            "session_id": "a1:s1",
+            "expected_instance_id": "instance-a",
+            "expected_revision": 4,
+            "patch": { "description": "Next step" }
+        }),
+    ));
+    let agent = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("the agent receives the metadata patch")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["msg_type"], "agent.session.metadata.patch");
+        assert_eq!(parsed["payload"]["name"], "s1");
+        assert_eq!(parsed["payload"]["expected_instance_id"], "instance-a");
+        assert_eq!(parsed["payload"]["expected_revision"], 4);
+        assert_eq!(parsed["payload"]["patch"]["description"], "Next step");
+        assert!(
+            parsed["payload"]["patch"].get("title").is_none(),
+            "an omitted patch field must stay omitted on the wire"
+        );
+        let request_id = parsed["payload"]["request_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        broker
+            .resolve_command(
+                "a1",
+                &request_id,
+                json!({
+                    "success": true,
+                    "metadata": {
+                        "revision": 5,
+                        "title": "Kept title",
+                        "description": "Next step",
+                        "tags": ["release"],
+                        "created_at": 1_762_300_000_u64,
+                        "updated_at": 1_762_303_600_u64,
+                    },
+                    "instance_id": "instance-a"
+                }),
+            )
+            .await;
+    };
+
+    let (action, ()) = tokio::join!(request, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], true);
+    assert_eq!(reply["payload"]["metadata"]["title"], "Kept title");
+    assert_eq!(reply["payload"]["metadata"]["description"], "Next step");
+    assert_eq!(reply["payload"]["instance_id"], "instance-a");
+}
+
+#[tokio::test]
+async fn a_patch_refusal_keeps_its_kind() {
+    let mut h = handler_with_online_agent().await;
+    let (sender, mut rx) = crate::server::outbound::WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+
+    let broker = Arc::clone(&h.command_broker);
+    let request = h.handle_message(proto_msg(
+        "server.session.metadata.patch",
+        json!({
+            "session_id": "a1:s1",
+            "expected_instance_id": "instance-a",
+            "expected_revision": 0,
+            "patch": { "title": "Stale" }
+        }),
+    ));
+    let agent = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("the agent receives the metadata patch")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let request_id = parsed["payload"]["request_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        broker
+            .resolve_command(
+                "a1",
+                &request_id,
+                json!({
+                    "success": false,
+                    "error": "expected instance instance-a, current instance instance-b",
+                    "error_kind": "conflict",
+                }),
+            )
+            .await;
+    };
+
+    let (action, ()) = tokio::join!(request, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], false);
+    assert_eq!(reply["payload"]["error_kind"], "conflict");
+    assert_eq!(reply["payload"]["metadata"], serde_json::Value::Null);
+}
+
+#[tokio::test]
 async fn an_agents_conflict_keeps_its_kind_and_detail() {
     let mut h = handler_with_online_agent().await;
     let (sender, mut rx) = crate::server::outbound::WsMessageSender::new();

@@ -618,6 +618,9 @@ impl SessionManager {
                 foreground_command: session.foreground_command,
                 working_dir: session.working_dir,
                 instance_id: session.instance_id,
+                // Metadata is attached by the wire boundary that answers a
+                // list (#4007); this internal snapshot does not read the store.
+                metadata: None,
             })
             .collect())
     }

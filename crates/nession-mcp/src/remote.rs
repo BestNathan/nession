@@ -38,7 +38,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionKillResponse, SessionRefusal, WebSessionsListResponse,
+    ServerSessionListReply, SessionKillResponse, SessionMetadataPatchPayload,
+    SessionMetadataResponse, SessionRefusal, WebSessionMetadataPatchPayload,
+    WebSessionsListResponse,
 };
 use serde_json::Map;
 use std::time::Duration;
@@ -424,6 +426,42 @@ impl NodeBackend for ServerRoutedNodeBackend {
         })
     }
 
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        let mut connection = self.connect_to_agent(agent_id).await?;
+        let reply = connection
+            .get_session_metadata(&format!("{agent_id}:{name}"))
+            .await
+            .map_err(map_client_error);
+        close_server(connection).await;
+        // A delivered metadata refusal is the owner's answer; the Tool maps its
+        // stable kind. Only a transport failure is an Err here.
+        reply
+    }
+
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        let mut connection = self.connect_to_agent(agent_id).await?;
+        let payload = WebSessionMetadataPatchPayload {
+            session_id: format!("{agent_id}:{}", request.name),
+            expected_instance_id: request.expected_instance_id,
+            expected_revision: request.expected_revision,
+            patch: request.patch,
+        };
+        let reply = connection
+            .patch_session_metadata(payload)
+            .await
+            .map_err(map_client_error);
+        close_server(connection).await;
+        reply
+    }
+
     async fn call_extension_tool(
         &self,
         agent_id: &str,
@@ -540,6 +578,36 @@ impl NodeBackend for RemoteNodeBackend {
             .map_err(map_client_error)?;
         Self::close(connection).await;
         Ok(reply)
+    }
+
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.ensure_target(agent_id)?;
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .get_session_metadata(name)
+            .await
+            .map_err(map_client_error);
+        Self::close(connection).await;
+        reply
+    }
+
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.ensure_target(agent_id)?;
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .patch_session_metadata(request)
+            .await
+            .map_err(map_client_error);
+        Self::close(connection).await;
+        reply
     }
 
     async fn call_extension_tool(

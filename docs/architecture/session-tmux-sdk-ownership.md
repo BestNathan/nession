@@ -88,13 +88,22 @@ state.
   (`SessionMetadata` / `validate_session_metadata`), atomic (temp + rename) and
   guarded by an optimistic revision under one per-instance lock. A stale
   revision is a conflict that leaves the stored metadata intact; invalid input
-  writes nothing.
-- **Transports:** the Agent answers `agent.session.metadata.get|update` on both
-  its P2P socket and its central connection. The Server's
-  `server.session.metadata.get|update` authorizes the request and routes it;
-  it does not keep a competing mutable store. Web/App read and write through
-  the Session product API (`SessionsPlugin`), and the display title falls back
-  to the tmux name.
+  writes nothing. `agent.session.metadata.patch` (#4007) resolves a partial
+  patch at this same owner: omitted fields are preserved, explicit `null`
+  clears title/description, a value replaces it, `tags: []` clears the list,
+  and an empty patch is invalid. A full update or a patch may carry
+  `expected_instance_id`; a different current instance is a conflict before
+  any write, even when the successor's revision is also 0.
+- **Transports:** the Agent answers `agent.session.metadata.get|update|patch`
+  on both its P2P socket and its central connection. The Server's
+  `server.session.metadata.get|update|patch` authorizes the request and routes
+  it; it does not keep a competing mutable store. Web/App read and write
+  through the Session product API (`SessionsPlugin`), and the display title
+  falls back to the tmux name. The MCP Tools
+  (`nession_agent_get_session_metadata` / `nession_agent_update_session_metadata`)
+  are another adaptor of the same owner. Session lists project a bounded
+  `title`/`tags`/`revision` summary in an explicit `available`/`unavailable`
+  state; `description` remains available only through Get.
 
 ## Five lifetimes that must not collapse
 

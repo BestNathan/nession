@@ -445,6 +445,8 @@ impl ConnectionHandler {
                         created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
                         instance_id: None,
+                        // The Agent's first inventory reports the summary.
+                        metadata: None,
                         activity: None,
                         activity_epoch: None,
                         activity_generation: 0,

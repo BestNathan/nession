@@ -35,7 +35,8 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreateResponsePayload, ClientSessionEnvBindingGetPayload,
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
     ClientSessionEnvBindingSetPayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
-    ServerSessionListPayload, ServerSessionListReply,
+    ServerSessionListPayload, ServerSessionListReply, SessionMetadataResponse,
+    WebSessionMetadataGetPayload, WebSessionMetadataPatchPayload,
 };
 use nession_protocol::Message;
 
@@ -60,6 +61,14 @@ impl UnitRequest for AgentListPayload {
 
 impl UnitRequest for ServerSessionListPayload {
     type Reply = ServerSessionListReply;
+}
+
+impl UnitRequest for WebSessionMetadataGetPayload {
+    type Reply = SessionMetadataResponse;
+}
+
+impl UnitRequest for WebSessionMetadataPatchPayload {
+    type Reply = SessionMetadataResponse;
 }
 
 impl UnitRequest for ProjectListPayload {
@@ -316,6 +325,33 @@ impl ClientConnection {
             },
         ))
         .await
+    }
+
+    /// `server.session.metadata.get` — one Session's Agent-owned work context.
+    ///
+    /// The reply carries the durable `instance_id` alongside the record, so a
+    /// caller can use it as the precondition of a later guarded update.
+    pub async fn get_session_metadata(
+        &mut self,
+        session_id: &str,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_SESSION_METADATA_GET,
+            WebSessionMetadataGetPayload {
+                session_id: session_id.to_string(),
+            },
+        ))
+        .await
+    }
+
+    /// `server.session.metadata.patch` — partial update with the required
+    /// incarnation and revision preconditions (#4007).
+    pub async fn patch_session_metadata(
+        &mut self,
+        payload: WebSessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_METADATA_PATCH, payload))
+            .await
     }
 
     /// `server.project.list` — every Project declaration the Server owns.
