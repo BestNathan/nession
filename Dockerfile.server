@@ -1,14 +1,14 @@
 # ---- Build stages (shared with agent via Docker build context) ----
 
 # Stage 1: Prepare cargo-chef recipe
-FROM rust:1.96-bullseye AS planner
+FROM rust:1.96-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS planner
 WORKDIR /build
 RUN cargo install cargo-chef --locked
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2: Build dependencies (cached)
-FROM rust:1.96-bullseye AS cacher
+FROM rust:1.96-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS cacher
 WORKDIR /build
 RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
@@ -19,7 +19,7 @@ COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # Stage 3: Build web UI
-FROM node:20-alpine AS web-builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS web-builder
 WORKDIR /build
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -40,7 +40,7 @@ ENV VITE_NESSION_TERMINAL_WEB_FONT_SIZE=${VITE_NESSION_TERMINAL_WEB_FONT_SIZE}
 RUN npm run build
 
 # Stage 4: Build server binary
-FROM rust:1.96-bullseye AS rust-builder
+FROM rust:1.96-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS rust-builder
 WORKDIR /build
 RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
