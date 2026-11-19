@@ -232,3 +232,45 @@ test('TLS Kustomize registration is repeatable, with no collision with MCP confi
   assert.throws(() => validateChangedPaths(
     ['environments/staging/mcp/sealed-secret.json'], environment, tlsSecret));
 });
+
+const inboundSecret = 'MCP_INBOUND_TOKEN';
+const inboundTarget = getTarget(environment, inboundSecret);
+
+test('staging MCP inbound token is a dedicated strict SealedSecret target', () => {
+  assert.equal(inboundTarget.name, 'nession-mcp-inbound-staging');
+  assert.equal(inboundTarget.namespace, 'nession');
+  assert.equal(inboundTarget.key, 'token');
+  assert.equal(inboundTarget.resource, 'environments/staging/mcp/sealed-inbound.json');
+  assert.throws(() => getTarget('production', inboundSecret));
+  assert.throws(() => getTarget('staging-01', inboundSecret));
+  const doc = createPlainSecret(environment, inboundSecret, 'opaque-query-safe_token');
+  assert.deepEqual(Object.keys(doc.data), ['token']);
+  assert.equal(Buffer.from(doc.data.token, 'base64').toString('utf8'), 'opaque-query-safe_token');
+  for (const invalid of ['', ' ', ' trailing', 'line\\nbreak', '\\tbad', 'bad\\0null']) {
+    assert.throws(() => createPlainSecret(environment, inboundSecret, invalid));
+  }
+});
+
+test('staging inbound sealing rejects foreign resources and remains idempotent', () => {
+  const yaml = 'resources:\\n- deployment.yaml\\n';
+  const next = addResource(yaml, inboundTarget.resource);
+  assert.match(next, /sealed-inbound\\.json/);
+  assert.equal(addResource(next, inboundTarget.resource), next);
+  const changed = [inboundTarget.resource, inboundTarget.kustomization];
+  assert.deepEqual(validateChangedPaths(changed, environment, inboundSecret), changed);
+  assert.throws(() => validateChangedPaths(
+    ['environments/staging/mcp/sealed-secret.json'], environment, inboundSecret));
+  const sealedInbound = {
+    apiVersion: 'bitnami.com/v1alpha1',
+    kind: 'SealedSecret',
+    metadata: {name: inboundTarget.name, namespace: inboundTarget.namespace},
+    spec: {
+      encryptedData: {token: 'AgEncryptedInbound'},
+      template: {metadata: {name: inboundTarget.name, namespace: inboundTarget.namespace}, type: 'Opaque'}
+    }
+  };
+  assert.equal(validateSealed(sealedInbound, environment, inboundSecret).kind, 'SealedSecret');
+  const wrong = structuredClone(sealedInbound);
+  wrong.spec.encryptedData['mcp.toml'] = 'AgEncryptedOldConfig';
+  assert.throws(() => validateSealed(wrong, environment, inboundSecret));
+});
