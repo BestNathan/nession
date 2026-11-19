@@ -7,6 +7,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_TOOL_RECOVERY_COMMENT,
+  QWEN_BASE_REVIEW_RECOVERY_COMMENT,
   assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
@@ -204,6 +205,27 @@ for(const mutation of [
   {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
 ])
   assert.throws(()=>assertDispatchAuthority({...toolsRecovery,...mutation}),
+    /authenticated owner\/main/);
+
+const baseReview=(await import('./qwen-review-base-failure.mjs')).SOURCE;
+const baseReviewEvent={...cliCommentEvent,
+  comment:{...cliCommentEvent.comment,id:6973000003,
+    body:QWEN_BASE_REVIEW_RECOVERY_COMMENT}};
+const baseRecovery={...cliRecovery,event:baseReviewEvent,
+  actionId:baseReview.action_id};
+assert.equal(assertDispatchAuthority(baseRecovery).issue,3784);
+for(const bad of [
+  {actionId:cliFailure.action_id},
+  {issue:3885},
+  {event:{...baseReviewEvent,action:'edited'}},
+  {event:{...baseReviewEvent,issue:{number:3784,state:'closed'}}},
+  {event:{...baseReviewEvent,comment:{...baseReviewEvent.comment,
+    body:QWEN_BASE_REVIEW_RECOVERY_COMMENT+' '}}},
+  {event:{...baseReviewEvent,comment:{...baseReviewEvent.comment,
+    user:{login:'attacker'}}}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+])
+  assert.throws(()=>assertDispatchAuthority({...baseRecovery,...bad}),
     /authenticated owner\/main/);
 
 const actualAction=await import('./outbox.mjs').then(m=>
@@ -470,3 +492,4 @@ await import('./qwen-reviewer-source-selftest.mjs');
 await import('./qwen-preflight-recovery-selftest.mjs');
 await import('./qwen-cli-failure-selftest.mjs');
 await import('./qwen-tool-policy-failure-selftest.mjs');
+await import('./qwen-review-base-failure-selftest.mjs');
