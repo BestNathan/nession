@@ -20,12 +20,18 @@ function safe(v) {
   return String(v ?? '').replace(/[^A-Za-z0-9 .,_:/()-]/g, ' ').slice(0, 180);
 }
 async function request(url, asText = false) {
-  const response = await fetch(API + url, {
-    headers: { Accept: 'application/vnd.github+json',
-      'User-Agent': 'nession-3961-oci-source-case' },
-    signal: AbortSignal.timeout(20000),
-    redirect: 'follow',
-  });
+  let response;
+  try {
+    response = await fetch(API + url, {
+      headers: { Accept: 'application/vnd.github+json',
+        'User-Agent': 'nession-3961-oci-source-case' },
+      signal: AbortSignal.timeout(20000),
+      redirect: 'follow',
+    });
+  } catch {
+    // Network/timeout/redirect errors cannot disprove an external release.
+    throw new Unobservable('public GitHub source readback temporarily unreachable');
+  }
   if (!response.ok) {
     if ([403, 404, 408, 429, 500, 502, 503, 504].includes(response.status))
       throw new Unobservable('public GitHub source readback not available');
