@@ -10,7 +10,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
   QWEN_TOOL_RECOVERY_COMMENT,
-  assertOwnerReviewDispatchRole}
+  assertReviewerRecoveryPrLease,assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -360,6 +360,28 @@ for(const wrong of [
   {environment:{...commentEnvironment,GITHUB_ACTOR:'external'}},
 ])assert.throws(()=>assertDispatchAuthority({...cRecovery,...wrong}),
   /authenticated owner\/main/);
+
+const cProductHead='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
+const cProductBranch='agent/3784/qwen-39c01222a8d00fa3';
+const cLeasePr={number:3919,state:'open',draft:false,merged_at:null,
+  head:{sha:cProductHead,ref:cProductBranch,repo:{full_name:'BestNathan/nession'}},
+  base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
+const cLeaseRef={ref:'refs/heads/'+cProductBranch,object:{sha:cProductHead}};
+import {REVIEWER_PREMODEL_FAILURE_3784_C} from './outbox.mjs';
+assert.equal(assertReviewerRecoveryPrLease(REVIEWER_PREMODEL_FAILURE_3784_C,
+  cLeasePr,cLeaseRef),true);
+for(const [pr,ref] of [
+  [{...cLeasePr,head:{...cLeasePr.head,
+    sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}},cLeaseRef],
+  [cLeasePr,{...cLeaseRef,object:{sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}}],
+  [{...cLeasePr,number:3918},cLeaseRef],
+  [{...cLeasePr,state:'closed'},cLeaseRef],
+  [{...cLeasePr,base:{...cLeasePr.base,ref:'staging'}},cLeaseRef],
+  [{...cLeasePr,head:{...cLeasePr.head,ref:'agent/3784/forged'}},cLeaseRef],
+])assert.throws(()=>assertReviewerRecoveryPrLease(
+  REVIEWER_PREMODEL_FAILURE_3784_C,pr,ref),/immutable #3784 Store v35 C/);
+assert.throws(()=>assertReviewerRecoveryPrLease(
+  null,cLeasePr,cLeaseRef),/unexpected Reviewer C PR lease source/);
 
 const jsonAction='8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7';
 const jsonRecovery={...ownerReview,actionId:jsonAction,
