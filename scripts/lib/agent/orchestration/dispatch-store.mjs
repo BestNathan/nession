@@ -20,7 +20,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   repairRuntimeSuccessorId,REVIEWER_PREMODEL_FAILURE,
   REVIEWER_PREMODEL_FAILURE_SOURCES,
   reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
-  REVIEWER_JSON_FAILURE,reviewerJsonSuccessorId,
+  REVIEWER_JSON_FAILURE_SOURCES,reviewerJsonSuccessorId,
   recordAttestedReviewerJsonFailure}
   from './outbox.mjs';
 import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
@@ -174,7 +174,10 @@ export function recoverAttestedReviewerPremodelFailure({remote,source}){
 // before any Store credential is used; this transaction never retries the
 // original workflow_dispatch or invents a Reviewer verdict.
 export function recoverAttestedReviewerJsonFailure({remote,source}){
-  const f=REVIEWER_JSON_FAILURE;
+  const f=REVIEWER_JSON_FAILURE_SOURCES.find(f=>
+    f.issue===source?.issue&&f.action_id===source?.action_id&&
+    f.run_id===source?.run_id);
+  if(!f)fail('unknown post-model Reviewer failure source');
   if(source?.verified!==true||source.issue!==f.issue||
       source.action_id!==f.action_id||source.run_id!==f.run_id||
       source.attempt!==1||source.source_sha!==f.source_sha||

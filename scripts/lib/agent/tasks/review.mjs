@@ -41,6 +41,9 @@ export function reviewModelView(admission,identity){
   };
   if(admission.kind==='authenticated_qwen_reviewer_admission_only')
     return Object.freeze({...common,expected_files:admission.expected_files,
+      // Source/Issue-bound canonical SC text (untrusted task data, no authority).
+      issue_criteria:admission.issue_criteria,
+      issue_criteria_sha256:admission.issue_criteria_sha256,
       ...(Array.isArray(admission.base_files)&&admission.base_files.length
         ?{base_files:admission.base_files}:{})});
   return Object.freeze({...common,expected_file:admission.expected_file,

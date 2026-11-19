@@ -203,7 +203,34 @@ export function armNativeAutoMerge({repo,prNumber,base,headSha}) {
   return {armed:true,context:QUALIFICATION_CONTEXT};
 }
 
+// GitHub Actions allows only one pending workflow per concurrency group.
+// A workflow-global Convergence lock can cancel ordinary pull_request_target
+// classifiers before they write the required status, stranding green PRs.
+// The controller still needs one global lock, but classification must be
+// independently schedulable.
+export function qualifierConcurrencyIsolated(workflow) {
+  if (typeof workflow !== 'string') return false;
+  const jobs=workflow.match(/^jobs:\s*$/m);
+  if (!jobs || /^concurrency:\s*$/m.test(workflow.slice(0,jobs.index))) return false;
+  const converge=workflow.split(/^  converge:\s*$/m);
+  if (converge.length !== 2) return false;
+  const job=converge[1].split(/^  [a-z][a-z0-9_-]*:\s*$/m)[0];
+  return /^    concurrency:\s*\n      group: release-staging-convergence\s*\n      cancel-in-progress: false\s*$/m.test(job);
+}
+
 function selfTest(){
+  const workflowPath=new URL('../.github/workflows/release-staging-convergence.yml',import.meta.url);
+  const current=fs.readFileSync(workflowPath,'utf8');
+  assert.equal(qualifierConcurrencyIsolated(current),true,
+    'required PR classifier must not share controller workflow-global queue');
+  assert.equal(qualifierConcurrencyIsolated(current.replace(/^jobs:\s*$/m,
+    'concurrency:\n  group: release-staging-convergence\n  cancel-in-progress: false\n\njobs:')),false,
+    'reintroducing a workflow-global lock must strand qualification tests');
+  assert.equal(qualifierConcurrencyIsolated(current.replace(
+    '      group: release-staging-convergence',
+    '      group: convergence-accidentally-unlocked')),false,
+    'controller must retain its canonical serialized writer lock');
+
   const checks={enforcement_level:'everyone',
     contexts:[QUALIFICATION_CONTEXT]};
   const branch={protected:true,protection:{required_status_checks:checks}};
