@@ -25,18 +25,22 @@ Coordinate Server, Agent, and MCP credential changes together.
 After the new MCP OCI image includes the env-credential loader and the
 operator has added **both** GitHub Environment Secrets
 `staging/NESSION_MCP_INBOUND_TOKEN` and `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`,
-manually dispatch **Deploy / Seal GitOps Secret** (environment `staging`).
-This workflow accepts only a fixed choice of the two Secret names, not
-arbitrary resource names or YAML paths. Each invocation reads the selected
-raw Secret and publishes only the corresponding `sealed-inbound.json` or
-`sealed-backend-server.json` plus its checked Kustomization enrollment.
-Verify the SealedSecrets controller materializes
-the exact namespace/name/key *before* cutting over the MCP Deployment.
-The operator must approve the protected GitHub Environment for each of
-the two manual SealedSecret publications. The second token's value must match
-the staging Server's existing auth token, or MCP backend calls will fail.
+manually dispatch **Deploy / Seal GitOps Secret** with ONLY `environment =
+staging`. The registered staging environment requires **both** Secret
+values. The workflow validates both before producing ciphertext; any absent,
+empty or invalid required Secret stops the entire run, without publishing
+a partial set. Both strict encrypted outputs (`sealed-inbound.json` and
+`sealed-backend-server.json`) are checked and published in **one** GitOps
+commit, with the shared Kustomization enrollment. There is no per-Secret
+selection input, arbitrary resource name, or YAML path.
+The operator approves the protected GitHub Environment once per run.
+Verify the SealedSecrets controller materializes **both** exact Kubernetes
+Secrets before switching the MCP Deployment. The backend token value must
+match the staging Server's actual auth token, or MCP tool calls will fail.
 
-**Migration safety:** Existing `MCP_CONFIG_TOML` Environment Secret,
+**Migration safety:** The environment-batch publisher is intentionally **not**
+the TLS certificate issuer; TLS is owned by `Deploy / Configure Site`.
+Existing `MCP_CONFIG_TOML` Environment Secret,
 `sealed-secret.json` and its Kubernetes Secret remain legacy rollback
 material until the read-only ConfigMap and credential injection are verified
 live. Do not enable the new Deployment before the new image and **both**
@@ -61,7 +65,8 @@ GitHub Environment names must match GitOps environment directory names:
 - production -> gitops/environments/production
 
 The **Deploy / Seal GitOps Secret** workflow now exposes only
-**staging/NESSION_MCP_INBOUND_TOKEN** and **staging/NESSION_MCP_BACKEND_SERVER_TOKEN**. The existing legacy full-TOML registry remains
+**staging/NESSION_MCP_INBOUND_TOKEN** and **staging/NESSION_MCP_BACKEND_SERVER_TOKEN**
+as one mandatory environment batch. The existing legacy full-TOML registry remains
 for historical ciphertext validation and rollback only, not for the current
 manual workflow. The existing `MCP_TLS_PEM_BUNDLE` registry
 entry is retained solely as a bounded strict SealedSecret target consumed by
