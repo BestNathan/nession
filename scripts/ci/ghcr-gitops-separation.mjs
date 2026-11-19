@@ -46,7 +46,7 @@ function selfTest(){
   checkSources(baseline);
   const fixtures=[
     [FILES[0],s=>s.replace('needs: verify-source','needs: mirror-acr')],
-    [FILES[0],s=>s.replace('source_run_attempt:','wrong_attempt:')],
+    [FILES[0],s=>s.replaceAll('source_run_attempt','wrong_attempt')],
     [FILES[0],s=>s.replace('group: gitops-writer','group: unsafe-writer')],
     [FILES[0],s=>s+'\n# ALIYUN_ACR_PASSWORD must not enter deploy\n'],
     [FILES[1],s=>s+'\n  deploy-staging-gitops:\n'],
