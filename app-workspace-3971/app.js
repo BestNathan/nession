@@ -56,7 +56,7 @@ function saveScroll(){const sc=$('#app-content');if(sc&&active())active().scroll
 function record(info){state.last=info;const x=$('#inspector');if(x)x.textContent=JSON.stringify({surface:state.surface,capability:state.cap,
   route:state.history.map((r,i)=>(i===state.cursor?'▶ ':'  ')+title(r)).join('  /  '),
   index:state.cursor,forward:state.history.length-state.cursor-1,dirty:state.dirty,overlay:state.overlay,
-  fixture:state.fixture,session:fakeSession(),last:state.last},null,2);}
+  fixture:state.fixture,theme:$('#product').dataset.theme||'light',session:fakeSession(),last:state.last},null,2);}
 function toast(s){const x=$('#app-toast');x.textContent=s;x.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>x.hidden=true,2200);}
 function push(r){saveScroll();state.history=state.history.slice(0,state.cursor+1).concat([{...r,scroll:0}]);state.cursor++;render('Push '+title(r));}
 function commitNav(op){saveScroll();if(op.type==='pop'){if(state.cursor>0){state.cursor--;render('Pop');}else if(state.surface==='workspace'){state.surface='terminal';render('Return to Terminal');}}
@@ -83,7 +83,7 @@ function head(){const a=active();const ancestors=state.history.slice(0,state.cur
     '<button type="button" class="h-secondary" data-action="stack" aria-label="Navigation stack, '+e(subtitle)+'">'+icon('layers',12)+'<span class="h-path">'+e(subtitle)+'</span>'+icon('down',10)+'</button></div>'+
     btn(action,symbol,primary)+btn('more','more','More actions');
 }
-function row(ic,label,meta,action,arg,extra=''){return '<button type="button" class="row-item" data-action="'+action+'" '+(arg?'data-id="'+e(arg)+'"':'')+'><span class="row-icon">'+icon(ic,17)+'</span><span class="row-text"><span class="row-label">'+e(label)+'</span>'+(meta?'<span class="row-meta">'+e(meta)+'</span>':'')+'</span>'+(extra?'<span class="row-extra">'+e(extra)+'</span>':'')+'<span class="row-arrow">'+icon('chevron',16)+'</span></button>';}
+function row(ic,label,meta,action,arg,extra=''){return '<button type="button" class="row-item" data-action="'+action+'" '+(arg?'data-id="'+e(arg)+'"':'')+'><span class="row-icon">'+icon(ic,18)+'</span><span class="row-text"><span class="row-label">'+e(label)+'</span>'+(meta?'<span class="row-meta">'+e(meta)+'</span>':'')+'</span>'+(extra?'<span class="row-extra">'+e(extra)+'</span>':'')+'<span class="row-arrow">'+icon('chevron',16)+'</span></button>';}
 function section(ic,label,desc,contents,shaded=false){return '<section class="surface '+(shaded?'shaded':'')+'"><div class="surface-head"><span class="surface-icon">'+icon(ic)+'</span><div class="head-copy"><div class="head-title">'+e(label)+'</div>'+(desc?'<div class="head-sub">'+e(desc)+'</div>':'')+'</div></div>'+contents+'</section>';}
 function kicker(name,more){return '<div class="kicker"><span>'+e(name)+'</span>'+(more?'<button data-action="browse">Browse all '+icon('chevron',11)+'</button>':'')+'</div>';}
 function facts(items){return '<div class="detail-facts">'+items.map(([k,v])=>'<div class="fact"><span class="key">'+e(k)+'</span><span class="value">'+e(v)+'</span></div>').join('')+'</div>';}
@@ -181,7 +181,7 @@ function renderFiles(a){
     '</div><div class="surface-body"><div class="action-strip"><button class="primary-button" data-action="push" data-id="edit">'+icon('edit')+' Edit file</button></div></div></div>');
   if(a.kind==='edit')return section('edit','Edit file','AppPageHeader.tsx · local mock draft',
     '<div class="field-list"><div class="field"><label for="editor-input">File contents</label>'+
-    '<textarea id="editor-input" data-swipe-owner spellcheck="false" style="width:100%;height:226px;resize:vertical;padding:12px;border:1px solid var(--nession-border);border-radius:9px;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace">'+e(state.editorValue)+'</textarea>'+
+    '<textarea id="editor-input" class="editor-input" data-swipe-owner spellcheck="false">'+e(state.editorValue)+'</textarea>'+
     '<div class="hint">Edit and try Header Back, swipe Pop or Capability switch. Nothing is written to disk.</div></div>'+
     '<div class="action-strip"><button class="primary-button" data-action="save">'+icon('save')+' Save mock draft</button></div></div>');
   return emptyView('empty');
@@ -217,7 +217,7 @@ function renderTerminal(){
    '<div class="term-body"><span class="dim">nession @ workspace</span>\n$ git status --short\n M web/src/app/patterns/AppPageHeader.tsx\n M web/src/app/experiences/app/AppLayers.tsx\n\n$ echo "Active Session"\nActive Session\n\n<span class="dim">Terminal is the persistent work surface.</span>\n<span class="dim">Open Workspace to inspect context.</span>\n\n$ ▍</div>'+
    '<div class="term-composer"><div class="term-field">Ask Nession…</div><button data-action="open-workspace" aria-label="Open Workspace" title="Open Workspace">'+icon('layers')+'</button></div>';
  if(state.surface==='sessions')term.innerHTML='<div class="term-top"><strong>Sessions</strong><button class="h-action" data-action="open-terminal" aria-label="Back to Terminal">'+icon('close')+'</button></div>'+
-   '<div style="padding:22px">'+section('terminal','Current Sessions','Pick a work session',
+   '<div class="session-list-pad">'+section('terminal','Current Sessions','Pick a work session',
       '<div class="surface-body p0">'+row('terminal','nession-dev','Active · local Agent','open-terminal','')+
       row('terminal','staging-build','Recent · remote Agent','open-terminal','')+'</div>')+'</div>';
 }
@@ -226,7 +226,7 @@ function render(message='Rendered'){
     $('#app-header').innerHTML=head();
     body.innerHTML=content();body.scrollTop=Math.max(0,active().scroll||0);
     $('#capsule-zone').innerHTML='<nav class="cap-capsule" aria-label="Workspace capabilities">'+
-      Object.entries(capNames).map(([k,n])=>'<button class="cap-item '+(state.cap===k?'active':'')+'" data-action="cap" data-id="'+k+'" aria-label="Open '+n+'" aria-pressed="'+(state.cap===k)+'">'+icon(k,17)+'<span class="cap-name">'+e(k==='claude'?'Claude':n)+'</span></button>').join('')+'</nav>';
+      Object.entries(capNames).map(([k,n])=>'<button class="cap-item '+(state.cap===k?'active':'')+'" data-action="cap" data-id="'+k+'" aria-label="Open '+n+'" aria-pressed="'+(state.cap===k)+'">'+icon(k,18)+'<span class="cap-name">'+e(k==='claude'?'Claude':n)+'</span></button>').join('')+'</nav>';
   }else{$('#app-header').innerHTML='';body.innerHTML='';}
   renderTerminal();renderOverlay();
   const p=$('#page-frame');p.style.transform='';p.style.transition='';
@@ -333,6 +333,15 @@ function settle(ev,kind){
 }
 function cancelSwipe(){if(move){move=null;$('#page-frame').style.transform='';$('#workspace-underlay').style.opacity='0';record('Swipe yielded to content');}}
 const prod=$('#product');
+/* Theme is a review-only control: canonical Light/Dark product tokens, never feature state. */
+document.querySelectorAll('[data-aw-theme]').forEach(button=>button.addEventListener('click',()=>{
+  const next=button.dataset.awTheme;
+  if(next!=='light'&&next!=='dark')return;
+  prod.dataset.theme=next;
+  document.querySelectorAll('[data-aw-theme]').forEach(x=>
+    x.setAttribute('aria-pressed',String(x.dataset.awTheme===next)));
+  record('Product tokens: '+next);
+}));
 prod.addEventListener('touchstart',ev=>begin(ev,'touch'),{passive:true});
 prod.addEventListener('touchmove',ev=>motion(ev,'touch'),{passive:false});
 prod.addEventListener('touchend',ev=>settle(ev,'touch'),{passive:true});

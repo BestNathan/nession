@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Nession · App Workspace unified interaction · #3971</title>
-<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./styles.css"></head>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./tokens.css"><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./review.css"></head>
 <body data-nession-prototype-frame="v1">
 <div class="np-page" data-np-root id="review">
   <header class="np-overview">
@@ -23,10 +23,10 @@
       <div class="np-section-heading"><div><h2>Interactive preview</h2><p>从 Claude 开始；打开 Browse 深入 Transcript，再尝试右滑返回、左滑前进。切换底部 Capability Capsule 观察通用布局。</p></div></div>
       <div class="np-preview-toolbar" aria-label="Review viewport tools"><strong>App viewport</strong>
         <button data-np-size="375">375</button><button data-np-size="390" aria-pressed="true">390</button><button data-np-size="430">430</button>
-        <span data-np-current-size></span><button type="button" data-np-reset>Reset</button>
+        <span data-np-current-size></span><div class="aw-theme-buttons" aria-label="Product theme"><button type="button" data-aw-theme="light" aria-pressed="true">Light</button><button type="button" data-aw-theme="dark" aria-pressed="false">Dark</button></div><button type="button" data-np-reset>Reset</button>
       </div>
       <div class="np-stage"><div class="np-device" data-np-device style="--np-device-height:844px">
-        <div id="product" class="product" data-experience="app" data-surface="workspace" aria-label="Nession App Workspace simulated UI">
+        <div id="product" class="product" data-experience="app" data-theme="light" data-surface="workspace" aria-label="Nession App Workspace simulated UI">
           <div id="terminal" class="terminal-screen" hidden></div>
           <div id="workspace" class="workspace-screen">
             <header class="app-header" id="app-header" aria-label="Workspace stack header"></header>
@@ -41,7 +41,7 @@
       <p class="np-stage-label">真实 CSS 像素尺寸 · 不缩放产品画布 · 触屏或鼠标水平拖动内容区</p>
     </section>
     <section class="np-details" aria-label="Prototype decisions and verification">
-      <h2>交互与验证场景</h2><p class="np-details-lede">以下为评审说明，不属于 App 产品界面。所有资源、操作与数据都是本地模拟。</p>
+      <h2>交互与验证场景</h2><p class="np-details-lede">以下为评审说明，不属于 App 产品界面。所有资源、操作与数据都是本地模拟。</p><p class="aw-token-note"><strong>Token reference:</strong> App 17 / 16 / 14 / 13 / 12 / 11.5 px typography roles; 44px touch targets; canonical Nession neutral surfaces, borders and semantic radii. Light / Dark changes the product tokens only; the review frame remains independent.</p>
       <div class="np-detail-grid">
         <article class="np-detail"><h3>01 · Stack Header</h3><p>主标题表示当前资源，副标题表示真实父路径。点击副标题打开祖先栈；右侧使用高频图标和 More，没有第二条导航栏。</p></article>
         <article class="np-detail"><h3>02 · Semantic surfaces</h3><p>Claude 使用连续 Reader，Git 使用分组 Collection，Sandbox 使用 Configuration 分区，Files 的编辑器是独立工作表面。保留公共 Canvas 与 Capsule。</p></article>

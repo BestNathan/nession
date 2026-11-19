@@ -1,0 +1,11 @@
+/* Review harness only — this CSS must never style .product or a capability.
+ * The external frame owns --np-*, while the product uses ./tokens.css --nession-/--aw-*.
+ */
+.review-fixtures{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:22px;border:1px solid var(--np-line);padding:14px;border-radius:14px}
+.review-fixtures strong{font-size:12px;margin-right:8px}
+.review-fixtures button{border:1px solid var(--np-line);background:var(--np-soft);color:var(--np-ink);padding:8px 12px;border-radius:9px;font-size:12px;cursor:pointer}
+.review-fixtures button[aria-pressed=true]{background:var(--np-ink);color:var(--np-page-bg,#fff)}
+
+.aw-theme-buttons{display:inline-flex;gap:4px;align-items:center;border-left:1px solid var(--np-line);padding-left:10px}
+.aw-theme-buttons button[aria-pressed="true"]{background:var(--np-ink);color:var(--np-paper);border-color:var(--np-ink)}
+.aw-token-note{font-size:12px;color:var(--np-dim);margin:10px 0}

@@ -24,9 +24,12 @@ function harness(){
   const fixtures=['normal','empty','error','session','terminal'].map(kind=>{
     const el=new Element(kind);el.dataset.fixture=kind;el.setAttribute=()=>{};return el;
   });
+  const themes=['light','dark'].map(kind=>{
+    const el=new Element(kind);el.dataset.awTheme=kind;el.setAttribute=(key,value)=>{el[key]=value;};return el;
+  });
   const document={
     querySelector:s=>nodes[s]||null,
-    querySelectorAll:s=>s==='[data-fixture]'?fixtures:[],
+    querySelectorAll:s=>s==='[data-fixture]'?fixtures:s==='[data-aw-theme]'?themes:[],
     addEventListener(){},
   };
   let t=100000;
@@ -47,7 +50,7 @@ function harness(){
     nodes['#product'].listeners.pointermove({...base,clientX:startX+dx,clientY:302});
     nodes['#product'].listeners.pointerup({...base,clientX:startX+dx,clientY:302});
   }
-  return {nodes,fixtures,click,drag,state:()=>JSON.parse(nodes['#inspector'].textContent)};
+  return {nodes,fixtures,themes,click,drag,state:()=>JSON.parse(nodes['#inspector'].textContent)};
 }
 test('Claude current work is primary with one host Header and four Capsule choices',()=>{
   const x=harness();
@@ -87,4 +90,19 @@ test('Capabilities share grouped surfaces, root swipe returns to Terminal, Sessi
   x.click('open-workspace');assert.equal(x.state().surface,'workspace');
   x.fixtures[3].listeners.click();assert.equal(x.state().index,0);
   assert.match(x.state().session,/staging-build/);
+});
+
+test('Light/Dark changes the product token scope without changing capability navigation',()=>{
+  const x=harness();
+  assert.equal(x.state().capability,'claude');
+  x.themes[1].listeners.click();
+  assert.equal(x.nodes['#product'].dataset.theme,'dark');
+  assert.equal(x.state().theme,'dark');
+  assert.equal(x.themes[1]['aria-pressed'],'true');
+  x.click('cap','git');
+  assert.equal(x.state().capability,'git');
+  assert.equal(x.state().theme,'dark');
+  x.themes[0].listeners.click();
+  assert.equal(x.nodes['#product'].dataset.theme,'light');
+  assert.equal(x.state().capability,'git');
 });

@@ -5,6 +5,30 @@
 **Branch:** `prototype/app-workspace-3971/` on the single shared orphan `prototype` branch  
 **Design decision:** App-owned one stack header, semantic content regions, icon-first actions, and one gesture arbitration path for nested Workspace navigation.
 
+## Design token convergence — 2026-11-19
+
+This revision deliberately **does not change the approved navigation/interaction flows**. It replaces prototype-local visual numbers with a traceable snapshot of actual Nession Web/App tokens.
+
+**Upstream source of truth:** [`design/generated/web.css`](https://github.com/BestNathan/nession/blob/a5f5813d56df2cdad0181610ce6999ce085e173e/design/generated/web.css), main `a5f5813d56df2cdad0181610ce6999ce085e173e`, blob `0bd2219b2541cf85bb3284d47299701a9bce52b5`. The checked-in **`tokens.css`** mirrors only the needed canonical roles (light/dark palettes, App `[data-experience="app"]` typography, density and shape). The extra `--aw-*` variables are **aliases**, not another palette.
+
+| Semantic role | Canonical App source | Effect on the prototype |
+|---|---|---|
+| Type | `--nession-typography-{title,primary,body,secondary,metadata,caption,code}-size` | **17 / 16 / 14 / 13 / 12 / 11.5 / 13px**; resource names no longer 13px beside 10px captions |
+| Weight | `--nession-typography-role-*-weight` | Header / section / row / metadata hierarchy uses one Nession weight ramp |
+| Colors | `--nession-background/card/surface/muted/border/foreground/action` | Product canvas = subtle Nession surface; primary cards = Nession card; secondary groups = muted; no new hex/OKLCH palette |
+| Radius | `--nession-radius-{control,surface,capsule}` | Controls, content regions and bottom Capsule no longer each invent radii |
+| Density | `--nession-control-md/row-lg/icon-sm/icon-md/panel-padding` | 44px icon-hit targets, 56px content rows, 18/20px icons, 16px App insets |
+| Capsule label | `--nession-terminal-capsule-capability-label-font-size` | 12px text, icon above text instead of cramped 9px inline labels |
+| State / dark | `.dark` canonical roles | External **Light / Dark** review toggle switches only product tokens; review-page appearance stays stable |
+
+**Intentional proposal:** Canonical `workspace-background` currently aliases the light ground, which made the #3971 surfaces visually blend into it. This candidate renders the existing `--nession-surface` role as the App **Canvas**, and `--nession-card` as the primary **Content Surface**. This changes the *role placement*, not the underlying tokens. Production design must explicitly approve that composition if implemented.
+
+**Isolation:** `../prototype-frame-2758/frame.css` / `review.css` own the review harness (`--np-*`). `tokens.css` and `styles.css` own only the simulated product (`--nession-*`, `--aw-*`). No shared review palette styles the product and no copied generated output is edited in `main`. Other prototypes should adopt the same canonical-source/snapshot model incrementally, **not** all import a new ad-hoc token package.
+
+**Fidelity limitation:** a static token snapshot does not automatically track future `main` token changes and is not a pixel-verified match to real App React components. No runtime UI functionality changed; all prior #3971 mock flows should continue. The reviewer may compare the Light/Dark product tokens and 375/390/430px widths without modifying routing.
+
+**Proof:** `node --test app-workspace-3971/prototype.test.mjs app-workspace-3971/interaction.test.mjs` for deterministic mock contracts; Chromium review of light/dark, 375/390/430px layout, sections, and touch/scroll when available. Such mock results **do not** satisfy production #3971 Acceptance Criteria.
+
 ## What is the product viewport?
 
 **Current production ownership (source reviewed on 2026-11-19):**
@@ -48,7 +72,7 @@ The real Terminal remains mounted below spatial layers; pushed capability depth 
 | Business data | Synthetic names, transcript entries, Git status, policies, file code |
 | Backend/provider | No network, no CLI/Agent/MCP calls, no persistent file mutation |
 | Gesture behavior | Browser-only exploration; **not** actual iOS/Safari/TUI gesture proof |
-| UI tokens | Selected roles from generated `web.css`; independent static CSS approximation, not pixel-verified React/shadcn |
+| UI tokens | Canonical App color/type/density snapshot in `tokens.css` (main SHA pinned above), `--aw-*` semantic aliases; role placement is a proposal, not pixel-verified React/shadcn |
 | Navigation | Local mock state, not Nession routing or stored Session history |
 | Local interaction smoke | 11/11 mock state transitions passed in V8 DOM-stub (not Chromium) |\n| Published preview | **Unverified until Pages manifest SHA + HTTPS HTML readback** |
 | Production Acceptance | Not attempted; Issue #3971 SCs remain Pending |
