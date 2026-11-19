@@ -31,6 +31,7 @@
 //! agent_id = "agent-..."
 //! ```
 
+use std::env::VarError;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,7 +64,9 @@ pub struct StandaloneMcpConfig {
     pub path: String,
     /// The address this program listens on.
     pub listen_address: String,
-    /// The inbound MCP token. Normally supplied as Authorization: Bearer.
+    /// The inbound MCP token. Normally supplied as Authorization: Bearer,
+    /// or via NESSION_MCP_INBOUND_TOKEN.
+    #[serde(default)]
     pub auth_token: String,
     /// Allow the same MCP inbound token in the URL query for headerless clients.
     /// Explicitly opt in; default remains Bearer-only.
@@ -122,7 +125,8 @@ pub struct BackendConfig {
 pub struct ServerBackendConfig {
     /// The Server WebSocket URL.
     pub endpoint: String,
-    /// The Server auth token.
+    /// The Server auth token (or NESSION_MCP_BACKEND_SERVER_TOKEN).
+    #[serde(default)]
     pub auth_token: String,
     /// Optional per-call request deadline.
     #[serde(default)]
@@ -134,7 +138,8 @@ pub struct ServerBackendConfig {
 pub struct AgentBackendConfig {
     /// The Agent WebSocket URL.
     pub endpoint: String,
-    /// The Agent's configured operator token.
+    /// The Agent operator token (or NESSION_MCP_BACKEND_AGENT_TOKEN).
+    #[serde(default)]
     pub auth_token: String,
     /// The Agent id this host is allowed to manage.
     pub agent_id: String,
@@ -145,10 +150,36 @@ impl StandaloneConfig {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|error| anyhow::anyhow!("could not read {}: {error}", path.display()))?;
-        let config: Self = toml::from_str(&text)
+        let mut config: Self = toml::from_str(&text)
             .map_err(|error| anyhow::anyhow!("could not parse {}: {error}", path.display()))?;
+        config.resolve_environment_credentials()?;
         config.validate()?;
         Ok(config)
+    }
+
+    /// Resolve only fixed credential sources, never arbitrary TOML interpolation.
+    /// Local explicit auth_token fields remain supported; duplicates fail closed.
+    fn resolve_environment_credentials(&mut self) -> anyhow::Result<()> {
+        resolve_credential(
+            &mut self.mcp.auth_token,
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token",
+        )?;
+        if let Some(server) = &mut self.backend.server {
+            resolve_credential(
+                &mut server.auth_token,
+                "NESSION_MCP_BACKEND_SERVER_TOKEN",
+                "[backend.server].auth_token",
+            )?;
+        }
+        if let Some(agent) = &mut self.backend.agent {
+            resolve_credential(
+                &mut agent.auth_token,
+                "NESSION_MCP_BACKEND_AGENT_TOKEN",
+                "[backend.agent].auth_token",
+            )?;
+        }
+        Ok(())
     }
 
     /// Fail closed on a document that cannot authenticate or reach a backend.
@@ -289,5 +320,118 @@ impl StandaloneConfig {
             (None, None) => Ok(None),
             _ => anyhow::bail!("[mcp] tls_cert_path and tls_key_path must be configured together"),
         }
+    }
+}
+
+fn resolve_credential(token: &mut String, env_name: &str, field_name: &str) -> anyhow::Result<()> {
+    let value = match std::env::var(env_name) {
+        Ok(value) => Some(value),
+        Err(VarError::NotPresent) => None,
+        Err(VarError::NotUnicode(_)) => anyhow::bail!("{env_name} is not valid Unicode"),
+    };
+    resolve_credential_value(token, value.as_deref(), env_name, field_name)
+}
+
+/// Keep fail-closed cases testable without modifying process-wide environment.
+fn resolve_credential_value(
+    token: &mut String,
+    environment_value: Option<&str>,
+    env_name: &str,
+    field_name: &str,
+) -> anyhow::Result<()> {
+    if let Some(value) = environment_value {
+        if !token.is_empty() {
+            anyhow::bail!("{field_name} and {env_name} cannot both supply a credential");
+        }
+        if value.trim().is_empty() {
+            anyhow::bail!("{env_name} credential is missing or empty");
+        }
+        *token = value.to_string();
+    }
+    if token.starts_with(concat!("$", "{")) && token.ends_with('}') {
+        anyhow::bail!("{field_name} is an unresolved placeholder: supply the fixed credential environment variable");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::resolve_credential_value;
+
+    #[test]
+    fn env_token_loads_when_toml_token_absent() {
+        let mut token = String::new();
+        resolve_credential_value(
+            &mut token,
+            Some("real-token"),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token",
+        )
+        .unwrap();
+        assert_eq!(token, "real-token");
+    }
+
+    #[test]
+    fn local_explicit_token_remains_supported() {
+        let mut token = "local-token".to_string();
+        resolve_credential_value(
+            &mut token,
+            None,
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token",
+        )
+        .unwrap();
+        assert_eq!(token, "local-token");
+    }
+
+    #[test]
+    fn duplicate_sources_and_empty_environment_fail_closed() {
+        let mut configured = "literal".to_string();
+        assert!(resolve_credential_value(
+            &mut configured,
+            Some("env"),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
+        )
+        .is_err());
+        assert_eq!(configured, "literal");
+
+        let mut missing = String::new();
+        assert!(resolve_credential_value(
+            &mut missing,
+            Some("   "),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn unresolved_placeholder_is_not_a_valid_bearer_token() {
+        let mut token = concat!("$", "{NESSION_MCP_INBOUND_TOKEN}").to_string();
+        assert!(resolve_credential_value(
+            &mut token,
+            None,
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
+        )
+        .is_err());
+
+        let mut another = String::new();
+        assert!(resolve_credential_value(
+            &mut another,
+            Some(concat!("$", "{MISSING}")),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn credential_free_toml_deserializes_before_injection() {
+        let config = "[mcp]\nlisten_address = \"0.0.0.0:9090\"\n[backend.server]\nendpoint = \"ws://server:18080\"\n";
+        let parsed: super::StandaloneConfig = toml::from_str(config).unwrap();
+        assert!(parsed.mcp.auth_token.is_empty());
+        assert!(parsed.backend.server.unwrap().auth_token.is_empty());
     }
 }
