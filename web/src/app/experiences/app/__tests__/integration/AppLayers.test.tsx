@@ -6,6 +6,7 @@ import { EDGE_PLATFORM_GUARD_PX } from '../../gesture';
 function renderLayers(
   layer: 'sessions' | 'terminal' | 'workspace',
   workspaceDetailPushed = false,
+  workspaceStack: import('@/app/workspace/workspaceContext').WorkspaceStackReport | null = null,
 ) {
   return render(
     <AppLayers
@@ -15,6 +16,7 @@ function renderLayers(
       terminal={<div data-testid="stub-terminal" />}
       workspace={<div data-testid="stub-workspace" />}
       workspaceDetailPushed={workspaceDetailPushed}
+      workspaceStack={workspaceStack}
     />,
   );
 }
@@ -164,6 +166,83 @@ describe('AppLayers — the edge band is measured from this element (#1081)', ()
     // Release begins a snapback; give it its window, then prove silence.
     await new Promise((resolve) => setTimeout(resolve, 260));
     expect(onLayerChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('AppLayers — the Workspace inner stack is one coordinator (#3971)', () => {
+  it('routes a claimed contact to Pop instead of standing down', async () => {
+    const onPop = vi.fn();
+    render(
+      <AppLayers
+        layer="workspace"
+        onLayerChange={vi.fn()}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={<div data-testid="stub-workspace" />}
+        workspaceDetailPushed
+        workspaceStack={{ pop: { title: 'Files', onActivate: onPop }, forward: null }}
+      />,
+    );
+    pinShell(390);
+    drag(screen.getByTestId('stub-workspace'), [
+      [100, 300],
+      [180, 300],
+    ]);
+
+    expect(onPop).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'idle'),
+    );
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'workspace');
+  });
+
+  it('still returns to the Terminal at the Workspace root', async () => {
+    const onLayerChange = vi.fn();
+    render(
+      <AppLayers
+        layer="workspace"
+        onLayerChange={onLayerChange}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={<div data-testid="stub-workspace" />}
+        workspaceDetailPushed={false}
+        workspaceStack={{ pop: null, forward: null }}
+      />,
+    );
+    pinShell(390);
+    drag(screen.getByTestId('stub-workspace'), [
+      [100, 300],
+      [180, 300],
+    ]);
+
+    await waitFor(() => expect(onLayerChange).toHaveBeenCalledWith('terminal'));
+  });
+
+  it('leaves an interactive owner its touch', async () => {
+    const onPop = vi.fn();
+    render(
+      <AppLayers
+        layer="workspace"
+        onLayerChange={vi.fn()}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={
+          <div>
+            <button type="button" data-testid="stub-action">Action</button>
+          </div>
+        }
+        workspaceDetailPushed
+        workspaceStack={{ pop: { title: 'Files', onActivate: onPop }, forward: null }}
+      />,
+    );
+    pinShell(390);
+    drag(screen.getByTestId('stub-action'), [
+      [100, 300],
+      [180, 300],
+    ]);
+
+    expect(onPop).not.toHaveBeenCalled();
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'idle');
   });
 });
 

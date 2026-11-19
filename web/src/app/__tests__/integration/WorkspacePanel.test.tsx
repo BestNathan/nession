@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -50,6 +50,7 @@ const domain: DomainState = {
 function panelElement(
   tool: CapabilityId,
   onDepthChange: (pushed: boolean) => void,
+  onStackChange?: Parameters<typeof WorkspacePanel>[0]['onStackChange'],
 ) {
   return (
     <WorkspacePanel
@@ -65,6 +66,7 @@ function panelElement(
       onSurfaceChange={vi.fn()}
       onToolChange={vi.fn()}
       onDepthChange={onDepthChange}
+      onStackChange={onStackChange}
     />
   );
 }
@@ -128,24 +130,66 @@ describe('WorkspacePanel — the pushed depth is reported upward (#1081)', () =>
     expect(screen.getByTestId('app-page-header')).toHaveTextContent('Conversation');
   });
 
+  it('reports the inner stack and projects truthful ancestry (#3971)', async () => {
+    const onStackChange = vi.fn();
+    render(panelElement('files', vi.fn(), onStackChange));
+
+    // At the capability root the secondary line is the active Session context,
+    // not a fabricated path.
+    expect(screen.getByTestId('app-page-subtitle-text')).toHaveTextContent(
+      'Fix terminal reconnect',
+    );
+
+    act(() => {
+      captured.depth?.setPush({
+        title: 'App.tsx',
+        subtitle: 'Files / web / src',
+        ancestors: [
+          { id: 'dir:web/src', title: 'src' },
+          { id: 'dir:web', title: 'web' },
+          { id: 'files-root', title: 'Files' },
+        ],
+        onLeave: vi.fn(),
+      });
+      captured.depth?.setForward?.({ title: 'App.tsx', onActivate: vi.fn() });
+    });
+
+    expect(screen.getByTestId('app-page-subtitle-text')).toHaveTextContent(
+      'Files / web / src',
+    );
+    await waitFor(() =>
+      expect(onStackChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          pop: expect.objectContaining({ title: 'src' }),
+          forward: expect.objectContaining({ title: 'App.tsx' }),
+        }),
+      ),
+    );
+  });
+
   it('renders a capability header action and retires it on a capability switch', () => {
     const onActivate = vi.fn();
     const { view } = renderPanel();
 
     act(() => {
-      captured.depth?.setAction?.({
-        label: 'Browse',
-        ariaLabel: 'Browse Claude',
-        onActivate,
-      });
+      captured.depth?.setActions?.([
+        {
+          id: 'browse',
+          label: 'Browse',
+          ariaLabel: 'Browse Claude',
+          icon: 'browse',
+          priority: true,
+          onActivate,
+        },
+      ]);
     });
-    fireEvent.click(screen.getByTestId('app-page-action'));
+    fireEvent.click(screen.getByTestId('app-page-action-browse'));
     expect(onActivate).toHaveBeenCalledTimes(1);
 
     // An action registered by the capability that was just left cannot decorate
     // the new capability's header.
     view.rerender(panelElement('git', vi.fn()));
-    expect(screen.queryByTestId('app-page-action')).toBeNull();
+    expect(screen.queryByTestId('app-page-action-browse')).toBeNull();
   });
 
   it('reports no detail once the panel is gone', () => {

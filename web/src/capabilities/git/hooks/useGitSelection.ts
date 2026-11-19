@@ -203,5 +203,14 @@ export function useGitSelection({
     void selectRow(row);
   }, [handedOver, rows, selectRow]);
 
-  return { state, selectRow };
+  /**
+   * Leave the open row (#3971). The App pushes a selected change as a depth, so
+   * its Back and inner Pop need one capability-owned leave; dropping the
+   * request token keeps a late answer for the old row from re-opening it.
+   */
+  const clearSelection = useCallback(() => {
+    selectionToken.current += 1; clearMediaUrl(); setState(NO_SELECTION);
+  }, [clearMediaUrl]);
+
+  return { state, selectRow, clearSelection };
 }

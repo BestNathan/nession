@@ -53,7 +53,7 @@ test('SC-03: 375/390/430 widths keep controls touch-safe and restore reading pos
     const title = await page.getByTestId('conversation-open').locator('h2').first().boundingBox();
     expect(title).not.toBeNull();
     expect(title.width).toBeLessThanOrEqual(width);
-    await expect(page.getByTestId('app-page-action')).toBeVisible();
+    await expect(page.getByTestId('app-page-action-browse')).toBeVisible();
 
     // Browse sheet: five resource rows, each a touch target, inside the width.
     await openBrowse(page);

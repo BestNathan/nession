@@ -119,7 +119,7 @@ test('SC-04: routes, no-Session root, dirty leave and visible controls', async (
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.locator('.cm-content').click();
   await page.keyboard.type('// guarded draft');
-  await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to src');
 
   await page.getByTestId('app-page-back').click();
   const dialog = page.getByRole('alertdialog');

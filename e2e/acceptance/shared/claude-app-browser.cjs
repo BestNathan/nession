@@ -24,7 +24,7 @@ async function openClaudeApp(page, search = '') {
 }
 
 async function openBrowse(page) {
-  await page.getByTestId('app-page-action').click();
+  await page.getByTestId('app-page-action-browse').click();
   await page.getByTestId('claude-browse-sheet').waitFor({ timeout: 10_000 });
 }
 

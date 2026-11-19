@@ -13,7 +13,11 @@ import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwarene
 import { TerminalWell } from '@/app/TerminalWell';
 import { AppKeyboardAvoidanceScrollport } from '@/app/experiences/app/AppKeyboardAvoidanceScrollport';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
-import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
+import type {
+  CapabilityFocus,
+  Experience,
+  WorkspaceStackReport,
+} from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
@@ -51,6 +55,12 @@ export interface ShellMainProps {
    * the callback is absent there and the report is dropped.
    */
   onWorkspaceDepthChange?: (pushed: boolean) => void;
+  /**
+   * Reports the active Workspace inner stack (#3971): what a right swipe would
+   * pop and what a left swipe would restore. The App pager is the single
+   * gesture coordinator; Web drops the report.
+   */
+  onWorkspaceStackChange?: (stack: WorkspaceStackReport | null) => void;
   /** Spatial shell: omit terminal on the Workspace page to avoid a second xterm. */
   showTerminal?: boolean;
   /** Spatial shell: omit workspace panel on the Terminal page. */
@@ -448,6 +458,7 @@ export function ShellMain({
   onOpenWorkspace,
   onCreate,
   onWorkspaceDepthChange,
+  onWorkspaceStackChange,
   showTerminal = true,
   showWorkspace = true,
   terminal,
@@ -546,6 +557,7 @@ export function ShellMain({
                 onSurfaceChange={onSurfaceChange}
                 onToolChange={openTool}
                 onDepthChange={onWorkspaceDepthChange}
+                onStackChange={onWorkspaceStackChange}
                 focus={focus}
                 onFocusConsumed={consumeFocus}
                 openWorktreeSession={onOpenWorktreeSession}

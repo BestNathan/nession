@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { WorkspaceSurface } from '@/components/ui/workspace-content';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
@@ -145,14 +146,21 @@ function BoundConversation({ data }: { data: ClaudeAppData }) {
           </Button>
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* A Reader is one predominant continuous surface (#3971). The surface
+          role is the host's contrast owner; messages stay inside it without
+          gaining card borders of their own. */}
+      <WorkspaceSurface
+        level="primary"
+        className="min-h-0 flex-1"
+        testId="claude-app-reader-surface"
+      >
         <ConversationTranscript
           snapshot={snapshot}
           providerLabel={claudeCodeConversationAdapter.identity.label}
           onLoadOlder={conversation.loadOlder}
           onReload={conversation.reload}
         />
-      </div>
+      </WorkspaceSurface>
       <p
         className={cn(
           'shrink-0 border-t px-4 py-2 text-muted-foreground',
@@ -219,7 +227,11 @@ export function ConversationRoute({
           {id === boundId ? ' · the current Session conversation' : ' · not bound to this Session'}
         </p>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
+      <WorkspaceSurface
+        level="primary"
+        className="min-h-0 flex-1"
+        testId="claude-app-reader-surface"
+      >
         {ready ? (
           <ConversationTranscript
             snapshot={snapshot}
@@ -235,7 +247,7 @@ export function ConversationRoute({
             Loading conversation…
           </p>
         )}
-      </div>
+      </WorkspaceSurface>
     </div>
   );
 }

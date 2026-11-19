@@ -28,6 +28,7 @@ test('capability content cannot take page geometry or the App header', () => {
   assert.deepEqual(rules(violations), [
     'no-capability-app-header',
     'no-capability-frame-geometry',
+    'no-capability-frame-geometry',
   ]);
   assert.ok(violations.every((violation) => violation.owner && violation.repair));
 });
@@ -56,6 +57,93 @@ test('local flex/grid composition and the issue example stay legal', () => {
     scanLayoutSource('<div className="h-[100dvh]" />', 'web/src/app/experiences/app/AppLayers.tsx'),
     [],
     'the Experience frame owns page geometry',
+  );
+});
+
+test('only the App Experience owns gesture arbitration (#3971)', () => {
+  const badImport = [
+    "import { useSwipePager } from '@/app/experiences/app/useSwipePager';",
+    "import { edgeBandSide } from '@/app/experiences/app/edgeBand';",
+  ].join('\n');
+  assert.deepEqual(
+    rules(scanLayoutSource(badImport, 'web/src/capabilities/bad/components/Bad.tsx')),
+    ['no-capability-gesture-ownership', 'no-capability-gesture-ownership'],
+  );
+
+  const badMarkers =
+    '<div data-swipe-phase="navigation" data-swipe-inner="pop" data-workspace-stack-pop="Root" />';
+  const violations = scanLayoutSource(
+    badMarkers,
+    'web/src/product/bad/Bad.tsx',
+  );
+  assert.deepEqual(rules(violations), [
+    'no-capability-gesture-ownership',
+    'no-capability-gesture-ownership',
+    'no-capability-gesture-ownership',
+  ]);
+  assert.ok(violations.every((violation) => violation.owner && violation.repair));
+
+  assert.deepEqual(
+    scanLayoutSource(
+      '<button data-swipe-owner="true" onClick={() => page()} />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+    'the explicit surface-owned escape hatch remains legal',
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div data-swipe-phase="navigation" data-workspace-stack-forward="Detail" />',
+      'web/src/app/experiences/app/AppLayers.tsx',
+    ),
+    [],
+    'the App coordinator publishes the markers',
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      "import { useSwipePager } from './useSwipePager';",
+      'web/src/app/experiences/app/AppLayers.tsx',
+    ),
+    [],
+  );
+});
+
+test('capability content cannot re-create an App header through a marker or Back control', () => {
+  for (const source of [
+    '<AppBackButton testid="app-tool-back" label="Back" onClick={() => noop()} />',
+    '<div data-testid="app-tool-header" />',
+    '<button data-testid="app-page-action-search" />',
+    '<div data-testid="files-app-nav" />',
+  ]) {
+    assert.deepEqual(
+      rules(scanLayoutSource(source, 'web/src/capabilities/bad/components/Bad.tsx')),
+      ['no-capability-app-header'],
+      source,
+    );
+  }
+});
+
+test('viewport-unit and fixed page geometry stays with the Experience frame', () => {
+  for (const source of [
+    '<div className="h-dvh" />',
+    '<div className="min-h-svh" />',
+    '<div className="h-[100lvh]" />',
+    '<div className="w-[100dvw]" />',
+    '<div className="fixed inset-y-0" />',
+  ]) {
+    assert.deepEqual(
+      rules(scanLayoutSource(source, 'web/src/capabilities/bad/components/Bad.tsx')),
+      ['no-capability-frame-geometry'],
+      source,
+    );
+  }
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div className="absolute inset-0 flex min-h-0" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+    'a local layer/overlay position is not page geometry',
   );
 });
 

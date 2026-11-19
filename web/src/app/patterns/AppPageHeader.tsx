@@ -1,9 +1,15 @@
+import { useState } from 'react';
+import { ChevronDown, Layers } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { titleAppClass } from '@/app/experiences/app/appTypography';
+import { metadataAppClass, titleAppClass } from '@/app/experiences/app/appTypography';
 import { chromeMonoRole } from '@/shared/typography/chromeRoles';
-import { Button } from '@/components/ui/button';
-import type { WorkspaceHeaderAction } from '@/app/workspace/workspaceContext';
+import type {
+  WorkspaceHeaderAction,
+  WorkspaceStackAncestor,
+} from '@/app/workspace/workspaceContext';
 import { AppBackButton } from './AppBackButton';
+import { AppHeaderActions } from './AppHeaderActions';
+import { AppStackSheet } from './AppStackSheet';
 
 export interface AppPageHeaderProps {
   /**
@@ -13,7 +19,7 @@ export interface AppPageHeaderProps {
    */
   backLabel: string;
   onBack: () => void;
-  /** The page's own name. */
+  /** The page's own name — the header's primary title. */
   title: string;
   /** Optional test hook for the host's title node. */
   titleTestId?: string;
@@ -29,16 +35,29 @@ export interface AppPageHeaderProps {
    */
   technical?: boolean;
   /**
-   * A capability-local action beside the title, contributed through the
-   * Workspace depth control. The capability supplies the semantic action; this
-   * header supplies the geometry and the touch target — a capability never
-   * renders a second bar (#1051).
+   * The header's secondary line (#3971): real ancestry below the title, or the
+   * active Session context at a capability root. Never a fabricated
+   * breadcrumb; a capability reports only what its stack actually contains.
    */
-  action?: WorkspaceHeaderAction | null;
+  subtitle?: string;
+  /**
+   * The stack above this depth, nearest ancestor first. Present only when the
+   * capability can actually jump to those ancestors; the header renders the
+   * secondary line as the Stack Sheet trigger only then.
+   */
+  ancestors?: readonly WorkspaceStackAncestor[];
+  /** Jump to an ancestor, running the same leave guard as Back. */
+  onJumpToAncestor?: (id: string) => void;
+  /**
+   * Capability-contributed action semantics (#3971). The host renders at most
+   * two compact icons and moves the rest, and every destructive action, into
+   * More with readable text. A capability never renders its own header bar.
+   */
+  actions?: readonly WorkspaceHeaderAction[] | null;
 }
 
 /**
- * The App's page header — **one** per depth (#1051).
+ * The App's page header — **one** per depth (#1051, #3971).
  *
  * The App used to compose several independent chrome owners, each answering
  * "what page am I on?" and "what does Back mean?" for itself: the Workspace
@@ -47,16 +66,17 @@ export interface AppPageHeaderProps {
  * rows because each was written to own its own level; the level, not the
  * component, is what owns navigation.
  *
- * So this is one component at both Workspace depths. A capability root passes
- * its own name and the depth below it (the Terminal); a pushed detail passes the
- * resource it pushed and its capability's root. What changes between them is
- * the two strings, not the number of bars.
+ * #3971 extends the one bar without adding a second one:
  *
- * The capability's own actions are deliberately not here. `#1051` allows them in
- * the page header *or* in a clearly subordinate toolbar, and the file viewer's
- * actions belong to the editor whose state they act on — Edit/Save are only
- * meaningful while the editor is on screen and dirty. What must not happen is
- * what did: a second bar whose Back and Close were two names for one leave.
+ * ```text
+ * Back | [primary title + truthful secondary ancestry] | priority icon(s) | More
+ * ```
+ *
+ * The primary title is the current capability/resource; the secondary line is
+ * the immediate ancestor or bounded parent path from the capability's real
+ * stack. Tapping it opens the optional Stack Sheet when the capability can
+ * navigate there. Right-side actions are capability-contributed *semantics*
+ * that the host renders as its own icon vocabulary and overflow.
  */
 export function AppPageHeader({
   backLabel,
@@ -64,38 +84,76 @@ export function AppPageHeader({
   title,
   titleTestId,
   technical,
-  action,
+  subtitle,
+  ancestors,
+  onJumpToAncestor,
+  actions,
 }: AppPageHeaderProps) {
+  const [stackOpen, setStackOpen] = useState(false);
+  const stackJump = onJumpToAncestor !== undefined
+    && ancestors !== undefined
+    && ancestors.length > 0;
+
   return (
     <header
       data-testid="app-page-header"
       className="flex shrink-0 items-center gap-1 px-[var(--nession-shell-space-2)] pt-[max(var(--nession-shell-space-1),env(safe-area-inset-top))]"
     >
       <AppBackButton label={backLabel} testid="app-page-back" onClick={onBack} />
-      {/* The page's name. `visual-language.md`'s role vocabulary names "current
-          capability title" and "pushed detail title" as the same role, so both
-          depths set it here — a capability's name in the product face, a pushed
-          path or resource name in mono at the same size (#1050 stage 4, #1073).
-          Web's `text-sm` that once stood here was the primitive's desktop
-          default doing a title's job. */}
-      <h1
-        data-testid={titleTestId}
-        className={cn('min-w-0 truncate', technical ? chromeMonoRole('title') : titleAppClass)}
+      <div
+        data-testid="app-page-titleblock"
+        className="relative flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-[var(--nession-rhythm-text-stack)] py-1"
       >
-        {title}
-      </h1>
-      {action ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="ml-auto shrink-0"
-          aria-label={action.ariaLabel ?? action.label}
-          data-testid="app-page-action"
-          onClick={() => action.onActivate()}
+        {/* The page's name. `visual-language.md`'s role vocabulary names "current
+            capability title" and "pushed detail title" as the same role, so both
+            depths set it here — a capability's name in the product face, a pushed
+            path or resource name in mono at the same size (#1050 stage 4, #1073).
+            Web's `text-sm` that once stood here was the primitive's desktop
+            default doing a title's job. */}
+        <h1
+          data-testid={titleTestId}
+          className={cn('min-w-0 truncate', technical ? chromeMonoRole('title') : titleAppClass)}
         >
-          {action.label}
-        </Button>
+          {title}
+        </h1>
+        {subtitle ? (
+          <span
+            data-testid="app-page-subtitle-text"
+            className={cn(
+              'flex min-w-0 items-center gap-[var(--nession-rhythm-text-stack)] text-muted-foreground',
+              metadataAppClass,
+            )}
+          >
+            {stackJump ? <Layers className="size-3 shrink-0" aria-hidden /> : null}
+            <span className="truncate">{subtitle}</span>
+            {stackJump ? <ChevronDown className="size-3 shrink-0" aria-hidden /> : null}
+          </span>
+        ) : null}
+        {/* The stack trigger is the title block itself, so the touch target meets
+            the App floor even though the secondary line is deliberately quiet.
+            It reaches the optional Stack Sheet and runs the capability's guarded
+            jump — not a second navigation owner. */}
+        {stackJump ? (
+          <button
+            type="button"
+            data-testid="app-page-subtitle"
+            aria-haspopup="dialog"
+            aria-expanded={stackOpen}
+            aria-label={`Navigation stack, ${subtitle ?? title}`}
+            className="absolute inset-0 rounded-[var(--nession-radius-control)] focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]"
+            onClick={() => setStackOpen(true)}
+          />
+        ) : null}
+      </div>
+      <AppHeaderActions actions={actions ?? []} />
+      {stackJump ? (
+        <AppStackSheet
+          open={stackOpen}
+          onOpenChange={setStackOpen}
+          title={title}
+          ancestors={ancestors}
+          onJumpToAncestor={(id) => onJumpToAncestor?.(id)}
+        />
       ) : null}
     </header>
   );

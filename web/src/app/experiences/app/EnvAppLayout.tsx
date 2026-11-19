@@ -204,7 +204,15 @@ export function EnvAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   const setPush = depth.setPush;
   const leaveDepth = screen.leaveDepth;
   useEffect(() => {
-    setPush(title === null ? null : { title, onLeave: leaveDepth });
+    setPush(title === null ? null : {
+      title,
+      // The Environment capability root is the one real parent this one-level
+      // local stack exposes; the guard stays `leaveDepth`, so Back and the
+      // shell's inner Pop both run the same dirty check (#3971).
+      subtitle: 'Environment',
+      backLabel: 'Back to Environment',
+      onLeave: leaveDepth,
+    });
   }, [setPush, title, leaveDepth]);
 
   return (

@@ -583,9 +583,9 @@ test.describe('App 390×844', () => {
     // resource sheet. The host keeps exactly one header at every depth.
     await expect(page.getByTestId('claude-code-view-tabs')).toHaveCount(0);
     await expect(page.getByTestId('app-page-header')).toHaveCount(1);
-    await expect(page.getByTestId('app-page-action')).toHaveAccessibleName('Browse Claude');
+    await expect(page.getByTestId('app-page-action-browse')).toHaveAccessibleName('Browse Claude');
 
-    await page.getByTestId('app-page-action').click();
+    await page.getByTestId('app-page-action-browse').click();
     const browseSheet = page.getByTestId('claude-browse-sheet');
     await expect(browseSheet).toBeVisible();
     for (const id of [

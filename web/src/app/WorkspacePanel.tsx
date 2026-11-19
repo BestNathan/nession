@@ -1,5 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { cn } from '@/shared/lib/utils';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
+import { useAppInnerStackMotion } from '@/app/workspace/appInnerStackMotion';
 import type { FileOps } from '@/capabilities/files';
 import { resolveConversationIdentity } from '@/app/conversationIdentities';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
@@ -13,10 +15,17 @@ import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import { useWorkspaceFocusLifecycle } from '@/app/workspace/useWorkspaceFocusLifecycle';
 import { useWorkspaceCapabilityChrome } from '@/app/workspace/hooks/useWorkspaceCapabilityChrome';
+import {
+  sessionContextLabel,
+  useWorkspaceStackReport,
+  workspaceBackLabel,
+  workspaceSubtitle,
+} from '@/app/workspace/hooks/useWorkspacePanelChrome';
 import type {
   CapabilityFocus,
   Experience,
   WorkspaceContext,
+  WorkspaceStackReport,
 } from '@/app/workspace/workspaceContext';
 
 export interface WorkspacePanelProps {
@@ -38,6 +47,15 @@ export interface WorkspacePanelProps {
    * that already has one. Absent on Web, which has no top-level gesture.
    */
   onDepthChange?: (pushed: boolean) => void;
+  /**
+   * Reports the capability's inner stack destinations (#3971).
+   *
+   * The App's single gesture coordinator routes a claimed contact here before
+   * the outer spatial navigator: right swipes pop one valid depth, left swipes
+   * restore only a recorded forward destination. `null` means the depth has no
+   * inner stack (or the panel is unmounting).
+   */
+  onStackChange?: (stack: WorkspaceStackReport | null) => void;
   /** What opened this view, when the entry carried context (`#826`). */
   focus?: CapabilityFocus;
   onFocusConsumed?: () => void;
@@ -95,15 +113,17 @@ export function WorkspacePanel({
   onSurfaceChange,
   onToolChange,
   onDepthChange,
+  onStackChange,
   focus,
   onFocusConsumed,
   openWorktreeSession,
   focusedProject,
   sessionProject,
 }: WorkspacePanelProps) {
-  // The pushed depth and the contextual header action are one capability-
-  // stamped state machine; the hook owns their ownership rule.
-  const { push, action, depth } = useWorkspaceCapabilityChrome(tool);
+  // The pushed depth, the contextual header actions and the recorded forward
+  // destination are one capability-stamped state machine; the hook owns their
+  // ownership rule.
+  const { push, actions, forward, depth } = useWorkspaceCapabilityChrome(tool);
 
   // Report the depth upward rather than keeping it private (#1081): the App's
   // pager needs it, and this is the component that owns it. The panel is
@@ -162,6 +182,14 @@ export function WorkspacePanel({
     [ctx, tool],
   );
 
+  const sessionContext = useMemo(
+    () => sessionContextLabel(selectedSession, selectedAgent),
+    [selectedAgent, selectedSession],
+  );
+  const subtitle = workspaceSubtitle(push, activeLabel, sessionContext);
+  const backLabel = workspaceBackLabel(push, activeLabel, selectedSession !== null);
+  useWorkspaceStackReport({ push, forward, activeLabel, onStackChange });
+
   // The Web's Workspace → Terminal route (#1204): one circular destination
   // action beside the capability dock — surface navigation, not a capability,
   // so it is never a dock entry and never displaced by the dock's content. The
@@ -178,6 +206,22 @@ export function WorkspacePanel({
   const ConversationGlyph = conversation?.glyph;
   const surfaceAction = surfaceActionFor(experience, selectedSession !== null, onSurfaceChange, ConversationGlyph);
 
+  // The inner stack page frame (#3971): header and content move together under
+  // the finger; the Capability Capsule keeps its station. The frame carries no
+  // transform at rest, so the resting layout is unchanged and the transition
+  // only exists while a released contact settles.
+  const innerMotion = useAppInnerStackMotion();
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const pageMotionStyle = innerMotion.action === null
+    ? undefined
+    : {
+      transform: `translateX(${innerMotion.offset}px)`,
+      transition:
+        innerMotion.settling && !reducedMotion
+          ? 'transform var(--nession-motion-shell-duration) var(--nession-motion-shell-ease)'
+          : undefined,
+    };
+
   return (
     <div
       role="region"
@@ -186,23 +230,26 @@ export function WorkspacePanel({
       className={cn('flex min-h-0 flex-1 flex-col', surface !== 'workspace' && 'hidden')}
     >
       {experience === 'app' ? (
-        <AppPageHeader
+        <div
+          data-testid="app-workspace-page-head"
+          className="shrink-0 will-change-transform"
+          style={pageMotionStyle}
+        >
+          <AppPageHeader
           /* Back goes to the depth below this one, and nowhere else: the Terminal
              from a capability root, the capability root from a pushed detail.
              `#1051`'s rule is one predictable leave per depth, so this is the
              only affordance in the App that leaves either of them. */
-          backLabel={
-            push
-              ? (push.backLabel ?? `Back to ${activeLabel}`)
-              : selectedSession
-                ? 'Back to terminal'
-                : 'Back to sessions'
-          }
+          backLabel={backLabel}
           onBack={push ? push.onLeave : () => onSurfaceChange('terminal')}
           title={push ? push.title : activeLabel}
+          subtitle={subtitle}
+          ancestors={push?.ancestors}
+          onJumpToAncestor={push?.onJumpToAncestor}
           technical={push !== null}
-          action={action}
-        />
+            actions={actions}
+          />
+        </div>
       ) : null}
       <WorkspaceShell
         ctx={ctx}

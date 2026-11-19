@@ -37,7 +37,7 @@ test('SC-01: Claude App opens on the bound conversation under one App header', a
   await expect(page.getByRole('tab')).toHaveCount(0);
   await expect(page.getByTestId('app-page-header')).toHaveCount(1);
   await expect(page.getByTestId('app-page-header')).toContainText('Claude Code');
-  await expect(page.getByTestId('app-page-action')).toHaveAccessibleName('Browse Claude');
+  await expect(page.getByTestId('app-page-action-browse')).toHaveAccessibleName('Browse Claude');
 
   // Terminal continuity: the Workspace is a layer; the Terminal stays mounted.
   await expect(page.getByTestId('app-layer-terminal')).toHaveCount(1);

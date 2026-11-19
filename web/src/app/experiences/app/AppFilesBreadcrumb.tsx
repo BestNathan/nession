@@ -53,11 +53,12 @@ export function AppFilesBreadcrumb({
         );
       })}
       </nav>
+      {/* The control band is the Experience's: 44px on App, never the local
+          36px these used to be. Same icon vocabulary as every other App action. */}
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-9 shrink-0"
         aria-label="Search files"
         onClick={() => onOpenSearch()}
       >
@@ -67,7 +68,6 @@ export function AppFilesBreadcrumb({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-9 shrink-0"
         aria-label="Folder actions"
         onClick={() => onOpenMore()}
       >
