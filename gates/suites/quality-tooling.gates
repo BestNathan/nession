@@ -32,6 +32,8 @@ mcp-standalone-image
 compose-storage-contract
 gitops-storage-contract
 cloudflare-site-dns-selftest
+gitops-seal-required-selftest
+mcp-secret-preflight-readback-selftest
 protocol-json-contract
 issue-contract-selftest
 e2e-tests-catalog
@@ -65,6 +67,7 @@ server-handler-concurrency-selftest
 runtime-image-tools-selftest
 mcp-standalone-image-selftest
 acr-mirror-deadline-selftest
+ghcr-gitops-separation
 compose-storage-contract-selftest
 gitops-storage-contract-selftest
 agent-provider-contract

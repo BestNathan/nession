@@ -811,10 +811,10 @@ function selfTest(){
   ].join('\n'));
   assert.throws(()=>checkInventory(manifest,unclassifiedWriter),
     /unclassified direct Git push in privileged Workflow/);
-  // #3674: ACR deploy, not GHCR-only Release, now owns the GitOps write token.
+  // #4032: GHCR GitOps deploy, not copy-only ACR, owns the GitOps write token.
   // Inject a rogue push into the actual privileged deployment workflow.
   const unclassifiedDeploy=new Map(sources);
-  const deploy='.github/workflows/deploy-staging-acr.yml';
+  const deploy='.github/workflows/deploy-staging-ghcr.yml';
   unclassifiedDeploy.set(deploy,unclassifiedDeploy.get(deploy)+
     '\n      - run: git push origin "HEAD:${ref}"\n');
   assert.throws(()=>checkInventory(manifest,unclassifiedDeploy),

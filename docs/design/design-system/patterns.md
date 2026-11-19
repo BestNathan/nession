@@ -6,6 +6,7 @@ Nession patterns are reusable assemblies of generic UI primitives that encode pr
 
 **Spec issue:** [#470](https://github.com/BestNathan/nession/issues/470)
 **Tokens:** [tokens.md](tokens.md) — patterns consume Semantic / Domain / Experience tokens.
+**Spatial relationships:** [spatial-relationships.md](spatial-relationships.md) — the single owner of Web/App Padding/Gap/Margin and content-rhythm relationships (#4045). Existing recipe geometry remains the observed baseline until consumer/browser verification.
 **Contracts:** measurable rules live in [contracts.md](contracts.md) / `design/contracts/`; enforcement lives in [validation.md](validation.md).
 
 ## Product rule for patterns

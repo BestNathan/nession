@@ -103,7 +103,26 @@ owner — while accepting local `flex`/`grid` composition. Browser checks then
 assert the computed result: one intended scroll owner, no page-level horizontal
 overflow, the approved control band, one App page header/Back, and visible
 actions. The canonical model is
-[composition.md §14](../../composition.md#14-layout-ownership-and-shared-recipes-3194).
+[composition.md §14](../composition.md#14-layout-ownership-and-shared-recipes-3194).
+
+## Spatial relationship and content-rhythm evidence (#4045)
+
+[Spatial Relationships / Content Rhythm](spatial-relationships.md) establishes
+the normative cross-Experience relationship vocabulary and one-owner-per-edge
+rule. Its candidate measurements are **not** assertions that current shipping
+consumers pass. Phase 1 is source/document evidence only.
+
+During later consumer migrations, use the existing Layout Ownership Gate and
+Browser Design catalog rather than a second gate. A deterministic fixture can
+reject a truly duplicated shared-recipe relationship or a second spacing owner;
+local content-specific `flex`/`grid` and legitimate renderer spacing remain
+legal. Compare **computed bounding-box distances** and roles between independent
+consumers, not just token-name presence. Required examples include icon glyph
+versus visual slot versus interactive hit target, title/subtitle, Section peers,
+continuous collection rows, form help/error, long/truncated resource names and
+prose/tool/code boundaries. Cover Web and App viewport/overflow/scroll-clearance
+and negative cases with source-aligned Chromium/Playwright evidence before
+claiming visual conformity.
 
 ## Failure shape
 

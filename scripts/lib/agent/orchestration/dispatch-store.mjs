@@ -13,6 +13,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordAttestedQwenPreflightFailureV2,qwenPreflightSuccessorIdV2,
   recordAttestedQwenPreflightFailureV3,qwenPreflightSuccessorIdV3,
   recordAttestedQwenCliFailure,qwenCliSuccessorId,
+  recordAttestedQwenRepairTurnsFailure,qwenRepairTurnsSuccessorId,
   recordAttestedQwenToolFailure,qwenToolSuccessorId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
@@ -20,7 +21,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   repairRuntimeSuccessorId,REVIEWER_PREMODEL_FAILURE,
   REVIEWER_PREMODEL_FAILURE_SOURCES,
   reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
-  REVIEWER_JSON_FAILURE,reviewerJsonSuccessorId,
+  REVIEWER_JSON_FAILURE_SOURCES,reviewerJsonSuccessorId,
   recordAttestedReviewerJsonFailure}
   from './outbox.mjs';
 import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
@@ -37,6 +38,8 @@ import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V2 as QWEN_KEY_FAILURE_V2,
   SOURCE_V3 as QWEN_KEY_FAILURE_V3} from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
+import {SOURCE as QWEN_REPAIR_TURNS_FAILURE}
+  from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
 
 const REF='agent-store';
@@ -174,7 +177,10 @@ export function recoverAttestedReviewerPremodelFailure({remote,source}){
 // before any Store credential is used; this transaction never retries the
 // original workflow_dispatch or invents a Reviewer verdict.
 export function recoverAttestedReviewerJsonFailure({remote,source}){
-  const f=REVIEWER_JSON_FAILURE;
+  const f=REVIEWER_JSON_FAILURE_SOURCES.find(f=>
+    f.issue===source?.issue&&f.action_id===source?.action_id&&
+    f.run_id===source?.run_id);
+  if(!f)fail('unknown post-model Reviewer failure source');
   if(source?.verified!==true||source.issue!==f.issue||
       source.action_id!==f.action_id||source.run_id!==f.run_id||
       source.attempt!==1||source.source_sha!==f.source_sha||
@@ -675,6 +681,57 @@ export function recoverAttestedQwenCliFailure({remote,source}){
       fail('new Qwen CLI failure recovery unexpectedly replayed Store CAS');
     return {status:'recovered',issue:f.issue,action_id:successorId,
       state_version:state.version,store_commit_sha:published.commit_sha};
+  });
+}
+
+// #3885: exact failed model AFTER native v2 Restore, no accepted v3.
+// Preserve the old signed Worker Run and checkpoint; new action must be
+// committed by Store CAS before the Controller can sign one new dispatch.
+export function recoverAttestedQwenRepairTurnsFailure({remote,source}){
+  const f=QWEN_REPAIR_TURNS_FAILURE;
+  if(source?.verified!==true||source.issue!==f.issue||
+     source.action_id!==f.action_id||source.run_id!==f.run_id||
+     source.attempt!==1||source.source_sha!==f.source_sha||
+     source.run_head_sha!==f.run_head_sha||
+     source.failure_code!==f.failure_code)
+    fail('source-attested Qwen Repair max-turns Run required');
+  return withStore(remote,dir=>{
+    const record=readIssueWorkflowState(dir,f.issue);
+    const state=record.state;
+    if(!state)fail('missing exact second native Repair Store');
+    const old=state.outbox.find(x=>x.id===f.action_id);
+    const id=qwenRepairTurnsSuccessorId(f.issue,f.action_id,f.run_id);
+    if(old?.status==='failed'){
+      const next=state.outbox.find(x=>x.id===id);
+      if(old.receipt?.source_run_id!==f.run_id||
+         old.receipt?.failure_code!==f.failure_code||
+         !next||!['pending','dispatching','dispatched','yielded'].includes(next.status)||
+         JSON.stringify(next.task)!==JSON.stringify(old.task))
+        fail('conflicting or duplicated repaired Qwen failure replay');
+      return {status:'replayed',issue:f.issue,action_id:id,
+        state_version:record.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(record.version!==f.state_version)
+      fail('second native Repair State changed since failed Worker');
+    const prefix='roles/developer/dev-qwen-01/issues/'+f.issue;
+    const head=path.join(dir,prefix+'/head.json');
+    const expected=path.join(dir,prefix+'/checkpoints/00000002.json');
+    const candidate=path.join(dir,prefix+'/checkpoints/00000003.json');
+    const failed=path.join(dir,prefix+'/runs/'+f.run_id+'-1.json');
+    if(!fs.existsSync(head)||!fs.existsSync(expected)||
+       fs.existsSync(candidate)||fs.existsSync(failed))
+      fail('failed Worker already has new accepted v3 native checkpoint');
+    const nativeHead=JSON.parse(fs.readFileSync(head,'utf8'));
+    if(nativeHead.version!==f.checkpoint_version||
+       nativeHead.ciphertext_sha256!==f.checkpoint_ciphertext_sha256||
+       nativeHead.checkpoint_path!==prefix+'/checkpoints/00000002.json')
+      fail('native v2 predecessor was altered after failed Worker');
+    const next=recordAttestedQwenRepairTurnsFailure(state,record.version,source);
+    const published=persist(dir,next,record.version,f.issue);
+    if(published.replayed)
+      fail('unexpected Qwen max-turns first recovery CAS replay');
+    return {status:'recovered',issue:f.issue,action_id:id,
+      state_version:next.version,store_commit_sha:published.commit_sha};
   });
 }
 

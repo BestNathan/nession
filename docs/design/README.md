@@ -68,6 +68,7 @@ The key downstream interpretation of the Principles is:
 | [visual-language.md](visual-language.md) | Canonical | What dominates and recedes; typography, surfaces, density, emphasis |
 | [composition.md](composition.md) | Canonical / evolving | Page-level layout relationships and responsive composition; must stay subordinate to contextual-presence rules |
 | [design-system/tokens.md](design-system/tokens.md) | Canonical implementation contract | Token layers and semantic vocabulary; never decides product presence |
+| [design-system/spatial-relationships.md](design-system/spatial-relationships.md) | Canonical design relationship contract | Web/App shared spacing meaning: Padding, Gap, Margin, inline icon/text geometry, content rhythm and ownership (#4045); first release is specification, not shipping pixel conformity |
 | [design-system/components.md](design-system/components.md) | Canonical implementation contract | Generic primitives and product/pattern boundary |
 | [design-system/patterns.md](design-system/patterns.md) | Canonical implementation contract | Reusable product/UI patterns and contextual capability composition |
 | [design-system/contracts.md](design-system/contracts.md) | Canonical executable-contract architecture | Measurable consequences of approved pattern decisions; downstream from product semantics |
