@@ -1,5 +1,7 @@
 # Claude Code App-first workspace — #3829
 
+> **Historical / partially superseded (2026-11-19):** The conversation-first/Browse IA is retained. The original mock's single-title Header, surface treatment and lack of inner Workspace stack swipe are superseded by [new App Workspace design #3971](../app-workspace-3971/index.html). This older artifact must not be used as current visual or gesture proof until its scenario is synchronized and republished. Original acceptance records are preserved.
+
 Requirement: https://github.com/BestNathan/nession/issues/3829
 
 ## Question / fidelity

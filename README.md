@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| App Workspace · Stack Header / semantic surfaces / icon-first / inner swipe · Claude / Git / Sandbox / Files · App | [#3971](https://github.com/BestNathan/nession/issues/3971) | [Interactive HTML](app-workspace-3971/index.html) · [Scenario](app-workspace-3971/README.md) |
+
+
 | Runner detail · Agent / resources, Jobs, Steps, Logs · Web/App | [#3855](https://github.com/BestNathan/nession/issues/3855) | [Interactive HTML](runner-detail-3855/index.html) · [Scenario](runner-detail-3855/README.md) |
 
 | Claude App · conversation-first work, Browse resource sheet, push/Raw/MCP/config, 375/390/430px | [#3829](https://github.com/BestNathan/nession/issues/3829) | [Interactive HTML](claude-app-3829/index.html) · [Scenario & fidelity](claude-app-3829/README.md) |

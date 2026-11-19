@@ -1,5 +1,7 @@
 # Mobile App Swipe Navigation Lab (#2724)
 
+> **Historical / partial supersession (2026-11-19):** Original Terminal/Sessions/Workspace top-level swipe gesture, OS guard and interactive surface exclusions remain authoritative. A pushed Workspace depth now has a proposed **inner stack swipe** under [App Workspace #3971](../app-workspace-3971/index.html), instead of only blocking outer shell paging. The old deep-detail mock is **stale for that new behavior** until revised and independently reverified; prior #2724 acceptance remains historical and is not modified.
+
 ## Owning Requirement
 [Requirement #2724 — Redesign mobile App swipe navigation and gesture ownership](https://github.com/BestNathan/nession/issues/2724)
 

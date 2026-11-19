@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · App Workspace unified interaction · #3971</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./styles.css"></head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review">
+  <header class="np-overview">
+    <nav class="np-breadcrumb" aria-label="Review navigation"><a data-nession-gallery-link href="../../#/prototypes">Nession / Prototypes</a><span>·</span>App Workspace</nav>
+    <span class="np-eyebrow">REQUIREMENT #3971 · APP EXPERIENCE SYSTEM</span>
+    <div class="np-header-main">
+      <div><h1 class="np-title">One workspace. One interaction language.</h1>
+        <p class="np-subtitle">统一的 Stack Header、内容区域层次、图标操作与栈内滑动。用同一套 App 交互语言浏览 Claude、Git、Sandbox、Files。</p></div>
+      <div class="np-links">
+        <a href="https://github.com/BestNathan/nession/issues/3971" target="_blank" rel="noopener noreferrer">Issue #3971</a>
+        <a href="./README.md">Scenario</a>
+        <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype/app-workspace-3971" target="_blank" rel="noopener noreferrer">View source</a>
+      </div>
+    </div>
+    <div class="np-meta"><span>Experience <strong>App / Workspace</strong></span><span>Content <strong>synthetic fixtures</strong></span><span>Scope <strong>visual + interaction candidate</strong></span></div>
+  </header>
+  <main>
+    <section class="np-preview" aria-label="Interactive App Workspace preview">
+      <div class="np-section-heading"><div><h2>Interactive preview</h2><p>从 Claude 开始；打开 Browse 深入 Transcript，再尝试右滑返回、左滑前进。切换底部 Capability Capsule 观察通用布局。</p></div></div>
+      <div class="np-preview-toolbar" aria-label="Review viewport tools"><strong>App viewport</strong>
+        <button data-np-size="375">375</button><button data-np-size="390" aria-pressed="true">390</button><button data-np-size="430">430</button>
+        <span data-np-current-size></span><button type="button" data-np-reset>Reset</button>
+      </div>
+      <div class="np-stage"><div class="np-device" data-np-device style="--np-device-height:844px">
+        <div id="product" class="product" data-experience="app" data-surface="workspace" aria-label="Nession App Workspace simulated UI">
+          <div id="terminal" class="terminal-screen" hidden></div>
+          <div id="workspace" class="workspace-screen">
+            <header class="app-header" id="app-header" aria-label="Workspace stack header"></header>
+            <div class="workspace-underlay" id="workspace-underlay" aria-hidden="true"></div>
+            <div class="page-frame" id="page-frame"><main class="app-content" id="app-content" tabindex="-1"></main></div>
+            <div class="capsule-zone" id="capsule-zone"></div>
+          </div>
+          <div class="app-overlay" id="app-overlay" hidden></div>
+          <div class="toast" id="app-toast" role="status" aria-live="polite" hidden></div>
+        </div>
+      </div></div>
+      <p class="np-stage-label">真实 CSS 像素尺寸 · 不缩放产品画布 · 触屏或鼠标水平拖动内容区</p>
+    </section>
+    <section class="np-details" aria-label="Prototype decisions and verification">
+      <h2>交互与验证场景</h2><p class="np-details-lede">以下为评审说明，不属于 App 产品界面。所有资源、操作与数据都是本地模拟。</p>
+      <div class="np-detail-grid">
+        <article class="np-detail"><h3>01 · Stack Header</h3><p>主标题表示当前资源，副标题表示真实父路径。点击副标题打开祖先栈；右侧使用高频图标和 More，没有第二条导航栏。</p></article>
+        <article class="np-detail"><h3>02 · Semantic surfaces</h3><p>Claude 使用连续 Reader，Git 使用分组 Collection，Sandbox 使用 Configuration 分区，Files 的编辑器是独立工作表面。保留公共 Canvas 与 Capsule。</p></article>
+        <article class="np-detail"><h3>03 · Icon-first actions</h3><p>Header / Row 仅显示必要图标，实际菜单与危险操作使用可读文本；44px 触控区域、焦点态和 accessible label 一致。</p></article>
+        <article class="np-detail"><h3>04 · Stack Swipe</h3><p>右滑 Pop，左滑仅在真实 Forward History 存在时前进；取消手势回弹。编辑器及弹层保护自身交互，未保存改动需要确认。</p></article>
+      </div>
+      <div class="review-fixtures"><strong>Reviewer fixture · 不属于产品</strong>
+        <button type="button" data-fixture="normal" aria-pressed="true">Normal</button>
+        <button type="button" data-fixture="empty">Empty</button>
+        <button type="button" data-fixture="error">Unavailable</button>
+        <button type="button" data-fixture="session">Switch Session</button>
+        <button type="button" data-fixture="terminal">Terminal</button>
+      </div>
+      <details class="np-inspector"><summary>Interaction state &amp; route inspector</summary><pre id="inspector">Loading local simulation…</pre></details>
+      <p class="np-details-lede">本原型不接入真实 Server / Agent / Claude / Git / Files，也不执行真实写入。现有生产 App 与该候选设计在 Header、内部 Swipe 和内容 Surface 上存在刻意差异；图形及动画仅供评审，不代表生产验收通过。</p>
+    </section>
+  </main>
+  <footer class="np-footer">Nession interactive design exploration · Issue #3971 · Mock only</footer>
+</div>
+<script src="../prototype-frame-2758/frame.js"></script><script src="./app.js"></script>
+</body></html>
