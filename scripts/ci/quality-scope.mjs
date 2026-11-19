@@ -35,7 +35,7 @@ export function selectQualityFamilies(paths) {
       else if(p!=='gates/suites/quality-tooling.gates')r.rust=r.web=true;
     } else if(p.startsWith('scripts/')) {
       r.tooling=true;
-      if(/^scripts\/(?:check-coverage|filtered-test|check-test-isolation|check-tmux-socket)/.test(p))r.rust=true;
+      if(/^scripts\/(?:check-coverage|filtered-test|rust-test-route|check-test-isolation|check-tmux-socket)/.test(p))r.rust=true;
       else if(/^scripts\/(?:check-design-tokens|filtered-web-test)/.test(p) || p.startsWith('scripts/ci/web-build-artifact'))r.web=true;
       else if(/^scripts\/protocol-gate/.test(p))r.rust=r.web=true;
       else if(/^scripts\/(?:ci\/quality-scope|ci\/case-smoke|acceptance-|issue-|e2e-|workflow-|gate-|lib\/agent\/|lib\/acceptance\/|lib\/e2e\/|lib\/issue\/|lib\/workflow\/|detector-selftest-coverage|collect-repo-health|repo-)/.test(p)) {
