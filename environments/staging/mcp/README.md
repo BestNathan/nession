@@ -59,16 +59,22 @@ MCP Pod restart after rotation.
    staging Server/Agent auth token value. Do not provide either as a repository
    Variable, JSON envelope, issue comment or GitOps file. The main-owned
    `Deploy / Seal GitOps Secret` workflow is manual-only, accepts only these
-   two registered exact names and encrypts one Secret per invocation.
+   environment-only input and encrypts the entire required Secret set in
+   one invocation. The registered staging set contains these two names;
+   any missing/invalid required value fails the entire run without publishing
+   a partial GitOps change.
    `SEALED_SECRETS_CERT_PEM` is the controller's existing public X.509
    certificate and NOT a credential.
-3. Dispatch the workflow **twice**, selecting each Secret individually:
-   `NESSION_MCP_INBOUND_TOKEN` writes `sealed-inbound.json` and
-   `NESSION_MCP_BACKEND_SERVER_TOKEN` writes `sealed-backend-server.json`.
-   Verify both files are enrolled by the authorized publisher and Argo CD
-   reconciles both exact K8s Secrets `nession-mcp-inbound-staging/token`
-   and `nession-mcp-backend-server-staging/token`. If a concurrent change
-   updates Kustomization, reconcile this PR against the new GitOps branch
+3. Dispatch **Deploy / Seal GitOps Secret once**, choosing only the
+   `staging` environment. It validates **both** required Secrets before
+   sealing. It produces `sealed-inbound.json` and
+   `sealed-backend-server.json`, and commits both along with their
+   Kustomization registration in **one atomic GitOps commit**. Missing or
+   invalid input or either malformed sealed output fails the whole run.
+   Verify Argo CD reconciles both exact Kubernetes Secrets
+   `nession-mcp-inbound-staging/token` and
+   `nession-mcp-backend-server-staging/token`. If a concurrent change
+   updates Kustomization, reconcile this draft PR against the latest GitOps
    HEAD before merging.
 4. **Before enabling `allow_query_token = true` publicly**, configure
    Cloudflare/Higress/origin Nginx logs to omit/redact request query strings.
@@ -95,10 +101,10 @@ writer for image tag advancement. It verifies all four ACR image indices
 (server/agent/ui/mcp) for amd64 and arm64 and updates their tags in one
 GitOps commit. Do not patch image tags or build images manually to bypass it.
 
-Re-running the trusted Secret publisher replaces only the selected encrypted
-`sealed-inbound.json` or `sealed-backend-server.json` entry; a SealedSecret
-update does **not** automatically restart pods consuming a Secret via
-environment variables. Trigger a
+Re-running the trusted Secret publisher reseals **both** registered
+credentials in one commit even if only one Secret value changed.
+A SealedSecret update does **not** automatically restart pods consuming
+a Secret via environment variables. Trigger a
 controlled MCP rollout after rotating the inbound token. Coordinate Server
 token changes across all three workloads. To roll back configuration,
 revert the reviewed GitOps desired-state merge or use a previously verified
