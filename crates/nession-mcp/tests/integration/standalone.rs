@@ -585,7 +585,7 @@ async fn standalone_query_token_authentication_is_opt_in() {
     let original = std::fs::read_to_string(&config_path).expect("read standalone config");
     let enabled = original.replacen(
         &format!("auth_token = \"{MCP_TOKEN}\""),
-        &format!("auth_token = \"{MCP_TOKEN}\"\\nallow_query_token = true"),
+        &format!("auth_token = \"{MCP_TOKEN}\"\nallow_query_token = true"),
         1,
     );
     std::fs::write(&config_path, enabled).expect("enable query authentication");
