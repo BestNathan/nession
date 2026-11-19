@@ -1,16 +1,19 @@
 // #3574: independently authenticate one already completed pre-model
 // Qwen Reviewer failure before mutating trusted Store or dispatching a successor.
-import {REVIEWER_PREMODEL_FAILURE as F} from './outbox.mjs';
+import {REVIEWER_PREMODEL_FAILURE as F,
+  REVIEWER_PREMODEL_FAILURE_SOURCES} from './outbox.mjs';
 
 const REPO='BestNathan/nession';
 function deny(s){throw Error('trusted Reviewer pre-model failure: '+s);}
-export function attestReviewerPremodelFailure(run,listing){
-  if(run?.id!==F.run_id||run.run_attempt!==1||
+export function attestReviewerPremodelFailure(run,listing,source=F){
+  if(!REVIEWER_PREMODEL_FAILURE_SOURCES.includes(source))
+    deny('unknown source-bound failure identity');
+  if(run?.id!==source.run_id||run.run_attempt!==1||
      run.name!=='Agent / Review'||
      run.path!=='.github/workflows/agent-review.yml'||
      run.event!=='workflow_dispatch'||
      run.actor?.login!=='github-actions[bot]'||
-     run.head_branch!=='main'||run.head_sha!==F.main_sha||
+     run.head_branch!=='main'||run.head_sha!==source.main_sha||
      run.status!=='completed'||run.conclusion!=='failure'||
      run.repository?.full_name!==REPO||
      run.head_repository?.full_name!==REPO||
@@ -23,7 +26,7 @@ export function attestReviewerPremodelFailure(run,listing){
   if(prepare.length!==1||review.length!==1||metrics.length!==1)
     deny('Reviewer failed job inventory differs from source');
   const jobOk=(job,conclusion)=>
-    job.run_id===F.run_id&&job.status==='completed'&&
+    job.run_id===source.run_id&&job.status==='completed'&&
     job.conclusion===conclusion&&
     (job.run_attempt==null||job.run_attempt===1);
   if(!jobOk(prepare[0],'failure')||!jobOk(review[0],'skipped')||
@@ -34,9 +37,9 @@ export function attestReviewerPremodelFailure(run,listing){
      failure[0].name!=='Prepare the reviewer admission'||
      failure[0].status!=='completed')
     deny('failed step is not bounded trusted pre-model admission');
-  return Object.freeze({verified:true,issue:F.issue,action_id:F.action_id,
-    run_id:F.run_id,attempt:1,source_sha:F.source_sha,
-    failure_code:F.failure_code});
+  return Object.freeze({verified:true,issue:source.issue,action_id:source.action_id,
+    run_id:source.run_id,attempt:1,source_sha:source.source_sha,
+    failure_code:source.failure_code});
 }
 async function api(token,path){
   if(typeof token!=='string'||token.length<8)deny('missing read token');
@@ -46,8 +49,10 @@ async function api(token,path){
   if(!response.ok)deny('source read failed ('+response.status+')');
   return response.json();
 }
-export async function verifyReviewerPremodelFailureLive(token){
-  const run=await api(token,'/actions/runs/'+F.run_id);
-  const jobs=await api(token,'/actions/runs/'+F.run_id+'/jobs?per_page=100');
-  return attestReviewerPremodelFailure(run,jobs);
+export async function verifyReviewerPremodelFailureLive(token,source=F){
+  if(!REVIEWER_PREMODEL_FAILURE_SOURCES.includes(source))
+    deny('unknown live failure identity');
+  const run=await api(token,'/actions/runs/'+source.run_id);
+  const jobs=await api(token,'/actions/runs/'+source.run_id+'/jobs?per_page=100');
+  return attestReviewerPremodelFailure(run,jobs,source);
 }
