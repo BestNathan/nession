@@ -241,7 +241,7 @@ async fn main() -> Result<()> {
         let mut summary = fs::OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(
             summary,
-            "### Toolchain OCI / EROFS GHCR release\n\n- Image: \`{}\`\n- Manifest: \`{}\`\n- Config: \`{}\`\n- EROFS: \`{}\` ({} bytes)\n- Upstream version: {}\n- Packaging revision: r{}\n- Platform: {}\n- Run: {}\n- Recipe source SHA: \`{}\`\n",
+            "### Toolchain OCI / EROFS GHCR release\n\n- Image: `{}`\n- Manifest: `{}`\n- Config: `{}`\n- EROFS: `{}` ({} bytes)\n- Upstream version: {}\n- Packaging revision: r{}\n- Platform: {}\n- Run: {}\n- Recipe source SHA: `{}`\n",
             release.image_ref(),
             remote_digest,
             remote_config.digest,
