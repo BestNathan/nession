@@ -136,7 +136,7 @@ test('Nession-owned shared recipes require token-backed visual metrics (#4050)',
 
 test('Nession recipe tokens and structural layout remain legal (#4050)', () => {
   const source =
-    '<div className="flex min-w-0 grid-cols-1 gap-[var(--nession-rhythm-inline)] p-[var(--nession-shell-space-3)]" />';
+    '<div className="flex min-w-0 grid-cols-1 gap-0 p-0 gap-[var(--nession-rhythm-inline)] p-[var(--nession-shell-space-3)]" />';
   for (const recipe of [
     'web/src/components/ui/resource-detail.tsx',
     'web/src/components/ui/configuration-form.tsx',
