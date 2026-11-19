@@ -19,7 +19,11 @@ import {deriveDispatchKey}
   from '../orchestration/controller-dispatch.mjs';
 import {preflightTrustedQwenPublisher,preflightTrustedQwenRepairPublisher}
   from './qwen-source-preflight.mjs';
-import {commitQwenRepairPublisherIntent} from './qwen-repair-intent.mjs';
+import {commitQwenRepairPublisherIntent,
+  commitQwenRepairPrewriteRecovery} from './qwen-repair-intent.mjs';
+import {SOURCE as QWEN_PREWRITE_FAILURE,
+  verifyQwenRepairPrewriteFailureLive}
+  from './qwen-repair-prewrite-failure.mjs';
 import {publishQwenRepairToSamePR,readBackQwenRepairPR}
   from './qwen-repair-github.mjs';
 import {commitQwenPublisherIntent}
@@ -72,7 +76,27 @@ export function artifactFor(artifacts,run,name,max){
     fail('missing, duplicate, expired or impersonated Worker Artifact');
   return matched[0];
 }
+export const QWEN_PREWRITE_RECOVERY_COMMAND=
+  '/nession recover-qwen-publisher issue=3784 failed_run=44476308903';
+export function isQwenPrewriteOwnerRecovery(env,event){
+  return env?.GITHUB_EVENT_NAME==='issue_comment'&&
+    env.GITHUB_ACTOR==='BestNathan'&&
+    event?.repository?.full_name===REPO&&
+    event?.action==='created'&&
+    event?.issue?.number===QWEN_PREWRITE_FAILURE.issue&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&
+    Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
+    event.comment.body===QWEN_PREWRITE_RECOVERY_COMMAND;
+}
 export function assertQwenPublisherRunAuthority(env,event,ingester,receipt){
+  const ownerRecovery=isQwenPrewriteOwnerRecovery(env,event)&&
+    ingester?.id===QWEN_PREWRITE_FAILURE.source_ingest_run_id&&
+    receipt?.issue===QWEN_PREWRITE_FAILURE.issue&&
+    receipt.run_id===QWEN_PREWRITE_FAILURE.worker_run_id&&
+    receipt.action_id===QWEN_PREWRITE_FAILURE.action_id&&
+    ingester?.event==='workflow_dispatch'&&
+    ingester.actor?.login==='github-actions[bot]';
   const natural=env?.GITHUB_EVENT_NAME==='workflow_run'&&
     event?.action==='completed'&&
     event.workflow_run?.id===ingester?.id&&
@@ -89,7 +113,7 @@ export function assertQwenPublisherRunAuthority(env,event,ingester,receipt){
     ingester?.actor?.login==='github-actions[bot]';
   if(env?.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
       env.GITHUB_REF!=='refs/heads/main'||
-      (!natural&&!botWake)||
+      (!natural&&!botWake&&!ownerRecovery)||
       env.GITHUB_WORKFLOW!=='Store / Qwen Publisher'||
       env.GITHUB_RUN_ATTEMPT!=='1'||
       !positive(Number(env.GITHUB_RUN_ID))||
@@ -97,7 +121,7 @@ export function assertQwenPublisherRunAuthority(env,event,ingester,receipt){
       ingester.status!=='completed'||ingester.conclusion!=='success'||
       ingester.run_attempt!==1||
       ingester.path!=='.github/workflows/store-agent-development-ingest.yml'||
-      (botWake
+      (botWake||ownerRecovery
         ? ingester.name!=='Qwen Developer Ingest worker:'+receipt.run_id
         : ingester.name!=='Store / Agent Development Ingest')||
       ingester.head_branch!=='main'||
@@ -188,8 +212,22 @@ export async function runTrustedQwenPublication({
       // or ambiguous prior Intent grants GET-only readback, never another POST.
       const intent=commitQwenRepairPublisherIntent({
         remote,preflight,publisher_run_id:Number(env.GITHUB_RUN_ID)});
-      const published=intent.may_publish
-        ?await publishQwenRepairToSamePR({preflight,intent,sourceCheckout,api})
+      let writer=intent;
+      if(isQwenPrewriteOwnerRecovery(env,event)){
+        // One exact, authenticated historical failure happened BEFORE even
+        // the first GitHub POST. The old WAL stays immutable/GET-only:
+        // only a new, separate durable Store CAS grant may allow one write.
+        if(intent.status!=='reconcile'||intent.may_publish!==false)
+          fail('Owner pre-write recovery requires the unchanged original WAL');
+        const proof=await verifyQwenRepairPrewriteFailureLive(
+          env.ACTIONS_READ_TOKEN);
+        writer=commitQwenRepairPrewriteRecovery({
+          remote,intent,source:proof,
+          recovery_run_id:Number(env.GITHUB_RUN_ID)});
+      }
+      const published=writer.may_publish
+        ?await publishQwenRepairToSamePR({
+          preflight,intent:writer,sourceCheckout,api})
         :null;
       const readback=await readBackQwenRepairPR({
         preflight,intent,sourceCheckout,api});
