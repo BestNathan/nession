@@ -6,6 +6,7 @@ import {SOURCE as f,verifyQwenRepairPrewriteFailure}
   from './qwen-repair-prewrite-failure.mjs';
 import {qwenRepairPrewriteRecoveryPath}
   from './qwen-repair-intent.mjs';
+import {isValidQwenPrewriteRecoveryGrant} from './qwen-repair-github.mjs';
 
 const repo={full_name:'BestNathan/nession'};
 const run={id:f.run_id,run_attempt:1,status:'completed',
@@ -70,5 +71,37 @@ for(const wrong of [
     wrong.run??run,wrong.jobs??jobs,
     wrong.artifacts??artifacts,wrong.log??log),
     /trusted Qwen pre-write Publisher failure/);
+}
+// Validate the SECOND one-shot Store marker independently of the old WAL.
+// A forged intent shape or arbitrary Issue/Run/branch never grants a write.
+const original={issue:f.issue,action_id:f.action_id,
+  worker_run_id:f.worker_run_id,source_sha:f.source_sha,
+  checkpoint_version:f.checkpoint_version,publisher_run_id:f.run_id};
+const marker='e'.repeat(40),originalWal='a'.repeat(40);
+const grant={status:'prewrite_recovery',may_publish:true,
+  store_commit_sha:marker,recovery:{verified:true,
+    failed_run_id:f.run_id,run_id:f.run_id+100,
+    wal_commit_sha:originalWal,
+    marker_path:qwenRepairPrewriteRecoveryPath(),
+    marker_store_commit_sha:marker},record:original};
+assert.equal(isValidQwenPrewriteRecoveryGrant(grant,original),true);
+for(const wrong of [
+  {intent:{...grant,status:'reconcile'}},
+  {intent:{...grant,may_publish:false}},
+  {intent:{...grant,store_commit_sha:'bad'}},
+  {intent:{...grant,recovery:{...grant.recovery,verified:false}}},
+  {intent:{...grant,recovery:{...grant.recovery,failed_run_id:f.run_id+1}}},
+  {intent:{...grant,recovery:{...grant.recovery,run_id:f.run_id}}},
+  {intent:{...grant,recovery:{...grant.recovery,wal_commit_sha:'bad'}}},
+  {intent:{...grant,recovery:{...grant.recovery,marker_store_commit_sha:originalWal}}},
+  {intent:{...grant,recovery:{...grant.recovery,marker_path:'workflows/issues/3784/results/evil.json'}}},
+  {record:{...original,issue:4046}},
+  {record:{...original,worker_run_id:0}},
+  {record:{...original,source_sha:'0'.repeat(40)}},
+  {record:{...original,checkpoint_version:2}},
+  {record:{...original,publisher_run_id:f.run_id+1}},
+]){
+  assert.equal(isValidQwenPrewriteRecoveryGrant(
+    wrong.intent??grant,wrong.record??original),false);
 }
 console.log('✓ source-attested real Qwen pre-write Run 44476308903, exact Job/Log/WAL locator, spoof/attempt-2/Artifact negatives');
