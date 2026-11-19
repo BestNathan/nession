@@ -211,19 +211,22 @@ export async function runTrustedQwenPublication({
         fail('Repair Publisher cannot diverge from main-owned native Ingest');
       // Commit the immutable one-shot GitHub mutation fence FIRST. A replayed
       // or ambiguous prior Intent grants GET-only readback, never another POST.
+      // Never mutate the Store on a historical failure claim until the
+      // external original Run/Job/log has been independently authenticated.
+      const ownerRecovery=isQwenPrewriteOwnerRecovery(env,event);
+      const recoveryProof=ownerRecovery
+        ?await verifyQwenRepairPrewriteFailureLive(env.ACTIONS_READ_TOKEN)
+        :null;
       const intent=commitQwenRepairPublisherIntent({
         remote,preflight,publisher_run_id:Number(env.GITHUB_RUN_ID)});
       let writer=intent;
-      if(isQwenPrewriteOwnerRecovery(env,event)){
-        // One exact, authenticated historical failure happened BEFORE even
-        // the first GitHub POST. The old WAL stays immutable/GET-only:
-        // only a new, separate durable Store CAS grant may allow one write.
+      if(ownerRecovery){
+        // The old WAL stays immutable/GET-only. A separately authenticated
+        // failed Run + Store CAS grants exactly one distinct write attempt.
         if(intent.status!=='reconcile'||intent.may_publish!==false)
-          fail('Owner pre-write recovery requires the unchanged original WAL');
-        const proof=await verifyQwenRepairPrewriteFailureLive(
-          env.ACTIONS_READ_TOKEN);
+          fail('Owner pre-write recovery requires unchanged original WAL');
         writer=commitQwenRepairPrewriteRecovery({
-          remote,intent,source:proof,
+          remote,intent,source:recoveryProof,
           recovery_run_id:Number(env.GITHUB_RUN_ID)});
       }
       const published=writer.may_publish
