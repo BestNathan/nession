@@ -198,7 +198,7 @@ async fn main() -> Result<()> {
             .open(path)?;
         writeln!(
             summary,
-            "### Nession EROFS / OCI GHCR smoke\n\n- Image: \`{identity}\`\n- Manifest: \`{}\`\n- Layer: \`{}\`\n- Config: \`{}\`\n- Uploaded blobs: {}\n- Reused blobs: {}\n- Uploaded manifests: {}\n- Verified: remote Manifest, Config, EROFS bytes and extracted tool\n",
+            "### Nession EROFS / OCI GHCR smoke\n\n- Image: `{identity}`\n- Manifest: `{}`\n- Layer: `{}`\n- Config: `{}`\n- Uploaded blobs: {}\n- Reused blobs: {}\n- Uploaded manifests: {}\n- Verified: remote Manifest, Config, EROFS bytes and extracted tool\n",
             manifest.digest(),
             layer.digest,
             config.digest(),
@@ -211,6 +211,7 @@ async fn main() -> Result<()> {
 }
 
 fn assert_extracted_tool(image: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target)?;
     let output = Command::new("fsck.erofs")
         .arg(format!("--extract={}", target.display()))
         .arg(image)
