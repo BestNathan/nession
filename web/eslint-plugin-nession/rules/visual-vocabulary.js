@@ -1,3 +1,9 @@
+import {
+  collectNonTokenSourceMetrics,
+  isShippingStyleFile,
+  rejectNewMetricDebt,
+} from '../../../design/scripts/visual-token-drift.mjs';
+
 /**
  * Repository-wide visual vocabulary boundary (#1451).
  *
@@ -9,12 +15,6 @@
  */
 
 import { isTokenOwnedRecipe } from '../../../design/scripts/recipe-style-owners.mjs';
-
-import {
-  collectNonTokenSourceMetrics,
-  isShippingStyleFile,
-  rejectNewMetricDebt,
-} from '../../../design/scripts/visual-token-drift.mjs';
 
 const RAW_COLOR_RE = /\[(?:#[0-9a-fA-F]{3,8}|(?:rgb|hsl|oklch|oklab)\([^\]]+)\]/i;
 const PALETTES = new Set([
