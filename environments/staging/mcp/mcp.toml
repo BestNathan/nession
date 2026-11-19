@@ -4,9 +4,11 @@
 [mcp]
 listen_address = "0.0.0.0:9090"
 path = "/mcp"
-# Explicit opt-in for headerless MCP clients; require HTTPS end-to-end and
-# redact query strings in Higress, origin Nginx and edge request logs.
-allow_query_token = true
+# Query-string credentials are disabled until Cloudflare, origin Nginx, and
+# Higress access logs have been verified to redact query parameters.
+# Activate only via a separately reviewed, evidence-backed GitOps change.
+# Authenticated native clients use Authorization: Bearer instead.
+allow_query_token = false
 allowed_hosts = [
   "staging-mcp-nession.bestnathan.top",
   "nession-mcp-staging",
