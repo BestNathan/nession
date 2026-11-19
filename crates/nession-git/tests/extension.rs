@@ -6,6 +6,7 @@
 //! "no session", "no directory", "no git", "not a repository" or "ok" a given
 //! input produces — not about tmux.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use nession_common::extension::AgentExtension;
+use nession_common::session_env::{SessionEnvironment, SessionEnvironmentError};
 use nession_git::{GitAgentExtension, WorkdirResolver};
 use serde_json::{json, Value};
 
@@ -27,8 +29,44 @@ impl WorkdirResolver for FixedResolver {
     }
 }
 
+/// A host environment with the Session overrides and Agent baseline a test
+/// states, or a fixed failure standing in for an unverifiable binding.
+#[derive(Default)]
+struct FixedEnvironment {
+    overrides: BTreeMap<String, String>,
+    agent: BTreeMap<String, String>,
+    failure: Option<String>,
+}
+
+#[async_trait]
+impl SessionEnvironment for FixedEnvironment {
+    async fn session_overrides(
+        &self,
+        _session: &str,
+        keys: Option<&[&str]>,
+    ) -> Result<BTreeMap<String, String>, SessionEnvironmentError> {
+        if let Some(message) = &self.failure {
+            return Err(SessionEnvironmentError::unavailable(message.clone()));
+        }
+        Ok(self
+            .overrides
+            .iter()
+            .filter(|(key, _)| keys.is_none_or(|keys| keys.contains(&key.as_str())))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect())
+    }
+
+    fn agent_variable(&self, key: &str) -> Option<String> {
+        self.agent.get(key).cloned()
+    }
+}
+
 fn extension(dir: Option<PathBuf>) -> GitAgentExtension {
-    GitAgentExtension::new("git", Arc::new(FixedResolver(dir)))
+    extension_with(dir, FixedEnvironment::default())
+}
+
+fn extension_with(dir: Option<PathBuf>, environment: FixedEnvironment) -> GitAgentExtension {
+    GitAgentExtension::new("git", Arc::new(FixedResolver(dir)), Arc::new(environment))
 }
 
 fn run(ext: &GitAgentExtension, command: &str, payload: Value) -> Result<Value> {
@@ -640,4 +678,84 @@ fn the_read_only_commit_unit_still_answers_commit_detail() {
     .unwrap();
     assert_eq!(detail["state"], "ok", "got {detail}");
     assert_eq!(detail["commit"]["subject"], "init");
+}
+
+/// SC-03 (#4080): a Session's explicit environment override reaches the git
+/// child the Agent launches on its behalf.
+#[test]
+fn a_session_environment_override_reaches_the_git_child() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "committed\n").unwrap();
+    let mut environment = FixedEnvironment::default();
+    environment
+        .overrides
+        .insert("GIT_AUTHOR_NAME".to_string(), "Session Author".to_string());
+    environment.overrides.insert(
+        "GIT_AUTHOR_EMAIL".to_string(),
+        "session@example.com".to_string(),
+    );
+    let ext = extension_with(Some(dir.path().to_path_buf()), environment);
+
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap().to_string();
+    let staged = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expected_snapshot": token}),
+    )
+    .unwrap();
+    let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
+
+    let committed = run(
+        &ext,
+        "git.create-commit",
+        json!({
+            "session": "agent:s",
+            "expected_snapshot": staged_token,
+            "message": "feat: session identity",
+            "request_id": "session-env-test"
+        }),
+    )
+    .unwrap();
+    assert_eq!(committed["state"], "ok", "got {committed}");
+    assert!(
+        committed["commit"]["author"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Session Author"),
+        "the answer states the Session's effective author, got {committed}"
+    );
+
+    // The commit itself carries the Session identity, not the Agent's process
+    // environment or the repository config.
+    let log = git_output(dir.path(), &["log", "-1", "--format=%an <%ae>"]).unwrap();
+    assert!(log.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).trim(),
+        "Session Author <session@example.com>"
+    );
+}
+
+/// SC-03 (#4080): an environment that cannot be verified is an explicit
+/// unavailable answer, never a silent Agent-environment run.
+#[test]
+fn an_unverifiable_session_environment_is_unavailable() {
+    let dir = repo().unwrap();
+    let ext = extension_with(
+        Some(dir.path().to_path_buf()),
+        FixedEnvironment {
+            failure: Some("cannot parse the durable binding for session s".to_string()),
+            ..FixedEnvironment::default()
+        },
+    );
+    let result = run(&ext, "git.status", json!({"session": "agent:s"})).unwrap();
+    assert_eq!(result["state"], "unavailable", "got {result}");
+    assert_eq!(result["reason"], "session_environment_unavailable");
+    assert!(
+        result["message"]
+            .as_str()
+            .unwrap()
+            .contains("Could not resolve this Session's environment"),
+        "got {result}"
+    );
 }

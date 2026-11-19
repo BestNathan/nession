@@ -602,6 +602,26 @@ impl SessionManager {
         &self.env
     }
 
+    /// Apply one Environment Binding revision to a running Session (#4080).
+    ///
+    /// The Agent-side executable step behind `agent.session.env.binding.set`
+    /// (and the legacy attach translation). [`EnvManager::apply_binding`] owns
+    /// the semantics; this public operation is what Session-addressed callers
+    /// and isolated runtime tests invoke, so no second path can mutate the
+    /// durable record or tmux environment.
+    pub async fn apply_session_binding(
+        &self,
+        name: &str,
+        revision: u64,
+        profiles: &[SessionEnvProfile],
+        snapshots: &[EnvSnapshot],
+    ) -> Result<()> {
+        self.env
+            .apply_binding(name, revision, profiles, snapshots)
+            .await
+            .map(|_| ())
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
         Ok(self
             .sdk_ops()

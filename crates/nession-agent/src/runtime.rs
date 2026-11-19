@@ -48,6 +48,7 @@ use crate::server::AgentServer;
 use crate::session::activity::{
     ClaudeActivityProvider, SessionActivityCoordinator, ShellActivityProvider,
 };
+use crate::session_env::AgentSessionEnvironment;
 use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
@@ -588,6 +589,11 @@ pub fn compose_providers(
     // path. Both providers share the one injected resolver.
     let workdir: Arc<dyn nession_git::WorkdirResolver> =
         Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux)));
+    // #4080. Session-addressed providers resolve values through the Session's
+    // Environment Binding (explicit overrides) before the Agent baseline. The
+    // Agent owns both halves, so it supplies the one boundary they share.
+    let session_env: Arc<dyn nession_common::session_env::SessionEnvironment> =
+        Arc::new(AgentSessionEnvironment::new(Arc::clone(&tmux)));
     let extensions: Vec<Box<dyn AgentExtension>> = vec![
         // #1005. The context is what lets this provider resolve a Session's cwd
         // and whether Claude is running in it — the agent owns session
@@ -596,15 +602,22 @@ pub fn compose_providers(
         Box::new(ClaudeCodeAgentExtension::new(Arc::new(
             TmuxSessionContext::new(Arc::clone(&tmux)).with_mcp_host(claude_mcp_host),
         ))),
-        Box::new(GitAgentExtension::new("git", Arc::clone(&workdir))),
+        Box::new(GitAgentExtension::new(
+            "git",
+            Arc::clone(&workdir),
+            Arc::clone(&session_env),
+        )),
         // #1290. One Git capability, two providers: local Git and the
-        // read-only GitHub hosting context. The client reads its token from
-        // the Agent's environment; an absent token is an honest unavailable
-        // state, not a startup failure.
+        // read-only GitHub hosting context. The transport is credential-free
+        // at composition; each Session-addressed request selects the
+        // credential its Session binding (or the Agent baseline) provides
+        // (#4080). An absent credential is an honest unavailable state, not a
+        // startup failure.
         Box::new(GithubAgentExtension::new(
             "git",
             workdir,
-            Arc::new(GithubClient::from_env()),
+            Arc::new(GithubClient::api_transport()),
+            session_env,
         )),
     ];
     // The third argument is the other half of what this runtime serves: the

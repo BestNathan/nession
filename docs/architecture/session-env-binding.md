@@ -113,6 +113,68 @@ The tmux Session environment is shared by the Session and is the initial
 environment for processes created later. It is never presented as evidence
 that an already-running process changed.
 
+## Session-addressed operations (#4080)
+
+A Nession Session is based on its Agent's runtime. The Agent environment is the
+legitimate inherited baseline; the Session's binding overlays explicit values.
+An Agent-owned capability that executes an operation **on behalf of a Session**
+resolves values in that order:
+
+```text
+explicit Session override (a key this binding manages)
+  → inherited Agent environment
+  → absent
+```
+
+The executable boundary is
+`nession_common::session_env::SessionEnvironment`, implemented once by the Agent
+in `crates/nession-agent/src/session_env.rs`. Its read side is
+`EnvManager::session_overrides`, which returns only the keys the binding
+manages and tmux currently holds. A key the Session merely inherited is
+deliberately absent: it is not a Session override, so a provider can put every
+Session candidate ahead of every Agent candidate without mistaking an inherited
+value for an explicit one.
+
+Consumers:
+
+- **GitHub credential.** The client is selected per Session-addressed request:
+  `Session.GITHUB_TOKEN → Session.GH_TOKEN → Agent.GITHUB_TOKEN → Agent.GH_TOKEN`
+  → not authenticated. The transport and cache are reused, but the cache key
+  carries the effective credential's fingerprint (never the token), so two
+  Sessions with different tokens share neither identity nor data. The GitHub
+  transport is credential-free at Agent composition.
+- **Git children.** `GitCmd` applies the Session's explicit overrides on top of
+  the inherited Agent environment. Nession's fixed rules still win: the
+  repository-variable scrubs (`GIT_DIR`, `GIT_WORK_TREE`, …) and the forced
+  prompt/locale policy are applied after the overrides.
+- **Claude MCP CLI/probe.** These children already read the Session's observed
+  `HOME`, `CLAUDE_CONFIG_DIR` and `PATH` from its tmux environment and inherit
+  the Agent for everything else. Deliberate host-global discovery (the Agent's
+  own `~/.claude` for global configuration) remains Agent-scoped.
+
+Failure and edge semantics:
+
+- A binding record that cannot be read or a tmux read that fails is reported
+  explicitly (`client_unavailable` / `session_environment_unavailable` with a
+  value-free message). It is **never** collapsed into "no override", which
+  would silently select an Agent credential the Session replaced.
+- An explicitly bound empty value is a Session value: a credential treats it as
+  "no credential" and does not fall through to another alias or the Agent.
+- Removing a key from the binding restores the captured baseline, so the Agent
+  value applies again. A managed key that tmux no longer holds has no explicit
+  value and likewise falls back to the Agent.
+- These reads follow the observed materialization: a `set`/`reapply` affects
+  the next request; no Agent restart is involved.
+- No environment value is ever logged, returned in a protocol response, or
+  placed in a cache key. Errors name the failing record/key and the Session
+  only.
+
+Agent-originated, non-Session operations (Agent configuration, tmux
+orchestration, EROFS image build/cache, Server/MCP service authentication, CLI
+self-update) continue to use the Agent's own environment; no Session scope is
+invented for them. Session creation inheritance (Layer A) and tmux environment
+materialization are unchanged.
+
 ## Create failure and retry (#2812)
 
 Creation is one multi-step operation owned by `SessionManager`; the durable

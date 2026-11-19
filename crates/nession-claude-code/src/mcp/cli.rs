@@ -470,6 +470,38 @@ mod tests {
         }
     }
 
+    /// SC-03 (#4080): the CLI child runs with the Session's observed
+    /// environment. An override is used as-is; a variable the host cannot
+    /// observe is left to the Agent's inherited environment rather than
+    /// invented.
+    #[tokio::test]
+    async fn the_session_path_is_used_and_an_unobservable_one_inherits_the_agent_path() {
+        let (_temp, roots, context, bin) = fixture("2.1.325 (Claude Code)", None);
+        let environment = command_environment(&context, "agent:s", &roots).await;
+        assert_eq!(
+            environment.path.as_deref(),
+            Some(bin.to_string_lossy().as_ref()),
+            "the Session's PATH must be the one the CLI child gets"
+        );
+        assert_eq!(
+            environment.home,
+            roots.home.to_string_lossy(),
+            "the observed Session HOME is the child's HOME"
+        );
+
+        let fallback =
+            command_environment(&crate::session_context::NoSessionContext, "agent:s", &roots).await;
+        assert_eq!(fallback.path, None);
+        let command = command("claude", &roots, &fallback);
+        assert!(
+            !command
+                .as_std()
+                .get_envs()
+                .any(|(key, _)| key == std::ffi::OsStr::new("PATH")),
+            "an unobservable Session must inherit the Agent PATH, not get a fabricated one"
+        );
+    }
+
     #[tokio::test]
     async fn detect_refuses_a_missing_cli() {
         let temp = TempDir::new().unwrap();

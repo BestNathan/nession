@@ -29,6 +29,7 @@ pub mod sandbox_images;
 pub mod sandbox_runtime;
 pub mod server;
 pub mod session;
+pub mod session_env;
 pub mod sync;
 pub mod tmux;
 pub mod token;
