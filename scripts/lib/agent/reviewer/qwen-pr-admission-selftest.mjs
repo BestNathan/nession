@@ -355,12 +355,18 @@ try{
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,
     fetcher:async name=>name.startsWith('pulls?')?[pr,pr]:fetcher(name),
   }),/unique published/);
-  fs.writeFileSync(path.join(directory,'301-1-'+'0'.repeat(64)+'.json'),
+  const duplicateOriginal=path.join(directory,'301-1-'+
+    '0'.repeat(64)+'.json');
+  fs.writeFileSync(duplicateOriginal,
     JSON.stringify({...intent,action_id:'0'.repeat(64),
       branch:'agent/'+ISSUE+'/qwen-'+'0'.repeat(16)})+'\n');
   await assert.rejects(()=>prepareQwenReviewAdmission({
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher}),
   /unique Qwen review publication Intent/);
+  // This isolated duplicate-intent negative must not poison the next
+  // independent recovered-Repair positive: it now authenticates BOTH
+  // the original Publisher and current Repair WAL.
+  fs.unlinkSync(duplicateOriginal);
   // The Reviewer prepare reader must fetch the successful reconciler
   // Run (403), not the original failed writer Run (402).
   writeIssueWorkflowState(root,recoveredPublished,published.version);
