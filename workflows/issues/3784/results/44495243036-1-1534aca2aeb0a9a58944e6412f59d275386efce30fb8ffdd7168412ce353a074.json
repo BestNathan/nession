@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "trusted_qwen_repair_second_prewrite_recovery_grant",
+  "repository": "BestNathan/nession",
+  "issue": 3784,
+  "original_publisher_run_id": 44476308903,
+  "original_wal_commit_sha": "22a504359941ae2702288dd92f047d77e99a7045",
+  "first_recovery_run_id": 44495243036,
+  "first_recovery_marker_sha": "c10839eee7bd85af92e8557cab7faed0cad5bd75",
+  "worker_run_id": 44475622445,
+  "action_id": "133f50b3b250d1baf0bbc05c3f3b2aa652d9f9db13f1f35f961a91e704a0326f",
+  "source_sha": "51f82d64ec159397ea501e6cbb99e7039ee141bd",
+  "checkpoint_version": 3,
+  "source_run_head_sha": "68eb90ec61830d7db141c0cd6d42c1272ce4b26b",
+  "failure_code": "qwen_repair_prewrite_materialize_readonly_mode_denied",
+  "recovery_run_id": 44497822207,
+  "publication": "one_second_write_attempt_not_yet_verified"
+}
