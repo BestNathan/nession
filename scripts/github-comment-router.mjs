@@ -66,6 +66,7 @@ function outputs(plan) {
     handler: plan.handler, issue_number: plan.issue_number, comment_id: plan.comment_id,
     target_sha: plan.target_sha ?? '', target_ref: plan.target_ref ?? '',
     criterion: plan.criterion ?? '', stage: plan.stage ?? '',
+    environment: plan.environment ?? '',
     platform: plan.platform ?? '', runtime_profile: plan.runtime_profile ?? '',
   })) {
     if (!/^[a-z_]+$/.test(key) || /[\r\n]/.test(String(value))) throw Error('invalid output');
@@ -80,6 +81,7 @@ function matchesPlan(plan) {
     (plan.target_ref ?? '') === (process.env.EXPECTED_REF ?? '') &&
     (plan.criterion ?? '') === (process.env.EXPECTED_CRITERION ?? '') &&
     (plan.stage ?? '') === (process.env.EXPECTED_STAGE ?? '') &&
+    (plan.environment ?? '') === (process.env.EXPECTED_ENVIRONMENT ?? '') &&
     (plan.platform ?? '') === (process.env.EXPECTED_PLATFORM ?? '') &&
     (plan.runtime_profile ?? '') === (process.env.EXPECTED_RUNTIME_PROFILE ?? '');
 }
