@@ -108,3 +108,38 @@ test('MCP public readback delegates typed-v2 validation and preserves exact-byte
  assert.match(readback,/for attempt in \{1\.\.18\}; do/,'readback must remain bounded');
  assert.match(readback,/MCP Documents public HTTPS bytes differ from validated build artifact/);
 });
+
+test('Pages publisher reuses main Cargo dependencies without bypassing source-backed Protocol/MCP publication',async()=>{
+ const yaml=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
+ const start=yaml.indexOf('      - name: Prepare Rust toolchain and restore trusted Pages Cargo cache');
+ const history=yaml.indexOf('      - name: Restore SHA-keyed historical Protocol schemas',start);
+ const generate=yaml.indexOf('      - name: Reconstruct missing historical Protocol schemas without credentials',history);
+ const build=yaml.indexOf('      - name: Build sanitized static Pages artifact',generate);
+ assert.ok(start>=0&&history>start&&generate>history&&build>generate,
+   'trusted Rust cache must restore before the credential-free historical producer and current-main build');
+ const rust=yaml.slice(start,history),historical=yaml.slice(history,generate);
+ assert.match(rust,/uses: actions-rust-lang\/setup-rust-toolchain@v1/);
+ for(const required of [
+   'cache: true',
+   'cache-key: pages-main-codegen-v1',
+   "cache-workspaces: '. -> target'",
+   'cache-targets: true',
+   'cache-workspace-crates: false',
+   'cache-bin: false',
+   'cache-on-failure: false',
+ ]) assert.ok(rust.includes(required),'missing Pages Rust cache policy: '+required);
+ assert.doesNotMatch(rust,/cache: false/,'restore must not silently revert to disabled');
+ assert.match(historical,/uses: actions\/cache@v4/);
+ assert.ok(historical.includes('path: ${{ runner.temp }}/nession-protocol-schemas/schema-*.json'),
+   'historical JSON cache must remain distinct from Cargo target or registry');
+ assert.ok(historical.includes('pages-protocol-schemas-v1-'),
+   'preserve the existing history cache and its restore prefix');
+ assert.doesNotMatch(historical,/path: .*?(?:target|registry|cargo-home)/);
+ const builder=await readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8');
+ assert.match(builder,/\['run','--quiet','-p','nession-protocol-codegen','--','--schema'\]/,
+   'current-main canonical Protocol source still executes instead of cache-to-Pages shortcut');
+ assert.match(builder,/\['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'\]/,
+   'MCP exporter remains source-backed on the existing canonical gate');
+ assert.match(yaml,/node pages\/scripts\/publish-prototypes\.mjs/);
+ assert.match(yaml,/Verify public site URL and exact deployed main SHA/);
+});
