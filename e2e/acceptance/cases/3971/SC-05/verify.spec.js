@@ -129,15 +129,24 @@ test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinato
 
   const anchor = await swipe.shellAnchor(page);
   const editor = await page.locator('.cm-editor').boundingBox();
-  if (!editor) {
+  const viewerPath = await page.getByTestId('file-viewer-path').boundingBox();
+  if (!editor || !viewerPath) {
     throw new Error('the pushed editor must be laid out');
   }
   const editorY = Math.round(editor.y + editor.height / 2);
-  // Start inside the editor's own edge band: the work-surface exception, not
-  // the surface interior (the dirty guard is what must decide, not ownership).
+  // Start on the viewer's non-interactive path chrome. The editor's whole
+  // surface is contenteditable and keeps its contact by design; the host
+  // header title block is the Stack Sheet trigger. The Pop is still the
+  // capability's guarded leave.
   await swipe.swipe(page, {
-    from: { x: anchor.shell.x + anchor.guard + 2, y: editorY },
-    to: { x: anchor.shell.x + anchor.guard + 122, y: editorY },
+    from: {
+      x: Math.round(viewerPath.x + viewerPath.width / 2),
+      y: Math.round(viewerPath.y + viewerPath.height / 2),
+    },
+    to: {
+      x: Math.round(viewerPath.x + viewerPath.width / 2 + 140),
+      y: Math.round(viewerPath.y + viewerPath.height / 2),
+    },
   });
   await expect(page.getByRole('alertdialog')).toContainText('Unsaved changes');
   await page.getByRole('button', { name: 'Cancel' }).click();

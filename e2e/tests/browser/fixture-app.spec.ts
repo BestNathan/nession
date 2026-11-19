@@ -388,13 +388,25 @@ test('the shell return swipe still respects a pushed detail and its dirty guard 
   await expect(page.getByTestId('files-app-layout')).toBeVisible();
   await openFixtureFile(page);
 
-  // A pushed detail is operated by the capability's own inner stack: the same
-  // right swipe Pops one level (the directory that held the file), and the
-  // outer Workspace layer does not slide. It is the same leave Back takes.
-  let anchor = await shellAnchor(page);
+  // A pushed detail is operated by the capability's own inner stack: a right
+  // swipe Pops one level (the directory that held the file), and the outer
+  // Workspace layer does not slide. Start on the viewer's non-interactive
+  // path chrome: the editor's whole surface is contenteditable and therefore
+  // keeps a contact by design, and the host header's title block is the Stack
+  // Sheet trigger.
+  const viewerPath = await page.getByTestId('file-viewer-path').boundingBox();
+  if (!viewerPath) {
+    throw new Error('the pushed viewer must lay out its path chrome');
+  }
   await swipe(page, {
-    from: { x: anchor.leftX, y: anchor.y },
-    to: { x: anchor.rightX, y: anchor.y },
+    from: {
+      x: Math.round(viewerPath.x + viewerPath.width / 2),
+      y: Math.round(viewerPath.y + viewerPath.height / 2),
+    },
+    to: {
+      x: Math.round(viewerPath.x + viewerPath.width / 2 + 160),
+      y: Math.round(viewerPath.y + viewerPath.height / 2),
+    },
   });
   await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'workspace');
   await expect(page.getByTestId('app-page-header').locator('h1')).toHaveText('src');
@@ -412,7 +424,7 @@ test('the shell return swipe still respects a pushed detail and its dirty guard 
   // untouched by that switch (no dialog, no discard).
   await page.getByTestId('workspace-tool-agent').click();
   await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to terminal');
-  anchor = await shellAnchor(page);
+  const anchor = await shellAnchor(page);
   await swipe(page, {
     from: { x: anchor.leftX, y: anchor.y },
     to: { x: anchor.rightX, y: anchor.y },
