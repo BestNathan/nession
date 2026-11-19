@@ -5,6 +5,57 @@ encrypted SealedSecret Kubernetes resource. The GitHub Secret holds original
 raw text, **not JSON, base64, or a multi-secret bundle**. A single Kubernetes
 TLS Secret has two required data keys: tls.crt and tls.key.
 
+## Current Staging MCP config ownership (#3914, 2026-11-19)
+
+The **nonsecret** standalone MCP TOML is reviewed and committed directly
+as `gitops/environments/staging/mcp/mcp.toml`. Kustomize generates a
+read-only ConfigMap. There is no GitHub Environment Variable for MCP
+configuration and no `${VARIABLE}` string interpolation.
+
+GitHub Environment `staging` contains **Secrets only** for the MCP
+credential cutover: `NESSION_MCP_INBOUND_TOKEN` is an independent, raw bearer
+credential sealed to `nession/nession-mcp-inbound-staging` key `token`;
+`NESSION_MCP_BACKEND_SERVER_TOKEN` is a separate raw GitHub Environment
+Secret sealed to `nession/nession-mcp-backend-server-staging` key `token`.
+The **backend credential value must match** the canonical staging Server/Agent
+shared token; the additional MCP Secret object is a deployment boundary,
+not permission to invent or independently rotate a different Server token.
+Coordinate Server, Agent, and MCP credential changes together.
+
+After the new MCP OCI image includes the env-credential loader and the
+operator has added **both** GitHub Environment Secrets
+`staging/NESSION_MCP_INBOUND_TOKEN` and `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`,
+manually dispatch **Deploy / Seal GitOps Secret** with ONLY `environment =
+staging`. The registered staging environment requires **both** Secret
+values. The workflow validates both before producing ciphertext; any absent,
+empty or invalid required Secret stops the entire run, without publishing
+a partial set. Both strict encrypted outputs (`sealed-inbound.json` and
+`sealed-backend-server.json`) are checked and published in **one** GitOps
+commit, with the shared Kustomization enrollment. There is no per-Secret
+selection input, arbitrary resource name, or YAML path.
+The operator approves the protected GitHub Environment once per run.
+Verify the SealedSecrets controller materializes **both** exact Kubernetes
+Secrets before switching the MCP Deployment. The backend token value must
+match the staging Server's actual auth token, or MCP tool calls will fail.
+
+**Migration safety:** The environment-batch publisher is intentionally **not**
+the TLS certificate issuer; TLS is owned by `Deploy / Configure Site`.
+Existing `MCP_CONFIG_TOML` Environment Secret,
+`sealed-secret.json` and its Kubernetes Secret remain legacy rollback
+material until the read-only ConfigMap and credential injection are verified
+live. Do not enable the new Deployment before the new image and **both**
+MCP Secrets are present. Environment-variable credentials are loaded at process
+startup; restart MCP after either Secret is rotated and coordinate backend credential rotation with Server/Agent. No credential content
+belongs in GitOps TOML, PRs or request/edge logs. Redact query parameters at
+Higress and Nginx before setting `allow_query_token = true`.
+
+### Legacy history (#3912)
+
+The following historical bootstrap notes describe the original full-TOML
+Secret workflow, not the current preferred configuration or current manual
+dispatcher input. Do not follow the `MCP_CONFIG_TOML` setup steps for a new
+configuration.
+
 ## Environment naming convention
 
 GitHub Environment names must match GitOps environment directory names:
@@ -14,7 +65,10 @@ GitHub Environment names must match GitOps environment directory names:
 - production -> gitops/environments/production
 
 The **Deploy / Seal GitOps Secret** workflow now exposes only
-**staging/MCP_CONFIG_TOML**. The existing `MCP_TLS_PEM_BUNDLE` registry
+**staging/NESSION_MCP_INBOUND_TOKEN** and **staging/NESSION_MCP_BACKEND_SERVER_TOKEN**
+as one mandatory environment batch. The existing legacy full-TOML registry remains
+for historical ciphertext validation and rollback only, not for the current
+manual workflow. The existing `MCP_TLS_PEM_BUNDLE` registry
 entry is retained solely as a bounded strict SealedSecret target consumed by
 **Deploy / Configure Site → issue-tls** (#3992). The TLS private key is minted
 ephemerally in the protected runner, not uploaded to a GitHub Environment
@@ -24,7 +78,9 @@ Secret. No workflow may accept an arbitrary namespace, output path or host.
 
 | GitHub Environment | GitHub Secret | Kubernetes Secret | data key | GitOps encrypted resource |
 |---|---|---|---|---|
-| staging | MCP_CONFIG_TOML | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
+| staging | NESSION_MCP_INBOUND_TOKEN | nession/nession-mcp-inbound-staging (Opaque) | token | environments/staging/mcp/sealed-inbound.json |
+| staging | NESSION_MCP_BACKEND_SERVER_TOKEN | nession/nession-mcp-backend-server-staging (Opaque) | token | environments/staging/mcp/sealed-backend-server.json |
+| staging | MCP_CONFIG_TOML (legacy/rollback only) | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
 | staging | *issued by Configure Site / issue-tls* | nession/nession-mcp-staging-tls (kubernetes.io/tls) | tls.crt + tls.key | environments/staging/mcp/sealed-tls.json |
 
 The target registry in scripts/ci/seal-gitops-secret.mjs is the sole owner of
