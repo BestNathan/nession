@@ -96,6 +96,7 @@ export const SECOND_SOURCE=Object.freeze({
   previous_recovery_run_id:44495243036,
   previous_marker_path:
     'workflows/issues/3784/results/44476308903-1-5495ac9faf020fba834cf802d66087832848f664d11ffa3bdaf599b80b68ec16.json',
+  previous_marker_store_sha:'c10839eee7bd85af92e8557cab7faed0cad5bd75',
 });
 export function verifySecondQwenRepairPrewriteFailure(run,jobs,artifacts,log){
   const f=SECOND_SOURCE;
