@@ -22,12 +22,29 @@ const CHECKS = Object.freeze([
       'Select PR-linked Case-method proofs (trusted main policy)'] },
 ]);
 
+const VISUAL_CHECKS = Object.freeze([
+  { key:'web_design', workflow:'ci-quality.yml', path:'.github/workflows/ci-quality.yml',
+    name:'CI / Quality Gate', job:'web-tests', steps:['Verify Web and design Gates'] },
+  { key:'browser_design', workflow:'e2e-tests.yml', path:'.github/workflows/e2e-tests.yml',
+    name:'E2E / Tests', job:'e2e',
+    steps:['Verify canonical browser design gate from the single E2E run'] },
+]);
+const checksFor = visual => visual ? [...CHECKS, ...VISUAL_CHECKS] : CHECKS;
 const positive = value => Number.isSafeInteger(value) && value > 0;
+
+export function requiresPrVisualEvidenceCriterion(criterion) {
+  const text = String(criterion?.text ?? '');
+  return /\\b(?:browser|viewport)\\b/i.test(text) &&
+    /\\b(?:Quality|CI|Gate)\\b/i.test(text) &&
+    /\\b(?:exact|source-aligned)\\b/i.test(text) &&
+    /\\b(?:PR|head)\\b/i.test(text);
+}
 
 export function requiresPrCiTriadCriterion(criterion) {
   const text = String(criterion?.text ?? '');
-  return /\bQuality\b/i.test(text) && /\bE2E\b/i.test(text) &&
-    /\bCase Smoke\b/i.test(text) && /\b(?:pass|passes|passed|succeed|succeeds)\b/i.test(text);
+  return requiresPrVisualEvidenceCriterion(criterion) ||
+    (/\bQuality\b/i.test(text) && /\bE2E\b/i.test(text) &&
+      /\bCase Smoke\b/i.test(text) && /\b(?:pass|passes|passed|succeed|succeeds)\b/i.test(text));
 }
 
 export function requiresPrCiTriad(context) {
@@ -85,17 +102,17 @@ function attestCheck(spec, sha, observation) {
   }};
 }
 
-export function attestPrCiTriad(sha, observations) {
+export function attestPrCiTriad(sha, observations, {visual=false}={}) {
   if (!SHA.test(String(sha))) throw Error('exact PR head SHA required');
   const checks = [];
-  for (const spec of CHECKS) {
+  for (const spec of checksFor(visual)) {
     const result = attestCheck(spec, sha, observations?.[spec.key]);
     if (result.status !== 'pass') return result;
     checks.push(result.check);
   }
   return { status:'pass', receipt:{
     kind:'pr_ci_triad_execution_v1', repository:REPO,
-    head_sha:sha, checks,
+    head_sha:sha, ...(visual ? {variant:'visual'} : {}), checks,
   }};
 }
 
@@ -103,8 +120,9 @@ export function validPrCiTriadReceipt(receipt, sha) {
   if (!receipt || receipt.kind !== 'pr_ci_triad_execution_v1' ||
       receipt.repository !== REPO || !SHA.test(String(sha)) ||
       receipt.head_sha !== sha || !Array.isArray(receipt.checks) ||
-      receipt.checks.length !== CHECKS.length) return false;
-  return CHECKS.every(spec => {
+      ![undefined,'visual'].includes(receipt.variant) ||
+      receipt.checks.length !== checksFor(receipt.variant === 'visual').length) return false;
+  return checksFor(receipt.variant === 'visual').every(spec => {
     const items = receipt.checks.filter(x => x.key === spec.key);
     return items.length === 1 && items[0].workflow === spec.path &&
       positive(items[0].run_id) && positive(items[0].run_attempt) &&
@@ -119,11 +137,11 @@ function githubJson(path) {
   }));
 }
 
-export function collectPrCiTriad(sha, request=githubJson) {
+export function collectPrCiTriad(sha, request=githubJson, {visual=false}={}) {
   if (!SHA.test(String(sha))) throw Error('exact PR head SHA required');
   try {
     const observations = {};
-    for (const spec of CHECKS) {
+    for (const spec of checksFor(visual)) {
       const query = new URLSearchParams({
         head_sha:sha, event:'pull_request', per_page:'25',
       });
@@ -135,7 +153,7 @@ export function collectPrCiTriad(sha, request=githubJson) {
           '/attempts/' + selected.run_attempt + '/jobs?per_page=100') : null;
       observations[spec.key] = {runs,jobs};
     }
-    return attestPrCiTriad(sha, observations);
+    return attestPrCiTriad(sha, observations, {visual});
   } catch (error) {
     console.error('Trusted PR Quality/E2E/Case Smoke readback failed:',
       error instanceof Error ? error.message : String(error));
@@ -149,7 +167,10 @@ export function enforcePrCiTriad(context, result) {
     .filter(requiresPrCiTriadCriterion).map(c => c.criterion));
   if (!required.size) return result;
   const source = context.pr_ci_triad;
+  const needsVisual = (context.criteria ?? []).some(c =>
+    required.has(c.criterion) && requiresPrVisualEvidenceCriterion(c));
   const valid = source?.status === 'pass' &&
+    (!needsVisual || source.receipt?.variant === 'visual') &&
     validPrCiTriadReceipt(source.receipt, context.target_ref);
   return {...result,criteria:result.criteria.map(item => {
     if (!required.has(item.criterion) || item.result !== 'Pass') return item;
