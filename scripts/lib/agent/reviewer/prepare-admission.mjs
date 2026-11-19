@@ -10,6 +10,7 @@ import { CONTROLLED_PUBLISHER_INTENT_PATH,
   validateControlledPublisherIntent } from '../publisher/store-intent.mjs';
 import { githubFetcher } from '../github-read.mjs';
 import {readIssueWorkflowState} from '../orchestration/state-store.mjs';
+import {extractSection,parseSuccessCriteria} from '../../../requirement-acceptance.mjs';
 import {qwenCommittedReviewIntent}
   from '../orchestration/qwen-reviewer-source.mjs';
 import {admitQwenPublishedReview,admitQwenRepairPublishedReview}
@@ -89,6 +90,25 @@ export async function boundedQwenReviewBaseFiles({files,baseSha,fetcher,
   return omit?[]:baseFiles;
 }
 
+// #4012: the Issue SC text is untrusted task context, never reviewer policy.
+// Parse the entire canonical Success Criteria block; never silently truncate.
+export function boundedQwenIssueCriteria(record,issue){
+  if(!Number.isSafeInteger(issue)||issue<1||
+     record?.number!==issue||record.state!=='open'||
+     record.repository_url!=='https://api.github.com/repos/BestNathan/nession'||
+     typeof record.body!=='string'||Buffer.byteLength(record.body)>128*1024)
+    fail('missing authenticated Reviewer Issue contract');
+  const parsed=parseSuccessCriteria(extractSection(record.body,'Success Criteria'));
+  if(parsed.errors.length||parsed.criteria.size>16)
+    fail('invalid or unbounded Reviewer Issue Success Criteria');
+  const criteria=[...parsed.criteria.values()].map(x=>({id:x.id,text:x.text}));
+  if(criteria.some(x=>!x.text||x.text!==x.text.trim()||
+       Buffer.byteLength(x.text)>1200)||
+     Buffer.byteLength(JSON.stringify(criteria))>4096)
+    fail('Reviewer Issue Success Criteria exceed bounded admission');
+  return criteria;
+}
+
 // The generic Qwen path reads the same orphan Store and the real Publisher PR
 // independently. No Issue text, model output, or workflow input may select a
 // different PR/SHA after the signed Outbox Reviewer action is committed.
@@ -141,12 +161,16 @@ export async function prepareQwenReviewAdmission({
   // authorized change from the PR-head end state.
   const baseSha=committed.repair?intent.original_main_sha:intent.target_main_sha;
   const baseFiles=await boundedQwenReviewBaseFiles({files,baseSha,fetcher});
+  const issueRecord=await fetcher('issues/'+issue);
+  const issueCriteria=boundedQwenIssueCriteria(issueRecord,issue);
   const tree=await fetcher('git/trees/'+commit.tree.sha+'?recursive=1');
   return committed.repair
     ? admitQwenRepairPublishedReview({state,intent,publisherRun,pullRequests,
-      pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles})
+      pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles,
+      issue_criteria:issueCriteria})
     : admitQwenPublishedReview({state,intent,publisherRun,recoveryRun,pullRequests,
-      pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles});
+      pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles,
+      issue_criteria:issueCriteria});
 }
 
 async function main(){

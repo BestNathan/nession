@@ -16,9 +16,12 @@ const ADMISSION_FIELDS=['schema_version','kind','status','repository','issue',
   'role','agent_id','task','review_action_id','pr_number','target_sha',
   'base_sha_at_publication','publisher_run_id','publisher_attempt',
   'publisher_intent_sha256','publisher_branch','original_worker_run_id',
-  'native_checkpoint_commit_sha','expected_files','base_files'];
+  'native_checkpoint_commit_sha','expected_files','base_files',
+  'issue_criteria','issue_criteria_sha256'];
 const FILE_FIELDS=['path','blob_sha','mode'];
 const BASE_FILE_FIELDS=['path','content'];
+const CRITERION_FIELDS=['id','text'];
+const MAX_CRITERIA=16,MAX_CRITERIA_BYTES=4096;
 const MAX_BASE_FILE=32*1024;
 const MAX_BASE_TOTAL=128*1024;
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -98,7 +101,17 @@ export function assertQwenReviewerAdmission(a,identity={agent_id:'review-qwen-01
       (a.base_files.length>0&&
         (a.base_files.length!==a.expected_files.length||
          a.base_files.some(f=>!a.expected_files.some(e=>e.path===f.path))))||
-      a.base_files.reduce((n,f)=>n+Buffer.byteLength(f.content),0)>MAX_BASE_TOTAL)
+      a.base_files.reduce((n,f)=>n+Buffer.byteLength(f.content),0)>MAX_BASE_TOTAL||
+      !Array.isArray(a.issue_criteria)||a.issue_criteria.length<1||
+      a.issue_criteria.length>MAX_CRITERIA||
+      a.issue_criteria.some(c=>!exact(c,CRITERION_FIELDS)||
+        !/^SC-[0-9]{2,}$/.test(c.id??'')||typeof c.text!=='string'||
+        !c.text.trim()||c.text!==c.text.trim()||
+        Buffer.byteLength(c.text)>1200)||
+      new Set(a.issue_criteria.map(c=>c.id)).size!==a.issue_criteria.length||
+      Buffer.byteLength(JSON.stringify(a.issue_criteria))>MAX_CRITERIA_BYTES||
+      !HEX.test(a.issue_criteria_sha256??'')||
+      a.issue_criteria_sha256!==hash({issue:a.issue,criteria:a.issue_criteria}))
     deny('invalid source-bound Reviewer admission');
   // The branch name is produced by a committed Publisher Intent, never a
   // Reviewer-supplied action or a model-supplied PR target.
@@ -130,7 +143,7 @@ function expectedReviewFiles(files,tree){
 export function admitQwenPublishedReview({
   state,intent,publisherRun,pullRequests,pr,ref,commit,files,tree,
   actionId,reviewerAgentId='review-qwen-01',base_files=[],
-  recoveryRun=null,
+  issue_criteria=[],recoveryRun=null,
 }){
   validateDevelopmentState(state);
   const record=validateQwenPublisherIntent(intent);
@@ -197,6 +210,7 @@ export function admitQwenPublishedReview({
     native_checkpoint_commit_sha:record.checkpoint_commit_sha,
     expected_files:expected,
     base_files,
+    issue_criteria,issue_criteria_sha256:hash({issue:record.issue,criteria:issue_criteria}),
   }));
 }
 
@@ -207,6 +221,7 @@ export function admitQwenPublishedReview({
 export function admitQwenRepairPublishedReview({
   state,intent,publisherRun,pullRequests,pr,ref,commit,files,tree,
   actionId,reviewerAgentId='review-qwen-01',base_files=[],
+  issue_criteria=[],
 }){
   validateDevelopmentState(state);
   const record=validateQwenRepairPublisherIntent(intent);
@@ -276,5 +291,6 @@ export function admitQwenRepairPublishedReview({
     native_checkpoint_commit_sha:record.checkpoint_commit_sha,
     expected_files:expected,
     base_files,
+    issue_criteria,issue_criteria_sha256:hash({issue:record.issue,criteria:issue_criteria}),
   }));
 }
