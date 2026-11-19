@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c3a86a92d5d58662426c311250d7a165aaaf3445a8e7ff2a104d004cbbb42ecc",
+  "run_id": 44529615338,
+  "run_attempt": 1,
+  "issue": 4007,
+  "criterion": "SC-03",
+  "criterion_text": "— Partial update, CAS, and incarnation rejection: a patch changing only description preserves title/tags and persists after re-read; explicit null/empty tags clear only their fields. Two writers with the same revision cannot both commit, validation refusal leaves metadata unchanged, and a stale `expected_instance_id` from Session A cannot mutate recreated same-name Session B even if both have revision 0. Tested with deterministic barriers around replacement and concurrent updates, including timeout/readback behavior (never automatically repeat an indeterminate mutation).",
+  "stage": "staging",
+  "target_sha": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+  "contract_sha256": "0d615828dfc359e9d1cb1c1bead0836c8a25aa5d0d97598f994b947606cc15d7",
+  "case_revision": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+  "case_tree_sha": "dce60855ce4d14fd9bf0b877133cf6194f2b67eb",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T13:10:05.994Z",
+  "finished_at": "2026-11-19T13:10:31.191Z",
+  "duration_ms": 25197,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "route.cjs",
+      "result": "Pass",
+      "summary": "Partial updates commit atomically under revision and incarnation preconditions",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-agent at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: a description-only patch preserved title/tags; title+tags replaced without clearing the description; a stale revision and an empty patch were refused; after kill/recreate the old instance token was a conflict and only the successor identity committed"
+        }
+      ],
+      "duration_ms": 20740,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "store.cjs",
+      "result": "Pass",
+      "summary": "The Agent owner is the single atomic patch authority with revision and incarnation fences",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-agent at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: eight concurrent patches at one revision produced one commit at revision 2; omitted fields were preserved, explicit null and [] cleared only their fields, invalid/empty patches wrote nothing, and a stale instance was a conflict with the successor record intact"
+        }
+      ],
+      "duration_ms": 4398,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44529615338,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44529615338",
+    "record_path": "runs/2026-11-19/44529615338-1/4007/SC-03.json",
+    "source_result_sha256": "8cb6feacf1075044ee360f3c100e4d3fe85a7b80e46e0c1f670a0f03784b7de4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44529615338-1",
+    "sha256": "8cb6feacf1075044ee360f3c100e4d3fe85a7b80e46e0c1f670a0f03784b7de4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44529615338",
+    "durability": "time-limited; object archival not configured"
+  }
+}

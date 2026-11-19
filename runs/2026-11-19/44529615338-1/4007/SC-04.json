@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "971d8f16b20dd0a553c791f1b3a4aaddbf390da89a96b1e3722b79269576615d",
+  "run_id": 44529615338,
+  "run_attempt": 1,
+  "issue": 4007,
+  "criterion": "SC-04",
+  "criterion_text": "— Discoverable work context without false freshness: `nession_agent_list_sessions` exposes bounded title/tag summary alongside existing live tmux facts and stable `session_id`/instance identity, while full description is returned only on Get; empty legacy context and failed/stale metadata lookup remain distinguishable. The staging Project `project_id` known/unknown/null semantics remain unchanged; read-only listing does not create/write Metadata or silently infer a task from foreground command/cwd.",
+  "stage": "staging",
+  "target_sha": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+  "contract_sha256": "0d615828dfc359e9d1cb1c1bead0836c8a25aa5d0d97598f994b947606cc15d7",
+  "case_revision": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+  "case_tree_sha": "7805e0d1b276716f577638f2cec438152001e453",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T13:10:31.191Z",
+  "finished_at": "2026-11-19T13:10:42.143Z",
+  "duration_ms": 10952,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "hosts.cjs",
+      "result": "Pass",
+      "summary": "Session lists expose bounded, mode-independent work-context summaries",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-mcp at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: all four hosting modes listed the saved Session with the same title/tags/revision summary and no description, listed a no-metadata Session as available revision 0, and kept the Project projection intact"
+        }
+      ],
+      "duration_ms": 2035,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "tool.cjs",
+      "result": "Pass",
+      "summary": "Summary availability is explicit and the Project projection is unchanged",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-mcp at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: a confirmed-empty summary serialized state=available revision 0 while a failed lookup serialized state=unavailable with no fabricated summary, the projection never contained description, and the Server projection still distinguished a confirmed non-association from unresolved metadata"
+        }
+      ],
+      "duration_ms": 4457,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "store.cjs",
+      "result": "Pass",
+      "summary": "List summaries are read-only, identity-keyed and truthfully unavailable on failure",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-agent at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: the list summary was read by instance identity without initializing tmux state or metadata, no identity meant a confirmed revision-0 record, and an invalid/unreadable identity became unavailable"
+        }
+      ],
+      "duration_ms": 4411,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44529615338,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44529615338",
+    "record_path": "runs/2026-11-19/44529615338-1/4007/SC-04.json",
+    "source_result_sha256": "a8cc8b0d7c43edd1b7d98deedcf1252bb3855256b860c4916761bbaddb0eafb3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44529615338-1",
+    "sha256": "a8cc8b0d7c43edd1b7d98deedcf1252bb3855256b860c4916761bbaddb0eafb3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44529615338",
+    "durability": "time-limited; object archival not configured"
+  }
+}

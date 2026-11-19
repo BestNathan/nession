@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5db914baaff58712c5d43db67af4f0455ded15e62599c163407951e3fc364ef5",
+  "run_id": 44529615338,
+  "run_attempt": 1,
+  "issue": 4007,
+  "criterion": "SC-02",
+  "criterion_text": "— Owner-backed Get across hosts: with one Agent/tmux Session whose persisted metadata has a known revision, invoking Get from Agent-embedded, Server-embedded and standalone (Server-routed and permitted direct-Agent configuration) reports the same actual title/description/tags/revision and instance identity. Restarting the Agent preserves that Session's metadata; a live legacy Session returns revision 0; an unavailable Agent or absent Session is not returned as an empty successful read.",
+  "stage": "staging",
+  "target_sha": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+  "contract_sha256": "0d615828dfc359e9d1cb1c1bead0836c8a25aa5d0d97598f994b947606cc15d7",
+  "case_revision": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+  "case_tree_sha": "442a518c891458fb441d20f97c1db13a91f7e68a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T13:07:41.478Z",
+  "finished_at": "2026-11-19T13:10:05.993Z",
+  "duration_ms": 144515,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "hosts.cjs",
+      "result": "Pass",
+      "summary": "Every hosting mode reads one owner-backed Session metadata record and identity",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-mcp at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: one real Agent backed all four MCP hosting modes; Get returned the same revision-0 record and instance identity from each, a missing Session was not_found rather than an empty success, and the list carried the summary"
+        }
+      ],
+      "duration_ms": 65586,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "agent.cjs",
+      "result": "Pass",
+      "summary": "The Agent owner is durable across restart and never lends metadata to a successor",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "nession-agent at exact SHA 2796eceb717e4508681c3a8ea21172ecf3ed7e45: metadata survived a fresh store over the same tmux Session, a legacy Session read revision 0 with empty fields, and a recreated same-name Session started at revision 0 with a different instance identity"
+        }
+      ],
+      "duration_ms": 78852,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44529615338,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2796eceb717e4508681c3a8ea21172ecf3ed7e45",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44529615338",
+    "record_path": "runs/2026-11-19/44529615338-1/4007/SC-02.json",
+    "source_result_sha256": "3f238a59a6237cb7ea2f031fb85b20375d5d52877b654ca8a15616e1e3014633"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44529615338-1",
+    "sha256": "3f238a59a6237cb7ea2f031fb85b20375d5d52877b654ca8a15616e1e3014633",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44529615338",
+    "durability": "time-limited; object archival not configured"
+  }
+}
