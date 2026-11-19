@@ -1,0 +1,22 @@
+{
+  "kind": "SealedSecret",
+  "apiVersion": "bitnami.com/v1alpha1",
+  "metadata": {
+    "name": "nession-mcp-inbound-staging",
+    "namespace": "nession",
+    "creationTimestamp": null
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "name": "nession-mcp-inbound-staging",
+        "namespace": "nession",
+        "creationTimestamp": null
+      },
+      "type": "Opaque"
+    },
+    "encryptedData": {
+      "token": "AgBVAxDTzTg/Mf5lgCgGOSR4pkQi/hQyIeAJSKuoTOThMpWGeFeTWTVyGJz3/VVgRoK/dHgDdCiYddAHkvDPwb0X6aB4hFFjfmNe7sYOIC27Ts58jPPovPUp0MOBMRA3lGo0lAsEfeprH6eISPLUEovas0nPczxWAdLxaTaV73UDXbUt4isOqAm26AU4g1NkHddklf5NO1mwmhuunhAOrQIDtC3UHQbsN1Vk16OHBeH59mXiRWcAvWx9Fpd5t8WrtHKLoaWF0lL4AfexVIP+VzGz0rVWHwF5qLSJlDk0GNMV0gfFya5HbeR/ldoMmhFzlAn+eDuowtFyDfIA7sRhUaLO7SE4xxr+VB1+QP3K89z1qPLHwI5qkgg943KkMLZzYmiWVFdRnkiI0BLqqyXY5JCHHanndAzynosO+56jxc4qeK9QqojILO6d+mtH7qIkSkstaIxAp80Tp9h/KcWeCvWoMIFzdj3okrEyDEN6tRwv3rdaVXQMTsBiOCYLJJ6+lN5qGEZWB4VqwlkqgluogU0BUBrSnrX/ATqR9MC9wyyB4viuCVO6gh1R92ZkT5x5qjA1tyCcjBjPths+DodvUZgaP3sEPQt74Rwhn3ouV4HENErw0CokLAf48nW7cd0/iFxqmNFRDytE9azoyISNxZbngmeeKkEtxSbLPeRTsyj12bQYn4IFTrdw/prag2y6Auroi+C18vvUm1a63EdUIeiPEg=="
+    }
+  }
+}
