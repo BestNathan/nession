@@ -23,6 +23,14 @@ auth_token = ""
 # explicit for any public ingress; add the ingress DNS name here.
 allowed_hosts = ["mcp.example.com"]
 
+# Optional (default false): permit ?token=<URL-encoded MCP inbound token> for
+# MCP clients that cannot supply Authorization headers. This is still an
+# authenticated endpoint, using exactly the same [mcp].auth_token verifier.
+# URL query credentials can leak through ingress access logs, browser history,
+# copied links and client connection configuration. Use HTTPS and configure
+# EVERY reverse proxy/edge to omit or redact query strings in logs.
+# allow_query_token = true
+
 # Browser origins allowed to call the endpoint. MCP clients do not send an
 # Origin header; leave this empty to refuse every browser origin, or name the
 # exact scheme/host/port a browser client uses.
