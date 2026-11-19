@@ -84,6 +84,7 @@ export const CATALOG = [
   ['deploy-acr-macos-mirror', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'delivery'],
   ['deploy-oci-pull-readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'delivery'],
   ['deploy-staging-rollout-readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'delivery'],
+  ['deploy-mcp-secret-preflight', 'deploy-mcp-secret-preflight.yml', 'Deploy / MCP Secret Preflight', 'deploy-mcp-secret-preflight.yml', 'Deploy / MCP Secret Preflight', 'delivery'],
   ['deploy-identity-ingest', 'deploy-identity-ingest.yml', 'Deploy / Identity Ingest', 'deploy-identity-ingest.yml', 'Deploy / Identity Ingest', 'delivery'],
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
