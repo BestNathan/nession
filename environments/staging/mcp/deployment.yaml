@@ -48,13 +48,14 @@ spec:
                   name: nession-mcp-inbound-staging
                   key: token
                   optional: false
-            # Same canonical staging credential as Server and Agent.
-            # Do not create an MCP-owned copy of the backend credential.
+            # Independently sealed MCP backend Server credential. Its VALUE
+            # must match the canonical staging Server/Agent auth token exactly.
+            # Rotate Server, Agent and MCP together to avoid auth drift.
             - name: NESSION_MCP_BACKEND_SERVER_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: nession-secret-staging
-                  key: auth-token
+                  name: nession-mcp-backend-server-staging
+                  key: token
                   optional: false
           volumeMounts:
             - name: mcp-config

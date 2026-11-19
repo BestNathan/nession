@@ -27,12 +27,15 @@ consume it. The fixed file mount is `/etc/nession/mcp.toml`.
 
 | Process env | Kubernetes Secret / key | Operator source |
 |---|---|---|
-| `NESSION_MCP_INBOUND_TOKEN` | `nession-mcp-inbound-staging/token` | GitHub Environment **Secret** `staging/MCP_INBOUND_TOKEN`, sealed offline into `sealed-inbound.json` |
-| `NESSION_MCP_BACKEND_SERVER_TOKEN` | `nession-secret-staging/auth-token` | **Existing canonical staging Server/Agent Secret**; do not duplicate |
+| `NESSION_MCP_INBOUND_TOKEN` | `nession-mcp-inbound-staging/token` | GitHub Environment **Secret** `staging/NESSION_MCP_INBOUND_TOKEN`, sealed into `sealed-inbound.json` |
+| `NESSION_MCP_BACKEND_SERVER_TOKEN` | `nession-mcp-backend-server-staging/token` | GitHub Environment **Secret** `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`, sealed into `sealed-backend-server.json` |
 
 Both `secretKeyRef` fields are required (`optional: false`); missing
 credentials block Pod startup rather than enabling anonymous access.
-The inbound credential is separate from the Server/Agent backend credential.
+The two MCP credentials are separate. The backend Server credential must
+equal the value of the staging Server/Agent canonical auth token; this
+standalone MCP Secret is an independent Kubernetes object, **not** a second
+Server identity. Provision/rotate consistently, otherwise MCP tool calls fail.
 Historical `MCP_CONFIG_TOML` Environment Secret and the encrypted legacy
 `sealed-secret.json` remain only for rollback until new runtime validation
 succeeds; the former is NOT a config source for the new Deployment.
@@ -46,28 +49,35 @@ MCP Pod restart after rotation.
 ## Safe cutover prerequisites and order
 
 1. Merge the independently reviewed **main** Secret publisher PR, which
-   registers only `staging/MCP_INBOUND_TOKEN`. Confirm a staging MCP image
+   registers exactly `staging/NESSION_MCP_INBOUND_TOKEN` and
+   `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`. Confirm a staging MCP image
    built from a SHA containing the env-credential loader (#3950) and standalone
    Query Token implementation (#3995) exists in ACR (both architectures).
-2. Set GitHub **Environment Secret** `staging/MCP_INBOUND_TOKEN` to a strong,
-   independently generated raw token. Do not provide it as a repository
+2. Set two GitHub **Environment Secrets**:
+   `staging/NESSION_MCP_INBOUND_TOKEN` to a strong, independently generated raw
+   token; `staging/NESSION_MCP_BACKEND_SERVER_TOKEN` to the **exact current**
+   staging Server/Agent auth token value. Do not provide either as a repository
    Variable, JSON envelope, issue comment or GitOps file. The main-owned
-   `Deploy / Seal GitOps Secret` workflow is manual-only and operates on this
-   one exact Secret name/namespace/key. `SEALED_SECRETS_CERT_PEM` is the
-   controller's existing public X.509 certificate and NOT a credential.
-3. Dispatch the workflow for `staging`; verify the encrypted
-   `environments/staging/mcp/sealed-inbound.json` is published and enrolled
-   in this Kustomization by the authorized publisher, Argo CD reconciles it,
-   and Kubernetes has Secret `nession-mcp-inbound-staging` with the `token`
-   key. If a concurrent change updates Kustomization, reconcile this PR
-   against the new GitOps branch HEAD before merging.
+   `Deploy / Seal GitOps Secret` workflow is manual-only, accepts only these
+   two registered exact names and encrypts one Secret per invocation.
+   `SEALED_SECRETS_CERT_PEM` is the controller's existing public X.509
+   certificate and NOT a credential.
+3. Dispatch the workflow **twice**, selecting each Secret individually:
+   `NESSION_MCP_INBOUND_TOKEN` writes `sealed-inbound.json` and
+   `NESSION_MCP_BACKEND_SERVER_TOKEN` writes `sealed-backend-server.json`.
+   Verify both files are enrolled by the authorized publisher and Argo CD
+   reconciles both exact K8s Secrets `nession-mcp-inbound-staging/token`
+   and `nession-mcp-backend-server-staging/token`. If a concurrent change
+   updates Kustomization, reconcile this PR against the new GitOps branch
+   HEAD before merging.
 4. **Before enabling `allow_query_token = true` publicly**, configure
    Cloudflare/Higress/origin Nginx logs to omit/redact request query strings.
    Query credentials must not appear in access logs, diagnostics, browser
    histories or copied tickets. Verify external TLS trust and the HTTPS
    redirect. No plaintext credentials may appear in GitOps/CI artifacts.
 5. Only then merge this desired-state PR to `gitops`. Argo CD mounts the
-   generated ConfigMap and injects Secrets into the MCP Pod. Confirm the
+   generated ConfigMap and injects **both** independently sealed Secrets into
+   the MCP Pod. Confirm the
    published ACR MCP tag is recent enough, the Deployment becomes Ready,
    and `POST /mcp` initializes with the inbound token both in
    `Authorization: Bearer` and in URL-encoded `?token=...`; invalid/absent
@@ -85,9 +95,10 @@ writer for image tag advancement. It verifies all four ACR image indices
 (server/agent/ui/mcp) for amd64 and arm64 and updates their tags in one
 GitOps commit. Do not patch image tags or build images manually to bypass it.
 
-Re-running the trusted Secret publisher replaces only its encrypted
-`sealed-inbound.json` entry; a SealedSecret update does **not** automatically
-restart pods consuming a Secret via environment variables. Trigger a
+Re-running the trusted Secret publisher replaces only the selected encrypted
+`sealed-inbound.json` or `sealed-backend-server.json` entry; a SealedSecret
+update does **not** automatically restart pods consuming a Secret via
+environment variables. Trigger a
 controlled MCP rollout after rotating the inbound token. Coordinate Server
 token changes across all three workloads. To roll back configuration,
 revert the reviewed GitOps desired-state merge or use a previously verified
@@ -98,6 +109,8 @@ Read-only verification commands:
 ```sh
 kubectl -n nession get sealedsecret nession-mcp-inbound-staging
 kubectl -n nession get secret nession-mcp-inbound-staging -o jsonpath='{.type}{"\\n"}'
+kubectl -n nession get sealedsecret nession-mcp-backend-server-staging
+kubectl -n nession get secret nession-mcp-backend-server-staging -o jsonpath='{.type}{"\\n"}'
 kubectl -n nession get deploy/nession-mcp-staging svc/nession-mcp-staging
 kubectl -n nession rollout status deployment/nession-mcp-staging
 ```
