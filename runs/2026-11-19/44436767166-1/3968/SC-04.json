@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "21006cd76acbd9366a1aa9dca6963885a7f37be05c7a883df6eab1374bdb6996",
+  "run_id": 44436767166,
+  "run_attempt": 1,
+  "issue": 3968,
+  "criterion": "SC-04",
+  "criterion_text": ": A subsequent authenticated Staging ACR Run demonstrates real exact-SHA GHCR→ACR four-role source/digest proof, or explicitly retains Pending with the observed operational blocker; a source-only fixture is not runtime proof.",
+  "stage": "staging",
+  "target_sha": "4aa667c5777801e2384d8be3ffa7f87cec8c4677",
+  "contract_sha256": "a48a2f832f9d768780447df7d221619835f580c9d54afa1b895d3b8a4da123eb",
+  "case_revision": "4aa667c5777801e2384d8be3ffa7f87cec8c4677",
+  "case_tree_sha": "1b496901bad56b32a7b297854a2e98280fc5981b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T01:28:36.964Z",
+  "finished_at": "2026-11-19T01:28:43.026Z",
+  "duration_ms": 6062,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "read-only GitHub source observation unavailable: HTTP 403",
+      "evidence": [],
+      "duration_ms": 158,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44436767166,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "ec95388860a697bba0072396b6716b797cd62b02",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "comment_case": {
+        "issue": 3968,
+        "criterion": "SC-04",
+        "comment_id": 6996781260
+      },
+      "dispatch_binding": {
+        "target_sha": "4aa667c5777801e2384d8be3ffa7f87cec8c4677",
+        "stage": "staging",
+        "issue": 3968,
+        "criterion": "SC-04",
+        "job_id": 135267467661,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44436767166",
+    "record_path": "runs/2026-11-19/44436767166-1/3968/SC-04.json",
+    "source_result_sha256": "3767218658defc6714aec258a2fc9ceba90210272b75c9f92196de34180a07ca"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44436767166-1",
+    "sha256": "3767218658defc6714aec258a2fc9ceba90210272b75c9f92196de34180a07ca",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44436767166",
+    "durability": "time-limited; object archival not configured"
+  }
+}
