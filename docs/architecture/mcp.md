@@ -275,6 +275,7 @@ absent, and `mcp.toml` is the default.
 [mcp]
 listen_address = "127.0.0.1:9090"
 auth_token = "<mcp-inbound-token>"
+# allow_query_token = true  # Optional: headerless MCP clients, off by default.
 
 [backend.server]
 endpoint = "wss://nession.example.com/ws"
@@ -293,6 +294,26 @@ agent_id = "agent-…"
   operator token; there is no implicit fallback between direct and routed mode.
 - The inbound token and the backend tokens are separate. The inbound token is
   never forwarded to a backend.
+- Standalone can explicitly set `[mcp] allow_query_token = true` to permit
+  `https://mcp.example.com/mcp?token=<URL-encoded-inbound-mcp-token>` for
+  headerless MCP clients (such as ChatGPT's **No authentication** connector
+  configuration). This uses the existing standalone inbound MCP token, **not**
+  `[backend.server].auth_token` or any Agent credential. The option defaults
+  to false and is not enabled by Server/Agent embedded hosts.
+- `token` is case-sensitive and decoded using URL form-query semantics:
+  encode reserved characters (notably `+` as `%2B`, `&` as `%26`).
+  An empty, malformed or repeated `token` fails authentication. A supplied
+  Authorization header must be a valid Bearer with the **same** credential;
+  invalid or conflicting credentials are refused, never allowed to fall back.
+- URL credentials can be captured by Cloudflare/Higress/Ingress access logs,
+  browser history, copied links, monitoring and client connector settings.
+  Protect the public connection using HTTPS, configure **every** reverse
+  proxy/edge to redact or omit request query strings in logs/traces, and use
+  an isolated rotatable inbound MCP token (never the Server/Agent token).
+  Nession itself never logs request-target queries or echoes credentials in
+  its 401 response. This client-compatibility mode is not OAuth and cannot
+  revoke individual clients. Real ChatGPT query persistence requires a
+  separate manual client-side verification.
 - After binding, the program prints `nession-mcp listening on <addr>` on
   stdout (logs go to stderr). This is what makes `listen_address =
   "127.0.0.1:0"` usable by a supervisor or test.
@@ -346,10 +367,12 @@ and the TLS fields are standalone-only and ignored by an embedding host.
 ## Transport, authentication and limits
 
 - Endpoint: `POST /mcp` (configurable path).
-- Every request must carry `Authorization: Bearer <token>`. Missing and wrong
-  tokens are both `401` with `WWW-Authenticate: Bearer` and no diagnostic body.
-  Authentication is fail-closed: MCP enabled with an empty token refuses to
-  start.
+- By default every request must carry `Authorization: Bearer <token>`.
+  Only explicitly opted-in **standalone** hosts accept `?token=...` instead;
+  when both are provided they must identify the same valid token. Missing,
+  malformed or wrong credentials receive `401` with `WWW-Authenticate:
+  Bearer` and no diagnostic body. Authentication is fail-closed: MCP enabled
+  with an empty token refuses to start.
 - **Origin policy:** a request carrying an `Origin` header must match
   `[mcp] allowed_origins` (RFC 6454 scheme/host/port). The default list is
   empty, which refuses every present browser Origin — the DNS-rebinding
