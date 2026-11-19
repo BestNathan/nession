@@ -839,6 +839,110 @@ try {
   assert.equal(qwenReviewerPublishedSource({
     storeRoot:post,issue,actionId:nextReview[0].id,sha:shaB})
       .publisher_run_id,recoveredPublisherRun);
+  // #4030: a Reviewer of the *repaired* PR-B can reject it again. The
+  // next Developer Repair must bind native checkpoint v2 / Repair Publisher
+  // Intent, NEVER the original v1 Developer checkpoint or a model Run ID.
+  const secondReviewRun=reviewRun+112;
+  const secondPrepared=recordDispatchIntent(storedB.state,storedB.version,
+    nextReview[0].id,{status:'prepared',dispatch_id:nextReview[0].id,
+      issuer_run_id:recoveredPublisherRun+2,ticket_sha256:'b'.repeat(64)});
+  const secondDispatched=recordDispatch(secondPrepared,
+    secondPrepared.version,nextReview[0].id,{status:'verified',
+      dispatch_id:nextReview[0].id,source_run_id:secondReviewRun});
+  const secondRejected=acceptTaskResult(secondDispatched,
+    secondDispatched.version,{
+      kind:'reviewer',issue,run_id:secondReviewRun,run_attempt:1,
+      target_sha:shaB,outcome:'changes_requested',task_id:nextReview[0].id,
+    },{
+      repository:'BestNathan/nession',path:'.github/workflows/agent-review.yml',
+      name:'Agent / Review',run_id:secondReviewRun,attempt:1,
+      event:'workflow_dispatch',ref:'refs/heads/main',issue,
+      task_id:nextReview[0].id,agent_id:'review-qwen-01',
+      input_sha:shaB,output_sha:shaB,verified:true,
+    },registry);
+  assert.equal(secondRejected.phase,'repair');
+  assert.equal(secondRejected.repair_attempts,2);
+  const secondRepair=secondRejected.outbox.find(x=>
+    x.task.role==='developer'&&x.task.task==='repair');
+  assert.equal(secondRepair.status,'pending');
+  for(const next of [secondPrepared,secondDispatched,secondRejected]){
+    const old=readIssueWorkflowState(post,issue);
+    writeIssueWorkflowState(post,next,old.version);
+    git(post,'add','-A');
+    git(post,'-c','user.name=Qwen Store Case',
+      '-c','user.email=qwen@example.invalid','commit',
+      '-m','verified second Review and Repair v'+next.version);
+    publish('agent-store',post,4);
+  }
+  const secondOrigin=attestQwenPublishedRepairCheckpoint({
+    storeRoot:post,state:secondRejected,actionId:secondRepair.id});
+  assert.deepEqual(secondOrigin,{verified:true,checkpoint_version:2,
+    checkpoint_commit_sha:repairAccepted.checkpoint.commit_sha,
+    ciphertext_sha256:repairAccepted.checkpoint.ciphertext_sha256,
+    source_sha:commitSha,source_run_id:repairWorkerId});
+  assert.notEqual(secondOrigin.checkpoint_commit_sha,
+    accepted.checkpoint.commit_sha,'never resume retired v1 native checkpoint');
+  for(const corrupted of [
+    {...secondRejected,target_sha:commitSha},
+    {...secondRejected,transitions:secondRejected.transitions.filter(x=>
+      !(x.kind==='publisher'&&x.target_sha===shaB))},
+    {...secondRejected,transitions:secondRejected.transitions.filter(x=>
+      !(x.kind==='reviewer'&&x.target_sha===commitSha))},
+    {...secondRejected,transitions:secondRejected.transitions.map(x=>
+      x.kind==='publisher'&&x.target_sha===commitSha
+        ?{...x,target_sha:'f'.repeat(40)}:x)},
+  ])assert.throws(()=>attestQwenPublishedRepairCheckpoint({
+    storeRoot:post,state:corrupted,actionId:secondRepair.id}),
+    /trusted Qwen Repair|trusted Qwen Reviewer|agent outbox/);
+  const currentWal=path.join(post,walLocation);
+  const currentWalBytes=fs.readFileSync(currentWal,'utf8');
+  try{
+    for(const mutation of [
+      {source_sha:'f'.repeat(40)},
+      {original_publisher_run_id:repairWalIntent.record.original_publisher_run_id+1},
+      {original_main_sha:'e'.repeat(40)},
+      {branch:'refs/heads/agent/'+issue+'/qwen-'+'f'.repeat(16)},
+      {checkpoint_version:3},
+    ]){
+      fs.writeFileSync(currentWal,JSON.stringify({
+        ...repairWalIntent.record,...mutation},null,2)+'\n');
+      assert.throws(()=>attestQwenPublishedRepairCheckpoint({
+        storeRoot:post,state:secondRejected,actionId:secondRepair.id}),
+        /trusted Qwen Repair|trusted Qwen Reviewer|Qwen Repair write-ahead/);
+    }
+  }finally{fs.writeFileSync(currentWal,currentWalBytes);}
+  const cp2='roles/developer/dev-qwen-01/issues/'+issue+
+    '/checkpoints/00000002.json';
+  const cp2Path=path.join(post,cp2);
+  const originalCp2Bytes=fs.readFileSync(cp2Path,'utf8');
+  try{
+    const stored=JSON.parse(originalCp2Bytes);
+    fs.writeFileSync(cp2Path,JSON.stringify({...stored,
+      metadata:{...stored.metadata,source_sha:'f'.repeat(40)}},null,2)+'\n');
+    assert.throws(()=>attestQwenPublishedRepairCheckpoint({
+      storeRoot:post,state:secondRejected,actionId:secondRepair.id}),
+      /trusted Qwen Repair origin/);
+  }finally{fs.writeFileSync(cp2Path,originalCp2Bytes);}
+  const secondBound=bindQwenRepairCheckpoint({
+    remote,issue,actionId:secondRepair.id});
+  assert.equal(secondBound.status,'bound');
+  assert.equal(secondBound.state_version,secondRejected.version+1);
+  assert.equal(bindQwenRepairCheckpoint({remote,issue,
+    actionId:secondRepair.id}).status,'replayed');
+  git(post,'pull','--ff-only','origin','agent-store');
+  const secondPublished=qwenRepairPublishedSource({
+    storeRoot:post,issue,actionId:secondRepair.id,sha:shaB});
+  assert.equal(secondPublished.branch,'refs/heads/'+branch);
+  assert.equal(secondPublished.base_sha,inputSha);
+  assert.equal(secondPublished.review_sha,shaB);
+  assert.equal(secondPublished.publisher_run_id,recoveredPublisherRun);
+  const secondSource=readIssueWorkflowState(post,issue).state.outbox
+    .find(x=>x.id===secondRepair.id);
+  assert.equal(secondSource.task.repair_checkpoint.checkpoint_version,2);
+  assert.equal(secondSource.task.repair_checkpoint.source_run_id,repairWorkerId);
+  assert.throws(()=>qwenRepairPublishedSource({
+    storeRoot:post,issue,actionId:secondRepair.id,sha:commitSha}),
+    /trusted Qwen Repair origin/);
   assert.equal(posts,5,'Repair update never creates a second GitHub PR');
   assert.equal(repairMutations.length,4,'Store handoff never writes GitHub');
 
