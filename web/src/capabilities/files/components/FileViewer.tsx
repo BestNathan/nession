@@ -133,8 +133,6 @@ interface FileViewerContentProps {
   loadedBytes: number;
   totalBytes: number;
   onRetry: () => void;
-  /** Return to the draft a failed reload kept, without discarding it. */
-  onKeepEditing: () => void;
   onChange: (value: string) => void;
   onSuggestionPreview: () => void;
   onSuggestionDismiss: () => void;
@@ -148,7 +146,7 @@ function FileViewerContent({
   loading, error, viewerType, mediaBlobUrl, mediaMimeType, path, originalContent, content,
   isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
   isChunkedLoading, loadedBytes, totalBytes,
-  onRetry, onKeepEditing, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
+  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
   onViewModeChange, initialLine, initialColumn,
 }: FileViewerContentProps) {
   // Chunked progress view — shown while a large file is being downloaded in chunks.
@@ -224,14 +222,7 @@ function FileViewerContent({
         ) : error ? (
           <div className={cn('flex h-full flex-col items-center justify-center gap-2 p-3', chromeSansRole('secondary'))}>
             <p className="text-destructive">{error}</p>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
-              {/* A failed reload keeps the user's draft in state; the error
-                  belongs to the read, so the draft must stay reachable (#3743). */}
-              {isDirty ? (
-                <Button variant="outline" size="sm" onClick={onKeepEditing}>Keep editing</Button>
-              ) : null}
-            </div>
+            <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>
         ) : (
           <FileContentViewer
@@ -390,14 +381,13 @@ export function FileViewer({
     isChunkedLoading,
     forceReadOnly,
     setShowUnsavedDialog,
-    reloadFile,
+    loadFile,
     handleEditToggle,
     handleSetViewMode,
     handleContentChange,
     handleSave,
     handleSaveOverwrite,
     handleReloadAfterConflict,
-    handleKeepEditing,
     handleCloseClick,
     handleConfirmClose,
     handleSuggestionPreview,
@@ -441,8 +431,7 @@ export function FileViewer({
         isChunkedLoading={isChunkedLoading}
         loadedBytes={loadedBytes}
         totalBytes={totalBytes}
-        onRetry={reloadFile}
-        onKeepEditing={handleKeepEditing}
+        onRetry={loadFile}
         onChange={handleContentChange}
         onSuggestionPreview={handleSuggestionPreview}
         onSuggestionDismiss={handleSuggestionDismiss}

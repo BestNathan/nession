@@ -7,10 +7,15 @@ import type {
   SandboxCurrentContext,
   SandboxImplementationSupport,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { imagesApi, type ImageDescriptor } from '@/capabilities/images';
+import {
+  imagesApi,
+  type ImageDescriptor,
+  type ImageLibraryEntry,
+} from '@/capabilities/images';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import { useSandboxDraft } from '../../hooks/useSandboxDraft';
 import { SandboxFilesystemFields } from '../../components/SandboxFilesystemFields';
+import { sandboxApi } from '../../SandboxPlugin';
 
 const workspaceApiMock = vi.hoisted(() => ({
   list: vi.fn(),
@@ -86,6 +91,26 @@ function image(imageId: string, digest: string, alias: string): ImageDescriptor 
   };
 }
 
+function libraryEntry(
+  descriptor: ImageDescriptor,
+  imageKind: string,
+): ImageLibraryEntry {
+  return {
+    image: descriptor,
+    repository: 'nession/fixtures',
+    tags: [],
+    manifest_digest: null,
+    media_type: null,
+    kind: null,
+    image_kind: imageKind,
+    mount_default: imageKind === 'tool' ? '/opt/fixture' : null,
+    platform: 'linux/amd64',
+    representation: 'single_layer',
+    layers: [],
+    closure: [],
+  };
+}
+
 function Harness() {
   const ctx = context();
   const draft = useSandboxDraft(ctx);
@@ -94,6 +119,7 @@ function Harness() {
     <SandboxFilesystemFields
       context={ctx}
       sessionId="a1:s1"
+      targetPlatform="linux/amd64"
       draft={draft}
       workingDir={workingDir}
       workingDirError={undefined}
@@ -106,25 +132,102 @@ function Harness() {
 describe('Sandbox Filesystem editor', () => {
   let surface: MockPluginSurface;
   let release: () => void;
+  let releaseSandbox: () => void;
 
   beforeEach(() => {
     workspaceApiMock.list.mockReset();
     workspaceApiMock.list.mockResolvedValue([]);
     surface = createMockPluginSurface();
     release = imagesApi.install(surface);
+    releaseSandbox = sandboxApi.install(surface);
   });
 
-  afterEach(() => release());
+  afterEach(() => {
+    release();
+    releaseSandbox();
+  });
 
   async function chooseRootfs(images: ImageDescriptor[]) {
     await userEvent.click(screen.getByTestId('sandbox-rootfs-image'));
-    await waitFor(() => expect(surface.requests[0]?.type).toBe('server.image.list'));
-    surface.resolveNext('server.image.list', { images, total: images.length });
+    await waitFor(() =>
+      expect(surface.requests[0]?.type).toBe('server.image.library.list'),
+    );
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: images.map((descriptor) => libraryEntry(descriptor, 'base_runtime')),
+      total: images.length,
+    });
     await screen.findByText(images[0].aliases[0]);
     await userEvent.click(screen.getByTestId('sandbox-image-row'));
     await userEvent.click(screen.getByTestId('sandbox-image-select-submit'));
     await screen.findByTestId('sandbox-rootfs-selected');
   }
+
+  it('projects role, platform and Agent cache, and refuses a mismatched or referenced image', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByTestId('sandbox-rootfs-image'));
+    await waitFor(() =>
+      expect(surface.requests[0]?.type).toBe('server.image.library.list'),
+    );
+    const base = libraryEntry(image('base', DIGEST, 'base-runtime'), 'base_runtime');
+    const tool = libraryEntry(image('tool', `sha256:${'b'.repeat(64)}`, 'rust-toolchain'), 'tool');
+    const referenced = {
+      ...libraryEntry(image('composite', `sha256:${'c'.repeat(64)}`, 'composite'), 'base_runtime'),
+      representation: 'referenced' as const,
+    };
+    const wrongPlatform = {
+      ...libraryEntry(image('arm', `sha256:${'d'.repeat(64)}`, 'arm-base'), 'base_runtime'),
+      platform: 'linux/arm64',
+    };
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [base, tool, referenced, wrongPlatform],
+      total: 4,
+    });
+    await screen.findByText('base-runtime');
+    const rows = await screen.findAllByTestId('sandbox-image-row');
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toBeEnabled();
+    expect(rows[0]).toHaveAttribute('data-image-role', 'base_runtime');
+    expect(rows[1]).toBeDisabled();
+    expect(rows[1]).toHaveTextContent('Not a Base Runtime image (Toolchain)');
+    expect(rows[2]).toBeDisabled();
+    expect(rows[2]).toHaveTextContent('Referenced composite images are not executable');
+    expect(rows[3]).toBeDisabled();
+    expect(rows[3]).toHaveTextContent('does not match this Agent (linux/amd64)');
+
+    // The Agent cache phase is observed for this Session's Agent, separately
+    // from the Server Ready badge.
+    const cacheRequest = surface.requests.find(
+      (request) => request.type === 'server.session.sandbox.context',
+    );
+    expect(cacheRequest?.payload.cache_digests).toEqual([
+      DIGEST,
+      `sha256:${'b'.repeat(64)}`,
+      `sha256:${'c'.repeat(64)}`,
+      `sha256:${'d'.repeat(64)}`,
+    ]);
+    surface.resolveNext('server.session.sandbox.context', {
+      success: true,
+      context: context(),
+      cache_statuses: [],
+      cache_observations: [
+        {
+          contract_version: 1,
+          digest: DIGEST,
+          phase: 'resumable',
+          downloaded_bytes: 524_288,
+          total_bytes: 4_194_304,
+          active: false,
+          updated_at: 1,
+        },
+      ],
+    });
+    await waitFor(() =>
+      expect(rows[0]).toHaveTextContent('Resumable partial'),
+    );
+    expect(rows[0]).toHaveTextContent('Server Ready');
+  });
 
   it('declares one Base Runtime RootFS and previews the mapping', async () => {
     render(<Harness />);
@@ -142,12 +245,15 @@ describe('Sandbox Filesystem editor', () => {
     await chooseRootfs([image('base', DIGEST, 'base-runtime')]);
     await userEvent.click(screen.getByTestId('sandbox-mount-add'));
     await waitFor(() =>
-      expect(surface.requests.some((request) => request.type === 'server.image.list')).toBe(
-        true,
-      ),
+      expect(
+        surface.requests.some(
+          (request) => request.type === 'server.image.library.list',
+        ),
+      ).toBe(true),
     );
-    surface.resolveNext('server.image.list', {
-      images: [image('tool', TOOL_DIGEST, 'rust-toolchain')],
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(image('tool', TOOL_DIGEST, 'rust-toolchain'), 'tool')],
       total: 1,
     });
     await screen.findByText('rust-toolchain');
@@ -165,13 +271,14 @@ describe('Sandbox Filesystem editor', () => {
     );
   });
 
-  it('declares an auto or Project Location Workspace only under an image RootFS', async () => {
+  it('declares an auto or Project Location Workspace under a Local RootFS', async () => {
     render(<Harness />);
-    await screen.findByText(/requires an image RootFS/);
-    expect(screen.getByTestId('sandbox-workspace-auto')).toBeDisabled();
-    expect(screen.getByTestId('sandbox-workspace-project')).toBeDisabled();
+    // A Local RootFS is a Host-root composition; it no longer needs a Base
+    // Runtime image before a Workspace can be selected (#3792, #3793).
+    expect(screen.queryByText(/requires an image RootFS/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('sandbox-workspace-auto')).toBeEnabled();
+    expect(screen.getByTestId('sandbox-workspace-project')).toBeEnabled();
 
-    await chooseRootfs([image('base', DIGEST, 'base-runtime')]);
     await userEvent.click(screen.getByTestId('sandbox-workspace-auto'));
     expect(screen.getByTestId('sandbox-filesystem-preview-workspace')).toHaveTextContent(
       'Auto by Session name',

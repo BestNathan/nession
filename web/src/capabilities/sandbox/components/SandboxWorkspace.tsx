@@ -9,6 +9,7 @@ import type {
 import type { ImageCacheObservation } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
+import { agentDisplayName } from '@/shared/lib/format';
 import { useSandboxContext, type SandboxContextState } from '../hooks/useSandboxContext';
 import { useSandboxDraft, type SandboxDraftState } from '../hooks/useSandboxDraft';
 import { useImageCacheObservations } from '../hooks/useImageCacheObservations';
@@ -70,6 +71,7 @@ interface SandboxContentProps {
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
   sessionId: string | null;
+  targetPlatform: string | null;
   observations: Map<string, ImageCacheObservation>;
   activeSection: SandboxSectionId;
   activePolicy: SandboxPolicyId;
@@ -124,6 +126,7 @@ function SandboxContent({
   workingDir,
   onWorkingDirChange,
   sessionId,
+  targetPlatform,
   observations,
   activeSection,
   activePolicy,
@@ -168,7 +171,12 @@ function SandboxContent({
     return <SandboxImagesPanel experience={ctx.experience} sessionId={sessionId} />;
   }
   if (activeSection === 'workspaces') {
-    return <SandboxWorkspacesPanel sessionId={sessionId} />;
+    return (
+      <SandboxWorkspacesPanel
+        sessionId={sessionId}
+        agentLabel={ctx.agent ? agentDisplayName(ctx.agent) : 'This Session’s Agent'}
+      />
+    );
   }
   if (context.status === 'inside') {
     if (activeSection === 'policies') {
@@ -208,6 +216,7 @@ function SandboxContent({
     workingDir,
     onWorkingDirChange,
     sessionId,
+    targetPlatform,
     observations,
     onPreflight: () => preflightState.runPreflight(draft.draft),
     onRequestEnter: transitions.requestEnter,
@@ -239,6 +248,10 @@ export function SandboxWorkspace({
   depth?: WorkspaceDepthControl;
 }) {
   const sessionId = ctx.session?.session_id ?? null;
+  const targetPlatform =
+    ctx.agent?.metadata?.os && ctx.agent.metadata.architecture
+      ? `${ctx.agent.metadata.os}/${ctx.agent.metadata.architecture}`
+      : null;
   const [activeSection, setActiveSection] = useState<SandboxSectionId>('overview');
   const [activePolicy, setActivePolicy] = useState<SandboxPolicyId>('filesystem');
   const sandbox = useSandboxContext(sessionId);
@@ -328,6 +341,7 @@ export function SandboxWorkspace({
           workingDir={workingDir}
           onWorkingDirChange={setWorkingDir}
           sessionId={sessionId}
+          targetPlatform={targetPlatform}
           observations={observations.observations}
           activeSection={activeSection}
           activePolicy={activePolicy}

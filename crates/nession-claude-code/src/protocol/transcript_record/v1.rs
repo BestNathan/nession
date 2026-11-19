@@ -29,7 +29,7 @@ pub const DEFAULT_CHUNK: u32 = 256 * 1024;
 /// Where a single-record read stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptRecordStateV1 {
     /// The record was found and this chunk is part of it.
@@ -49,9 +49,9 @@ pub enum TranscriptRecordStateV1 {
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordRequestV1 {
     /// The Nession session the read is scoped to. Required.
     pub session_id: String,
@@ -71,9 +71,9 @@ pub struct TranscriptRecordRequestV1 {
 }
 
 /// The answer: one chunk of one record.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordResponseV1 {
     pub state: TranscriptRecordStateV1,
 

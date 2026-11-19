@@ -19,14 +19,24 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::{AgentConfig, AttachMode};
+use nession_agent::connection::{ServerClient, ServerClientHandle};
+use nession_agent::extension::ExtensionRegistry;
 use nession_agent::p2p_auth::P2pAuth;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
 use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::{McpConfig, ServerConfig};
-use nession_server::db::Database;
+use nession_common::SecretString;
+use nession_protocol::contracts::agent::v1::AgentMetadata;
+use nession_protocol::contracts::project::v1::{ProjectLocation, ProjectSessionDefaults};
+use nession_server::db::{Database, ProjectRow};
 use nession_server::server::WebSocketServer;
 use rand::Rng;
+use rmcp::model::{CallToolRequestParams, ProtocolVersion};
+use rmcp::service::NotificationContext;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::{ClientHandler, ClientLifecycleMode, ClientServiceExt, RoleClient};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -37,6 +47,10 @@ const SERVER_TOKEN: &str = "server-token";
 const AGENT_TOKEN: &str = "agent-token";
 const AGENT_ID: &str = "standalone-agent";
 const CLUSTER_AGENT: &str = "cluster-agent";
+/// A real tmux-backed Agent registered over the central Server connection.
+const PROJECT_AGENT: &str = "project-agent";
+/// A syntactically valid Server-minted Project identity.
+const PROJECT_ID: &str = "project-123e4567-e89b-42d3-a456-426614174000";
 
 struct ChildGuard(Child);
 
@@ -110,12 +124,22 @@ impl HttpResponse {
     }
 }
 
-async fn start_server_with_mcp(mcp_enabled: bool) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+async fn start_server_with_mcp(
+    mcp_enabled: bool,
+) -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<Database>) {
+    start_server_with_heartbeat(mcp_enabled, 10, 60).await
+}
+
+async fn start_server_with_heartbeat(
+    mcp_enabled: bool,
+    heartbeat_interval_secs: u64,
+    heartbeat_timeout_secs: u64,
+) -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<Database>) {
     let config = ServerConfig {
         listen_address: "127.0.0.1:0".to_string(),
         auth_token: SERVER_TOKEN.to_string(),
-        heartbeat_interval_secs: 10,
-        heartbeat_timeout_secs: 60,
+        heartbeat_interval_secs,
+        heartbeat_timeout_secs,
         image_blob_dir: std::env::temp_dir()
             .join(format!("nession-test-images-{}", uuid::Uuid::new_v4()))
             .join("blobs")
@@ -134,7 +158,8 @@ async fn start_server_with_mcp(mcp_enabled: bool) -> (SocketAddr, tokio::task::J
         ..Default::default()
     };
     let db = Database::new(":memory:").await.expect("database");
-    let mut server = WebSocketServer::new(config, Arc::new(db))
+    let db = Arc::new(db);
+    let mut server = WebSocketServer::new(config, Arc::clone(&db))
         .await
         .expect("server");
     let addr = server.local_addr().expect("address");
@@ -144,7 +169,7 @@ async fn start_server_with_mcp(mcp_enabled: bool) -> (SocketAddr, tokio::task::J
             .await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    (addr, handle)
+    (addr, handle, db)
 }
 
 async fn start_agent(
@@ -186,11 +211,108 @@ async fn start_agent(
             },
             ..Default::default()
         };
-        server.mount_mcp(&config, agent_token).expect("mount MCP");
+        server
+            .mount_mcp(&config, agent_token, Vec::new())
+            .expect("mount MCP");
     }
     let (handle, addr) = server.start().await.expect("start agent");
     tokio::time::sleep(Duration::from_millis(50)).await;
     (addr, handle)
+}
+
+/// Register a real tmux-backed Agent with the Server over its central
+/// connection.
+///
+/// The Server's canonical `server.session.create`/list routes then reach this
+/// Agent's real `SessionManager`, which is what makes the Project-context
+/// proof a Server+Agent+tmux runtime Case rather than a projection test.
+async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Arc<SessionManager>) {
+    let tmux = Arc::new(SessionManager::new());
+    let metadata = AgentMetadata {
+        tmux_version: "3.3".to_string(),
+        os_version: "test".to_string(),
+        nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
+        architecture: String::new(),
+        os: String::new(),
+        variant: None,
+    };
+    let registry = ExtensionRegistry::new(
+        PROJECT_AGENT,
+        Vec::new(),
+        nession_agent::protocol::served_descriptors().expect("served descriptors"),
+    )
+    .expect("extension registry");
+    let client = ServerClient::new(
+        format!("ws://{server_addr}"),
+        SERVER_TOKEN,
+        PROJECT_AGENT,
+        "test-host",
+        "127.0.0.1",
+        19998,
+        None,
+        Vec::new(),
+        None,
+        metadata,
+        Arc::clone(&tmux),
+        "/tmp".to_string(),
+        Some(Arc::new(registry)),
+        SecretString::new(AGENT_TOKEN),
+        nession_agent::execution::mutation_scheduler(),
+    );
+    let (handle, _interval) = client.connect_and_run().await.expect("register agent");
+    (handle, tmux)
+}
+
+/// Send one authenticated Server request on a fresh WebSocket.
+///
+/// This is how a Web client reaches the real `server_routes!` table. The
+/// connection is closed after the reply; only the reply payload is returned.
+async fn server_call(addr: SocketAddr, wire: &str, payload: Value) -> Value {
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("server socket");
+    let (mut sink, mut stream) = ws.split();
+    let auth = json!({
+        "msg_type": "server.auth",
+        "id": "auth-1",
+        "timestamp": 0,
+        "payload": { "auth_token": SERVER_TOKEN, "client_id": "project-test" }
+    });
+    sink.send(WsMessage::Text(auth.to_string()))
+        .await
+        .expect("send auth");
+    let reply = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(frame)) = stream.next().await {
+            let parsed: Value =
+                serde_json::from_str(frame.to_text().expect("text frame")).expect("auth JSON");
+            if parsed["id"] == "auth-1" {
+                return parsed;
+            }
+        }
+        panic!("the Server closed before answering auth");
+    })
+    .await
+    .expect("auth reply timeout");
+    assert_eq!(reply["payload"]["status"], "success", "{reply}");
+
+    let id = format!("call-{}", uuid::Uuid::new_v4());
+    let request = json!({ "msg_type": wire, "id": id, "timestamp": 0, "payload": payload });
+    sink.send(WsMessage::Text(request.to_string()))
+        .await
+        .expect("send request");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(frame)) = stream.next().await {
+            let parsed: Value =
+                serde_json::from_str(frame.to_text().expect("text frame")).expect("reply JSON");
+            if parsed["id"] == id.as_str() {
+                return parsed["payload"].clone();
+            }
+        }
+        panic!("the Server closed before answering {wire}");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{wire} reply timeout"))
 }
 
 fn spawn_standalone(config_path: &Path) -> ChildGuard {
@@ -401,8 +523,13 @@ async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, 
         .await
         .expect("register");
     let task_log = Arc::clone(&log);
+    let answering_agent = CLUSTER_AGENT.to_string();
     let task = tokio::spawn(async move {
-        while let Some(Ok(frame)) = stream.next().await {
+        let mut heartbeat = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            tokio::select! {
+                frame = stream.next() => {
+            let Some(Ok(frame)) = frame else { break };
             let Ok(text) = frame.to_text() else { continue };
             let Ok(parsed) = serde_json::from_str::<Value>(text) else {
                 continue;
@@ -467,7 +594,28 @@ async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, 
                     "payload": payload
                 })
             };
-            let _ = sink.send(WsMessage::Text(response.to_string())).await;
+            if sink.send(WsMessage::Text(response.to_string())).await.is_err() {
+                break;
+            }
+                }
+                _ = heartbeat.tick() => {
+                    let beat = json!({
+                        "msg_type": "control.heartbeat",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": 0,
+                        "payload": {
+                            "agent_id": answering_agent,
+                            "status": "online",
+                            "session_count": 0,
+                            "active_sessions": 0,
+                            "metadata": { "uptime_seconds": 0, "load_average": [0.0, 0.0, 0.0] }
+                        }
+                    });
+                    if sink.send(WsMessage::Text(beat.to_string())).await.is_err() {
+                        break;
+                    }
+                }
+            }
         }
     });
     (task, log)
@@ -669,7 +817,7 @@ async fn standalone_query_token_authentication_is_opt_in() {
 
 #[tokio::test]
 async fn standalone_routes_agent_session_tools_through_the_server() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -690,7 +838,7 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 
     let session = initialize_with(mcp_addr, MCP_TOKEN).await;
     let tools = tools_of(mcp_addr, MCP_TOKEN).await;
-    assert_eq!(tools.as_array().expect("tools").len(), 11);
+    assert_eq!(tools.as_array().expect("tools").len(), 15);
 
     let agents = call_tool(
         mcp_addr,
@@ -783,8 +931,361 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 /// Server, keep the durable revision safe under a stale writer, and never put
 /// ENV values in a result.
 #[tokio::test]
+async fn project_context_sessions_use_server_association_and_real_agent_runtime() {
+    let (server_addr, server_task, db) = start_server_with_mcp(true).await;
+    let (agent_handle, tmux) = register_real_agent(server_addr).await;
+
+    let project_dir = tempfile::tempdir().expect("project directory");
+    let project_path = project_dir.path().to_string_lossy().into_owned();
+    db.insert_project(&ProjectRow {
+        project_id: PROJECT_ID.to_string(),
+        name: "MCP Project".to_string(),
+        description: Some("a Project-context Session test".to_string()),
+        source: None,
+        locations: vec![ProjectLocation {
+            agent_id: PROJECT_AGENT.to_string(),
+            path: project_path.clone(),
+        }],
+        session_defaults: Some(ProjectSessionDefaults {
+            shell: None,
+            env_profile_ids: vec!["base.env".to_string()],
+            sandbox_policy_ref: None,
+        }),
+        image_digest: None,
+        created_at: 1,
+        updated_at: 2,
+    })
+    .await
+    .expect("insert Project");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut child = spawn_standalone(&config_path);
+    let mcp_addr = await_listen_addr(&mut child.0).await;
+    let session = initialize_with(mcp_addr, MCP_TOKEN).await;
+
+    let env = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_env_write",
+        json!({ "name": "base.env", "content": "PUBLIC=1\n" }),
+    )
+    .await;
+    assert_eq!(env["isError"], false, "{env}");
+
+    // Discovery is Server-owned and independent of the Agent's live state.
+    let projects = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_list",
+        json!({}),
+    )
+    .await;
+    assert_eq!(projects["isError"], false, "{projects}");
+    let projects = text_of(&projects);
+    assert!(
+        projects["projects"]
+            .as_array()
+            .expect("projects")
+            .iter()
+            .any(|project| project["project_id"] == PROJECT_ID),
+        "{projects}"
+    );
+
+    let project = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_get",
+        json!({ "project_id": PROJECT_ID }),
+    )
+    .await;
+    assert_eq!(project["isError"], false, "{project}");
+    assert_eq!(text_of(&project)["locations"][0]["path"], project_path);
+
+    // SC-02/SC-03: create through the Project, inheriting its ENV defaults,
+    // and confirm the persisted association through both MCP projections.
+    let name = unique_name("project");
+    let created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": PROJECT_ID,
+            "agent_id": PROJECT_AGENT,
+            "name": name,
+            "target": { "kind": "existing", "working_dir": project_path }
+        }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let created = text_of(&created);
+    assert_eq!(created["project_id"], PROJECT_ID);
+    assert_eq!(created["session_id"], format!("{PROJECT_AGENT}:{name}"));
+
+    let scoped = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": PROJECT_ID, "force": true }),
+    )
+    .await;
+    assert_eq!(scoped["isError"], false, "{scoped}");
+    let scoped = text_of(&scoped);
+    assert!(
+        scoped["sessions"]
+            .as_array()
+            .expect("project sessions")
+            .iter()
+            .any(|entry| entry["name"] == name && entry["agent_id"] == PROJECT_AGENT),
+        "{scoped}"
+    );
+
+    let agent_sessions = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    assert_eq!(agent_sessions["isError"], false, "{agent_sessions}");
+    let agent_sessions = text_of(&agent_sessions);
+    let project_entry = agent_sessions["sessions"]
+        .as_array()
+        .expect("agent sessions")
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .cloned()
+        .expect("the Project Session is live on the Agent");
+    assert_eq!(project_entry["project_id"], PROJECT_ID);
+    let instance_before = project_entry["instance_id"].clone();
+
+    // A Session created through the Agent seam is explicitly unassociated.
+    let plain = unique_name("plain");
+    let plain_created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": PROJECT_AGENT, "name": plain }),
+    )
+    .await;
+    assert_eq!(plain_created["isError"], false, "{plain_created}");
+    let agent_sessions = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    let agent_sessions = text_of(&agent_sessions);
+    let plain_entry = agent_sessions["sessions"]
+        .as_array()
+        .expect("agent sessions")
+        .iter()
+        .find(|entry| entry["name"] == plain)
+        .cloned()
+        .expect("the plain Session is live on the Agent");
+    assert_eq!(
+        plain_entry["project_id"],
+        Value::Null,
+        "a confirmed non-association must be explicit null"
+    );
+
+    // SC-04: Web reassociation moves both projections without touching the
+    // Agent's Session runtime.
+    let rebind = server_call(
+        server_addr,
+        "server.session.project.set",
+        json!({
+            "session_id": format!("{PROJECT_AGENT}:{plain}"),
+            "project_id": PROJECT_ID
+        }),
+    )
+    .await;
+    assert_eq!(rebind["success"], true, "{rebind}");
+
+    let scoped = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": PROJECT_ID, "force": true }),
+    )
+    .await;
+    let scoped = text_of(&scoped);
+    let scoped_names: Vec<&str> = scoped["sessions"]
+        .as_array()
+        .expect("project sessions")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert!(scoped_names.contains(&plain.as_str()), "{scoped}");
+    assert!(scoped_names.contains(&name.as_str()), "{scoped}");
+
+    let unbind = server_call(
+        server_addr,
+        "server.session.project.set",
+        json!({
+            "session_id": format!("{PROJECT_AGENT}:{name}"),
+            "project_id": null
+        }),
+    )
+    .await;
+    assert_eq!(unbind["success"], true, "{unbind}");
+
+    let scoped = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_list",
+        json!({ "project_id": PROJECT_ID, "force": true }),
+    )
+    .await;
+    let scoped = text_of(&scoped);
+    let scoped_names: Vec<&str> = scoped["sessions"]
+        .as_array()
+        .expect("project sessions")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert!(!scoped_names.contains(&name.as_str()), "{scoped}");
+    assert!(scoped_names.contains(&plain.as_str()), "{scoped}");
+
+    let agent_sessions = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    let agent_sessions = text_of(&agent_sessions);
+    let project_entry = agent_sessions["sessions"]
+        .as_array()
+        .expect("agent sessions")
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .cloned()
+        .expect("the unbound Session is still live");
+    assert_eq!(project_entry["project_id"], Value::Null);
+    assert_eq!(
+        project_entry["instance_id"], instance_before,
+        "Web membership changes must not replace the Session incarnation"
+    );
+    let live = tmux.list_sessions().await.expect("tmux sessions");
+    assert!(
+        live.iter().any(|session| session.name == name),
+        "Web membership changes must not touch the Agent Session runtime"
+    );
+
+    // SC-02: the Server remains the validator. An undeclared location, an
+    // unknown Project and a Managed target without a Project image are
+    // refusals, never unqualified successful creates.
+    let undeclared = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": PROJECT_ID,
+            "agent_id": PROJECT_AGENT,
+            "name": unique_name("undeclared"),
+            "target": { "kind": "existing", "working_dir": "/not/a/declared/location" }
+        }),
+    )
+    .await;
+    assert_eq!(undeclared["isError"], true, "{undeclared}");
+    assert!(
+        undeclared["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not an Existing Location"),
+        "{undeclared}"
+    );
+
+    let unknown_project = "project-223e4567-e89b-42d3-a456-426614174000";
+    let unknown = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": unknown_project,
+            "agent_id": PROJECT_AGENT,
+            "name": unique_name("unknown"),
+            "target": { "kind": "existing", "working_dir": project_path }
+        }),
+    )
+    .await;
+    assert_eq!(unknown["isError"], true, "{unknown}");
+    assert!(
+        unknown["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not found"),
+        "{unknown}"
+    );
+
+    let missing = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_get",
+        json!({ "project_id": unknown_project }),
+    )
+    .await;
+    assert_eq!(missing["isError"], true, "{missing}");
+
+    let managed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_session_create",
+        json!({
+            "project_id": PROJECT_ID,
+            "agent_id": PROJECT_AGENT,
+            "name": unique_name("managed"),
+            "target": {
+                "kind": "managed",
+                "base_digest": format!("sha256:{}", "a".repeat(64))
+            }
+        }),
+    )
+    .await;
+    assert_eq!(managed["isError"], true, "{managed}");
+    assert!(
+        managed["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("does not pin an EROFS image"),
+        "{managed}"
+    );
+
+    for session_name in [&name, &plain] {
+        let _ = call_tool(
+            mcp_addr,
+            MCP_TOKEN,
+            &session,
+            "nession_agent_kill_session",
+            json!({ "agent_id": PROJECT_AGENT, "name": session_name }),
+        )
+        .await;
+    }
+    let _ = agent_handle.shutdown().await;
+    terminate_and_wait(&mut child.0).await;
+    server_task.abort();
+}
+
+#[tokio::test]
 async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1104,7 +1605,7 @@ async fn standalone_binds_a_session_with_revision_cas_and_no_value_leakage() {
 /// and a save that does not advance the Session binding.
 #[tokio::test]
 async fn standalone_manages_env_files_with_canonical_guards() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1356,7 +1857,7 @@ async fn standalone_manages_env_files_with_canonical_guards() {
 
 #[tokio::test]
 async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, false).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let config_path = write_direct_config(dir.path(), server_addr, agent_addr);
@@ -1403,6 +1904,19 @@ async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
     .await;
     assert_eq!(wrong["isError"], true);
 
+    // Project Tools are Server-owned even in explicit direct-Agent mode: the
+    // configured Server answers them and the direct Agent route never does.
+    let projects = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_server_project_list",
+        json!({}),
+    )
+    .await;
+    assert_eq!(projects["isError"], false, "{projects}");
+    assert_eq!(text_of(&projects)["projects"], json!([]));
+
     let killed = call_tool(
         mcp_addr,
         MCP_TOKEN,
@@ -1421,7 +1935,7 @@ async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
 /// SC-03: all three hosts serve one catalog, byte for byte.
 #[tokio::test]
 async fn all_three_hosts_share_one_tool_catalog() {
-    let (server_addr, server_task) = start_server_with_mcp(true).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(true).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, true).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let config_path = write_routed_config(dir.path(), server_addr);
@@ -1432,7 +1946,7 @@ async fn all_three_hosts_share_one_tool_catalog() {
     let agent_tools = tools_of(agent_addr, AGENT_TOKEN).await;
     let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
 
-    assert_eq!(server_tools.as_array().expect("tools").len(), 11);
+    assert_eq!(server_tools.as_array().expect("tools").len(), 15);
     let names: Vec<_> = server_tools
         .as_array()
         .expect("tools")
@@ -1443,6 +1957,10 @@ async fn all_three_hosts_share_one_tool_catalog() {
         names,
         vec![
             "nession_server_list_agents",
+            "nession_server_project_list",
+            "nession_server_project_get",
+            "nession_server_project_session_list",
+            "nession_server_project_session_create",
             "nession_server_env_list",
             "nession_server_env_get",
             "nession_server_env_write",
@@ -1498,5 +2016,536 @@ async fn all_three_hosts_share_one_tool_catalog() {
     }
 
     let _ = agent_handle.shutdown().await;
+    server_task.abort();
+}
+
+/// The fixture Extension Tool manifest a participant advertises (`#3778`).
+fn extension_manifest(description: &str, version: u32) -> Value {
+    json!({
+        "manifest_version": version,
+        "tools": [{
+            "name": "fixture_extension_echo",
+            "provider": "fixture-extension",
+            "description": description,
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["agent_id", "message", "session_id"],
+                "properties": {
+                    "agent_id": { "type": "string", "description": "The owning Agent." },
+                    "message": { "type": "string", "description": "The message to echo." },
+                    "session_id": { "type": "string", "description": "The owner-specific Session." }
+                }
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string", "description": "The echoed message." },
+                    "agent": { "type": "string", "description": "The answering Agent." }
+                }
+            }
+        }]
+    })
+}
+
+/// Register a participant that advertises a contribution manifest and answers
+/// the Server's relayed Tool call like the owning Agent would.
+///
+/// Returns only after the Server accepted the registration, so the manifest is
+/// already installed (or refused) when the caller inspects the catalog.
+async fn register_extension_agent(
+    addr: SocketAddr,
+    agent_id: &str,
+    manifest: Value,
+) -> (tokio::task::JoinHandle<()>, Arc<BrokerLog>) {
+    let log = Arc::new(BrokerLog::default());
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+        .await
+        .expect("mock agent socket");
+    let (mut sink, mut stream) = ws.split();
+    let register = json!({
+        "msg_type": "server.agent.register",
+        "id": "register-1",
+        "timestamp": 0,
+        "payload": {
+            "agent_id": agent_id,
+            "hostname": "mock",
+            "ip_address": "127.0.0.1",
+            "port": 19999,
+            "auth_token": SERVER_TOKEN,
+            "protocol_manifest": { "provider": "test-agent", "protocols": {} },
+            "mcp_tool_manifest": manifest,
+            "metadata": {
+                "tmux_version": "3.3",
+                "os_version": "Linux",
+                "nession_version": "0.1.0"
+            }
+        }
+    });
+    sink.send(WsMessage::Text(register.to_string()))
+        .await
+        .expect("register");
+    // The acceptance is sent after the Server installed the manifest, so this
+    // wait is the synchronization point for the catalog assertions below.
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("registration answer")
+            .expect("registration frame")
+            .expect("registration frame is valid");
+        let text = frame.to_text().expect("text frame");
+        let parsed: Value = serde_json::from_str(text).expect("registration JSON");
+        if parsed["msg_type"] == "server.agent.register" {
+            assert_eq!(parsed["payload"]["status"], "accepted", "{parsed}");
+            break;
+        }
+    }
+    let task_log = Arc::clone(&log);
+    let answering_agent = agent_id.to_string();
+    let task = tokio::spawn(async move {
+        let mut heartbeat = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            tokio::select! {
+                frame = stream.next() => {
+            let Some(Ok(frame)) = frame else { break };
+            let Ok(text) = frame.to_text() else { continue };
+            let Ok(parsed) = serde_json::from_str::<Value>(text) else {
+                continue;
+            };
+            let Some(request_id) = parsed["payload"]["request_id"].as_str() else {
+                continue;
+            };
+            let command = parsed["msg_type"].as_str().unwrap_or_default().to_string();
+            task_log
+                .commands
+                .lock()
+                .expect("broker log")
+                .push(command.clone());
+            let payload = if command == "agent.mcp.tool.call" {
+                let arguments = &parsed["payload"]["arguments"];
+                let message = arguments["message"].as_str().unwrap_or_default();
+                let session = arguments["session_id"].as_str().unwrap_or_default();
+                if session == "missing-session" {
+                    json!({
+                        "request_id": request_id,
+                        "command": command,
+                        "success": false,
+                        "error": {
+                            "kind": "not_found",
+                            "message": format!("Session '{session}' does not exist")
+                        },
+                    })
+                } else {
+                    json!({
+                        "request_id": request_id,
+                        "command": command,
+                        "success": true,
+                        "result": { "message": message, "agent": answering_agent },
+                    })
+                }
+            } else {
+                json!({
+                    "request_id": request_id,
+                    "command": command,
+                    "success": true,
+                    "sessions": [],
+                })
+            };
+            let response = json!({
+                "msg_type": "server.agent.command-response",
+                "id": format!("response-{request_id}"),
+                "timestamp": 0,
+                "payload": payload
+            });
+            if sink.send(WsMessage::Text(response.to_string())).await.is_err() {
+                break;
+            }
+                }
+                _ = heartbeat.tick() => {
+                    let beat = json!({
+                        "msg_type": "control.heartbeat",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": 0,
+                        "payload": {
+                            "agent_id": answering_agent,
+                            "status": "online",
+                            "session_count": 0,
+                            "active_sessions": 0,
+                            "metadata": { "uptime_seconds": 0, "load_average": [0.0, 0.0, 0.0] }
+                        }
+                    });
+                    if sink.send(WsMessage::Text(beat.to_string())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    (task, log)
+}
+
+/// `#3778` SC-03: one contributed Tool, advertised by its owning Agent,
+/// invoked through Server-embedded and Standalone hosts, with wrong-target and
+/// conflicting/stale manifests failing closed.
+#[tokio::test]
+async fn extension_tool_routes_to_the_named_agent_across_hosts() {
+    // A one-second liveness window makes the offline transition observable in
+    // this test without a sixty-second wait.
+    let (server_addr, server_task, _db) = start_server_with_heartbeat(true, 1, 1).await;
+    let (first_agent, first_log) = register_extension_agent(
+        server_addr,
+        CLUSTER_AGENT,
+        extension_manifest("Echo one message.", 1),
+    )
+    .await;
+
+    let server_tools = tools_of(server_addr, SERVER_TOKEN).await;
+    let tool = server_tools
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .expect("the contributed Tool is advertised");
+    assert_eq!(tool["description"], "Echo one message.");
+    assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+    assert_eq!(
+        tool["inputSchema"]["required"],
+        json!(["agent_id", "message", "session_id"])
+    );
+    assert_eq!(
+        tool["outputSchema"]["properties"]["agent"]["description"],
+        "The answering Agent."
+    );
+
+    let server_session = initialize_with(server_addr, SERVER_TOKEN).await;
+    let called = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(called["isError"], false, "{called}");
+    assert_eq!(
+        text_of(&called),
+        json!({ "message": "hello", "agent": CLUSTER_AGENT })
+    );
+    assert_eq!(
+        first_log.commands(),
+        vec!["agent.mcp.tool.call".to_string()],
+        "the Server brokered exactly one call to the owning Agent"
+    );
+
+    // A different Agent is not silently substituted.
+    let wrong = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": "other-agent", "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(wrong["isError"], true, "{wrong}");
+    assert_eq!(text_of(&wrong)["error"]["kind"], "not_found", "{wrong}");
+
+    // Owner-specific addressing is forwarded and the owner decides: an
+    // unknown Session is refused by the Agent, never guessed or rerouted.
+    let unknown_session = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "hello", "session_id": "missing-session" }),
+    )
+    .await;
+    assert_eq!(unknown_session["isError"], true, "{unknown_session}");
+    assert_eq!(
+        text_of(&unknown_session)["error"]["kind"],
+        "not_found",
+        "{unknown_session}"
+    );
+
+    // A second Agent advertising the same name with a different contract is
+    // refused as a manifest. The first contract stays advertised and the second
+    // Agent cannot be routed to it.
+    let (second_agent, _) = register_extension_agent(
+        server_addr,
+        "second-agent",
+        extension_manifest("Different semantics.", 1),
+    )
+    .await;
+    let after_conflict = tools_of(server_addr, SERVER_TOKEN).await;
+    let tool = after_conflict
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .expect("the contributed Tool is still advertised");
+    assert_eq!(
+        tool["description"], "Echo one message.",
+        "a conflicting manifest must not replace the live contract"
+    );
+    let conflicted = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": "second-agent", "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(conflicted["isError"], true, "{conflicted}");
+    assert_eq!(
+        text_of(&conflicted)["error"]["kind"],
+        "not_found",
+        "the refused Agent's contribution is not routable"
+    );
+
+    // An unsupported manifest version is refused the same way.
+    let (third_agent, _) = register_extension_agent(
+        server_addr,
+        "third-agent",
+        extension_manifest("Stale semantics.", 99),
+    )
+    .await;
+    let stale = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": "third-agent", "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(stale["isError"], true, "{stale}");
+    assert_eq!(text_of(&stale)["error"]["kind"], "not_found", "{stale}");
+
+    // Standalone reads the Server's validated manifest at startup and invokes
+    // the same Tool against the same explicitly named Agent.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut standalone = spawn_standalone(&config_path);
+    let standalone_addr = await_listen_addr(&mut standalone.0).await;
+    let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
+    assert!(
+        standalone_tools
+            .as_array()
+            .expect("tools")
+            .iter()
+            .any(|tool| tool["name"] == "fixture_extension_echo"),
+        "standalone must advertise the Server's contributed Tool: {standalone_tools}"
+    );
+    // Same name means the same schema and description in every hosting mode.
+    let server_contribution = tools_of(server_addr, SERVER_TOKEN)
+        .await
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .cloned()
+        .expect("the Server still advertises the contribution");
+    let standalone_contribution = standalone_tools
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "fixture_extension_echo")
+        .cloned()
+        .expect("the standalone host advertises the contribution");
+    assert_eq!(
+        standalone_contribution, server_contribution,
+        "the contributed Tool definition must be identical across hosts"
+    );
+    let standalone_session = initialize_with(standalone_addr, MCP_TOKEN).await;
+    let via_standalone = call_tool(
+        standalone_addr,
+        MCP_TOKEN,
+        &standalone_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "via standalone", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(via_standalone["isError"], false, "{via_standalone}");
+    assert_eq!(
+        text_of(&via_standalone),
+        json!({ "message": "via standalone", "agent": CLUSTER_AGENT })
+    );
+
+    // An Agent going offline keeps its Tool listed and answers the truth for
+    // the named target; it never reroutes to another Agent or a local guess.
+    first_agent.abort();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let listed = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_server_list_agents",
+            json!({}),
+        )
+        .await;
+        let status = text_of(&listed)["agents"]
+            .as_array()
+            .and_then(|agents| {
+                agents
+                    .iter()
+                    .find(|agent| agent["agent_id"] == CLUSTER_AGENT)
+            })
+            .map(|agent| agent["status"].clone());
+        if status == Some(json!("offline")) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the Server never observed the Agent's disconnect: {listed}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let offline = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "fixture_extension_echo",
+        json!({ "agent_id": CLUSTER_AGENT, "message": "hello", "session_id": "s1" }),
+    )
+    .await;
+    assert_eq!(offline["isError"], true, "{offline}");
+    assert_eq!(
+        text_of(&offline)["error"]["kind"],
+        "unavailable",
+        "{offline}"
+    );
+    let after_offline = tools_of(server_addr, SERVER_TOKEN).await;
+    assert!(
+        after_offline
+            .as_array()
+            .expect("tools")
+            .iter()
+            .any(|tool| tool["name"] == "fixture_extension_echo"),
+        "an offline owner keeps its capability advertised: {after_offline}"
+    );
+
+    second_agent.abort();
+    third_agent.abort();
+    server_task.abort();
+}
+
+fn catalog_revision(tools: &rmcp::model::ListToolsResult) -> u64 {
+    tools
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.0.get("nession/catalogRevision"))
+        .and_then(Value::as_u64)
+        .expect("every tools/list carries the catalog revision")
+}
+
+/// Records a legacy session's `notifications/tools/list_changed`.
+struct ToolListWatcher {
+    changed: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+impl ClientHandler for ToolListWatcher {
+    fn on_tool_list_changed(
+        &self,
+        _context: NotificationContext<RoleClient>,
+    ) -> impl std::future::Future<Output = ()> + rmcp::service::MaybeSendFuture + '_ {
+        let _ = self.changed.send(());
+        std::future::ready(())
+    }
+}
+
+/// `#3778` SC-02: an explicit manifest update is observable and notifies a
+/// connected legacy session; ordinary catalog reads and calls do not churn the
+/// generation, and a stateless modern client sees the same revision.
+#[tokio::test]
+async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_not_churn() {
+    let (server_addr, server_task, _db) = start_server_with_heartbeat(true, 1, 1).await;
+    let uri = format!("http://{server_addr}/mcp");
+    let (changed_tx, mut changed_rx) = tokio::sync::mpsc::unbounded_channel();
+    let legacy = ToolListWatcher {
+        changed: changed_tx,
+    }
+    .serve_with_lifecycle(
+        StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(uri.clone()).auth_header(SERVER_TOKEN),
+        ),
+        ClientLifecycleMode::Initialize,
+    )
+    .await
+    .expect("legacy client");
+
+    let first = legacy.list_tools(None).await.expect("tools/list");
+    let first_revision = catalog_revision(&first);
+    assert_eq!(first.tools.len(), 15);
+
+    // Reading and calling do not alter the catalog generation.
+    let _ = legacy
+        .call_tool(CallToolRequestParams::new("nession_server_list_agents"))
+        .await
+        .expect("tools/call");
+    let stable = legacy.list_tools(None).await.expect("tools/list");
+    assert_eq!(catalog_revision(&stable), first_revision);
+    assert_eq!(stable.tools.len(), 15);
+
+    // Ordinary Session runtime work is not a catalog event either.
+    let _ = legacy
+        .call_tool(
+            CallToolRequestParams::new("nession_agent_create_session").with_arguments(
+                json!({ "agent_id": CLUSTER_AGENT, "name": "runtime-churn" })
+                    .as_object()
+                    .expect("arguments")
+                    .clone(),
+            ),
+        )
+        .await
+        .expect("session create");
+    let after_session = legacy.list_tools(None).await.expect("tools/list");
+    assert_eq!(catalog_revision(&after_session), first_revision);
+    assert_eq!(after_session.tools.len(), 15);
+
+    // Installing a manifest is an explicit catalog change: the connected
+    // legacy session receives the list-change notification and the next list
+    // carries the new generation.
+    let (agent, _) = register_extension_agent(
+        server_addr,
+        CLUSTER_AGENT,
+        extension_manifest("Echo one message.", 1),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), changed_rx.recv())
+        .await
+        .expect("a list-change notification must arrive")
+        .expect("the notification channel stays open");
+    let changed = legacy.list_tools(None).await.expect("tools/list");
+    let changed_revision = catalog_revision(&changed);
+    assert!(
+        changed_revision > first_revision,
+        "{changed_revision} <= {first_revision}"
+    );
+    assert!(changed
+        .tools
+        .iter()
+        .any(|tool| tool.name == "fixture_extension_echo"));
+
+    // The same generation is visible to a stateless modern client, which has
+    // no notification channel and relies on the revision and TTL.
+    let modern = ()
+        .serve_with_lifecycle(
+            StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(uri).auth_header(SERVER_TOKEN),
+            ),
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await
+        .expect("modern client");
+    let modern_tools = modern.list_tools(None).await.expect("tools/list");
+    assert_eq!(catalog_revision(&modern_tools), changed_revision);
+    assert!(modern_tools
+        .tools
+        .iter()
+        .any(|tool| tool.name == "fixture_extension_echo"));
+    modern.cancel().await.expect("cancel modern");
+    legacy.cancel().await.expect("cancel legacy");
+    agent.abort();
     server_task.abort();
 }

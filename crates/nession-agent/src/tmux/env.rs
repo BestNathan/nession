@@ -55,10 +55,10 @@ const SHELL_REVISION_FILE: &str = "shell-revision";
 /// The Agent's durable record for one Session's materialization.
 const BINDING_STATE_FILE: &str = "binding.json";
 
-const ENV_RUNTIME_VAR: &str = "NESSON_ENV_RUNTIME";
-const ENV_REVISION_VAR: &str = "NESSON_ENV_REVISION";
-const SHELL_REVISION_VAR: &str = "NESSON_ENV_SHELL_REVISION";
-const USER_ZDOTDIR_VAR: &str = "NESSON_USER_ZDOTDIR";
+const ENV_RUNTIME_VAR: &str = "NESSION_RUNTIME_ENV_RUNTIME";
+const ENV_REVISION_VAR: &str = "NESSION_RUNTIME_ENV_REVISION";
+const SHELL_REVISION_VAR: &str = "NESSION_RUNTIME_ENV_SHELL_REVISION";
+const USER_ZDOTDIR_VAR: &str = "NESSION_RUNTIME_USER_ZDOTDIR";
 
 const STATUS_IN_SYNC: &str = "in_sync";
 const STATUS_PENDING_SHELL: &str = "pending_shell";
@@ -862,8 +862,11 @@ fn reserved_key_reason(key: &str) -> Option<&'static str> {
         "LANG" => Some("locale policy is owned by Nession"),
         "ZDOTDIR" => Some("the zsh Session-local adapter owns this directory"),
         _ if key.starts_with("LC_") => Some("locale policy is owned by Nession"),
-        _ if key.starts_with("NESSON_") => {
+        _ if key.starts_with("NESSION_RUNTIME_") => {
             Some("Nession runtime and integration variables are owned by Nession")
+        }
+        _ if key.starts_with("NESSON_") => {
+            Some("legacy Nession runtime variables cannot be profile-managed")
         }
         _ => None,
     }
@@ -984,15 +987,15 @@ elif [ -r "$HOME/.profile" ]; then
 fi
 
 __nession_env_sync() {
-  [ -n "${NESSON_ENV_RUNTIME:-}" ] || return 0
-  [ -r "${NESSON_ENV_RUNTIME}" ] || return 0
+  [ -n "${NESSION_RUNTIME_ENV_RUNTIME:-}" ] || return 0
+  [ -r "${NESSION_RUNTIME_ENV_RUNTIME}" ] || return 0
   local __nession_rev
-  __nession_rev=$(cat "${NESSON_ENV_REVISION}" 2>/dev/null) || return 0
-  [ "$__nession_rev" = "${NESSON_ENV_APPLIED_REVISION:-}" ] && return 0
-  . "${NESSON_ENV_RUNTIME}"
-  export NESSON_ENV_APPLIED_REVISION="$__nession_rev"
-  if [ -n "${NESSON_ENV_SHELL_REVISION:-}" ]; then
-    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSON_ENV_SHELL_REVISION}" ) 2>/dev/null
+  __nession_rev=$(cat "${NESSION_RUNTIME_ENV_REVISION}" 2>/dev/null) || return 0
+  [ "$__nession_rev" = "${NESSION_RUNTIME_ENV_APPLIED_REVISION:-}" ] && return 0
+  . "${NESSION_RUNTIME_ENV_RUNTIME}"
+  export NESSION_RUNTIME_ENV_APPLIED_REVISION="$__nession_rev"
+  if [ -n "${NESSION_RUNTIME_ENV_SHELL_REVISION:-}" ]; then
+    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSION_RUNTIME_ENV_SHELL_REVISION}" ) 2>/dev/null
   fi
 }
 
@@ -1011,7 +1014,7 @@ const ZSH_ADAPTER_FILES: [(&str, &str); 5] = [
         ".zshenv",
         r#"# Nession Session-local zsh adapter (#170 Phase B).
 __nession_session_zdotdir="${ZDOTDIR:-$HOME}"
-__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zshenv" ]; then
   . "${__nession_user_zdotdir}/.zshenv"
 fi
@@ -1023,7 +1026,7 @@ export ZDOTDIR
     ),
     (
         ".zprofile",
-        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zprofile" ]; then
   . "${__nession_user_zdotdir}/.zprofile"
 fi
@@ -1032,21 +1035,21 @@ fi
     (
         ".zshrc",
         r#"# Nession Session-local zsh adapter (#170 Phase B).
-__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zshrc" ]; then
   . "${__nession_user_zdotdir}/.zshrc"
 fi
 
 __nession_env_sync() {
-  [ -n "${NESSON_ENV_RUNTIME:-}" ] || return 0
-  [ -r "${NESSON_ENV_RUNTIME}" ] || return 0
+  [ -n "${NESSION_RUNTIME_ENV_RUNTIME:-}" ] || return 0
+  [ -r "${NESSION_RUNTIME_ENV_RUNTIME}" ] || return 0
   local __nession_rev
-  __nession_rev=$(cat "${NESSON_ENV_REVISION}" 2>/dev/null) || return 0
-  [ "$__nession_rev" = "${NESSON_ENV_APPLIED_REVISION:-}" ] && return 0
-  . "${NESSON_ENV_RUNTIME}"
-  export NESSON_ENV_APPLIED_REVISION="$__nession_rev"
-  if [ -n "${NESSON_ENV_SHELL_REVISION:-}" ]; then
-    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSON_ENV_SHELL_REVISION}" ) 2>/dev/null
+  __nession_rev=$(cat "${NESSION_RUNTIME_ENV_REVISION}" 2>/dev/null) || return 0
+  [ "$__nession_rev" = "${NESSION_RUNTIME_ENV_APPLIED_REVISION:-}" ] && return 0
+  . "${NESSION_RUNTIME_ENV_RUNTIME}"
+  export NESSION_RUNTIME_ENV_APPLIED_REVISION="$__nession_rev"
+  if [ -n "${NESSION_RUNTIME_ENV_SHELL_REVISION:-}" ]; then
+    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSION_RUNTIME_ENV_SHELL_REVISION}" ) 2>/dev/null
   fi
 }
 
@@ -1060,7 +1063,7 @@ fi
     ),
     (
         ".zlogin",
-        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zlogin" ]; then
   . "${__nession_user_zdotdir}/.zlogin"
 fi
@@ -1068,7 +1071,7 @@ fi
     ),
     (
         ".zlogout",
-        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zlogout" ]; then
   . "${__nession_user_zdotdir}/.zlogout"
 fi
@@ -1108,6 +1111,24 @@ mod tests {
         assert_eq!(overlay.warnings.len(), 2);
         assert!(overlay.warnings.iter().any(|w| w.contains("TERM")));
         assert!(overlay.warnings.iter().any(|w| w.contains("TMUX")));
+    }
+
+    #[test]
+    fn mcp_token_is_bindable_while_internal_identity_is_protected() {
+        let overlay = EnvManager::merge_snapshots(&[snapshot(
+            "mcp.env",
+            &[
+                ("NESSION_MCP_TOKEN", "fixture-token"),
+                ("NESSION_RUNTIME_SESSION_INSTANCE_ID", "forged"),
+                ("NESSON_SESSION_INSTANCE_ID", "legacy-forged"),
+            ],
+        )])
+        .expect("credential may be bound from an explicit Profile");
+        assert_eq!(
+            overlay.vars,
+            vec![("NESSION_MCP_TOKEN".to_string(), "fixture-token".to_string())]
+        );
+        assert_eq!(overlay.warnings.len(), 2);
     }
 
     #[test]
@@ -1197,9 +1218,9 @@ mod tests {
             .find(|(name, _)| *name == ".zshrc")
             .expect("the hook belongs in .zshrc")
             .1;
-        assert!(zshrc.contains("NESSON_USER_ZDOTDIR"));
+        assert!(zshrc.contains("NESSION_RUNTIME_USER_ZDOTDIR"));
         assert!(zshrc.contains("add-zsh-hook precmd"));
-        assert!(zshrc.contains("NESSON_ENV_RUNTIME"));
+        assert!(zshrc.contains("NESSION_RUNTIME_ENV_RUNTIME"));
         assert!(!zshrc.contains("tmux show-environment"));
     }
 
@@ -1209,7 +1230,7 @@ mod tests {
         assert!(!BASH_ADAPTER.contains("send-keys"));
         assert!(!BASH_ADAPTER.contains("show-environment"));
         assert!(BASH_ADAPTER.contains("PROMPT_COMMAND"));
-        assert!(BASH_ADAPTER.contains("NESSON_ENV_RUNTIME"));
+        assert!(BASH_ADAPTER.contains("NESSION_RUNTIME_ENV_RUNTIME"));
     }
 
     #[test]
@@ -1229,12 +1250,17 @@ mod tests {
             "LANG",
             "LC_ALL",
             "ZDOTDIR",
-            "NESSON_PS1",
+            "NESSION_RUNTIME_PS1",
         ] {
             assert!(reserved_key_reason(key).is_some(), "{key} must be reserved");
         }
         assert!(reserved_key_reason("PATH").is_none());
         assert!(reserved_key_reason("ANTHROPIC_API_KEY").is_none());
+        // Integration credentials are user-provisioned, not internal runtime state.
+        assert!(reserved_key_reason("NESSION_MCP_TOKEN").is_none());
+        assert!(reserved_key_reason("NESSION_TEST").is_none());
+        assert!(reserved_key_reason("NESSION_RUNTIME_ENV_REVISION").is_some());
+        assert!(reserved_key_reason("NESSON_ENV_REVISION").is_some());
     }
 
     // ── the binding engine, against a fake tmux ──────────────────────────────
@@ -2239,6 +2265,72 @@ esac"#,
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_token_profile_materializes_in_real_tmux_without_spoofing_identity() {
+        if !crate::tmux::cmd::global()
+            .std()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+        {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let manager = crate::tmux::manager::SessionManager::new();
+        let session = crate::test_support::TestSession::new("mcp-token-profile");
+        manager
+            .create_session(session.name(), 80, 24, "/tmp", &[])
+            .await
+            .expect("create real tmux Session");
+        let instance = manager
+            .session_instance_id(session.name())
+            .await
+            .expect("original instance identity");
+        let snapshots = vec![snapshot(
+            "mcp.env",
+            &[
+                ("NESSION_MCP_TOKEN", "fixture-token"),
+                ("NESSION_RUNTIME_SESSION_INSTANCE_ID", "forged"),
+            ],
+        )];
+        let profiles = profiles_from_snapshots(&snapshots, "attach");
+        let outcome = manager
+            .env()
+            .apply_binding(session.name(), 1, &profiles, &snapshots)
+            .await
+            .expect("apply authorized credential profile");
+
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|warning| { warning.contains("NESSION_RUNTIME_SESSION_INSTANCE_ID") }),
+            "forged runtime identity must be refused"
+        );
+        assert_eq!(
+            manager
+                .get_session_env(session.name(), "NESSION_MCP_TOKEN")
+                .await
+                .expect("observable tmux environment")
+                .as_deref(),
+            Some("fixture-token")
+        );
+        assert_eq!(
+            manager
+                .session_instance_id(session.name())
+                .await
+                .expect("identity remains anchored"),
+            instance
+        );
+        manager
+            .kill_session(session.name())
+            .await
+            .expect("cleanup tmux Session");
+    }
+
     // ── the shell adapter, against a real shell ──────────────────────────────
 
     /// Spawn the generated adapter in a real interactive shell and return the
@@ -2280,7 +2372,7 @@ esac"#,
         }
         // The test's user config lives in `home`; a ZDOTDIR inherited from the
         // developer's own shell must not redirect it.
-        command.env("NESSON_USER_ZDOTDIR", home);
+        command.env("NESSION_RUNTIME_USER_ZDOTDIR", home);
         let mut child = command.spawn().expect("the shell starts");
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
@@ -2406,6 +2498,86 @@ esac"#,
     /// A child started before the binding changes keeps the environment it was
     /// born with. The shell converges at its next prompt; processes already
     /// running are not rewritten.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_surviving_legacy_bash_adapter_converges_after_runtime_rename() {
+        let shell = "/bin/bash";
+        assert!(std::path::Path::new(shell).exists(), "bash is required");
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let mgr = EnvManager::new(dir.path().join("state"));
+        let mut adapter = mgr.install_shell_adapter("legacy-bash", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+
+        // This rcfile is the old Agent's previously installed adapter. The
+        // upgraded Agent changes its *new* template, not this surviving file.
+        let rcfile = std::path::PathBuf::from(&adapter.command[2]);
+        let legacy_script = BASH_ADAPTER.replace("NESSION_RUNTIME_", "NESSON_");
+        std::fs::write(&rcfile, legacy_script).expect("legacy rcfile");
+        for (key, _) in &mut adapter.env {
+            *key = key.replace("NESSION_RUNTIME_", "NESSON_");
+        }
+
+        let session_dir = mgr.session_dir("legacy-bash");
+        mgr.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let (mut child, mut stdin, mut lines) = spawn_adapter_shell(shell, &adapter, &home).await;
+        let first = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY1:$NESSION_TEST\"",
+            "LEGACY1:",
+        )
+        .await;
+        assert!(first.contains("LEGACY1:one"), "{first}");
+
+        mgr.write_runtime_files(
+            &session_dir,
+            2,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "two".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let _ = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY_SYNC\"",
+            "LEGACY_SYNC",
+        )
+        .await;
+        let second = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY2:$NESSION_TEST\"",
+            "LEGACY2:",
+        )
+        .await;
+        assert!(second.contains("LEGACY2:two"), "{second}");
+        assert_eq!(
+            tokio::fs::read_to_string(session_dir.join(SHELL_REVISION_FILE))
+                .await
+                .unwrap()
+                .trim(),
+            "2"
+        );
+        drop(stdin);
+        let _ = child.wait().await;
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_running_child_keeps_its_environment_when_the_binding_changes() {

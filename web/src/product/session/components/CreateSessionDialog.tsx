@@ -29,6 +29,8 @@ import {
 } from '@/product/session/model/envSelection';
 import type { Project, ProjectLocation } from '@/product/project/types';
 import { ProjectLocationDetails } from './CreateSessionParts';
+import { CreateSessionManagedFields, CreateSessionRuntimeChoice } from './CreateSessionManagedFields';
+import { CreateSessionReview } from './CreateSessionReview';
 
 type CreateSessionForm = ReturnType<typeof useCreateSessionForm>;
 
@@ -368,6 +370,59 @@ function ProjectEnvField({ form }: { form: CreateSessionForm }) {
   );
 }
 
+function CreateSessionDialogFooter({
+  form,
+  project,
+  onClose,
+}: {
+  form: CreateSessionForm;
+  project?: Project | null;
+  onClose: () => void;
+}) {
+  /**
+   * A Managed create has an explicit reviewed snapshot (#3794 SC-01). The
+   * existing Host flow keeps its accepted direct Create; its Agent/location
+   * and effective ENV are already visible inline.
+   */
+  const managedReview = Boolean(project) && form.runtimeMode === 'managed';
+  const createUnavailable = form.loading
+    || (project
+      ? form.runtimeMode === 'native'
+        ? !form.selectedLocation || form.locationUnavailable
+        : form.onlineAgents.length === 0
+      : !form.agentId);
+  return (
+    <DialogFooter>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => (form.reviewing ? form.backToForm() : onClose())}
+        disabled={form.loading}
+      >
+        {form.reviewing ? 'Back' : 'Cancel'}
+      </Button>
+      {managedReview && !form.reviewing ? (
+        <Button
+          type="button"
+          data-testid="create-session-review"
+          disabled={createUnavailable}
+          onClick={form.beginReview}
+        >
+          Review
+        </Button>
+      ) : (
+        <Button
+          type="submit"
+          data-testid="create-session-submit"
+          disabled={createUnavailable}
+        >
+          {form.loading ? 'Creating...' : 'Create'}
+        </Button>
+      )}
+    </DialogFooter>
+  );
+}
+
 export function CreateSessionDialog({
   isOpen,
   onClose,
@@ -395,56 +450,53 @@ export function CreateSessionDialog({
         </DialogHeader>
         <form onSubmit={form.handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <DialogBody className="flex flex-col gap-4">
-            {project ? (
-              <ProjectLocationSelect
-                locations={form.locations}
-                agents={agents}
-                selectedLocation={form.selectedLocation}
-                locationIndex={form.locationIndex}
-                onIndexChange={form.setLocationIndex}
-                disabled={form.loading}
-              />
+            {form.reviewing ? (
+              <CreateSessionReview form={form} />
             ) : (
-              <AgentSelect
-                agents={form.onlineAgents}
-                value={form.agentId}
-                onChange={form.setAgentId}
-                disabled={form.loading}
-              />
+              <>
+                {project ? <CreateSessionRuntimeChoice form={form} /> : null}
+                {project && form.runtimeMode === 'native' ? (
+                  <ProjectLocationSelect
+                    locations={form.locations}
+                    agents={agents}
+                    selectedLocation={form.selectedLocation}
+                    locationIndex={form.locationIndex}
+                    onIndexChange={form.setLocationIndex}
+                    disabled={form.loading}
+                  />
+                ) : null}
+                {project && form.runtimeMode === 'managed' ? (
+                  <CreateSessionManagedFields form={form} />
+                ) : null}
+                {project ? null : (
+                  <AgentSelect
+                    agents={form.onlineAgents}
+                    value={form.agentId}
+                    onChange={form.setAgentId}
+                    disabled={form.loading}
+                  />
+                )}
+                <SessionFields
+                  nameInputRef={form.nameInputRef}
+                  sessionName={form.sessionName}
+                  setSessionName={form.setSessionName}
+                  loading={form.loading}
+                >
+                  {project ? (
+                    <ProjectEnvField form={form} />
+                  ) : (
+                    <OptionalEnvField form={form} />
+                  )}
+                </SessionFields>
+              </>
             )}
-            <SessionFields
-              nameInputRef={form.nameInputRef}
-              sessionName={form.sessionName}
-              setSessionName={form.setSessionName}
-              loading={form.loading}
-            >
-              {project ? (
-                <ProjectEnvField form={form} />
-              ) : (
-                <OptionalEnvField form={form} />
-              )}
-            </SessionFields>
             {form.error && (
               <p className={cn('text-destructive', chromeSansRole('body'))} data-testid="create-session-error">
                 {form.error}
               </p>
             )}
           </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.loading}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              data-testid="create-session-submit"
-              disabled={
-                form.loading ||
-                (project ? !form.selectedLocation || form.locationUnavailable : !form.agentId)
-              }
-            >
-              {form.loading ? 'Creating...' : 'Create'}
-            </Button>
-          </DialogFooter>
+          <CreateSessionDialogFooter form={form} project={project} onClose={onClose} />
         </form>
       </DialogContent>
     </Dialog>

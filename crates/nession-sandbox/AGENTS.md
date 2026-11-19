@@ -70,9 +70,13 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   builder/puller. The Sandbox re-verifies every digest and authorizes every
   source beneath the Agent EROFS image root; it never fetches, extracts or
   resolves a logical image.
-- The compatibility root is an empty tmpfs + Base Runtime at `/`; `/workspace`
-  is a read-only lower set merged with a bounded writable upper/work via
-  `fuse-overlayfs` (or a direct bind when no Project image exists). Toolchains
+- An image-root composition is an empty tmpfs + Base Runtime at `/`. A
+  Host-root composition (#3792) omits the Base, keeps the ordinary read-only
+  host root, mounts toolchains under a private `/opt` tmpfs and binds the
+  Workspace at `/workspace` (which must already exist on the Agent host).
+  The Workspace is a read-only lower set merged with a bounded writable
+  upper/work via `fuse-overlayfs` (or a direct bind when no Project image
+  exists). Toolchains
   are read-only and only `/opt/<name>`. Do not add arbitrary overlapping-root
   ordering. A writable RootFS is an explicit opt-in via
   `filesystem.rootfs.writable` + prepared `base_writable`; its execution-owned

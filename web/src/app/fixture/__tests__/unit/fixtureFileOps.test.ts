@@ -108,37 +108,6 @@ describe('fixtureFileOps', () => {
     fixtureFilesControl().reset();
   });
 
-  it('fails or holds exactly the next whole-file read, never a chunk (#3743)', async () => {
-    fixtureFilesControl().reset();
-    const target = fixtureFileOps();
-    const control = fixtureFilesControl();
-
-    // A scripted failure belongs to the next whole-file read and is consumed.
-    control.failNextRead('fixture: read unavailable');
-    await expect(target.readFile('web/src/App.tsx')).rejects.toThrow('fixture: read unavailable');
-    await expect(target.readFile('web/src/App.tsx')).resolves.toBeTruthy();
-
-    // A held read settles only through the control, with the current content.
-    control.holdNextRead();
-    const held = target.readFile('web/src/index.css');
-    // Chunked requests carry offset/limit, so they are not the held read.
-    await expect(target.readFile('web/src/index.css', { offset: 0, limit: 4 }))
-      .resolves.toBeTruthy();
-    await target.writeFile('web/src/index.css', 'held read content');
-    control.releaseHeldRead();
-    const data = await held;
-    expect(target.base64Decode(data.content)).toBe('held read content');
-
-    // A held read can be failed deterministically instead.
-    control.holdNextRead();
-    const failing = target.readFile('web/src/App.tsx');
-    control.failHeldRead('fixture: held read failed');
-    await expect(failing).rejects.toThrow('fixture: held read failed');
-
-    expect(() => control.releaseHeldRead()).toThrow('no read is held');
-    fixtureFilesControl().reset();
-  });
-
   it('getCwd answers the fixture root', async () => {
     await expect(ops.getCwd('s')).resolves.toEqual({ path: '' });
   });

@@ -14,8 +14,6 @@ import { workspaceLabel } from '../model';
 export interface SandboxFilesystemWorkspaceProps {
   sessionId: string | null;
   workspace: SandboxFilesystemWorkspace | undefined;
-  /** A Workspace selection requires an image RootFS. */
-  rootfsIsImage: boolean;
   workingDir: string;
   workingDirError: string | undefined;
   onWorkingDirChange: (value: string) => void;
@@ -197,7 +195,6 @@ function SelectedProjectLocation({
 export function SandboxFilesystemWorkspaceSection({
   sessionId,
   workspace,
-  rootfsIsImage,
   workingDir,
   workingDirError,
   onWorkingDirChange,
@@ -206,16 +203,13 @@ export function SandboxFilesystemWorkspaceSection({
   const inventory = useAgentWorkspaces(sessionId);
   const managed = workspace?.kind === 'managed' ? workspace : null;
   const projectLocation = workspace?.kind === 'project_location';
-  const rootfsReason = !rootfsIsImage
-    ? 'A Workspace selection requires an image RootFS; choose a Base Runtime image in RootFS first.'
-    : null;
-  const pickerReason = rootfsReason ?? inventory.error;
-  const disabledReason = rootfsReason ?? inventory.error;
+  const pickerReason = inventory.error;
+  const disabledReason = inventory.error;
 
   return (
     <FormSection
       title="Workspace (/workspace)"
-      description="The durable directory bound at /workspace and the default working directory after Enter. Managed Workspaces outlive the execution; cleanup releases the lease, not the bytes."
+      description="The durable directory bound at /workspace and the default working directory after Enter. A Local RootFS can carry a Workspace and toolchains as a Host-root composition; Managed Workspaces outlive the execution and cleanup releases the lease, not the bytes."
       testId="sandbox-workspace-section"
     >
       <div role="radiogroup" aria-label="Workspace source" className="flex flex-col gap-2">
@@ -237,7 +231,6 @@ export function SandboxFilesystemWorkspaceSection({
           variant={workspace?.kind === 'auto' ? 'secondary' : 'outline'}
           className="justify-start"
           data-testid="sandbox-workspace-auto"
-          disabled={rootfsReason !== null}
           onClick={() => onChange({ kind: 'auto' })}
         >
           Auto by Session name
@@ -249,7 +242,6 @@ export function SandboxFilesystemWorkspaceSection({
           variant={projectLocation ? 'secondary' : 'outline'}
           className="justify-start"
           data-testid="sandbox-workspace-project"
-          disabled={rootfsReason !== null}
           onClick={() => onChange({ kind: 'project_location' })}
         >
           Project Location
@@ -263,7 +255,7 @@ export function SandboxFilesystemWorkspaceSection({
             inventory={inventory}
             managed={managed}
             disabledReason={pickerReason}
-            nameDisabledReason={rootfsReason}
+            nameDisabledReason={null}
             onChange={onChange}
           />
         )}

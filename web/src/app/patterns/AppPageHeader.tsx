@@ -1,6 +1,8 @@
 import { cn } from '@/shared/lib/utils';
 import { titleAppClass } from '@/app/experiences/app/appTypography';
 import { chromeMonoRole } from '@/shared/typography/chromeRoles';
+import { Button } from '@/components/ui/button';
+import type { WorkspaceHeaderAction } from '@/app/workspace/workspaceContext';
 import { AppBackButton } from './AppBackButton';
 
 export interface AppPageHeaderProps {
@@ -26,6 +28,13 @@ export interface AppPageHeaderProps {
    * string does on the page* (#1073).
    */
   technical?: boolean;
+  /**
+   * A capability-local action beside the title, contributed through the
+   * Workspace depth control. The capability supplies the semantic action; this
+   * header supplies the geometry and the touch target — a capability never
+   * renders a second bar (#1051).
+   */
+  action?: WorkspaceHeaderAction | null;
 }
 
 /**
@@ -55,6 +64,7 @@ export function AppPageHeader({
   title,
   titleTestId,
   technical,
+  action,
 }: AppPageHeaderProps) {
   return (
     <header
@@ -74,6 +84,19 @@ export function AppPageHeader({
       >
         {title}
       </h1>
+      {action ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto shrink-0"
+          aria-label={action.ariaLabel ?? action.label}
+          data-testid="app-page-action"
+          onClick={() => action.onActivate()}
+        >
+          {action.label}
+        </Button>
+      ) : null}
     </header>
   );
 }

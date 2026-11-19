@@ -190,6 +190,22 @@ descriptor (managed workspaces never expose a physical path). It keeps no
 second inventory. The Agent's response is the observed resource, not a
 Server-cached claim.
 
+A `server.workspace.list` reply may also carry the Session Project's Existing
+Locations on the resolved Agent as `project_location` descriptors (#3797).
+They are server-owned declarations, not Agent observations: their status is
+`unobserved`, they carry the declared path, and they never claim a store,
+lease, mount, usage or delete action. The list refuses the whole inventory when
+the Project binding cannot be read instead of presenting a partial one.
+
+A managed descriptor carries the ordered `lower_digests` the durable upper was
+prepared against, whether `overlay_storage` was initialized, measured
+`used_bytes` when measurable, the Agent-observed `mounted` and `lease_count`,
+the linked Session `consumers`, and the durable registry `updated_at`.
+Consumers are Session names only; the descriptor never reveals a host path,
+execution directory, grant or another consumer's private runtime identity.
+Deletion is only offered for a managed Workspace whose status is `available`;
+Project Locations and any non-available observation have no delete path.
+
 ## Limits / when to revisit
 
 - Project Location selection is limited to the current Project's declaration
@@ -201,7 +217,8 @@ Server-cached claim.
   filesystem last-writer semantics; Nession does not merge conflicting writes.
 - The Agent data directory must be a durable mount. A container writable layer
   is not a durable workspace store; the manager does not redirect to one.
-- The Web/App inventory and selection surface are P3.
+- The Web/App inventory exposes selection, observed detail and safe deletion;
+  it never creates a second registry or a Project Location deletion path.
 
 ## References
 

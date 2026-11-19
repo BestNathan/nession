@@ -5,7 +5,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
-import { formatSize } from '../format';
+import { formatSize, transcriptLabel } from '../format';
 import { parseTranscriptRecord } from '../model/transcriptRecord';
 import { useTranscriptViewState } from '../hooks/useTranscriptViewState';
 import { TranscriptRawInspector } from './TranscriptRawInspector';
@@ -16,25 +16,19 @@ import type { TranscriptsListState } from '../hooks/useTranscripts';
 import type { ClaudeCodeTranscriptItem, ClaudeCodeTranscriptRecord } from '../types';
 
 /**
- * What to call a transcript in the list.
- *
- * Claude titles a session but never a subagent — `ai-title` is a session-level
- * record — so the fallback is what sidechains actually get. The provider's id
- * for one is path-shaped, `<session-uuid>/agent-<id>`, and behind `truncate`
- * the tail that distinguishes one subagent from another is the first thing
- * lost, leaving rows that read alike. `agent_id` is on the contract for
- * precisely that job, so it is the fallback before the id.
+ * What to call a transcript in the list. See `format.ts` — one owner, because
+ * the App's pushed transcript depth names the same resource.
  */
-function labelOf(transcript: ClaudeCodeTranscriptItem): string {
-  return transcript.title ?? transcript.agent_id ?? transcript.id;
-}
 
-function TranscriptList({
+export function TranscriptList({
   list,
   onSelect,
+  touch = false,
 }: {
   list: TranscriptsListState;
   onSelect: (id: string) => void;
+  /** The App's 44px row floor. Web keeps its tighter pointer row. */
+  touch?: boolean;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-list">
@@ -80,13 +74,13 @@ function TranscriptList({
           <li key={transcript.id}>
             <button
               type="button"
-              className="w-full px-3 py-2 text-left hover:bg-muted/50"
+              className={cn('w-full px-3 py-2 text-left hover:bg-muted/50', touch && 'min-h-11')}
               onClick={() => onSelect(transcript.id)}
               data-testid="transcript-open"
             >
               <div className="flex items-center gap-2">
                 <span className={cn('truncate', chromeSansRole('secondary'))}>
-                  {labelOf(transcript)}
+                  {transcriptLabel(transcript)}
                 </span>
                 {transcript.kind === 'sidechain' ? (
                   <span
@@ -190,7 +184,16 @@ function PushedRecord({
   );
 }
 
-function TranscriptDetail({
+/**
+ * One transcript's records, with the provider's own state answers.
+ *
+ * Shared by the Web detail and the App's pushed transcript depth so "this
+ * transcript was deleted", "this directory cannot be established", "the read
+ * failed" and "nothing was recorded" stay four different sentences on both
+ * surfaces. `touch` raises the record rows and their Raw actions to the App's
+ * 44px floor; the Web master/detail omits it.
+ */
+export function TranscriptRecordsBody({
   records,
   layout,
   expandedRef,
@@ -199,10 +202,7 @@ function TranscriptDetail({
   onOpenRaw,
   onLoadOlder,
   onReload,
-  rawRecord,
-  onCloseRaw,
-  agentId,
-  sessionId,
+  touch = false,
 }: {
   records: TranscriptRecordsState;
   layout: 'master-detail' | 'push';
@@ -212,14 +212,11 @@ function TranscriptDetail({
   onOpenRaw: (record: ClaudeCodeTranscriptRecord) => void;
   onLoadOlder: () => void;
   onReload: () => void;
-  rawRecord: ClaudeCodeTranscriptRecord | null;
-  onCloseRaw: () => void;
-  agentId: string | undefined;
-  sessionId: string | undefined;
+  touch?: boolean;
 }) {
   const showRecords = records.state === 'ready' || records.records.length > 0;
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col" data-testid="transcript-detail-view">
+    <>
       {records.state === 'not_found' ? (
         <p
           className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
@@ -266,8 +263,52 @@ function TranscriptDetail({
           onLoadOlder={records.hasMore ? onLoadOlder : undefined}
           loadingOlder={records.loadingOlder}
           partialTail={records.partialTail}
+          touch={touch}
         />
       ) : null}
+    </>
+  );
+}
+
+function TranscriptDetail({
+  records,
+  layout,
+  expandedRef,
+  onToggleRecord,
+  onOpenRecord,
+  onOpenRaw,
+  onLoadOlder,
+  onReload,
+  rawRecord,
+  onCloseRaw,
+  agentId,
+  sessionId,
+}: {
+  records: TranscriptRecordsState;
+  layout: 'master-detail' | 'push';
+  expandedRef: string | null;
+  onToggleRecord: (recordRef: string) => void;
+  onOpenRecord: (record: ClaudeCodeTranscriptRecord) => void;
+  onOpenRaw: (record: ClaudeCodeTranscriptRecord) => void;
+  onLoadOlder: () => void;
+  onReload: () => void;
+  rawRecord: ClaudeCodeTranscriptRecord | null;
+  onCloseRaw: () => void;
+  agentId: string | undefined;
+  sessionId: string | undefined;
+}) {
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col" data-testid="transcript-detail-view">
+      <TranscriptRecordsBody
+        records={records}
+        layout={layout}
+        expandedRef={expandedRef}
+        onToggleRecord={onToggleRecord}
+        onOpenRecord={onOpenRecord}
+        onOpenRaw={onOpenRaw}
+        onLoadOlder={onLoadOlder}
+        onReload={onReload}
+      />
       {layout === 'master-detail' && rawRecord ? (
         <div
           className="absolute inset-y-0 right-0 z-10 flex w-[min(var(--nession-overlay-standard-max-width),100%)] flex-col border-l bg-background shadow-[var(--nession-elevation-floating)]"

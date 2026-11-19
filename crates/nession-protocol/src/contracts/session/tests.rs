@@ -456,6 +456,71 @@ fn test_session_instance_identity_is_optional_on_updates_and_reports() {
 }
 
 #[test]
+fn session_activity_is_optional_and_independent_on_the_web_projection() {
+    let base = serde_json::json!({
+        "session_id": "a1:s1",
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "detached",
+        "window_count": 1,
+        "attached_clients": 0,
+        "last_activity": "2026-11-18T00:00:00Z",
+    });
+
+    // A legacy Agent reports no activity at all. That is `unknown` to a
+    // consumer, and the wire says so by absence rather than inventing idle.
+    let legacy: WebSessionInfo = serde_json::from_value(base).unwrap();
+    assert!(legacy.activity.is_none());
+
+    let with_activity: WebSessionInfo = serde_json::from_value(serde_json::json!({
+        "session_id": "a1:s1",
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "detached",
+        "window_count": 1,
+        "attached_clients": 0,
+        "activity": {
+            "state": "working",
+            "attention": "input_required",
+            "capability_id": "claude-code",
+            "observed_at_ms": 1_700_000_000_000_i64
+        },
+        "last_activity": "2026-11-18T00:00:00Z",
+    }))
+    .unwrap();
+    let activity = with_activity.activity.expect("activity is present");
+    assert_eq!(activity.state, "working");
+    assert_eq!(activity.attention.as_deref(), Some("input_required"));
+    assert_eq!(activity.capability_id.as_deref(), Some("claude-code"));
+
+    // The lifecycle `status` and the activity level are different fields with
+    // different values; the projection does not merge them.
+    assert_eq!(with_activity.status, "detached");
+}
+
+#[test]
+fn agent_session_activity_payload_round_trips_with_its_identity_fence() {
+    let payload = AgentSessionActivityPayload {
+        agent_id: "a1".to_string(),
+        session_name: "s1".to_string(),
+        instance_id: "inc-1".to_string(),
+        epoch: "epoch-1".to_string(),
+        generation: 7,
+        state: "idle".to_string(),
+        attention: None,
+        capability_id: Some("shell".to_string()),
+        observed_at_ms: 1_700_000_000_000,
+    };
+    let json = serde_json::to_value(&payload).unwrap();
+    assert!(
+        json.get("attention").is_none(),
+        "an absent attention is absent"
+    );
+    let decoded: AgentSessionActivityPayload = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+#[test]
 fn test_client_session_kill_payload() {
     let payload = ClientSessionKillPayload {
         session_id: "agent-1:doomed".to_string(),
@@ -796,4 +861,69 @@ fn unknown_managed_fields_are_refused() {
         toolchain.is_err(),
         "an unknown toolchain key must be refused"
     );
+}
+
+/// #3796: the prepare request carries the user's explicit intent instead of
+/// inferring a download from an observation read, and an unknown field is a
+/// contract error rather than a silently ignored hint.
+#[test]
+fn an_image_prepare_request_carries_an_explicit_intent() {
+    use crate::contracts::image::v1::{ImageCacheObservation, ImageCachePhase};
+
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let payload: ClientSessionSandboxImagePreparePayload =
+        serde_json::from_value(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "resume",
+        }))
+        .expect("a resume request is valid");
+    assert_eq!(payload.intent, SandboxImagePrepareIntent::Resume);
+    assert_eq!(payload.digest, digest);
+    assert_eq!(
+        serde_json::to_value(&payload).unwrap()["intent"],
+        serde_json::json!("resume")
+    );
+
+    assert!(
+        serde_json::from_value::<ClientSessionSandboxImagePreparePayload>(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "prepare",
+            "download": true,
+        }))
+        .is_err(),
+        "an extra field must not silently change a cache mutation"
+    );
+    assert!(
+        serde_json::from_value::<ClientSessionSandboxImagePreparePayload>(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "download",
+        }))
+        .is_err(),
+        "an unknown intent is refused rather than guessed"
+    );
+
+    let observation = ImageCacheObservation {
+        contract_version: crate::contracts::image::v1::IMAGE_CACHE_OBSERVATION_VERSION,
+        digest: format!("sha256:{}", "b".repeat(64)),
+        phase: ImageCachePhase::Verifying,
+        downloaded_bytes: Some(5),
+        total_bytes: Some(10),
+        active: true,
+        updated_at: 1,
+        detail: None,
+    };
+    observation.validate().unwrap();
+    let reply = SandboxImagePrepareResponse {
+        success: true,
+        error: None,
+        error_kind: None,
+        observation: Some(observation.clone()),
+        observations: vec![observation],
+    };
+    let round_trip: SandboxImagePrepareResponse =
+        serde_json::from_value(serde_json::to_value(&reply).unwrap()).unwrap();
+    assert_eq!(round_trip, reply);
 }

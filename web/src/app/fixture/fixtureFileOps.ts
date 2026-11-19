@@ -31,10 +31,11 @@ let state: FixtureState | null = null;
 /** Test-only write controls for the guarded Web Files transition Case (#3171). */
 let nextWriteDelayMs = 0;
 let nextWriteError: string | null = null;
-/** Test-only read controls for the conflict-reload transaction Case (#3743). */
-let nextReadError: string | null = null;
-let nextReadHold = false;
-let heldRead: { release: () => void; fail: (message: string) => void } | null = null;
+/**
+ * Test-only read pacing for the App Search partial-results Cases (#3738):
+ * the loading state is otherwise a microtask-long window in the fixture.
+ */
+let listDirDelayMs = 0;
 
 function parentOf(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -76,6 +77,64 @@ function initialState(): FixtureState {
   for (const [path, content] of Object.entries(FIXTURE_FILE_CONTENTS)) {
     contents.set(path, content);
   }
+  return { entries, contents, revisions, revisionCounter };
+}
+
+function fileEntry(path: string, size: number): FileEntry {
+  return {
+    name: baseName(path),
+    path,
+    full_path: `/${path}`,
+    is_dir: false,
+    size,
+    modified: FIXTURE_MODIFIED_TS,
+  };
+}
+
+export interface FixtureSearchForestOptions {
+  /** Empty sibling directories created at the root before every file tree. */
+  emptyDirectories?: number;
+  /** Filler files under `bulk/`; the file cap is reached before `late/`. */
+  filesBeforeMatch?: number;
+  /** Add `early/needle.txt`, a match inside the scanned portion. */
+  matchBeforeBudget?: boolean;
+}
+
+/**
+ * Deterministic Search-scale tree (#3738).
+ *
+ * `early/` (optional), `bulk/` filler, then `late/needle.txt`: breadth-first
+ * order means the early match is scanned first, the filler exhausts the file
+ * budget, and the late match stays beyond it. Empty root directories exercise
+ * the request budget independently of files.
+ */
+function searchForestState(options: FixtureSearchForestOptions): FixtureState {
+  const entries = new Map<string, FileEntry>();
+  const contents = new Map<string, string>();
+  const revisions = new Map<string, string>();
+  let revisionCounter = 0;
+
+  const addFile = (path: string, content: string): void => {
+    entries.set(path, fileEntry(path, byteLength(content)));
+    contents.set(path, content);
+    revisions.set(path, `fixture-${revisionCounter++}`);
+  };
+
+  for (let i = 0; i < (options.emptyDirectories ?? 0); i += 1) {
+    const path = `empty-${String(i).padStart(5, '0')}`;
+    entries.set(path, dirEntry(path));
+  }
+  if (options.matchBeforeBudget === true) {
+    entries.set('early', dirEntry('early'));
+    addFile('early/needle.txt', 'fixture early needle');
+  }
+  entries.set('bulk', dirEntry('bulk'));
+  for (let i = 0; i < (options.filesBeforeMatch ?? 0); i += 1) {
+    addFile(`bulk/filler-${String(i).padStart(5, '0')}.txt`, 'filler');
+  }
+  entries.set('late', dirEntry('late'));
+  addFile('late/needle.txt', 'fixture late needle');
+
   return { entries, contents, revisions, revisionCounter };
 }
 
@@ -142,14 +201,23 @@ function base64Decode(b64: string): string {
 }
 
 function listDir(path: string): Promise<{ entries: FileEntry[] }> {
-  return Promise.resolve({ entries: childrenOf(current(), path) });
+  // Read the tree when the request is made, then hold only the response —
+  // the fixture's delay is test pacing, not a concurrent filesystem.
+  const entries = childrenOf(current(), path);
+  const delay = listDirDelayMs;
+  if (delay === 0) {
+    return Promise.resolve({ entries });
+  }
+  return new Promise((resolve) => {
+    setTimeout(() => resolve({ entries }), delay);
+  });
 }
 
 function mimeTypeFor(path: string): string {
   return path.endsWith('.md') ? 'text/markdown' : 'text/plain';
 }
 
-function readNow(
+function readFile(
   path: string,
   options?: { offset?: number; limit?: number },
 ): Promise<FileData> {
@@ -173,42 +241,6 @@ function readNow(
     total_size: bytes.length,
     has_more: offset + slice.length < bytes.length,
     revision: knownRevision(target, path),
-  });
-}
-
-/**
- * Whole-file reads pass through the Case controls; chunked requests always
- * carry offset/limit, so a held or failed read is exactly the viewer's
- * replacement read rather than one chunk of a large-file stream.
- */
-function readFile(
-  path: string,
-  options?: { offset?: number; limit?: number },
-): Promise<FileData> {
-  if (options !== undefined) {
-    return readNow(path, options);
-  }
-  const failure = nextReadError;
-  const hold = nextReadHold;
-  nextReadError = null;
-  nextReadHold = false;
-  if (failure !== null) {
-    return reject(failure);
-  }
-  if (!hold) {
-    return readNow(path);
-  }
-  return new Promise<FileData>((resolveRead, rejectRead) => {
-    heldRead = {
-      release: () => {
-        heldRead = null;
-        resolveRead(readNow(path));
-      },
-      fail: (message) => {
-        heldRead = null;
-        rejectRead(new Error(message));
-      },
-    };
   });
 }
 
@@ -379,14 +411,10 @@ export interface FixtureFilesControl {
   delayNextWrite: (milliseconds: number) => void;
   /** Reject exactly the next write with a non-conflict failure. */
   failNextWrite: (message?: string) => void;
-  /** Reject exactly the next whole-file read (a viewer's replacement read). */
-  failNextRead: (message?: string) => void;
-  /** Hold exactly the next whole-file read until released or failed. */
-  holdNextRead: () => void;
-  /** Release a held read with the file's current stored content. */
-  releaseHeldRead: () => void;
-  /** Reject a held read. */
-  failHeldRead: (message?: string) => void;
+  /** Replace the tree with the deterministic Search-scale forest (#3738). */
+  seedSearchForest: (options?: FixtureSearchForestOptions) => void;
+  /** Delay every subsequent `listDir`, so App Search loading is observable. */
+  setListDirDelay: (milliseconds: number) => void;
 }
 
 export function fixtureFilesControl(): FixtureFilesControl {
@@ -395,9 +423,7 @@ export function fixtureFilesControl(): FixtureFilesControl {
       state = null;
       nextWriteDelayMs = 0;
       nextWriteError = null;
-      nextReadError = null;
-      nextReadHold = false;
-      heldRead = null;
+      listDirDelayMs = 0;
     },
     revisionOf: (path: string) => knownRevision(current(), path),
     contentsOf: (path: string) => current().contents.get(path) ?? null,
@@ -407,23 +433,12 @@ export function fixtureFilesControl(): FixtureFilesControl {
     failNextWrite: (message = 'fixture: the next write failed') => {
       nextWriteError = message;
     },
-    failNextRead: (message = 'fixture: the next read failed') => {
-      nextReadError = message;
+    seedSearchForest: (options = {}) => {
+      state = searchForestState(options);
+      listDirDelayMs = 0;
     },
-    holdNextRead: () => {
-      nextReadHold = true;
-    },
-    releaseHeldRead: () => {
-      if (heldRead === null) {
-        throw new Error('fixture: no read is held');
-      }
-      heldRead.release();
-    },
-    failHeldRead: (message = 'fixture: the held read failed') => {
-      if (heldRead === null) {
-        throw new Error('fixture: no read is held');
-      }
-      heldRead.fail(message);
+    setListDirDelay: (milliseconds: number) => {
+      listDirDelayMs = Math.max(0, Math.min(milliseconds, 5_000));
     },
     writeExternal: (path: string, content: string) => {
       const target = current();

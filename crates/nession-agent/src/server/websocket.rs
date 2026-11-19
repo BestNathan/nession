@@ -59,6 +59,7 @@ use axum::Router;
 use futures_util::StreamExt;
 use nession_mcp::McpService;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
+use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_runtime::frame::WsFrame;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 use nession_runtime::lane::{KeyedLane, Work};
@@ -216,6 +217,9 @@ pub mod msg_types {
     pub const SESSION_CAPTURE_PREVIEW: &str = "agent.session.capture-preview";
     pub const SESSION_METADATA_GET: &str = "agent.session.metadata.get";
     pub const SESSION_METADATA_UPDATE: &str = "agent.session.metadata.update";
+    /// One Extension-contributed MCP Tool call on the direct P2P surface
+    /// (`#3778`).
+    pub const MCP_TOOL_CALL: &str = "agent.mcp.tool.call";
     pub const CLIENT_ATTACH: &str = "agent.attach";
     pub const CLIENT_DETACH: &str = "agent.detach";
     pub const TERMINAL_INPUT: &str = "agent.terminal.input";
@@ -1209,6 +1213,11 @@ struct AgentIngress {
     agent_id: String,
     attach_mode: AttachMode,
     resize: ResizeReporter,
+    /// The composed contribution catalog and its Tool context (`#3778`).
+    /// `None` when MCP is disabled; the direct P2P contribution route then
+    /// refuses with a truthful unavailable answer.
+    mcp_catalog: Option<Arc<nession_mcp::McpCatalog>>,
+    mcp_tool_context: Option<Arc<nession_mcp::ToolContext>>,
 }
 
 /// Router state for one accepted P2P connection.
@@ -1465,6 +1474,9 @@ pub(crate) struct P2pRequest<'a> {
     /// channel's size changes into (`#961-D`; `crate::tmux::control` says which
     /// notification those actually are). See [`crate::server::resize`].
     resize: &'a ResizeReporter,
+    /// The composed contribution catalog and its Tool context (`#3778`).
+    mcp_catalog: Option<&'a Arc<nession_mcp::McpCatalog>>,
+    mcp_tool_context: Option<&'a Arc<nession_mcp::ToolContext>>,
 }
 
 impl P2pRequest<'_> {
@@ -1517,6 +1529,9 @@ struct Connection {
     /// `client.auth`. `None` is "the upgrade happened, the peer is not a peer
     /// yet" — every business frame is refused in that state.
     authority: Arc<StdMutex<Option<AuthContext>>>,
+    /// The composed contribution catalog and its context (`#3778`).
+    mcp_catalog: Option<Arc<nession_mcp::McpCatalog>>,
+    mcp_tool_context: Option<Arc<nession_mcp::ToolContext>>,
 }
 
 impl Connection {
@@ -1779,6 +1794,8 @@ impl Frame {
             agent_id: &connection.agent_id,
             attach_mode: &connection.attach_mode,
             resize: &connection.resize,
+            mcp_catalog: connection.mcp_catalog.as_ref(),
+            mcp_tool_context: connection.mcp_tool_context.as_ref(),
         };
 
         let reply = dispatch_p2p(ctx, &msg_type, payload).await;
@@ -3027,6 +3044,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // Project membership is Server-owned (#3082);
                                 // a direct Agent view has no authority for it.
                                 project_id: None,
+                                // Activity is projected by the Server from the
+                                // Agent's dedicated level wire (#3804); this
+                                // direct view has no coordinator snapshot.
+                                activity: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                             }
                         })
@@ -3343,6 +3364,67 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("cwd_failed", &e.to_string()),
                 }
             }
+            // One Extension-contributed MCP Tool call on the direct P2P
+            // surface (#3778). Same owner rules as the Server-relayed route:
+            // the named Agent must be this one, the Tool must be advertised by
+            // this Agent's composed catalog, and execution uses the same
+            // context its embedded MCP endpoint uses.
+            "agent.mcp.tool.call" => "agent.mcp.tool.call" => 1 => P2pAccess::Authenticated => Query => {
+                let call: McpToolCallPayload = match serde_json::from_value(payload_value) {
+                    Ok(call) => call,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let reply = match (ctx.mcp_catalog, ctx.mcp_tool_context) {
+                    (Some(catalog), Some(context)) => {
+                        if call.agent_id != ctx.agent_id {
+                            McpToolCallReply::failure(
+                                "invalid_argument",
+                                format!(
+                                    "this Agent is '{}', not '{}'",
+                                    ctx.agent_id, call.agent_id
+                                ),
+                            )
+                        } else {
+                            let snapshot = catalog.snapshot();
+                            if !snapshot
+                                .contributions()
+                                .iter()
+                                .any(|tool| tool.name == call.tool)
+                            {
+                                McpToolCallReply::failure(
+                                    "not_found",
+                                    format!(
+                                        "this Agent does not advertise contributed Tool `{}`",
+                                        call.tool
+                                    ),
+                                )
+                            } else {
+                                match call.arguments.as_object().cloned() {
+                                    Some(arguments) => {
+                                        match snapshot.call(context, &call.tool, Some(arguments)).await {
+                                            Ok(value) => McpToolCallReply::success(value),
+                                            Err(error) => McpToolCallReply::failure(
+                                                error.kind.as_str(),
+                                                error.message,
+                                            ),
+                                        }
+                                    }
+                                    None => McpToolCallReply::failure(
+                                        "invalid_argument",
+                                        "`arguments` must be an object",
+                                    ),
+                                }
+                            }
+                        }
+                    }
+                    _ => McpToolCallReply::failure(
+                        "unavailable",
+                        "this Agent has no composed contribution catalog",
+                    ),
+                };
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, reply))
+                    .unwrap_or_default()
+            }
 }
 
 impl AgentServer {
@@ -3420,10 +3502,15 @@ impl AgentServer {
     /// a second path to tmux. The cluster backend reuses the Server this Agent
     /// reports to, or reports a structured "no Server" error in standalone
     /// mode.
+    ///
+    /// `tool_providers` is the Agent runtime's explicit Extension composition
+    /// (`#3778`). The catalog validates it before this returns; an invalid
+    /// contribution fails the mount.
     pub fn mount_mcp(
         &mut self,
         config: &crate::config::AgentConfig,
         agent_token: &str,
+        tool_providers: Vec<Arc<dyn nession_mcp::provider::McpToolProvider>>,
     ) -> Result<()> {
         self.mcp = crate::server::mcp::build(
             crate::server::mcp::McpHost {
@@ -3436,8 +3523,21 @@ impl AgentServer {
             Arc::clone(&self.tmux_manager),
             Arc::clone(&self.sessions),
             Arc::clone(&self.mutations),
+            tool_providers,
         )?;
         Ok(())
+    }
+
+    /// The composed MCP catalog this Agent serves, when MCP is enabled
+    /// (`#3778`). The runtime advertises its manifest on registration and
+    /// executes Server-relayed contribution calls through it.
+    pub fn mcp_catalog(&self) -> Option<Arc<nession_mcp::McpCatalog>> {
+        self.mcp.as_ref().map(|service| service.catalog())
+    }
+
+    /// The Tool context the composed catalog's handlers receive.
+    pub fn mcp_tool_context(&self) -> Option<Arc<nession_mcp::ToolContext>> {
+        self.mcp.as_ref().map(|service| service.tool_context())
     }
 
     /// Start accepting connections. Returns a [`ServerHandle`] that can be
@@ -3499,6 +3599,8 @@ impl AgentServer {
             agent_id: self.agent_id.clone(),
             attach_mode: self.attach_mode.clone(),
             resize: self.resize.clone(),
+            mcp_catalog: self.mcp.as_ref().map(|mcp| mcp.catalog()),
+            mcp_tool_context: self.mcp.as_ref().map(|mcp| mcp.tool_context()),
         };
         let tls_acceptor = self.tls_acceptor;
         let auth = Arc::clone(&self.auth);
@@ -3694,6 +3796,8 @@ impl AgentServer {
             agent_id,
             attach_mode,
             resize,
+            mcp_catalog,
+            mcp_tool_context,
         } = context;
 
         // Everything a frame of this connection needs, owned once and shared by
@@ -3717,6 +3821,8 @@ impl AgentServer {
             addr,
             auth,
             authority: Arc::new(StdMutex::new(None)),
+            mcp_catalog,
+            mcp_tool_context,
         });
 
         // The loop owns the connection; keep the outbound handle so the writer
@@ -7429,6 +7535,8 @@ mod tests {
                 agent_id: "test-agent",
                 attach_mode: &attach_mode,
                 resize: &resize,
+                mcp_catalog: None,
+                mcp_tool_context: None,
             };
             dispatch_p2p(ctx, msg_types::TERMINAL_RESIZE, payload).await
         });
@@ -7568,6 +7676,9 @@ mod tests {
         msg_types::FILE_CREATE_DIR,
         msg_types::FILE_RENAME,
         msg_types::FILE_CWD,
+        // #3778: an Extension-contributed MCP Tool call, on both the direct P2P
+        // surface and the Server-relayed control channel.
+        msg_types::MCP_TOOL_CALL,
     ];
 
     #[test]

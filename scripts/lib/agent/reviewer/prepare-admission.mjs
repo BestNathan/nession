@@ -57,38 +57,6 @@ export async function prepareReviewAdmission({
   },reviewerAgentId);
 }
 
-// PR base files can be larger than the 16KiB Reviewer admission envelope.
-// Fetch and validate each at the immutable original base SHA; when the
-// cumulative context cannot fit, use the schema's empty base_files fallback,
-// never truncated or misrepresented base bytes.
-export async function boundedQwenReviewBaseFiles({files,baseSha,fetcher,
-  embedBudget=4096,maxSourceBytes=128*1024}){
-  if(!Array.isArray(files)||files.length<1||files.length>8||
-     !HEX40.test(baseSha??'')||typeof fetcher!=='function'||
-     !Number.isInteger(embedBudget)||embedBudget<0||embedBudget>8192)
-    fail('invalid Qwen Review base-file evidence request');
-  const baseFiles=[];let total=0,omit=false;
-  for(const file of files){
-    if(!file||typeof file.filename!=='string'||!file.filename.length)
-      fail('invalid PR changed-file entry');
-    const entry=await fetcher('contents/'+file.filename+'?ref='+baseSha);
-    if(entry?.encoding!=='base64'||typeof entry.content!=='string'||
-       !/^[A-Za-z0-9+/=\s]+$/.test(entry.content))
-      fail('missing authenticated PR base file');
-    const bytes=Buffer.from(entry.content.replace(/\s/g,''),'base64');
-    if(bytes.length<1||bytes.length>maxSourceBytes||
-       (Number.isSafeInteger(entry.size)&&entry.size!==bytes.length))
-      fail('unsafe PR base file');
-    total+=bytes.length;
-    if(total>embedBudget){omit=true;continue;}
-    const text=bytes.toString('utf8');
-    if(!Buffer.from(text,'utf8').equals(bytes))
-      fail('non-UTF8 PR base file');
-    baseFiles.push({path:file.filename,content:text});
-  }
-  return omit?[]:baseFiles;
-}
-
 // The generic Qwen path reads the same orphan Store and the real Publisher PR
 // independently. No Issue text, model output, or workflow input may select a
 // different PR/SHA after the signed Outbox Reviewer action is committed.
@@ -115,11 +83,6 @@ export async function prepareQwenReviewAdmission({
   // writer Run, which can have failed after the PR-B GitHub write.
   const publisherRun=await fetcher('actions/runs/'+
     (committed.publisher_run_id??intent.publisher_run_id));
-  // GET-only recovery of the exact original failed PR writer was completed
-  // independently. No new model, Publisher or Store write in Reviewer prep.
-  const recoveryRun=!committed.repair&&issue===3784&&
-    intent.publisher_run_id===44281178406
-    ?await fetcher('actions/runs/44431297473'):null;
   const pullRequests=await fetcher('pulls?state=all&head=BestNathan:'+
     encodeURIComponent(branch)+'&per_page=100');
   if(!Array.isArray(pullRequests)||pullRequests.length!==1||
@@ -140,12 +103,21 @@ export async function prepareQwenReviewAdmission({
   // the exact base bytes of every admitted file so it can distinguish the
   // authorized change from the PR-head end state.
   const baseSha=committed.repair?intent.original_main_sha:intent.target_main_sha;
-  const baseFiles=await boundedQwenReviewBaseFiles({files,baseSha,fetcher});
+  const baseFiles=[];
+  for(const file of files){
+    if(!file||typeof file.filename!=='string')fail('invalid PR changed-file entry');
+    const entry=await fetcher('contents/'+file.filename+'?ref='+baseSha);
+    if(entry?.encoding!=='base64'||typeof entry.content!=='string')
+      fail('missing authenticated PR base file');
+    const bytes=Buffer.from(entry.content.replace(/\s/g,''),'base64');
+    if(bytes.length<1||bytes.length>32*1024)fail('unsafe PR base file');
+    baseFiles.push({path:file.filename,content:bytes.toString('utf8')});
+  }
   const tree=await fetcher('git/trees/'+commit.tree.sha+'?recursive=1');
   return committed.repair
     ? admitQwenRepairPublishedReview({state,intent,publisherRun,pullRequests,
       pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles})
-    : admitQwenPublishedReview({state,intent,publisherRun,recoveryRun,pullRequests,
+    : admitQwenPublishedReview({state,intent,publisherRun,pullRequests,
       pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles});
 }
 

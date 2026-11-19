@@ -285,11 +285,13 @@ pub struct ClientSessionCreatePayload {
     /// pre-Project create path unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-    /// Request a Managed EROFS-backed Session (#3062). Requires `project_id`
-    /// whose Project pins an image; the Server resolves and authorizes every
-    /// artifact before handing the Agent preparation grants.
-    #[cfg_attr(feature = "codegen", ts(skip))]
-    #[cfg_attr(feature = "schema", schemars(skip))]
+    /// Request a Managed EROFS-backed Session (#3062, #3794). Requires
+    /// `project_id` whose Project pins an image; the Server resolves and
+    /// authorizes every artifact before handing the Agent preparation grants.
+    ///
+    /// The Web projection names immutable digests and optional `/opt/<name>`
+    /// targets only. It never carries a host path, a download URL or a grant:
+    /// the Server and Agent remain the executable owners.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ClientManagedCreate>,
 }
@@ -722,6 +724,68 @@ pub struct AgentSessionUpdatePayload {
 // The command/request_id protocol
 // ============================================================================
 
+/// One Session Activity level observed by the Agent that owns the Session.
+///
+/// A **fourth, independent** Session dimension (#3804): `state` is
+/// `working | idle | unknown` and never a reinterpretation of `status`,
+/// Agent connectivity or attachment. `attention` is orthogonal to it.
+///
+/// This is the Server/Web projection of the Agent-owned coordinator snapshot;
+/// the Agent remains the only authority that produced it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionActivityView {
+    /// `working`, `idle` or `unknown`.
+    ///
+    /// A `String` rather than an enum, matching `status`'s treatment on the
+    /// adjacent payload: the Server validates the value and refuses anything
+    /// else, so a closed enum here would describe validation that lives
+    /// elsewhere.
+    pub state: String,
+    /// `input_required` when the owning capability needs the user, else absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<String>,
+    /// The capability that owns the Pane whose level produced this aggregate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_id: Option<String>,
+    /// When the Agent observed this level (Unix milliseconds).
+    pub observed_at_ms: i64,
+}
+
+/// `server.agent.session-activity` — one Activity level from an Agent.
+///
+/// One-way, like `server.agent.session-update`, but deliberately a separate
+/// unit: an Activity change is **not** Session interaction recency, so it must
+/// not travel through the update handler that stamps `last_activity`.
+///
+/// The Agent sends it only when the level changes (or on full resync). The
+/// Server keeps it in memory, fences it by incarnation/epoch/generation, and
+/// projects it into `WebSessionInfo::activity`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSessionActivityPayload {
+    pub agent_id: String,
+    pub session_name: String,
+    /// Durable tmux Session incarnation. A level for another incarnation is
+    /// refused; a same-name recreation never inherits Activity.
+    pub instance_id: String,
+    /// Agent-process epoch. A restarted Agent has a new epoch and its
+    /// generation counter may restart at 1 without being read as stale.
+    pub epoch: String,
+    /// Monotonic per `(epoch, Session)`; non-increasing values are refused.
+    pub generation: u64,
+    /// `working`, `idle` or `unknown`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_id: Option<String>,
+    /// When the Agent observed this level (Unix milliseconds).
+    pub observed_at_ms: i64,
+}
+
 /// `agent.session.report` — the Server asks an Agent to report its sessions.
 ///
 /// Request-only, **because its answer is a different unit**. The agent replies
@@ -1101,6 +1165,16 @@ pub struct WebSessionInfo {
     /// reuses the same `agent_id:session_name` does not inherit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// The Agent's current Session Activity level (#3804).
+    ///
+    /// A fourth, independent dimension; it never rewrites `status`,
+    /// connectivity, attachment or `last_activity`. Absent means this Agent has
+    /// not reported Activity (a legacy Agent, or one that has not reconciled
+    /// yet), which consumers must render as `unknown`, never `idle`. A present
+    /// `working` states the Agent's current observation; a Web client still
+    /// treats it as unknown when that Agent is offline or stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<SessionActivityView>,
     pub last_activity: String,
 }
 
@@ -1981,6 +2055,76 @@ pub struct ServerSessionSandboxContextPayload {
     pub session_name: String,
     #[serde(default)]
     pub cache_digests: Vec<String>,
+}
+
+/// The explicit user-authorized action for one Image identity in the current
+/// Session Agent's cache (#3796).
+///
+/// The intent is *not* inferred from an observation: a read never downloads,
+/// and the user chooses whether an absent digest is fetched, a durable partial
+/// is resumed, or a failed identity is retried.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxImagePrepareIntent {
+    /// Fetch an absent, resumable or failed identity. A verified identity is
+    /// already prepared and is returned unchanged.
+    Prepare,
+    /// Continue a durable partial from its measured offset.
+    Resume,
+    /// Re-attempt a failed identity after a corrupted or failed verification.
+    Retry,
+}
+
+/// `server.session.sandbox.image-prepare` — one explicit prepare/resume/retry
+/// of one Image identity in the current Session Agent's cache.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxImagePreparePayload {
+    /// `agent_id:session_name`, the registry key the Session list already uses.
+    pub session_id: String,
+    /// The immutable Manifest identity (or a legacy Blob digest) to prepare.
+    pub digest: String,
+    pub intent: SandboxImagePrepareIntent,
+}
+
+/// `server.session.sandbox.image-prepare`'s reply.
+///
+/// `observation` is the Agent's authoritative aggregate state for the
+/// identity's required closure. `observations` names every observed closure
+/// digest so a consumer can show which object is still missing; it never
+/// contains a local path or a bearer grant.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxImagePrepareResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<crate::contracts::sandbox::v1::SandboxActionErrorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<crate::contracts::image::v1::ImageCacheObservation>,
+    #[serde(default)]
+    pub observations: Vec<crate::contracts::image::v1::ImageCacheObservation>,
+}
+
+/// `agent.session.sandbox.image-prepare` — the Server forwards the authorized
+/// identity, the explicit intent and the one scoped grant it minted.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSessionSandboxImagePreparePayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub digest: String,
+    pub intent: SandboxImagePrepareIntent,
+    /// The Server-authorized objects for this identity. The Agent verifies
+    /// every object byte and never invents a route or a digest.
+    pub grant: ManagedImageGrant,
 }
 
 /// `server.session.sandbox.preflight` — validate one draft against the exact

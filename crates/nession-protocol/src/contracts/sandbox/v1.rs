@@ -215,11 +215,18 @@ pub struct SandboxImageRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemComposition {
-    /// The minimal glibc Base Runtime image mounted at `/`.
-    pub base: SandboxImageRef,
+    /// The optional Base Runtime image mounted at `/`.
+    ///
+    /// Absent means a Host-root composition: no Base Runtime view is mounted
+    /// and the ordinary host root is the read-only root, with the declared
+    /// toolchains and Workspace layered over it (#3792). It must agree with
+    /// the client's `filesystem.rootfs` Local selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<SandboxImageRef>,
     /// Whether the Agent prepared an execution-owned transient writable
     /// upper/work over `base` (#3698). It must agree with the client's
-    /// `filesystem.rootfs` `writable` selection.
+    /// `filesystem.rootfs` `writable` selection; a Host-root composition
+    /// never carries a writable RootFS.
     #[serde(default, skip_serializing_if = "is_false")]
     pub base_writable: bool,
     /// The Project source image and/or the bounded writable workspace.
@@ -771,13 +778,10 @@ pub fn validate_image_selections(
             "a Sandbox Workspace Overlay accepts at most 16 ordered EROFS lowers",
         ));
     }
-    if !selections.is_empty() && base == 0 {
-        errors.push(field_error(
-            "images.base",
-            "missing-role",
-            "a Sandbox image composition requires a Base Runtime image",
-        ));
-    }
+    // No Base is required: a Host-root composition may carry only
+    // toolchains and/or workspace lowers (#3792). At most one Base remains a
+    // hard rule because `/` has one owner.
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -1597,9 +1601,11 @@ mod tests {
         ];
         validate_image_selections(&valid).expect("a coherent composition passes");
 
-        let mut missing_base = valid[1..].to_vec();
-        let errors = validate_image_selections(&missing_base).unwrap_err();
-        assert!(errors.iter().any(|error| error.field == "images.base"));
+        // A Host-root selection may carry only a Workspace lower and/or
+        // toolchains; no Base is required (#3792).
+        let host_root = valid[1..].to_vec();
+        validate_image_selections(&host_root)
+            .expect("a Host-root selection needs no Base Runtime image");
 
         let mut duplicate_base = valid.clone();
         duplicate_base.push(SandboxImageSelection {
@@ -1626,9 +1632,7 @@ mod tests {
         let errors = validate_image_selections(&base_overlay).unwrap_err();
         assert!(errors.iter().any(|error| error.field == "images[0].mode"));
 
-        missing_base.clear();
-        validate_image_selections(&missing_base)
-            .expect("no selection is the existing Native policy");
+        validate_image_selections(&[]).expect("no selection is the existing Native policy");
     }
 
     #[test]

@@ -261,3 +261,20 @@ convergence status is synthesized from the desired revision alone.
   and no Agent dispatch; concurrent store writers have exactly one winner).
 - `crates/nession-agent/src/extension.rs` and the protocol Gates: the manifest
   advertises the units it serves and the generated bindings do not drift.
+
+## Runtime environment namespace
+
+Nession-owned control/integration variables in new Sessions use the canonical
+`NESSION_RUNTIME_*` prefix. Session ENV Profiles cannot override it. The
+legacy `NESSON_*` prefix remains reserved during migration, to prevent a
+Profile from forging a surviving Session's old runtime identity. User-provided
+`NESSION_MCP_TOKEN` and other non-runtime `NESSION_*` keys remain bindable.
+
+Old tmux Sessions keep their already-injected `NESSON_*` variables and
+pre-existing Bash/zsh adapter files. The Agent accepts the old instance
+marker as read-only compatibility input and reuses the same per-Session
+overlay/revision file paths for subsequent ENV Binding reapplication. A new
+Session does not inherit either the old or the new internal environment
+namespace from the Agent daemon; MCP credentials require explicit Session
+binding. Neither running shells nor already-running Claude subprocesses
+receive a retroactive OS environment change.

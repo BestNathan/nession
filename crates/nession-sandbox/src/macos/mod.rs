@@ -246,6 +246,7 @@ pub fn prepare(
         shared_mounts: Vec::new(),
         overlay: None,
         transient_rootfs: None,
+        recovery_pending: false,
         channel_dir: None,
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),

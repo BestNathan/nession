@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -109,6 +109,43 @@ describe('WorkspacePanel — the pushed depth is reported upward (#1081)', () =>
     });
 
     expect(onDepthChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('names the depth a nested push returns to (#3829)', () => {
+    renderPanel();
+
+    act(() => {
+      captured.depth?.setPush({
+        title: 'Conversation',
+        backLabel: 'Back to Conversations',
+        onLeave: vi.fn(),
+      });
+    });
+
+    // The capability owns its stack, so the shell renders the label it was
+    // given rather than guessing the capability root.
+    expect(screen.getByTestId('app-page-back')).toHaveAccessibleName('Back to Conversations');
+    expect(screen.getByTestId('app-page-header')).toHaveTextContent('Conversation');
+  });
+
+  it('renders a capability header action and retires it on a capability switch', () => {
+    const onActivate = vi.fn();
+    const { view } = renderPanel();
+
+    act(() => {
+      captured.depth?.setAction?.({
+        label: 'Browse',
+        ariaLabel: 'Browse Claude',
+        onActivate,
+      });
+    });
+    fireEvent.click(screen.getByTestId('app-page-action'));
+    expect(onActivate).toHaveBeenCalledTimes(1);
+
+    // An action registered by the capability that was just left cannot decorate
+    // the new capability's header.
+    view.rerender(panelElement('git', vi.fn()));
+    expect(screen.queryByTestId('app-page-action')).toBeNull();
   });
 
   it('reports no detail once the panel is gone', () => {

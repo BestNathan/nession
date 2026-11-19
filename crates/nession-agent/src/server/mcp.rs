@@ -17,6 +17,7 @@ use std::sync::Arc;
 use nession_mcp::backend::{ClusterBackend, NodeBackend, UnavailableClusterBackend};
 use nession_mcp::error::ToolError;
 use nession_mcp::pending_mutation::PendingMutation;
+use nession_mcp::provider::McpToolProvider;
 use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
 use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
 use nession_mcp::{McpService, ServiceConfig};
@@ -49,11 +50,16 @@ pub(crate) struct McpHost<'a> {
 }
 
 /// Build the Agent-hosted MCP service when `[mcp] enabled = true`.
+///
+/// `tool_providers` is the runtime's explicit Extension composition (#3778):
+/// the Agent owns which contributions reach the shared endpoint, while the
+/// shared catalog owns validation and generation swaps.
 pub(crate) fn build(
     host: McpHost<'_>,
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionRegistry>,
     mutations: Arc<KeyedLane<ResourceKey>>,
+    tool_providers: Vec<Arc<dyn McpToolProvider>>,
 ) -> anyhow::Result<Option<Arc<McpService>>> {
     let McpHost {
         config,
@@ -102,7 +108,7 @@ pub(crate) fn build(
         allowed_origins: config.mcp.allowed_origins.clone(),
         allowed_hosts,
     };
-    let service = McpService::new(service_config, cluster, node)?;
+    let service = McpService::with_providers(service_config, cluster, node, tool_providers)?;
     Ok(Some(Arc::new(service)))
 }
 
@@ -184,7 +190,10 @@ impl NodeBackend for AgentNodeBackend {
             sessions,
             stale_agents: Vec::new(),
         };
-        Ok(SessionListOutput::from_agent_sessions(&reply.sessions))
+        Ok(SessionListOutput::from_agent_sessions(
+            agent_id,
+            &reply.sessions,
+        ))
     }
 
     async fn create_session(

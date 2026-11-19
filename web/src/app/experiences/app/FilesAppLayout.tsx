@@ -99,6 +99,7 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
         status={search.status}
         error={search.error}
         results={search.results}
+        incomplete={search.incomplete}
         onSelectFile={(entry) => nav.openFile(entry)}
         onRetry={search.retry}
       />

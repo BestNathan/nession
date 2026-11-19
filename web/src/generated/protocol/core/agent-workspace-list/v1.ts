@@ -23,8 +23,42 @@ export const VERSION = 1;
 
 export type ServerWorkspaceListPayload = { request_id: string, namespace?: string | null, };
 export type AgentWorkspaceKind = "project_location" | "managed";
-export type AgentWorkspaceStatus = "available" | "in_use" | "missing" | "error";
-export type AgentWorkspaceDescriptor = { workspace_id: string, name: string, namespace: string, kind: AgentWorkspaceKind, status: AgentWorkspaceStatus, auto_created: boolean, created_at: number, last_used_at: number, path?: string | null, detail?: string | null, };
+export type AgentWorkspaceStatus = "available" | "in_use" | "missing" | "error" | "unobserved";
+export type AgentWorkspaceDescriptor = { workspace_id: string, name: string, namespace: string, kind: AgentWorkspaceKind, status: AgentWorkspaceStatus, auto_created: boolean, created_at: number, last_used_at: number, path?: string | null, detail?: string | null, 
+/**
+ * The ordered immutable Project EROFS lower digests this Workspace's
+ * durable upper was prepared against (#3797). Empty for a plain
+ * directory Workspace or a Project Location reference.
+ */
+lower_digests?: Array<string>, 
+/**
+ * Whether the owning Agent initialized the durable writable Overlay
+ * `upper`/`work` pair. Always false for a Project Location.
+ */
+overlay_storage?: boolean, 
+/**
+ * Measured persistent bytes of the durable writable store, when the
+ * Agent could measure them. A failed measurement is absent, never zero.
+ */
+used_bytes?: number | null, 
+/**
+ * Session names currently holding a lease or a bound Sandbox execution.
+ * Sorted and deduplicated; never a host path or a grant.
+ */
+consumers?: Array<string>, 
+/**
+ * Whether an Overlay Merged View is currently observed mounted.
+ */
+mounted?: boolean, 
+/**
+ * The Agent's in-memory RW attachment count at observation time.
+ */
+lease_count?: number, 
+/**
+ * The last durable registry update in Unix seconds. Zero means the
+ * descriptor did not carry an update time.
+ */
+updated_at?: number, };
 
 // ── Operations ──
 

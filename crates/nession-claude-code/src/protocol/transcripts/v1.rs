@@ -56,7 +56,7 @@ pub const DEFAULT_ITEM_LIMIT: u32 = 50;
 /// at, and that is a failure to answer rather than a state to report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptKindV1 {
     /// A session's own transcript.
@@ -72,9 +72,9 @@ pub enum TranscriptKindV1 {
 /// a client renders a header from one object rather than joining the list
 /// against the page, which is the join `#1222` removed from the conversation
 /// pair.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptItemV1 {
     /// The transcript's identity, opaque to the caller.
     ///
@@ -119,9 +119,9 @@ pub struct TranscriptItemV1 {
 /// Beside the items rather than on one of them, exactly as the conversation
 /// unit's binding is: a binding is a fact about the Session, not a property of
 /// the transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptBindingV1 {
     /// The transcript the Session is bound to — one of `items[]`'s ids.
     pub transcript_id: String,
@@ -135,7 +135,7 @@ pub struct TranscriptBindingV1 {
 /// as it is for conversations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptsStateV1 {
     /// The provider answered; `items` is the whole answer, empty or not.
@@ -150,7 +150,7 @@ pub enum TranscriptsStateV1 {
 /// What the caller asks for.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptsRequestV1 {
     /// The Nession session whose transcripts are wanted. Required, because
     /// visibility is scoped to a Session's cwd — there is no machine-wide
@@ -171,7 +171,7 @@ pub struct TranscriptsRequestV1 {
 /// The answer.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptsResponseV1 {
     pub state: TranscriptsStateV1,
 

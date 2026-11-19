@@ -82,11 +82,37 @@ export interface WorkspacePush {
   /** The pushed page's own name. */
   title: string;
   /**
+   * What Back returns to, named for assistive technology.
+   *
+   * A capability owns its own stack, so it — not the shell — knows whether the
+   * depth below is its root, a collection, or another detail. Omitted means
+   * "the capability root", which is the only answer the shell can derive.
+   */
+  backLabel?: string;
+  /**
    * Leave this depth. The capability supplies this, so the guard that protects
    * unsaved state (or any other local precondition) stays with the state it
    * protects rather than being re-implemented by the shell.
    */
   onLeave: () => void;
+}
+
+/**
+ * A capability-local action the App page header may carry beside its title.
+ *
+ * The header itself stays the shell's — one Back/title band per depth (#1051).
+ * A capability contributes the *semantic action* (its name and what it does),
+ * not a second bar: "Browse" belongs to the Claude resource browser, while the
+ * geometry, touch target and placement belong to the App chrome. This is the
+ * narrow counterpart of the Workspace capsule: switching what a capability
+ * shows is not leaving the depth.
+ */
+export interface WorkspaceHeaderAction {
+  /** Visible label. */
+  label: string;
+  /** Accessible name when it should say more than the visible label. */
+  ariaLabel?: string;
+  onActivate: () => void;
 }
 
 /**
@@ -100,6 +126,12 @@ export interface WorkspacePush {
 export interface WorkspaceDepthControl {
   /** Register a pushed depth, or `null` to return to the capability root. */
   setPush: (push: WorkspacePush | null) => void;
+  /**
+   * Register a contextual action for the App page header, or `null` to remove
+   * it. Optional because a Web view — and a capability with no header action —
+   * never has one to declare.
+   */
+  setAction?: (action: WorkspaceHeaderAction | null) => void;
 }
 
 /** What a Workspace view is handed in both experiences. */

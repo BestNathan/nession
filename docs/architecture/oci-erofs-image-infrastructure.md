@@ -259,6 +259,31 @@ committed. A concurrent Tag update whose expected old digest no longer matches
 fails instead of overwriting. Moving a Tag never changes an already pinned
 Manifest for a Session.
 
+### Library and Tag lifecycle (#3799)
+
+The Server Catalog is also a managed Library surface, not only a build
+publication target. `server.image.library.list` projects each revision with its
+Repository, mutable Tags, immutable Manifest/Index/Composite digest, media
+type, platform, the advisory `io.nession.kind` role and
+`io.nession.mount.default` target, representation, descriptor edges, reachable
+EROFS closure and known reference impact. Metadata the catalog cannot read is
+returned as explicit unknown; the legacy digest/alias descriptor is never used
+to synthesize it. Consumers project these fields as hints (role-specific
+pickers, a proposed mount target) but never treat them as authorization: the
+Server grant, Agent resolver and Sandbox target validation remain the
+executable owners.
+
+`server.image.tag.set` creates only when the Tag is absent, or moves only when
+the exact expected digest still resolves. A stale expectation returns a
+conflict with the digest the Tag actually names, and the caller must re-review
+rather than retry blindly. `server.image.tag.remove` is a logical unlink: it
+requires the exact expected digest, reports known Project/Session pins, other
+Tags, leases and Compose references, and requires explicit confirmation when
+references exist. Unobservable impact fails closed. No Tag operation deletes
+CAS bytes, bypasses a pin or evicts an Agent cache; the Server GC remains the
+only reclaim authority, and a pinned or live-reachable closure survives an
+unlink.
+
 ### Agent
 
 ```text

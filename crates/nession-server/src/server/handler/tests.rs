@@ -61,6 +61,7 @@ impl TestDeps {
                 crate::image::ImageManagerOptions {
                     max_concurrent_builds: 1,
                     build_root,
+                    source_root: Some(std::env::temp_dir()),
                     build_stage_timeout: Some(std::time::Duration::from_secs(30)),
                     build_log_max_bytes: crate::image::DEFAULT_BUILD_LOG_MAX_BYTES,
                     build_retention_secs: crate::image::DEFAULT_BUILD_RETENTION_SECS,
@@ -100,6 +101,7 @@ impl TestDeps {
                 env_service: Arc::clone(&self.env_service),
                 image_manager: Arc::clone(&self.image_manager),
                 db: Arc::clone(&self.db),
+                extension_tools: None,
             },
             ConnectionHandlerConfig {
                 server_auth_token: auth_token.to_string(),
@@ -149,6 +151,38 @@ fn parse_reply(action: HandlerAction) -> serde_json::Value {
 }
 
 // ---- handle_message dispatch ----
+
+/// #3799 SC-02: Library reads and Tag mutations are authenticated Server
+/// operations; an unauthenticated connection is refused before any catalog
+/// read or write.
+#[tokio::test]
+async fn the_image_library_and_tag_units_refuse_an_unauthenticated_client() {
+    let deps = TestDeps::new().await;
+    let mut handler = deps.handler("");
+    for (wire, frame) in [
+        (
+            "server.image.library.list",
+            proto_msg("server.image.library.list", json!({})),
+        ),
+        (
+            "server.image.impact.get",
+            proto_msg("server.image.impact.get", json!({})),
+        ),
+        (
+            "server.image.tag.set",
+            proto_msg("server.image.tag.set", json!({})),
+        ),
+        (
+            "server.image.tag.remove",
+            proto_msg("server.image.tag.remove", json!({})),
+        ),
+    ] {
+        let action = handler.handle_message(frame).await.unwrap();
+        let payload = parse_reply(action)["payload"].clone();
+        assert_eq!(payload["success"], false, "{wire}");
+        assert_eq!(payload["error_kind"], "unauthorized", "{wire}");
+    }
+}
 
 #[tokio::test]
 async fn close_message_returns_close() {
@@ -1809,6 +1843,9 @@ pub(super) async fn bind_for_test(
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
             created_at: now,
             last_activity: now,
         })
@@ -1833,6 +1870,7 @@ mod server_agent_address_update_v1;
 mod server_agent_command_response_v1;
 mod server_agent_list_v1;
 mod server_agent_register_v1;
+mod server_agent_session_activity_v1;
 mod server_agent_session_update_v1;
 mod server_agent_terminal_resize_v1;
 mod server_auth_v1;
